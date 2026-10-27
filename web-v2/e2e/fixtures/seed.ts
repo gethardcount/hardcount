@@ -25,12 +25,13 @@ export function createPlan(currency = 'USD'): Promise<Plan> {
     currency,
     billing_interval: 'monthly',
     base_amount_cents: 4900,
+    base_bill_timing: 'in_arrears',
   })
 }
 
 export function createMeter(): Promise<Meter> {
   const id = uniq()
-  return api<Meter>('POST', '/meters', { key: `e2e_calls_${id}`, name: `E2E Calls ${id}`, unit: 'call', aggregation: 'sum' })
+  return api<Meter>('POST', '/meters', { event_name: `e2e_calls_${id}`, name: `E2E Calls ${id}`, unit: 'call', aggregation: 'sum' })
 }
 
 // A test clock frozen at the current time, so billing periods line up with
@@ -60,7 +61,6 @@ export function createSubscription(customerId: string, planId: string): Promise<
     customer_id: customerId,
     items: [{ plan_id: planId, quantity: 1 }],
     billing_time: 'anniversary',
-    start_now: true,
   })
 }
 
@@ -110,7 +110,7 @@ export async function seedWorld() {
     url: 'https://example.com/velox-e2e',
     description: 'E2E endpoint',
   })
-  await api('POST', '/credits/grant', { customer_id: billed.customer.id, amount_cents: 1000, description: 'E2E welcome credit' })
+  await api('POST', '/credits/grant', { customer_id: billed.customer.id, currency: 'USD', amount_cents: 1000, description: 'E2E welcome credit' })
   return {
     customer: billed.customer,
     plan: billed.plan,

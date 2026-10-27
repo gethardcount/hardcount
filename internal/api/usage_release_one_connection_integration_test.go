@@ -1,0 +1,134 @@
+package api
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/shopspring/decimal"
+
+	"github.com/sagarsuperuser/velox/internal/audit"
+	"github.com/sagarsuperuser/velox/internal/customer"
+	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	"github.com/sagarsuperuser/velox/internal/pricing"
+	"github.com/sagarsuperuser/velox/internal/testutil"
+	"github.com/sagarsuperuser/velox/internal/usage"
+)
+
+// releaseSubs answers one active subscription whose plan prices meterID.
+type releaseSubs struct {
+	meterID    string
+	start, end time.Time
+}
+
+func (s releaseSubs) ListLiveByCustomer(context.Context, string, string) ([]domain.Subscription, error) {
+	started := s.start.Add(-time.Hour)
+	return []domain.Subscription{{
+		ID: "sub_release", Status: domain.SubscriptionActive,
+		CurrentBillingPeriodStart: &s.start, CurrentBillingPeriodEnd: &s.end, StartedAt: &started,
+		Items: []domain.SubscriptionItem{{ID: "si_release", PlanID: "pln_release"}},
+	}}, nil
+}
+
+// ListItemIntervals answers the item on its plan since before the period.
+func (s releaseSubs) ListItemIntervals(context.Context, string, string) ([]domain.ItemInterval, error) {
+	return []domain.ItemInterval{{SubscriptionItemID: "si_release", PlanID: "pln_release", Quantity: 1, StartsAt: s.start.Add(-time.Hour)}}, nil
+}
+
+// ListCustomerMeterCoverageEnds answers no other subscription.
+func (s releaseSubs) ListCustomerMeterCoverageEnds(context.Context, string, string, string, time.Time, time.Time) ([]domain.MeterCoverageEnd, error) {
+	return nil, nil
+}
+
+// releasePricing reads meters from the store and answers that plan
+// pln_release prices meterID for every event.
+type releasePricing struct {
+	*pricing.PostgresStore
+	meterID string
+}
+
+func (p releasePricing) PriceMatchesAt(_ context.Context, _ string, pins []pricing.PlanPin) ([]pricing.PinPrices, error) {
+	out := make([]pricing.PinPrices, len(pins))
+	for i, pin := range pins {
+		out[i].Passed = true
+		if pin.PlanID == "pln_release" {
+			out[i].Matches = []pricing.PriceMatch{{MeterID: p.meterID, Match: map[string]string{}}}
+		}
+	}
+	return out, nil
+}
+
+// releaseThresholds answers a paid threshold invoice that billed through at.
+type releaseThresholds struct{ at time.Time }
+
+func (r releaseThresholds) ThresholdWatermarks(context.Context, string, string, time.Time, time.Time) (*time.Time, *time.Time, error) {
+	return &r.at, &r.at, nil
+}
+
+// A held-usage release reads its meters' aggregation on its own
+// transaction's connection, through the production OpenPeriodReader and with
+// the audit logger wired as the router wires it. Read on
+// a second connection while the release's transaction holds one, a pool of
+// one connection (or N releases on a pool of N) waits for a connection that
+// is never freed.
+//
+// Mutation-verify: read the aggregation through the adapter's MeterBuckets
+// (pricing GetMeter, its own transaction) in releaseBuckets again → the
+// release fails at its deadline with nothing released.
+func TestRelease_ReadsTheAggregationOnItsOwnConnection(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	tenantID := testutil.CreateTestTenant(t, db, "Release one connection")
+	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 60*time.Second)
+	defer cancel()
+
+	usageSvc := usage.NewService(usage.NewPostgresStore(db))
+	usageSvc.SetAuditLogger(audit.NewLogger(db))
+	pricingStore := pricing.NewPostgresStore(db)
+	const ext, eventName = "ext_one_conn", "tokens_one_conn"
+	now := time.Now().UTC()
+	at := now.Add(-time.Hour).Truncate(time.Second)
+	for _, key := range []string{"one-conn:input", "one-conn:output"} {
+		if _, err := usageSvc.HoldCall(ctx, tenantID, usage.HoldCallInput{
+			Source: domain.HeldUsageSourceLiteLLM, ExternalCustomerID: ext, EventName: eventName,
+			Reason: domain.HeldReasonCustomerNotFound,
+			Events: []usage.CallEvent{{Quantity: decimal.NewFromInt(5), IdempotencyKey: key, Timestamp: &at}},
+		}); err != nil {
+			t.Fatalf("hold %s: %v", key, err)
+		}
+	}
+	meter, err := pricing.NewService(pricingStore).CreateMeter(ctx, tenantID, pricing.CreateMeterInput{
+		EventName: eventName, Name: eventName, Unit: "tokens", Aggregation: "sum",
+	})
+	if err != nil {
+		t.Fatalf("create meter: %v", err)
+	}
+	cus, err := customer.NewPostgresStore(db).Create(ctx, tenantID, domain.Customer{DisplayName: "One conn", ExternalID: ext})
+	if err != nil {
+		t.Fatalf("create customer: %v", err)
+	}
+	usageSvc.SetOpenPeriodReader(usageOpenPeriods{
+		subs:       releaseSubs{meterID: meter.ID, start: now.Add(-2 * time.Hour), end: now.Add(24 * time.Hour)},
+		pricing:    releasePricing{PostgresStore: pricingStore, meterID: meter.ID},
+		thresholds: releaseThresholds{at: now.Add(-30 * time.Minute)},
+	})
+
+	db.Pool.SetMaxOpenConns(1)
+	t.Cleanup(func() { db.Pool.SetMaxOpenConns(5) })
+	relCtx, relCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer relCancel()
+	res, err := usageSvc.Release(relCtx, tenantID, usage.ReleaseInput{
+		ExternalCustomerID: ext,
+		CustomerID:         cus.ID,
+		MeterIDs:           map[string]string{eventName: meter.ID},
+	})
+	if err != nil {
+		t.Fatalf("release on a pool of one connection: %v", err)
+	}
+	// sum is additive, and the rows are before the paid threshold invoice's
+	// end: the close does not count them.
+	want := usage.ReleaseResult{CustomerID: cus.ID, Released: 2, OutsideOpenPeriod: 2}
+	if res != want {
+		t.Errorf("release = %+v, want %+v", res, want)
+	}
+}

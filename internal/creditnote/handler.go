@@ -2,7 +2,6 @@ package creditnote
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -92,6 +91,7 @@ func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
 	r.Post("/", h.create)
 	r.Get("/", h.list)
+	r.Get("/stats", h.stats)
 	r.Get("/{id}", h.get)
 	r.Get("/{id}/pdf", h.downloadPDF)
 	r.Post("/{id}/issue", h.issue)
@@ -187,6 +187,16 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, r, http.StatusCreated, cn)
 }
 
+func (h *Handler) stats(w http.ResponseWriter, r *http.Request) {
+	st, err := h.svc.Stats(r.Context(), auth.TenantID(r.Context()))
+	if err != nil {
+		respond.InternalError(w, r)
+		slog.ErrorContext(r.Context(), "credit note stats", "error", err)
+		return
+	}
+	respond.JSON(w, r, http.StatusOK, st)
+}
+
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	page := middleware.ParsePageParams(r)
@@ -232,6 +242,9 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) issue(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
@@ -263,6 +276,9 @@ func (h *Handler) issue(w http.ResponseWriter, r *http.Request) {
 // connected. Svc.RetryRefund looks for the refund at Stripe before any
 // create, so retries converge (see its contract).
 func (h *Handler) retryRefund(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
@@ -287,6 +303,9 @@ func (h *Handler) retryRefund(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) void(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
@@ -447,14 +466,16 @@ func (h *Handler) sendEmail(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
-	if h.emailSender == nil {
-		respond.FromError(w, r, errs.InvalidState("credit-note email is not configured on this deployment"), "credit_note_email")
+	var body SendEmailRequest
+	if !respond.DecodeStrict(w, r, &body) {
 		return
 	}
-
-	var body SendEmailRequest
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Email == "" {
-		respond.BadRequest(w, r, "email is required")
+	if body.Email == "" {
+		respond.ValidationField(w, r, "email", "email is required")
+		return
+	}
+	if h.emailSender == nil {
+		respond.FromError(w, r, errs.InvalidState("credit-note email is not configured on this deployment"), "credit_note_email")
 		return
 	}
 	// The To address gets the same check as a customer's stored email.

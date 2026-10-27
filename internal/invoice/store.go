@@ -74,9 +74,10 @@ type Store interface {
 	// collection produces the same invoice end-state as a successful
 	// engine charge.
 	MarkPaid(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time) (domain.Invoice, error)
-	// MarkPaidOffline is MarkPaid for Record Offline Payment: check runs on
-	// the row under the lock and can refuse. Never for a card settlement.
-	MarkPaidOffline(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time, check func(tx *sql.Tx, locked domain.Invoice) error) (domain.Invoice, error)
+	// MarkPaidOffline is MarkPaid for Record Offline Payment: it sets
+	// paid_out_of_band and writes no PaymentIntent, and check runs on the
+	// row under the lock and can refuse. Never for a card settlement.
+	MarkPaidOffline(ctx context.Context, tenantID, id string, paidAt time.Time, check func(tx *sql.Tx, locked domain.Invoice) error) (domain.Invoice, error)
 	// ChargeHeldTx: the charge hold — none, live or stale (ADR-127) — and
 	// its value. Caller holds the row lock on tx.
 	ChargeHeldTx(ctx context.Context, tx *sql.Tx, id string) (domain.ChargeHoldState, domain.ChargeHold, error)
@@ -118,7 +119,7 @@ type Store interface {
 	AddLineItemAtomicAudited(ctx context.Context, tenantID, invoiceID string, item domain.InvoiceLineItem, emit func(tx *sql.Tx, item domain.InvoiceLineItem, inv domain.Invoice) error) (domain.InvoiceLineItem, domain.Invoice, error)
 
 	// UpdateTaxAtomic re-stamps an invoice's tax decision after a manual
-	// retry. Locks the invoice row, gates on tax_status in (pending, failed)
+	// retry. Locks the invoice row, gates on tax_status pending
 	// and status='draft', rewrites per-line tax stamps and invoice-level tax
 	// columns, increments tax_retry_count, recomputes total + amount_due.
 	// Returns errs.InvalidState when a gate fails (caller surfaces 409) and
@@ -126,7 +127,7 @@ type Store interface {
 	UpdateTaxAtomic(ctx context.Context, tenantID, invoiceID string, update domain.InvoiceTaxRetryUpdate, lineItems []domain.InvoiceLineItem) (domain.Invoice, error)
 
 	// ListPendingTaxRetry returns draft invoices awaiting another
-	// tax-calculation attempt: tax_status in (pending, failed),
+	// tax-calculation attempt: tax_status pending,
 	// tax_error_code is in the retryable set (the worker filters
 	// further on this side), tax_next_retry_at is NULL or in the
 	// past, and tax_retry_count is below the per-invoice cap.
@@ -227,12 +228,11 @@ type Store interface {
 
 	// FindBaseInvoiceForPeriod returns the most-recent NON-VOIDED invoice
 	// carrying a base-fee line item with billing_period_start = the given
-	// periodStart for the given subscription. Used by proration-credit
-	// paths (handleItemProration on downgrade) to verify
-	// the customer actually paid for the current period before granting
-	// a "refund" — industry standard (Chargebee distinguishes Refundable
-	// vs Adjustment credit notes based on this; Stripe warns operators
-	// to disable proration when the latest invoice is unpaid).
+	// periodStart for the given subscription. A written-off one counts: it
+	// is billed but unpaid. handleItemProration reads it to refuse a net
+	// charge while the period's base is unpaid (ADR-050) — industry
+	// standard (Recurly blocks a change on a past-due invoice; Stripe warns
+	// operators to disable proration when the latest invoice is unpaid).
 	//
 	// For in_advance plans, the cycle-close invoice from the prior period
 	// (or BillOnCreate's day-1 invoice for new subs) carries the base
@@ -242,14 +242,6 @@ type Store interface {
 	// subs in the first place. Returns errs.ErrNotFound when no
 	// matching invoice exists.
 	FindBaseInvoiceForPeriod(ctx context.Context, tenantID, subscriptionID string, periodStart time.Time) (domain.Invoice, error)
-
-	// LatestThresholdPeriodEnd returns the latest billing_period_end of
-	// the subscription's non-voided threshold invoices whose
-	// billing_period_start falls inside [periodStart, periodEnd). The
-	// cycle close treats it as the "billed through" watermark so a
-	// reset_billing_cycle=false threshold fire doesn't get re-billed at
-	// period end. errs.ErrNotFound when no threshold invoice exists.
-	LatestThresholdPeriodEnd(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (time.Time, error)
 
 	// RecordChargeAttempt / ListChargeAttemptsByInvoice are the ADR-102
 	// charge-attempt facts: one row per attempt, upserted by

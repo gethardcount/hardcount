@@ -1,17 +1,15 @@
 # Run two or more copies of Velox (high availability)
 
-This page is for the engineer who runs Velox where a restart must not cause downtime. You run two or more copies of the Velox API behind a load balancer. While one copy restarts or crashes, the others keep serving.
+Run two or more copies of the Velox API behind a load balancer. While one copy restarts or crashes, the others keep serving.
 
-Think of a shop with two tills: when one closes, customers queue at the other.
-
-One VM with Docker Compose is also a supported production setup, for a small team that can accept a few minutes of downtime during a restart. If that is you, start with [Install on one VM](../../deploy/compose/README.md) instead.
+Downtime during a restart is fine for you? Use [Production on one VM](../production-one-vm.md).
 
 ## What you need
 
 - Two or more `velox-api` copies behind a load balancer.
 - A managed Postgres with automatic failover and point-in-time restore.
 - A managed Redis. Velox uses it only for rate limiting, and all copies share its counts. If Redis goes down after start-up, see [Redis going down after boot](runbook/replica-will-not-start.md#redis-going-down-after-boot).
-- A connection pooler, if you want one. PgBouncer in transaction mode works, and CI runs the test suite through it. RDS Proxy is expected to behave the same way but has not been tested ([details](postgres-requirements.md)). Run database upgrades (migrations) over a direct connection.
+- A connection pooler is optional: [Postgres requirements → Connection poolers](postgres-requirements.md#connection-poolers).
 
 The settings for each copy are in [Self-host](../self-host.md#settings). Every copy uses the same settings and the same database.
 
@@ -22,7 +20,7 @@ Each copy answers API requests. Background jobs are different: billing runs, pay
 - **One copy runs each job at a time.** Before each run of a job, a copy takes a short lease: a row in Postgres that says "this copy runs this job now" (see [leader lease](../glossary.md)). The other copies stand by. If the copy holding a lease dies, another one takes over within about 15 seconds.
 - **Queued rows are claimed once.** Webhooks and emails wait in queue tables (outboxes) until a background worker sends them. A worker skips any row another worker already holds, instead of waiting for it (Postgres `SKIP LOCKED`).
 
-One feature still assumes a single copy. The dashboard's live webhook event stream shows only the events sent by the copy that serves the stream. It does not touch money.
+A few features still assume one copy: the dashboard's live webhook stream, test-clock advances, and one billing log note. None of them touch money.
 
 ## Set up the load balancer
 
@@ -36,7 +34,7 @@ One feature still assumes a single copy. The dashboard's live webhook event stre
 
 2. Set `TRUST_PROXY` on every copy to the address range (CIDR) of the load balancer. Separate several ranges with commas.
 
-   Without it, every request seems to come from the load balancer. The per-address limits on the public payment pages (60 a minute) and on sign-in, `/v1/auth` (100 a minute), then become one shared limit for every customer and every operator of the install. The sign-in throttle also counts every try as if it came from one address, so 5 wrong passwords for an email, from anyone, make every new browser wait to sign in with it. Set `TRUST_PROXY=none` only when the copies take client connections directly, with no proxy in front.
+   Why it matters: [Self-host → Settings](../self-host.md#settings). Set `TRUST_PROXY=none` only when the copies take client connections directly, with no proxy in front.
 
    **You see:** the copy starts. In `production`, a copy with `TRUST_PROXY` unset refuses to start with `TRUST_PROXY is required in production`.
 
@@ -44,7 +42,7 @@ One feature still assumes a single copy. The dashboard's live webhook event stre
 
    **You see:** when you stop a copy, `/health/ready` on that copy answers 503 `{"status":"draining"}` for that long, while it still serves requests.
 
-4. Give each copy 120 seconds to shut down: Kubernetes `terminationGracePeriodSeconds: 120`. The Compose stack already sets `stop_grace_period: 120s`.
+4. Set the shutdown grace period (Kubernetes `terminationGracePeriodSeconds`) above `SHUTDOWN_DRAIN_DELAY` plus 90 seconds: 120s with the 5s default, 180s with `SHUTDOWN_DRAIN_DELAY=60s`. The Compose stack sets `stop_grace_period: 120s`.
 
 5. Check the database connections. Each copy opens up to `DB_MAX_OPEN_CONNS` connections (default 20). Copies × `DB_MAX_OPEN_CONNS` must stay below your Postgres `max_connections`.
 
@@ -68,9 +66,9 @@ On a stop signal (SIGTERM), a copy first tells the load balancer it is leaving: 
 | 2. A test-clock advance in progress | Stopped at the limit. The clock stays `advancing` until a copy restarts. See [Test-clock advance hung](runbook/test-clock-advance-hung.md). | Up to 30s |
 | 3. Background jobs | | Up to 30s |
 
-The worst case is 90 seconds. Usually it takes under 2 seconds.
+The worst case is `SHUTDOWN_DRAIN_DELAY` plus 90 seconds. Usually the three stages take under 2 seconds after the drain delay.
 
-A grace period shorter than 120 seconds can kill a copy (SIGKILL) halfway through. Velox is built to survive that: queued webhooks and emails a copy had claimed are picked up again when its lease runs out, and the next copy to start recovers a killed test-clock advance. The cost is that a few webhooks or emails can be sent twice.
+A grace period shorter than that can kill a copy (SIGKILL) halfway through. Velox is built to survive that: queued webhooks and emails a copy had claimed are picked up again when its lease runs out, and the next copy to start recovers a killed test-clock advance. The cost is that a few webhooks or emails can be sent twice.
 
 ## Upgrades
 
@@ -80,24 +78,8 @@ Read the upgrade notes in the [changelog](../../CHANGELOG.md) first. Then take a
 
 - **A release whose notes say it has migrations:** stop every old copy, run `velox migrate` once (or start one new copy with `RUN_MIGRATIONS_ON_BOOT=true`), then start the other new copies.
 - **A release with no migrations:** upgrade one copy at a time.
-- **From v0.8.x to v0.9.0:** run v0.9.0's `velox migrate` once first. It adds goose's record (`goose_db_version`, at version 180) and changes none of Velox's tables, so the v0.8.x copies keep serving while it runs. Then upgrade the copies one at a time. With `RUN_MIGRATIONS_ON_BOOT=false`, a v0.9.0 copy started before that step refuses to start, and its log says `1 migration to apply`.
+- Upgrading from Velox 0.8.x is not supported; install fresh.
 
 Run `velox migrate status` with the new release first to see the plan. Never roll a migration back in production; see [Self-host](../self-host.md#database-upgrades-migrations).
 
-### Upgrading from v0.3.2 or older
-
-The upgrade from v0.3.2 or older to v0.4.0 or newer must stop every copy before it starts the new ones. Do this one upgrade this way, not rolling:
-
-1. Apply the migrations first, as for any upgrade.
-2. Stop every old copy. In Kubernetes, use the `Recreate` strategy, or `maxSurge: 0` with `maxUnavailable: 100%`.
-3. Start the new copies.
-
-**You see:** `/health/ready` answers 200 on every new copy.
-
-Why: v0.4.0 changed how copies agree on who runs each job. An old copy and a new copy do not see each other's claim, so while both run, every background job runs twice. Money stays correct, because each write checks the state it changes, but webhook events can be sent twice.
-
-## Related
-
-- [Self-host](../self-host.md): settings, Postgres and monitoring.
-- [A background job is stuck](runbook/background-job-stuck.md): what to do when a background job seems stuck.
-- [HA readiness review](../records/ha-readiness-2026-07-06.md): the dated record of what was checked for two or more copies, and why.
+**Next:** [A background job is stuck](runbook/background-job-stuck.md): what to check when billing or another background job stops.

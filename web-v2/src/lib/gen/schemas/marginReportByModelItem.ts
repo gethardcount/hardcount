@@ -10,9 +10,10 @@
 
 export type MarginReportByModelItem = {
   model: string;
-  cost_micros: number;
+  /** This model's stamped provider cost in US cents, as a decimal string. */
+  cost_cents: string;
   revenue_cents?: number;
-  /** True only when a pricing rule pins this model — margin is never heuristically allocated. */
+  /** True only when the price that billed the usage names this model — margin is never heuristically allocated. */
   attributed: boolean;
   /** This model's (revenue − cost) / revenue in basis points, by the same formula as the report's margin_bps. Omitted whenever the report's margin_bps is omitted for currency or unresolved_events, and when the row is not attributed or has no provider cost of its own. */
   margin_bps?: number;

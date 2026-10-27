@@ -151,7 +151,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -235,7 +236,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -442,49 +444,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/customers/{customer_id}/invoices": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List the customer's invoices
-         * @description Newest first. Returns the first `limit` invoices only; there is
-         *     no `offset`. For paging and filters use
-         *     `GET /v1/invoices?customer_id=`.
-         */
-        get: operations["listCustomerInvoices"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/customers/{customer_id}/subscriptions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List the customer's subscriptions
-         * @description All statuses, newest first, up to 50. There is no paging and no
-         *     `total`; for more use `GET /v1/subscriptions?customer_id=`.
-         */
-        get: operations["listCustomerSubscriptions"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/customers/{customer_id}/payment-methods": {
         parameters: {
             query?: never;
@@ -524,12 +483,12 @@ export interface paths {
          *     is saved when Stripe reports the setup succeeded.
          *
          *     At most one call per customer per minute when the server has Redis
-         *     configured. The minute starts at any call, including one that then
-         *     fails, so a second call within it returns 429 `cooldown_active`
-         *     with a `Retry-After` header. Without Redis there is no cooldown.
+         *     configured. The minute starts at any call whose body is accepted,
+         *     including one that then fails, so a second call within it returns
+         *     429 `cooldown_active` with a `Retry-After` header. Without Redis
+         *     there is no cooldown.
          *
-         *     A body that is not valid JSON is ignored and the email is sent
-         *     without a note. The send is written to the audit log.
+         *     The send is written to the audit log.
          */
         post: operations["sendCustomerPaymentSetupEmail"];
         delete?: never;
@@ -556,8 +515,6 @@ export interface paths {
          *     added. The card is saved when Stripe reports the setup succeeded.
          *     The link is written to the audit log; if the audit row cannot be
          *     written, no link is returned.
-         *
-         *     Fails with 500 when Stripe is not connected for this mode.
          */
         post: operations["createCustomerPaymentSetupSession"];
         delete?: never;
@@ -607,59 +564,6 @@ export interface paths {
          *     the call).
          */
         post: operations["setCustomerDefaultPaymentMethod"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/checkout/setup": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Start a card setup in Stripe Checkout (older route)
-         * @description An older route the dashboard no longer uses. Prefer
-         *     `POST /v1/customers/{customer_id}/payment-methods/setup-session`.
-         *
-         *     Creates the Stripe customer if there is none, or copies
-         *     `customer_name`, `email` and the address to the existing one. It
-         *     then returns a Stripe Checkout URL in setup mode (card only, no
-         *     charge). Stripe sends the customer back to `return_url` with
-         *     `?payment=success` or `?payment=cancel` added. Without
-         *     `return_url` it uses `http://localhost:5173/customers/{customer_id}`,
-         *     which works only in local development. Writes an audit row. Needs
-         *     the `customer:write` permission.
-         */
-        post: operations["createCheckoutSetupSession"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/checkout/status/{customerID}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get a customer's card setup status (older route)
-         * @description An older route the dashboard no longer uses. Prefer
-         *     `GET /v1/customers/{customer_id}/payment-methods`.
-         *
-         *     An unknown customer is 404. Needs the `customer:write` permission.
-         */
-        get: operations["getCheckoutSetupStatus"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -727,15 +631,16 @@ export interface paths {
                                 current_period_end?: string;
                             }[];
                             usage?: {
-                                meter_key?: string;
+                                event_name?: string;
                                 meter_name?: string;
                                 unit?: string;
                                 currency?: string;
                                 total_quantity?: string;
                                 /** Format: int64 */
                                 total_amount_cents?: number;
-                                rules?: {
-                                    rule_key?: string;
+                                /** @description One row per price that took usage this period. */
+                                prices?: {
+                                    /** @description The labels the price takes. Absent for a price that takes every event. */
                                     dimension_match?: {
                                         [key: string]: string;
                                     };
@@ -754,11 +659,12 @@ export interface paths {
                             }[];
                             /**
                              * Format: int64
-                             * @description Projected METERED cost for the current period, in cents. Recurring base fees are not included — an in_advance base is already invoiced at period open.
+                             * @description The metered cost of the current billing period so far, in cents, including usage a threshold invoice already billed. Recurring base fees are not included — an in_advance base is already invoiced at period open.
                              */
                             projected_total_cents?: number;
-                            /** @description The customer's credit position. `balance_cents` is the ledger balance, less any grant past its expiry date that is not yet written off: credit is drawn down when an invoice is issued, so it does not move with usage. `unbilled_usage_cents` is the usage no invoice has billed yet, and `estimated_remaining_cents` is the balance minus that, never below zero. These three are the same figures `GET /v1/credits/balance/{customer_id}/live` returns. `unbilled_usage_cents` can differ from `projected_total_cents`: it leaves out usage a threshold invoice already billed and usage sent before a trial's first paid period, and counts each subscription over its own period. It is an estimate: tax, base fees billed at period end and unpaid invoices are not subtracted, and totals in different currencies are added together. */
+                            /** @description The customer's credit position, one entry per currency, ordered by currency. `balance_cents` is the ledger balance in that currency, less any grant past its expiry date that is not yet written off: credit is drawn down when an invoice is issued, so it does not move with usage. `unbilled_usage_cents` is the usage no invoice has billed yet that will be invoiced in that currency, and `estimated_remaining_cents` is the balance minus that, never below zero. These three are the same figures `GET /v1/credits/balance/{customer_id}/live` returns. `unbilled_usage_cents` differs from `projected_total_cents` after a threshold invoice: it leaves out the usage that invoice billed. It is an estimate: tax, base fees billed at period end and unpaid invoices are not subtracted. */
                             credits?: {
+                                currency?: string;
                                 /** Format: int64 */
                                 balance_cents?: number;
                                 /** Format: int64 */
@@ -775,7 +681,7 @@ export interface paths {
                                 promotional_remaining_cents?: number;
                                 /** Format: int64 */
                                 estimated_remaining_cents?: number;
-                            };
+                            }[];
                         };
                     };
                 };
@@ -960,7 +866,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -970,16 +877,17 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
-                        key: string;
+                        /** @description The `event_name` usage events will send for this meter. Letters, digits, `-` and `_`; at most 100 characters. */
+                        event_name: string;
                         name: string;
                         /** @default unit */
                         unit?: string;
                         /**
+                         * @description How the meter rolls its events into one quantity per billing period. Fixed once the meter has a usage event.
                          * @default sum
                          * @enum {string}
                          */
                         aggregation?: "sum" | "count" | "max" | "last";
-                        rating_rule_version_id?: string;
                     };
                 };
             };
@@ -1016,16 +924,17 @@ export interface paths {
         options?: never;
         head?: never;
         /**
-         * Update meter (incl. the default rating-rule binding)
-         * @description Fields omitted are left unchanged. `rating_rule_version_id` sets
-         *     the meter's DEFAULT rating rule — the rate applied to usage no
-         *     dimension pricing rule claims (the remedy for silently-unbilled
-         *     unmatched usage); pass an empty string to clear it. The rule must
-         *     exist on the tenant. Clearing it is refused with 409 when the meter
-         *     has no pricing rule either and a plan with a live (draft, trialing
-         *     or active) subscription uses the meter: that usage would be left off
-         *     every invoice. Add a pricing rule first, or move the subscriptions
-         *     to a plan without this meter.
+         * Update meter
+         * @description Fields omitted are left unchanged. A meter only counts: its prices
+         *     are on the plans (`/v1/plans/{id}/prices`).
+         *
+         *     `aggregation` can change until the meter has a usage event, then
+         *     it is fixed: a change is refused with 409 `meter_has_usage`. Usage
+         *     events are counted under the aggregation the meter has; to count
+         *     differently, make a new meter with another event name. Held usage
+         *     for its `event_name` does not fix it: it is counted under the
+         *     meter's aggregation once released. `name` and `unit` can always
+         *     change, at once.
          */
         patch: {
             parameters: {
@@ -1036,7 +945,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -1052,8 +962,6 @@ export interface paths {
                         unit?: string;
                         /** @enum {string} */
                         aggregation?: "sum" | "count" | "max" | "last";
-                        /** @description Default rating rule; empty string clears. */
-                        rating_rule_version_id?: string;
                     };
                 };
             };
@@ -1075,18 +983,19 @@ export interface paths {
                     content?: never;
                 };
                 /**
-                 * @description `invalid_state`. The new default's currency conflicts with the
-                 *     meter's other prices or with a plan that uses the meter, or
-                 *     clearing the default would leave the meter with no price while a
-                 *     live subscription's plan uses it. The message names the plans.
+                 * @description `meter_has_usage`: the meter has usage events, so its
+                 *     `aggregation` cannot change. `invalid_state`: another write
+                 *     changed the meter during this one.
                  */
                 409: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
                 };
-                /** @description Validation failure (unknown rule id, bad aggregation) */
+                /** @description Validation failure (bad aggregation, an empty name, or an unknown field) */
                 422: {
                     headers: {
                         [name: string]: unknown;
@@ -1095,86 +1004,6 @@ export interface paths {
                 };
             };
         };
-        trace?: never;
-    };
-    "/v1/meters/{meter_id}/pricing-rules": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List a meter's pricing rules
-         * @description Every pricing rule on the meter, highest priority first, then oldest
-         *     first. At billing time each usage event is billed by the first rule
-         *     in this order whose `dimension_match` it matches.
-         */
-        get: operations["listMeterPricingRules"];
-        put?: never;
-        /**
-         * Create or update a meter pricing rule
-         * @description Binds a rating rule to the part of the meter's usage whose dimensions
-         *     match `dimension_match`. The rule is identified by the meter and
-         *     `rating_rule_version_id`: posting the same pair again updates
-         *     `dimension_match`, `aggregation_mode` and `priority` on the existing
-         *     rule and keeps its id. Both cases return 201. The meter id in the
-         *     path is used; a `meter_id` in the body is ignored.
-         */
-        post: operations["upsertMeterPricingRule"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/meters/{meter_id}/pricing-rules/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get a meter pricing rule
-         * @description The rule is looked up by `id` alone; `meter_id` is not checked against it.
-         */
-        get: operations["getMeterPricingRule"];
-        put?: never;
-        post?: never;
-        /**
-         * Delete a meter pricing rule
-         * @description Removes the rule. Usage already invoiced is not changed; the next
-         *     invoices bill the meter's usage without this rule. The rule is
-         *     looked up by `id` alone; `meter_id` is not checked against it.
-         *     Deleting the meter's last price (no other rule and no default
-         *     rating rule on the meter) is refused while a plan with a draft,
-         *     trialing or active subscription uses the meter.
-         */
-        delete: operations["deleteMeterPricingRule"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/meter-pricing-rules": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List all meter pricing rules
-         * @description Every pricing rule on every meter in this tenant and mode, highest priority first.
-         */
-        get: operations["listAllMeterPricingRules"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
         trace?: never;
     };
     "/v1/credit-notes": {
@@ -1214,7 +1043,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -1311,9 +1141,9 @@ export interface paths {
         /**
          * Per-grant burndown + kind subtotals
          * @description The customer's credit blocks with drawdown state — granted /
-         *     drawn / remaining per grant, expiry, and remaining split by
-         *     cost-basis class (commit = money-backed, promotional = free,
-         *     other = legacy/adjustments). include_exhausted=true adds
+         *     drawn / remaining per grant, expiry, and remaining per currency
+         *     split by cost-basis class (commit = money-backed, promotional =
+         *     free, other = legacy/adjustments). include_exhausted=true adds
          *     fully-drawn blocks for history. Each grant's `consumed_cents`
          *     also counts credit no invoice used: `expired_cents`, the part that
          *     expired unused; `retired_cents`, commit credit taken back when the
@@ -1374,14 +1204,17 @@ export interface paths {
         put?: never;
         /**
          * Add or remove credit
-         * @description Writes one `adjustment` entry to the customer's credit ledger. A
-         *     positive amount adds credit; a negative amount removes it. Audit
-         *     action is `credit.adjustment` or `credit.deduction`.
+         * @description Writes one `adjustment` entry to the customer's credit ledger in
+         *     `currency`. A positive amount adds credit in that currency; a
+         *     negative amount removes credit in that currency only. Audit action
+         *     is `credit.adjustment` or `credit.deduction`.
          *
-         *     Errors (422, `param` names the field): `customer_id` or
-         *     `description` missing; `amount_cents` is zero, above 100000000
-         *     ($1,000,000), or a removal larger than the credit that can be
-         *     drawn (expired grants not yet written off do not count).
+         *     Errors (422, `param` names the field): `customer_id`, `currency` or
+         *     `description` missing; `currency` not supported (an unknown code or
+         *     a zero-decimal currency such as JPY); `amount_cents` is zero, above
+         *     100000000 (1,000,000.00 in that currency), or a removal larger than
+         *     the credit in that currency that can be drawn (expired grants not
+         *     yet written off do not count).
          */
         post: operations["adjustCredits"];
         delete?: never;
@@ -1399,10 +1232,10 @@ export interface paths {
         };
         /**
          * List credit balances for all customers
-         * @description One row per customer that has any credit ledger entry, highest
-         *     balance first. No paging and no `total`. `total_granted` is the
-         *     sum of every credit added (grants, positive adjustments and
-         *     reversals).
+         * @description One row per customer and currency that has any credit ledger
+         *     entry, highest balance first. No paging and no `total`.
+         *     `total_granted` is the sum of every credit added in that currency
+         *     (grants, positive adjustments and reversals).
          */
         get: operations["listCreditBalances"];
         put?: never;
@@ -1423,8 +1256,8 @@ export interface paths {
         /**
          * List a customer's credit ledger
          * @description Ledger entries for one customer. `balance_after` is the running
-         *     balance in time order over the whole ledger, so it stays right
-         *     when you filter by `entry_type`.
+         *     balance in the entry's currency, in time order over the whole
+         *     ledger, so it stays right when you filter by `entry_type`.
          */
         get: operations["listCreditLedgerEntries"];
         put?: never;
@@ -1483,7 +1316,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -1567,9 +1401,7 @@ export interface paths {
          * @description Mutates url / description / events / active WITHOUT rotating the
          *     signing secret — the receiver keeps verifying while the target or
          *     event set changes. Fields omitted are left unchanged; events are
-         *     validated against the emit catalog. This is also how a
-         *     recipe-created endpoint (inactive, placeholder URL) is pointed at
-         *     a real receiver and activated.
+         *     validated against the emit catalog.
          */
         patch: {
             parameters: {
@@ -1580,7 +1412,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -1646,7 +1479,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -1776,57 +1610,6 @@ export interface paths {
         };
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/webhook-endpoints/events/{id}/deliveries": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List an event's deliveries (older route)
-         * @description An older route the dashboard no longer uses. Prefer
-         *     `GET /v1/webhook_events/{id}/deliveries`, which also answers 404 for
-         *     an unknown event.
-         *
-         *     Returns the deliveries of the event and of its replays, oldest
-         *     first. An unknown id returns 200 with an empty list. Needs the
-         *     `apikey:write` permission.
-         */
-        get: operations["listWebhookEventDeliveriesLegacy"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/webhook-endpoints/events/{id}/replay": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Replay an event to all matching endpoints (older route)
-         * @description An older route the dashboard no longer uses. Prefer
-         *     `POST /v1/webhook_events/{id}/replay`.
-         *
-         *     Does the same replay. The response always says `replayed`, even
-         *     when no endpoint will receive the copy. Writes an audit row. Needs
-         *     the `apikey:write` permission.
-         */
-        post: operations["replayWebhookEventLegacy"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2018,7 +1801,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -2037,12 +1821,18 @@ export interface paths {
                         /** Format: int64 */
                         base_amount_cents?: number;
                         /**
-                         * @description Optional. Defaults to in_arrears. See Plan.base_bill_timing
-                         *     for semantics (ADR-031).
+                         * @description Required when `base_amount_cents` is above 0. With a base
+                         *     of 0 it may be left out, and the plan is in_arrears;
+                         *     `in_advance` with a base of 0 is refused. See
+                         *     Plan.base_bill_timing (ADR-031).
                          * @enum {string}
                          */
                         base_bill_timing?: "in_advance" | "in_arrears";
-                        meter_ids?: string[];
+                        /**
+                         * @description The plan's usage prices, created with it in one request.
+                         *     Each takes the plan's currency.
+                         */
+                        prices?: components["schemas"]["PriceInput"][];
                         /**
                          * @description Optional. A plan is created active; archive it with PATCH.
                          * @enum {string}
@@ -2058,19 +1848,38 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description Plan created */
+                /** @description Plan created, with its prices */
                 201: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["Plan"];
+                        "application/json": components["schemas"]["PlanDetail"];
                     };
                 };
                 /**
-                 * @description A field failed validation, `status` is set to anything but
-                 *     `active` (a plan is created active; archive it with PATCH), or
-                 *     the body has an unknown field (`param` names it; the body must use only the fields listed here).
+                 * @description `price_exists`: two prices name the same meter and
+                 *     `dimension_match`. `price_conflict`: two prices on one meter
+                 *     could both take one event with the same number of labels, so
+                 *     neither would win; the message names the other price, and
+                 *     `param` names the second one. Nothing is created.
+                 */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /**
+                 * @description A field failed validation (a price names an unknown meter, a
+                 *     rate is outside its limits, `base_bill_timing` is missing with a
+                 *     base fee above 0 or is `in_advance` with a base of 0), `status`
+                 *     is set to anything but `active` (a plan is created active;
+                 *     archive it with PATCH), or the body has an unknown field
+                 *     (`param` names it, `prices[i].` first for a price; the body must
+                 *     use only the fields listed here).
                  */
                 422: {
                     headers: {
@@ -2106,135 +1915,21 @@ export interface paths {
          * Update plan
          * @description A field left out keeps its current value. To clear `description`
          *     or `tax_code`, send an empty string. `code`, `currency` and
-         *     `billing_interval` cannot be changed and are ignored.
+         *     `billing_interval` cannot be changed: sending one is a 422 naming
+         *     it. The plan's
+         *     usage prices change through `/v1/plans/{id}/prices`.
          *
-         *     `base_amount_cents`, `base_bill_timing` and `meter_ids` change what
-         *     subscriptions are billed. Changing any of them is refused while a
-         *     subscription that is not canceled or archived uses the plan
-         *     (`live_subscription_count` on Get plan): create a new plan instead. `base_amount_cents` can only be set to a value above 0.
-         *     Every meter in `meter_ids` must have a price (a default rating rule
-         *     or a pricing rule) in the plan's currency.
+         *     `base_amount_cents` cannot change while a subscription that is not
+         *     canceled uses the plan (`live_subscription_count` on Get plan):
+         *     create a new plan instead. It can be set to 0. `base_bill_timing`
+         *     cannot change once a subscription has used the plan (`used`). A
+         *     plan with no base fee must be `in_arrears`. `name`, `description`,
+         *     `tax_code` and `status` change at once.
          */
         patch: operations["updatePlan"];
         trace?: never;
     };
-    "/v1/rating-rules": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List rating rules */
-        get: {
-            parameters: {
-                query?: {
-                    /** @description Only versions of this rule. */
-                    rule_key?: string;
-                    lifecycle_state?: "draft" | "active" | "archived";
-                    /** @description When true, only the newest version of each rule. */
-                    latest?: boolean;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Rating rule list */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data: components["schemas"]["RatingRule"][];
-                        };
-                    };
-                };
-            };
-        };
-        put?: never;
-        /** Create rating rule */
-        post: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /**
-                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                     *     the same value on every retry. For 24 hours, a repeat with the same
-                     *     key, method, path and body gets the first response again, with an
-                     *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
-                     */
-                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                };
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        rule_key: string;
-                        name: string;
-                        /** @enum {string} */
-                        mode: "flat" | "graduated" | "package";
-                        currency: string;
-                        /** @description Per-unit rate in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units). */
-                        flat_amount_cents?: string;
-                        graduated_tiers?: {
-                            up_to?: number;
-                            /** @description Per-unit rate in cents, as a decimal string. */
-                            unit_amount_cents?: string;
-                        }[];
-                        package_size?: number;
-                        package_amount_cents?: number;
-                        /** @description Package-mode per-unit overage rate in cents, as a decimal string. Fixed fees (package_amount_cents) stay integer cents. */
-                        overage_unit_amount_cents?: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description Rating rule created */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["RatingRule"];
-                    };
-                };
-                /** @description The body is not valid JSON. */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /**
-                 * @description A field failed validation, or the body has an unknown field at
-                 *     any depth (`param` names it; the body must use only the fields
-                 *     listed here).
-                 */
-                422: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/rating-rules/{id}": {
+    "/v1/plans/{id}/prices": {
         parameters: {
             query?: never;
             header?: never;
@@ -2242,16 +1937,67 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get rating rule
-         * @description Returns one rating rule version by its id.
+         * List a plan's prices
+         * @description The plan's usage prices from now on, in the order they were added.
          */
-        get: operations["getRatingRule"];
+        get: operations["listPlanPrices"];
         put?: never;
-        post?: never;
+        /**
+         * Add a price to a plan
+         * @description On a plan no subscription has used, the price applies at once
+         *     (`effective: now`). On a used plan it applies from each
+         *     subscriber's next billing period (`effective: next_period`); until
+         *     then the plan's other prices bill the meter's usage as before. A
+         *     subscriber who first joins the plan in a period after the add pays
+         *     it from the join (see `PriceWrite`).
+         *
+         *     A price that names a removed price's meter and `dimension_match`
+         *     adds that price back under its id. Its old customer overrides do
+         *     not come back.
+         */
+        post: operations["addPlanPrice"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/v1/plans/{id}/prices/{price_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove a price from a plan
+         * @description On a plan no subscription has used, the price is gone at once. On a
+         *     used plan it takes no part from each subscriber's next billing
+         *     period; the current period keeps it. A subscriber who first joins the
+         *     plan in a period after the removal does not pay it (see
+         *     `PriceWrite`). The removal
+         *     ends every customer override of the price, each when the removal
+         *     takes effect for its customer, and the answer names them
+         *     (`ended_overrides`). Adding the price back later keeps its id but not
+         *     the overrides.
+         */
+        delete: operations["removePlanPrice"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a price's rate
+         * @description Changes the price's shape. Its meter and `dimension_match` are its
+         *     identity and cannot change: add a price for other events instead.
+         *     On a plan no subscription has used, the change applies at once; on
+         *     a used plan, from each subscriber's next billing period. The current
+         *     period keeps the price it started with. A subscriber who first joins
+         *     the plan in a period after the change pays it from the join (see
+         *     `PriceWrite`). Customer overrides of the price keep applying.
+         */
+        patch: operations["updatePlanPrice"];
         trace?: never;
     };
     "/v1/subscriptions": {
@@ -2268,13 +2014,25 @@ export interface paths {
                     customer_id?: string;
                     /** @description Filter to subscriptions with a live item on this plan. */
                     plan_id?: string;
-                    status?: string;
+                    /**
+                     * @description Exact status. Any other value is a 400. Paused collection is not
+                     *     a status: use `collection=paused`.
+                     */
+                    status?: "draft" | "trialing" | "active" | "canceled";
                     /**
                      * @description `failing` returns only subscriptions that carry a
                      *     `billing_failure`: those waiting for their next billing attempt
                      *     and those that are parked. Any other value is a 400.
                      */
                     billing?: "failing";
+                    /**
+                     * @description `paused` returns only active and trialing subscriptions whose
+                     *     `pause_collection` is in force, whether an operator or dunning set
+                     *     it. A timed pause ends at `resumes_at` (on the subscription's test
+                     *     clock, if it has one), even while the response still carries it.
+                     *     Any other value is a 400.
+                     */
+                    collection?: "paused";
                     /** @description Case-insensitive substring match on display name or code. */
                     search?: string;
                     /** @description One of display_name, status, next_billing_at, trial_end_at, created_at (default). */
@@ -2301,6 +2059,15 @@ export interface paths {
                         };
                     };
                 };
+                /** @description A `status`, `billing` or `collection` value the API does not know. */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
             };
         };
         put?: never;
@@ -2314,7 +2081,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -2338,8 +2106,26 @@ export interface paths {
                          * @enum {string}
                          */
                         billing_time?: "calendar" | "anniversary";
+                        /**
+                         * @description Days of free trial; 0 means no trial. Above 0, the
+                         *     subscription is `trialing` from now and its first paid
+                         *     period starts on the day the trial ends.
+                         */
                         trial_days?: number;
-                        start_now?: boolean;
+                        /**
+                         * @description Leave it out and the subscription starts now. Without
+                         *     `trial_days` it is `active`, its first period starts
+                         *     today in the account's billing time zone (the clock's
+                         *     day for a customer on a test clock), and a non-zero base
+                         *     fee billed in advance is invoiced now. With `trial_days`
+                         *     above 0 it is `trialing` from now. Send `draft` to create it
+                         *     without starting it: it bills nothing until you activate
+                         *     it with `POST /v1/subscriptions/{id}/activate`. A draft
+                         *     cannot have a trial (`trial_days` above 0). An empty or
+                         *     null `status` is refused.
+                         * @enum {string}
+                         */
+                        status?: "draft";
                     };
                 };
             };
@@ -2355,7 +2141,12 @@ export interface paths {
                 };
                 /**
                  * @description A field failed validation (`param` names it), for example
-                 *     `trial_days` outside 0 to 730, or the body has an unknown field (`param` names it; the body must use only the fields listed here).
+                 *     `trial_days` outside 0 to 730, `status` other than `draft`
+                 *     (empty and null included), or `trial_days` above 0 with
+                 *     `status: draft`. Or the body has an unknown
+                 *     field (`param` names it; the body must use only the fields
+                 *     listed here). `start_now` is such a field since 2026-10-23: a
+                 *     subscription starts now unless `status` is `draft`.
                  */
                 422: {
                     headers: {
@@ -2392,7 +2183,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -2467,7 +2259,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -2634,9 +2427,10 @@ export interface paths {
         post?: never;
         /**
          * Clear a scheduled cancel
-         * @description Removes a scheduled cancel. Calling it on a subscription with no
-         *     schedule returns the subscription unchanged. Sends the
-         *     `subscription.cancel_cleared` webhook event.
+         * @description Removes a scheduled cancel and sends the
+         *     `subscription.cancel_cleared` webhook event. Calling it on a
+         *     subscription with no schedule returns the subscription unchanged
+         *     and sends no event.
          *
          *     If the scheduled date has already passed, the cancel has taken
          *     effect and the request answers 409.
@@ -2670,9 +2464,13 @@ export interface paths {
          *     periods that end before that instant bill as drafts, and later
          *     periods bill normally. Without it, the pause lasts until you call
          *     `DELETE /v1/subscriptions/{id}/pause-collection`. A new call
-         *     replaces the current pause.
+         *     replaces the current pause, including one dunning set; the pause is
+         *     then yours (`set_by: operator`), and a payment no longer lifts it.
          *
-         *     Sends the `subscription.collection_paused` webhook event.
+         *     Sends the `subscription.collection_paused` webhook event, with
+         *     `triggered_by: operator`. If the current pause had already ended
+         *     (its `resumes_at` has passed), its `subscription.collection_resumed`
+         *     is sent first.
          */
         put: operations["pauseSubscriptionCollection"];
         post?: never;
@@ -2680,9 +2478,11 @@ export interface paths {
          * Resume collection
          * @description Ends a collection pause. The period that is running bills
          *     normally; a period that ended during the pause keeps its draft
-         *     invoice. Calling it on a subscription that is not paused returns
-         *     the subscription unchanged. Sends the
-         *     `subscription.collection_resumed` webhook event.
+         *     invoice. Sends the `subscription.collection_resumed` webhook
+         *     event. If the pause had already ended (its `resumes_at` has
+         *     passed), the event says what ended it: `triggered_by` is `payment`
+         *     or `schedule`, not `operator`. Calling it on a subscription that is
+         *     not paused returns the subscription unchanged and sends no event.
          */
         delete: operations["resumeSubscriptionCollection"];
         options?: never;
@@ -2753,6 +2553,13 @@ export interface paths {
          *     the period ends. A threshold bills sooner; it does not cap or
          *     block usage. Set `amount_gte`, `item_thresholds`, or both. The
          *     first threshold reached triggers the invoice.
+         *
+         *     The threshold invoice bills the period's usage so far, and no base
+         *     fee. The period keeps its dates, the base fee is billed as it would
+         *     be with no threshold, and the period's next invoice bills the rest
+         *     of the usage.
+         *     `reset_billing_cycle`, which started a new period at the threshold
+         *     invoice, was removed; a body that sends it is refused with 422.
          *
          *     Each call replaces the whole configuration. Item thresholds left
          *     out of the body are removed.
@@ -2980,16 +2787,7 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: {
-                    /**
-                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                     *     the same value on every retry. For 24 hours, a repeat with the same
-                     *     key, method, path and body gets the first response again, with an
-                     *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
-                     */
-                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                };
+                header?: never;
                 path?: never;
                 cookie?: never;
             };
@@ -2998,16 +2796,19 @@ export interface paths {
                     "application/json": {
                         /** @description The customer's external_id (your identifier), not the internal vlx_cus_ id. */
                         external_customer_id: string;
-                        /** @description The meter key (e.g. "tokens"). */
+                        /** @description The meter's `event_name` (e.g. "tokens"). */
                         event_name: string;
-                        /** @description Decimal quantity — accepts a JSON number (5) or string ("5.5") for exact fractional values. */
+                        /**
+                         * @description A JSON number (`5`) or a string holding one (`"5.5"`,
+                         *     for exact decimals). At most 12 decimal places; trailing
+                         *     zeros do not count. Its size must be under 10^26, and it
+                         *     is at most 100 characters. A negative value is a
+                         *     correction. A missing quantity, or any other value, is
+                         *     refused with 422 and `param: quantity`.
+                         */
                         quantity: number | string;
-                        /** @description Scalar dimension values used for pricing-rule dispatch (e.g. {"model", "token_type"}). */
+                        /** @description Scalar labels of the event (e.g. {"model", "token_type"}). A price takes an event whose labels include the price's `dimension_match`. */
                         dimensions?: {
-                            [key: string]: unknown;
-                        };
-                        /** @description Older name for `dimensions`. When both are sent, `dimensions` wins. */
-                        properties?: {
                             [key: string]: unknown;
                         };
                         /**
@@ -3020,9 +2821,8 @@ export interface paths {
                          *     event, such as a batch index or a timestamp that can
                          *     repeat, or that usage is lost. Empty or whitespace-only
                          *     keys are refused with 422, and so are keys longer than
-                         *     255 characters. The `Idempotency-Key` header does not
-                         *     count as this key: it caches one HTTP response for 24
-                         *     hours.
+                         *     255 characters. This is the only dedup key: the usage
+                         *     routes ignore the `Idempotency-Key` header.
                          */
                         idempotency_key: string;
                         /** Format: date-time */
@@ -3044,7 +2844,11 @@ export interface paths {
                         "application/json": components["schemas"]["UsageEvent"];
                     };
                 };
-                /** @description Event ingested */
+                /**
+                 * @description Event ingested. A `billing_status` is what Velox found when the
+                 *     event arrived (see `UsageBillingStatus`); the event is stored
+                 *     all the same.
+                 */
                 201: {
                     headers: {
                         [name: string]: unknown;
@@ -3056,14 +2860,30 @@ export interface paths {
                 /**
                  * @description Validation failed and nothing was stored. `param` names the
                  *     field: `idempotency_key` when it is missing, blank or longer
-                 *     than 255 characters, `external_customer_id` or `event_name` for
-                 *     an unknown customer or meter, `timestamp` for a malformed one.
+                 *     than 255 characters, `quantity` when it is missing or not as
+                 *     described above, `external_customer_id` or `event_name` for an
+                 *     unknown customer or meter, `timestamp` for a malformed one, and
+                 *     `properties` when it has a key (it was renamed `dimensions`;
+                 *     `null` or `{}` is ignored).
                  */
                 422: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content?: never;
+                };
+                /**
+                 * @description `ingest_unavailable`: a customer or meter lookup, or the read of
+                 *     the customer's billing periods, could not be answered. Nothing
+                 *     was recorded; retry.
+                 */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
                 };
             };
         };
@@ -3098,16 +2918,7 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: {
-                    /**
-                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                     *     the same value on every retry. For 24 hours, a repeat with the same
-                     *     key, method, path and body gets the first response again, with an
-                     *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
-                     */
-                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                };
+                header?: never;
                 path?: never;
                 cookie?: never;
             };
@@ -3116,15 +2927,18 @@ export interface paths {
                     "application/json": {
                         /** @description The customer's external_id (your identifier), not the internal vlx_cus_ id. */
                         external_customer_id: string;
-                        /** @description The meter key (e.g. "tokens"). */
+                        /** @description The meter's `event_name` (e.g. "tokens"). */
                         event_name: string;
-                        /** @description Decimal quantity — accepts a JSON number (5) or string ("5.5") for exact fractional values. */
+                        /**
+                         * @description A JSON number (`5`) or a string holding one (`"5.5"`,
+                         *     for exact decimals). At most 12 decimal places;
+                         *     trailing zeros do not count. Its size must be under
+                         *     10^26, and it is at most 100 characters. A negative
+                         *     value is a correction. A missing quantity, or any
+                         *     other value, fails validation.
+                         */
                         quantity: number | string;
                         dimensions?: {
-                            [key: string]: unknown;
-                        };
-                        /** @description Older name for `dimensions`. When both are sent, `dimensions` wins. */
-                        properties?: {
                             [key: string]: unknown;
                         };
                         /**
@@ -3137,9 +2951,8 @@ export interface paths {
                          *     event, such as a batch index or a timestamp that can
                          *     repeat, or that usage is lost. Empty or whitespace-only
                          *     keys are refused with 422, and so are keys longer than
-                         *     255 characters. The `Idempotency-Key` header does not
-                         *     count as this key: it caches one HTTP response for 24
-                         *     hours.
+                         *     255 characters. This is the only dedup key: the usage
+                         *     routes ignore the `Idempotency-Key` header.
                          */
                         idempotency_key: string;
                         /** Format: date-time */
@@ -3154,13 +2967,7 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": {
-                            /** @description Newly written events. */
-                            ingested?: number;
-                            /** @description Idempotency replays — already ingested, counted as success. */
-                            deduplicated?: number;
-                            total?: number;
-                        };
+                        "application/json": components["schemas"]["UsageEventBatchResult"];
                     };
                 };
                 /** @description Request body over the 1MB cap — send smaller batches. */
@@ -3180,6 +2987,19 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content?: never;
+                };
+                /**
+                 * @description `ingest_unavailable`: a customer or meter lookup, or the read of
+                 *     the customer's billing periods, could not be answered. Nothing
+                 *     was recorded; retry the whole batch.
+                 */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
                 };
             };
         };
@@ -3208,8 +3028,13 @@ export interface paths {
          *
          *     The event counts toward the billing period its timestamp falls in
          *     only if that period's invoice has not been built yet. An event for
-         *     an already-invoiced period is stored but never billed; bill it with
-         *     a one-off invoice.
+         *     an already-invoiced period is stored, but that invoice does not
+         *     bill it; bill it with a one-off invoice if needed. Its 201 carries
+         *     the `billing_status` Velox found (see `UsageBillingStatus`):
+         *     `after_close` while the subscription that invoiced the period is
+         *     active or trialing, `outside_subscription` once it has ended. A
+         *     billing period of another subscription that is not invoiced yet and
+         *     holds the event's time decides the status instead.
          *
          *     Shares idempotency keys with live ingest: a repeated
          *     `idempotency_key` returns 200 with the original event and an
@@ -3235,7 +3060,7 @@ export interface paths {
          * @description Usage rows the LiteLLM integration received for a customer or meter
          *     that did not exist yet. They are kept with their idempotency keys,
          *     not billed, until you release or discard them. Grouped by external
-         *     customer ID, meter key and reason, most recent arrival first. Lists
+         *     customer ID, event name and reason, most recent arrival first. Lists
          *     the 200 external customer IDs with the most recent arrivals, with
          *     every group for each; `total_customers` and `total_rows` count all
          *     held rows, listed or not. Requires usage read permission.
@@ -3292,8 +3117,8 @@ export interface paths {
         put?: never;
         /**
          * Discard held usage
-         * @description Marks the held rows for one external customer ID (and one meter
-         *     key, when given) as discarded. They are never billed. The rows stay
+         * @description Marks the held rows for one external customer ID (and one event
+         *     name, when given) as discarded. They are never billed. The rows stay
          *     stored as a record. Writes an audit log entry. Requires usage write
          *     permission.
          */
@@ -3323,29 +3148,6 @@ export interface paths {
          *     for compatibility only.
          */
         get: operations["aggregateUsageEvents"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/usage-summary/{customer_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Customer usage summary
-         * @description Per-meter quantity totals and the event count for one customer over
-         *     a window. Without `from` and `to` the window is the current calendar
-         *     month in UTC (the test clock's month when the customer is on one).
-         *     Quantities are plain sums, whatever the meter's aggregation.
-         */
-        get: operations["getUsageSummary"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3390,7 +3192,7 @@ export interface paths {
                     overdue?: boolean;
                     /** @description Comma-separated invoice IDs to fetch exactly. */
                     ids?: string;
-                    /** @description One of invoice_number, amount_due_cents, billing_period_start, due_at, issued_at, status, payment_status, created_at (default). */
+                    /** @description One of invoice_number, amount_due_cents, billing_period_start, due_at, issued_at, status, payment_status, created_at (default). amount_due_cents sorts a paid invoice by what paid it (`amount_paid_cents` plus `credits_applied_cents`, since paying zeroes `amount_due_cents`) and every other invoice by `amount_due_cents`, which a voided or written-off invoice keeps. */
                     sort?: string;
                     dir?: "asc" | "desc";
                     limit?: number;
@@ -3431,9 +3233,16 @@ export interface paths {
          *     one transaction, or omit them and add lines later with
          *     `POST /v1/invoices/{id}/line-items`.
          *
+         *     A manual invoice uses the customer's currency. A `currency` that
+         *     differs from the customer's billing-profile currency, or from the
+         *     plan currency of any of the customer's live (draft, trialing or
+         *     active) subscriptions, is refused with 409. A customer with neither
+         *     may be invoiced in any supported currency.
+         *
          *     Defaults when a field is left out:
-         *     - `currency`: the customer's billing-profile currency, then the
-         *       tenant default, then `USD`.
+         *     - `currency`: the customer's billing-profile currency, then the plan
+         *       currency of the customer's live subscriptions, then the tenant
+         *       default.
          *     - `net_payment_term_days`: the tenant's net payment terms. A
          *       negative value is stored as 0 (due on receipt).
          *     - `billing_period_start` / `billing_period_end`: now.
@@ -3472,8 +3281,7 @@ export interface paths {
          *     when a mid-period change makes the invoice differ. Composes across customer / subscription / pricing;
          *     registered as a sibling of `/v1/invoices` (chi picks the more
          *     specific pattern, otherwise `/{id}` would capture
-         *     `create_preview` as an invoice ID). See
-         *     [`docs/design/create-preview.md`](../docs/design/create-preview.md).
+         *     `create_preview` as an invoice ID).
          */
         post: {
             parameters: {
@@ -3484,7 +3292,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -3643,7 +3452,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -3694,7 +3504,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description Invalid recipient or CC entry */
+                /** @description `email` is missing or invalid, a CC entry is invalid, or the body has an unknown field (`param` names it) */
                 422: {
                     headers: {
                         [name: string]: unknown;
@@ -3751,6 +3561,12 @@ export interface paths {
          *     it) and resolves any active dunning run with `invoice_voided`.
          *     Fires the `invoice.voided` webhook event.
          *
+         *     A spend-threshold invoice (`billing_reason = threshold`) that is
+         *     voided before its period's invoice is built gives its charges back:
+         *     that invoice bills them too. Voided after that, its charges are
+         *     billed on no invoice; bill them with a one-off invoice if they
+         *     should be charged.
+         *
          *     A paid invoice cannot be voided: issue a credit note instead.
          */
         post: operations["voidInvoice"];
@@ -3805,6 +3621,27 @@ export interface paths {
          *     Resolves any active dunning run with `invoice_not_collectible`, so
          *     payment retries stop. Fires the `invoice.marked_uncollectible`
          *     webhook event.
+         *
+         *     A written-off spend-threshold invoice keeps its charges billed: no
+         *     later invoice bills them again unless the invoice is then voided.
+         *     `POST /v1/invoices/{id}/void` says when a void gives them back.
+         *
+         *     Asks Stripe to expire any Checkout session still open for the
+         *     invoice. If Stripe refuses or cannot be reached, the session stays
+         *     payable until it expires, at most an hour after it opened.
+         *
+         *     If the invoice billed its subscription's current period in advance,
+         *     it still counts as unpaid for that subscription. While it has an
+         *     amount due, a plan change, added item or seat increase that would
+         *     charge for the rest of the period is refused with
+         *     `unpaid_invoice_blocks_change`, unless a charge on the invoice is
+         *     still being confirmed with Stripe. A cancel, downgrade, removed item
+         *     or plan swap lowers what it asks for by the unused time; a cancel or
+         *     a change of billing interval on the period's first day voids it
+         *     instead, if nothing is paid on it, no charge on it is being
+         *     confirmed with Stripe and it bills nothing else. A written-off invoice from an earlier period, or one not
+         *     tied to a subscription's period, does not affect subscription
+         *     changes.
          */
         post: operations["markInvoiceUncollectible"];
         delete?: never;
@@ -3827,6 +3664,8 @@ export interface paths {
          * @description Marks a `finalized` or `uncollectible` invoice as paid for money
          *     received another way, such as a bank transfer, cheque or cash. The
          *     full amount due is recorded; partial payments are not supported.
+         *     The invoice gets `paid_out_of_band: true` and no
+         *     `stripe_payment_intent_id`.
          *
          *     Resolves any active dunning run with `payment_recovered`. Fires the
          *     `invoice.payment_recorded` webhook event. The optional `note` is
@@ -3939,7 +3778,7 @@ export interface paths {
          * @description Returns everything that happened to an invoice, oldest first:
          *     lifecycle steps (created, finalized, paid, voided, marked
          *     uncollectible), charge attempts (source `payment`, event_type
-         *     `charge_attempt.succeeded|failed|unknown`), dunning retries, credit
+         *     `charge_attempt.succeeded|failed|unknown|below_minimum`), dunning retries, credit
          *     notes, customer emails, and card disputes (source `dispute`, a
          *     `payment.dispute_opened` row and, once Stripe closes the dispute, a
          *     `payment.dispute_closed` row; both at Stripe's own time).
@@ -3987,6 +3826,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/credit-notes/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get credit note totals
+         * @description Counts of every credit note by status, and the money on issued
+         *     notes, one entry per currency. Covers every note in this mode, not a
+         *     page of them. Draft and voided notes are counted but move no money.
+         */
+        get: operations["getCreditNoteStats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/credit-notes/{id}/send": {
         parameters: {
             query?: never;
@@ -4014,7 +3875,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -4064,7 +3926,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description Not issued (draft/voided), or invalid recipient */
+                /** @description Not issued (draft/voided), `email` is missing or invalid, or the body has an unknown field (`param` names it) */
                 422: {
                     headers: {
                         [name: string]: unknown;
@@ -4224,7 +4086,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -4264,7 +4127,7 @@ export interface paths {
         /**
          * Retry tax calculation on a deferred invoice
          * @description Re-runs tax calculation against a draft invoice whose
-         *     `tax_status` is `pending` or `failed`. Backs the operator-
+         *     `tax_status` is `pending`. Backs the operator-
          *     facing "Retry tax" action surfaced by the unified
          *     `Attention` shape.
          *
@@ -4295,7 +4158,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -4324,7 +4188,7 @@ export interface paths {
                 };
                 /**
                  * @description Invoice is not in a retryable state (status != draft, or
-                 *     tax_status not in pending/failed). Also returned when the
+                 *     tax_status is not pending). Also returned when the
                  *     tax was saved but the invoice's state then stopped the
                  *     finalize.
                  */
@@ -5015,7 +4879,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -5038,44 +4903,6 @@ export interface paths {
                 };
             };
         };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/billing/preview/{subscription_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Invoice preview (dry run) */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    subscription_id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Invoice preview */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["InvoicePreview"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -5127,7 +4954,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -5142,8 +4970,8 @@ export interface paths {
                         model: string;
                         /** @description ADR-044 role — input / output / cache_read. */
                         token_type: string;
-                        /** @description Decimal dollars per token (e.g. "0.000003"). */
-                        cost_per_token: string;
+                        /** @description US cents per token, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 tokens). 0 or more, under 10^10, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. */
+                        unit_cost_cents: string;
                         /**
                          * @description Rates are in USD only, the currency LiteLLM reports cost
                          *     in. Any other value is 422.
@@ -5164,7 +4992,7 @@ export interface paths {
                         "application/json": components["schemas"]["ProviderCostRate"];
                     };
                 };
-                /** @description `validation_error`: a required field is missing, `cost_per_token` is negative, or `currency` is not USD (param names the field). */
+                /** @description `validation_error`: a required field is missing, `unit_cost_cents` is not a number or is outside its limits, `currency` is not USD, or the body has an unknown field such as `cost_per_token` (`param` names the field; the body must use only the fields listed here). */
                 422: {
                     headers: {
                         [name: string]: unknown;
@@ -5232,9 +5060,9 @@ export interface paths {
          * Per-customer margin report (operator only)
          * @description Rated usage revenue vs stamped provider COGS for a window (ADR-079).
          *     A usage unit-economics view — base fees, credits, and taxes are not
-         *     included. Per-model margin renders only where pricing rules pin the
-         *     model; other revenue is reported unattributed, never allocated by
-         *     heuristic.
+         *     included. Per-model margin renders only where the price that billed
+         *     the usage names the model; other revenue is reported unattributed,
+         *     never allocated by heuristic.
          *
          *     The window is `[from, to)`: `from` inclusive, `to` exclusive. A
          *     missing bound defaults to the last 30 days ending at the customer's
@@ -5313,7 +5141,13 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Grant credits to customer */
+        /**
+         * Grant credits to customer
+         * @description Adds a block of credit in `currency`. The credit pays only the
+         *     customer's invoices in that currency; it is never converted. A
+         *     grant in a currency the customer is not billed in is accepted and
+         *     shows as its own balance.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -5323,7 +5157,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -5334,6 +5169,13 @@ export interface paths {
                 content: {
                     "application/json": {
                         customer_id: string;
+                        /**
+                         * @description ISO 4217 code of the credit. Required. Case-insensitive;
+                         *     stored uppercase. Zero-decimal currencies (such as JPY)
+                         *     are not supported yet.
+                         * @example USD
+                         */
+                        currency: string;
                         /** Format: int64 */
                         amount_cents: number;
                         description?: string;
@@ -5368,7 +5210,7 @@ export interface paths {
                         "application/json": components["schemas"]["CreditLedgerEntry"];
                     };
                 };
-                /** @description A field failed validation, or the body has an unknown field (`param` names it; the body must use only the fields listed here). */
+                /** @description A field failed validation (a missing or unsupported `currency` has `param` `currency`), or the body has an unknown field (`param` names it; the body must use only the fields listed here). */
                 422: {
                     headers: {
                         [name: string]: unknown;
@@ -5392,7 +5234,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get customer credit balance */
+        /**
+         * Get customer credit balance
+         * @description The customer's balances, one per currency the customer's credit
+         *     ledger holds, ordered by currency. Empty when the customer has no
+         *     ledger entry.
+         */
         get: {
             parameters: {
                 query?: never;
@@ -5404,13 +5251,15 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Credit balance */
+                /** @description Credit balances, one per currency. */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["CreditBalance"];
+                        "application/json": {
+                            data: components["schemas"]["CreditBalance"][];
+                        };
                     };
                 };
                 /** @description No customer with this ID in this tenant and mode. */
@@ -5441,8 +5290,9 @@ export interface paths {
         };
         /**
          * Get customer live credit balance
-         * @description How much credit the customer has left right now: the settled balance
-         *     less the usage no invoice has billed yet. Use it to decide in your
+         * @description How much credit the customer has left right now, per currency: the
+         *     settled balance less the usage no invoice has billed yet in that
+         *     currency. Use it to decide in your
          *     own code whether to keep serving a prepaid customer; Velox records
          *     usage and never refuses it.
          *
@@ -5551,7 +5401,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -5736,7 +5587,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -5814,7 +5666,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -5971,13 +5824,17 @@ export interface paths {
         put?: never;
         /**
          * Instantiate recipe (idempotent apply)
-         * @description Applies the recipe for the tenant under one transaction: rating
-         *     rules and meters are adopted-or-created, pricing rules bound, a
-         *     fresh born-unique plan generated, optional dunning policy and
-         *     (inactive) webhook endpoint created, then the install badge written.
-         *     Idempotent per (tenant, livemode): re-posting an installed recipe
-         *     returns the EXISTING instance — 201 both times, never a 409, never
-         *     a duplicate plan (ADR-085; badge livemode-scoped per m0157).
+         * @description Applies the recipe for the tenant under one transaction: meters are
+         *     adopted-or-created, a fresh born-unique plan is generated with the
+         *     recipe's prices, then the install badge written. It creates nothing
+         *     else: no dunning policy and no webhook endpoint. Adopting a meter
+         *     other plans price changes none of their prices.
+         *     Idempotent per (tenant, livemode): re-posting a recipe that is
+         *     installed returns the EXISTING instance with 201 and creates
+         *     nothing (ADR-085; badge livemode-scoped per m0157). Two installs
+         *     that run at the same time can conflict: the second gets a 409 and
+         *     installs nothing. A retry returns the first install, or, for
+         *     another recipe, reuses the meter it made.
          */
         post: operations["instantiateRecipe"];
         delete?: never;
@@ -6087,7 +5944,7 @@ export interface paths {
          *     both required and may span at most 366 days. `customer_id`,
          *     `meter_id` and `dimensions` narrow it like the event list. Columns: id,
          *     customer_id, meter_id, quantity, timestamp, idempotency_key,
-         *     origin, dimensions_json, provider_cost_micros,
+         *     origin, dimensions_json, provider_cost_cents (US cents, a decimal),
          *     provider_cost_source.
          *
          *     Audit row, `EXPORT_INCOMPLETE` marker and formula escaping work
@@ -6395,8 +6252,8 @@ export interface paths {
          * Replace dunning policy settings
          * @description Replaces every setting of the policy with the body. This is not a
          *     partial update: an omitted field takes its default (`enabled`
-         *     false, `name` empty, 3 attempts, 3 grace days, pause the
-         *     subscription, leave the invoice open). Send the full policy.
+         *     false, `name` empty, pause the subscription, leave the invoice
+         *     open), and `retry_days` is required. Send the full policy.
          *     `is_default` cannot be changed here; use set-default.
          */
         patch: operations["updateDunningPolicy"];
@@ -6440,13 +6297,21 @@ export interface paths {
         put?: never;
         /**
          * Create a customer price override
-         * @description Gives one customer its own price for one rating rule. The override
-         *     is keyed by the rule's `rule_key`, so it keeps applying after a new
-         *     version of the rule is published. If the customer already has an
-         *     active override for that rule, it is closed and replaced by this one.
-         *     A new or replaced price applies from the customer's next billing
-         *     period; the current period keeps the price it opened with. The
-         *     override's currency is the rule's currency.
+         * @description Gives one customer its own rate for one plan price. The override is
+         *     keyed by the price, so it keeps applying when the price's rate
+         *     changes; removing the price ends it. If the customer already has an
+         *     active override for that price, it is closed and replaced by this
+         *     one. A new or replaced rate applies from the customer's next
+         *     billing period, in the customer's time (its test clock's, if it has
+         *     one); the current period keeps the rate it started with. It applies
+         *     from the join when a subscription of the customer first joins the
+         *     plan in a period after it is created: an override created before a
+         *     subscription starts (after a trial, before the trial ends), even on
+         *     the same day, applies from its first period. On a test clock, it takes effect just after the
+         *     clock's time, so a subscription created at that same clock time
+         *     bills the list price; advance the clock first. The override takes
+         *     the plan's currency. A plan swap does not carry
+         *     it: the new plan's price is another price.
          */
         post: operations["createPriceOverride"];
         delete?: never;
@@ -6468,8 +6333,11 @@ export interface paths {
         /**
          * End a customer price override
          * @description Marks the override inactive. The row is kept. The customer goes back
-         *     to the rule's normal price from the next billing period; the current
-         *     period keeps the price it opened with.
+         *     to the price's rate from its next billing period, in the customer's
+         *     time; the current period keeps the rate it started with. A
+         *     subscription of the customer that first joins the plan in a period
+         *     after the override ends (a new subscription, an immediate plan
+         *     change, an added item) pays the price's rate from the join.
          */
         delete: operations["deletePriceOverride"];
         options?: never;
@@ -6491,13 +6359,15 @@ export interface paths {
          * @description Target for LiteLLM Proxy's `generic_api` logging callback. Accepts
          *     one LiteLLM log record, a JSON array of records, or
          *     `{"events": [...]}`. Each completion, chat, text-completion or
-         *     embedding record becomes up to three usage events on the `tokens`
+         *     embedding record becomes up to five usage events on the `tokens`
          *     meter, one per `token_type` dimension: `input` (prompt tokens not
-         *     read from cache), `cache_read` and `output`. Each event also carries
-         *     `model` (a model family name when recognised), `model_raw` and
-         *     `provider`, plus `team_id` and `request_tags` from `metadata` when
-         *     present. Other call types, and records with no token counts, are
-         *     counted as `skipped`.
+         *     read from or written to the cache), `cache_read`, `cache_write_5m`,
+         *     `cache_write_1h` and `output`. A record's events are recorded in
+         *     one transaction. Each event also carries `model` (a model family
+         *     name when recognised), `model_raw` and `provider`, plus `team_id`
+         *     and `request_tags` from `metadata` when present. Other call types,
+         *     records with no token counts, failed calls and LiteLLM
+         *     response-cache hits are counted as `skipped`.
          *
          *     The customer is the record's `user` or `end_user` (or
          *     `metadata.user_api_key_end_user_id`), matched against the
@@ -6631,9 +6501,11 @@ export interface paths {
          *     low-balance alerts off.
          *
          *     Empty `default_currency`, `timezone`, `invoice_prefix`,
-         *     `tax_provider` and `tax_on_failure` fall back to their defaults.
-         *     `default_currency` and `company_country` are stored in upper case,
-         *     and `brand_color` in lower case. Choosing `stripe_tax` with no
+         *     `credit_note_prefix`, `tax_provider` and `tax_on_failure` fall back
+         *     to their defaults.
+         *     `default_currency`, `company_country`, `invoice_prefix` and
+         *     `credit_note_prefix` are stored in upper case, and `brand_color` in
+         *     lower case. Choosing `stripe_tax` with no
          *     `default_product_tax_code` sets it to `txcd_10103001` (SaaS,
          *     business use).
          *
@@ -6933,7 +6805,15 @@ export interface components {
                 code?: string;
                 message?: string;
                 request_id?: string;
-                /** @description The request field the error is about. Sent only when the error names one. */
+                /**
+                 * @description The request field the error is about. Sent only when the error
+                 *     names one. A request body may hold only the fields its
+                 *     operation lists, spelled and cased as listed: any other
+                 *     field, or one the server sets (such as `id`), is refused
+                 *     with 422 and `param` naming it. An operation with no request body lists no fields: send
+                 *     no body, `{}` or `null`. The Stripe and Postmark webhooks and
+                 *     the LiteLLM callback take their sender's body as it comes.
+                 */
                 param?: string;
             };
         };
@@ -7004,12 +6884,26 @@ export interface components {
         Meter: {
             id?: string;
             tenant_id?: string;
-            key?: string;
+            /** @description The `event_name` usage events send for this meter. */
+            event_name?: string;
             name?: string;
             unit?: string;
-            /** @enum {string} */
+            /**
+             * @description How the meter rolls its events into one quantity per billing
+             *     period. Every price of the meter bills under it. `last`
+             *     is the latest event by timestamp, then by id. Fixed once the
+             *     meter has a usage event (see `has_usage`).
+             * @enum {string}
+             */
             aggregation?: "sum" | "count" | "max" | "last";
-            rating_rule_version_id?: string;
+            /**
+             * @description Whether the meter has usage events. Once it has, its
+             *     `aggregation` cannot change. Held usage for its `event_name`
+             *     does not count until it is released. Returned when you create,
+             *     get or update one meter; the meter list leaves it out. A create
+             *     or update that succeeded leaves it out if it could not be read.
+             */
+            has_usage?: boolean;
             /** Format: date-time */
             created_at?: string;
             /** Format: date-time */
@@ -7024,19 +6918,24 @@ export interface components {
             /** @enum {string} */
             billing_interval?: "monthly" | "yearly";
             /** @enum {string} */
-            status?: "draft" | "active" | "archived";
+            status?: "active" | "archived";
             /** Format: int64 */
             base_amount_cents?: number;
             /**
              * @description When the recurring base fee is invoiced relative to the period it covers.
-             *     in_arrears (default): base + usage billed at period end.
+             *     in_arrears: base + usage billed at period end.
              *     in_advance: base billed at period start (day 1 on create; cycle-close invoice
              *     carries upcoming period's base + elapsed period's usage). Usage lines are
-             *     always arrears regardless of this flag. See ADR-031.
+             *     always arrears regardless of this field. A plan with no base fee is
+             *     in_arrears. See ADR-031.
              * @enum {string}
              */
             base_bill_timing?: "in_advance" | "in_arrears";
-            meter_ids?: string[];
+            /**
+             * @description The plan's usage prices from now on. A plan's meters are the
+             *     meters it has a price for.
+             */
+            prices?: components["schemas"]["PlanPrice"][];
             description?: string;
             /** @description Stripe tax code for this plan. Absent means the tenant's `default_product_tax_code`. */
             tax_code?: string;
@@ -7045,32 +6944,141 @@ export interface components {
             /** Format: date-time */
             updated_at?: string;
         };
-        RatingRule: {
-            id?: string;
-            tenant_id?: string;
-            rule_key?: string;
-            name?: string;
-            version?: number;
-            /** @enum {string} */
-            mode?: "flat" | "graduated" | "package";
-            currency?: string;
-            /** @description Per-unit rate in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units). Arbitrary precision; invoice line amounts and totals still round to whole cents. */
-            flat_amount_cents?: string;
-            graduated_tiers?: {
-                up_to?: number;
-                /** @description Per-unit rate in cents, as a decimal string (see flat_amount_cents). */
-                unit_amount_cents?: string;
-            }[];
-            /** @enum {string} */
-            lifecycle_state?: "draft" | "active" | "archived";
+        /** @description A plan as Get, Create and Update plan answer it. */
+        PlanDetail: components["schemas"]["Plan"] & {
+            /**
+             * @description Whether a subscription has ever used the plan (canceled ones
+             *     and scheduled plan changes included). On a plan no one has
+             *     used, a price change applies at once; on a used plan, from
+             *     each subscriber's next billing period, and from the join for
+             *     a subscriber who first joins the plan in a period after it.
+             */
+            used: boolean;
+            /**
+             * @description Subscriptions on this plan that are not canceled. While it
+             *     is above 0, `base_amount_cents` cannot change (see Update
+             *     plan).
+             */
+            live_subscription_count: number;
+        };
+        /**
+         * @description How a price bills a quantity. Send only the mode's fields: a field the
+         *     mode does not use must be 0 or left out (`tiers`: `[]` or left out),
+         *     or the request is refused with 422 and `param` naming it.
+         */
+        PriceShape: {
+            /**
+             * @description `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one.
+             * @enum {string}
+             */
+            mode: "per_unit" | "graduated" | "package";
+            /** @description Price per unit in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units). Used when `mode` is `per_unit`. 0 or more, under 10^18, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. A value outside them is refused with 422 and `param` naming the field. Invoice line amounts round to whole cents. */
+            unit_amount_cents?: string;
+            /** @description Used when `mode` is `graduated`. Each `up_to` is a whole number above the one before. The last tier has `up_to: null` (no upper bound), and only the last. Otherwise 422 with `param` `tiers`. A tier's rate takes the limits of `unit_amount_cents`; a refusal names `tiers[i].unit_amount_cents` (i counts from 0). */
+            tiers?: components["schemas"]["PriceTier"][];
+            /**
+             * Format: int64
+             * @description Used when `mode` is `package`. Must be above 0.
+             */
+            package_size?: number;
+            /** @description Price of one package in cents, as a decimal string (e.g. "0.2" with `package_size` 1000 = $0.002 per 1,000 units), with the limits of `unit_amount_cents`. Used when `mode` is `package`. */
+            package_amount_cents?: string;
+        };
+        /**
+         * @description One usage price of a plan: a meter, the events it takes
+         *     (`dimension_match`) and its rate. The price takes the plan's
+         *     currency. Its id stays the same when its rate changes; its meter
+         *     and `dimension_match` are its identity and never change.
+         */
+        PlanPrice: {
+            /** @example vlx_prc_1a2b3c4d5e6f7890abcdef12 */
+            id: string;
+            plan_id: string;
+            meter_id: string;
+            /**
+             * @description The labels an event must carry for this price to take it, for
+             *     example `{"model": "claude-opus-4.5", "token_type": "input"}`.
+             *     `{}` takes every event of the meter. Of the prices whose labels
+             *     an event carries, the one with the most labels takes it.
+             */
+            dimension_match: {
+                [key: string]: string;
+            };
+            /**
+             * @description As on PriceShape.
+             * @enum {string}
+             */
+            mode: "per_unit" | "graduated" | "package";
+            /** @description Price per unit in cents, as a decimal string. */
+            unit_amount_cents?: string;
+            /** @description Empty (`[]`) unless `mode` is `graduated`. */
+            tiers?: components["schemas"]["PriceTier"][];
             /** Format: int64 */
             package_size?: number;
-            /** Format: int64 */
-            package_amount_cents?: number;
-            /** @description Per-unit overage rate in cents, as a decimal string. */
-            overage_unit_amount_cents?: string;
+            /** @description Price of one package in cents, as a decimal string. */
+            package_amount_cents?: string;
             /** Format: date-time */
-            created_at?: string;
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description When the content shown was saved.
+             */
+            updated_at: string;
+        };
+        /**
+         * @description The answer to a price write: the price, and when the write applies.
+         *     `now`: no subscription has used the plan, so it applies at once.
+         *     `next_period`: each subscriber pays the new content from their next
+         *     billing period; the current period keeps the prices it started with.
+         *     A subscriber who first joins the plan in a period after the write
+         *     gets it from the join: a subscription that starts after it (after a
+         *     trial, from the trial's end), an immediate plan change onto the
+         *     plan, or an item added on it. Each is priced from that moment by the
+         *     plan's prices then, so a subscription that starts later on the day
+         *     of the write bills a price added that day and not one removed that
+         *     day. A subscription that was on the plan earlier in the period and
+         *     joins it again keeps the prices of its first join until its next
+         *     period. On a test clock, the write takes effect just after the
+         *     clock's time: a subscriber who joins at that same clock time gets
+         *     the earlier prices.
+         */
+        PriceWrite: components["schemas"]["PlanPrice"] & {
+            /** @enum {string} */
+            effective: "now" | "next_period";
+            /** @description True on the answer to a removal. */
+            removed?: boolean;
+            /**
+             * @description On a removal, the customer overrides of the price it ended.
+             *     Each ends when the removal takes effect for its customer.
+             */
+            ended_overrides?: {
+                id: string;
+                customer_id: string;
+            }[];
+        };
+        /** @description One price to add to a plan. */
+        PriceInput: {
+            meter_id: string;
+            /**
+             * @description The labels an event must carry for the price to take it.
+             *     Values are strings of 1 to 100 characters, keys too; at
+             *     most 16 labels. Omitted or `{}` takes every event of the
+             *     meter. Two prices of one plan and meter that could both take
+             *     one event with the same number of labels are refused (409
+             *     `price_conflict`).
+             */
+            dimension_match?: {
+                [key: string]: string;
+            };
+        } & components["schemas"]["PriceShape"];
+        PriceTier: {
+            /**
+             * Format: int64
+             * @description The tier's upper bound in whole units: the tier prices the quantity above the previous tier's bound, up to this one. `null` on the last tier, which has no upper bound. Only the last tier is `null`, and it must be.
+             */
+            up_to: number | null;
+            /** @description Price per unit in cents in this tier, as a decimal string. */
+            unit_amount_cents: string;
         };
         Subscription: {
             id: string;
@@ -7081,7 +7089,7 @@ export interface components {
             /** @description The subscription's priced lines. Each item names its plan. */
             items?: components["schemas"]["SubscriptionItem"][];
             /** @enum {string} */
-            status: "draft" | "trialing" | "active" | "canceled" | "archived";
+            status: "draft" | "trialing" | "active" | "canceled";
             /** @enum {string} */
             billing_time: "calendar" | "anniversary";
             /** Format: date-time */
@@ -7192,21 +7200,92 @@ export interface components {
              */
             origin?: "api" | "backfill";
             /**
-             * Format: int64
-             * @description What serving this event cost you at your provider, in millionths
-             *     of a dollar, priced from your provider cost rates when the event
-             *     arrived. Absent when no rate matched or the event has no costed
-             *     dimensions.
+             * @description What serving this event cost you at your provider, in US cents as
+             *     a decimal string (e.g. "0.45"), set when the event arrived: from
+             *     your provider cost rates, or the cost the sender reported (see
+             *     `provider_cost_source`). Absent when the cost is unknown or the
+             *     event has no costed dimensions.
              */
-            provider_cost_micros?: number;
+            provider_cost_cents?: string;
             /**
-             * @description Where `provider_cost_micros` came from: `table` (your provider
+             * @description Where `provider_cost_cents` came from: `table` (your provider
              *     cost rates), `observed` (the cost the sender reported), or
              *     `not_applicable` (the meter has no costed dimensions). Absent when
              *     the cost is unknown.
              * @enum {string}
              */
             provider_cost_source?: "table" | "not_applicable" | "observed";
+            billing_status?: components["schemas"]["UsageBillingStatus"];
+        };
+        /**
+         * @description What Velox found when the event arrived. It checked the event
+         *     against the customer's subscriptions, the plans and prices in force,
+         *     and the invoices already built at that moment. Sent only on the
+         *     answer that wrote the event; the event is stored all the same.
+         *
+         *     A status that is present was true at that moment:
+         *
+         *     - `after_close`: the event's time is already invoiced. A
+         *       spend-threshold invoice counts only once it is paid. Bill the
+         *       event with a one-off invoice if it should be charged.
+         *     - `not_on_plan`: a billing period not invoiced yet holds the event's
+         *       time, but its plan has no price for this meter.
+         *     - `outside_subscription`: no active or trialing subscription of the
+         *       customer bills the event's time. For example, it has none, or the
+         *       time is before one starts, in a free trial, or after one ends or
+         *       its scheduled cancel.
+         *     - `no_price`: the plan that bills the event's time prices this
+         *       meter, but no price of that plan takes the event's `dimensions`.
+         *       A price takes an event whose dimensions include all of its
+         *       `dimension_match`, compared as strings: the number `1` is not the
+         *       string `"1"`.
+         *
+         *     No `billing_status` means Velox found no reason then. It is not a
+         *     promise that the event will be billed. Velox checks only the
+         *     customer's current billing periods: time after a period end whose
+         *     invoice is not built yet is not checked, nor is time after a trial's
+         *     end before Velox ends the trial. A later change can change the
+         *     outcome either way: a subscription created, activated or changed, a
+         *     trial extended, a scheduled cancel undone, or a price added. The
+         *     invoice is the final answer.
+         *
+         *     Two cases can make a present status wrong: a price change whose
+         *     save began before a billing period started and finished after the
+         *     request read the prices, and a subscription change saved while the
+         *     request is in flight. Absent on a replay and on a read.
+         * @enum {string}
+         */
+        UsageBillingStatus: "after_close" | "no_price" | "not_on_plan" | "outside_subscription";
+        UsageEventBatchResult: {
+            /** @description Newly written events. */
+            ingested: number;
+            /** @description Idempotency replays — already ingested, counted as success. */
+            deduplicated: number;
+            /** @description Events in the request. */
+            total: number;
+            /** @description Of `ingested`, the events answered `billing_status` `after_close`. */
+            after_close: number;
+            /** @description Of `ingested`, the events answered `billing_status` `no_price`. */
+            no_price: number;
+            /** @description Of `ingested`, the events answered `billing_status` `not_on_plan`. */
+            not_on_plan: number;
+            /** @description Of `ingested`, the events answered `billing_status` `outside_subscription`. */
+            outside_subscription: number;
+            /**
+             * @description One entry per event, in the order sent: `results[i]` is the
+             *     request's event `i`.
+             */
+            results: components["schemas"]["UsageEventBatchEventResult"][];
+        };
+        UsageEventBatchEventResult: {
+            /**
+             * @description `ingested`: the batch wrote the event. `deduplicated`: an event
+             *     with its `idempotency_key` was already stored, earlier or in
+             *     this batch, so it was not stored again.
+             * @enum {string}
+             */
+            status: "ingested" | "deduplicated";
+            billing_status?: components["schemas"]["UsageBillingStatus"];
         };
         /**
          * @description What an issued invoice or credit note prints about its buyer, copied
@@ -7268,14 +7347,13 @@ export interface components {
          */
         InvoicePaymentStatus: "pending" | "processing" | "succeeded" | "failed" | "unknown";
         /**
-         * @description Whether tax has been successfully calculated. Happy path is `ok`.
-         *     `pending` means a transient calculation failure is awaiting retry;
-         *     `failed` means retries are exhausted (operator resolves manually).
-         *     Pending/failed invoices are blocked from finalize so we never send
-         *     a wrong tax amount.
+         * @description Whether tax has been calculated. `ok`: it has. `pending`: the
+         *     calculation failed, and `tax_error_code` says why and whether
+         *     Velox retries it. A pending invoice cannot be finalized, so a wrong
+         *     tax amount is never sent.
          * @enum {string}
          */
-        InvoiceTaxStatus: "ok" | "pending" | "failed";
+        InvoiceTaxStatus: "ok" | "pending";
         /**
          * @description Urgency of an Attention surface. Operators sort/filter on this
          *     and the dashboard renders one colour per level. Priority
@@ -7316,10 +7394,22 @@ export interface components {
          *     When the invoice also has `payment_anomaly`, that reason stays and
          *     its message asks the operator to check Stripe before any refund.
          *     The disputes themselves are at `GET /v1/invoices/{id}/disputes`
-         *     (2026-10-19).
+         *     (2026-10-19). `amount_below_minimum` reports an invoice Stripe
+         *     refused to charge, or refused a payment page for, because the amount
+         *     is below Stripe's minimum charge. The minimum depends on the
+         *     currency the Stripe account settles in; Stripe's reply, in
+         *     `provider_response`, names it. Nothing was charged, the invoice
+         *     stays `finalized` with `payment_status` `pending`, it is not
+         *     charged again automatically, dunning does not start (a run already
+         *     open ends), and the customer is not emailed. The operator voids it
+         *     or records a payment; Collect payment applies the customer's credit
+         *     balance and pays it if that covers the amount, and otherwise asks
+         *     Stripe again. Stripe's answer can change (for a converted charge the
+         *     minimum is the settlement currency's), and a different answer ends
+         *     this reason (2026-10-23).
          * @enum {string}
          */
-        AttentionReason: "tax_calculation_failed" | "tax_location_required" | "payment_failed" | "payment_unconfirmed" | "payment_anomaly" | "payment_processing" | "payment_scheduled" | "awaiting_payment" | "no_payment_method" | "dunning_exhausted" | "collection_paused" | "commit_exposure" | "dispute_lost";
+        AttentionReason: "tax_calculation_failed" | "tax_location_required" | "payment_failed" | "payment_unconfirmed" | "payment_anomaly" | "payment_processing" | "payment_scheduled" | "awaiting_payment" | "no_payment_method" | "dunning_exhausted" | "collection_paused" | "commit_exposure" | "dispute_lost" | "amount_below_minimum";
         /**
          * @description What an operator must know BEFORE recording an OFFLINE payment on a
          *     written-off invoice (`status = uncollectible`) — a consequence that
@@ -7336,8 +7426,6 @@ export interface components {
          *     `tax_reversed_unrecoverable` — the invoice's tax was reversed with the
          *     tax provider and cannot be re-reported automatically; the recorded
          *     payment collects tax already reported as not collected.
-         *     `recovery_superseded` — the invoice was billed on a usage threshold
-         *     and that usage has since been re-billed; the payment double-collects.
          *     `relief_not_reissued` — a credit the invoice was owed was never
          *     applied, so `amount_due_cents` is higher than what is owed and the
          *     customer may have overpaid.
@@ -7346,7 +7434,7 @@ export interface components {
             /** @description Always false — this shape only ever warns. */
             blocked: boolean;
             /** @enum {string} */
-            code?: "tax_reversed_unrecoverable" | "recovery_superseded" | "relief_not_reissued";
+            code?: "tax_reversed_unrecoverable" | "relief_not_reissued";
             /** @description Operator-facing sentence naming the consequence that will go unreconciled if the payment is recorded. */
             message?: string;
         };
@@ -7360,12 +7448,14 @@ export interface components {
          *     status unknown with no payment intent recorded), for a customer
          *     who paid another way: Velox records a payment that Stripe shows,
          *     and charges the invoice again if none appears within 24 hours.
-         *     Dashboards render it as a secondary action. `void_invoice` is offered only
-         *     on prepaid-commit exposure, and only while some of the granted
+         *     Dashboards render it as a secondary action. `void_invoice` is offered
+         *     on prepaid-commit exposure, only while some of the granted
          *     credit is still unspent: voiding retires the unspent balance
          *     (ADR-078) and is the sole recovery for an unpaid invoice whose
          *     credit is already live. Credit the customer has already spent
-         *     is never clawed back (2026-08-04).
+         *     is never clawed back (2026-08-04). It is also offered on
+         *     `amount_below_minimum`, an amount Stripe will not charge
+         *     (2026-10-23).
          * @enum {string}
          */
         AttentionAction: "edit_billing_profile" | "retry_tax" | "retry_payment" | "wait_provider" | "rotate_api_key" | "reconcile_payment" | "review_registration" | "charge_now" | "send_reminder" | "add_payment_method" | "update_payment_method" | "connect_tax_provider" | "void_invoice" | "mark_uncollectible";
@@ -7467,7 +7557,11 @@ export interface components {
          * @enum {string}
          */
         InvoiceBillingReason: "subscription_cycle" | "subscription_create" | "subscription_cancel" | "subscription_update" | "manual" | "threshold";
-        /** @enum {string} */
+        /**
+         * @description `discount` and `tax` appear only on lines added before 2026-10-22;
+         *     a new line cannot use them.
+         * @enum {string}
+         */
         InvoiceLineType: "base_fee" | "usage" | "add_on" | "discount" | "tax";
         /**
          * @description Classifies per-item proration artifacts so the dedup index can
@@ -7538,13 +7632,12 @@ export interface components {
             tax_retry_count?: number;
             tax_pending_reason?: string;
             /**
-             * @description Typed taxonomy of `tax_pending_reason`. One of
-             *     `customer_data_invalid`, `jurisdiction_unsupported`,
-             *     `provider_outage`, `provider_auth`, `unknown`. Empty for
-             *     invoices deferred before this column existed (migration
-             *     0067).
+             * @description Why tax could not be calculated, as a code. Set while
+             *     `tax_status` is `pending`; `tax_pending_reason` has the
+             *     detail.
+             * @enum {string}
              */
-            tax_error_code?: string;
+            tax_error_code?: "customer_data_invalid" | "jurisdiction_unsupported" | "provider_outage" | "provider_auth" | "provider_not_configured" | "unknown";
             /**
              * Format: date-time
              * @description The earliest time the background retry may calculate tax again,
@@ -7561,7 +7654,8 @@ export interface components {
             /**
              * @description Set when a payment arrived that the invoice did not expect. The
              *     webhook event name of the cause: `payment.duplicate_charge`,
-             *     `payment.amount_mismatch` or `payment.received_on_voided_invoice`.
+             *     `payment.amount_mismatch`, `payment.currency_mismatch` or
+             *     `payment.received_on_voided_invoice`.
              *     Only the latest one is kept.
              */
             payment_anomaly_kind?: string;
@@ -7631,7 +7725,23 @@ export interface components {
              * @description When the invoice was marked uncollectible.
              */
             uncollectible_at?: string;
+            /**
+             * @description The Stripe PaymentIntent of the card charge that paid the
+             *     invoice, or of its last charge that is in progress or failed. It
+             *     can be absent after a charge was sent: for example when the
+             *     invoice was then paid without a card (by credits, with nothing
+             *     due, or outside Velox: `paid_out_of_band`), or when Stripe
+             *     refused the last charge as below its minimum.
+             */
             stripe_payment_intent_id?: string;
+            /**
+             * @description True when the payment was recorded as made outside Velox, such as
+             *     a bank transfer or cheque (`POST /v1/invoices/{id}/record-payment`,
+             *     or a payment recovery run resolved as `payment_recovered`). Such
+             *     an invoice has no `stripe_payment_intent_id`, so there is no card
+             *     to refund.
+             */
+            paid_out_of_band?: boolean;
             last_payment_error?: string;
             auto_charge_pending?: boolean;
             /**
@@ -7684,11 +7794,9 @@ export interface components {
             source_change_type?: components["schemas"]["ItemChangeType"];
             billing_reason?: components["schemas"]["InvoiceBillingReason"];
             /**
-             * @description Source Stripe invoice id (`in_xxx`) for an invoice imported from
-             *     a Stripe account. Currently always empty: the Stripe importer was
-             *     removed (deferred until a design-partner cutover) and nothing
-             *     writes this field today. The column and its unique index remain
-             *     for a future importer. Empty for Velox-native invoices.
+             * @description Source Stripe invoice id (`in_xxx`). Set only on invoices the
+             *     Stripe importer wrote before it was removed on 2026-04-29.
+             *     Empty on every other invoice.
              */
             stripe_invoice_id?: string;
             /**
@@ -7700,6 +7808,14 @@ export interface components {
              *     instead of inferring it. Always false in live mode.
              */
             is_simulated?: boolean;
+            /**
+             * @description The test clock this invoice's dates follow: the clock its customer
+             *     is pinned to, for cycle and one-off invoices alike. Read from the
+             *     customer on `GET /v1/invoices` and `GET /v1/invoices/{id}`; other
+             *     responses may leave it out. Left out for a customer on wall-clock
+             *     time, and always in live mode.
+             */
+            test_clock_id?: string;
         };
         /** @description A single line on an invoice. */
         InvoiceLineItem: {
@@ -7712,14 +7828,10 @@ export interface components {
             /** @description The meter's unit ("tokens", "seconds", …), stamped on usage lines at write time so invoice surfaces can apply the display-scale convention (token rates read "$3.00 / 1M tokens"). Empty on non-usage lines and on lines written before the 0173 backfill. */
             meter_unit?: string;
             description: string;
-            /** Format: int64 */
-            quantity: number;
-            /** @description Exact (possibly fractional) usage quantity as a decimal string (e.g. "1.5"). The integer `quantity` is this truncated, kept for back-compat (Stripe quantity_decimal parity). "0" means none — use `quantity`. Line amounts stay whole cents. */
-            quantity_decimal?: string;
-            /** Format: int64 */
-            unit_amount_cents: number;
-            /** @description Full-precision per-unit price in DECIMAL CENTS (e.g. "0.3" = $0.003 per unit), the Stripe unit_amount_decimal model. Derived on read as amount_cents ÷ quantity, so it reconciles with the rounded line amount and, unlike the whole-cent `unit_amount_cents`, never collapses a sub-cent rate to 0. Render with the decimal-aware rate formatter; line amounts/totals stay whole cents. */
-            unit_amount_decimal?: string;
+            /** @description The line's exact quantity as a decimal string, for example "3" or "1.5". Line amounts stay whole cents. */
+            quantity: string;
+            /** @description The unit price in cents at full precision, for example "0.3" for $0.003. On a usage line priced `per_unit` it is that rate; on any other line it is amount_cents ÷ quantity. Line amounts and totals stay whole cents. */
+            unit_amount_decimal: string;
             /** Format: int64 */
             amount_cents: number;
             /**
@@ -7744,8 +7856,14 @@ export interface components {
             /** Format: int64 */
             total_amount_cents: number;
             currency: string;
+            /** @description On a usage line, the shape of its price: `per_unit`, `graduated` or `package`. Absent on other lines. */
             pricing_mode?: string;
-            rating_rule_version_id?: string;
+            /** @description On a usage line, the plan price that billed it. Absent on other lines. */
+            price_id?: string;
+            /** @description On a usage line, the labels its price takes. Absent for a price that takes every event, and on other lines. */
+            dimension_match?: {
+                [key: string]: string;
+            };
             /** Format: date-time */
             billing_period_start?: string | null;
             /** Format: date-time */
@@ -7780,10 +7898,10 @@ export interface components {
             provider: string;
             model: string;
             token_type: string;
-            /** @description Decimal dollars per token. */
-            cost_per_token: string;
+            /** @description US cents per token, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 tokens). */
+            unit_cost_cents: string;
             /**
-             * @description Always USD. Cost and margin count every rate in dollars.
+             * @description Always USD. Cost and margin count every rate in US cents.
              * @enum {string}
              */
             currency: "USD";
@@ -7800,17 +7918,14 @@ export interface components {
             to: string;
             /**
              * Format: int64
-             * @description Total rated usage revenue in the window.
+             * @description Total rated usage revenue in the window, an estimate at each subscription's current prices. Only active and trialing subscriptions are counted.
              */
             revenue_cents: number;
             /** @description Currency of revenue_cents (the customer's price rules). Omitted when the window's revenue spans more than one currency or the customer has no priced meter. */
             revenue_currency?: string;
-            /**
-             * Format: int64
-             * @description Total stamped provider cost, micro-dollars.
-             */
-            cost_micros: number;
-            /** @description Currency of cost_micros. Always USD. */
+            /** @description Total stamped provider cost in US cents, as a decimal string (e.g. "275.75"). */
+            cost_cents: string;
+            /** @description Currency of cost_cents. Always USD. */
             cost_currency: string;
             /**
              * Format: int64
@@ -7819,11 +7934,11 @@ export interface components {
             margin_bps?: number;
             by_model: {
                 model: string;
-                /** Format: int64 */
-                cost_micros: number;
+                /** @description This model's stamped provider cost in US cents, as a decimal string. */
+                cost_cents: string;
                 /** Format: int64 */
                 revenue_cents?: number;
-                /** @description True only when a pricing rule pins this model — margin is never heuristically allocated. */
+                /** @description True only when the price that billed the usage names this model — margin is never heuristically allocated. */
                 attributed: boolean;
                 /**
                  * Format: int64
@@ -7835,7 +7950,7 @@ export interface components {
             unattributed_revenue_cents: number;
             /**
              * Format: int64
-             * @description Token events with costable dims but no matching rate — add a rate to cost new events.
+             * @description Token events with costable dims but no cost — no rate matched (add a rate to cost new events), or the cost, quantity × `unit_cost_cents`, was too large to record (about $9.2 trillion or more, either sign).
              */
             unresolved_events: number;
             /**
@@ -7845,7 +7960,6 @@ export interface components {
             costed_events: number;
             /** @description Whether the tenant has any provider cost rate. False with costed_events 0 means no rates are set up. */
             cost_rates_configured: boolean;
-            cache_write_excluded?: boolean;
         };
         /**
          * @description Response shape for `GET /v1/invoices/{id}`. The handler returns the
@@ -7857,10 +7971,10 @@ export interface components {
             invoice: components["schemas"]["Invoice"];
             line_items: components["schemas"]["InvoiceLineItem"][];
         };
-        /** @description A customer's credit balance and where the credit went. Every cent granted is either still in the balance or in one of the totals: total_granted = total_used + total_expired + total_retired + total_deducted + balance_cents. */
+        /** @description A customer's credit balance in one currency and where that credit went. Every cent granted is either still in the balance or in one of the totals: total_granted = total_used + total_expired + total_retired + total_deducted + balance_cents. */
         CreditBalance: {
             customer_id: string;
-            /** @description The currency the customer is billed in, uppercase. Credit has no currency of its own: it pays the customer's invoices one cent for one cent, so its amounts read in this currency. The first of: the billing profile's currency, the plan of the customer's active or trialing subscription, the newest invoice's currency, the workspace default. */
+            /** @description The currency of this balance, uppercase. Each credit ledger entry stores its own currency, and credit pays only invoices in that currency. A customer with credit in two currencies has two balances; they are never added together or converted. */
             currency: string;
             /** Format: int64 */
             balance_cents: number;
@@ -7890,17 +8004,28 @@ export interface components {
              */
             total_deducted: number;
         };
-        /** @description A customer's credit position right now. `balance_cents` is the credit the customer can spend: the settled ledger balance, which moves only when an invoice, grant, adjustment or expiry is written, less any grant that is past its expiry date and not yet written off. `unbilled_usage_cents` is the usage of the current period that no invoice has billed yet. `estimated_remaining_cents` is the first minus the second, never below zero. */
+        /** @description A customer's credit position right now, one entry per currency: every currency the customer holds credit in, and every currency a live subscription will invoice usage in. Amounts in two currencies are never added together. */
         CreditLiveBalance: {
             customer_id: string;
+            /** @description Ordered by currency. */
+            balances: components["schemas"]["CreditLiveCurrency"][];
+            /**
+             * Format: date-time
+             * @description When the server computed these figures.
+             */
+            computed_at: string;
+        };
+        /** @description The live position in one currency. `balance_cents` is the credit the customer can spend in it: the settled ledger balance, which moves only when an invoice, grant, adjustment or expiry is written, less any grant that is past its expiry date and not yet written off. `unbilled_usage_cents` is the usage of the current period that no invoice has billed yet and that will be invoiced in this currency. `estimated_remaining_cents` is the first minus the second, never below zero. */
+        CreditLiveCurrency: {
+            currency: string;
             /**
              * Format: int64
-             * @description Settled ledger balance, less what is left of any grant past its expiry date that the hourly expiry run has not written off yet (an invoice cannot draw on such a grant). Can be negative.
+             * @description Settled ledger balance in this currency, less what is left of any grant past its expiry date that the hourly expiry run has not written off yet (an invoice cannot draw on such a grant). Can be negative.
              */
             balance_cents: number;
             /**
              * Format: int64
-             * @description Metered usage that the next invoice of each subscription will bill, priced as the period close prices it. Usage that a mid-period threshold invoice already billed is not counted again. After a mid-period plan change each meter is counted for the time a plan carrying it was on the subscription. For a trialing subscription only usage inside its first paid period counts; that period starts at the beginning of the day the trial ends.
+             * @description Metered usage that the next invoice of each subscription invoiced in this currency will bill, priced as the period close prices it. Usage that a mid-period threshold invoice already billed is not counted again. After a mid-period plan change each meter is counted for the time a plan carrying it was on the subscription. For a trialing subscription only usage inside its first paid period counts; that period starts at the beginning of the day the trial ends.
              */
             unbilled_usage_cents: number;
             /**
@@ -7908,11 +8033,6 @@ export interface components {
              * @description `balance_cents` minus `unbilled_usage_cents`, floored at zero. To see how far past zero a customer is, subtract the two parts yourself.
              */
             estimated_remaining_cents: number;
-            /**
-             * Format: date-time
-             * @description When the server computed these figures.
-             */
-            computed_at: string;
         };
         /** @description One override key declared in a recipe's `overridable` list. Drives validation at instantiate time and the override form in the dashboard's preview dialog. */
         RecipeOverride: {
@@ -7926,40 +8046,10 @@ export interface components {
             pattern?: string;
         };
         RecipeMeter: {
-            key: string;
+            event_name: string;
             name: string;
             unit: string;
             aggregation: string;
-        };
-        RecipeRatingRule: {
-            key: string;
-            name?: string;
-            /** @enum {string} */
-            mode: "flat" | "graduated" | "package";
-            currency: string;
-            /** @description Per-unit rate in cents, as a decimal string (see RatingRule.flat_amount_cents). */
-            flat_amount_cents: string;
-            graduated_tiers?: {
-                up_to?: number;
-                /** @description Per-unit rate in cents, as a decimal string. */
-                unit_amount_cents?: string;
-            }[];
-            /** Format: int64 */
-            package_size?: number;
-            /** Format: int64 */
-            package_amount_cents?: number;
-            /** @description Per-unit overage rate in cents, as a decimal string. */
-            overage_unit_amount_cents: string;
-        };
-        RecipePricingRule: {
-            meter_key: string;
-            rating_rule_key: string;
-            dimension_match: {
-                [key: string]: unknown;
-            };
-            /** @enum {string} */
-            aggregation_mode: "sum" | "count" | "last_during_period" | "last_ever" | "max";
-            priority: number;
         };
         RecipePlan: {
             code: string;
@@ -7970,49 +8060,25 @@ export interface components {
             /** Format: int64 */
             base_amount_cents: number;
             /**
-             * @description Optional; empty defaults to in_arrears at plan creation (ADR-031).
+             * @description Optional when the base fee is 0; the plan is then in_arrears (ADR-031).
              * @enum {string}
              */
             base_bill_timing?: "in_advance" | "in_arrears";
-            meter_keys: string[];
-        };
-        RecipeDunningPolicy: {
-            name: string;
-            max_retries: number;
-            intervals_hours: number[];
-            /**
-             * @description What exhausting all retries does to the subscription behind the unpaid invoice. `pause` pauses collection only (the cycle keeps drafting invoices); `cancel` cancels the subscription. No-op on a one-off invoice, which has no subscription.
-             * @enum {string}
-             */
-            final_subscription_action: "none" | "pause" | "cancel";
-            /**
-             * @description What exhausting all retries does to the unpaid invoice. `mark_uncollectible` writes it off as bad debt — the receivable closes, the invoice stays on the books for audit, and it remains settleable out of band. `none` leaves it finalized and due, which means it stays open until a human closes or collects it.
-             *     Independent of `final_subscription_action` (ADR-112): the two were one enum until 2026-08-05, which made "cancel and write off" inexpressible.
-             * @enum {string}
-             */
-            final_invoice_action: "none" | "mark_uncollectible";
-        };
-        RecipeWebhook: {
-            events: string[];
-            url_placeholder: string;
+            /** @description The plan's usage prices. Each takes the plan's currency. */
+            prices: components["schemas"]["RecipePrice"][];
         };
         /** @description Per-role count of objects a recipe will produce when instantiated. Recipes create no product entity — there is no `products` count. */
         RecipeCreates: {
             meters: number;
-            rating_rules: number;
-            pricing_rules: number;
             plans: number;
-            dunning_policies: number;
-            webhook_endpoints: number;
+            /** @description The prices the install puts on its plans. */
+            prices: number;
         };
-        /** @description Per-role map of entity IDs a recipe apply produced (including ADOPTED catalog objects — apply reconnects to an existing meter/rule graph rather than duplicating it, ADR-085). Every field is omitted when empty; clients must guard reads. */
+        /** @description Per-role map of entity IDs a recipe apply produced (including ADOPTED meters — apply reconnects to an existing meter rather than duplicating it, ADR-085). Every field is omitted when empty; clients must guard reads. */
         RecipeCreatedObjects: {
             meter_ids?: string[];
-            rating_rule_ids?: string[];
-            pricing_rule_ids?: string[];
             plan_ids?: string[];
-            dunning_policy_id?: string;
-            webhook_endpoint_id?: string;
+            price_ids?: string[];
         };
         /** @description The install badge: the record of a recipe being applied for a tenant (scoped per livemode since m0157). Field names are `recipe_key` / `recipe_version` — NOT `key`/`version`, which the recipe template itself uses. */
         RecipeInstance: {
@@ -8030,7 +8096,7 @@ export interface components {
             /** @description Operator email or API key ID. Omitted when empty. */
             created_by?: string;
         };
-        /** @description A recipe template as served by list/detail: the full parsed YAML (meters, rating rules, pricing rules, plans, optional dunning policy and webhook), not just display metadata. */
+        /** @description A recipe template as served by list/detail: the full parsed YAML, its meters and its plans with their prices, not just display metadata. A recipe creates nothing else. */
         Recipe: {
             key: string;
             version: string;
@@ -8039,11 +8105,7 @@ export interface components {
             description?: string;
             overridable: components["schemas"]["RecipeOverride"][];
             meters: components["schemas"]["RecipeMeter"][];
-            rating_rules: components["schemas"]["RecipeRatingRule"][];
-            pricing_rules: components["schemas"]["RecipePricingRule"][];
             plans: components["schemas"]["RecipePlan"][];
-            dunning_policy?: components["schemas"]["RecipeDunningPolicy"];
-            webhook?: components["schemas"]["RecipeWebhook"];
         };
         RecipeListItem: components["schemas"]["Recipe"] & {
             creates: components["schemas"]["RecipeCreates"];
@@ -8053,15 +8115,19 @@ export interface components {
         RecipeDetail: components["schemas"]["Recipe"] & {
             creates: components["schemas"]["RecipeCreates"];
         };
-        /** @description Would-be-created object graph, grouped by role. All arrays are always present (possibly empty); optional singletons (dunning, webhook) are emitted as 0-or-1-length arrays so clients iterate without null guards. */
+        /** @description What an install creates: the meters, and each plan with its prices. Both arrays are always present. An install reuses a meter that already exists with the same `event_name` and aggregation. */
         RecipePreviewObjects: {
             meters: components["schemas"]["RecipeMeter"][];
-            rating_rules: components["schemas"]["RecipeRatingRule"][];
-            pricing_rules: components["schemas"]["RecipePricingRule"][];
             plans: components["schemas"]["RecipePlan"][];
-            dunning_policies: components["schemas"]["RecipeDunningPolicy"][];
-            webhook_endpoints: components["schemas"]["RecipeWebhook"][];
         };
+        /** @description One usage price of a recipe plan. It takes the plan's currency. */
+        RecipePrice: {
+            /** @description The `event_name` of the recipe meter the price is on. */
+            meter: string;
+            dimension_match: {
+                [key: string]: string;
+            };
+        } & components["schemas"]["PriceShape"];
         RecipePreviewResult: {
             key: string;
             version: string;
@@ -8148,12 +8214,30 @@ export interface components {
         };
         CustomerUsage: {
             customer_id: string;
+            /**
+             * @description The window the response covers. With no `from` and `to`
+             *     (`current_billing_cycle`), each subscription is rated over its
+             *     own current billing period, and the period runs from the
+             *     earliest start to the latest end of those periods. A meter's
+             *     totals and daily `buckets` cover its own subscription's whole
+             *     period, including usage a threshold invoice already billed.
+             */
             period: {
                 /** Format: date-time */
                 from: string;
                 /** Format: date-time */
                 to: string;
-                /** @enum {string} */
+                /**
+                 * @description `current_billing_cycle`: no `from` and `to` were sent, and
+                 *     the amounts are what the period's invoices bill.
+                 *     `explicit`: the window you sent. Its amounts are an
+                 *     estimate, so a past window can differ from its invoices.
+                 *     Only active and trialing subscriptions are counted: the
+                 *     usage of a canceled subscription is left out. Each
+                 *     subscription's usage in the window is priced at the
+                 *     prices of its current billing period.
+                 * @enum {string}
+                 */
                 source: "current_billing_cycle" | "explicit";
             };
             /**
@@ -8178,6 +8262,10 @@ export interface components {
                 /** Format: int64 */
                 amount_cents: number;
             }[];
+            /**
+             * @description Problems found working out this usage, in words, such as usage
+             *     that no price takes or a meter whose usage went below zero.
+             */
             warnings: string[];
             /** @description One entry per UTC day in the period, including days with no usage. */
             buckets: {
@@ -8191,7 +8279,7 @@ export interface components {
         };
         CustomerUsageMeter: {
             meter_id: string;
-            meter_key: string;
+            event_name: string;
             meter_name: string;
             unit: string;
             currency: string;
@@ -8199,12 +8287,18 @@ export interface components {
             total_quantity: string;
             /** Format: int64 */
             total_amount_cents: number;
-            /** @description One row per pricing rule that claimed events. */
-            rules: {
-                rating_rule_version_id: string;
-                rule_key: string;
+            /**
+             * @description One row per (plan, price) that took usage, and a `no_price` row
+             *     per plan for the usage no price of that plan took. Two plans can
+             *     price one meter differently.
+             */
+            prices: {
+                /** @description Absent on a `no_price` row. */
+                price_id?: string;
+                plan_id: string;
+                /** @description The labels the price takes. Absent for a price that takes every event. */
                 dimension_match?: {
-                    [key: string]: unknown;
+                    [key: string]: string;
                 };
                 /** @description Decimal string. */
                 quantity: string;
@@ -8213,11 +8307,10 @@ export interface components {
                 /** @description Price per unit in cents, as a decimal string; the same figure the invoice line shows. */
                 unit_amount_decimal?: string;
                 /**
-                 * @description True for events that matched no pricing rule. Velox
-                 *     bills nothing for them, and they are left out of the
-                 *     meter's totals.
+                 * @description True for usage no price of the plan took. Velox bills
+                 *     nothing for it, and it is left out of the meter's totals.
                  */
-                unmatched?: boolean;
+                no_price?: boolean;
             }[];
         };
         CustomerOverview: {
@@ -8246,6 +8339,7 @@ export interface components {
         };
         PaymentMethod: {
             id: string;
+            customer_id: string;
             /** @example card */
             type: string;
             card_brand?: string;
@@ -8256,36 +8350,14 @@ export interface components {
             /** Format: date-time */
             created_at: string;
         };
-        CustomerPaymentSetup: {
-            customer_id: string;
-            tenant_id?: string;
-            /**
-             * @description `ready`: the customer has a default payment method. `pending`:
-             *     a Stripe customer exists but there is no default payment method
-             *     yet. `missing`: there is no Stripe customer.
-             * @enum {string}
-             */
-            setup_status: "missing" | "pending" | "ready";
-            default_payment_method_present: boolean;
-            /** @example card */
-            payment_method_type?: string;
-            stripe_customer_id?: string;
-            stripe_payment_method_id?: string;
-            card_brand?: string;
-            card_last4?: string;
-            card_exp_month?: number;
-            card_exp_year?: number;
-            /** Format: date-time */
-            created_at: string;
-            /** Format: date-time */
-            updated_at: string;
-        };
         CreditLedgerEntry: {
             id: string;
             tenant_id?: string;
             customer_id: string;
             /** @enum {string} */
             entry_type: "grant" | "usage" | "expiry" | "adjustment";
+            /** @description The entry's currency, uppercase. Credit pays only invoices in its own currency. */
+            currency: string;
             /**
              * Format: int64
              * @description Positive adds credit, negative removes it.
@@ -8293,7 +8365,7 @@ export interface components {
             amount_cents: number;
             /**
              * Format: int64
-             * @description Customer's credit balance after this entry, in cents.
+             * @description The customer's credit balance in this entry's currency after it, in cents.
              */
             balance_after: number;
             description: string;
@@ -8370,19 +8442,34 @@ export interface components {
             behavior: "keep_as_draft";
             /**
              * Format: date-time
-             * @description When collection resumes. Absent when the pause lasts until it is cleared.
+             * @description When collection resumes. Absent when the pause lasts until it is
+             *     cleared. On a pause set by dunning, it is when Velox recorded the
+             *     payment of the invoice the pause was set for.
              */
             resumes_at?: string;
+            /**
+             * @description Who paused collection. `operator`: you, through the API or the
+             *     dashboard; the pause lasts until you resume it or until
+             *     `resumes_at`. `dunning`: a dunning policy's `pause` final action.
+             *     A dunning pause lifts by itself once the invoice whose dunning
+             *     set it is paid, even if another invoice is still owed. Periods
+             *     that ended during the pause keep their draft invoices.
+             * @enum {string}
+             */
+            readonly set_by: "operator" | "dunning";
         };
-        /** @description Limits that make Velox invoice before the period ends. */
+        /**
+         * @description Limits that make Velox invoice before the period ends. A threshold
+         *     invoice bills the period's usage so far, and no base fee. The period
+         *     keeps its dates, the base fee is billed as it would be with no
+         *     threshold, and the period's next invoice bills the rest of the usage.
+         */
         SubscriptionBillingThresholds: {
             /**
              * Format: int64
-             * @description Running-subtotal threshold in cents. Absent when not set.
+             * @description Usage threshold in cents, compared with the period's usage so far (the base fee is not counted). Absent when not set.
              */
             amount_gte?: number;
-            /** @description Whether a threshold invoice starts a new billing period. */
-            reset_billing_cycle: boolean;
             item_thresholds: components["schemas"]["SubscriptionItemThreshold"][];
         };
         SubscriptionItemThreshold: {
@@ -8519,7 +8606,7 @@ export interface components {
         AnalyticsTopMeter: {
             meter_id: string;
             meter_name: string;
-            key: string;
+            event_name: string;
             /** Format: int64 */
             events: number;
             /** @description Summed quantity, as a decimal string. */
@@ -8532,7 +8619,7 @@ export interface components {
          */
         AnalyticsOverview: {
             period: components["schemas"]["AnalyticsPeriod"];
-            /** @description The tenant's default currency. Every money field uses it, except `credit_balance_total` and `outstanding_by_currency`. */
+            /** @description The tenant's default currency. Every money field uses it, except `credit_balance_by_currency` and `outstanding_by_currency`, which carry their own. */
             currency: string;
             /**
              * Format: int64
@@ -8584,11 +8671,12 @@ export interface components {
              * @description Average total of invoices paid in the window.
              */
             avg_invoice_value: number;
-            /**
-             * Format: int64
-             * @description Sum of all customers' credit balances. Not limited to `currency`.
-             */
-            credit_balance_total: number;
+            /** @description Customers' credit balances added up per currency, `currency` first, then largest. A currency whose balance is zero is left out. Customers on a test clock are not counted. */
+            credit_balance_by_currency: {
+                currency: string;
+                /** Format: int64 */
+                amount_cents: number;
+            }[];
             /**
              * @description Customer records with status `active`. Includes customers with
              *     no subscription or only canceled ones; `live_customers` counts
@@ -8610,7 +8698,7 @@ export interface components {
             trialing_subscriptions: number;
             /** @description Invoices paid in the window. */
             paid_invoices: number;
-            /** @description Invoices created in the window whose payment failed. All currencies. */
+            /** @description Open invoices created in the window whose payment failed. A voided or written-off invoice is not counted. All currencies. */
             failed_payments: number;
             /** @description `failed_payments` for the previous window. */
             failed_payments_prev: number;
@@ -8648,7 +8736,7 @@ export interface components {
             nrr: number;
             /**
              * Format: double
-             * @description Dunning runs opened in the window that are resolved, divided by all runs opened in the window. 0 when none were opened.
+             * @description Dunning runs opened in the window that a payment closed (`resolution` is `payment_recovered` and the invoice has `amount_paid_cents` above 0), divided by all runs opened in the window. A run closed by a void, a write-off, or a credit note or customer credit that left nothing due is not recovered. 0 when none were opened.
              */
             dunning_recovery_rate: number;
             mrr_movement: components["schemas"]["AnalyticsMrrMovementTotals"];
@@ -8687,7 +8775,7 @@ export interface components {
             /** @description Optional. Must belong to `customer_id`. Leave out for a one-off invoice. */
             subscription_id?: string;
             /**
-             * @description ISO 4217 code. Defaults to the customer's billing currency, then the tenant default.
+             * @description ISO 4217 code. Must be the customer's currency (see 409). Defaults to the billing-profile currency, then the live subscriptions' plan currency, then the tenant default.
              * @example USD
              */
             currency?: string;
@@ -8700,6 +8788,48 @@ export interface components {
             memo?: string;
             /** @description Lines created in the same transaction as the invoice. */
             line_items?: components["schemas"]["InvoiceLineItemInput"][];
+        };
+        CreditNoteStats: {
+            draft_count: number;
+            issued_count: number;
+            voided_count: number;
+            /**
+             * @description Money on issued notes, one entry per currency, the tenant's
+             *     default currency first. Empty when no note is issued.
+             */
+            by_currency: {
+                currency: string;
+                /**
+                 * Format: int64
+                 * @description Total of the issued notes.
+                 */
+                total_cents: number;
+                /**
+                 * Format: int64
+                 * @description Refunds that succeeded. A refund still pending or one that failed is not counted here.
+                 */
+                refunded_cents: number;
+                /**
+                 * Format: int64
+                 * @description Refunds not confirmed yet. Neither succeeded nor failed, the refund is waiting on Stripe, Stripe's answer was unclear, or its result was never recorded.
+                 */
+                refund_pending_cents: number;
+                /**
+                 * Format: int64
+                 * @description Refunds that failed. No money went back to the card.
+                 */
+                refund_failed_cents: number;
+                /**
+                 * Format: int64
+                 * @description Added to customers' credit balances.
+                 */
+                credited_cents: number;
+                /**
+                 * Format: int64
+                 * @description Recorded as paid back outside Stripe.
+                 */
+                out_of_band_cents: number;
+            }[];
         };
         /**
          * @description A credit note reduces what a customer owes on an invoice, or gives
@@ -8948,44 +9078,21 @@ export interface components {
         };
         /**
          * @description The `data` of the outbound webhook events `payment.dispute_opened`
-         *     and `payment.dispute_closed` (docs/webhooks.md). Both are saved in the
-         *     same transaction that records the dispute, so a crash cannot drop
-         *     them. `payment.dispute_opened` is sent once per dispute, when Velox
-         *     first records it; if the first event Velox receives is already the
-         *     close, both are sent, and both carry the closed status and
-         *     `closed_at`. Their delivery order is not guaranteed.
-         *     `payment.dispute_closed` is sent when the dispute reaches a closed
-         *     status it did not have: `won`, `lost`, `warning_closed` or
-         *     `prevented`. A lost dispute that Stripe later marks won sends it
-         *     again.
+         *     and `payment.dispute_closed` (docs/webhooks.md): the invoice the
+         *     disputed payment paid and the dispute, each as the API returns it.
+         *     Both are saved in the same transaction that records the dispute, so
+         *     a crash cannot drop them. `payment.dispute_opened` is sent once per
+         *     dispute, when Velox first records it; if the first event Velox
+         *     receives is already the close, both are sent, and both carry the
+         *     closed status and `closed_at`. Their delivery order is not
+         *     guaranteed. `payment.dispute_closed` is sent when the dispute
+         *     reaches a closed status it did not have: `won`, `lost`,
+         *     `warning_closed` or `prevented`. A lost dispute that Stripe later
+         *     marks won sends it again.
          */
         DisputeWebhookEventData: {
-            invoice_id: string;
-            invoice_number: string;
-            customer_id: string;
-            /** @description The Velox dispute record (`InvoiceDispute.id`). */
-            dispute_id: string;
-            stripe_dispute_id: string;
-            stripe_charge_id?: string;
-            /** @description The disputed Stripe PaymentIntent. */
-            payment_intent_id: string;
-            /** @description The dispute's status when the event was saved (see `InvoiceDispute.status`). */
-            status: string;
-            reason?: string;
-            /** Format: int64 */
-            amount_cents: number;
-            currency: string;
-            /** Format: date-time */
-            evidence_due_by?: string;
-            /** Format: date-time */
-            opened_at: string;
-            /**
-             * Format: date-time
-             * @description Set when the dispute is closed: always on `payment.dispute_closed`,
-             *     and on `payment.dispute_opened` when the first event Velox received
-             *     was already the close.
-             */
-            closed_at?: string;
+            invoice: components["schemas"]["Invoice"];
+            dispute: components["schemas"]["InvoiceDispute"];
         };
         InvoicePaymentTimeline: {
             events: components["schemas"]["InvoiceTimelineEvent"][];
@@ -9000,8 +9107,13 @@ export interface components {
             invoice_id: string;
             customer_id?: string;
             policy_id: string;
-            /** @enum {string} */
-            state: "active" | "paused" | "escalated" | "resolved";
+            /**
+             * @description `active`: retries are running. `escalated`: retries ran out
+             *     (`resolution` is `retries_exhausted`). `resolved`: the run ended
+             *     another way; see `resolution`.
+             * @enum {string}
+             */
+            state: "active" | "escalated" | "resolved";
             reason?: string;
             attempt_count: number;
             /** Format: date-time */
@@ -9016,10 +9128,12 @@ export interface components {
              *     `action_failed` is set on a run that is still `active`. The
              *     final action (pause, cancel or mark uncollectible) failed and
              *     will be retried at `next_action_at`. `manually_resolved` appears
-             *     only on older runs.
+             *     only on older runs. `amount_below_minimum`: a charge on the
+             *     invoice was refused by Stripe because the amount is below its
+             *     minimum charge, so the run ended without its final action.
              * @enum {string}
              */
-            resolution?: "payment_recovered" | "invoice_voided" | "invoice_not_collectible" | "retries_exhausted" | "action_failed" | "manually_resolved";
+            resolution?: "payment_recovered" | "invoice_voided" | "invoice_not_collectible" | "retries_exhausted" | "action_failed" | "manually_resolved" | "amount_below_minimum";
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -9040,6 +9154,14 @@ export interface components {
             effective_now?: string;
             /** @description Filled in on list responses. */
             test_clock_id?: string;
+            /**
+             * @description How many retries the run's policy makes: the length of its
+             *     `retry_days`. Filled in on list responses.
+             *     When `attempt_count` has reached it, no charge is retried:
+             *     `next_action_at` is when the final action (pause, cancel or
+             *     mark uncollectible) runs.
+             */
+            max_retry_attempts?: number;
         };
         DunningRunEvent: {
             id: string;
@@ -9047,9 +9169,9 @@ export interface components {
             tenant_id?: string;
             invoice_id: string;
             /** @enum {string} */
-            event_type: "dunning_started" | "retry_scheduled" | "retry_attempted" | "retry_succeeded" | "retry_failed" | "paused" | "resumed" | "escalated" | "resolved";
+            event_type: "dunning_started" | "retry_attempted" | "escalated" | "resolved";
             /** @enum {string} */
-            state: "active" | "paused" | "escalated" | "resolved";
+            state: "active" | "escalated" | "resolved";
             reason?: string;
             attempt_count: number;
             metadata?: {
@@ -9083,18 +9205,21 @@ export interface components {
         DunningStats: {
             active_count: number;
             escalated_count: number;
+            /** @description Resolved runs, whatever closed them (a payment, a void or a write-off). */
             resolved_count: number;
+            /** @description Resolved runs that a payment closed (`resolution` is `payment_recovered` and the invoice has `amount_paid_cents` above 0). A run closed by a credit note or customer credit that left nothing due is resolved, not recovered. */
+            recovered_count: number;
             /**
              * Format: int64
-             * @description Amount due on active and escalated runs, in `currency` only.
+             * @description Amount due on active and escalated runs whose invoice is still open, in `currency` only. A voided or written-off invoice is not at risk.
              */
             at_risk_cents: number;
             /** @description The tenant's default currency. */
             currency: string;
             /**
-             * @description Amount due on active and escalated runs, one entry per currency.
-             *     `currency` comes first, then the largest amount. Empty when no run
-             *     is at risk.
+             * @description Amount due on active and escalated runs whose invoice is still
+             *     open, one entry per currency. `currency` comes first, then the
+             *     largest amount. Empty when no run is at risk.
              */
             at_risk_by_currency: {
                 currency: string;
@@ -9102,57 +9227,46 @@ export interface components {
                 amount_cents: number;
             }[];
         };
-        MeterPricingRule: {
-            id: string;
-            tenant_id?: string;
-            meter_id: string;
-            rating_rule_version_id: string;
-            /** @description Dimensions an event must have for this rule to bill it. `{}` matches every event. */
-            dimension_match: {
-                [key: string]: unknown;
-            };
-            /** @enum {string} */
-            aggregation_mode: "sum" | "count" | "last_during_period" | "last_ever" | "max";
-            /** @description Rules are tried highest first. */
-            priority: number;
-            /** Format: date-time */
-            created_at: string;
-            /** Format: date-time */
-            updated_at: string;
-        };
+        /**
+         * @description A customer's negotiated rate for one plan price. It keeps applying
+         *     when the price's rate changes, and ends when the price is removed.
+         *     It takes the plan's currency.
+         */
         CustomerPriceOverride: {
             /** @example vlx_cpo_1a2b3c4d5e6f7890 */
             id: string;
             tenant_id?: string;
-            /** @description The rating rule this override replaces the price of, across all its versions. */
-            rule_key: string;
             customer_id: string;
-            /** @description The rule version named when the override was created. For reference only. */
-            rating_rule_version_id: string;
-            /** @enum {string} */
-            mode: "flat" | "graduated" | "package";
-            /** @description Per-unit rate in cents, as a decimal string. */
-            flat_amount_cents?: string;
+            /** @description The plan price this override replaces the rate of, for this customer. */
+            price_id: string;
+            /**
+             * @description As on PriceShape.
+             * @enum {string}
+             */
+            mode: "per_unit" | "graduated" | "package";
+            /** @description Price per unit in cents, as a decimal string. */
+            unit_amount_cents?: string;
             /** @description Empty (`[]`) unless `mode` is `graduated`. */
-            graduated_tiers?: {
-                /**
-                 * Format: int64
-                 * @description 0 on the last tier means no upper bound.
-                 */
-                up_to?: number;
-                /** @description Per-unit rate in cents, as a decimal string. */
-                unit_amount_cents?: string;
-            }[];
+            tiers?: components["schemas"]["PriceTier"][];
             /** Format: int64 */
             package_size?: number;
-            /** Format: int64 */
-            package_amount_cents?: number;
-            /** @description Per-unit overage rate in cents, as a decimal string. */
-            overage_unit_amount_cents?: string;
+            /** @description Price of one package in cents, as a decimal string. */
+            package_amount_cents?: string;
             reason?: string;
             active: boolean;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the override starts, in the customer's time: wall time, or
+             *     its test clock's time. A subscription already on the plan gets
+             *     it from its next period; one that first joins the plan in a
+             *     period after this instant gets it from the join.
+             */
             created_at: string;
+            /**
+             * Format: date-time
+             * @description When the override ended, in the customer's time. Absent while it is active.
+             */
+            deactivated_at?: string;
             /** Format: date-time */
             updated_at: string;
         };
@@ -9164,27 +9278,29 @@ export interface components {
              */
             enabled: boolean;
             /**
-             * @description 0 or less means the default, 3.
-             * @default 3
-             */
-            max_retry_attempts: number;
-            /**
-             * @description Days before the first retry. 0 or less means the default, 3.
-             * @default 3
-             */
-            grace_period_days: number;
-            /**
-             * @description Waits before retries 2 to N, as Go durations (h, m, s units; no
-             *     days, so 3 days is "72h"). Needs at least
-             *     `max_retry_attempts - 1` entries, each above zero.
+             * @description Days to wait before each retry. The first counts from the failed
+             *     payment, or, with no card on file, from the collection that found
+             *     none. Each later one counts from the retry before it: `[3, 4, 7]`
+             *     retries on day 3, 7 and 14. The number of retries is the length
+             *     of the list. A day is 24 hours. `retry_schedule`,
+             *     `max_retry_attempts` and `grace_period_days` are refused.
              * @example [
-             *       "72h",
-             *       "120h"
+             *       3,
+             *       4,
+             *       7
              *     ]
              */
-            retry_schedule?: string[];
+            retry_days: number[];
             /**
-             * @description What happens to the subscription when retries run out.
+             * @description What happens to the subscription when retries run out. `pause`
+             *     pauses collection and sends `subscription.collection_paused`
+             *     with `triggered_by: dunning`. It does nothing if collection is
+             *     already paused, the subscription is canceled, or the invoice
+             *     was paid first. `cancel` cancels the subscription and sends
+             *     `subscription.canceled` with `canceled_by: dunning`. It does
+             *     nothing if the subscription is already canceled. If a scheduled
+             *     cancel was already due, that cancel happens instead, and its
+             *     event says `canceled_by: schedule`.
              * @default pause
              * @enum {string}
              */
@@ -9207,17 +9323,24 @@ export interface components {
             /**
              * @description True for the "Default retries" policy the account was created
              *     with, until you edit it or make it the default. While it is
-             *     true, the next enabled policy you create (by hand or from a
-             *     recipe) becomes the default instead. Ignored in request bodies.
+             *     true, the next enabled policy you create becomes the default
+             *     instead. Set by the server: a request body that sends it is
+             *     refused with 422.
              */
             seeded: boolean;
-            retry_schedule: string[] | null;
-            max_retry_attempts: number;
+            /**
+             * @description Days to wait before each retry; the number of retries is its length.
+             * @example [
+             *       3,
+             *       4,
+             *       7
+             *     ]
+             */
+            retry_days: number[];
             /** @enum {string} */
             final_subscription_action: "none" | "pause" | "cancel";
             /** @enum {string} */
             final_invoice_action: "none" | "mark_uncollectible";
-            grace_period_days: number;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -9245,14 +9368,9 @@ export interface components {
                 /** @description Plain sum of reported quantities, as a decimal string. */
                 total: string;
                 /**
-                 * @description The aggregation billing uses for this meter's events (`sum`,
-                 *     `count`, `max`, `last`), read from its pricing rules and, for
-                 *     events no rule claims, the meter's own aggregation. `mixed`
-                 *     when those differ, or when a `max` or `last` meter is billed
-                 *     in more than one part (several rules, or a rule plus the
-                 *     events no rule claims), since peaks of the parts added up
-                 *     are not one peak: `value` is then the plain sum, which
-                 *     billing may not use. Empty when unknown.
+                 * @description The meter's aggregation (`sum`, `count`, `max`, `last`),
+                 *     which every price of the meter bills under. Empty when
+                 *     unknown.
                  */
                 aggregation: string;
                 /**
@@ -9276,18 +9394,6 @@ export interface components {
                 }[];
             }[];
         };
-        UsageSummary: {
-            customer_id: string;
-            /** Format: date-time */
-            period_from: string;
-            /** Format: date-time */
-            period_to: string;
-            /** @description Meter id to the sum of its quantities, as a decimal string. */
-            meters: {
-                [key: string]: string;
-            };
-            total_events: number;
-        };
         /**
          * @description The fields of a LiteLLM `StandardLoggingPayload` that Velox reads.
          *     Other fields are accepted and ignored.
@@ -9295,10 +9401,19 @@ export interface components {
         LitellmSpendLog: {
             /** @description LiteLLM's call id. Used to build the events' idempotency keys. */
             id?: string;
+            /** @description A `failure` record (a call the provider refused or that timed out) is skipped, whatever token counts it carries. */
+            status?: string;
             /**
-             * @description Only completion, acompletion, chat, chat.completion, embedding,
-             *     aembedding, text_completion and atext_completion records produce
-             *     usage. Others are skipped.
+             * @description `true` when LiteLLM answered from its own response cache. The
+             *     record is skipped and counted in `cache_hits`: the provider
+             *     charged nothing.
+             */
+            cache_hit?: boolean | null;
+            /**
+             * @description A record bills on its token counts unless its call type is one
+             *     Velox does not bill (images, audio, realtime, moderation,
+             *     batches, files, A2A, response retrieval, ...); those are
+             *     skipped, and a skipped record that carries tokens is logged.
              */
             call_type?: string;
             model?: string;
@@ -9320,12 +9435,26 @@ export interface components {
                 prompt_tokens_details?: {
                     /** Format: int64 */
                     cached_tokens?: number;
+                    /** Format: int64 */
+                    cache_creation_tokens?: number;
+                    /**
+                     * @description Anthropic's cache writes by cache lifetime. They become
+                     *     `cache_write_5m` and `cache_write_1h` events, taken out
+                     *     of `input`. Without this split, or when it does not add
+                     *     up to the cache-write count, the writes stay in `input`.
+                     */
+                    cache_creation_token_details?: {
+                        /** Format: int64 */
+                        ephemeral_5m_input_tokens?: number | null;
+                        /** Format: int64 */
+                        ephemeral_1h_input_tokens?: number | null;
+                    };
                 };
                 /** Format: int64 */
                 cache_read_input_tokens?: number;
                 /**
                  * Format: int64
-                 * @description Not billed on its own; billed as input only when included in prompt_tokens.
+                 * @description Cache-write tokens, included in prompt_tokens. Split into `cache_write_5m` and `cache_write_1h` by `prompt_tokens_details.cache_creation_token_details`.
                  */
                 cache_creation_input_tokens?: number;
             };
@@ -9342,18 +9471,22 @@ export interface components {
             response_cost?: number;
             /**
              * @description The provider's own cost, in dollars. When present, each event's
-             *     provider cost comes from its part (input, output or cache read)
-             *     instead of the provider-costs table. A part that is missing or
-             *     negative falls back to the table. `input_cost` includes cache
-             *     reads, so the input event gets `input_cost` minus
-             *     `cache_read_cost`. If there were cache reads but no
-             *     `cache_read_cost`, the input and cache-read events use the
-             *     provider-costs table.
+             *     provider cost comes from its part (input, output, cache read or
+             *     cache write) instead of the provider-costs table. A part that is
+             *     missing or negative falls back to the table. `input_cost`
+             *     includes cache reads and cache writes, so the input event gets
+             *     `input_cost` minus `cache_read_cost` and `cache_creation_cost`.
+             *     If there were cache reads but no `cache_read_cost`, or split-off
+             *     cache writes but no `cache_creation_cost`, the input-side events
+             *     use the provider-costs table. With 1-hour cache writes they
+             *     always do: LiteLLM prices `cache_creation_cost` at the 5-minute
+             *     rate.
              */
             cost_breakdown?: {
                 input_cost?: number;
                 output_cost?: number;
                 cache_read_cost?: number;
+                cache_creation_cost?: number;
                 tool_usage_cost?: number;
                 total_cost?: number;
             };
@@ -9369,11 +9502,12 @@ export interface components {
                 [key: string]: unknown;
             };
         };
-        /** @description The usage rows still held for one external customer ID, meter key and reason. */
+        /** @description The usage rows still held for one external customer ID, event name and reason. */
         HeldUsageGroup: {
             /** @description The LiteLLM `user` value the rows carried. */
             external_customer_id: string;
-            meter_key: string;
+            /** @description The `event_name` the rows carried. */
+            event_name: string;
             /**
              * @description What was missing when the rows arrived.
              * @enum {string}
@@ -9393,9 +9527,14 @@ export interface components {
             last_received_at: string;
             /** @description The customer whose external ID now matches, or empty when none does yet. */
             customer_id: string;
-            /** @description Whether a meter with this key exists now. */
+            /** @description Whether a meter with this `event_name` exists now. */
             meter_exists: boolean;
         };
+        /**
+         * @description The counts are what Velox found when the release wrote the rows, as
+         *     for `billing_status` (see `UsageBillingStatus`). The invoice is the
+         *     final answer.
+         */
         HeldUsageReleaseResult: {
             /** @description The customer the rows were ingested for. */
             customer_id: string;
@@ -9403,8 +9542,9 @@ export interface components {
             released: number;
             /**
              * @description Rows that were already usage events under the same idempotency
-             *     key (LiteLLM resent the call after the customer existed). Marked
-             *     released, not written again.
+             *     key (LiteLLM resent the call after the customer existed), and
+             *     LiteLLM cache-write rows whose call is already billed with the
+             *     writes inside its input row. Marked released, not written again.
              */
             deduplicated: number;
             /**
@@ -9419,23 +9559,42 @@ export interface components {
              */
             more_to_release: number;
             /**
-             * @description Released rows inside an active subscription's current billing
-             *     period whose meter the subscription's plan prices. That period's
-             *     invoice counts them.
+             * @description Released rows in a billing period not invoiced yet that a price
+             *     of its plan takes. Rows Velox does not check count here too:
+             *     rows after the current period's end, while the subscription
+             *     continues, and rows after a trial's end while the subscription
+             *     still trials. Rows of a sum or count meter stamped before the end
+             *     of this period's spend-threshold invoice are not counted here:
+             *     see `pending_threshold_invoice` and `outside_open_period`.
              */
             in_open_period: number;
             /**
-             * @description Released rows inside an active subscription's current billing
-             *     period whose meter no plan on that subscription prices. No
-             *     invoice charges them.
+             * @description Released rows in a billing period not invoiced yet whose plan
+             *     prices the meter, but no price of that plan takes them (their
+             *     dimensions do not include any price's `dimension_match`).
+             */
+            no_price: number;
+            /**
+             * @description Released rows in a billing period not invoiced yet whose plan
+             *     does not price the meter.
              */
             not_on_plan: number;
             /**
-             * @description Released rows outside every current billing period: before the
-             *     subscription started, or in an earlier period. A subscription
-             *     invoice does not count them unless that period's invoice has not
-             *     been built yet. Bill them with a one-off invoice if they should
-             *     be charged.
+             * @description Released rows of a sum or count meter stamped before the end of
+             *     this period's spend-threshold invoice, while that invoice is not
+             *     paid. The period's invoice counts them only if that invoice is
+             *     voided before the period closes. A written-off invoice can still
+             *     be voided.
+             */
+            pending_threshold_invoice: number;
+            /**
+             * @description Released rows outside every subscription's time (before it
+             *     started, in a free trial, after it ended or after its scheduled
+             *     cancel, or in another, ended subscription's time), and rows in a
+             *     period already invoiced. Also rows of a sum or count meter
+             *     stamped before the end of this period's paid spend-threshold
+             *     invoice. Bill them with a one-off invoice if they should be
+             *     charged.
              */
             outside_open_period: number;
         };
@@ -9450,9 +9609,35 @@ export interface components {
              *     `POST /v1/usage-events/held/release`.
              */
             held: number;
-            /** @description Records that carry no billable tokens. */
+            /** @description Records that bill nothing - a call type with no tokens, zero tokens, a failed call (`status` `failure`) or a LiteLLM response-cache hit. */
             skipped: number;
-            /** @description One entry per event or record that was not recorded. A record can appear more than once. */
+            /** @description The LiteLLM response-cache hits among `skipped`. LiteLLM's own spend counts them as $0. */
+            cache_hits: number;
+            /**
+             * @description Of `accepted`, the events answered `billing_status:
+             *     after_close`: their time was already invoiced. A replay never
+             *     counts here.
+             */
+            after_close: number;
+            /**
+             * @description Of `accepted`, the events no price of the subscription's plan
+             *     takes (`billing_status: no_price`), such as a model no price
+             *     names. A replay never counts here.
+             */
+            no_price: number;
+            /**
+             * @description Of `accepted`, the events whose meter the subscription's plan
+             *     does not price (`billing_status: not_on_plan`). A replay never
+             *     counts here.
+             */
+            not_on_plan: number;
+            /**
+             * @description Of `accepted`, the events whose time no subscription of the
+             *     customer bills (`billing_status: outside_subscription`). A replay
+             *     never counts here.
+             */
+            outside_subscription: number;
+            /** @description One entry per record that was not recorded. A record's events are recorded together or not at all. */
             errors?: {
                 /** @description The LiteLLM record id. */
                 id: string;
@@ -9515,12 +9700,21 @@ export interface components {
             timezone?: string;
             /** @description Starts every invoice number, such as `VLX-000001`. */
             invoice_prefix?: string;
+            /**
+             * @description Starts every credit note number, such as `CN-000001`. A change
+             *     applies to new credit notes only. Issued notes keep their
+             *     numbers. It must differ from `invoice_prefix`, or an invoice and
+             *     a credit note would get the same number.
+             */
+            credit_note_prefix?: string;
             /** @description Days until an invoice is due. 0 means due on issue. */
             net_payment_terms?: number;
             /**
              * Format: int64
-             * @description When a customer's credit balance drops below this amount, the
-             *     `credit.balance_low` webhook fires. null turns it off.
+             * @description When a customer's credit in one currency drops below this
+             *     amount, in that currency's minor units, the `credit.balance_low`
+             *     webhook fires: 1000 means $10.00 of USD credit and €10.00 of EUR
+             *     credit. null turns it off.
              */
             credit_balance_low_threshold_cents?: number | null;
             /**
@@ -9807,7 +10001,12 @@ export interface components {
         WebhookStreamFrame: {
             event_id: string;
             event_type: string;
-            /** @description The payload's `customer_id`, or empty. */
+            /**
+             * @description The customer the event is about: the `customer_id` of the
+             *     resource in `data` (its `id` for a `customer.*` event), or empty.
+             *     For an event queued before `data` held the resource, its
+             *     `data.customer_id`.
+             */
             customer_id: string;
             /**
              * @description Delivery state. Live frames send `pending`, `succeeded` or
@@ -9821,31 +10020,6 @@ export interface components {
             created_at: string;
             livemode: boolean;
             replay_of_event_id: string | null;
-        };
-        /** @description One delivery of an event to one endpoint, as the older events routes return it. */
-        WebhookDelivery: {
-            id: string;
-            tenant_id?: string;
-            livemode: boolean;
-            webhook_endpoint_id: string;
-            /** @description The event this delivery belongs to. For a replay's delivery, the replay's own id; the message it sent carries the original event's `id`. */
-            webhook_event_id: string;
-            /** @enum {string} */
-            status: "pending" | "succeeded" | "failed";
-            /** @description HTTP status from the receiver. Left out when there was no response. */
-            http_status_code?: number;
-            response_body?: string;
-            error_message?: string;
-            attempt_count: number;
-            /** Format: date-time */
-            next_retry_at?: string;
-            /** Format: date-time */
-            created_at: string;
-            /** Format: date-time */
-            completed_at?: string;
-            /** @description The endpoint's URL, kept after the endpoint is deleted. */
-            endpoint_url?: string;
-            endpoint_description?: string;
         };
         /**
          * @description What the hosted invoice page shows. It leaves out internal ids and
@@ -9896,14 +10070,10 @@ export interface components {
             };
             line_items: {
                 description: string;
-                /** Format: int64 */
-                quantity: number;
-                /** @description The exact quantity when it has a fraction, for example `1.5`. Left out for whole quantities. */
-                quantity_decimal?: string;
-                /** Format: int64 */
-                unit_amount_cents: number;
+                /** @description The exact quantity as a decimal string, for example `3` or `1.5`. */
+                quantity: string;
                 /** @description The unit price in cents at full precision, for example `0.3` for $0.003. */
-                unit_amount_decimal?: string;
+                unit_amount_decimal: string;
                 meter_unit?: string;
                 /** Format: int64 */
                 amount_cents: number;
@@ -9939,16 +10109,21 @@ export interface components {
             };
             /**
              * @description True when the customer can pay online now: the invoice is
-             *     finalized, something is owed, no payment is in progress, and the
-             *     seller has Stripe connected for the invoice's mode.
+             *     finalized, something is owed, no payment is in progress, the
+             *     seller has Stripe connected for the invoice's mode, and Stripe's
+             *     latest answer for the amount was not that it is below its
+             *     minimum charge.
              */
             pay_enabled: boolean;
             /**
-             * @description Sent only when money is owed but the seller has no payment
-             *     provider connected for this mode.
+             * @description Sent only when money is owed but can't be paid online:
+             *     `online_payment_unavailable` when the seller has no payment
+             *     provider connected for this mode, `amount_below_minimum` when
+             *     Stripe's latest answer refused the amount as below its minimum
+             *     charge.
              * @enum {string}
              */
-            pay_unavailable_reason?: "online_payment_unavailable";
+            pay_unavailable_reason?: "online_payment_unavailable" | "amount_below_minimum";
             /** @description False for a test-mode invoice. The page shows a test-mode banner. */
             livemode: boolean;
         };
@@ -9993,6 +10168,8 @@ export interface components {
             id: string;
             /** @description `grant` or `adjustment`. */
             entry_type: string;
+            /** @description The block's currency, uppercase. */
+            currency: string;
             /**
              * @description Absent for unclassified credit.
              * @enum {string}
@@ -10042,25 +10219,29 @@ export interface components {
         };
         /**
          * @description A customer's credit blocks, newest first, with the remaining credit
-         *     added up by kind.
+         *     added up by currency and kind.
          */
         CreditGrants: {
             grants: components["schemas"]["CreditGrantBlock"][];
-            /**
-             * Format: int64
-             * @description Remaining credit the customer paid for (`commit`).
-             */
-            commit_remaining_cents: number;
-            /**
-             * Format: int64
-             * @description Remaining free credit (`promotional`).
-             */
-            promotional_remaining_cents: number;
-            /**
-             * Format: int64
-             * @description Remaining credit with no kind, such as adjustments and proration credits.
-             */
-            other_remaining_cents: number;
+            /** @description One entry per currency with credit left, ordered by currency. */
+            remaining_by_currency: {
+                currency: string;
+                /**
+                 * Format: int64
+                 * @description Remaining credit the customer paid for (`commit`).
+                 */
+                commit_remaining_cents: number;
+                /**
+                 * Format: int64
+                 * @description Remaining free credit (`promotional`).
+                 */
+                promotional_remaining_cents: number;
+                /**
+                 * Format: int64
+                 * @description Remaining credit with no kind, such as adjustments and credit-note credit.
+                 */
+                other_remaining_cents: number;
+            }[];
         };
         /** @description A new webhook endpoint and its signing secret. The secret is shown only here. */
         WebhookEndpointCreated: {
@@ -10085,7 +10266,11 @@ export interface components {
             /** @example invoice.finalized */
             event_type: string;
             /**
-             * @description The event's data. docs/webhooks.md lists what each event carries;
+             * @description The event's data: the resource the event is about, under the
+             *     resource's name (`invoice`, `subscription`, `customer`,
+             *     `payment_method`, `dunning_run` or `credit_balance`), as the
+             *     API returns it, and the few keys the event adds beside it.
+             *     docs/webhooks.md lists what each event carries;
              *     `payment.dispute_opened` and `payment.dispute_closed` carry a
              *     `DisputeWebhookEventData`.
              */
@@ -10174,11 +10359,11 @@ export interface components {
             description: string;
             meter_id?: string;
             meter_unit?: string;
-            rating_rule_version_id?: string;
-            rule_key?: string;
-            /** @description For a meter with several pricing rules, the dimension values this line's rule matches. */
+            /** @description On a usage line, the plan price that priced it. */
+            price_id?: string;
+            /** @description On a usage line, the labels its price takes. Absent for a price that takes every event. */
             dimension_match?: {
-                [key: string]: unknown;
+                [key: string]: string;
             };
             currency: string;
             /** @description Exact quantity as a decimal string. */
@@ -10188,7 +10373,7 @@ export interface components {
             /** Format: int64 */
             amount_cents: number;
             /** @enum {string} */
-            pricing_mode?: "flat" | "graduated" | "package";
+            pricing_mode?: "per_unit" | "graduated" | "package";
         };
         InvoicePreviewTotal: {
             currency: string;
@@ -10203,7 +10388,8 @@ export interface components {
          *     the same value on every retry. For 24 hours, a repeat with the same
          *     key, method, path and body gets the first response again, with an
          *     `Idempotent-Replayed: true` header, instead of running again. The
-         *     error cases are in docs/api-surface.md.
+         *     error cases are in docs/api-surface.md. The usage routes do not take
+         *     it: each usage event carries its own `idempotency_key`.
          */
         IdempotencyKey: string;
     };
@@ -10311,7 +10497,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -10424,7 +10611,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -10477,8 +10665,9 @@ export interface operations {
             };
             /**
              * @description A field failed validation, or the body has a key the profile does
-             *     not have, such as `tax_exempt` (set `tax_status` instead). `param`
-             *     names the field. A body read back from GET is accepted.
+             *     not have, such as `tax_exempt` (set `tax_status` instead), or one
+             *     the server sets, such as `customer_id` or `created_at`. `param`
+             *     names the field.
              */
             422: {
                 headers: {
@@ -10599,76 +10788,6 @@ export interface operations {
             };
         };
     };
-    listCustomerInvoices: {
-        parameters: {
-            query?: {
-                /** @description Default 25, at most 100. */
-                limit?: number;
-            };
-            header?: never;
-            path: {
-                customer_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Invoices. `total` counts all of the customer's invoices. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        data: components["schemas"]["Invoice"][];
-                        total: number;
-                    };
-                };
-            };
-            /** @description Customer not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
-    listCustomerSubscriptions: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                customer_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Subscriptions. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        data: components["schemas"]["Subscription"][];
-                    };
-                };
-            };
-            /** @description Customer not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
     listCustomerPaymentMethods: {
         parameters: {
             query?: never;
@@ -10712,7 +10831,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -10746,6 +10866,15 @@ export interface operations {
                     };
                 };
             };
+            /** @description The body is not valid JSON. Nothing was sent. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Customer not found. */
             404: {
                 headers: {
@@ -10756,9 +10885,10 @@ export interface operations {
                 };
             };
             /**
-             * @description `email_not_configured`: this server has no SMTP set up. Nothing
-             *     was sent and no setup link was created. Like any other call, it
-             *     starts the one-minute cooldown.
+             * @description Nothing was sent. `email_not_configured`: this server has no SMTP
+             *     set up, and no setup link was created. `stripe_not_connected`:
+             *     Stripe is not connected for this mode. Like any other call that
+             *     gets this far, it starts the one-minute cooldown.
              */
             409: {
                 headers: {
@@ -10769,8 +10899,9 @@ export interface operations {
                 };
             };
             /**
-             * @description `note_too_long` (more than 2000 bytes) or
-             *     `missing_email` (the customer has no email).
+             * @description `note_too_long` (more than 2000 bytes),
+             *     `missing_email` (the customer has no email), or an unknown
+             *     field (`param` names it).
              */
             422: {
                 headers: {
@@ -10791,10 +10922,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /**
-             * @description Stripe is not connected for this mode, or the setup session
-             *     could not be created. No email was queued.
-             */
+            /** @description The setup session could not be created. No email was queued. */
             500: {
                 headers: {
                     [name: string]: unknown;
@@ -10836,7 +10964,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -10873,6 +11002,24 @@ export interface operations {
             };
             /** @description Customer not found. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `stripe_not_connected`: Stripe is not connected for this mode. Connect it under Settings. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The body has an unknown field (`param` names it). */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10924,7 +11071,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -10947,123 +11095,6 @@ export interface operations {
                 };
             };
             /** @description No such active payment method for this customer. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
-    createCheckoutSetupSession: {
-        parameters: {
-            query?: never;
-            header?: {
-                /**
-                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
-                 */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    customer_id: string;
-                    customer_name?: string;
-                    email?: string;
-                    address_line1?: string;
-                    address_city?: string;
-                    address_state?: string;
-                    address_postal_code?: string;
-                    address_country?: string;
-                    /** @description The page Stripe sends the customer back to. Always send it, because the default works only in local development. */
-                    return_url?: string;
-                };
-            };
-        };
-        responses: {
-            /** @description Setup session created. */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @description Stripe Checkout Session ID. */
-                        session_id: string;
-                        /** @description Stripe Checkout URL. */
-                        url: string;
-                        stripe_customer_id: string;
-                    };
-                };
-            };
-            /** @description The body is not valid JSON. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description No such customer in this mode. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description `customer_id` is missing. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Stripe is not connected for this mode, or a Stripe call failed. Code `stripe_error`. */
-            502: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
-    getCheckoutSetupStatus: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                customerID: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Setup status. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CustomerPaymentSetup"];
-                };
-            };
-            /** @description No customer with this ID in this tenant and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -11188,7 +11219,9 @@ export interface operations {
              *     payment status is `processing` or `unknown`.
              *     `payment_in_progress` when another payment for it has started.
              *     `online_payment_unavailable` when the seller has no Stripe keys
-             *     for the invoice's mode.
+             *     for the invoice's mode. `amount_below_minimum` when Stripe's
+             *     latest answer for the amount was that it is below Stripe's
+             *     minimum charge, so no payment page is made for it.
              */
             409: {
                 headers: {
@@ -11304,6 +11337,15 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description The seller has not connected Stripe for this mode, so a card cannot be added online. Code `online_payment_unavailable`. The token still works. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Rate limited (60/min/IP) */
             429: {
                 headers: {
@@ -11311,7 +11353,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Stripe is not connected for this mode, or Stripe could not create the session. Code `stripe_error`. */
+            /** @description Starting the session failed, at Stripe or on the server. Code `stripe_error`. */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -11349,227 +11391,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
-    listMeterPricingRules: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                meter_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Pricing rules */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        data: components["schemas"]["MeterPricingRule"][];
-                    };
-                };
-            };
-            /** @description No meter with this ID in this tenant and mode. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
-    upsertMeterPricingRule: {
-        parameters: {
-            query?: never;
-            header?: {
-                /**
-                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
-                 */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-            };
-            path: {
-                meter_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /** @description The rating rule that prices the matched usage. Must exist in this tenant and mode. */
-                    rating_rule_version_id: string;
-                    /**
-                     * @description Event dimensions this rule claims, for example
-                     *     `{"model": "gpt-4o", "token_type": "input"}`. Values must be
-                     *     strings, numbers or booleans. Omitted or `{}` matches every event.
-                     */
-                    dimension_match?: {
-                        [key: string]: unknown;
-                    };
-                    /**
-                     * @description How the matched events become one quantity for the period.
-                     * @default sum
-                     * @enum {string}
-                     */
-                    aggregation_mode?: "sum" | "count" | "last_during_period" | "last_ever" | "max";
-                    /**
-                     * @description Higher wins when an event matches more than one rule.
-                     * @default 0
-                     */
-                    priority?: number;
-                };
-            };
-        };
-        responses: {
-            /** @description The created or updated rule */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MeterPricingRule"];
-                };
-            };
-            /** @description `invalid_request`: the body is not valid JSON. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /**
-             * @description `invalid_state`: the rating rule's currency differs from the
-             *     meter's other prices or from a plan that uses the meter, or the
-             *     rule has versions in more than one currency.
-             */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /**
-             * @description `validation_error`: unknown meter or rating rule, unknown
-             *     `aggregation_mode`, more than 16 `dimension_match` keys, or a
-             *     non-scalar `dimension_match` value.
-             */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
-    getMeterPricingRule: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                meter_id: string;
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The rule */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MeterPricingRule"];
-                };
-            };
-            /** @description `not_found`: no rule with this id. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
-    deleteMeterPricingRule: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                meter_id: string;
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Deleted */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description `not_found`: no rule with this id. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /**
-             * @description `invalid_state`: this is the meter's last price and a live
-             *     subscription's plan uses the meter. The message names the plans.
-             */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
-    listAllMeterPricingRules: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Pricing rules */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        data: components["schemas"]["MeterPricingRule"][];
-                    };
                 };
             };
         };
@@ -11623,7 +11444,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -11634,6 +11456,11 @@ export interface operations {
             content: {
                 "application/json": {
                     customer_id: string;
+                    /**
+                     * @description ISO 4217 code of the balance to change. Case-insensitive; stored uppercase.
+                     * @example USD
+                     */
+                    currency: string;
                     /**
                      * Format: int64
                      * @description Positive adds credit, negative removes it. Not zero.
@@ -11790,7 +11617,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -11855,77 +11683,6 @@ export interface operations {
             };
         };
     };
-    listWebhookEventDeliveriesLegacy: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Deliveries */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        data: components["schemas"]["WebhookDelivery"][];
-                    };
-                };
-            };
-        };
-    };
-    replayWebhookEventLegacy: {
-        parameters: {
-            query?: never;
-            header?: {
-                /**
-                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
-                 */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Replay created */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        status: "replayed";
-                        /** @description The new event created by the replay. */
-                        event_id: string;
-                        /** @description The original event. */
-                        replay_of: string;
-                    };
-                };
-            };
-            /** @description No such event in this mode */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
     listWebhookEventDeliveries: {
         parameters: {
             query?: never;
@@ -11980,7 +11737,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -12195,21 +11953,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The plan */
+            /** @description The plan, with its prices */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Plan"] & {
-                        /**
-                         * @description Subscriptions on this plan that are not canceled or
-                         *     archived. While it is above 0, `base_amount_cents`,
-                         *     `base_bill_timing` and `meter_ids` cannot change
-                         *     (see Update plan).
-                         */
-                        live_subscription_count: number;
-                    };
+                    "application/json": components["schemas"]["PlanDetail"];
                 };
             };
             /** @description `not_found`: no plan with this id in this tenant and mode. */
@@ -12232,7 +11982,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -12250,28 +12001,26 @@ export interface operations {
                     description?: string;
                     /**
                      * Format: int64
-                     * @description Ignored when 0 or less.
+                     * @description 0 or more. Omit to keep the current base fee.
                      */
                     base_amount_cents?: number;
                     /** @enum {string} */
                     base_bill_timing?: "in_advance" | "in_arrears";
-                    /** @description Replaces the plan's meters. Omit to keep them. */
-                    meter_ids?: string[];
                     /** @enum {string} */
-                    status?: "draft" | "active" | "archived";
+                    status?: "active" | "archived";
                     /** @description Stripe product tax code. Omit to keep the current code; an empty string clears it, and the base fee then uses the tenant's `default_product_tax_code`. */
                     tax_code?: string;
                 };
             };
         };
         responses: {
-            /** @description The updated plan */
+            /** @description The updated plan, with its prices */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Plan"];
+                    "application/json": components["schemas"]["PlanDetail"];
                 };
             };
             /** @description `invalid_request`: the body is not valid JSON. */
@@ -12293,8 +12042,8 @@ export interface operations {
                 };
             };
             /**
-             * @description `invalid_state`: a meter in `meter_ids` is priced in a currency
-             *     other than the plan's.
+             * @description `invalid_state`: another write changed the plan's base fee
+             *     during this one.
              */
             409: {
                 headers: {
@@ -12305,10 +12054,12 @@ export interface operations {
                 };
             };
             /**
-             * @description `validation_error`: a billing field changed while live
-             *     subscriptions use the plan (param `plan`), an unknown or unpriced
-             *     meter in `meter_ids`, an invalid `base_bill_timing`, or an invalid
-             *     `tax_code`.
+             * @description `validation_error`: the base fee changed while live
+             *     subscriptions use the plan (param `plan`), `base_bill_timing`
+             *     changed on a used plan or is `in_advance` with a base of 0, a
+             *     negative base fee, a `status` other than `active` or
+             *     `archived`, an invalid `tax_code`, or an unknown field such as
+             *     `meter_ids` (a plan's meters are its prices' meters).
              */
             422: {
                 headers: {
@@ -12318,12 +12069,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /**
-             * @description `internal_error`. Among other causes, a `status` outside
-             *     `draft`, `active` and `archived` is not checked before it is
-             *     written, so the database refuses it and the call answers 500,
-             *     not 422. Nothing is changed.
-             */
+            /** @description `internal_error`. Nothing is changed. */
             500: {
                 headers: {
                     [name: string]: unknown;
@@ -12334,7 +12080,7 @@ export interface operations {
             };
         };
     };
-    getRatingRule: {
+    listPlanPrices: {
         parameters: {
             query?: never;
             header?: never;
@@ -12345,17 +12091,205 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The rating rule version */
+            /** @description Prices */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RatingRule"];
+                    "application/json": {
+                        data: components["schemas"]["PlanPrice"][];
+                    };
                 };
             };
-            /** @description `not_found`: no rating rule with this id in this tenant and mode. */
+            /** @description `not_found`: no plan with this id in this tenant and mode. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    addPlanPrice: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PriceInput"];
+            };
+        };
+        responses: {
+            /** @description The price, and when it applies */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PriceWrite"];
+                };
+            };
+            /** @description `invalid_request`: the body is not valid JSON. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `not_found`: no plan with this id in this tenant and mode. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description `price_exists`: the plan already has a price on this meter with
+             *     this `dimension_match`; edit it instead. `price_conflict`: a
+             *     price on the plan and meter could take the same events with the
+             *     same number of labels, so neither would win; the message names
+             *     it. Add a label to make one more specific, or give a shared
+             *     label another value. `meter_overlap`: the meter is new to a used
+             *     plan, and a customer on the plan already has it on another item,
+             *     of the same subscription or another one.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description `validation_error`: an unknown meter, a label that is not a
+             *     string or breaks the limits, a rate outside its limits, a price
+             *     shape that cannot be billed, or an unknown field (`param` names
+             *     it).
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    removePlanPrice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                price_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The removed price, when the removal applies, and the overrides it ended */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PriceWrite"];
+                };
+            };
+            /** @description `not_found`: no such plan, or no such price on it (a removed price included). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    updatePlanPrice: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+                price_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PriceShape"];
+            };
+        };
+        responses: {
+            /** @description The price, and when the change applies */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PriceWrite"];
+                };
+            };
+            /** @description `invalid_request`: the body is not valid JSON. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `not_found`: no such plan, or no such price on it (a removed price included). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description `validation_error`: a rate outside its limits, a price shape
+             *     that cannot be billed, `meter_id` or `dimension_match` (the
+             *     price's identity), or another unknown field (`param` names it).
+             */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -12405,7 +12339,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -12435,8 +12370,8 @@ export interface operations {
                 };
             };
             /**
-             * @description Code `invalid_state`: the subscription is already `canceled` or
-             *     `archived`. Code `unbilled_period`: a billing period ended and
+             * @description Code `invalid_state`: the subscription is already `canceled`.
+             *     Code `unbilled_period`: a billing period ended and
              *     could not be invoiced; retry billing first.
              */
             409: {
@@ -12458,7 +12393,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -12509,8 +12445,8 @@ export interface operations {
                 };
             };
             /**
-             * @description Code `invalid_state`: the subscription is `canceled` or
-             *     `archived`, or its status changed while the request ran (read
+             * @description Code `invalid_state`: the subscription is `canceled`, or its
+             *     status changed while the request ran (read
              *     it again and retry). Code `unbilled_period`: a billing period
              *     ended and could not be invoiced; retry billing first.
              */
@@ -12591,7 +12527,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -12642,8 +12579,8 @@ export interface operations {
                 };
             };
             /**
-             * @description Code `invalid_state`: the subscription is `canceled` or
-             *     `archived`. Code `unbilled_period`: a billing period ended and
+             * @description Code `invalid_state`: the subscription is `canceled`. Code
+             *     `unbilled_period`: a billing period ended and
              *     could not be invoiced; retry billing first.
              */
             409: {
@@ -12721,7 +12658,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -12773,7 +12711,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -12857,7 +12796,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -12871,20 +12811,13 @@ export interface operations {
                 "application/json": {
                     /**
                      * Format: int64
-                     * @description Invoice early when the period's running subtotal reaches this amount, in cents of the subscription's currency.
+                     * @description Invoice early when the period's usage so far reaches this amount, in cents of the subscription's currency. The base fee is not counted.
                      */
                     amount_gte?: number;
-                    /**
-                     * @description `true` starts a new billing period when a threshold
-                     *     invoice is issued. `false` keeps the period; the rest of
-                     *     the period's usage is billed at its normal end.
-                     * @default false
-                     */
-                    reset_billing_cycle?: boolean;
                     item_thresholds?: {
                         /** @description An item of this subscription. Each item can appear once. */
                         subscription_item_id: string;
-                        /** @description Invoice early when the item's usage in the period reaches this quantity. A decimal string, 0 or more (e.g. "1000" or "3.14"). */
+                        /** @description Invoice early when the item's usage in the period reaches this quantity. A decimal string (e.g. "1000" or "3.14"): more than 0, under 10^26, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. */
                         usage_gte: string;
                     }[];
                 };
@@ -12918,7 +12851,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Code `invalid_state`: the subscription is `canceled` or `archived`. */
+            /** @description Code `invalid_state`: the subscription is `canceled`. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -12931,8 +12864,8 @@ export interface operations {
              * @description Neither `amount_gte` nor `item_thresholds` is set;
              *     `amount_gte` is negative; an item id is missing, repeated, or
              *     not on this subscription; a `usage_gte` is not a number or is
-             *     negative; or the subscription's plans use more than one
-             *     currency.
+             *     outside its limits (`param` is `item_thresholds[i].usage_gte`);
+             *     or the subscription's plans use more than one currency.
              *     Also: the body has an unknown field (`param` names it; the body must use only the fields listed here).
              */
             422: {
@@ -12985,7 +12918,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -13036,12 +12970,13 @@ export interface operations {
             };
             /**
              * @description Code `already_exists`: the subscription already has an item for
-             *     this plan. Code `invalid_state`: the subscription is `canceled`
-             *     or `archived`; the plan is archived; the plan's meters overlap
-             *     another live subscription of the customer; or the plan's
+             *     this plan. Code `invalid_state`: the subscription is `canceled`;
+             *     the plan is archived; the plan's meters (the meters it has a
+             *     price for) overlap another live subscription of the customer; or the plan's
              *     currency differs from the subscription's. Code
              *     `unpaid_invoice_blocks_change`: the invoice for the current
-             *     period is unpaid; settle or void it first. Code
+             *     period is unpaid (a written-off invoice is unpaid); settle or
+             *     void it first. Code
              *     `unbilled_period`: a billing period ended and could not be
              *     invoiced; retry billing first.
              */
@@ -13121,7 +13056,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -13179,11 +13115,12 @@ export interface operations {
             };
             /**
              * @description Code `invalid_state`: the subscription is not `active`, the new
-             *     plan is archived, its meters overlap another live subscription
-             *     of the customer, or its currency differs. Code
+             *     plan is archived, its meters (the meters it has a price for)
+             *     overlap another live subscription of the customer, or its
+             *     currency differs. Code
              *     `unpaid_invoice_blocks_change`: an increase would charge against
-             *     an unpaid invoice for the current period; settle or void it
-             *     first. Code `subscription_period_moved`: the billing period
+             *     an unpaid invoice for the current period (a written-off invoice
+             *     is unpaid); settle or void it first. Code `subscription_period_moved`: the billing period
              *     changed while the request ran; read the subscription again and
              *     retry. Code `item_changed`: a plan change found the
              *     subscription's items changed by another request that finished
@@ -13299,16 +13236,7 @@ export interface operations {
     backfillUsageEvent: {
         parameters: {
             query?: never;
-            header?: {
-                /**
-                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
-                 */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
@@ -13317,16 +13245,19 @@ export interface operations {
                 "application/json": {
                     /** @description The customer's external_id (your identifier), not the internal vlx_cus_ id. */
                     external_customer_id: string;
-                    /** @description The meter key (e.g. "tokens"). */
+                    /** @description The meter's `event_name` (e.g. "tokens"). */
                     event_name: string;
-                    /** @description Decimal quantity, as a JSON number or a string. Omitted means 0. Negative values are allowed as corrections. */
-                    quantity?: number | string;
-                    /** @description Scalar dimension values used to pick the pricing rule. */
+                    /**
+                     * @description A JSON number (`5`) or a string holding one (`"5.5"`,
+                     *     for exact decimals). At most 12 decimal places; trailing
+                     *     zeros do not count. Its size must be under 10^26, and it
+                     *     is at most 100 characters. A negative value is a
+                     *     correction. A missing quantity, or any other value, is
+                     *     refused with 422 and `param: quantity`.
+                     */
+                    quantity: number | string;
+                    /** @description Scalar labels of the event. A price takes an event whose labels include the price's `dimension_match`. */
                     dimensions?: {
-                        [key: string]: unknown;
-                    };
-                    /** @description Older name for `dimensions`. Used only when `dimensions` is absent. */
-                    properties?: {
                         [key: string]: unknown;
                     };
                     /**
@@ -13339,9 +13270,8 @@ export interface operations {
                      *     event, such as a batch index or a timestamp that can
                      *     repeat, or that usage is lost. Empty or whitespace-only
                      *     keys are refused with 422, and so are keys longer than
-                     *     255 characters. The `Idempotency-Key` header does not
-                     *     count as this key: it caches one HTTP response for 24
-                     *     hours.
+                     *     255 characters. This is the only dedup key: the usage
+                     *     routes ignore the `Idempotency-Key` header.
                      */
                     idempotency_key: string;
                     /**
@@ -13363,7 +13293,11 @@ export interface operations {
                     "application/json": components["schemas"]["UsageEvent"];
                 };
             };
-            /** @description Event recorded */
+            /**
+             * @description Event recorded. A `billing_status` is what Velox found when the
+             *     event arrived (see `UsageBillingStatus`); the event is stored
+             *     all the same.
+             */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -13387,7 +13321,10 @@ export interface operations {
              *     `idempotency_key`); missing `external_customer_id`, `event_name`
              *     or `timestamp`; unknown customer or meter; a future or badly
              *     formatted `timestamp`; more than 16 dimensions or a non-scalar
-             *     dimension value; a quantity of 10^26 or more.
+             *     dimension value; a missing or malformed `quantity`, one with
+             *     more than 12 decimal places, one of 10^26 or more, or one
+             *     longer than 100 characters; a
+             *     `properties` field with a key (it was renamed `dimensions`).
              */
             422: {
                 headers: {
@@ -13398,8 +13335,9 @@ export interface operations {
                 };
             };
             /**
-             * @description `ingest_unavailable`: the customer or meter lookup could not be
-             *     answered. Nothing was recorded; retry.
+             * @description `ingest_unavailable`: the customer or meter lookup, or the read
+             *     of the customer's billing periods, could not be answered.
+             *     Nothing was recorded; retry.
              */
             503: {
                 headers: {
@@ -13440,16 +13378,7 @@ export interface operations {
     releaseHeldUsage: {
         parameters: {
             query?: never;
-            header?: {
-                /**
-                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
-                 */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
@@ -13491,16 +13420,7 @@ export interface operations {
     discardHeldUsage: {
         parameters: {
             query?: never;
-            header?: {
-                /**
-                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
-                 */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
@@ -13508,8 +13428,8 @@ export interface operations {
             content: {
                 "application/json": {
                     external_customer_id: string;
-                    /** @description Discard only this meter's rows. Omit for all. */
-                    meter_key?: string;
+                    /** @description Discard only the rows with this `event_name`. Omit for all. */
+                    event_name?: string;
                 };
             };
         };
@@ -13525,7 +13445,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description `validation_error`: `external_customer_id` is missing. */
+            /** @description `validation_error`: `external_customer_id` is missing, or the body has an unknown field (`param` names it; the body must use only the fields listed here). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -13583,67 +13503,6 @@ export interface operations {
             };
         };
     };
-    getUsageSummary: {
-        parameters: {
-            query?: {
-                /** @description Window start. RFC 3339, or a date (YYYY-MM-DD) meaning 00:00:00 UTC. */
-                from?: string;
-                /** @description Window end, exclusive. RFC 3339, or a date (YYYY-MM-DD) meaning 23:59:59.999999 UTC that day, so the day is included. */
-                to?: string;
-            };
-            header?: never;
-            path: {
-                /** @description Internal customer id (vlx_cus_...). */
-                customer_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Summary */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["UsageSummary"];
-                };
-            };
-            /** @description No customer with this ID in this tenant and mode. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description `validation_error`: `from` or `to` cannot be parsed, or `to` is before `from` (param names the field). */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /**
-             * @description The totals could not be read. The body is `{"error": "internal_error"}`,
-             *     not the usual error object.
-             */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        error?: "internal_error";
-                    };
-                };
-            };
-        };
-    };
     createInvoice: {
         parameters: {
             query?: never;
@@ -13653,7 +13512,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -13694,9 +13554,24 @@ export interface operations {
                 };
             };
             /**
+             * @description `currency` is not the customer's (code
+             *     `customer_currency_conflict`). The message names the billing
+             *     profile or subscription plan currency it conflicts with.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
              * @description Validation error: missing `customer_id`, unsupported currency,
-             *     an invalid line item (the message names the line number), or
-             *     an unknown field (`param` names it; the body must use only the fields listed here).
+             *     an invalid line item (the message names the line number), line
+             *     items whose total does not fit 64-bit cents (`param` is
+             *     `line_items`), or an unknown field (`param` names it; the body
+             *     must use only the fields listed here).
              */
             422: {
                 headers: {
@@ -13760,7 +13635,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -13826,7 +13702,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -13881,7 +13758,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -13939,7 +13817,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -13992,7 +13871,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -14061,7 +13941,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -14110,7 +13991,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -14146,7 +14028,13 @@ export interface operations {
              *     about an hour). Code `payment_unidentifiable`: Stripe's answer
              *     to the earlier charge was unclear and named no payment; Velox
              *     records a payment that appears, and the invoice is charged again
-             *     as usual if none has appeared 24 hours after that charge.
+             *     as usual if none has appeared 24 hours after that charge. Code
+             *     `amount_below_minimum`: the amount is below Stripe's minimum
+             *     charge, so nothing was charged; the invoice stays open with
+             *     `payment_status` `pending`, and no dunning starts. Collect
+             *     applies the credit balance first and asks Stripe each time
+             *     anything is still owed: for a converted charge, Stripe's minimum
+             *     follows the account's settlement currency.
              */
             409: {
                 headers: {
@@ -14199,7 +14087,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -14342,6 +14231,26 @@ export interface operations {
             };
         };
     };
+    getCreditNoteStats: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Credit note totals. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditNoteStats"];
+                };
+            };
+        };
+    };
     getCreditNote: {
         parameters: {
             query?: never;
@@ -14382,7 +14291,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -14431,7 +14341,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -14500,7 +14411,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -14670,7 +14582,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -14912,7 +14825,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -14965,7 +14879,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -15000,7 +14915,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description An existing meter with the same key diverges from the recipe (aggregation mismatch) — reconcile the meter before instantiating. */
+            /** @description Nothing is installed. Either a meter with the recipe's `event_name` has another aggregation, so the recipe cannot use it, or another install that ran at the same time created the meter, the plan code or this recipe's install first (retry). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -15369,7 +15284,7 @@ export interface operations {
         parameters: {
             query?: {
                 invoice_id?: string;
-                state?: "active" | "paused" | "escalated" | "resolved";
+                state?: "active" | "escalated" | "resolved";
                 /** @description Page size. Default 50, maximum 100. */
                 limit?: number;
                 offset?: number;
@@ -15434,7 +15349,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -15560,7 +15476,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -15582,11 +15499,20 @@ export interface operations {
                     "application/json": components["schemas"]["DunningPolicy"];
                 };
             };
+            /** @description `invalid_request`: the body is not valid JSON. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /**
-             * @description `validation_error`: body is not valid JSON, the old
-             *     `final_action` field was sent, a limit was exceeded, an unknown
-             *     final action, or a `retry_schedule` entry that is too short or
-             *     not a valid duration.
+             * @description `validation_error`: a replaced field was sent (`final_action`,
+             *     `retry_schedule`, `max_retry_attempts`, `grace_period_days`),
+             *     `retry_days` is missing or out of bounds, or an unknown final
+             *     action.
              */
             422: {
                 headers: {
@@ -15685,7 +15611,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -15707,6 +15634,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DunningPolicy"];
+                };
+            };
+            /** @description `invalid_request`: the body is not valid JSON. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
             /** @description `not_found`: no policy with this id in this tenant and mode. */
@@ -15738,7 +15674,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -15777,6 +15714,8 @@ export interface operations {
             query?: {
                 /** @description Only this customer's overrides. */
                 customer_id?: string;
+                /** @description Only this price's overrides. */
+                price_id?: string;
             };
             header?: never;
             path?: never;
@@ -15806,7 +15745,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -15817,21 +15757,20 @@ export interface operations {
             content: {
                 "application/json": {
                     customer_id: string;
-                    /** @description Any version of the rule to override. */
-                    rating_rule_version_id: string;
-                    /** @enum {string} */
-                    mode: "flat" | "graduated" | "package";
-                    /** @description Per-unit rate in cents, as a decimal string. Used when `mode` is `flat`. 0 or more. */
-                    flat_amount_cents?: string;
+                    /** @description The plan price to override. */
+                    price_id: string;
                     /**
-                     * @description Used when `mode` is `graduated`. Each `up_to` must be larger
-                     *     than the one before, and the last tier must have
-                     *     `up_to: 0` (no upper bound).
+                     * @description As on PriceShape, also for the fields a mode does not use.
+                     * @enum {string}
                      */
-                    graduated_tiers?: {
+                    mode: "per_unit" | "graduated" | "package";
+                    /** @description Price per unit in cents, as a decimal string. Used when `mode` is `per_unit`. 0 or more, under 10^18, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. A value outside them is refused with 422 and `param` naming the field. */
+                    unit_amount_cents?: string;
+                    /** @description Used when `mode` is `graduated`. Each `up_to` is a whole number above the one before. The last tier has `up_to: null` (no upper bound), and only the last. Otherwise 422 with `param` `tiers`. */
+                    tiers?: {
                         /** Format: int64 */
-                        up_to?: number;
-                        /** @description Per-unit rate in cents, as a decimal string. */
+                        up_to?: number | null;
+                        /** @description Price per unit in cents in this tier, as a decimal string, with the limits of `unit_amount_cents`. A refusal names `tiers[i].unit_amount_cents` (i counts from 0). */
                         unit_amount_cents?: string;
                     }[];
                     /**
@@ -15839,13 +15778,8 @@ export interface operations {
                      * @description Used when `mode` is `package`. Must be above 0.
                      */
                     package_size?: number;
-                    /**
-                     * Format: int64
-                     * @description Price of one package in cents. Used when `mode` is `package`.
-                     */
-                    package_amount_cents?: number;
-                    /** @description Package-mode per-unit overage rate in cents, as a decimal string. */
-                    overage_unit_amount_cents?: string;
+                    /** @description Price of one package in cents, as a decimal string, with the limits of `unit_amount_cents`. Used when `mode` is `package`. */
+                    package_amount_cents?: string;
                     reason?: string;
                 };
             };
@@ -15878,7 +15812,11 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description `already_exists`: another request created an override for the same customer and rule at the same moment. Retry. */
+            /**
+             * @description `already_exists`: another request created an override for the
+             *     same customer and price at the same moment. Retry.
+             *     `invalid_state`: the price was removed from its plan.
+             */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -15888,10 +15826,12 @@ export interface operations {
                 };
             };
             /**
-             * @description `validation_error`: a missing field, an unknown rating rule, a
-             *     price shape that cannot be billed (negative rate, bad tier table,
-             *     package size of 0), or an unknown field at any depth (`param`
-             *     names it; the body must use only the fields listed here).
+             * @description `validation_error`: a missing field, an unknown price, a
+             *     rate that is not a number or is outside its limits, a price
+             *     shape that cannot be billed (bad
+             *     tier table, package size of 0), or an unknown field at any depth
+             *     (`param` names it; the body must use only the fields listed
+             *     here).
              */
             422: {
                 headers: {
@@ -15941,16 +15881,7 @@ export interface operations {
     ingestLitellmSpend: {
         parameters: {
             query?: never;
-            header?: {
-                /**
-                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
-                 */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
@@ -16035,7 +15966,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -16140,7 +16072,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -16256,7 +16189,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -16355,7 +16289,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -16426,7 +16361,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -16486,7 +16422,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };

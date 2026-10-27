@@ -1,7 +1,6 @@
 package recipe
 
 import (
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -98,11 +97,8 @@ func (h *Handler) preview(w http.ResponseWriter, r *http.Request) {
 
 	key := chi.URLParam(r, "key")
 	var req PreviewRequest
-	if r.ContentLength > 0 {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respond.BadRequest(w, r, "invalid JSON body")
-			return
-		}
+	if !respond.DecodeStrict(w, r, &req, respond.EmptyBodyOK) {
+		return
 	}
 	rec, err := h.svc.Preview(r.Context(), key, req.Overrides)
 	if err != nil {
@@ -123,11 +119,8 @@ func (h *Handler) instantiate(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	key := chi.URLParam(r, "key")
 	var req InstantiateRequest
-	if r.ContentLength > 0 {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respond.BadRequest(w, r, "invalid JSON body")
-			return
-		}
+	if !respond.DecodeStrict(w, r, &req, respond.EmptyBodyOK) {
+		return
 	}
 	inst, err := h.svc.Instantiate(r.Context(), tenantID, key, req.Overrides, InstantiateOptions{
 		CreatedBy: auth.KeyID(r.Context()),

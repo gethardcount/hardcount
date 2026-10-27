@@ -73,11 +73,10 @@ func TestUpdateItem_ProrationInvoiceCreateFailure_RollsBackQuantity(t *testing.T
 		},
 		createInvoiceErr: errors.New("simulated proration invoice write failure"),
 	}
-	credits := &creditsMock{}
 
 	h := NewHandler(svcWithStore(store))
 	h.SetDB(db)
-	h.SetProrationDeps(plans, invoices, credits)
+	h.SetProrationDeps(plans, invoices)
 
 	reqCtx := clock.WithEffectiveNow(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), proNow)
 	newQty := int64(2)

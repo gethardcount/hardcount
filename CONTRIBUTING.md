@@ -85,6 +85,46 @@ go test -p 1 ./... -count=1 -short=false    # unit + integration tests
 To try a release without Go or Node, use `deploy/compose/quickstart.sh`
 instead (see the [README](README.md)).
 
+### Local services
+
+`docker compose up -d postgres redis mailpit` starts everything the API can
+use on your machine:
+
+| Service | Where | Notes |
+|---|---|---|
+| Postgres | `:5432` | Password `velox`. Data is kept in a Docker volume. |
+| Redis | `:6379` | Used for rate limiting. Optional outside production: without it, only sign-in (`/v1/auth`) is rate-limited. |
+| Mailpit | `:1025` (SMTP), `:8025` (web) | Catches every email Velox sends, so nothing leaves your machine. |
+| The API | `:8080` | Started by `make dev`. Not a container. |
+
+`make bootstrap` takes an optional owner email and password:
+`VELOX_BOOTSTRAP_EMAIL=you@example.com VELOX_BOOTSTRAP_PASSWORD=change-me-please1 make bootstrap`.
+A password needs at least 12 characters, and Velox refuses common passwords
+from leaked-password lists.
+
+### Add a second account
+
+One Velox server can hold many accounts (tenants), each with its own data,
+dashboard users and API keys. To add another one, run the bootstrap tool
+again with a different owner email:
+
+```bash
+make bootstrap VELOX_BOOTSTRAP_EMAIL=tenant-b@velox.local \
+  VELOX_BOOTSTRAP_PASSWORD='choose-a-password' \
+  VELOX_BOOTSTRAP_TENANT='Tenant B'
+```
+
+The tool runs from source, so it needs Go and this repository. It is not in
+the Docker image. There is no button for this in the dashboard, and a
+secret key cannot do it: only a platform key can manage accounts, and a
+standard Velox server issues none.
+
+### Several worktrees
+
+Never `git stash` in a repo shared by several worktrees. The stash belongs
+to the whole repo, and a `pop` can land another worktree's work in your
+tree.
+
 ### Without make
 
 These are the same steps without make. `make dev` reads `.env`, which sets
@@ -150,9 +190,15 @@ internal/{domain}/
   `internal/arch/boundaries_test.go` enforces this: a new cross-domain
   import fails the test until it is added there on purpose.
 - Every handler uses `respond.JSON()` / `respond.FromError()` for responses.
-- Every store method runs inside a transaction scoped to one tenant by
-  Postgres Row-Level Security (RLS). A tenant is one account's data in a
-  shared database; RLS hides every other tenant's rows.
+- Most store methods run inside a transaction scoped to one tenant by
+  Postgres Row-Level Security (RLS):
+  `db.BeginTx(ctx, postgres.TxTenant, tenantID)`. A tenant is one account's
+  data in a shared database; RLS hides every other tenant's rows.
+- Some store methods run under `postgres.TxBypass`, where RLS does not
+  apply: work across tenants, work before the tenant is known, and two
+  signed-in areas. Such a query must filter by `tenant_id` itself.
+  [Architecture](docs/architecture.md#design-rules) lists them. A new use
+  fails `internal/arch/txbypass_allowlist_test.go` until it is listed there.
 - Integration tests use `testutil.SetupTestDB()`.
 
 ## Adding a new domain
@@ -226,6 +272,34 @@ Notes on three of them:
   the `//tz:ok` date rule) are described in
   [How we test](docs/testing.md#which-test-to-write).
 
+## What we accept
+
+Anyone can contribute. We judge the change, not the person. To keep review
+time for real work, every pull request meets this bar:
+
+1. **Start with an issue.** For anything bigger than a typo or a broken
+   link, open an issue first, or comment on an existing one. Wait until a
+   maintainer agrees with the approach, then link that issue in your pull
+   request. A pull request without an agreed issue is closed without review.
+2. **Some areas are maintainer-only.** A change in these areas needs an
+   agreed issue that says an outside pull request is welcome:
+   - money and state machines: invoices, payments, credits, dunning,
+     subscriptions and tax;
+   - database migrations;
+   - sign-in, sessions and API keys;
+   - CI and release files (`.github/`);
+   - dependencies (`go.mod`, `web-v2/package.json` and the lock files).
+3. **One change per pull request,** with its tests and docs, and CI green.
+   Unrelated edits, such as formatting sweeps, renames or bulk dependency
+   bumps, are closed.
+4. **Show that you ran it.** Say what you changed, why, and how you checked
+   it. A pull request that was not run or understood is closed.
+
+**What happens next:** CI on a pull request from outside the project waits
+until a maintainer has read the diff and approved the run. We answer within
+two days. A pull request below the bar gets one short comment and is
+closed; you are welcome to open an issue and try again.
+
 ## Pull requests
 
 1. Fork the repo and create a feature branch.
@@ -255,4 +329,4 @@ customer), subscriptions and tax. Follow the
   removed ([§5](docs/dev/money-path-robustness-playbook.md#5-test-lock-doctrine)).
 
 Words used here that you have not met are in the
-[glossary](docs/glossary.md#for-contributors).
+[glossary](docs/dev/glossary.md).

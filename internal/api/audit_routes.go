@@ -223,15 +223,15 @@ var auditRouteRegistry = map[routeKey]auditDecl{
 	{"DELETE", "/v1/customers/{customer_id}/payment-methods/{pmID}"}:         explicit("paymentmethods.Service.Detach → Log(delete, payment_method) + Log(update) on any promoted new default."),
 
 	// --- pricing --------------------------------------------------------
-	{"POST", "/v1/meters"}:                                 explicit("pricing.Handler.createMeter → Log(create, meter)."),
-	{"PATCH", "/v1/meters/{id}"}:                           explicit("pricing.Service.UpdateMeter → LogInTx(update, meter) on the meter's own tx."),
-	{"POST", "/v1/meters/{meter_id}/pricing-rules"}:        explicit("pricing.Handler.upsertMeterPricingRule → Log(update, meter_pricing_rule)."),
-	{"DELETE", "/v1/meters/{meter_id}/pricing-rules/{id}"}: explicit("pricing.Service.DeleteMeterPricingRule → LogInTx(delete, meter_pricing_rule). The catch-all recorded this as 'deleted meter {meter_id}' — ADR-090's headline fabrication."),
-	{"POST", "/v1/plans"}:                                  explicit("pricing.Handler.createPlan → Log(create, plan)."),
-	{"PATCH", "/v1/plans/{id}"}:                            explicit("pricing.Handler.updatePlan → Log(update, plan)."),
-	{"POST", "/v1/rating-rules"}:                           explicit("pricing.Handler.createRatingRule → Log(create, rating_rule)."),
-	{"POST", "/v1/price-overrides"}:                        explicit("pricing.Handler.createOverride → Log(create, price_override)."),
-	{"DELETE", "/v1/price-overrides/{id}"}:                 explicit("pricing.Handler.deleteOverride → Log(delete, price_override)."),
+	{"POST", "/v1/meters"}:                         explicit("pricing.Handler.createMeter → Log(create, meter)."),
+	{"PATCH", "/v1/meters/{id}"}:                   explicit("pricing.Service.UpdateMeter → LogInTx(update, meter) on the meter's own tx."),
+	{"POST", "/v1/plans"}:                          explicit("pricing.Handler.createPlan → Log(create, plan)."),
+	{"PATCH", "/v1/plans/{id}"}:                    explicit("pricing.Handler.updatePlan → Log(update, plan)."),
+	{"POST", "/v1/plans/{id}/prices"}:              explicit("pricing.Service.AddPrice → LogInTx(create, plan_price) on the price write's tx, with the content and when it applies."),
+	{"PATCH", "/v1/plans/{id}/prices/{price_id}"}:  explicit("pricing.Service.EditPrice → LogInTx(update, plan_price) on the price write's tx, with the content before and after."),
+	{"DELETE", "/v1/plans/{id}/prices/{price_id}"}: explicit("pricing.Service.RemovePrice → LogInTx(delete, plan_price) on the price write's tx, with the overrides it ended."),
+	{"POST", "/v1/price-overrides"}:                explicit("pricing.Handler.createOverride → Log(create, price_override)."),
+	{"DELETE", "/v1/price-overrides/{id}"}:         explicit("pricing.Handler.deleteOverride → Log(delete, price_override)."),
 
 	// --- recipes --------------------------------------------------------
 	{"POST", "/v1/recipes/{key}/instantiate"}: explicit("recipe.Service.Instantiate → LogInTx(create, recipe) on the generate-plan tx (ADR-085 born-unique install). An idempotent re-apply installs nothing, emits nothing, and declares audit.MarkSkip on the badge-exists branch — a no-op deserves no record (the catch-all fabricated a 'created recipe' row for it)."),
@@ -298,7 +298,6 @@ var auditRouteRegistry = map[routeKey]auditDecl{
 	{"PATCH", "/v1/webhook-endpoints/endpoints/{id}"}:                               explicit("webhook.Handler.updateEndpoint → Log(update, webhook_endpoint)."),
 	{"DELETE", "/v1/webhook-endpoints/endpoints/{id}"}:                              explicit("webhook.Handler.deleteEndpoint → Log(delete, webhook_endpoint)."),
 	{"POST", "/v1/webhook-endpoints/endpoints/{id}/rotate-secret"}:                  explicit("webhook.Handler.rotateSecret → Log(rotate, webhook_endpoint) — never records the secret."),
-	{"POST", "/v1/webhook-endpoints/events/{id}/replay"}:                            explicit("webhook.Handler.replayEvent → Log(update, webhook_event: replayed)."),
 	{"POST", "/v1/webhook_events/{id}/replay"}:                                      explicit("webhook.Handler.replayEventV2 → Log(update, webhook_event: replayed)."),
 	{"POST", "/v1/webhook-endpoints/endpoints/{id}/deliveries/{deliveryID}/replay"}: explicit("webhook.Handler.replayDelivery → Log(update, webhook_delivery: replayed_to_endpoint) — records target endpoint + replay clone ids."),
 
@@ -322,7 +321,6 @@ var auditRouteRegistry = map[routeKey]auditDecl{
 	{"DELETE", "/v1/test-clocks/{id}"}:             explicit("testclock.Handler.delete → Log(delete, test_clock: teardown), reading the clock BEFORE the teardown so the row carries its name + final frozen instant. ADR-086: the audit row is the simulation's ONLY surviving record after teardown."),
 
 	// --- checkout / public payment surfaces --------------------------------
-	{"POST", "/v1/checkout/setup"}:                          explicit("payment.CheckoutHandler.createSetupSession → persistStripeMapping → LogInTx(update, customer; metadata action=checkout_setup_started) on the STRIPE-CUSTOMER-MAPPING write. There is no 'session-claim' tx. Emits only when the UPDATE touched a row, so a setup against a customer that is not on this tenant/livemode plane fabricates nothing."),
 	{"POST", "/v1/public/invoices/{token}/checkout"}:        explicit("hostedInvoiceStripeAdapter (api/adapters.go) → LogInTx on the checkout-claim tx; actor is the CUSTOMER (auth.WithCustomerActor). Outside the old catch-all entirely."),
 	{"POST", "/v1/public/payment-updates/{token}/checkout"}: explicit("payment.PublicPaymentHandler.createCheckoutSession → LogInTx on the token consume/restore txs; customer actor."),
 }

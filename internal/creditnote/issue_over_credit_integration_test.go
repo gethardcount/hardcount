@@ -22,15 +22,7 @@ import (
 type ledgerGranter struct{ svc *credit.Service }
 
 func (g ledgerGranter) in(i creditnote.CreditGrantInput) credit.GrantInput {
-	return credit.GrantInput{CustomerID: i.CustomerID, AmountCents: i.AmountCents, Description: i.Description, InvoiceID: i.InvoiceID}
-}
-func (g ledgerGranter) Grant(ctx context.Context, tenantID string, i creditnote.CreditGrantInput) error {
-	_, err := g.svc.Grant(ctx, tenantID, g.in(i))
-	return err
-}
-func (g ledgerGranter) GrantForCreditNote(ctx context.Context, tenantID, cnID string, i creditnote.CreditGrantInput) error {
-	_, err := g.svc.GrantForCreditNote(ctx, tenantID, cnID, g.in(i))
-	return err
+	return credit.GrantInput{Currency: i.Currency, CustomerID: i.CustomerID, AmountCents: i.AmountCents, Description: i.Description, InvoiceID: i.InvoiceID}
 }
 func (g ledgerGranter) GrantForCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, cnID string, i creditnote.CreditGrantInput) error {
 	_, err := g.svc.GrantForCreditNoteTx(ctx, tx, tenantID, cnID, g.in(i))
@@ -91,7 +83,7 @@ func (r *overCreditRig) draft(t *testing.T, cents int64) domain.CreditNote {
 // applyCredits grants the customer `cents` of credit and applies it to the invoice.
 func (r *overCreditRig) applyCredits(t *testing.T, cents int64) {
 	t.Helper()
-	if _, err := r.credits.Grant(r.ctx, r.tenantID, credit.GrantInput{CustomerID: r.cust.ID, AmountCents: cents, Description: "goodwill"}); err != nil {
+	if _, err := r.credits.Grant(r.ctx, r.tenantID, credit.GrantInput{Currency: "USD", CustomerID: r.cust.ID, AmountCents: cents, Description: "goodwill"}); err != nil {
 		t.Fatalf("Grant: %v", err)
 	}
 	applied, err := r.credits.ApplyToInvoice(r.ctx, r.tenantID, r.cust.ID, r.inv.ID, 10000)
@@ -111,7 +103,7 @@ func (r *overCreditRig) invoiceNow(t *testing.T) domain.Invoice {
 
 func (r *overCreditRig) balance(t *testing.T) int64 {
 	t.Helper()
-	b, err := r.credits.GetBalance(r.ctx, r.tenantID, r.cust.ID)
+	b, err := testutil.BalanceUSD(r.credits.GetBalance(r.ctx, r.tenantID, r.cust.ID))
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}
@@ -373,7 +365,7 @@ func TestIssue_RacingCreditApplication_ConservesInvoiceAndCredits(t *testing.T) 
 	for i := 0; i < 8; i++ {
 		r := newOverCreditRig(t, "CN Race")
 		draft := r.draft(t, 10000)
-		if _, err := r.credits.Grant(r.ctx, r.tenantID, credit.GrantInput{CustomerID: r.cust.ID, AmountCents: 6000, Description: "goodwill"}); err != nil {
+		if _, err := r.credits.Grant(r.ctx, r.tenantID, credit.GrantInput{Currency: "USD", CustomerID: r.cust.ID, AmountCents: 6000, Description: "goodwill"}); err != nil {
 			t.Fatalf("Grant: %v", err)
 		}
 
@@ -446,4 +438,77 @@ func TestCreate_NoteAboveDuePlusAppliedCredits_Refused(t *testing.T) {
 	if ok := r.draft(t, 9000); ok.TotalCents != 9000 {
 		t.Fatalf("a 9000 note was not created at 9000: %d", ok.TotalCents)
 	}
+}
+
+// A relief note's Issue that finds the invoice written off while it waits for
+// the row issues on the unpaid path, as on an unpaid invoice: a written-off
+// invoice is billed but unpaid (ADR-050 amendment 2026-10-23). Until
+// 2026-10-23 Issue voided the note as an orphan here, so the customer who
+// later paid the written-off invoice paid for the time the note was for.
+//
+// 6000c of credits pay part of the 100.00 invoice, so 4000c is due. The 5000c
+// relief clears what is due and hands 1000c of the credits back. With nothing
+// due the invoice stays written off: only a finalized invoice is settled at
+// zero due.
+//
+// Mutation: hold an uncollectible source in issueHeld (the pre-2026-10-23
+// orphan void) → the note comes back voided.
+func TestIssue_WrittenOffWhileWaitingForItsRow_StillRelieves(t *testing.T) {
+	r := newOverCreditRig(t, "CN Written Off While Waiting")
+	r.applyCredits(t, 6000)
+
+	tx, err := r.db.BeginTx(r.ctx, postgres.TxTenant, r.tenantID)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	draft, err := r.notes.CreateAdjustmentDraftTx(r.ctx, tx, r.tenantID, r.inv.ID, 5000, "subscription_cancellation", "unused time")
+	if err != nil {
+		t.Fatalf("relief draft: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit draft: %v", err)
+	}
+
+	// Hold the invoice row in an open transaction that writes it off.
+	holder, err := r.db.BeginTx(r.ctx, postgres.TxTenant, r.tenantID)
+	if err != nil {
+		t.Fatalf("begin holder: %v", err)
+	}
+	defer postgres.Rollback(holder)
+	if _, err := holder.ExecContext(r.ctx, `
+		UPDATE invoices SET status = 'uncollectible', uncollectible_at = now(), auto_charge_pending = false
+		WHERE id = $1`, r.inv.ID); err != nil {
+		t.Fatalf("write off in holder: %v", err)
+	}
+
+	type result struct {
+		cn  domain.CreditNote
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		cn, ierr := r.notes.Issue(r.ctx, r.tenantID, draft.ID)
+		done <- result{cn, ierr}
+	}()
+	// Issue has read the invoice open and waits on the row in
+	// LockForCreditNoteTx (see the paid-while-waiting test above for the match).
+	testutil.WaitForLockWaiter(t, r.ctx, testutil.AdminPool(t), "SELECT id, tenant_id, customer_id, COALESCE(subscription_id,'')")
+	if err := holder.Commit(); err != nil {
+		t.Fatalf("commit holder: %v", err)
+	}
+	res := <-done
+	if res.err != nil {
+		t.Fatalf("Issue: %v", res.err)
+	}
+	if res.cn.Status != domain.CreditNoteIssued {
+		t.Fatalf("note status %s, want issued: a written-off invoice's relief lowers what it asks for", res.cn.Status)
+	}
+	inv := r.invoiceNow(t)
+	if inv.Status != domain.InvoiceUncollectible || inv.AmountDueCents != 0 || inv.CreditsAppliedCents != 5000 {
+		t.Fatalf("invoice %s, due %d, credits applied %d; want uncollectible, 0, 5000", inv.Status, inv.AmountDueCents, inv.CreditsAppliedCents)
+	}
+	if got := r.balance(t); got != 1000 {
+		t.Fatalf("customer balance = %d, want the 1000 of credits the note displaced", got)
+	}
+	r.conserved(t)
 }

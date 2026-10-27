@@ -13,7 +13,6 @@ export type DunningRunEventState = typeof DunningRunEventState[keyof typeof Dunn
 
 export const DunningRunEventState = {
   active: 'active',
-  paused: 'paused',
   escalated: 'escalated',
   resolved: 'resolved',
 } as const;

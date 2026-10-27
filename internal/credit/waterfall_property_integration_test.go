@@ -99,6 +99,7 @@ func TestProperty_Waterfall_ConservesAndRespectsOrder(t *testing.T) {
 			expired := r.IntN(4) == 0 // a quarter of blocks are already expired
 
 			in := credit.GrantInput{
+				Currency:    "USD",
 				CustomerID:  custID,
 				AmountCents: amount,
 				Description: fmt.Sprintf("trial %d block %d", trial, i),

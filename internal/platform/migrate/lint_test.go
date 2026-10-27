@@ -504,8 +504,8 @@ func sessionSettingFindings(body []byte) ([]string, error) {
 //
 //	-- velox:blocking-ddl-ok: <why this is safe>
 //
-// The check covers each file's Up section. Migration 180 is the v0.8.1
-// baseline, which every install already has.
+// The check covers each file's Up section. Migration 180 is the baseline,
+// which only ever runs on an empty database.
 
 const blockingDDLOptOut = "-- velox:blocking-ddl-ok:"
 

@@ -99,7 +99,7 @@ func (f *providerCostAuditFixture) rateCount(t *testing.T) int {
 func TestProviderCostAudit_SharedFate(t *testing.T) {
 	f := newProviderCostAuditFixture(t)
 
-	const rateBody = `{"provider":"anthropic","model":"claude-sonnet-4","token_type":"input","cost_per_token":"0.000003","currency":"usd"}`
+	const rateBody = `{"provider":"anthropic","model":"claude-sonnet-4","token_type":"input","unit_cost_cents":"0.0003","currency":"usd"}`
 
 	var rateID string
 
@@ -137,8 +137,8 @@ func TestProviderCostAudit_SharedFate(t *testing.T) {
 			got.Metadata["token_type"] != "input" {
 			t.Errorf("metadata must identify the rate's key: %+v", got.Metadata)
 		}
-		if got.Metadata["cost_per_token"] != "0.000003" {
-			t.Errorf("metadata cost_per_token: got %v, want 0.000003", got.Metadata["cost_per_token"])
+		if got.Metadata["unit_cost_cents"] != "0.0003" {
+			t.Errorf("metadata unit_cost_cents: got %v, want 0.0003", got.Metadata["unit_cost_cents"])
 		}
 		// Currency is normalized by the handler before the write — the audit
 		// row must show the value that actually landed, not the request's.
@@ -153,7 +153,7 @@ func TestProviderCostAudit_SharedFate(t *testing.T) {
 			t.Fatalf("list rates: %v", err)
 		}
 		rec, _ := f.serve(t, failingProviderCostEmitter{}, http.MethodPut, "/",
-			`{"provider":"anthropic","model":"claude-sonnet-4","token_type":"input","cost_per_token":"9.999999","currency":"usd"}`)
+			`{"provider":"anthropic","model":"claude-sonnet-4","token_type":"input","unit_cost_cents":"999.9999","currency":"usd"}`)
 		if rec.Code < 500 {
 			t.Fatalf("upsert must fail when its audit emission fails; got %d", rec.Code)
 		}
@@ -161,7 +161,7 @@ func TestProviderCostAudit_SharedFate(t *testing.T) {
 		if err != nil {
 			t.Fatalf("list rates: %v", err)
 		}
-		if len(after) != len(before) || !after[0].CostPerToken.Equal(before[0].CostPerToken) {
+		if len(after) != len(before) || !after[0].UnitCostCents.Equal(before[0].UnitCostCents) {
 			t.Errorf("rate moved despite the failed audit emission: before=%+v after=%+v", before, after)
 		}
 		if rows := f.auditRows(t, audit.QueryFilter{}); len(rows) != 1 {
@@ -171,7 +171,7 @@ func TestProviderCostAudit_SharedFate(t *testing.T) {
 
 	t.Run("a brand-new rate rolls back entirely when its audit fails", func(t *testing.T) {
 		rec, _ := f.serve(t, failingProviderCostEmitter{}, http.MethodPut, "/",
-			`{"provider":"openai","model":"gpt-5","token_type":"output","cost_per_token":"0.00001","currency":"usd"}`)
+			`{"provider":"openai","model":"gpt-5","token_type":"output","unit_cost_cents":"0.001","currency":"usd"}`)
 		if rec.Code < 500 {
 			t.Fatalf("upsert must fail when its audit emission fails; got %d", rec.Code)
 		}
@@ -229,7 +229,7 @@ func TestProviderCostAudit_SharedFate(t *testing.T) {
 		// The row is gone from provider_cost_rates — the audit metadata is the
 		// only surviving description of what was removed.
 		if got.Metadata["provider"] != "anthropic" || got.Metadata["model"] != "claude-sonnet-4" ||
-			got.Metadata["token_type"] != "input" || got.Metadata["cost_per_token"] != "0.000003" {
+			got.Metadata["token_type"] != "input" || got.Metadata["unit_cost_cents"] != "0.0003" {
 			t.Errorf("delete metadata must describe the deleted rate: %+v", got.Metadata)
 		}
 	})

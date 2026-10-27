@@ -2,6 +2,7 @@ package billing
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/platform/money"
@@ -103,7 +104,9 @@ func collapseTaxRequestLines(lineItems []domain.InvoiceLineItem, defaultTaxCode 
 		group := append([]int{i}, absorberOf[i]...)
 		amount := int64(0)
 		for _, gi := range group {
-			amount += lineItems[gi].AmountCents
+			if amount, err = addCents(amount, lineItems[gi].AmountCents); err != nil {
+				return nil, nil, fmt.Errorf("tax: line %d group amount: %w", i, err)
+			}
 		}
 		if amount < 0 {
 			return nil, nil, fmt.Errorf("tax: line %d (%q) nets negative (%d¢) after absorbing its credit lines — cannot build a provider-safe calculation", i, li.Description, amount)
@@ -140,6 +143,31 @@ func commitLineTaxReason(providerName string) string {
 	return domain.TaxReasonPrepaidCreditPurchase
 }
 
+// checkLineAmountsFit returns ErrAmountOverflow when the sizes of the line
+// amounts sum past int64. Each line fits (the rater refuses one that does
+// not), but two can sum past it; inside the bound, every sum of these lines,
+// whatever their signs, fits.
+func checkLineAmountsFit(lineItems []domain.InvoiceLineItem) error {
+	var sum int64
+	for i, li := range lineItems {
+		a := li.AmountCents
+		if a == math.MinInt64 {
+			return fmt.Errorf("line %d amount: %w", i, domain.ErrAmountOverflow)
+		}
+		var err error
+		if sum, err = domain.AddCents(sum, max(a, -a)); err != nil {
+			return fmt.Errorf("invoice lines sum past int64 cents: %w", err)
+		}
+	}
+	return nil
+}
+
+// addCentsSigned adds two cent amounts of any sign; ok is false when the sum
+// does not fit int64.
+func addCentsSigned(a, b int64) (int64, bool) {
+	return money.Add(a, b)
+}
+
 // commitInvoiceSubtotal is the subtotal to tax an invoice from. For an
 // invoice with a commit line it is the sum of the lines, not the stored
 // header. The stored lines always hold what was entered (UpdateTaxAtomic
@@ -150,17 +178,20 @@ func commitLineTaxReason(providerName string) string {
 // on manual invoices, whose lines hold what the operator entered, so their
 // sum is what to tax from. An invoice without a commit line keeps the
 // subtotal it was given.
-func commitInvoiceSubtotal(lineItems []domain.InvoiceLineItem, subtotal int64) int64 {
+func commitInvoiceSubtotal(lineItems []domain.InvoiceLineItem, subtotal int64) (int64, error) {
 	var sum int64
 	hasCommit := false
 	for _, li := range lineItems {
-		sum += li.AmountCents
+		var err error
+		if sum, err = addCents(sum, li.AmountCents); err != nil {
+			return 0, fmt.Errorf("invoice lines sum: %w", err)
+		}
 		hasCommit = hasCommit || li.IsCommitLine()
 	}
 	if !hasCommit {
-		return subtotal
+		return subtotal, nil
 	}
-	return sum
+	return sum, nil
 }
 
 // expandTaxResultLines maps the provider's per-request-line results back onto
@@ -171,7 +202,13 @@ func commitInvoiceSubtotal(lineItems []domain.InvoiceLineItem, subtotal int64) i
 // partition splitUpgradeProration stamps at create time (creditTax =
 // RoundHalfToEven(T×credit, net); chargeTax = T − creditTax), so a retried
 // invoice reproduces the create-time per-line split to the cent.
-func expandTaxResultLines(resLines []tax.ResultLine, groups [][]int, lineItems []domain.InvoiceLineItem) []tax.ResultLine {
+//
+// The partition is checked against int64: a member's share is worked in 128
+// bits, and a member's or the absorber's share that does not fit is
+// ErrAmountOverflow. (A credit larger than the group's net takes a tax
+// larger than the group's, and the absorber the rest, so the shares can
+// outgrow the group's tax.)
+func expandTaxResultLines(resLines []tax.ResultLine, groups [][]int, lineItems []domain.InvoiceLineItem) ([]tax.ResultLine, error) {
 	out := make([]tax.ResultLine, len(lineItems))
 	for k := range groups {
 		if k >= len(resLines) {
@@ -186,7 +223,14 @@ func expandTaxResultLines(resLines []tax.ResultLine, groups [][]int, lineItems [
 
 		groupNet := int64(0)
 		for _, gi := range group {
-			groupNet += lineItems[gi].AmountCents
+			var err error
+			if groupNet, err = addCents(groupNet, lineItems[gi].AmountCents); err != nil {
+				return nil, fmt.Errorf("tax split of line %d: group net: %w", group[0], err)
+			}
+		}
+		// collapseTaxRequestLines refuses a group that nets negative.
+		if groupNet < 0 {
+			return nil, fmt.Errorf("tax split of line %d: group nets negative (%d¢)", group[0], groupNet)
 		}
 
 		var taxAssigned, netAssigned int64
@@ -194,26 +238,40 @@ func expandTaxResultLines(resLines []tax.ResultLine, groups [][]int, lineItems [
 			memberTax := int64(0)
 			memberNet := lineItems[gi].AmountCents
 			if groupNet != 0 {
-				memberTax = money.RoundHalfToEven(rl.TaxAmountCents*lineItems[gi].AmountCents, groupNet)
+				var ok bool
+				if memberTax, ok = money.MulDivRoundHalfToEvenSigned(rl.TaxAmountCents, lineItems[gi].AmountCents, groupNet); !ok {
+					return nil, fmt.Errorf("tax split of line %d: tax share of line %d: %w", group[0], gi, domain.ErrAmountOverflow)
+				}
 				if rl.NetAmountCents != groupNet {
 					// Inclusive mode carved the group's net; scale members.
-					memberNet = money.RoundHalfToEven(rl.NetAmountCents*lineItems[gi].AmountCents, groupNet)
+					if memberNet, ok = money.MulDivRoundHalfToEvenSigned(rl.NetAmountCents, lineItems[gi].AmountCents, groupNet); !ok {
+						return nil, fmt.Errorf("tax split of line %d: net share of line %d: %w", group[0], gi, domain.ErrAmountOverflow)
+					}
 				}
 			}
 			member := rl
 			member.NetAmountCents = memberNet
 			member.TaxAmountCents = memberTax
 			out[gi] = member
-			taxAssigned += memberTax
-			netAssigned += memberNet
+			var err error
+			if taxAssigned, err = addCents(taxAssigned, memberTax); err != nil {
+				return nil, fmt.Errorf("tax split of line %d: %w", group[0], err)
+			}
+			if netAssigned, err = addCents(netAssigned, memberNet); err != nil {
+				return nil, fmt.Errorf("tax split of line %d: %w", group[0], err)
+			}
 		}
 		absorber := rl
-		absorber.NetAmountCents = rl.NetAmountCents - netAssigned
+		var err error
 		if rl.NetAmountCents == groupNet { // exclusive: keep stored amounts exact
 			absorber.NetAmountCents = lineItems[group[0]].AmountCents
+		} else if absorber.NetAmountCents, err = subCents(rl.NetAmountCents, netAssigned); err != nil {
+			return nil, fmt.Errorf("tax split of line %d: absorber net: %w", group[0], err)
 		}
-		absorber.TaxAmountCents = rl.TaxAmountCents - taxAssigned
+		if absorber.TaxAmountCents, err = subCents(rl.TaxAmountCents, taxAssigned); err != nil {
+			return nil, fmt.Errorf("tax split of line %d: absorber tax: %w", group[0], err)
+		}
 		out[group[0]] = absorber
 	}
-	return out
+	return out, nil
 }

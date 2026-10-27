@@ -45,7 +45,7 @@ type dueBillerSpy struct {
 	err error
 }
 
-func (b *dueBillerSpy) BillDueNow(_ context.Context, _, id string) (int, error) {
+func (b *dueBillerSpy) BillDue(_ context.Context, _, id string, _ time.Duration) (int, error) {
 	b.calls++
 	b.sawRecord = b.store.subs[id].BillingFailure != nil
 	if b.err != nil {

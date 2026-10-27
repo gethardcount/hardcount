@@ -243,8 +243,8 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	paymentMethodsSvc.SetPortalBaseURL(customerPortalURL)
 	// compositePaymentSetupStore presents the customer_payment_setups
 	// wire shape (domain.CustomerPaymentSetup) on top of canonical
-	// sources. Lets payment/checkout.go + payment/stripe.go +
-	// dunning retrier keep their existing PaymentSetupStore-shaped
+	// sources. Lets payment/stripe.go + the dunning retrier keep
+	// their existing PaymentSetupStore-shaped
 	// wiring while structurally not reading the deprecated table.
 	paymentSetupStore := &compositePaymentSetupStore{customers: customerStore, pms: paymentMethodsSvc}
 
@@ -264,8 +264,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	usageSvc := usage.NewService(usageStore)
 	usageH := usage.NewHandler(usageSvc, customerStore, pricingSvc)
 	usageH.SetMeterLister(pricingSvc)
-	usageH.SetHeldDeps(customerStore, subStore, pricingSvc)
-	usageH.SetSummaryCustomerLookup(customerStore)
+	usageH.SetHeldDeps(customerStore)
 	customerUsageSvc := usage.NewCustomerUsageService(usageSvc, customerStore, subStore, pricingSvc)
 	customerUsageH := usage.NewCustomerUsageHandler(customerUsageSvc)
 	// Provider cost rates + margin (ADR-079).
@@ -289,6 +288,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// monthly math and a yearly + trial sub gets a 1-month first
 	// cycle instead of a full year.
 	subSvc.SetPlanReader(pricingStore)
+	subSvc.SetPlanMeterReader(pricingStore)
 	creditStore := credit.NewPostgresStore(db)
 	creditSvc := credit.NewService(creditStore)
 	creditSvc.SetCustomerReader(customerStore)
@@ -301,7 +301,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	}
 
 	// Wire proration dependencies for plan change invoicing
-	subH.SetProrationDeps(pricingSvc, &prorationInvoiceCreatorAdapter{PostgresStore: invoiceStore, numberer: settingsStore}, &prorationCreditGranterAdapter{svc: creditSvc})
+	subH.SetProrationDeps(pricingSvc, &prorationInvoiceCreatorAdapter{PostgresStore: invoiceStore, numberer: settingsStore})
 
 	// Payment / webhook / checkout / refund handlers
 	stripeRefunder := payment.NewStripeRefunder(stripeClients)
@@ -366,13 +366,10 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// Commit funding at finalize (ADR-078 D2): FinalizeWithDates grants the
 	// commit block in the finalize coordinator tx via credit.Service.
 	invoiceStore.SetCommitFunder(creditSvc)
+	// Paying the invoice a dunning pause was set for lifts the pause in the
+	// paid transaction (ADR-036 amendment 2026-10-22).
+	invoiceStore.SetDunningPauseReleaser(subStore)
 	subH.SetEventDispatcher(eventDispatcher)
-	// Trial-expiry phases (catchup orchestrator + wall-clock cron)
-	// fire subscription.trial_ended via the subscription Service —
-	// matches the engine auto-flip path so webhook consumers see one
-	// event per trial transition regardless of which path activated
-	// the sub.
-	subSvc.SetEventDispatcher(eventDispatcher)
 	auditLogger := audit.NewLogger(db)
 	// actor_name is resolved by LEFT JOIN at read time, and customers.display_name
 	// is encrypted at rest — so without this, every customer-actor row (a
@@ -415,9 +412,6 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// timeline event (all or none).
 	dunningStore.SetOutboxEnqueuer(outboxStore)
 	dunningSvc := dunning.NewService(dunningStore, nil, clk) // retrier set below after stripeAdapter created
-	// PaymentCancel is wired lazily below (SetPaymentCanceler) — stopping
-	// collection needs the payment SERVICE (session expiry + PI cancel),
-	// which is constructed after this handler.
 	dunningH := dunning.NewHandler(dunningSvc)
 
 	// Recipe registry — built-in pricing recipes loaded once at boot from
@@ -429,7 +423,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		panic(fmt.Sprintf("load recipe registry: %v", err))
 	}
 	recipeStore := recipe.NewPostgresStore(db)
-	recipeSvc := recipe.NewService(db, recipeStore, recipeRegistry, pricingSvc, dunningSvc, webhookOutSvc)
+	recipeSvc := recipe.NewService(db, recipeStore, recipeRegistry, pricingSvc)
 	recipeH := recipe.NewHandler(recipeSvc)
 
 	// Global circuit breaker around Stripe calls. When Stripe is unhealthy
@@ -500,6 +494,11 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	webhookH := payment.NewHandler(stripeAdapter, tenantStripeSvc)
 
 	invoiceSvc := invoice.NewService(invoiceStore, clk, settingsStore)
+	// Every committed void, whichever path voided it (operator, dunning
+	// resolve, the cancel or plan-swap relief), stops collection at Stripe
+	// and closes the invoice's dunning run (invoice.Service.AfterVoid).
+	invoiceSvc.SetCollectionStopper(stripeAdapter)
+	invoiceSvc.SetDunningResolver(dunningSvc)
 	// Mark-uncollectible adapter (ADR-036 amendment) — Stripe-standard
 	// dunning terminal action. Wires here because it depends on the
 	// invoice service which is defined just above; other dunning
@@ -513,9 +512,6 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// void writer: guards + in-flight block + tax reversal + invoice.voided
 	// event) instead of the raw store. Same lazy wire as the marker above.
 	dunningH.SetInvoiceVoider(invoiceSvc)
-	// Void-resolve must stop collection at Stripe the same way the operator
-	// void does — one seam, both callers.
-	dunningH.SetPaymentCanceler(stripeAdapter)
 	// Wire the post-connect tax-retry hook (ADR-019). When an
 	// operator (re)connects Stripe in Settings → Payments, the
 	// tenantstripe service fans out a goroutine that flushes any
@@ -525,17 +521,10 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		CreditNotes:     &creditNoteListerAdapter{svc: creditNoteSvc},
 		Charger:         stripeAdapter,
 		PaymentSetups:   paymentSetupStore,
-		PaymentCancel:   stripeAdapter,
 		Dunning:         dunningSvc,
 		DunningTimeline: &dunningTimelineAdapter{store: dunningStore},
 		RefundIssuer:    &refundIssuerAdapter{svc: creditNoteSvc},
 	})
-	// Return URLs are passed per-request now (return_url body field)
-	// instead of read from env — every Checkout flow in the codebase
-	// is contextual, not global. STRIPE_CHECKOUT_{SUCCESS,CANCEL}_URL
-	// were a pre-portal anti-pattern.
-	checkoutH := payment.NewCheckoutHandler(stripeClients, paymentSetupStore)
-
 	// Token service for public payment update links. Used by the
 	// no-PM-at-finalize email (noPaymentMethodNotifierAdapter) and
 	// the public token-authenticated payment-update SPA flow. The
@@ -592,7 +581,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// so `make dev` works without extra config.
 	// Constructed as a named var (not an inline literal) so the ADR-090
 	// boot gate below can verify its audit emitter is wired.
-	hostedInvoiceStripe := &hostedInvoiceStripeAdapter{clients: stripeClients, ensurer: paymentMethodsStripe, sessions: checkoutSessionStore, audit: auditLogger}
+	hostedInvoiceStripe := &hostedInvoiceStripeAdapter{clients: stripeClients, ensurer: paymentMethodsStripe, sessions: checkoutSessionStore, audit: auditLogger, belowMinimum: stripeAdapter}
 
 	hostedInvoiceH := hostedinvoice.New(hostedinvoice.Deps{
 		Invoices:    invoiceSvc,
@@ -830,16 +819,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	paymentReadiness := &paymentReadinessAdapter{customers: customerStore, pms: paymentMethodsSvc}
 	engine := billing.NewEngine(subStore, usageStore, pricingSvc,
 		&invoiceWriterAdapter{PostgresStore: invoiceStore}, creditSvc, settingsStore, paymentReadiness, stripeAdapter, clk, customerStore)
-	// ADR-101 Phase 4 (2026-07-28): billing_intervals is the ONLY
-	// segment source — the legacy fact-log interpretation, the shadow
-	// comparator, and the VELOX_BILLING_INTERVALS_READER kill switches
-	// are gone (clean soak: 140/140 cutover sweep, two-mode corpus CI on
-	// every PR since, zero unexplained divergences). A stale env value
-	// can no longer change behavior; say so loudly instead of silently
-	// ignoring an operator's kill-switch intent.
-	if v := strings.TrimSpace(os.Getenv("VELOX_BILLING_INTERVALS_READER")); v != "" && v != "on" {
-		slog.Warn("VELOX_BILLING_INTERVALS_READER is set but the flag was removed at ADR-101 Phase 4 — billing_intervals always bill; the legacy reader no longer exists", "value", v)
-	}
+	// ADR-101: billing_intervals is the only segment source.
 	engine.SetIntervalReader(subStore)
 	engine.SetInvoiceGrace(o.invoiceGrace)
 	engine.SetTestClockReader(testClockStore)
@@ -861,6 +841,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// period close does. The secret-key read and the public cost dashboard
 	// both serve that one function, so they cannot disagree.
 	engine.SetLiveBalanceReaders(creditSvc, subStore)
+	// Customer usage, the public cost dashboard and the margin report price
+	// usage through the engine's rater (ADR-130 §10).
+	customerUsageSvc.SetRater(engine)
 	creditSvc.SetLiveBalanceReader(engine)
 	costDashboardSvc.SetLiveBalanceReader(engine)
 	// Plumb effective-now resolution into dunning so every per-invoice
@@ -904,6 +887,12 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// live POST, batch, backfill, LiteLLM). Live mode never pays the
 	// lookup — test clocks are test-mode-only by DB CHECK.
 	usageSvc.SetResolver(engine)
+	// Ingest reads the customer's open periods before it writes an event, to
+	// flag one whose period was already invoiced (billing_status
+	// "after_close", ADR-120), and the held-usage release reads them to say
+	// which released rows an invoice counts. The invoice store supplies the
+	// threshold watermarks.
+	usageSvc.SetOpenPeriodReader(usageOpenPeriods{subs: subStore, pricing: pricingStore, thresholds: invoiceStore})
 	// subscription.Service uses the resolver at Create / Activate /
 	// ChangeItem / ScheduleCancel / PauseCollection / EndTrial /
 	// ExtendTrial so every per-sub timestamp the operator writes
@@ -946,7 +935,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// ADR-119: the operator's retry-billing bills one subscription through
 	// the engine's own attempt.
 	subSvc.SetDueBiller(engine)
-	engine.SetCreditGranter(creditSvc)
+	// Dunning's final pause and cancel wait for the same grace as the
+	// billing runs (ADR-120 amendment 2026-10-22); operator writes do not.
+	subSvc.SetInvoiceGrace(o.invoiceGrace)
 	// ADR-031 / #22 / ADR-118: the cancel and plan-swap relief for the unused
 	// part of an in_advance period, written in the change's transaction —
 	// a credit note crediting the balance (paid invoice), a credit note
@@ -989,6 +980,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// net_payment_term_days inherits the tenant's configured default (then 30),
 	// mirroring the cycle engine. settingsStore satisfies TenantSettingsReader.
 	invoiceSvc.SetTenantSettingsReader(settingsStore)
+	// The currency a manual invoice must agree with, or takes when none is
+	// sent (ADR-100, ADR-129): billing profile, then live subscription plans.
+	invoiceSvc.SetCustomerCurrencyFacts(customerCurrencyFactsAdapter{profiles: customerStore, subs: subStore})
 	testClockSvc.SetBillingRunner(engine)
 	// Phase 0.5 (Bug #8): trial expiry — flip status='trialing' subs
 	// to active at trial_end_at when sim time elapses past it, BEFORE
@@ -1092,11 +1086,6 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		// keys; when it exists, its emitter must be wired.
 		audit.MustWired(publicPaymentH)
 	}
-	if checkoutH != nil {
-		// Same guard: nil when Stripe isn't configured.
-		checkoutH.SetAuditLogger(auditLogger)
-		audit.MustWired(checkoutH)
-	}
 
 	// Invoice finalize commits the upstream Stripe Tax calculation into a
 	// tax_transaction so the tenant's Stripe Tax reports reflect the final
@@ -1120,7 +1109,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// Operator-initiated retry-tax routes through the billing engine,
 	// which owns provider resolve → recompute → atomic persist. Backs
 	// the "Retry tax" action surfaced by the unified Attention shape on
-	// invoices in tax_status pending or failed.
+	// invoices in tax_status pending.
 	invoiceSvc.SetTaxRetrier(engine)
 
 	// Payment-method reader powers the no_payment_method attention
@@ -1164,7 +1153,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// *creditnote.Service satisfies CreditNoteIssuer directly.
 	subH.SetCreditNoteIssuer(creditNoteSvc)
 
-	billingH := billing.NewHandler(engine, subStore)
+	billingH := billing.NewHandler(engine)
 	// create_preview composes customer / subscription resolution on top of
 	// the engine's preview path. Mounted at /v1/invoices/create_preview
 	// (Stripe-equivalent), gated by PermInvoiceRead — read-only, no DB
@@ -1413,7 +1402,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// locking operators out of login during a Redis blip re-introduces
 	// the DoS the #21 design avoids. Login keeps a brute-force floor even
 	// then: the sign-in throttle lives in Postgres. The HA-readiness audit (docs/dev/
-	// docs/records/ha-readiness-2026-07-06.md) found the prior wiring mounted the
+	// docs/dev/records/ha-readiness-2026-07-06.md) found the prior wiring mounted the
 	// fail-closed general limiter on /v1/auth, contradicting this
 	// stated design — a prod Redis outage killed dashboard login.
 	//
@@ -1432,7 +1421,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// first hour of wiring the proxy — and LiteLLM at stock config retries
 	// NOTHING (max_retries=0; the queue is cleared on any send error —
 	// verified against LiteLLM source 2026-07-06, see docs/dev/
-	// docs/records/ha-readiness-2026-07-06.md), so every 429 was a silently dropped,
+	// docs/dev/records/ha-readiness-2026-07-06.md), so every 429 was a silently dropped,
 	// permanently unbilled event. Peer
 	// anchor: Stripe meter events allow 1,000 calls/s live; Orb's TEST mode
 	// alone allows 2,000 events/min. Default 1000 req/s per key, override
@@ -1690,10 +1679,8 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		// After auth so tenant ID is available for the bucket key. Ingest
 		// paths ride their own (much larger) bucket — see ingestLimiter.
 		r.Use(mw.SplitRateLimit(isIngestPath, ingestLimiter, rateLimiter))
-		// Ingest routes (isIngestPath): a 5xx releases the Idempotency-Key
-		// instead of pinning it — ingest is a single-tx writer with DB-level
-		// per-event dedup, so the documented contract is "non-2xx means not
-		// recorded — retry with the SAME key" (HA register work item 11).
+		// Ingest routes (isIngestPath) ignore the Idempotency-Key header:
+		// each event's own idempotency_key is the one dedup rule there.
 		r.Use(mw.Idempotency(db, isIngestPath))
 		// No audit middleware here. Audit rows are EMITTED by the code that
 		// owns the mutation, inside its transaction (audit.Logger.LogInTx), and
@@ -1720,9 +1707,14 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		// notice to decide it server-side.
 		r.Get("/whoami", func(w http.ResponseWriter, req *http.Request) {
 			ctx := req.Context()
+			live, err := postgres.Livemode(ctx)
+			if err != nil {
+				respond.FromError(w, req, err, "whoami")
+				return
+			}
 			out := map[string]any{
 				"tenant_id":             auth.TenantID(ctx),
-				"livemode":              auth.Livemode(ctx),
+				"livemode":              live,
 				"can_email_setup_links": setupLinksEmailable,
 				"can_send_invites":      membersSvc.CanInvite(),
 				// smtp_configured lets any page show one global "email is
@@ -1778,16 +1770,8 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		// Chargebee, Lago, Orb expose the same shape.
 		r.With(auth.RequireMethod(auth.PermCustomerRead, auth.PermCustomerWrite)).Mount("/customers/{customer_id}/payment-methods", paymentMethodsH.OperatorRoutes())
 		r.With(auth.RequireMethod(auth.PermPricingRead, auth.PermPricingWrite)).Mount("/meters", pricingH.MeterRoutes())
-		// Meter-scoped pricing rule subtree. Mounted as a sibling of
-		// /meters so reads (PermPricingRead) and writes (PermPricingWrite)
-		// can carry independent guards without nesting permission middleware.
-		r.Mount("/meters/{meter_id}/pricing-rules", pricingH.MeterPricingRuleRoutes(
-			auth.Require(auth.PermPricingRead),
-			auth.Require(auth.PermPricingWrite),
-		))
-		r.With(auth.Require(auth.PermPricingRead)).Mount("/meter-pricing-rules", pricingH.AllMeterPricingRuleRoutes())
+		// A plan and its prices (/v1/plans/{id}/prices) are one subtree.
 		r.With(auth.RequireMethod(auth.PermPricingRead, auth.PermPricingWrite)).Mount("/plans", pricingH.PlanRoutes())
-		r.With(auth.RequireMethod(auth.PermPricingRead, auth.PermPricingWrite)).Mount("/rating-rules", pricingH.RatingRuleRoutes())
 		r.With(auth.Require(auth.PermPricingWrite)).Mount("/recipes", recipeH.Routes())
 		r.With(auth.RequireMethod(auth.PermSubscriptionRead, auth.PermSubscriptionWrite)).Mount("/subscriptions", subH.Routes())
 		// Backfill is mounted ahead of the /usage-events subtree so chi picks
@@ -1806,7 +1790,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		// create_preview must mount BEFORE /invoices because chi tries
 		// patterns in registration order — once /invoices is mounted with
 		// /{id}/... children, "create_preview" would be claimed as an
-		// invoice ID. See docs/design/create-preview.md.
+		// invoice ID. See docs/dev/design/create-preview.md.
 		r.With(auth.Require(auth.PermInvoiceRead)).Mount("/invoices/create_preview", createPreviewH.Routes())
 		r.With(auth.RequireMethod(auth.PermInvoiceRead, auth.PermInvoiceWrite)).Mount("/invoices", invoiceH.Routes())
 		r.With(auth.Require(auth.PermInvoiceWrite)).Mount("/credit-notes", creditNoteH.Routes())
@@ -1820,12 +1804,11 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		// 30s middleware.Timeout would kill long-lived streams). Uses
 		// underscore (webhook_events) on purpose so the shape matches
 		// Stripe's /v1/events convention and doesn't collide with the
-		// legacy /webhook-endpoints/events path.
+		// /webhook-endpoints/events list.
 		//
 		// PermAPIKeyRead is sufficient for both read (deliveries) and
 		// replay — replay is state-mutating but is functionally a
-		// re-issue of an already-emitted event, the same posture the
-		// legacy /webhook-endpoints/events/{id}/replay surface takes.
+		// re-issue of an already-emitted event.
 		r.With(auth.Require(auth.PermAPIKeyRead)).Mount("/webhook_events", webhookOutH.EventRoutes())
 		r.With(auth.Require(auth.PermAPIKeyRead)).Mount("/audit-log", auditH.Routes())
 		r.With(auth.Require(auth.PermAPIKeyWrite)).Mount("/settings", settingsH.Routes())
@@ -1833,10 +1816,6 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		r.With(auth.Require(auth.PermAPIKeyWrite)).Mount("/settings/email", emailSettingsH.Routes())
 		r.With(auth.Require(auth.PermInvoiceRead)).Mount("/analytics", analyticsH.Routes())
 		r.With(auth.Require(auth.PermTestClockWrite)).Mount("/test-clocks", testClockH.Routes())
-		r.With(auth.Require(auth.PermUsageRead)).Mount("/usage-summary", usageH.SummaryRoutes())
-		if checkoutH != nil {
-			r.With(auth.Require(auth.PermCustomerWrite)).Mount("/checkout", checkoutH.Routes())
-		}
 
 		// Customer Detail — the dashboard's per-customer composed views,
 		// registered in the same /customers/{...} namespace as usage /
@@ -1845,13 +1824,12 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		// (ADR-051); renamed so that name means only the removed feature.
 		customerDetail := newCustomerDetailHandler(customerStore, subStore, invoiceStore)
 		r.With(auth.Require(auth.PermCustomerRead)).Get("/customers/{customer_id}/overview", customerDetail.overview)
-		r.With(auth.Require(auth.PermCustomerRead)).Get("/customers/{customer_id}/invoices", customerDetail.listInvoices)
-		r.With(auth.Require(auth.PermCustomerRead)).Get("/customers/{customer_id}/subscriptions", customerDetail.listSubscriptions)
-		// Legacy /v1/payment-portal/{id}/update-payment-method removed:
-		// all "add a payment method" flows now go through
-		// paymentmethods.Service.CreateSetupSession (single path).
-		// Operator dashboard uses POST /v1/customers/{id}/payment-methods/send-setup-email
-		// (email) or POST /v1/customers/{id}/payment-methods/setup-session (copy-link).
+		// A card is added through one of two Stripe Checkout setup sessions.
+		// The operator's goes through paymentmethods.Service.CreateSetupSession:
+		// POST /v1/customers/{id}/payment-methods/send-setup-email (email) or
+		// POST /v1/customers/{id}/payment-methods/setup-session (copy-link).
+		// The customer's comes from the payment-update email link:
+		// POST /v1/public/payment-updates/{token}/checkout.
 	})
 
 	s.router = r
@@ -2050,10 +2028,12 @@ func loggablePath(r *http.Request) string {
 	return path
 }
 
-// isIngestPath scopes the dedicated ingest rate-limit bucket: the
-// usage-events subtree (single, batch, backfill — reads ride along
-// harmlessly) and the LiteLLM adapter, which POSTs one callback per LLM
-// call and must never be squeezed through the operator-CRUD bucket.
+// isIngestPath names the usage routes: the usage-events subtree (single,
+// batch, backfill, held release and discard; reads ride along harmlessly)
+// and the LiteLLM adapter. They ride the dedicated ingest rate-limit bucket
+// (one callback per LLM call must never be squeezed through the
+// operator-CRUD bucket), and they ignore the Idempotency-Key header: each
+// event's idempotency_key, or the held row moving once, is their dedup.
 func isIngestPath(r *http.Request) bool {
 	return strings.HasPrefix(r.URL.Path, "/v1/usage-events") ||
 		strings.HasPrefix(r.URL.Path, "/v1/integrations/litellm")

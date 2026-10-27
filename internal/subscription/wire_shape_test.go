@@ -24,13 +24,11 @@ import (
 //     so the UI can iterate without a null guard.
 //
 // This is the merge gate for /v1/subscriptions/{id}/billing-thresholds.
-// See docs/design/billing-thresholds.md.
+// See docs/dev/design/billing-thresholds.md.
 func TestWireShape_SnakeCase(t *testing.T) {
 	t.Run("BillingThresholdsInputFullyPopulated", func(t *testing.T) {
-		reset := true
 		body := BillingThresholdsInput{
-			AmountGTE:         500000,
-			ResetBillingCycle: &reset,
+			AmountGTE: 500000,
 			ItemThresholds: []ItemThresholdInput{
 				{
 					SubscriptionItemID: "vlx_subitem_abc",
@@ -49,14 +47,14 @@ func TestWireShape_SnakeCase(t *testing.T) {
 			t.Fatalf("unmarshal: %v", err)
 		}
 
-		topLevel := []string{"amount_gte", "reset_billing_cycle", "item_thresholds"}
+		topLevel := []string{"amount_gte", "item_thresholds"}
 		for _, k := range topLevel {
 			if _, ok := raw[k]; !ok {
 				t.Errorf("input missing %q (raw keys=%v)", k, mapKeys(raw))
 			}
 		}
 		// PascalCase leak guard
-		for _, k := range []string{"AmountGTE", "ResetBillingCycle", "ItemThresholds"} {
+		for _, k := range []string{"AmountGTE", "ItemThresholds"} {
 			if _, ok := raw[k]; ok {
 				t.Errorf("input leaked PascalCase key %q", k)
 			}
@@ -92,8 +90,7 @@ func TestWireShape_SnakeCase(t *testing.T) {
 		// is rendered to the dashboard. Same snake_case, same always-array
 		// idiom for item_thresholds, same string-precision usage_gte.
 		bt := domain.BillingThresholds{
-			AmountGTE:         500000,
-			ResetBillingCycle: true,
+			AmountGTE: 500000,
 			ItemThresholds: []domain.SubscriptionItemThreshold{
 				{
 					SubscriptionItemID: "vlx_subitem_abc",
@@ -112,12 +109,16 @@ func TestWireShape_SnakeCase(t *testing.T) {
 			t.Fatalf("unmarshal: %v", err)
 		}
 
-		for _, k := range []string{"amount_gte", "reset_billing_cycle", "item_thresholds"} {
+		for _, k := range []string{"amount_gte", "item_thresholds"} {
 			if _, ok := raw[k]; !ok {
 				t.Errorf("billing_thresholds missing %q (keys=%v)", k, mapKeys(raw))
 			}
 		}
-		for _, k := range []string{"AmountGTE", "ResetBillingCycle", "ItemThresholds"} {
+		// Removed 2026-10-23: a fire always keeps the billing period.
+		if _, ok := raw["reset_billing_cycle"]; ok {
+			t.Errorf("billing_thresholds still carries reset_billing_cycle (keys=%v)", mapKeys(raw))
+		}
+		for _, k := range []string{"AmountGTE", "ItemThresholds"} {
 			if _, ok := raw[k]; ok {
 				t.Errorf("billing_thresholds leaked PascalCase key %q", k)
 			}
@@ -152,9 +153,8 @@ func TestWireShape_SnakeCase(t *testing.T) {
 		// item_thresholds must still serialize as []. Empty-state UI
 		// iterates over the slice; null would crash.
 		bt := domain.BillingThresholds{
-			AmountGTE:         500000,
-			ResetBillingCycle: true,
-			ItemThresholds:    []domain.SubscriptionItemThreshold{},
+			AmountGTE:      500000,
+			ItemThresholds: []domain.SubscriptionItemThreshold{},
 		}
 		blob, err := json.Marshal(bt)
 		if err != nil {

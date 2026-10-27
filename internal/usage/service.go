@@ -28,6 +28,9 @@ type Service struct {
 	// held keeps usage rows that could not be ingested yet (#1044). Taken
 	// from the store when it implements HeldStore (PostgresStore does).
 	held HeldStore
+	// periods reads the customer's open periods, to answer an event with
+	// its billing_status; see SetOpenPeriodReader.
+	periods OpenPeriodReader
 }
 
 func NewService(store Store) *Service {
@@ -43,6 +46,11 @@ func NewService(store Store) *Service {
 // operator inserting BACKDATED usage is changing what a customer gets billed
 // for a period that may already have closed, so that action is recorded.
 func (s *Service) SetAuditLogger(a AuditEmitter) { s.audit = a }
+
+// SetOpenPeriodReader wires the open-period reads that answer an event with
+// its billing_status (open_period.go). Optional:
+// unwired, nothing is flagged (narrow tests).
+func (s *Service) SetOpenPeriodReader(r OpenPeriodReader) { s.periods = r }
 
 // SetResolver wires the unified clock.Resolver (implemented by
 // *billing.Engine). Ingest timestamps default to and gate against the
@@ -66,28 +74,35 @@ func (s *Service) SetResolver(r clock.Resolver) {
 // test-mode-only (DB CHECK on test_clocks.livemode), so a live
 // customer can never be pinned and the high-volume production ingest
 // path stays at zero extra queries.
-func (s *Service) simNow(ctx context.Context, tenantID, customerID string) clock.Sim {
+func (s *Service) simNow(ctx context.Context, tenantID, customerID string) (clock.Sim, error) {
 	if sim, ok := clock.SimOf(ctx); ok {
-		return sim
+		return sim, nil
 	}
 	if t, ok := clock.EffectiveNow(ctx); ok {
 		// Bound instant whose clock is unknown — keep the instant, claim no clock.
-		return clock.Sim{At: t}
+		return clock.Sim{At: t}, nil
 	}
-	if s.resolver != nil && !postgres.Livemode(ctx) && customerID != "" {
-		if sim, err := s.resolver.SimForCustomer(ctx, tenantID, customerID); err == nil {
-			return sim
+	if s.resolver != nil && customerID != "" {
+		live, err := postgres.Livemode(ctx)
+		if err != nil {
+			return clock.Sim{}, err
 		}
-		// Resolver errors mean the customer read failed — ingest's own
-		// store call will surface that; don't block on the clock here.
+		if !live {
+			if sim, err := s.resolver.SimForCustomer(ctx, tenantID, customerID); err == nil {
+				return sim, nil
+			}
+			// Resolver errors mean the customer read failed — ingest's own
+			// store call will surface that; don't block on the clock here.
+		}
 	}
-	return clock.Sim{At: time.Now().UTC()}
+	return clock.Sim{At: time.Now().UTC()}, nil
 }
 
 // effectiveNow is simNow's instant — the value the ingest gates and
 // timestamps use.
-func (s *Service) effectiveNow(ctx context.Context, tenantID, customerID string) time.Time {
-	return s.simNow(ctx, tenantID, customerID).At
+func (s *Service) effectiveNow(ctx context.Context, tenantID, customerID string) (time.Time, error) {
+	sim, err := s.simNow(ctx, tenantID, customerID)
+	return sim.At, err
 }
 
 // IngestInput is the internal service input — uses resolved internal IDs only.
@@ -128,7 +143,8 @@ func (s *Service) Ingest(ctx context.Context, tenantID string, input IngestInput
 // invoice keeps the quantities it copied into its line items, and nothing
 // re-aggregates a closed period, so a backfill into one is stored but not
 // billed, the same outcome as a late live event (see KNOWN BEHAVIOR in
-// prepare). The operator bills it with a one-off invoice.
+// prepare), and its 201 says so (billing_status "after_close"). The
+// operator bills it with a one-off invoice.
 func (s *Service) Backfill(ctx context.Context, tenantID string, input IngestInput) (domain.UsageEvent, error) {
 	if input.Timestamp == nil {
 		return domain.UsageEvent{}, errs.Required("timestamp")
@@ -141,7 +157,10 @@ func (s *Service) Backfill(ctx context.Context, tenantID string, input IngestInp
 	// makes strict past-only brittle to verify, and the 'backfill' origin
 	// tag already distinguishes these rows from live POST traffic for
 	// audit purposes.
-	sim := s.simNow(ctx, tenantID, input.CustomerID)
+	sim, err := s.simNow(ctx, tenantID, input.CustomerID)
+	if err != nil {
+		return domain.UsageEvent{}, err
+	}
 	if input.Timestamp.After(sim.At) {
 		return domain.UsageEvent{}, errs.Invalid("timestamp", "must not be in the future for backfill — use POST /usage-events for real-time ingest")
 	}
@@ -181,10 +200,11 @@ func (s *Service) backfillEmission(ctx context.Context) func(tx *sql.Tx, out dom
 }
 
 // MaxDimensionKeys caps the size of the JSONB dimensions map on each
-// usage event. Dimensions feed pricing-rule dispatch via @> subset
-// matches at finalize time; bounding the per-event JSONB size protects
-// the GIN index from pathological tenants and matches the equivalent
-// cap on meter_pricing_rules.dimension_match (16 keys).
+// usage event. Dimensions decide which plan price takes the event (a price
+// takes an event whose dimensions include all of its dimension_match);
+// bounding the per-event JSONB size protects the GIN index from
+// pathological tenants and matches the cap on a price's dimension_match
+// (domain.MaxDimensionKeys, 16 labels).
 const MaxDimensionKeys = 16
 
 // usageFutureSkew is how far ahead of wall-clock a live usage event timestamp
@@ -192,15 +212,21 @@ const MaxDimensionKeys = 16
 // letting events be parked in a future billing period.
 const usageFutureSkew = 5 * time.Minute
 
-// maxQuantityMagnitude is the exclusive upper bound on |quantity|. The column
-// is NUMERIC(38,12) → 26 integer digits, so values ≥ 10^26 overflow it.
-var maxQuantityMagnitude = decimal.New(1, 26) // 10^26
+// checkQuantity refuses a quantity the NUMERIC(38,12) column cannot store
+// exactly (domain.QuantityLimits: under 10^26, at most 12 decimal places), and
+// returns the value to store. Before B5 the column rounded a 13th decimal
+// place away, so the event billed a quantity the caller never sent, and a
+// value too large made Postgres reject the INSERT, a 500.
+func checkQuantity(q decimal.Decimal) (decimal.Decimal, error) {
+	return domain.CheckDecimal("quantity", q, domain.QuantityLimits)
+}
 
 // validateDimensions enforces the v1 dimension contract: at most
 // MaxDimensionKeys keys, scalar values only (string, number, bool, nil).
 // Object/array values are rejected — Postgres `@>` would still match
-// them but the priority+claim semantics aren't well-defined for nested
-// containers in v1 (revisit if a design partner needs it).
+// them, but a price's dimension_match holds string values only, so a
+// nested value could never be priced (revisit if a design partner needs
+// it).
 func validateDimensions(dims map[string]any) error {
 	if len(dims) > MaxDimensionKeys {
 		return errs.Invalid("dimensions", fmt.Sprintf("at most %d keys (got %d)", MaxDimensionKeys, len(dims)))
@@ -227,28 +253,52 @@ func (s *Service) ingestAudited(ctx context.Context, tenantID string, input Inge
 	if err != nil {
 		return domain.UsageEvent{}, err
 	}
-	event, err := s.store.IngestAudited(ctx, tenantID, prepared, emit)
+	// The open periods are read BEFORE the write, the meter's aggregation on
+	// the write's transaction after the insert: see open_period.go.
+	periods, err := s.openPeriodsFor(ctx, tenantID, prepared.CustomerID, periodCacheFrom(ctx))
+	if err != nil {
+		return domain.UsageEvent{}, err
+	}
+	var class Class
+	event, err := s.store.IngestAudited(ctx, tenantID, prepared, func(tx *sql.Tx, out domain.UsageEvent) error {
+		c, err := s.classifyWritten(ctx, tx, prepared, periods, map[string]MeterBuckets{})
+		if err != nil {
+			return err
+		}
+		class = c
+		if emit == nil {
+			return nil
+		}
+		return emit(tx, out)
+	})
 	if err == nil {
 		// Count only rows that actually landed. An idempotency-replay errors
 		// out of store.Ingest (no new row), so it isn't counted — the metric
-		// is true ingest throughput, not request volume. Every path funnels
-		// here (live POST, batch, backfill, LiteLLM).
+		// is true ingest throughput, not request volume. Single and backfill
+		// count here; batch and the LiteLLM doors count their own written
+		// rows.
 		mw.RecordUsageIngested(1)
+		s.markWritten(ctx, &event, class)
 	}
 	return event, err
 }
 
-// prepare runs the full per-event validation + timestamp resolution and
-// composes the domain row, WITHOUT writing it. Split from ingest so
-// BatchIngest can validate every event up front and then hand the whole
-// slice to one store transaction (all-or-nothing).
+// markWritten sets billing_status on a row the write just inserted and
+// records it, when the row has one (open_period.go). A replay never reaches
+// here: it is an error out of the store.
+func (s *Service) markWritten(ctx context.Context, event *domain.UsageEvent, class Class) {
+	event.BillingStatus = s.statusOf(class)
+	recordUnbilled(ctx, *event, event.BillingStatus)
+}
+
 // lateUsageEvents counts events, other than backfills, whose timestamp is
 // more than 24h before the customer's effective now when they arrive, and
 // logs a WARN for each. That is all it measures. It is a proxy for "missed
 // its invoice": an event one minute after its invoice was built is not
 // counted, and a 25h-old event in a period that is still open is. The exact
-// per-customer report of events that arrived after their period's invoice is
-// deferred (ADR-120, velox-ops register). Backfill-origin events are
+// per-event signal is billing_status "after_close" and
+// velox_usage_unbilled_total{reason="after_close"} (open_period.go); a
+// per-customer list of those events is deferred (ADR-120). Backfill-origin events are
 // excluded: an operator posting history on purpose is not the silent leak
 // this counter exists to surface.
 var lateUsageEvents *prometheus.CounterVec
@@ -269,17 +319,49 @@ func init() {
 	}
 }
 
+// prepare runs the full per-event validation + timestamp resolution and
+// composes the domain row, WITHOUT writing it, then records the event as
+// late if it is. Split from ingest so BatchIngest can validate every event
+// up front and then hand the whole slice to one store transaction
+// (all-or-nothing).
 func (s *Service) prepare(ctx context.Context, tenantID string, input IngestInput, origin domain.UsageEventOrigin) (domain.UsageEvent, error) {
-	if strings.TrimSpace(input.CustomerID) == "" {
-		return domain.UsageEvent{}, errs.Required("customer_id")
-	}
-	if strings.TrimSpace(input.MeterID) == "" {
-		return domain.UsageEvent{}, errs.Required("meter_id")
-	}
-	if err := validateDimensions(input.Dimensions); err != nil {
+	ev, late, err := s.build(ctx, tenantID, input, origin)
+	if err != nil {
 		return domain.UsageEvent{}, err
 	}
-	// quantity == 0 (absent or explicit) stays 0 — PRESENCE semantics.
+	if late {
+		recordLate(ctx, ev)
+	}
+	return ev, nil
+}
+
+// recordLate counts and logs one late event (see lateUsageEvents).
+func recordLate(ctx context.Context, ev domain.UsageEvent) {
+	lateUsageEvents.WithLabelValues(string(ev.Origin)).Inc()
+	slog.WarnContext(ctx, "late usage event (>24h past) — may fall in an already-finalized period and go unbilled",
+		"customer_id", ev.CustomerID,
+		"meter_id", ev.MeterID,
+		"timestamp", ev.Timestamp,
+		"origin", string(ev.Origin),
+	)
+}
+
+// build is prepare without recording anything: it validates the event,
+// resolves its timestamp and composes the row, and reports whether the row
+// is late. A caller that builds rows it may not write (IngestCall builds a
+// call's two mappings and writes one) records only the rows it wrote.
+func (s *Service) build(ctx context.Context, tenantID string, input IngestInput, origin domain.UsageEventOrigin) (domain.UsageEvent, bool, error) {
+	if strings.TrimSpace(input.CustomerID) == "" {
+		return domain.UsageEvent{}, false, errs.Required("customer_id")
+	}
+	if strings.TrimSpace(input.MeterID) == "" {
+		return domain.UsageEvent{}, false, errs.Required("meter_id")
+	}
+	if err := validateDimensions(input.Dimensions); err != nil {
+		return domain.UsageEvent{}, false, err
+	}
+	// quantity == 0 stays 0 — PRESENCE semantics (the HTTP doors refuse a
+	// missing quantity; parseQuantity).
 	// The old code silently coerced it to 1: an integrator emitting
 	// zero-usage heartbeats ("request happened, zero tokens billed") was
 	// billed one unit per event on sum-aggregated meters — a money bug
@@ -288,13 +370,9 @@ func (s *Service) prepare(ctx context.Context, tenantID string, input IngestInpu
 	// honestly contribute nothing. (Stripe parity: meter events carry an
 	// explicit value; there is no silent default.) Negative values remain
 	// allowed as usage corrections.
-	// The quantity column is NUMERIC(38,12): at most 26 integer digits. A value
-	// with |q| ≥ 10^26 overflows the column and Postgres rejects the INSERT,
-	// surfacing as an HTTP 500. Reject it here as a clean 422 instead. (Excess
-	// fractional precision beyond 12 places is rounded by the column, not an
-	// error, so only the integer magnitude is gated.)
-	if input.Quantity.Abs().Cmp(maxQuantityMagnitude) >= 0 {
-		return domain.UsageEvent{}, errs.Invalid("quantity", "magnitude too large — must be less than 10^26")
+	quantity, err := checkQuantity(input.Quantity)
+	if err != nil {
+		return domain.UsageEvent{}, false, err
 	}
 
 	// "Now" is the CUSTOMER's effective now — a test clock's frozen_time
@@ -306,7 +384,10 @@ func (s *Service) prepare(ctx context.Context, tenantID string, input IngestInpu
 	// compared against wall-clock, so on a clock advanced into the future
 	// every sim-timestamped event was rejected as "in the future" and the
 	// flagship advance-and-bill-usage demo broke at ingest.
-	now := s.effectiveNow(ctx, tenantID, input.CustomerID)
+	now, err := s.effectiveNow(ctx, tenantID, input.CustomerID)
+	if err != nil {
+		return domain.UsageEvent{}, false, err
+	}
 	ts := now
 	if input.Timestamp != nil {
 		// Reject future-dated live events (a small clock-skew tolerance keeps
@@ -315,7 +396,7 @@ func (s *Service) prepare(ctx context.Context, tenantID string, input IngestInpu
 		// in a future billing period. Backfill applies its own stricter
 		// past-only gate before reaching here.
 		if input.Timestamp.After(now.Add(usageFutureSkew)) {
-			return domain.UsageEvent{}, errs.Invalid("timestamp", "must not be in the future")
+			return domain.UsageEvent{}, false, errs.Invalid("timestamp", "must not be in the future")
 		}
 		ts = input.Timestamp.UTC()
 	}
@@ -330,21 +411,14 @@ func (s *Service) prepare(ctx context.Context, tenantID string, input IngestInpu
 	// on no invoice, now or later. The operator bills it with a one-off
 	// invoice. Velox does not refuse late events (refusing would break
 	// retries and stream pipelines) and does not move them onto a later
-	// invoice. The counter below
-	// is a proxy (see lateUsageEvents), not a report of missed events.
-	if origin != domain.UsageOriginBackfill && ts.Before(now.Add(-24*time.Hour)) {
-		lateUsageEvents.WithLabelValues(string(origin)).Inc()
-		slog.WarnContext(ctx, "late usage event (>24h past) — may fall in an already-finalized period and go unbilled",
-			"customer_id", input.CustomerID,
-			"meter_id", input.MeterID,
-			"timestamp", ts,
-			"origin", string(origin),
-		)
-	}
+	// invoice; it flags them (billing_status "after_close", open_period.go).
+	// The late flag below feeds a counter that is a proxy (see
+	// lateUsageEvents), not a report of missed events.
+	late := origin != domain.UsageOriginBackfill && ts.Before(now.Add(-24*time.Hour))
 	return domain.UsageEvent{
 		CustomerID:     input.CustomerID,
 		MeterID:        input.MeterID,
-		Quantity:       input.Quantity,
+		Quantity:       quantity,
 		Dimensions:     input.Dimensions,
 		IdempotencyKey: input.IdempotencyKey,
 		Timestamp:      ts,
@@ -353,7 +427,34 @@ func (s *Service) prepare(ctx context.Context, tenantID string, input IngestInpu
 		// over the rate table or is replaced by the table's figure on
 		// RETURNING. Nil leaves the phase-1 behaviour untouched.
 		ProviderCostMicros: input.ObservedCostMicros,
-	}, nil
+	}, late, nil
+}
+
+// BatchResult is what one batch wrote.
+type BatchResult struct {
+	// Inserted counts rows newly written.
+	Inserted int
+	// Deduplicated counts rows already stored under the same key.
+	Deduplicated int
+	// Results is each event's result, in request order.
+	Results []BatchEventResult
+	// Unbilled counts the written rows by billing_status (open_period.go).
+	Unbilled UnbilledCounts
+}
+
+// The results of one batch event.
+const (
+	BatchIngested     = "ingested"
+	BatchDeduplicated = "deduplicated"
+)
+
+// BatchEventResult is what a batch did with one event: wrote it
+// ("ingested") or found it already stored under its key ("deduplicated").
+// BillingStatus is set only on a row the batch wrote, when it has one: a
+// deduplicated row was answered when it was first written.
+type BatchEventResult struct {
+	Status        string `json:"status"`
+	BillingStatus string `json:"billing_status,omitempty"`
 }
 
 // BatchIngest validates every event, then writes them ALL in one store
@@ -364,11 +465,13 @@ func (s *Service) prepare(ctx context.Context, tenantID string, input IngestInpu
 // retry of a batch that did commit is deduped only by the events' keys,
 // which the HTTP door requires (#980).
 //
-// Returns (inserted, deduped, errs). Validation failures are collected
-// for EVERY failing index (a bare "quantity too large" across a 500-event
-// batch was undebuggable) and abort before any write. Idempotency replays
-// count as deduped — success, not failure — matching the LiteLLM door.
-func (s *Service) BatchIngest(ctx context.Context, tenantID string, events []IngestInput) (int, int, []error) {
+// Validation failures are collected for EVERY failing index (a bare
+// "quantity too large" across a 500-event batch was undebuggable) and
+// abort before any write. Idempotency replays count as deduplicated —
+// success, not failure — matching the LiteLLM door. A failed open-period
+// read aborts before any write too, and a failed meter read rolls the batch
+// back (errIngestUnavailable).
+func (s *Service) BatchIngest(ctx context.Context, tenantID string, events []IngestInput) (BatchResult, []error) {
 	prepared := make([]domain.UsageEvent, 0, len(events))
 	var batchErrs []error
 	for i, input := range events {
@@ -380,17 +483,48 @@ func (s *Service) BatchIngest(ctx context.Context, tenantID string, events []Ing
 		prepared = append(prepared, ev)
 	}
 	if len(batchErrs) > 0 {
-		return 0, 0, batchErrs
+		return BatchResult{}, batchErrs
 	}
 
-	inserted, deduped, err := s.store.IngestBatch(ctx, tenantID, prepared)
+	// The open periods are read BEFORE the write, each meter's aggregation on
+	// the write's transaction after the inserts: see open_period.go.
+	cache := periodCacheFrom(ctx)
+	for _, ev := range prepared {
+		if _, err := s.openPeriodsFor(ctx, tenantID, ev.CustomerID, cache); err != nil {
+			return BatchResult{}, []error{err}
+		}
+	}
+	classes := make([]Class, len(prepared))
+	inserted, deduped, err := s.store.IngestBatch(ctx, tenantID, prepared, func(tx *sql.Tx, inserted []int) error {
+		meters := map[string]MeterBuckets{}
+		for _, i := range inserted {
+			c, err := s.classifyWritten(ctx, tx, prepared[i], cache.periods[prepared[i].CustomerID], meters)
+			if err != nil {
+				return err
+			}
+			classes[i] = c
+		}
+		return nil
+	})
 	if err != nil {
-		return 0, 0, []error{err}
+		return BatchResult{}, []error{err}
 	}
-	if inserted > 0 {
-		mw.RecordUsageIngested(inserted)
+	res := BatchResult{Inserted: len(inserted), Deduplicated: deduped, Results: make([]BatchEventResult, len(prepared))}
+	for i := range res.Results {
+		res.Results[i].Status = BatchDeduplicated
 	}
-	return inserted, deduped, nil
+	if res.Inserted > 0 {
+		mw.RecordUsageIngested(res.Inserted)
+	}
+	// Only rows this batch inserted: a row deduplicated against an earlier
+	// write was flagged, or not, when that write happened.
+	for _, i := range inserted {
+		status := s.statusOf(classes[i])
+		res.Results[i] = BatchEventResult{Status: BatchIngested, BillingStatus: status}
+		res.Unbilled.Add(status)
+		recordUnbilled(ctx, prepared[i], status)
+	}
+	return res, nil
 }
 
 // GetByIdempotencyKey fetches the event a replayed key originally wrote —
@@ -434,29 +568,19 @@ func (s *Service) AggregateDailyBuckets(ctx context.Context, tenantID, customerI
 	return s.store.AggregateDailyBuckets(ctx, tenantID, customerID, meterIDs, from, to)
 }
 
-// AggregateByPricingRules resolves a single (customer, meter, period) into
-// per-rule aggregations using the priority+claim algorithm. The defaultMode
-// applies to events that match no rule; it must be one of the four
-// period-bounded modes (sum, count, max, last_during_period) — last_ever
-// as a meter-default is rejected because it would silently break the
-// "current state" semantics for unclaimed events.
-//
-// See docs/design/multi-dim-meters.md for the resolution semantics; this
-// method is the runtime entry point that billing-finalize will call.
-func (s *Service) AggregateByPricingRules(
+// AggregateClaims rolls one customer's events of one meter in [from, to)
+// into one quantity per claim, under the meter's aggregation (see the Store
+// contract). An unknown aggregation is refused, never read as a sum: a
+// meter's events must not bill under an aggregation the meter does not
+// have.
+func (s *Service) AggregateClaims(
 	ctx context.Context,
-	tenantID, customerID, meterID string,
-	defaultMode domain.AggregationMode,
+	tenantID, customerID, meterID, aggregation string,
+	claims []domain.UsageClaim,
 	from, to time.Time,
-) ([]domain.RuleAggregation, error) {
-	if defaultMode == "" {
-		defaultMode = domain.AggSum
+) ([]domain.ClaimedUsage, error) {
+	if !domain.ValidAggregation(aggregation) {
+		return nil, errs.Invalid("aggregation", fmt.Sprintf("must be one of sum, count, max, last; got %q", aggregation))
 	}
-	switch defaultMode {
-	case domain.AggSum, domain.AggCount, domain.AggMax, domain.AggLastDuringPeriod:
-		// ok
-	default:
-		return nil, errs.Invalid("default_mode", fmt.Sprintf("must be one of sum/count/max/last_during_period, got %q", defaultMode))
-	}
-	return s.store.AggregateByPricingRules(ctx, tenantID, customerID, meterID, defaultMode, from, to)
+	return s.store.AggregateClaims(ctx, tenantID, customerID, meterID, aggregation, claims, from, to)
 }

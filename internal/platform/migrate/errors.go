@@ -16,17 +16,26 @@ const RunbookPath = "docs/ops/runbook/migration-failed-midway.md"
 
 // LockTimeoutRunbookPath is the operator page for a migration that stopped
 // on a table lock. LockTimeoutError names it.
-const LockTimeoutRunbookPath = "docs/ops/runbook/migration-lock-timeout.md"
+const LockTimeoutRunbookPath = "docs/ops/runbook/migration-failed-midway.md#it-waited-5s-for-a-table-lock"
 
 // pgLockNotAvailable is SQLSTATE 55P03, what Postgres raises when
 // lock_timeout expires ("canceling statement due to lock timeout").
 const pgLockNotAvailable = "55P03"
 
+// ErrNoMigrationRecord says the database has Velox tables but goose has
+// not recorded migration 180. Up, Down and CheckSchemaReady return it
+// before they change anything; `velox migrate status` shows it as
+// PlanUnrecorded.
+var ErrNoMigrationRecord = errors.New("this database has Velox tables but no migration record " +
+	"(goose_db_version has no row for 180), so Velox cannot tell which version they are at. Nothing was changed. " +
+	"Restore the backup together with its migration table, or use an empty database. " +
+	"Upgrading from Velox 0.8.x is not supported; install fresh. Steps: " + RunbookPath)
+
 // FileError says a migration failed. goose stops at the first failure and
 // records nothing for it.
 type FileError struct {
 	Version int64
-	// Name is the file name, or "00180 v0.8.1 baseline" for migration 180.
+	// Name is the file name, or "00180 baseline" for migration 180.
 	Name string
 	// NoTx is true for an index-build file, which runs without a
 	// transaction.
@@ -42,8 +51,8 @@ func (e *FileError) Error() string {
 		b.WriteString("It runs without a transaction, so Postgres may have left the index INVALID. " +
 			"Running the upgrade again is safe: the file drops the index and builds it again. Fix the cause first.")
 	case e.Version == baselineVersion && isDuplicateObject(e.Err):
-		b.WriteString("This database already has Velox tables but no migration record, and none of the baseline was applied. " +
-			"Restore the backup together with its migration table, or use an empty database.")
+		b.WriteString("This database already holds objects the baseline creates, and none of the baseline was applied. " +
+			"Use an empty database.")
 	default:
 		b.WriteString("It runs in one transaction, so none of it was applied. Fix the cause and run the upgrade again.")
 	}
@@ -96,50 +105,6 @@ func (e *LockWaitError) Error() string {
 }
 
 func (e *LockWaitError) Unwrap() error { return e.Err }
-
-// v08Kind names the three states the state check refuses (ADR-125).
-type v08Kind int
-
-const (
-	// v08NotClean (M1): a v0.8 record that is not a clean 180.
-	v08NotClean v08Kind = iota + 1
-	// v08Mismatch (M2): goose has 180, and schema_migrations is not the
-	// frozen (180, false) record migration 180 left.
-	v08Mismatch
-	// v08OutsidePublic (M3): Velox's tables resolve outside public.
-	v08OutsidePublic
-)
-
-// V08Error is the state check's refusal. It runs before every Up, in
-// CheckSchemaReady and in `velox migrate status`, and changes nothing.
-type V08Error struct {
-	kind   v08Kind
-	record v08Record
-	goose  int64  // highest version in goose_db_version (M2)
-	schema string // the schema the tables resolve to (M3)
-}
-
-func (e *V08Error) Error() string {
-	switch e.kind {
-	case v08NotClean:
-		return fmt.Sprintf("This database's v0.8 migration record (schema_migrations) says %s. "+
-			"This release takes over only a clean v0.8.0, v0.8.1 or v0.8.2 database at version 180. "+
-			"Run `velox migrate` with Velox v0.8.1 first; if it reports the database dirty, follow the runbook it links. "+
-			"A version above 180 came from a development build: use an empty database. Nothing was changed.",
-			e.record.describe())
-	case v08Mismatch:
-		return fmt.Sprintf("public.schema_migrations (%s) does not match this release's record in goose_db_version (version %d). "+
-			"Either a v0.8.x backup was restored over this database, or a v0.8.x binary ran `migrate`, `migrate rollback` "+
-			"or `migrate force` against it after the upgrade. Velox will not guess which schema is present. "+
-			"Steps: %s#two-migration-records. Nothing was changed.",
-			e.record.describe(), e.goose, RunbookPath)
-	case v08OutsidePublic:
-		return fmt.Sprintf("Velox v0.8 kept its tables in schema %q (found through search_path). "+
-			"This release keeps them in public and will not move them. "+
-			"Restore the database so that its tables are in public. Nothing was changed.", e.schema)
-	}
-	return "unknown migration state. Nothing was changed."
-}
 
 // describeDBError renders a Postgres error with the fields an operator
 // needs to find the cause: the detail names the duplicate key on 23505.

@@ -9,6 +9,6 @@
  */
 
 /**
- * Scalar dimension values used for pricing-rule dispatch (e.g. {"model", "token_type"}).
+ * Scalar labels of the event (e.g. {"model", "token_type"}). A price takes an event whose labels include the price's `dimension_match`.
  */
 export type PostV1UsageEventsBodyDimensions = { [key: string]: unknown };

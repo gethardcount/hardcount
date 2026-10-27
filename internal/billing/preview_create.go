@@ -28,19 +28,19 @@ type SubscriptionLister interface {
 }
 
 // PreviewService composes the per-domain reads behind
-// POST /v1/invoices/create_preview. See docs/design/create-preview.md.
+// POST /v1/invoices/create_preview. See docs/dev/design/create-preview.md.
 //
 // The hard work — dimension-match-aware aggregation in
-// usage.AggregateByPricingRules and per-rule pricing via
-// domain.ComputeAmountCents — already exists on Engine.rateMeterWindow. This
+// usage.AggregateClaims and per-rule pricing via
+// domain.ComputeAmountCents — already exists in the engine's one rater
+// (rateUsageWindows, rate.go). This
 // service is a thin composition: customer existence → subscription
 // resolution → period resolution → defer to engine.previewWithWindow for
 // the actual line generation.
 //
 // We deliberately compose against Engine (rather than reimplementing the
-// per-(meter, rule) walk here) so the create_preview surface and the
-// in-app debug route /v1/billing/preview/{subscription_id} share one code
-// path — preview math == invoice math by construction.
+// per-(meter, rule) walk here) so create_preview rates usage with the
+// engine's own code — preview math == invoice math by construction.
 type PreviewService struct {
 	engine        *Engine
 	customers     CustomerLookup
@@ -91,9 +91,8 @@ type CreatePreviewRequest struct {
 //  4. Defer to the engine: previewCycle (mirrors the cycle close) for the
 //     default window, previewWithWindow for an explicit one.
 //
-// Returns a PreviewResult with the same wire shape produced by
-// Engine.Preview so the cost dashboard can consume both surfaces with one
-// TS type set.
+// Returns a PreviewResult, the one wire shape the subscription page and the
+// cost dashboard both read.
 func (s *PreviewService) CreatePreview(ctx context.Context, tenantID string, req CreatePreviewRequest) (PreviewResult, error) {
 	customerID := strings.TrimSpace(req.CustomerID)
 	if customerID == "" {

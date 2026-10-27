@@ -2,7 +2,6 @@ package usage_test
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 	"time"
 
@@ -14,33 +13,39 @@ import (
 	"github.com/sagarsuperuser/velox/internal/usage"
 )
 
-// TestAggregateByPricingRules is the runtime contract test for
-// docs/design/multi-dim-meters.md priority+claim resolution. Each
-// sub-test exercises one piece of the algorithm:
+// TestAggregateClaims is the runtime contract test for the claim
+// aggregation (docs/dev/design/multi-dim-meters.md, ADR-130 §2). Each
+// sub-test exercises one piece of it:
 //
-//   - per-mode aggregation: sum, count, max, last_during_period, last_ever
-//   - priority+claim: the top-priority matching rule wins, no double-count
+//   - the meter's one aggregation: sum, count, max, last
+//   - the claim: the first matching claim in rank order wins, no double-count
 //   - subset-match: extra dimensions on the event do not disqualify it
-//   - default fallback: events matching no rule become the unclaimed bucket
+//   - unclaimed: events matching no claim become the unclaimed bucket
 //   - decimal precision: NUMERIC(38,12) round-trips losslessly
 //
 // The same Postgres schema is shared across sub-tests, but each writes a
-// fresh tenant so RLS keeps them isolated and the priority counters can
-// be assigned freely.
-func TestAggregateByPricingRules(t *testing.T) {
+// fresh tenant so RLS keeps them isolated.
+func TestAggregateClaims(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 30*time.Second)
 	defer cancel()
 
 	store := usage.NewPostgresStore(db)
+	aggregate := func(t *testing.T, tenantID, customerID, meterID, agg string, claims []domain.UsageClaim, from, to time.Time) []domain.ClaimedUsage {
+		t.Helper()
+		got, err := store.AggregateClaims(ctx, tenantID, customerID, meterID, agg, claims, from, to)
+		if err != nil {
+			t.Fatalf("aggregate: %v", err)
+		}
+		return got
+	}
 
-	t.Run("sum mode aggregates claimed events", func(t *testing.T) {
+	t.Run("sum adds the claimed events", func(t *testing.T) {
 		tenantID := testutil.CreateTestTenant(t, db, "Agg Sum")
 		customerID := insertTestCustomer(t, db, tenantID, "cus_sum")
 		meterID := insertTestMeter(t, db, tenantID, "mtr_sum", "tokens_sum")
 		rrvID := insertTestRatingRule(t, db, tenantID, "rate_sum")
-		insertTestPricingRule(t, db, tenantID, meterID, rrvID,
-			map[string]any{"model": "gpt-4"}, domain.AggSum, 100)
+		c := insertTestPricingRule(t, db, tenantID, meterID, rrvID, map[string]any{"model": "gpt-4"}, 100)
 
 		from := time.Now().Add(-1 * time.Hour)
 		to := time.Now().Add(1 * time.Hour)
@@ -49,24 +54,18 @@ func TestAggregateByPricingRules(t *testing.T) {
 		ingest(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(20), map[string]any{"model": "gpt-4"})
 		ingest(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(99), map[string]any{"model": "claude"})
 
-		got, err := store.AggregateByPricingRules(ctx, tenantID, customerID, meterID, domain.AggSum, from, to)
-		if err != nil {
-			t.Fatalf("aggregate: %v", err)
-		}
-		want := map[string]decimal.Decimal{
+		assertRuleAggregations(t, aggregate(t, tenantID, customerID, meterID, "sum", []domain.UsageClaim{c}, from, to), map[string]decimal.Decimal{
 			rrvID: decimal.NewFromInt(30), // gpt-4 events
-			"":    decimal.NewFromInt(99), // unclaimed default
-		}
-		assertRuleAggregations(t, got, want)
+			"":    decimal.NewFromInt(99), // unclaimed
+		})
 	})
 
-	t.Run("count mode counts claimed events", func(t *testing.T) {
+	t.Run("count counts the claimed events, and the unclaimed ones too", func(t *testing.T) {
 		tenantID := testutil.CreateTestTenant(t, db, "Agg Count")
 		customerID := insertTestCustomer(t, db, tenantID, "cus_cnt")
 		meterID := insertTestMeter(t, db, tenantID, "mtr_cnt", "tokens_cnt")
 		rrvID := insertTestRatingRule(t, db, tenantID, "rate_cnt")
-		insertTestPricingRule(t, db, tenantID, meterID, rrvID,
-			map[string]any{"model": "gpt-4"}, domain.AggCount, 100)
+		c := insertTestPricingRule(t, db, tenantID, meterID, rrvID, map[string]any{"model": "gpt-4"}, 100)
 
 		from := time.Now().Add(-1 * time.Hour)
 		to := time.Now().Add(1 * time.Hour)
@@ -74,23 +73,20 @@ func TestAggregateByPricingRules(t *testing.T) {
 		ingest(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(10), map[string]any{"model": "gpt-4"})
 		ingest(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(50), map[string]any{"model": "gpt-4"})
 		ingest(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(99), map[string]any{"model": "gpt-4"})
+		ingest(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(7), map[string]any{"model": "claude"})
 
-		got, err := store.AggregateByPricingRules(ctx, tenantID, customerID, meterID, domain.AggSum, from, to)
-		if err != nil {
-			t.Fatalf("aggregate: %v", err)
-		}
-		assertRuleAggregations(t, got, map[string]decimal.Decimal{
+		assertRuleAggregations(t, aggregate(t, tenantID, customerID, meterID, "count", []domain.UsageClaim{c}, from, to), map[string]decimal.Decimal{
 			rrvID: decimal.NewFromInt(3), // count, not sum
+			"":    decimal.NewFromInt(1),
 		})
 	})
 
-	t.Run("max mode picks largest claimed quantity", func(t *testing.T) {
+	t.Run("max takes each bucket's largest quantity", func(t *testing.T) {
 		tenantID := testutil.CreateTestTenant(t, db, "Agg Max")
 		customerID := insertTestCustomer(t, db, tenantID, "cus_max")
 		meterID := insertTestMeter(t, db, tenantID, "mtr_max", "tokens_max")
 		rrvID := insertTestRatingRule(t, db, tenantID, "rate_max")
-		insertTestPricingRule(t, db, tenantID, meterID, rrvID,
-			map[string]any{"model": "gpt-4"}, domain.AggMax, 100)
+		c := insertTestPricingRule(t, db, tenantID, meterID, rrvID, map[string]any{"model": "gpt-4"}, 100)
 
 		from := time.Now().Add(-1 * time.Hour)
 		to := time.Now().Add(1 * time.Hour)
@@ -98,118 +94,39 @@ func TestAggregateByPricingRules(t *testing.T) {
 		ingest(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(10), map[string]any{"model": "gpt-4"})
 		ingest(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(50), map[string]any{"model": "gpt-4"})
 		ingest(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(25), map[string]any{"model": "gpt-4"})
+		ingest(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(80), map[string]any{"model": "claude"})
+		ingest(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(30), map[string]any{"model": "claude"})
 
-		got, err := store.AggregateByPricingRules(ctx, tenantID, customerID, meterID, domain.AggSum, from, to)
-		if err != nil {
-			t.Fatalf("aggregate: %v", err)
-		}
-		assertRuleAggregations(t, got, map[string]decimal.Decimal{
+		assertRuleAggregations(t, aggregate(t, tenantID, customerID, meterID, "max", []domain.UsageClaim{c}, from, to), map[string]decimal.Decimal{
 			rrvID: decimal.NewFromInt(50),
+			"":    decimal.NewFromInt(80),
 		})
 	})
 
-	t.Run("last_during_period picks latest event in window", func(t *testing.T) {
-		tenantID := testutil.CreateTestTenant(t, db, "Agg LDP")
+	t.Run("last takes the latest event in the window", func(t *testing.T) {
+		tenantID := testutil.CreateTestTenant(t, db, "Agg Last")
 		customerID := insertTestCustomer(t, db, tenantID, "cus_ldp")
 		meterID := insertTestMeter(t, db, tenantID, "mtr_ldp", "tokens_ldp")
 		rrvID := insertTestRatingRule(t, db, tenantID, "rate_ldp")
-		insertTestPricingRule(t, db, tenantID, meterID, rrvID,
-			map[string]any{"model": "gpt-4"}, domain.AggLastDuringPeriod, 100)
+		c := insertTestPricingRule(t, db, tenantID, meterID, rrvID, map[string]any{"model": "gpt-4"}, 100)
 
 		now := time.Now()
 		from := now.Add(-2 * time.Hour)
-		to := now.Add(1 * time.Hour)
+		to := now.Add(-2 * time.Minute)
 
-		// Three in-period events at distinct timestamps; latest qty=42.
-		ts1 := now.Add(-90 * time.Minute)
-		ts2 := now.Add(-30 * time.Minute)
-		ts3 := now.Add(-5 * time.Minute)
-		ingestAt(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(10), map[string]any{"model": "gpt-4"}, ts1)
-		ingestAt(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(99), map[string]any{"model": "gpt-4"}, ts2)
-		ingestAt(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(42), map[string]any{"model": "gpt-4"}, ts3)
+		// Three in-window events at distinct timestamps; latest qty=42.
+		// One after the window, the latest of all, is not in it.
+		ingestAt(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(10), map[string]any{"model": "gpt-4"}, now.Add(-90*time.Minute))
+		ingestAt(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(99), map[string]any{"model": "gpt-4"}, now.Add(-30*time.Minute))
+		ingestAt(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(42), map[string]any{"model": "gpt-4"}, now.Add(-5*time.Minute))
+		ingestAt(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(7), map[string]any{"model": "gpt-4"}, now.Add(-1*time.Minute))
 
-		got, err := store.AggregateByPricingRules(ctx, tenantID, customerID, meterID, domain.AggSum, from, to)
-		if err != nil {
-			t.Fatalf("aggregate: %v", err)
-		}
-		assertRuleAggregations(t, got, map[string]decimal.Decimal{
+		assertRuleAggregations(t, aggregate(t, tenantID, customerID, meterID, "last", []domain.UsageClaim{c}, from, to), map[string]decimal.Decimal{
 			rrvID: decimal.NewFromInt(42),
 		})
 	})
 
-	t.Run("last_ever ignores period bounds", func(t *testing.T) {
-		tenantID := testutil.CreateTestTenant(t, db, "Agg LE")
-		customerID := insertTestCustomer(t, db, tenantID, "cus_le")
-		meterID := insertTestMeter(t, db, tenantID, "mtr_le", "tokens_le")
-		rrvID := insertTestRatingRule(t, db, tenantID, "rate_le")
-		insertTestPricingRule(t, db, tenantID, meterID, rrvID,
-			map[string]any{"metric": "seats"}, domain.AggLastEver, 100)
-
-		now := time.Now()
-		// "Period" is the last hour, but the relevant event is 30 days
-		// ago. last_ever should still pick it up.
-		from := now.Add(-1 * time.Hour)
-		to := now.Add(1 * time.Hour)
-
-		oldTs := now.Add(-30 * 24 * time.Hour)
-		ingestAt(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(7), map[string]any{"metric": "seats"}, oldTs)
-		// One newer event NOT matching the rule — must not bleed in.
-		ingest(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(99), map[string]any{"metric": "other"})
-
-		got, err := store.AggregateByPricingRules(ctx, tenantID, customerID, meterID, domain.AggSum, from, to)
-		if err != nil {
-			t.Fatalf("aggregate: %v", err)
-		}
-		// last_ever rule sees the 30-day-old seat-count event; the
-		// other event ('metric=other') is unclaimed and rolls into the
-		// default sum bucket — but only events INSIDE the period are
-		// in that bucket, so unclaimed=99.
-		assertRuleAggregations(t, got, map[string]decimal.Decimal{
-			rrvID: decimal.NewFromInt(7),  // last_ever: 30d-old seats=7
-			"":    decimal.NewFromInt(99), // unclaimed in period
-		})
-	})
-
-	t.Run("last_ever winner excluded from period buckets (no double-count)", func(t *testing.T) {
-		// Regression: an event whose top-priority matching rule is
-		// last_ever must NOT also be aggregated by a lower-priority
-		// period rule (or the unclaimed default). Before the fix, the
-		// period-bounded query filtered last_ever out of the LATERAL
-		// candidate set, so such events fell through to the next rule
-		// AND were claimed again by the last_ever pass — double-counting.
-		tenantID := testutil.CreateTestTenant(t, db, "Agg LE NoDouble")
-		customerID := insertTestCustomer(t, db, tenantID, "cus_le_dbl")
-		meterID := insertTestMeter(t, db, tenantID, "mtr_le_dbl", "tokens_le_dbl")
-		leverRRV := insertTestRatingRule(t, db, tenantID, "rate_le_dbl")
-		sumRRV := insertTestRatingRule(t, db, tenantID, "rate_sum_dbl")
-
-		// High-priority last_ever rule + lower-priority sum rule, both
-		// matching {model: gpt-4}. The events match BOTH; last_ever wins.
-		insertTestPricingRule(t, db, tenantID, meterID, leverRRV,
-			map[string]any{"model": "gpt-4"}, domain.AggLastEver, 100)
-		insertTestPricingRule(t, db, tenantID, meterID, sumRRV,
-			map[string]any{"model": "gpt-4"}, domain.AggSum, 50)
-
-		now := time.Now()
-		from := now.Add(-2 * time.Hour)
-		to := now.Add(1 * time.Hour)
-
-		ingestAt(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(10), map[string]any{"model": "gpt-4"}, now.Add(-90*time.Minute))
-		ingestAt(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(42), map[string]any{"model": "gpt-4"}, now.Add(-5*time.Minute))
-
-		got, err := store.AggregateByPricingRules(ctx, tenantID, customerID, meterID, domain.AggSum, from, to)
-		if err != nil {
-			t.Fatalf("aggregate: %v", err)
-		}
-		// Only the last_ever bucket should exist (latest event qty=42).
-		// The sum rule and the unclaimed default must be absent — the
-		// events belong solely to last_ever.
-		assertRuleAggregations(t, got, map[string]decimal.Decimal{
-			leverRRV: decimal.NewFromInt(42),
-		})
-	})
-
-	t.Run("priority claim prevents double-count when rules overlap", func(t *testing.T) {
+	t.Run("the first matching claim wins when claims overlap; no double-count", func(t *testing.T) {
 		tenantID := testutil.CreateTestTenant(t, db, "Agg Priority")
 		customerID := insertTestCustomer(t, db, tenantID, "cus_prio")
 		meterID := insertTestMeter(t, db, tenantID, "mtr_prio", "tokens_prio")
@@ -218,29 +135,26 @@ func TestAggregateByPricingRules(t *testing.T) {
 
 		// Specific rule (priority 100): cached gpt-4 events at premium.
 		// Coarse rule (priority 50): all gpt-4 events at base rate.
-		// An event matching both must be claimed by the priority-100 rule.
-		insertTestPricingRule(t, db, tenantID, meterID, highRRV,
-			map[string]any{"model": "gpt-4", "cached": true}, domain.AggSum, 100)
-		insertTestPricingRule(t, db, tenantID, meterID, lowRRV,
-			map[string]any{"model": "gpt-4"}, domain.AggSum, 50)
+		// An event matching both is claimed by the first claim, the
+		// priority-100 rule.
+		high := insertTestPricingRule(t, db, tenantID, meterID, highRRV, map[string]any{"model": "gpt-4", "cached": "true"}, 100)
+		low := insertTestPricingRule(t, db, tenantID, meterID, lowRRV, map[string]any{"model": "gpt-4"}, 50)
 
 		from := time.Now().Add(-1 * time.Hour)
 		to := time.Now().Add(1 * time.Hour)
 
-		// Cached gpt-4 → high-priority rule.
-		ingest(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(10), map[string]any{"model": "gpt-4", "cached": true})
-		// Uncached gpt-4 → matches only low-priority rule.
-		ingest(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(20), map[string]any{"model": "gpt-4", "cached": false})
-		// Another cached gpt-4 → high.
-		ingest(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(5), map[string]any{"model": "gpt-4", "cached": true})
+		ingest(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(10), map[string]any{"model": "gpt-4", "cached": "true"})
+		ingest(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(20), map[string]any{"model": "gpt-4", "cached": "false"})
+		ingest(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(5), map[string]any{"model": "gpt-4", "cached": "true"})
 
-		got, err := store.AggregateByPricingRules(ctx, tenantID, customerID, meterID, domain.AggSum, from, to)
-		if err != nil {
-			t.Fatalf("aggregate: %v", err)
-		}
-		assertRuleAggregations(t, got, map[string]decimal.Decimal{
+		assertRuleAggregations(t, aggregate(t, tenantID, customerID, meterID, "sum", []domain.UsageClaim{high, low}, from, to), map[string]decimal.Decimal{
 			highRRV: decimal.NewFromInt(15), // 10 + 5 cached gpt-4
 			lowRRV:  decimal.NewFromInt(20), // 20 uncached gpt-4
+		})
+		// The claim order is the caller's: the other order gives the coarse
+		// claim every gpt-4 event.
+		assertRuleAggregations(t, aggregate(t, tenantID, customerID, meterID, "sum", []domain.UsageClaim{low, high}, from, to), map[string]decimal.Decimal{
+			lowRRV: decimal.NewFromInt(35),
 		})
 	})
 
@@ -251,8 +165,7 @@ func TestAggregateByPricingRules(t *testing.T) {
 		rrvID := insertTestRatingRule(t, db, tenantID, "rate_subset")
 		// Rule asks for {model: gpt-4} only — events with extra
 		// dimensions (operation, cached, region) must still match.
-		insertTestPricingRule(t, db, tenantID, meterID, rrvID,
-			map[string]any{"model": "gpt-4"}, domain.AggSum, 100)
+		c := insertTestPricingRule(t, db, tenantID, meterID, rrvID, map[string]any{"model": "gpt-4"}, 100)
 
 		from := time.Now().Add(-1 * time.Hour)
 		to := time.Now().Add(1 * time.Hour)
@@ -262,16 +175,12 @@ func TestAggregateByPricingRules(t *testing.T) {
 		ingest(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(20),
 			map[string]any{"model": "gpt-4", "operation": "output", "cached": true})
 
-		got, err := store.AggregateByPricingRules(ctx, tenantID, customerID, meterID, domain.AggSum, from, to)
-		if err != nil {
-			t.Fatalf("aggregate: %v", err)
-		}
-		assertRuleAggregations(t, got, map[string]decimal.Decimal{
+		assertRuleAggregations(t, aggregate(t, tenantID, customerID, meterID, "sum", []domain.UsageClaim{c}, from, to), map[string]decimal.Decimal{
 			rrvID: decimal.NewFromInt(30),
 		})
 	})
 
-	t.Run("no rules: every event lands in unclaimed bucket", func(t *testing.T) {
+	t.Run("no claims: every event lands in the unclaimed bucket", func(t *testing.T) {
 		tenantID := testutil.CreateTestTenant(t, db, "Agg NoRules")
 		customerID := insertTestCustomer(t, db, tenantID, "cus_nor")
 		meterID := insertTestMeter(t, db, tenantID, "mtr_nor", "tokens_nor")
@@ -282,13 +191,20 @@ func TestAggregateByPricingRules(t *testing.T) {
 		ingest(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(40), map[string]any{"model": "gpt-4"})
 		ingest(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(2), map[string]any{"model": "claude"})
 
-		got, err := store.AggregateByPricingRules(ctx, tenantID, customerID, meterID, domain.AggSum, from, to)
-		if err != nil {
-			t.Fatalf("aggregate: %v", err)
-		}
-		assertRuleAggregations(t, got, map[string]decimal.Decimal{
+		assertRuleAggregations(t, aggregate(t, tenantID, customerID, meterID, "sum", nil, from, to), map[string]decimal.Decimal{
 			"": decimal.NewFromInt(42),
 		})
+	})
+
+	t.Run("an aggregation the meter cannot have is refused", func(t *testing.T) {
+		tenantID := testutil.CreateTestTenant(t, db, "Agg Bad")
+		customerID := insertTestCustomer(t, db, tenantID, "cus_bad")
+		meterID := insertTestMeter(t, db, tenantID, "mtr_bad", "tokens_bad")
+		for _, agg := range []string{"last_ever", "last_during_period", ""} {
+			if _, err := store.AggregateClaims(ctx, tenantID, customerID, meterID, agg, nil, time.Now().Add(-time.Hour), time.Now()); err == nil {
+				t.Errorf("aggregation %q: want an error", agg)
+			}
+		}
 	})
 
 	t.Run("decimal precision round-trips through aggregation", func(t *testing.T) {
@@ -296,8 +212,7 @@ func TestAggregateByPricingRules(t *testing.T) {
 		customerID := insertTestCustomer(t, db, tenantID, "cus_dec")
 		meterID := insertTestMeter(t, db, tenantID, "mtr_dec", "tokens_dec")
 		rrvID := insertTestRatingRule(t, db, tenantID, "rate_dec")
-		insertTestPricingRule(t, db, tenantID, meterID, rrvID,
-			map[string]any{"model": "gpt-4"}, domain.AggSum, 100)
+		c := insertTestPricingRule(t, db, tenantID, meterID, rrvID, map[string]any{"model": "gpt-4"}, 100)
 
 		from := time.Now().Add(-1 * time.Hour)
 		to := time.Now().Add(1 * time.Hour)
@@ -309,13 +224,9 @@ func TestAggregateByPricingRules(t *testing.T) {
 		ingest(t, ctx, store, tenantID, customerID, meterID, q1, map[string]any{"model": "gpt-4"})
 		ingest(t, ctx, store, tenantID, customerID, meterID, q2, map[string]any{"model": "gpt-4"})
 
-		got, err := store.AggregateByPricingRules(ctx, tenantID, customerID, meterID, domain.AggSum, from, to)
-		if err != nil {
-			t.Fatalf("aggregate: %v", err)
-		}
 		var foundRule decimal.Decimal
-		for _, r := range got {
-			if r.RatingRuleVersionID == rrvID {
+		for _, r := range aggregate(t, tenantID, customerID, meterID, "sum", []domain.UsageClaim{c}, from, to) {
+			if r.PriceID == rrvID {
 				foundRule = r.Quantity
 			}
 		}
@@ -353,12 +264,12 @@ func ingestAt(t *testing.T, ctx context.Context, store *usage.PostgresStore,
 	}
 }
 
-func assertRuleAggregations(t *testing.T, got []domain.RuleAggregation, want map[string]decimal.Decimal) {
+func assertRuleAggregations(t *testing.T, got []domain.ClaimedUsage, want map[string]decimal.Decimal) {
 	t.Helper()
 	gotByRRV := make(map[string]decimal.Decimal, len(got))
 	for _, r := range got {
-		// Key by rating_rule_version_id; "" is the unclaimed bucket.
-		gotByRRV[r.RatingRuleVersionID] = r.Quantity
+		// Key by price id; "" is the unclaimed bucket.
+		gotByRRV[r.PriceID] = r.Quantity
 	}
 	if len(gotByRRV) != len(want) {
 		t.Errorf("aggregation count: got %d entries (%v), want %d (%v)",
@@ -376,73 +287,28 @@ func assertRuleAggregations(t *testing.T, got []domain.RuleAggregation, want map
 	}
 }
 
-// insertTestRatingRule creates a minimal flat-rate rating rule version so
-// pricing-rule rows have a valid FK target. The actual prices are not
-// exercised here — aggregation only cares about the rrv id.
-func insertTestRatingRule(t *testing.T, db *postgres.DB, tenantID, key string) string {
+// insertTestRatingRule names a price for a claim. A claim is in memory
+// (AggregateClaims takes the list), so nothing is stored: the id is what the
+// buckets come back keyed by.
+func insertTestRatingRule(t *testing.T, _ *postgres.DB, _, key string) string {
 	t.Helper()
-
-	id := postgres.NewID("vlx_rrv")
-	tx, err := db.BeginTx(postgres.WithLivemode(context.Background(), false), postgres.TxTenant, tenantID)
-	if err != nil {
-		t.Fatalf("begin rrv: %v", err)
-	}
-	defer postgres.Rollback(tx)
-
-	_, err = tx.ExecContext(context.Background(), `
-		INSERT INTO rating_rule_versions (id, tenant_id, rule_key, name, version, lifecycle_state, mode, currency, flat_amount_cents)
-		VALUES ($1, $2, $3, $4, 1, 'active', 'flat', 'USD', 100)
-	`, id, tenantID, key, key)
-	if err != nil {
-		t.Fatalf("insert rrv: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit rrv: %v", err)
-	}
-	return id
+	return "vlx_prc_" + key
 }
 
-// insertTestPricingRule writes a row to meter_pricing_rules. We hit the
-// table directly rather than going through the pricing service because
-// these tests are scoped to the aggregation query — the service-layer
-// coverage already lives in pricing/service_test.go.
-func insertTestPricingRule(t *testing.T, db *postgres.DB,
-	tenantID, meterID, rrvID string,
-	dims map[string]any, mode domain.AggregationMode, priority int,
-) {
+// insertTestPricingRule is the claim of price priceID on dims. Claims are
+// listed in the order the caller passes them; priority is not read.
+func insertTestPricingRule(t *testing.T, _ *postgres.DB,
+	_, _, priceID string,
+	dims map[string]any, _ int,
+) domain.UsageClaim {
 	t.Helper()
-
-	tx, err := db.BeginTx(postgres.WithLivemode(context.Background(), false), postgres.TxTenant, tenantID)
-	if err != nil {
-		t.Fatalf("begin mpr: %v", err)
+	match := map[string]string{}
+	for k, v := range dims {
+		s, ok := v.(string)
+		if !ok {
+			t.Fatalf("claim label %q is %T, want a string", k, v)
+		}
+		match[k] = s
 	}
-	defer postgres.Rollback(tx)
-
-	dimsJSON, err := jsonbValue(dims)
-	if err != nil {
-		t.Fatalf("marshal dims: %v", err)
-	}
-
-	_, err = tx.ExecContext(context.Background(), `
-		INSERT INTO meter_pricing_rules
-		    (id, tenant_id, meter_id, rating_rule_version_id, dimension_match, aggregation_mode, priority)
-		VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)
-	`, postgres.NewID("vlx_mpr"), tenantID, meterID, rrvID, dimsJSON, string(mode), priority)
-	if err != nil {
-		t.Fatalf("insert mpr: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit mpr: %v", err)
-	}
-}
-
-func jsonbValue(m map[string]any) (string, error) {
-	if len(m) == 0 {
-		return "{}", nil
-	}
-	b, err := json.Marshal(m)
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
+	return domain.UsageClaim{PriceID: priceID, Match: match}
 }

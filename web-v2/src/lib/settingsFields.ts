@@ -28,6 +28,7 @@ export const SETTINGS_FIELDS: ReadonlyArray<{ field: string; tab: SettingsFormTa
   { field: 'timezone', tab: 'general', label: 'Timezone' },
   { field: 'default_currency', tab: 'invoicing', label: 'Default currency' },
   { field: 'invoice_prefix', tab: 'invoicing', label: 'Invoice prefix' },
+  { field: 'credit_note_prefix', tab: 'invoicing', label: 'Credit note prefix' },
   { field: 'net_payment_terms', tab: 'invoicing', label: 'Payment terms' },
   { field: 'credit_balance_low_threshold', tab: 'invoicing', label: 'Credit low-balance alert' },
   { field: 'invoice_footer', tab: 'invoicing', label: 'Invoice footer' },

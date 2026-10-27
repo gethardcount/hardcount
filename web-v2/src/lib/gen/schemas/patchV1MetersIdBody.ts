@@ -13,6 +13,4 @@ export type PatchV1MetersIdBody = {
   name?: string;
   unit?: string;
   aggregation?: PatchV1MetersIdBodyAggregation;
-  /** Default rating rule; empty string clears. */
-  rating_rule_version_id?: string;
 };

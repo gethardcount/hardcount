@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useQuery } from '@tanstack/react-query'
 import { useParams, useSearchParams } from 'react-router-dom'
-import { formatCents, formatRate, formatDate, formatTaxRate } from '@/lib/api'
+import { formatCents, formatRate, formatLineQuantity, formatDate, formatTaxRate } from '@/lib/api'
 import { invoiceLineRate } from '@/lib/priceDisplay'
-import { invoiceAmountLabel } from '@/lib/invoiceTerminal'
+import { invoiceAmountLine, invoiceDueCents, invoiceHeadline, invoicePaymentInFlight, invoicePaymentSucceeded } from '@/lib/invoiceTerminal'
 import { hostedTotalRows, loadErrorCopy, payErrorCopy, payUnavailableCopy } from '@/lib/hostedInvoice'
 import { sellerContact } from '@/lib/sellerContact'
 import { SellerContactLink } from '@/components/SellerContactLink'
@@ -54,14 +54,11 @@ interface HostedInvoicePayload {
   }
   line_items: {
     description: string
-    quantity: number
-    // Exact fractional usage quantity (decimal string); when present it is
-    // the display quantity — the integer `quantity` is its truncation.
-    quantity_decimal?: string
-    unit_amount_cents: number
+    // The exact quantity as a decimal string ("3", "1.5").
+    quantity: string
     // Full-precision per-unit price in decimal cents (e.g. "0.3" = $0.003);
     // render with formatRate so sub-cent rates don't collapse to "$0.00".
-    unit_amount_decimal?: string
+    unit_amount_decimal: string
     meter_unit?: string
     amount_cents: number
     tax_amount_cents?: number
@@ -156,7 +153,7 @@ export default function HostedInvoicePage() {
     !!d &&
     paidSignal &&
     d.invoice.status === 'finalized' &&
-    d.invoice.payment_status !== 'succeeded'
+    !invoicePaymentSucceeded(d.invoice)
 
   // Invoice fetch keyed by (token, paidSignal). retry=false so a
   // genuinely invalid token doesn't pound the public endpoint; the
@@ -457,10 +454,10 @@ export default function HostedInvoicePage() {
                     amount_due (it moves into amount_paid), so the shared
                     label/figure pair below would lead with $0.00. */}
                 <p className="text-xs text-muted-foreground uppercase tracking-wider">
-                  {invoice.status === 'paid' ? 'Amount paid' : invoiceAmountLabel(invoice.status)}
+                  {invoiceHeadline(invoice).label}
                 </p>
                 <p className="text-2xl font-semibold text-foreground tabular-nums">
-                  {formatCents(invoice.status === 'paid' ? invoice.amount_paid_cents : invoice.amount_due_cents, invoice.currency)}
+                  {formatCents(invoiceHeadline(invoice).cents, invoice.currency)}
                 </p>
                 {invoice.due_at && invoice.status === 'finalized' && (
                   <p className="text-xs text-muted-foreground mt-1">
@@ -522,12 +519,10 @@ export default function HostedInvoicePage() {
                       <tr key={i} className="border-t">
                         <td className="px-4 py-3 text-foreground">{li.description}</td>
                         <td className="px-4 py-3 text-right text-muted-foreground tabular-nums">
-                          {li.quantity_decimal && Number(li.quantity_decimal) !== 0
-                            ? Number(li.quantity_decimal).toLocaleString(undefined, { maximumFractionDigits: 12 })
-                            : li.quantity}
+                          {formatLineQuantity(li.quantity)}
                         </td>
                         <td className="px-4 py-3 text-right text-muted-foreground tabular-nums hidden sm:table-cell">
-                          {invoiceLineRate(li, li.currency, formatRate(li.unit_amount_decimal ?? li.unit_amount_cents, li.currency))}
+                          {invoiceLineRate(li, li.currency, formatRate(li.unit_amount_decimal, li.currency))}
                         </td>
                         <td className="px-4 py-3 text-right text-foreground tabular-nums">
                           {formatCents(li.amount_cents, li.currency)}
@@ -613,10 +608,10 @@ export default function HostedInvoicePage() {
                     invoiceAmountLabel. */}
                 <div className="flex justify-between pt-2 border-t font-semibold">
                   <dt className="text-foreground">
-                    {invoiceAmountLabel(invoice.status)}
+                    {invoiceAmountLine(invoice).label}
                   </dt>
                   <dd className="text-foreground tabular-nums">
-                    {formatCents(invoice.amount_due_cents, invoice.currency)}
+                    {formatCents(invoiceAmountLine(invoice).cents, invoice.currency)}
                   </dd>
                 </div>
               </dl>
@@ -640,27 +635,27 @@ export default function HostedInvoicePage() {
                 in-flight states (ADR-107), so say WHICH one it is and what,
                 if anything, they should do. */}
             {!data.pay_enabled && !isPaymentSettling(data) &&
-              (data.invoice.payment_status === 'processing' ||
-                data.invoice.payment_status === 'unknown') && (
+              invoicePaymentInFlight(data.invoice) !== null && (
                 <div className="rounded-lg bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 px-4 py-3">
                   <p className="font-medium text-amber-800 dark:text-amber-300">
-                    {data.invoice.payment_status === 'processing'
+                    {invoicePaymentInFlight(data.invoice) === 'processing'
                       ? 'A payment for this invoice is being confirmed'
                       : "We're checking a recent payment on this invoice"}
                   </p>
                   <p className="text-sm text-amber-700/80 dark:text-amber-400/80 mt-1">
-                    {data.invoice.payment_status === 'processing'
+                    {invoicePaymentInFlight(data.invoice) === 'processing'
                       ? "You don't need to do anything — we'll email a receipt once it completes."
                       : "Payment is paused here so you can't be charged twice while we confirm it with our payment provider. If you've already been charged, nothing further is needed; otherwise we'll be in touch."}
                   </p>
                 </div>
               )}
 
-            {/* Owed, but the seller has no payment provider connected: say so
-                instead of offering a Pay button that can only fail. */}
-            {data.pay_unavailable_reason === 'online_payment_unavailable' && (
+            {/* Owed, but it can't be paid online: the seller has no payment
+                provider connected, or the amount is below the card minimum.
+                Say so instead of offering a Pay button that can only fail. */}
+            {data.pay_unavailable_reason && (
               <div role="status" className="rounded-lg bg-muted px-4 py-3 text-sm text-foreground">
-                {payUnavailableCopy(seller)}
+                {payUnavailableCopy(seller, data.pay_unavailable_reason)}
               </div>
             )}
 
@@ -692,7 +687,7 @@ export default function HostedInvoicePage() {
                   ) : (
                     <>
                       <CreditCard size={16} className="mr-2" aria-hidden="true" />
-                      Pay {formatCents(invoice.amount_due_cents, invoice.currency)}
+                      Pay {formatCents(invoiceDueCents(invoice), invoice.currency)}
                       <ExternalLink size={14} className="ml-2 opacity-60" aria-hidden="true" />
                     </>
                   )}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/sagarsuperuser/velox/internal/platform/leader"
 	"strings"
@@ -38,46 +39,42 @@ type OutboxEnqueuer interface {
 
 // SetOutboxEnqueuer wires transactional lifecycle events (2026-07-05,
 // DispatchTx-seam subscription subset): subscription.created / .activated /
-// .canceled / .trial_ended are enqueued IN the transition tx, so a crash in
-// the old commit→dispatch window can no longer silently drop them — a
+// .canceled / .trial_ended, and dunning's .collection_paused, are enqueued
+// IN the transition tx, so a crash in the old commit→dispatch window can
+// no longer silently drop them — a
 // dropped emission left no row anywhere (nothing to replay, nothing to
 // reconcile). Optional — when unset (narrow tests), no events are enqueued.
 func (s *PostgresStore) SetOutboxEnqueuer(o OutboxEnqueuer) { s.outbox = o }
 
-// lifecyclePayload is the shared event payload base — mirrors the shape the
-// handler's fireEvent historically emitted so consumers see no contract
-// change: subscription_id, customer_id, status, item_count, period bounds.
-func lifecyclePayload(sub domain.Subscription, extra map[string]any) map[string]any {
-	payload := map[string]any{
-		"subscription_id": sub.ID,
-		"customer_id":     sub.CustomerID,
-		"status":          string(sub.Status),
-		"item_count":      len(sub.Items),
-	}
-	if sub.CurrentBillingPeriodStart != nil {
-		payload["current_period_start"] = sub.CurrentBillingPeriodStart.UTC()
-	}
-	if sub.CurrentBillingPeriodEnd != nil {
-		payload["current_period_end"] = sub.CurrentBillingPeriodEnd.UTC()
-	}
-	for k, v := range extra {
-		payload[k] = v
-	}
-	return payload
-}
-
-// enqueueLifecycle enqueues one lifecycle event on the caller's tx. An
-// enqueue failure fails the transition — atomicity with the state change is
-// the entire point of the seam (the pre-fix post-commit dispatch could drop
-// the event with no trace). No-op when the enqueuer isn't wired.
+// enqueueLifecycle enqueues one lifecycle event on the caller's tx, carrying
+// sub (ADR-131): the caller passes the row with its items as the
+// transaction has written it. An enqueue failure fails the transition —
+// atomicity with the state change is the entire point of the seam (the
+// pre-fix post-commit dispatch could drop the event with no trace). No-op
+// when the enqueuer isn't wired.
 func (s *PostgresStore) enqueueLifecycle(ctx context.Context, tx *sql.Tx, eventType string, sub domain.Subscription, extra map[string]any) error {
 	if s.outbox == nil {
 		return nil
 	}
-	if _, err := s.outbox.Enqueue(ctx, tx, sub.TenantID, eventType, lifecyclePayload(sub, extra)); err != nil {
+	if _, err := s.outbox.Enqueue(ctx, tx, sub.TenantID, eventType, domain.SubscriptionWebhookData(sub, extra)); err != nil {
 		return fmt.Errorf("enqueue %s: %w", eventType, err)
 	}
 	return nil
+}
+
+// finishCancelTx is the last write of every cancel writer: it retires the
+// row's live-only state (retireLiveOnlyStateTx), then queues
+// subscription.canceled with the row as the transaction leaves it, so the
+// event shows what the API shows after the commit.
+func (s *PostgresStore) finishCancelTx(ctx context.Context, tx *sql.Tx, id string, extra map[string]any) (domain.Subscription, error) {
+	sub, err := retireLiveOnlyStateTx(ctx, tx, id)
+	if err != nil {
+		return domain.Subscription{}, err
+	}
+	if err := s.enqueueLifecycle(ctx, tx, domain.EventSubscriptionCanceled, sub, extra); err != nil {
+		return domain.Subscription{}, err
+	}
+	return sub, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -87,8 +84,8 @@ func (s *PostgresStore) enqueueLifecycle(ctx context.Context, tx *sql.Tx, eventT
 const subCols = `id, tenant_id, code, display_name, customer_id, status, billing_time,
 	trial_start_at, trial_end_at, started_at, activated_at, canceled_at,
 	cancel_at, COALESCE(cancel_at_period_end, false),
-	pause_collection_behavior, pause_collection_resumes_at,
-	billing_threshold_amount_gte, COALESCE(billing_threshold_reset_cycle, true),
+	pause_collection_behavior, pause_collection_resumes_at, pause_collection_invoice_id,
+	billing_threshold_amount_gte,
 	current_billing_period_start, current_billing_period_end, next_billing_at,
 	COALESCE(billing_anchor_day, 0),
 	COALESCE(test_clock_id,''),
@@ -154,6 +151,25 @@ func (s *PostgresStore) createInTx(ctx context.Context, tx *sql.Tx, tenantID str
 	id := postgres.NewID("vlx_sub")
 	now := clock.Now(ctx)
 
+	// A clock customer's subscription takes its clock FOR KEY SHARE before
+	// the insert (ADR-130 §8). The insert's foreign keys lock the customer
+	// first and the clock second. A test-clock teardown holds its clock FOR
+	// UPDATE and later deletes the customer, so waiting at the clock while
+	// holding the customer deadlocks it. Read first, the create waits at the
+	// clock holding nothing the teardown deletes.
+	if sub.TestClockID != "" {
+		var locked string
+		err := tx.QueryRowContext(ctx, `SELECT id FROM test_clocks WHERE id = $1 FOR KEY SHARE`, sub.TestClockID).Scan(&locked)
+		if errors.Is(err, sql.ErrNoRows) {
+			// A teardown of the clock committed while this waited for it,
+			// and deleted the customer with it.
+			return domain.Subscription{}, errs.NotFound("customer")
+		}
+		if err != nil {
+			return domain.Subscription{}, fmt.Errorf("lock test clock %s: %w", sub.TestClockID, err)
+		}
+	}
+
 	err := scanSubRow(tx.QueryRowContext(ctx, `
 		INSERT INTO subscriptions (id, tenant_id, code, display_name, customer_id, status,
 			billing_time, trial_start_at, trial_end_at, started_at,
@@ -182,6 +198,9 @@ func (s *PostgresStore) createInTx(ctx context.Context, tx *sql.Tx, tenantID str
 		}
 		return domain.Subscription{}, err
 	}
+	if err := lockPlansTx(ctx, tx, itemPlanIDs(sub.Items)); err != nil {
+		return domain.Subscription{}, err
+	}
 
 	// Insert each requested item in the same tx. The UNIQUE (subscription_id,
 	// plan_id) constraint rejects duplicate plans in the same request.
@@ -208,8 +227,15 @@ func (s *PostgresStore) createInTx(ctx context.Context, tx *sql.Tx, tenantID str
 		inserted = append(inserted, stored)
 	}
 	sub.Items = inserted
+	items := make([]itemPlan, 0, len(inserted))
+	for _, it := range inserted {
+		items = append(items, itemPlan{itemID: it.ID, planID: it.PlanID})
+	}
+	if err := refuseMeterOverlapTx(ctx, tx, items); err != nil {
+		return domain.Subscription{}, err
+	}
 
-	// ADR-101: a StartNow create IS the items' billable open — one interval
+	// ADR-101: a start-now create IS the items' billable open — one interval
 	// per item at the (already day-snapped) period start, same tx. Draft and
 	// trialing creates open nothing; their activation writer owns it.
 	if sub.Status == domain.SubscriptionActive {
@@ -266,7 +292,7 @@ func (s *PostgresStore) PauseCollections(ctx context.Context, tenantID string, i
 	defer postgres.Rollback(tx)
 
 	rows, err := tx.QueryContext(ctx,
-		`SELECT `+subCols+` FROM subscriptions WHERE id = ANY($1::text[])`, postgres.StringArray(ids))
+		`SELECT `+subCols+` FROM subscriptions WHERE id = ANY($1::text[])`, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -381,6 +407,47 @@ func (s *PostgresStore) ListByTestClock(ctx context.Context, tenantID, clockID s
 	return subs, nil
 }
 
+// ListLiveByCustomer returns every active and trialing subscription of the
+// customer, items and thresholds hydrated, in one transaction. It backs
+// usage ingest's open-period read (usage.OpenPeriodReader), which runs
+// before every event write, so it is one narrow read: no count, no page.
+// Capped at 1000 subscriptions, far above the live ones one customer holds.
+func (s *PostgresStore) ListLiveByCustomer(ctx context.Context, tenantID, customerID string) ([]domain.Subscription, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer postgres.Rollback(tx)
+
+	rows, err := tx.QueryContext(ctx, `
+		SELECT `+qualifiedSubCols("s")+` FROM subscriptions s
+		WHERE s.customer_id = $1 AND s.status IN ('active', 'trialing')
+		ORDER BY s.created_at ASC, s.id ASC LIMIT 1000
+	`, customerID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var subs []domain.Subscription
+	for rows.Next() {
+		var sub domain.Subscription
+		if err := scanSubRow(rows, &sub); err != nil {
+			return nil, err
+		}
+		subs = append(subs, sub)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	_ = rows.Close()
+	for i := range subs {
+		if err := hydrateSubChildrenTx(ctx, tx, &subs[i]); err != nil {
+			return nil, err
+		}
+	}
+	return subs, nil
+}
+
 func cancelSpec() transitionSpec {
 	return transitionSpec{
 		targetStatus: string(domain.SubscriptionCanceled),
@@ -398,12 +465,12 @@ func cancelSpec() transitionSpec {
 // every non-terminal status — draft (operator scrapping a never-activated
 // row), trialing (customer abandoning during trial — by far the dominant
 // industry cancel path; Stripe / Lago / Recurly / Chargebee all allow it),
-// and active. Only canceled/archived are rejected (the row already
+// and active. Only canceled is rejected (the row already
 // terminated). Note: the `paused` source state was removed in PR-8
 // when the hard-pause API was deleted — no path now produces
 // status='paused', so it's not in allowedFrom.
 func (s *PostgresStore) CancelAtomic(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
-	return s.transitionAtomic(ctx, tenantID, id, cancelSpec())
+	return s.CancelAtomicWithBill(ctx, tenantID, id, nil)
 }
 
 // CancelAtomicWithBill cancels the subscription AND runs billFn — the
@@ -412,7 +479,9 @@ func (s *PostgresStore) CancelAtomic(ctx context.Context, tenantID, id string) (
 // an uninvoiced partial period (a revenue leak: there is no final-on-cancel
 // reconciler). ADR-056 coordinator pattern. The external finalize (tax commit +
 // auto-charge) and the proration relief's legs run post-commit via the caller
-// (FinalizeOnCreateInvoice / FinishRelief). billFn may be nil.
+// (FinalizeOnCreateInvoice / FinishRelief). billFn may be nil. billFn gets
+// the row as the flip left it; the row returned, and the one
+// subscription.canceled carries, is the retired one (finishCancelTx).
 func (s *PostgresStore) CancelAtomicWithBill(ctx context.Context, tenantID, id string, billFn func(tx *sql.Tx, canceled domain.Subscription) error) (domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -429,10 +498,62 @@ func (s *PostgresStore) CancelAtomicWithBill(ctx context.Context, tenantID, id s
 			return domain.Subscription{}, err
 		}
 	}
+	// canceled_by comes from cancelActorLabel — the SAME rule the ADR-090
+	// audit row in this transaction uses, so the webhook and the audit
+	// evidence can never disagree about who canceled.
+	if canceled, err = s.finishCancelTx(ctx, tx, id, map[string]any{"canceled_by": cancelActorLabel(ctx)}); err != nil {
+		return domain.Subscription{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return domain.Subscription{}, err
 	}
 	return canceled, nil
+}
+
+// retireLiveOnlyStateTx clears, on a subscription its caller canceled in tx,
+// the state that only says what a live subscription does next: the cancel
+// schedule and its items' pending plan changes. Each cancel writer runs it
+// as the last write of its transaction and returns its row. Left on the row,
+// they made the API and the dashboard show a scheduled cancel (with Undo) or
+// a coming plan change on a canceled subscription. A column added later that
+// only a live subscription uses is cleared here too.
+//
+// The collection pause is not live-only, so it stays. It holds the
+// subscription's unpaid invoices after the cancel: the auto-charge sweep
+// (notPausedForCollection) and the tax retry's auto-finalize read it, and a
+// cancel's own keep_as_draft final invoice is one of them. Clearing it would
+// let Velox charge invoices the operator, or dunning's pause, held back.
+// Resume collection releases them.
+//
+// The pending plan lives on subscription_items, so it takes a second UPDATE.
+// Clearing only the pending columns writes no subscription_item_changes row:
+// the trigger records plan, quantity and removal changes only.
+func retireLiveOnlyStateTx(ctx context.Context, tx *sql.Tx, id string) (domain.Subscription, error) {
+	var sub domain.Subscription
+	if err := scanSubRow(tx.QueryRowContext(ctx, `
+		UPDATE subscriptions
+		SET cancel_at = NULL,
+		    cancel_at_period_end = false
+		WHERE id = $1 AND status = 'canceled'
+		RETURNING `+subCols,
+		id,
+	), &sub); err != nil {
+		return domain.Subscription{}, fmt.Errorf("clear the canceled subscription's cancel schedule: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE subscription_items
+		SET pending_plan_id = NULL,
+		    pending_plan_effective_at = NULL,
+		    updated_at = $2
+		WHERE subscription_id = $1 AND pending_plan_id IS NOT NULL`,
+		id, clock.Now(ctx),
+	); err != nil {
+		return domain.Subscription{}, fmt.Errorf("clear the canceled subscription's pending plan changes: %w", err)
+	}
+	if err := hydrateSubChildrenTx(ctx, tx, &sub); err != nil {
+		return domain.Subscription{}, err
+	}
+	return sub, nil
 }
 
 // ScheduleCancellation persists the soft-cancel intent. The schedule fires
@@ -447,7 +568,7 @@ func (s *PostgresStore) CancelAtomicWithBill(ctx context.Context, tenantID, id s
 // a "free at trial end" intent on a sub an activation writer just flipped
 // would silently turn it into a paid-period cancel. Status drift returns
 // InvalidState (409, re-read). Paused subs remain schedulable (Stripe
-// parity); canceled/archived are rejected — nothing to schedule once
+// parity); canceled is rejected — nothing to schedule once
 // terminated.
 func (s *PostgresStore) ScheduleCancellation(ctx context.Context, tenantID, id string, cancelAt *time.Time, cancelAtPeriodEnd bool, observedStatus domain.SubscriptionStatus) (domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
@@ -467,7 +588,7 @@ func (s *PostgresStore) ScheduleCancellation(ctx context.Context, tenantID, id s
 	err = scanSubRow(tx.QueryRowContext(ctx, `
 		UPDATE subscriptions
 		SET cancel_at = $1, cancel_at_period_end = $2, updated_at = $3
-		WHERE id = $4 AND status = $5 AND status NOT IN ('canceled','archived')
+		WHERE id = $4 AND status = $5 AND status <> 'canceled'
 		RETURNING `+subCols,
 		postgres.NullableTime(cancelAt), cancelAtPeriodEnd, now, id, observedStatus,
 	), &sub)
@@ -501,11 +622,14 @@ func (s *PostgresStore) ScheduleCancellation(ctx context.Context, tenantID, id s
 	return sub, nil
 }
 
-// ClearScheduledCancellation undoes a prior schedule. Idempotent — a row
-// with both fields already cleared returns unchanged. Returns errs.ErrNotFound
-// if the subscription doesn't exist; status is not checked because clearing
-// a schedule on a canceled sub would be a no-op anyway and surfacing
-// not-found there would mask the real "you already canceled" state.
+// ClearScheduledCancellation undoes a prior schedule. A row with no schedule
+// is not written and returns ErrNoScheduledCancel, so only a clear that
+// changed the row announces it (two racing clears: the second sees the
+// cleared row). Returns errs.ErrNotFound if the subscription doesn't exist.
+// Status is not checked: every cancel
+// writer clears the schedule in its own transaction (retireLiveOnlyStateTx),
+// and migration 192 cleared the rows earlier cancels left, so on a canceled
+// subscription this changes nothing.
 func (s *PostgresStore) ClearScheduledCancellation(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -519,11 +643,19 @@ func (s *PostgresStore) ClearScheduledCancellation(ctx context.Context, tenantID
 		UPDATE subscriptions
 		SET cancel_at = NULL, cancel_at_period_end = false, updated_at = $1
 		WHERE id = $2
+		  AND (cancel_at IS NOT NULL OR cancel_at_period_end)
 		RETURNING `+subCols,
 		now, id,
 	), &sub)
 	if err == sql.ErrNoRows {
-		return domain.Subscription{}, errs.ErrNotFound
+		var exists bool
+		if e := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM subscriptions WHERE id = $1)`, id).Scan(&exists); e != nil {
+			return domain.Subscription{}, e
+		}
+		if !exists {
+			return domain.Subscription{}, errs.ErrNotFound
+		}
+		return domain.Subscription{}, ErrNoScheduledCancel
 	}
 	if err != nil {
 		return domain.Subscription{}, err
@@ -549,8 +681,8 @@ func (s *PostgresStore) ClearScheduledCancellation(ctx context.Context, tenantID
 //
 // The CAS proves `expected` (period start + watermark) as well as
 // status='active': a closer that planned this terminal close from a period
-// another writer has since moved (a threshold reset, a swap, a sibling
-// close) writes nothing. Zero rows disambiguate to ErrNotFound (row gone) or
+// another writer has since moved (a swap, a sibling close) writes
+// nothing. Zero rows disambiguate to ErrNotFound (row gone) or
 // ErrWatermarkMoved — ONE sentinel for "already canceled" and "period
 // moved", because in both cases the closer's snapshot is stale and it must
 // roll back and re-read; the engine's bounded retry then finds the sub
@@ -594,15 +726,10 @@ func (s *PostgresStore) FireScheduledCancellationTx(ctx context.Context, tx *sql
 		return domain.Subscription{}, err
 	}
 
-	// Schedule-driven cancel — enqueue in-tx with the schedule provenance
-	// the engine's post-commit dispatch historically stamped.
-	if err := s.enqueueLifecycle(ctx, tx, domain.EventSubscriptionCanceled, sub, map[string]any{
-		"canceled_at": at.UTC(),
-		"canceled_by": "schedule",
-	}); err != nil {
-		return domain.Subscription{}, err
-	}
-	return sub, nil
+	// The engine built this close's invoice from its snapshot before the tx,
+	// so the retire can run before that insert. Schedule-driven cancel:
+	// subscription.canceled is queued in-tx with the schedule provenance.
+	return s.finishCancelTx(ctx, tx, id, map[string]any{"canceled_by": "schedule"})
 }
 
 // WithTenantTx runs fn inside one tenant-scoped transaction: commit when fn
@@ -694,10 +821,7 @@ func (s *PostgresStore) FireScheduledCancellationWithBill(ctx context.Context, t
 		}
 	}
 
-	if err := s.enqueueLifecycle(ctx, tx, domain.EventSubscriptionCanceled, sub, map[string]any{
-		"canceled_at": at.UTC(),
-		"canceled_by": "schedule",
-	}); err != nil {
+	if sub, err = s.finishCancelTx(ctx, tx, id, map[string]any{"canceled_by": "schedule"}); err != nil {
 		return domain.Subscription{}, err
 	}
 
@@ -707,41 +831,46 @@ func (s *PostgresStore) FireScheduledCancellationWithBill(ctx context.Context, t
 	return sub, nil
 }
 
-// SetPauseCollection writes (behavior, resumes_at) onto the row. Rejects
-// rows in canceled/archived since collection-pause on a terminated sub has
-// no meaning — the engine wouldn't observe the row anyway, but failing
-// loudly here keeps the API honest. Active and paused (hard) are both
-// allowed: a hard-paused sub can simultaneously have pause_collection
-// configured for the moment status flips back to active.
-func (s *PostgresStore) SetPauseCollection(ctx context.Context, tenantID, id string, pc domain.PauseCollection) (domain.Subscription, error) {
+// SetPauseCollection writes the operator's (behavior, resumes_at) onto the
+// row and clears pause_collection_invoice_id: an operator who re-pauses a
+// subscription dunning paused takes the pause over, and a payment no longer
+// lifts it. A lifted pause still on the row is resumed first, with its own
+// trigger (clearLiftedPauseTx; onResume writes its audit row). Rejects a
+// canceled row since collection-pause on a terminated sub has no meaning —
+// the engine wouldn't observe the row anyway, but failing loudly here keeps
+// the API honest. Active and paused (hard) are both allowed: a hard-paused
+// sub can simultaneously have pause_collection configured for the moment
+// status flips back to active.
+func (s *PostgresStore) SetPauseCollection(ctx context.Context, tenantID, id string, pc domain.PauseCollection, onResume ResumeAudit) (domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return domain.Subscription{}, err
 	}
 	defer postgres.Rollback(tx)
 
+	locked, err := lockSubForPauseTx(ctx, tx, id)
+	if err != nil {
+		return domain.Subscription{}, err
+	}
+	if locked.Status == domain.SubscriptionCanceled {
+		return domain.Subscription{}, errs.InvalidState(fmt.Sprintf("Collection can't be paused on a %s subscription.", locked.Status))
+	}
 	now := clock.Now(ctx)
+	if err := s.resumeIfLiftedTx(ctx, tx, locked, now, onResume); err != nil {
+		return domain.Subscription{}, err
+	}
+
 	var sub domain.Subscription
 	err = scanSubRow(tx.QueryRowContext(ctx, `
 		UPDATE subscriptions
 		SET pause_collection_behavior = $1,
 		    pause_collection_resumes_at = $2,
+		    pause_collection_invoice_id = NULL,
 		    updated_at = $3
-		WHERE id = $4 AND status NOT IN ('canceled','archived')
+		WHERE id = $4
 		RETURNING `+subCols,
 		string(pc.Behavior), postgres.NullableTime(pc.ResumesAt), now, id,
 	), &sub)
-	if err == sql.ErrNoRows {
-		var currentStatus string
-		err2 := tx.QueryRowContext(ctx, `SELECT status FROM subscriptions WHERE id = $1`, id).Scan(&currentStatus)
-		if err2 == sql.ErrNoRows {
-			return domain.Subscription{}, errs.ErrNotFound
-		}
-		if err2 != nil {
-			return domain.Subscription{}, err2
-		}
-		return domain.Subscription{}, errs.InvalidState(fmt.Sprintf("Collection can't be paused on a %s subscription.", currentStatus))
-	}
 	if err != nil {
 		return domain.Subscription{}, err
 	}
@@ -756,44 +885,305 @@ func (s *PostgresStore) SetPauseCollection(ctx context.Context, tenantID, id str
 	return sub, nil
 }
 
-// ClearPauseCollection nulls both pause_collection_* columns. Idempotent —
-// runs even on a row that already has them null, returning the unchanged
-// subscription. Returns errs.ErrNotFound if the row doesn't exist; status
-// is not checked because clearing a no-op pause on a terminated sub is
-// itself a no-op.
-func (s *PostgresStore) ClearPauseCollection(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
+// lockSubForPauseTx reads the subscription row FOR NO KEY UPDATE, the lock
+// every writer of the pause takes first (lockSubscriptionRow's order).
+func lockSubForPauseTx(ctx context.Context, tx *sql.Tx, id string) (domain.Subscription, error) {
+	var sub domain.Subscription
+	err := scanSubRow(tx.QueryRowContext(ctx, `SELECT `+subCols+` FROM subscriptions WHERE id = $1 FOR NO KEY UPDATE`, id), &sub)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.Subscription{}, errs.ErrNotFound
+	}
+	if err != nil {
+		return domain.Subscription{}, fmt.Errorf("lock subscription for the pause: %w", err)
+	}
+	return sub, nil
+}
+
+// resumeIfLiftedTx resumes locked's pause when it has lifted at now: a
+// writer about to replace or clear it announces its resume first. The row
+// is locked, so the clear cannot miss.
+func (s *PostgresStore) resumeIfLiftedTx(ctx context.Context, tx *sql.Tx, locked domain.Subscription, now time.Time, onResume ResumeAudit) error {
+	if locked.PauseCollection == nil || locked.PauseCollection.InForceAt(now) {
+		return nil
+	}
+	_, ok, err := s.clearLiftedPauseTx(ctx, tx, locked, onResume)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("resume the lifted pause on %s: the locked row changed", locked.ID)
+	}
+	return nil
+}
+
+// clearLiftedPauseTx clears the lifted pause listed holds, and in the same
+// transaction runs onResume (its "Collection resumed" audit row) and
+// queues subscription.collection_resumed, with the trigger and instant of
+// liftedPauseResume. It is the one writer that removes a lifted pause.
+//
+// The clear is a compare-and-set on the pause listed: the row must still
+// hold a lifted pause with the same resumes_at and the same setter
+// (pause_collection_invoice_id set or not). Every writer that replaces a
+// pause writes a new resumes_at (none, or a future one) or clears it, and a
+// payment stamps resumes_at only on a dunning pause with none. So the pair
+// changes whenever the pause does, except on a test clock, where a payment
+// can lift a new dunning pause at the very instant an operator's timed
+// pause reached its date: the setter tells them apart, and with it the
+// trigger. Two dunning pauses lifted at the same instant are not told
+// apart, and need not be: the resume is the same (payment, at that
+// instant). The invoice id is not part of the key for that reason.
+//
+// ok is false when the CAS misses: the pause changed since it was listed,
+// and nothing is written or announced.
+func (s *PostgresStore) clearLiftedPauseTx(ctx context.Context, tx *sql.Tx, listed domain.Subscription, onResume ResumeAudit) (domain.Subscription, bool, error) {
+	pc := listed.PauseCollection
+	if pc == nil || pc.ResumesAt == nil {
+		return domain.Subscription{}, false, nil
+	}
+	r := liftedPauseResume(*pc)
+	ctx = r.bind(ctx, listed)
+	// On a test clock the bound instant is r.At itself, so the lifted check
+	// holds by the resumes_at match: a clock only moves forward.
+	now := clock.Now(ctx)
+	var cleared domain.Subscription
+	err := scanSubRow(tx.QueryRowContext(ctx, `
+		UPDATE subscriptions
+		SET pause_collection_behavior = NULL,
+		    pause_collection_resumes_at = NULL,
+		    pause_collection_invoice_id = NULL,
+		    updated_at = $1
+		WHERE id = $2
+		  AND pause_collection_behavior IS NOT NULL
+		  AND pause_collection_resumes_at = $3
+		  AND pause_collection_resumes_at <= $1
+		  AND (pause_collection_invoice_id IS NOT NULL) = $4
+		RETURNING `+subCols,
+		now, listed.ID, *pc.ResumesAt, pc.SetBy == domain.PauseSetByDunning,
+	), &cleared)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.Subscription{}, false, nil
+	}
+	if err != nil {
+		return domain.Subscription{}, false, fmt.Errorf("clear the lifted pause: %w", err)
+	}
+	if err := hydrateSubChildrenTx(ctx, tx, &cleared); err != nil {
+		return domain.Subscription{}, false, err
+	}
+	if onResume != nil {
+		if err := onResume(ctx, tx, cleared, r); err != nil {
+			return domain.Subscription{}, false, err
+		}
+	}
+	if err := s.enqueueLifecycle(ctx, tx, domain.EventSubscriptionCollectionResumed, cleared, r.eventExtras()); err != nil {
+		return domain.Subscription{}, false, err
+	}
+	return cleared, true, nil
+}
+
+// SetDunningPause is dunning's pause final action for the unpaid invoice
+// invoiceID: keep_as_draft with no resumes_at, recording invoiceID as the
+// invoice whose payment lifts it (ReleaseDunningPauseTx).
+//
+// It locks the subscription row, then the invoice, the order every writer
+// of both takes (lockSubscriptionRow), and pauses only while that invoice
+// is still owed (finalized or uncollectible). A payment that commits
+// between dunning's paid re-check and this write is seen here, and nothing
+// is paused (DunningPauseInvoiceSettled): a pause written after the payment
+// would have nothing left to lift it.
+//
+// It never overrides a pause in force (DunningPauseAlreadyHeld). An
+// operator's pause, timed or not, keeps its resumes_at and stays the
+// operator's; a dunning pause already set, by this run's earlier attempt or
+// by another invoice's dunning, keeps its invoice. A pause whose resumes_at
+// has passed but which the resumer has not cleared yet is not in force: it
+// is resumed first, with its own trigger and onResume's audit row, as the
+// resumer would have (clearLiftedPauseTx), and then replaced.
+// errs.InvalidState covers a canceled subscription.
+//
+// When it pauses, it runs inTx (the service's "Collection paused" audit
+// row) and queues subscription.collection_paused (triggered_by dunning), all
+// in the same transaction.
+func (s *PostgresStore) SetDunningPause(ctx context.Context, tenantID, subID, invoiceID string, inTx func(tx *sql.Tx, sub domain.Subscription) error, onResume ResumeAudit) (domain.Subscription, DunningPauseOutcome, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return domain.Subscription{}, 0, err
+	}
+	defer postgres.Rollback(tx)
+
+	locked, err := lockSubForPauseTx(ctx, tx, subID)
+	if err != nil {
+		return domain.Subscription{}, 0, err
+	}
+	if locked.Status == domain.SubscriptionCanceled {
+		return domain.Subscription{}, 0, errs.InvalidState(fmt.Sprintf("Collection can't be paused on a %s subscription.", locked.Status))
+	}
+
+	var invStatus string
+	err = tx.QueryRowContext(ctx, `SELECT status FROM invoices WHERE id = $1 FOR NO KEY UPDATE`, invoiceID).Scan(&invStatus)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.Subscription{}, 0, errs.ErrNotFound
+	}
+	if err != nil {
+		return domain.Subscription{}, 0, fmt.Errorf("lock invoice for the dunning pause: %w", err)
+	}
+	if invStatus != string(domain.InvoiceFinalized) && invStatus != string(domain.InvoiceUncollectible) {
+		return domain.Subscription{}, DunningPauseInvoiceSettled, nil
+	}
+
+	now := clock.Now(ctx)
+	if locked.PauseCollection.InForceAt(now) {
+		return domain.Subscription{}, DunningPauseAlreadyHeld, nil
+	}
+	if err := s.resumeIfLiftedTx(ctx, tx, locked, now, onResume); err != nil {
+		return domain.Subscription{}, 0, err
+	}
+	var sub domain.Subscription
+	err = scanSubRow(tx.QueryRowContext(ctx, `
+		UPDATE subscriptions
+		SET pause_collection_behavior = $1,
+		    pause_collection_resumes_at = NULL,
+		    pause_collection_invoice_id = $2,
+		    updated_at = $3
+		WHERE id = $4 AND pause_collection_behavior IS NULL
+		RETURNING `+subCols,
+		string(domain.PauseCollectionKeepAsDraft), invoiceID, now, subID,
+	), &sub)
+	if err != nil {
+		// The row is locked and holds no pause: a miss is a bug, not a race.
+		return domain.Subscription{}, 0, fmt.Errorf("write the dunning pause: %w", err)
+	}
+	if err := hydrateSubChildrenTx(ctx, tx, &sub); err != nil {
+		return domain.Subscription{}, 0, err
+	}
+	// The audit row and the event are written with the pause, so they exist
+	// exactly when the pause commits. A re-attempted exhaustion finds the
+	// pause in force above and writes nothing, so a post-commit write that
+	// failed or a crash dropped would never come.
+	if inTx != nil {
+		if err := inTx(tx, sub); err != nil {
+			return domain.Subscription{}, 0, err
+		}
+	}
+	if err := s.enqueueLifecycle(ctx, tx, domain.EventSubscriptionCollectionPaused, sub, map[string]any{
+		"triggered_by": "dunning",
+	}); err != nil {
+		return domain.Subscription{}, 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.Subscription{}, 0, err
+	}
+	return sub, DunningPauseWritten, nil
+}
+
+// LockDunningPauseTx is the first statement of a transaction that may mark
+// invoiceID paid (the invoice store's paid entry points, through
+// invoice.DunningPauseReleaser). When a dunning pause on the invoice's
+// subscription waits for this invoice's payment, it locks the subscription
+// row before the caller locks the invoice, so the release keeps the order
+// every writer of both takes (lockSubscriptionRow): a cancel or plan swap
+// that holds the subscription and then relieves the invoice is waited for,
+// not deadlocked with. Any other subscription is not locked, so a payment
+// waits behind nothing it did not wait behind before.
+//
+// A pause dunning sets after this read usually cannot need the lock:
+// SetDunningPause locks the subscription, then waits for the invoice lock
+// this transaction takes next, and then finds the invoice paid. Not when
+// SetDunningPause already holds the invoice at this read and commits after
+// it: this transaction then waits for the invoice, holds it when the pause
+// commits, and its ReleaseDunningPauseTx waits for the subscription row
+// lock. A transaction holding the subscription that then waits for this
+// invoice's row lock deadlocks with it (40P01, one side fails and is
+// retried). The period closers' watermark read takes FOR KEY SHARE, which
+// does not wait for a payment, for this reason.
+func (s *PostgresStore) LockDunningPauseTx(ctx context.Context, tx *sql.Tx, invoiceID string) error {
+	var one int
+	err := tx.QueryRowContext(ctx, `
+		SELECT 1 FROM subscriptions
+		WHERE id = (SELECT subscription_id FROM invoices WHERE id = $1)
+		  AND pause_collection_invoice_id = $1
+		  AND pause_collection_resumes_at IS NULL
+		FOR NO KEY UPDATE`, invoiceID).Scan(&one)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("lock subscription for the dunning-pause release: %w", err)
+	}
+	return nil
+}
+
+// ReleaseDunningPauseTx runs in the transaction that marks paidInvoiceID
+// paid (the invoice store's markPaidLockedTx, through
+// invoice.DunningPauseReleaser), after LockDunningPauseTx. When dunning
+// paused the subscription's collection for this invoice, it stamps
+// pause_collection_resumes_at = at, the time the payment is recorded. From
+// that instant every reader treats the pause as lifted
+// (PauseCollection.InForceAt), and the scheduled resumer clears it, writes
+// the "Collection resumed" row and sends subscription.collection_resumed,
+// after any period that ended under the pause has closed as a draft.
+//
+// Only the payment of the invoice whose dunning set the pause lifts it
+// (Sagar's A3 decision, 2026-10-21); another invoice still owed does not
+// hold it. An operator's pause (no invoice), a pause already timed, and a
+// canceled subscription are left alone.
+func (s *PostgresStore) ReleaseDunningPauseTx(ctx context.Context, tx *sql.Tx, subID, paidInvoiceID string, at time.Time) error {
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE subscriptions SET pause_collection_resumes_at = $1, updated_at = $1
+		WHERE id = $2
+		  AND pause_collection_invoice_id = $3
+		  AND pause_collection_resumes_at IS NULL
+		  AND status <> 'canceled'`, at, subID, paidInvoiceID); err != nil {
+		return fmt.Errorf("release the dunning pause: %w", err)
+	}
+	return nil
+}
+
+// ClearPauseCollection is the operator's resume: it nulls the
+// pause_collection_* columns, including the invoice a dunning pause waits
+// for. A row with no pause returns ErrNotPaused; a missing row
+// errs.ErrNotFound. A lifted pause (its resumes_at has passed) is resumed
+// with its own trigger and onResume's audit row (clearLiftedPauseTx), and
+// the call returns ErrPauseLifted after the commit: collection had already
+// resumed, so the operator resumed nothing. Status is not checked: a
+// canceled subscription keeps its pause, which still holds its unpaid
+// invoices, and clearing it is how an operator releases them.
+func (s *PostgresStore) ClearPauseCollection(ctx context.Context, tenantID, id string, onResume ResumeAudit) (domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return domain.Subscription{}, err
 	}
 	defer postgres.Rollback(tx)
 
+	// The row lock serializes two clearers (an operator's double click, or
+	// an operator and the resumer); the second reads the cleared row and
+	// gets ErrNotPaused, so only the winner announces the resume (hazard 5
+	// root fix, 2026-08-30).
+	locked, err := lockSubForPauseTx(ctx, tx, id)
+	if err != nil {
+		return domain.Subscription{}, err
+	}
+	if locked.PauseCollection == nil {
+		return domain.Subscription{}, ErrNotPaused
+	}
 	now := clock.Now(ctx)
+	if !locked.PauseCollection.InForceAt(now) {
+		if err := s.resumeIfLiftedTx(ctx, tx, locked, now, onResume); err != nil {
+			return domain.Subscription{}, err
+		}
+		if err := tx.Commit(); err != nil {
+			return domain.Subscription{}, err
+		}
+		return domain.Subscription{}, ErrPauseLifted
+	}
+
 	var sub domain.Subscription
-	// CAS: only a row that IS paused changes. Two clearers racing on the same
-	// row (dual-leader window) serialize on the row lock; the second
-	// re-evaluates the predicate against the cleared row and gets 0 rows —
-	// so only the winner announces the resume (hazard 5 root fix, 2026-08-30).
 	err = scanSubRow(tx.QueryRowContext(ctx, `
 		UPDATE subscriptions
 		SET pause_collection_behavior = NULL,
 		    pause_collection_resumes_at = NULL,
+		    pause_collection_invoice_id = NULL,
 		    updated_at = $1
 		WHERE id = $2
-		  AND pause_collection_behavior IS NOT NULL
 		RETURNING `+subCols,
 		now, id,
 	), &sub)
-	if err == sql.ErrNoRows {
-		var exists bool
-		if e := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM subscriptions WHERE id = $1)`, id).Scan(&exists); e != nil {
-			return domain.Subscription{}, e
-		}
-		if !exists {
-			return domain.Subscription{}, errs.ErrNotFound
-		}
-		return domain.Subscription{}, ErrNotPaused
-	}
 	if err != nil {
 		return domain.Subscription{}, err
 	}
@@ -806,6 +1196,31 @@ func (s *PostgresStore) ClearPauseCollection(ctx context.Context, tenantID, id s
 		return domain.Subscription{}, err
 	}
 	return sub, nil
+}
+
+// ResumeLiftedPause is the scheduled resumers' clear of a lifted pause
+// they listed: clearLiftedPauseTx in its own transaction, with the audit
+// row and subscription.collection_resumed queued in it. It returns
+// ErrNotPaused when the row no longer holds the pause it listed: another
+// writer resumed or replaced it after the list, and announced what it did.
+func (s *PostgresStore) ResumeLiftedPause(ctx context.Context, tenantID string, listed domain.Subscription, onResume ResumeAudit) (domain.Subscription, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return domain.Subscription{}, err
+	}
+	defer postgres.Rollback(tx)
+
+	cleared, ok, err := s.clearLiftedPauseTx(ctx, tx, listed, onResume)
+	if err != nil {
+		return domain.Subscription{}, err
+	}
+	if !ok {
+		return domain.Subscription{}, ErrNotPaused
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.Subscription{}, err
+	}
+	return cleared, nil
 }
 
 // ActivateAfterTrial flips status 'trialing' → 'active' atomically. Sets
@@ -854,6 +1269,9 @@ func (s *PostgresStore) ActivateDraftWithBill(ctx context.Context, tenantID, id 
 		return domain.Subscription{}, err
 	}
 	if err := hydrateSubChildrenTx(ctx, tx, &sub); err != nil {
+		return domain.Subscription{}, err
+	}
+	if err := lockPlansTx(ctx, tx, itemPlanIDs(sub.Items)); err != nil {
 		return domain.Subscription{}, err
 	}
 	// ADR-101: activation IS the items' billable open.
@@ -933,6 +1351,9 @@ func (s *PostgresStore) activateAfterTrialInTx(ctx context.Context, tx *sql.Tx, 
 		return domain.Subscription{}, err
 	}
 	if err := hydrateSubChildrenTx(ctx, tx, &sub); err != nil {
+		return domain.Subscription{}, err
+	}
+	if err := lockPlansTx(ctx, tx, itemPlanIDs(sub.Items)); err != nil {
 		return domain.Subscription{}, err
 	}
 	// ADR-101: trial conversion IS the items' billable open — at the
@@ -1044,6 +1465,9 @@ func (s *PostgresStore) endTrialEarlyInTx(ctx context.Context, tx *sql.Tx, id st
 	if err := hydrateSubChildrenTx(ctx, tx, &sub); err != nil {
 		return domain.Subscription{}, err
 	}
+	if err := lockPlansTx(ctx, tx, itemPlanIDs(sub.Items)); err != nil {
+		return domain.Subscription{}, err
+	}
 	// ADR-101: the early end resets the period anchor above, so the open
 	// lands at the just-stamped period start.
 	if err := intervalOpenForItems(ctx, tx, sub, "trial_convert"); err != nil {
@@ -1130,27 +1554,9 @@ type transitionSpec struct {
 	wrongStateMsg string
 }
 
-func (s *PostgresStore) transitionAtomic(ctx context.Context, tenantID, id string, spec transitionSpec) (domain.Subscription, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return domain.Subscription{}, err
-	}
-	defer postgres.Rollback(tx)
-
-	sub, err := s.transitionInTx(ctx, tx, id, spec, clock.Now(ctx))
-	if err != nil {
-		return domain.Subscription{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return domain.Subscription{}, err
-	}
-	return sub, nil
-}
-
 // transitionInTx runs the status-transition UPDATE (+ child hydration) on the
-// given tx WITHOUT committing. Shared by transitionAtomic and the
-// CancelAtomicWithBill coordinator so the final-on-cancel invoice can join the
-// same transaction (ADR-056).
+// given tx WITHOUT committing, for the CancelAtomicWithBill coordinator, so
+// the final-on-cancel invoice can join the same transaction (ADR-056).
 func (s *PostgresStore) transitionInTx(ctx context.Context, tx *sql.Tx, id string, spec transitionSpec, now time.Time) (domain.Subscription, error) {
 	// Build the WHERE status IN (...) clause with positional args starting at $3
 	// ($1 = updated_at, $2 = id). canceled_at slots in at $3 when needed.
@@ -1204,23 +1610,13 @@ func (s *PostgresStore) transitionInTx(ctx context.Context, tx *sql.Tx, id strin
 	}
 
 	// Cancel via CancelAtomic / CancelAtomicWithBill (cancelSpec is the only
-	// canceled-target spec). Enqueue in-tx. canceled_by comes from
-	// cancelActorLabel — the SAME rule the ADR-090 audit row in this very
-	// transaction uses, so the outbound webhook and the audit evidence can
-	// never disagree about who canceled. Pre-fix this hardcoded "operator"
-	// while the audit row could say "dunning" for the same event.
+	// canceled-target spec). CancelAtomicWithBill queues subscription.canceled
+	// in this transaction once the row is final (finishCancelTx).
 	if spec.targetStatus == "canceled" {
 		// ADR-101: an immediate cancel seals every open interval — at the
 		// cancel instant for the common mid-period case, capped at the
 		// period end the final invoice covers.
 		if err := intervalCloseAllForCancel(ctx, tx, sub, now); err != nil {
-			return domain.Subscription{}, err
-		}
-		extra := map[string]any{"canceled_by": cancelActorLabel(ctx)}
-		if sub.CanceledAt != nil {
-			extra["canceled_at"] = sub.CanceledAt.UTC()
-		}
-		if err := s.enqueueLifecycle(ctx, tx, domain.EventSubscriptionCanceled, sub, extra); err != nil {
 			return domain.Subscription{}, err
 		}
 	}
@@ -1235,6 +1631,10 @@ func (s *PostgresStore) transitionInTx(ctx context.Context, tx *sql.Tx, id strin
 // instant billSubscription's own checks use: an arm that admitted a row the
 // engine then declined would be saved as errStillDue on a healthy sub.
 func (s *PostgresStore) GetDueBilling(ctx context.Context, now, dueBy time.Time, exclude []string, limit int) ([]domain.Subscription, error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return nil, err
+	}
 	// Leader-only funnel (ADR-114): the claim proves the caller's lease token
 	// in its own snapshot. Outside a led tick this fails loud — never an
 	// unfenced fallback.
@@ -1271,8 +1671,8 @@ func (s *PostgresStore) GetDueBilling(ctx context.Context, now, dueBy time.Time,
 	// with an explicit WHERE clause since TxBypass doesn't set app.livemode.
 	//
 	// exclude: subs the billing drain already attempted this run (P27). The
-	// COALESCE is load-bearing: a nil slice reaches Postgres as NULL (see
-	// postgres.StringArray), and NOT (id = ANY(NULL)) is NULL, which would
+	// COALESCE is load-bearing: pgx sends a nil slice as NULL, and
+	// NOT (id = ANY(NULL)) is NULL, which would
 	// drop every row. The drain's first page always passes nil.
 	//
 	// Billing-failure gate (ADR-119): a sub whose saved failure is parked, or
@@ -1292,7 +1692,7 @@ func (s *PostgresStore) GetDueBilling(ctx context.Context, now, dueBy time.Time,
 		  AND NOT (s.id = ANY(COALESCE($6::text[], '{}')))
 		ORDER BY s.next_billing_at ASC LIMIT $3
 		FOR UPDATE OF s SKIP LOCKED
-	`, postgres.Livemode(ctx), now, limit, string(leader.RoleBilling), token, postgres.StringArray(exclude), dueBy)
+	`, live, now, limit, string(leader.RoleBilling), token, exclude, dueBy)
 	if err != nil {
 		return nil, err
 	}
@@ -1362,7 +1762,7 @@ func (s *PostgresStore) GetDueBillingForTenant(ctx context.Context, tenantID str
 		  AND NOT (s.id = ANY(COALESCE($3::text[], '{}')))
 		ORDER BY s.next_billing_at ASC LIMIT $2
 		FOR UPDATE OF s SKIP LOCKED
-	`, now, limit, postgres.StringArray(exclude), dueBy)
+	`, now, limit, exclude, dueBy)
 	if err != nil {
 		return nil, err
 	}
@@ -1421,7 +1821,7 @@ func (s *PostgresStore) GetDueBillingForClock(ctx context.Context, tenantID, clo
 		  AND NOT (s.id = ANY(COALESCE($3::text[], '{}')))
 		ORDER BY s.next_billing_at ASC LIMIT $2
 		FOR UPDATE OF s SKIP LOCKED
-	`, clockID, limit, postgres.StringArray(exclude))
+	`, clockID, limit, exclude)
 	if err != nil {
 		return nil, err
 	}
@@ -1482,6 +1882,10 @@ func resumeNotWaitingOnCloseSQL(a string) string {
 // but whose next_billing_at was still in the future would stay
 // paused indefinitely. The new scan closes that gap.
 func (s *PostgresStore) ListExpiredPauseCollections(ctx context.Context, before time.Time, limit int) ([]domain.Subscription, error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return nil, err
+	}
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		return nil, err
@@ -1500,7 +1904,7 @@ func (s *PostgresStore) ListExpiredPauseCollections(ctx context.Context, before 
 		  AND `+resumeNotWaitingOnCloseSQL("s")+`
 		ORDER BY s.pause_collection_resumes_at ASC LIMIT $3
 		FOR UPDATE OF s SKIP LOCKED
-	`, postgres.Livemode(ctx), before, limit)
+	`, live, before, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -1584,9 +1988,9 @@ func (s *PostgresStore) ListExpiredPauseCollectionsForClock(ctx context.Context,
 // invoice exists.
 //
 // Normal cycle close passes the sub's existing BillingAnchorDay unchanged;
-// the re-anchor paths (cross-interval plan swap, threshold reset) pass the
-// recomputed anchor day for the new "now" cadence (ADR-055). A verify-only
-// caller (the reset=false threshold fire) passes the row's CURRENT values: it
+// the re-anchor path (cross-interval plan swap) passes the recomputed anchor
+// day for the new "now" cadence (ADR-055). A verify-only caller (the
+// threshold fire) passes the row's CURRENT values: it
 // must be an UPDATE, not SELECT … FOR UPDATE, so every closer shares one
 // statement, one lock mode and one test — FOR UPDATE would also take the
 // stronger lock that blocks the FK FOR KEY SHARE of unrelated invoice inserts.
@@ -1754,9 +2158,14 @@ func (s *PostgresStore) ClosePeriod(ctx context.Context, tenantID, id string, ex
 // (ADR-115). That mode leaves the FOR KEY SHARE of an invoice insert's
 // foreign-key check free.
 //
-// With every item writer taking this row first, all writers of a
-// subscription's state lock in one order: subscription row, item rows,
-// billing_intervals, invoices. So two of them cannot deadlock, and a change
+// Every writer of a subscription's state takes this row first. A writer that
+// references more than one plan takes them next (lockPlansTx); item rows,
+// billing_intervals and invoices come after. The dunning pause takes the same
+// order: its write (SetDunningPause) and the payment that lifts it
+// (LockDunningPauseTx, before the payment locks the invoice) lock the
+// subscription row first, except when the pause commits after the payment's
+// check (see
+// LockDunningPauseTx). So two of them cannot deadlock, and a change
 // that read the state under this lock (LockForItemChangeTx) has seen every
 // item change that committed before it. A transaction that already holds the
 // row (the plan swap after its period CAS, an item change after
@@ -1783,6 +2192,129 @@ func lockSubscriptionOfItem(ctx context.Context, tx *sql.Tx, itemID string) erro
 		return errs.ErrNotFound
 	}
 	return err
+}
+
+// lockPlansTx takes every plan a writer will reference, in ascending id, in
+// one statement (D08 §4.21). FOR KEY SHARE is the lock the foreign-key checks
+// on subscription_items, subscription_item_changes and billing_intervals
+// take, so those checks then find it held.
+//
+// Without it, the checks take plans in the order the statements reach them.
+// A swap A→B reaches B first (the item's new plan_id), then A (the change
+// row's from_plan_id). The meter-in-use guard (D05, CountSubsUsingMeterTx)
+// locks the plans that list a meter FOR UPDATE in ascending id. With
+// id(A) < id(B) the two waited on each other, and Postgres aborted one with
+// a deadlock error (40P01). Both now take plans in the same order.
+//
+// A writer that references more than one plan calls it right after its
+// subscription row, before it locks any other row. D05 is the only plan lock
+// that blocks FOR KEY SHARE, and it waits only for plans. A writer that waits
+// for a plan while it holds another row can still close a cycle through a
+// third transaction: one that holds a higher plan and waits for that row. The
+// cross-interval swap is the case: an activation holds plan B and waits for
+// the tenant's number row to number its invoice, D05 holds A and waits for B,
+// and a swap off A that has numbered its refund credit note waits for A. So
+// the swap takes its plans (LockPlansTx) after its period CAS and before its
+// refund drafts. Item add and schedule call it too, though one plan is in
+// order by itself. Quantity change and removal reference only the item's own
+// plan and leave it to their foreign-key checks. Those run in the item write,
+// before the proration invoice or clawback credit note takes a number, and
+// must stay there (internal/api TestE2E_ItemChange_ReachesItsPlanBeforeTheNumberRow).
+//
+// The order is the database's ORDER BY id, the one D05 uses. A plan RLS hides
+// from the transaction is not locked here; its foreign-key check still
+// refuses or locks it as before.
+func lockPlansTx(ctx context.Context, tx *sql.Tx, planIDs []string) error {
+	ids := make([]string, 0, len(planIDs))
+	seen := make(map[string]bool, len(planIDs))
+	for _, id := range planIDs {
+		if id != "" && !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx,
+		`SELECT id FROM plans WHERE id = ANY($1) ORDER BY id FOR KEY SHARE`,
+		ids,
+	); err != nil {
+		return fmt.Errorf("lock plans: %w", err)
+	}
+	return nil
+}
+
+// itemPlan is an item and the plan a write just put on it (its plan, or
+// its pending plan).
+type itemPlan struct{ itemID, planID string }
+
+// refuseMeterOverlapTx is the double-billing guard (Service.rejectMeterOverlap)
+// again, on the write's transaction, after the write. Each item's new plan
+// must price no meter that another live item of the customer prices, its
+// own subscription's other items included.
+//
+// The service checks before the transaction, on the plans' meters as they
+// were then. A price for a new meter can commit in between: on a plan no one
+// has used it runs no overlap check, and on a used plan its check cannot see
+// an item that is not written yet. A price write holds its plan FOR UPDATE,
+// and the writer holds the plan FOR KEY SHARE (lockPlansTx) before this
+// check. So a price that committed first is read here, and one that comes
+// later waits for this transaction, then sees the item and refuses the
+// meter (pricing's 409 meter_overlap).
+func refuseMeterOverlapTx(ctx context.Context, tx *sql.Tx, items []itemPlan) error {
+	itemIDs := make([]string, 0, len(items))
+	planIDs := make([]string, 0, len(items))
+	for _, it := range items {
+		if it.planID != "" {
+			itemIDs = append(itemIDs, it.itemID)
+			planIDs = append(planIDs, it.planID)
+		}
+	}
+	if len(itemIDs) == 0 {
+		return nil
+	}
+	var meterID, code string
+	var sameSub bool
+	err := tx.QueryRowContext(ctx, `
+		SELECT pp.meter_id, s2.code, s2.id = own.id
+		FROM unnest($1::text[], $2::text[]) AS n(item_id, plan_id)
+		JOIN subscription_items ni ON ni.id = n.item_id
+		JOIN subscriptions own ON own.id = ni.subscription_id
+		JOIN plan_prices pp ON pp.plan_id = n.plan_id
+		JOIN subscriptions s2 ON s2.customer_id = own.customer_id AND s2.status IN ('draft', 'trialing', 'active')
+		JOIN subscription_items b ON b.subscription_id = s2.id AND b.deleted_at IS NULL AND b.id <> n.item_id
+		JOIN plan_prices pb ON pb.meter_id = pp.meter_id AND (pb.plan_id = b.plan_id OR pb.plan_id = b.pending_plan_id)
+		ORDER BY pp.meter_id, s2.code
+		LIMIT 1`, itemIDs, planIDs).Scan(&meterID, &code, &sameSub)
+	if err == sql.ErrNoRows {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("check meter overlap: %w", err)
+	}
+	if sameSub {
+		return errs.InvalidState(fmt.Sprintf(
+			"this subscription already has an item billing meter %s — usage would be invoiced twice; remove or swap the existing item instead",
+			meterID))
+	}
+	return errs.InvalidState(fmt.Sprintf(
+		"subscription %q already bills meter %s for this customer — usage would be invoiced twice; cancel that subscription first, or price both plans as items on one subscription",
+		code, meterID))
+}
+
+// itemPlanIDs is the plan of each item.
+func itemPlanIDs(items []domain.SubscriptionItem) []string {
+	ids := make([]string, 0, len(items))
+	for _, it := range items {
+		ids = append(ids, it.PlanID)
+	}
+	return ids
+}
+
+// LockPlansTx: see the Store interface.
+func (s *PostgresStore) LockPlansTx(ctx context.Context, tx *sql.Tx, planIDs []string) error {
+	return lockPlansTx(ctx, tx, planIDs)
 }
 
 // LockForItemChangeTx: see the Store interface. tenantID is accepted for
@@ -1863,6 +2395,9 @@ func (s *PostgresStore) addItemInTx(ctx context.Context, tx *sql.Tx, tenantID st
 	if err := lockSubscriptionRow(ctx, tx, item.SubscriptionID); err != nil {
 		return domain.SubscriptionItem{}, err
 	}
+	if err := lockPlansTx(ctx, tx, []string{item.PlanID}); err != nil {
+		return domain.SubscriptionItem{}, err
+	}
 	qty := item.Quantity
 	if qty <= 0 {
 		qty = 1
@@ -1880,6 +2415,9 @@ func (s *PostgresStore) addItemInTx(ctx context.Context, tx *sql.Tx, tenantID st
 			return domain.SubscriptionItem{}, errs.AlreadyExists("plan_id",
 				fmt.Sprintf("subscription already has an item for plan %q", item.PlanID))
 		}
+		return domain.SubscriptionItem{}, err
+	}
+	if err := refuseMeterOverlapTx(ctx, tx, []itemPlan{{itemID: stored.ID, planID: stored.PlanID}}); err != nil {
 		return domain.SubscriptionItem{}, err
 	}
 	// ADR-101: same-tx interval open (with the day-grade 'add' clamp).
@@ -1970,6 +2508,19 @@ func (s *PostgresStore) applyItemPlanImmediatelyInTx(ctx context.Context, tx *sq
 	if err := lockSubscriptionOfItem(ctx, tx, itemID); err != nil {
 		return domain.SubscriptionItem{}, err
 	}
+	// The swap references the item's current plan (the change row's
+	// from_plan_id) and the new one. The current plan cannot change now:
+	// every item writer takes the subscription row first.
+	var currentPlanID string
+	if err := tx.QueryRowContext(ctx, `SELECT plan_id FROM subscription_items WHERE id = $1`, itemID).Scan(&currentPlanID); err != nil {
+		if err == sql.ErrNoRows {
+			return domain.SubscriptionItem{}, errs.ErrNotFound
+		}
+		return domain.SubscriptionItem{}, err
+	}
+	if err := lockPlansTx(ctx, tx, []string{currentPlanID, newPlanID}); err != nil {
+		return domain.SubscriptionItem{}, err
+	}
 	// Clears any scheduled change — an immediate swap supersedes a pending one.
 	// deleted_at IS NULL: as in updateItemQuantityInTx.
 	var stored domain.SubscriptionItem
@@ -1992,6 +2543,9 @@ func (s *PostgresStore) applyItemPlanImmediatelyInTx(ctx context.Context, tx *sq
 			return domain.SubscriptionItem{}, errs.AlreadyExists("plan_id",
 				fmt.Sprintf("subscription already has an item for plan %q", newPlanID))
 		}
+		return domain.SubscriptionItem{}, err
+	}
+	if err := refuseMeterOverlapTx(ctx, tx, []itemPlan{{itemID: stored.ID, planID: newPlanID}}); err != nil {
 		return domain.SubscriptionItem{}, err
 	}
 	// ADR-101: the plan swap moves at its effective instant, same tx.
@@ -2028,6 +2582,9 @@ func (s *PostgresStore) setItemPendingPlanInTx(ctx context.Context, tx *sql.Tx, 
 	if err := lockSubscriptionOfItem(ctx, tx, itemID); err != nil {
 		return domain.SubscriptionItem{}, err
 	}
+	if err := lockPlansTx(ctx, tx, []string{pendingPlanID}); err != nil {
+		return domain.SubscriptionItem{}, err
+	}
 	now := clock.Now(ctx)
 	var stored domain.SubscriptionItem
 	// deleted_at IS NULL: as in updateItemQuantityInTx.
@@ -2044,6 +2601,9 @@ func (s *PostgresStore) setItemPendingPlanInTx(ctx context.Context, tx *sql.Tx, 
 		return domain.SubscriptionItem{}, errs.ErrNotFound
 	}
 	if err != nil {
+		return domain.SubscriptionItem{}, err
+	}
+	if err := refuseMeterOverlapTx(ctx, tx, []itemPlan{{itemID: stored.ID, planID: pendingPlanID}}); err != nil {
 		return domain.SubscriptionItem{}, err
 	}
 	return stored, nil
@@ -2082,6 +2642,14 @@ func (s *PostgresStore) ClearItemPendingPlan(ctx context.Context, tenantID, item
 	return stored, nil
 }
 
+// duePendingItemsWhere selects a subscription's items whose scheduled plan
+// change is due at $1 ($2 is the subscription id).
+const duePendingItemsWhere = `subscription_id = $2
+		  AND deleted_at IS NULL
+		  AND pending_plan_id IS NOT NULL
+		  AND pending_plan_effective_at IS NOT NULL
+		  AND pending_plan_effective_at <= $1`
+
 func (s *PostgresStore) ApplyDuePendingItemPlansAtomic(ctx context.Context, tenantID, subscriptionID string, now time.Time) ([]domain.SubscriptionItem, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -2089,6 +2657,34 @@ func (s *PostgresStore) ApplyDuePendingItemPlansAtomic(ctx context.Context, tena
 	}
 	defer postgres.Rollback(tx)
 	if err := lockSubscriptionRow(ctx, tx, subscriptionID); err != nil {
+		return nil, err
+	}
+	// Each due item references its current plan (the change row's
+	// from_plan_id) and its pending one. The same predicate as the UPDATE
+	// below, read under the subscription row lock, so the set cannot change.
+	var duePlans []string
+	if err := func() error {
+		rows, err := tx.QueryContext(ctx, `
+			SELECT plan_id, pending_plan_id FROM subscription_items
+			WHERE `+duePendingItemsWhere,
+			now, subscriptionID,
+		)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var cur, pending string
+			if err := rows.Scan(&cur, &pending); err != nil {
+				return err
+			}
+			duePlans = append(duePlans, cur, pending)
+		}
+		return rows.Err()
+	}(); err != nil {
+		return nil, fmt.Errorf("read due plan changes: %w", err)
+	}
+	if err := lockPlansTx(ctx, tx, duePlans); err != nil {
 		return nil, err
 	}
 
@@ -2106,11 +2702,7 @@ func (s *PostgresStore) ApplyDuePendingItemPlansAtomic(ctx context.Context, tena
 		    pending_plan_id = NULL,
 		    pending_plan_effective_at = NULL,
 		    updated_at = $1
-		WHERE subscription_id = $2
-		  AND deleted_at IS NULL
-		  AND pending_plan_id IS NOT NULL
-		  AND pending_plan_effective_at IS NOT NULL
-		  AND pending_plan_effective_at <= $1
+		WHERE `+duePendingItemsWhere+`
 		RETURNING `+itemCols,
 		now, subscriptionID,
 	)
@@ -2192,12 +2784,11 @@ func (s *PostgresStore) removeItemInTx(ctx context.Context, tx *sql.Tx, itemID s
 
 // FindMeterConflicts implements the double-billing guard's conflict scan:
 // one query walks the customer's live (draft/trialing/active) subs → live
-// items → plans → unnested meter_ids, intersected with the candidate set.
-// pending_plan_id joins too — a scheduled swap starts billing its meters at
-// the next cycle boundary, so admitting an overlap against it now just
-// defers the double-bill. Tenant scoping rides the RLS tx like every other
-// reader; candidate meters travel as a jsonb array (matching how plans
-// store meter_ids) rather than pulling in a driver-specific array type.
+// items → the meters their plans have ever priced, intersected with the
+// candidate set. pending_plan_id joins too — a scheduled swap starts billing
+// its meters at the next cycle boundary, so admitting an overlap against it
+// now just defers the double-bill. Tenant scoping rides the RLS tx like
+// every other reader.
 func (s *PostgresStore) FindMeterConflicts(ctx context.Context, tenantID, customerID, excludeItemID string, meterIDs []string) ([]MeterConflict, error) {
 	if len(meterIDs) == 0 {
 		return nil, nil
@@ -2217,13 +2808,8 @@ func (s *PostgresStore) FindMeterConflicts(ctx context.Context, tenantID, custom
 		FROM subscriptions sub
 		JOIN subscription_items si
 		  ON si.subscription_id = sub.id AND si.deleted_at IS NULL
-		JOIN plans p
-		  ON p.id = si.plan_id OR p.id = si.pending_plan_id
-		-- meter_ids is 'null' (not '[]') for meterless plans — the pricing
-		-- store marshals a nil slice — and unnesting a scalar is an error.
-		CROSS JOIN LATERAL jsonb_array_elements_text(
-			CASE WHEN jsonb_typeof(p.meter_ids) = 'array' THEN p.meter_ids ELSE '[]'::jsonb END
-		) AS m(meter_id)
+		JOIN plan_prices m
+		  ON m.plan_id = si.plan_id OR m.plan_id = si.pending_plan_id
 		WHERE sub.customer_id = $1
 		  AND sub.status IN ('draft', 'trialing', 'active')
 		  AND si.id <> $2
@@ -2250,12 +2836,12 @@ func (s *PostgresStore) FindMeterConflicts(ctx context.Context, tenantID, custom
 // Billing thresholds
 // ---------------------------------------------------------------------------
 
-// SetBillingThresholds writes the (amount_gte, reset_cycle, item_thresholds)
-// triple onto the row in one transaction. Replaces the per-item threshold
+// SetBillingThresholds writes the (amount_gte, item_thresholds) pair onto
+// the row in one transaction. Replaces the per-item threshold
 // set: any item_thresholds row not in the new slice is deleted, present
 // rows are upserted by primary key (subscription_item_id).
 //
-// Rejects rows in canceled/archived since a threshold on a terminal
+// Rejects a canceled row since a threshold on a terminal
 // subscription has no meaning — the engine wouldn't observe it anyway,
 // but the API surface should be consistent. Service layer is responsible
 // for validating that every t.ItemThresholds[i].SubscriptionItemID
@@ -2280,11 +2866,10 @@ func (s *PostgresStore) SetBillingThresholds(ctx context.Context, tenantID, id s
 	err = scanSubRow(tx.QueryRowContext(ctx, `
 		UPDATE subscriptions
 		SET billing_threshold_amount_gte = $1,
-		    billing_threshold_reset_cycle = $2,
-		    updated_at = $3
-		WHERE id = $4 AND status NOT IN ('canceled','archived')
+		    updated_at = $2
+		WHERE id = $3 AND status <> 'canceled'
 		RETURNING `+subCols,
-		amountArg, t.ResetBillingCycle, now, id,
+		amountArg, now, id,
 	), &sub)
 	if err == sql.ErrNoRows {
 		var currentStatus string
@@ -2346,9 +2931,8 @@ func (s *PostgresStore) SetBillingThresholds(ctx context.Context, tenantID, id s
 	return sub, nil
 }
 
-// ClearBillingThresholds nulls the amount_gte column, resets reset_cycle
-// to its default (true), and deletes every per-item threshold row for
-// this subscription. Idempotent — clearing on a sub with no threshold
+// ClearBillingThresholds nulls the amount_gte column and deletes every
+// per-item threshold row for this subscription. Idempotent — clearing on a sub with no threshold
 // returns the unchanged subscription.
 func (s *PostgresStore) ClearBillingThresholds(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
@@ -2362,7 +2946,6 @@ func (s *PostgresStore) ClearBillingThresholds(ctx context.Context, tenantID, id
 	err = scanSubRow(tx.QueryRowContext(ctx, `
 		UPDATE subscriptions
 		SET billing_threshold_amount_gte = NULL,
-		    billing_threshold_reset_cycle = TRUE,
 		    updated_at = $1
 		WHERE id = $2
 		RETURNING `+subCols,
@@ -2762,15 +3345,14 @@ type rowScanner interface {
 
 // scanSubRow scans subCols into sub. Handles fields that need post-processing
 // — currently the nullable (behavior, resumes_at) pair that composes into
-// the *PauseCollection field on the domain struct, plus the (amount_gte,
-// reset_cycle) pair that composes into BillingThresholds. Per-item
+// the *PauseCollection field on the domain struct, plus amount_gte, which
+// composes into BillingThresholds. Per-item
 // thresholds are hydrated separately by hydrateThresholds since they
 // live in an aux table.
 func scanSubRow(row rowScanner, sub *domain.Subscription) error {
-	var pauseBehavior sql.NullString
+	var pauseBehavior, pauseInvoiceID sql.NullString
 	var pauseResumesAt sql.NullTime
 	var thresholdAmountGTE sql.NullInt64
-	var thresholdResetCycle bool
 	var failedFor, failedAt, nextAttemptAt sql.NullTime
 	var failureCount int
 	var lastError string
@@ -2779,8 +3361,8 @@ func scanSubRow(row rowScanner, sub *domain.Subscription) error {
 		&sub.Status, &sub.BillingTime, &sub.TrialStartAt, &sub.TrialEndAt, &sub.StartedAt,
 		&sub.ActivatedAt, &sub.CanceledAt,
 		&sub.CancelAt, &sub.CancelAtPeriodEnd,
-		&pauseBehavior, &pauseResumesAt,
-		&thresholdAmountGTE, &thresholdResetCycle,
+		&pauseBehavior, &pauseResumesAt, &pauseInvoiceID,
+		&thresholdAmountGTE,
 		&sub.CurrentBillingPeriodStart,
 		&sub.CurrentBillingPeriodEnd, &sub.NextBillingAt,
 		&sub.BillingAnchorDay,
@@ -2795,6 +3377,10 @@ func scanSubRow(row rowScanner, sub *domain.Subscription) error {
 	if pauseBehavior.Valid {
 		pc := &domain.PauseCollection{
 			Behavior: domain.PauseCollectionBehavior(pauseBehavior.String),
+			SetBy:    domain.PauseSetByOperator,
+		}
+		if pauseInvoiceID.Valid {
+			pc.SetBy = domain.PauseSetByDunning
 		}
 		if pauseResumesAt.Valid {
 			t := pauseResumesAt.Time
@@ -2805,15 +3391,11 @@ func scanSubRow(row rowScanner, sub *domain.Subscription) error {
 	// BillingThresholds is partially populated here from the columns on the
 	// row. ItemThresholds is filled in by hydrateThresholds because it lives
 	// in an aux table. The struct is allocated here only when amount_gte is
-	// set; for item-only thresholds hydrateThresholds allocates it and
-	// re-reads the row's reset_cycle column itself (it is NOT derivable
-	// from struct-nilness — assuming the column default here is the bug
-	// fixed 2026-07-21).
+	// set; for item-only thresholds hydrateThresholds allocates it.
 	if thresholdAmountGTE.Valid {
 		sub.BillingThresholds = &domain.BillingThresholds{
-			AmountGTE:         thresholdAmountGTE.Int64,
-			ResetBillingCycle: thresholdResetCycle,
-			ItemThresholds:    []domain.SubscriptionItemThreshold{},
+			AmountGTE:      thresholdAmountGTE.Int64,
+			ItemThresholds: []domain.SubscriptionItemThreshold{},
 		}
 	}
 	// ADR-069: derive the read-only cancel_effective_at at THE scan choke
@@ -2914,21 +3496,8 @@ func hydrateThresholds(ctx context.Context, tx *sql.Tx, sub *domain.Subscription
 	}
 	if sub.BillingThresholds == nil {
 		// Item-only thresholds: scanSubRow allocates the struct only when
-		// amount_gte is set, so the row's real reset_cycle value was
-		// discarded — read it back rather than guess. Fabricating `true`
-		// here made every item-only threshold sub re-anchor its cycle on
-		// fire regardless of the stored flag (found live, FLOW B14
-		// 2026-07-21: engine + API both consumed the fabricated value).
-		var resetCycle bool
-		if err := tx.QueryRowContext(ctx, `
-			SELECT billing_threshold_reset_cycle FROM subscriptions WHERE id = $1
-		`, sub.ID).Scan(&resetCycle); err != nil {
-			return fmt.Errorf("read reset_cycle for item thresholds on %s: %w", sub.ID, err)
-		}
-		sub.BillingThresholds = &domain.BillingThresholds{
-			ResetBillingCycle: resetCycle,
-			ItemThresholds:    items,
-		}
+		// amount_gte is set.
+		sub.BillingThresholds = &domain.BillingThresholds{ItemThresholds: items}
 		return nil
 	}
 	sub.BillingThresholds.ItemThresholds = items
@@ -3003,6 +3572,19 @@ func buildSubWhere(f ListFilter) (string, []any) {
 		// can never disagree about which subscriptions are failing.
 		clauses = append(clauses, domain.SubscriptionBillingFailingSQL("s"))
 	}
+	if f.Collection == ListCollectionPaused {
+		// Live rows only, the same rule as the dashboard's pause chip: a
+		// canceled row can still carry the pause columns, and nothing is
+		// collected from it for a reason the pause explains. And only a
+		// pause in force now, the engine's rule (PauseCollection.InForceAt):
+		// a timed pause stops holding collection at resumes_at, though the
+		// resumer leaves it on the row while a period that ended before then
+		// is still open. "Now" is the subscription's test clock, when it has
+		// one, as in the clock's charge sweep.
+		clauses = append(clauses, `(s.pause_collection_behavior IS NOT NULL AND s.status IN ('active','trialing')
+			AND (s.pause_collection_resumes_at IS NULL OR s.pause_collection_resumes_at >
+			     COALESCE((SELECT tc.frozen_time FROM test_clocks tc WHERE tc.id = s.test_clock_id), now())))`)
+	}
 	if f.Search != "" {
 		// One placeholder reused across both columns — Postgres
 		// allows repeating $N, and it keeps the pattern arg single-
@@ -3032,14 +3614,14 @@ func buildSubWhere(f ListFilter) (string, []any) {
 }
 
 // CountLiveSubsByPlan returns the number of subscriptions referencing
-// the given plan whose status is not canceled or archived. Used by
+// the given plan whose status is not canceled. Used by
 // pricing.Service.UpdatePlan (ADR-034) to gate billing-affecting
 // field mutations — once any live sub attaches, the plan's base
 // price / timing / meter set is frozen.
 //
-// "Live" excludes canceled + archived. Draft / active / trialing /
-// paused all qualify because they can still produce future invoices
-// and need deterministic terms.
+// "Live" excludes canceled. Draft, trialing and active all qualify
+// because they can still produce future invoices and need
+// deterministic terms.
 func (s *PostgresStore) CountLiveSubsByPlan(ctx context.Context, tenantID, planID string) (int, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -3053,7 +3635,7 @@ func (s *PostgresStore) CountLiveSubsByPlan(ctx context.Context, tenantID, planI
 		FROM subscriptions s
 		JOIN subscription_items si ON si.subscription_id = s.id AND si.deleted_at IS NULL
 		WHERE si.plan_id = $1
-		  AND s.status NOT IN ('canceled', 'archived')
+		  AND s.status <> 'canceled'
 	`, planID).Scan(&count)
 	if err != nil {
 		return 0, err
@@ -3168,11 +3750,7 @@ func (s *PostgresStore) CancelAtTrialEnd(ctx context.Context, tenantID, id strin
 	// would have been the first). Nothing to seal on a free cancel.
 	// Free trialing→canceled (ADR-069) — enqueue in-tx with the provenance
 	// both prior dispatch sites (service + engine) stamped.
-	extra := map[string]any{"canceled_by": "schedule", "reason": "trial_end_cancel"}
-	if sub.CanceledAt != nil {
-		extra["canceled_at"] = sub.CanceledAt.UTC()
-	}
-	if err := s.enqueueLifecycle(ctx, tx, domain.EventSubscriptionCanceled, sub, extra); err != nil {
+	if sub, err = s.finishCancelTx(ctx, tx, id, map[string]any{"canceled_by": "schedule", "reason": "trial_end_cancel"}); err != nil {
 		return domain.Subscription{}, err
 	}
 	if err := tx.Commit(); err != nil {

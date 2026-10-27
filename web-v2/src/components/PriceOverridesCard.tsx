@@ -1,9 +1,12 @@
 import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Loader2, Trash2 } from 'lucide-react'
-import { api, formatRate, formatRateBare, formatDate, type PriceOverride, type RatingRule } from '@/lib/api'
-import { dollarsToRateCents } from '@/lib/priceInput'
+import { api, formatDate, type Meter, type Plan, type PlanPrice, type PriceOverride } from '@/lib/api'
+import { priceRate } from '@/lib/priceDisplay'
 import { showApiError } from '@/lib/formErrors'
+import { PriceShapeFields, buildPriceShape, usePriceShape } from '@/components/PriceShapeFields'
+import { useCustomerSubscriptions } from '@/hooks/useCustomerCurrency'
+import { CUSTOMER_PLANS_FIRST_HINT, customerPlanIds, customerPlansFirst } from '@/lib/overridePlans'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -12,74 +15,59 @@ import { Combobox } from '@/components/Combobox'
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select'
 
-// PriceOverridesCard is the operator home for negotiated per-customer
-// prices (ADR-070). Before this card the surface was API-only: a deal was
-// invisible in the dashboard except as unexplained math on the usage card
-// and the invoice. The card shows each deal NEXT TO the current list price
-// (the contrast is the information), and its copy carries the two ADR-070
-// facts operators must not be surprised by: deals follow the rule across
-// republishes, and every rate change lands at the NEXT period open.
+// PriceOverridesCard is the operator home for a customer's negotiated rates:
+// each one replaces the rate of one plan price for this customer (ADR-130).
+// The card shows each deal next to the price's list rate (the contrast is
+// the information). A deal keeps applying when the price's rate changes,
+// ends when the price is removed, and every change applies from the
+// customer's next billing period.
 
-const MODE_OPTIONS = [
-  { value: 'flat', label: 'Flat per-unit' },
-  { value: 'graduated', label: 'Graduated tiers' },
-  { value: 'package', label: 'Package' },
-]
-
-// priceSummary renders a rule's or override's pricing block in operator
-// language, e.g. "$0.01/unit", "3 tiers", "$10.00 per 100 units".
-function priceSummary(p: { mode: string; flat_amount_cents: string; graduated_tiers?: { up_to: number; unit_amount_cents: string }[]; package_size: number; package_amount_cents: number }, currency: string | undefined): string {
-  // An override whose list price is gone has no currency to show: no symbol,
-  // never the workspace's.
-  const rate = (cents: string) => (currency ? formatRate(cents, currency) : formatRateBare(cents))
-  switch (p.mode) {
-    case 'flat':
-      return `${rate(p.flat_amount_cents)}/unit`
-    case 'graduated':
-      return `${p.graduated_tiers?.length ?? 0} tiers`
-    case 'package':
-      return `${rate(String(p.package_amount_cents))} per ${p.package_size} units`
-    default:
-      return p.mode
-  }
+// listedPrice is one plan price with the names the card shows for it.
+interface ListedPrice {
+  price: PlanPrice
+  plan: Plan
+  meter?: Meter
 }
 
-// latestByKey collapses the version history to the CURRENT list price per
-// rule_key — the thing a deal is compared against.
-function latestByKey(rules: RatingRule[]): Map<string, RatingRule> {
-  const out = new Map<string, RatingRule>()
-  for (const r of rules) {
-    const cur = out.get(r.rule_key)
-    if (!cur || r.version > cur.version) out.set(r.rule_key, r)
-  }
-  return out
+function describe(p: ListedPrice): string {
+  const labels = Object.entries(p.price.dimension_match ?? {}).map(([k, v]) => `${k}=${v}`).join(', ')
+  return `${p.plan.name} · ${p.meter?.name ?? p.price.meter_id}${labels ? ` (${labels})` : ''}`
+}
+
+function listRate(p: ListedPrice): string {
+  return priceRate({ ...p.price, currency: p.plan.currency }, p.meter?.unit ?? '')
 }
 
 // readOnly mirrors the archived-customer gate the rest of the customer page
-// applies via !isArchived. The card renders below a banner that says "All
-// data is read-only", so leaving its Add/End controls live let an operator
-// open a full "Save override" form — and end an existing deal — on a customer
-// the page had just declared frozen.
-export function PriceOverridesCard({ customerId, customerTestClockId, readOnly = false }: { customerId: string; customerTestClockId?: string; readOnly?: boolean }) {
+// applies: an archived customer's deals can be read, not changed.
+export function PriceOverridesCard({ customerId, readOnly = false }: { customerId: string; readOnly?: boolean }) {
   const queryClient = useQueryClient()
   const [creating, setCreating] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState<PriceOverride | null>(null)
 
   const { data: overridesData, isLoading } = useQuery({
     queryKey: ['price-overrides', customerId],
-    queryFn: () => api.listPriceOverrides(customerId),
+    queryFn: () => api.listPriceOverrides({ customerId }),
   })
-  const { data: rulesData } = useQuery({
-    queryKey: ['rating-rules'],
-    queryFn: () => api.listRatingRules(),
-  })
+  const { data: plansData } = useQuery({ queryKey: ['plans'], queryFn: () => api.listPlans() })
+  const { data: metersData } = useQuery({ queryKey: ['meters'], queryFn: () => api.listMeters() })
 
   const overrides = (overridesData?.data ?? []).filter(o => o.active)
-  const listPrices = useMemo(() => latestByKey(rulesData?.data ?? []), [rulesData])
+  const prices = useMemo(() => {
+    const out = new Map<string, ListedPrice>()
+    for (const plan of plansData?.data ?? []) {
+      for (const price of plan.prices ?? []) {
+        out.set(price.id, { price, plan, meter: metersData?.data.find(m => m.id === price.meter_id) })
+      }
+    }
+    return out
+  }, [plansData, metersData])
+
+  // The plans of the customer's subscriptions: their prices are listed first
+  // in the form (empty until the subscriptions load).
+  const { data: subsData } = useCustomerSubscriptions(customerId)
+  const customerPlans = useMemo(() => customerPlanIds(subsData?.data ?? []), [subsData])
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['price-overrides', customerId] })
@@ -103,25 +91,22 @@ export function PriceOverridesCard({ customerId, customerTestClockId, readOnly =
           <div className="text-center py-4">
             <p className="text-sm text-muted-foreground">No negotiated prices — this customer bills at list price.</p>
             <p className="text-xs text-muted-foreground mt-1">
-              An override replaces one price's rate for this customer only, and stays when you publish a new version of that price.
+              An override replaces one plan price's rate for this customer only. It stays when the price's rate changes, and ends if the price is removed.
             </p>
           </div>
         ) : (
           <div className="space-y-3">
             {overrides.map(o => {
-              const list = listPrices.get(o.rule_key)
+              const list = prices.get(o.price_id)
               return (
                 <div key={o.id} className="flex items-start justify-between gap-3 rounded-md border border-border px-3 py-2">
                   <div className="min-w-0">
-                    <p className="text-sm font-medium truncate">
-                      {list?.name || o.rule_key}
-                      <span className="ml-2 font-mono text-xs text-muted-foreground">{o.rule_key}</span>
-                    </p>
+                    <p className="text-sm font-medium truncate">{list ? describe(list) : o.price_id}</p>
                     <p className="text-sm mt-0.5">
-                      <span className="font-semibold">{priceSummary(o, list?.currency)}</span>
-                      {list && (
-                        <span className="text-muted-foreground"> · list price {priceSummary(list, list.currency)}</span>
-                      )}
+                      <span className="font-semibold">
+                        {priceRate({ ...o, currency: list?.plan.currency }, list?.meter?.unit ?? '')}
+                      </span>
+                      {list && <span className="text-muted-foreground"> · list price {listRate(list)}</span>}
                     </p>
                     <p className="text-xs text-muted-foreground mt-0.5">
                       {o.reason ? `${o.reason} · ` : ''}since {formatDate(o.created_at)}
@@ -131,7 +116,7 @@ export function PriceOverridesCard({ customerId, customerTestClockId, readOnly =
                     <button
                       type="button"
                       onClick={() => setConfirmDelete(o)}
-                      aria-label={`End override on ${list?.name || o.rule_key}`}
+                      aria-label={`End override on ${list ? describe(list) : o.price_id}`}
                       className="text-muted-foreground hover:text-destructive transition-colors shrink-0 mt-1"
                     >
                       <Trash2 size={15} />
@@ -147,8 +132,8 @@ export function PriceOverridesCard({ customerId, customerTestClockId, readOnly =
       {creating && (
         <CreateOverrideDialog
           customerId={customerId}
-          clockPinned={!!customerTestClockId}
-          rules={rulesData?.data ?? []}
+          prices={[...prices.values()]}
+          customerPlans={customerPlans}
           existing={overrides}
           onClose={() => setCreating(false)}
           onCreated={() => { setCreating(false); refresh() }}
@@ -157,8 +142,7 @@ export function PriceOverridesCard({ customerId, customerTestClockId, readOnly =
       {confirmDelete && (
         <DeleteOverrideDialog
           override={confirmDelete}
-          clockPinned={!!customerTestClockId}
-          ruleName={listPrices.get(confirmDelete.rule_key)?.name || confirmDelete.rule_key}
+          name={prices.get(confirmDelete.price_id) ? describe(prices.get(confirmDelete.price_id)!) : confirmDelete.price_id}
           onClose={() => setConfirmDelete(null)}
           onDeleted={() => { setConfirmDelete(null); refresh() }}
         />
@@ -167,83 +151,45 @@ export function PriceOverridesCard({ customerId, customerTestClockId, readOnly =
   )
 }
 
-function CreateOverrideDialog({ customerId, clockPinned, rules, existing, onClose, onCreated }: {
+function CreateOverrideDialog({ customerId, prices, customerPlans, existing, onClose, onCreated }: {
   customerId: string
-  clockPinned: boolean
-  rules: RatingRule[]
+  prices: ListedPrice[]
+  customerPlans: Set<string>
   existing: PriceOverride[]
   onClose: () => void
   onCreated: () => void
 }) {
-  const latest = useMemo(() => latestByKey(rules), [rules])
-  const [versionId, setVersionId] = useState('')
-  const [mode, setMode] = useState('flat')
-  const [flatAmount, setFlatAmount] = useState('')
-  const [tiers, setTiers] = useState<{ upTo: string; price: string }[]>([
-    { upTo: '1000', price: '0.10' },
-    { upTo: '', price: '0.05' },
-  ])
-  const [packageSize, setPackageSize] = useState('100')
-  const [packageAmount, setPackageAmount] = useState('10.00')
+  const [priceId, setPriceId] = useState('')
+  const shape = usePriceShape()
   const [reason, setReason] = useState('')
   const [formError, setFormError] = useState('')
   const [saving, setSaving] = useState(false)
 
-  const selectedRule = rules.find(r => r.id === versionId)
-  const replacing = selectedRule && existing.some(o => o.rule_key === selectedRule.rule_key)
+  const selected = prices.find(p => p.price.id === priceId)
+  const replacing = !!selected && existing.some(o => o.price_id === priceId)
 
-  const ruleOptions = useMemo(() =>
-    [...latest.values()]
-      .sort((a, b) => a.name.localeCompare(b.name) || a.rule_key.localeCompare(b.rule_key))
-      .map(r => ({
-        value: r.id,
-        label: `${r.name} (${r.rule_key}) — list ${priceSummary(r, r.currency)}`,
-        keywords: [r.rule_key, r.name],
-      })), [latest])
+  const options = useMemo(() =>
+    customerPlansFirst(
+      [...prices].sort((a, b) => describe(a).localeCompare(describe(b))),
+      p => p.plan.id,
+      customerPlans,
+    ).map(p => ({
+      value: p.price.id,
+      label: `${describe(p)} — list ${listRate(p)}`,
+      keywords: [p.plan.name, p.plan.code, p.meter?.event_name ?? ''],
+    })), [prices, customerPlans])
+  const someMine = prices.some(p => customerPlans.has(p.plan.id))
+  const someOther = prices.some(p => !customerPlans.has(p.plan.id))
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!versionId) return
-    setSaving(true)
+    if (!priceId) return
     setFormError('')
+    const built = buildPriceShape(shape)
+    if ('error' in built) { setFormError(built.error); return }
+    setSaving(true)
     try {
-      const payload: Parameters<typeof api.createPriceOverride>[0] = {
-        customer_id: customerId,
-        rating_rule_version_id: versionId,
-        mode,
-        reason: reason.trim() || undefined,
-      }
-      // A blank or unreadable price is refused here: the server accepts 0 as
-      // a deliberate free rate, so it cannot catch a price left empty.
-      if (mode === 'flat') {
-        const cents = dollarsToRateCents(flatAmount)
-        if (cents === null) { setFormError('Price per unit: enter a price as a plain number, for example 0.01. Use 0 for free.'); setSaving(false); return }
-        payload.flat_amount_cents = cents
-      }
-      if (mode === 'graduated') {
-        for (let i = 0; i < tiers.length - 1; i++) {
-          const current = parseInt(tiers[i].upTo) || 0
-          const next = tiers[i + 1].upTo === '' ? Infinity : (parseInt(tiers[i + 1].upTo) || 0)
-          if (current <= 0) { setFormError(`Tier ${i + 1}: "Up to" must be greater than 0`); setSaving(false); return }
-          if (next !== Infinity && next <= current) { setFormError(`Tier ${i + 2}: "Up to" must be greater than ${current}`); setSaving(false); return }
-        }
-        const tierCents: string[] = []
-        for (let i = 0; i < tiers.length; i++) {
-          const cents = dollarsToRateCents(tiers[i].price)
-          if (cents === null) { setFormError(`Tier ${i + 1}: enter a price as a plain number, for example 0.01. Use 0 for free.`); setSaving(false); return }
-          tierCents.push(cents)
-        }
-        payload.graduated_tiers = tiers.map((t, i) => ({
-          up_to: t.upTo === '' ? 0 : parseInt(t.upTo) || 0,
-          unit_amount_cents: tierCents[i],
-        }))
-      }
-      if (mode === 'package') {
-        payload.package_size = parseInt(packageSize) || 1
-        if (dollarsToRateCents(packageAmount) === null) { setFormError('Price per package: enter a price as a plain number, for example 10.00. Use 0 for free.'); setSaving(false); return }
-        payload.package_amount_cents = Math.round(parseFloat(packageAmount) * 100)
-      }
-      await api.createPriceOverride(payload)
+      await api.createPriceOverride({ customer_id: customerId, price_id: priceId, reason: reason.trim() || undefined, ...built.shape })
       onCreated()
     } catch (err) {
       showApiError(err, 'Failed to create price override')
@@ -258,21 +204,26 @@ function CreateOverrideDialog({ customerId, clockPinned, rules, existing, onClos
         <DialogHeader>
           <DialogTitle>Add price override</DialogTitle>
           <DialogDescription>
-            A negotiated rate for this customer on one price. It stays when you publish new
-            versions of that price, until you end it.
+            A negotiated rate for this customer on one plan price. It applies from this customer's
+            next billing period; the period in progress keeps the rate it started with. If the customer
+            subscribes to the plan or moves to it after you save, it applies from then, unless the same
+            subscription was on the plan earlier in that billing period. On a test clock, advance the clock first.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} noValidate className="space-y-4">
           <div className="space-y-2">
             <Label>Price</Label>
             <Combobox
-              value={versionId}
-              onChange={setVersionId}
-              options={ruleOptions}
-              placeholder="Select a price..."
-              emptyMessage="No prices yet. Create one on the Pricing page first."
+              value={priceId}
+              onChange={setPriceId}
+              options={options}
+              placeholder="Select a plan price..."
+              emptyMessage="No plan prices yet. Add one on a plan first."
               triggerClassName="w-full"
             />
+            {someMine && someOther && (
+              <p className="text-xs text-muted-foreground">{CUSTOMER_PLANS_FIRST_HINT}</p>
+            )}
             {replacing && (
               <p className="text-xs text-amber-600 dark:text-amber-500">
                 This customer already has an override on this price. Saving replaces it from the next billing period.
@@ -280,116 +231,25 @@ function CreateOverrideDialog({ customerId, clockPinned, rules, existing, onClos
             )}
           </div>
 
-          <div>
-            <Label>Pricing model</Label>
-            <Select items={MODE_OPTIONS} value={mode} onValueChange={(v) => setMode(v ?? 'flat')}>
-              <SelectTrigger className="w-full mt-1">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {MODE_OPTIONS.map(o => (
-                  <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {mode === 'flat' && (
-            <div>
-              <Label>Negotiated price per unit ($)</Label>
-              <Input type="number" step="any" min={0} value={flatAmount}
-                onChange={e => setFlatAmount(e.target.value)} placeholder="0.01" className="mt-1" />
-              {selectedRule && (
-                <p className="text-xs text-muted-foreground mt-1">
-                  List price: {priceSummary(selectedRule, selectedRule.currency)}. Sub-cent rates allowed.
-                </p>
-              )}
-            </div>
-          )}
-
-          {mode === 'graduated' && (
-            <div className="space-y-3">
-              <Label>Negotiated tiers</Label>
-              <div className="rounded-lg border border-border overflow-hidden">
-                <div className="grid grid-cols-[1fr_1fr_36px] gap-0 px-3 py-2 border-b border-border bg-muted">
-                  <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Up to (units)</span>
-                  <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Price per unit ($)</span>
-                  <span />
-                </div>
-                {tiers.map((tier, idx) => (
-                  <div key={idx} className="grid grid-cols-[1fr_1fr_36px] gap-0 px-3 py-2 border-b border-border last:border-b-0 items-center">
-                    <div className="pr-2">
-                      <Input type="number" min={0} value={tier.upTo}
-                        onChange={e => setTiers(t => t.map((r, i) => i === idx ? { ...r, upTo: e.target.value } : r))}
-                        placeholder={idx === tiers.length - 1 ? 'Unlimited' : '1000'} />
-                    </div>
-                    <div className="pr-2">
-                      <Input type="number" step="any" min={0} value={tier.price}
-                        onChange={e => setTiers(t => t.map((r, i) => i === idx ? { ...r, price: e.target.value } : r))}
-                        placeholder="0.01" />
-                    </div>
-                    <div className="flex justify-center">
-                      {tiers.length > 1 && (
-                        <button type="button" aria-label={`Remove tier ${idx + 1}`}
-                          onClick={() => setTiers(t => t.filter((_, i) => i !== idx))}
-                          className="text-muted-foreground hover:text-destructive transition-colors">
-                          <Trash2 size={14} />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <button type="button" onClick={() => setTiers(t => [...t, { upTo: '', price: '' }])}
-                className="text-sm font-medium text-primary hover:text-primary/80 transition-colors">
-                + Add tier
-              </button>
-              <p className="text-xs text-muted-foreground">Leave "Up to" empty on the last tier for unlimited. Tiers are evaluated in order.</p>
-            </div>
-          )}
-
-          {mode === 'package' && (
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label>Units per package</Label>
-                <Input type="number" min={1} value={packageSize} onChange={e => setPackageSize(e.target.value)}
-                  placeholder="100" className="mt-1" />
-              </div>
-              <div>
-                <Label>Price per package ($)</Label>
-                <Input type="number" step="0.01" min={0} value={packageAmount}
-                  onChange={e => setPackageAmount(e.target.value)} placeholder="10.00" className="mt-1" />
-              </div>
-            </div>
-          )}
+          <PriceShapeFields
+            f={shape}
+            currency={selected?.plan.currency ?? 'USD'}
+            idPrefix="override"
+            hint={selected ? `List price: ${listRate(selected)}. Sub-cent rates allowed.` : undefined}
+          />
 
           <div>
-            <Label>Reason (optional)</Label>
-            <Input value={reason} onChange={e => setReason(e.target.value)} maxLength={255}
+            <Label htmlFor="override-reason">Reason (optional)</Label>
+            <Input id="override-reason" value={reason} onChange={e => setReason(e.target.value)} maxLength={255}
               placeholder="e.g. Annual contract — negotiated Jan 2027" className="mt-1" />
             <p className="text-xs text-muted-foreground mt-1">Shown on this card and in the audit trail.</p>
           </div>
 
-          {formError && (
-            <div className="px-3 py-2 rounded-md bg-destructive/10 border border-destructive/20">
-              <p className="text-destructive text-sm">{formError}</p>
-            </div>
-          )}
-
-          <p className="text-xs text-muted-foreground border-t border-border pt-3">
-            <strong className="text-foreground">Takes effect from this customer's next billing period.</strong>{' '}
-            The period already in progress keeps the price it started with.
-            {clockPinned && (
-              <span className="block mt-1 text-amber-700 dark:text-amber-500">
-                Test-clock customer: in simulations, price changes apply to the current simulated
-                period too — the next-period rule holds only on real time.
-              </span>
-            )}
-          </p>
+          {formError && <p className="text-sm text-destructive">{formError}</p>}
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-            <Button type="submit" disabled={saving || !versionId}>
+            <Button type="submit" disabled={saving || !priceId}>
               {saving ? <><Loader2 size={14} className="animate-spin mr-2" /> Saving...</> : 'Save override'}
             </Button>
           </DialogFooter>
@@ -399,10 +259,9 @@ function CreateOverrideDialog({ customerId, clockPinned, rules, existing, onClos
   )
 }
 
-function DeleteOverrideDialog({ override, clockPinned, ruleName, onClose, onDeleted }: {
+function DeleteOverrideDialog({ override, name, onClose, onDeleted }: {
   override: PriceOverride
-  clockPinned: boolean
-  ruleName: string
+  name: string
   onClose: () => void
   onDeleted: () => void
 }) {
@@ -424,19 +283,13 @@ function DeleteOverrideDialog({ override, clockPinned, ruleName, onClose, onDele
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>End price override</DialogTitle>
-          <DialogDescription>
-            {ruleName} returns to list price for this customer.
-          </DialogDescription>
+          <DialogDescription>{name} returns to list price for this customer.</DialogDescription>
         </DialogHeader>
         <p className="text-sm text-muted-foreground">
           <strong className="text-foreground">List price applies from the next billing period.</strong>{' '}
-          The period already in progress still bills the negotiated price it started with.
-          {clockPinned && (
-            <span className="block mt-1 text-xs text-amber-700 dark:text-amber-500">
-              Test-clock customer: in simulations, ending a deal affects the current simulated
-              period too — the next-period rule holds only on real time.
-            </span>
-          )}
+          The period already in progress still bills the negotiated rate it started with. If the customer
+          subscribes to the plan or moves to it after you end the override, list price applies from then,
+          unless the same subscription was on the plan earlier in that billing period.
         </p>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>

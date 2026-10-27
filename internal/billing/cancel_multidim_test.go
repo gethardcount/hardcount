@@ -9,6 +9,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // TestBillFinalOnImmediateCancel_MultiDimMeterBilled locks the ADR-044 fix for
@@ -17,7 +18,7 @@ import (
 // RatingRuleVersionID empty) was silently skipped by BillFinalOnImmediateCancel's
 // single-rule-only usage loop, so a mid-period immediate cancel emitted NO
 // invoice for all token usage. The cycle path, preview, and the threshold
-// scan all carry the AggregateByPricingRules fork; this asserts the cancel
+// scan all carry the AggregateClaims fork; this asserts the cancel
 // path now does too.
 //
 // Numbers: 1,000,000 input tokens @ $3.00/M + 500,000 output tokens @
@@ -44,36 +45,25 @@ func TestBillFinalOnImmediateCancel_MultiDimMeterBilled(t *testing.T) {
 			// Pure-usage plan: no base fee, one multi-dim tokens meter.
 			"pln_tok": {ID: "pln_tok", Name: "Tokens", Currency: "USD",
 				BillingInterval: domain.BillingMonthly, BaseAmountCents: 0,
-				BaseBillTiming: domain.BillInArrears, MeterIDs: []string{"mtr_tokens"}},
+				BaseBillTiming: domain.BillInArrears},
 		},
 		meters: map[string]domain.Meter{
 			// Multi-dim shape: NO meter-linked default rule. Pre-fix the
 			// cancel loop's `RatingRuleVersionID == "" → continue` guard
 			// skipped this meter entirely.
-			"mtr_tokens": {ID: "mtr_tokens", Key: "tokens", Name: "Tokens",
-				Unit: "tokens", Aggregation: "sum", RatingRuleVersionID: ""},
+			"mtr_tokens": {ID: "mtr_tokens", EventName: "tokens", Name: "Tokens",
+				Unit: "tokens", Aggregation: "sum"},
 		},
-		rules: map[string]domain.RatingRuleVersion{
-			// Per-token decimal rates (ADR-045): $3.00/M and $15.00/M.
-			"rrv_in": {ID: "rrv_in", RuleKey: "tok_in", Version: 1,
-				Mode: domain.PricingFlat, FlatAmountCents: decimal.RequireFromString("0.0003")},
-			"rrv_out": {ID: "rrv_out", RuleKey: "tok_out", Version: 1,
-				Mode: domain.PricingFlat, FlatAmountCents: decimal.RequireFromString("0.0015")},
-		},
-		meterPricingRules: map[string][]domain.MeterPricingRule{
-			"mtr_tokens": {
-				{ID: "mpr_in", MeterID: "mtr_tokens", RatingRuleVersionID: "rrv_in",
-					DimensionMatch: map[string]any{"token_type": "input"}},
-				{ID: "mpr_out", MeterID: "mtr_tokens", RatingRuleVersionID: "rrv_out",
-					DimensionMatch: map[string]any{"token_type": "output"}},
-			},
+		prices: map[string][]domain.PlanPrice{
+			"pln_tok": {priceWith("prc_in", "mtr_tokens", map[string]string{"token_type": "input"}, domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.RequireFromString("0.0003")}),
+				priceWith("prc_out", "mtr_tokens", map[string]string{"token_type": "output"}, domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.RequireFromString("0.0015")})},
 		},
 	}
 	usage := &mockUsage{
-		ruleAggs: map[string][]domain.RuleAggregation{
+		priceAggs: map[string][]domain.ClaimedUsage{
 			"mtr_tokens": {
-				{RuleID: "mpr_in", RatingRuleVersionID: "rrv_in", Quantity: decimal.NewFromInt(1_000_000)},
-				{RuleID: "mpr_out", RatingRuleVersionID: "rrv_out", Quantity: decimal.NewFromInt(500_000)},
+				{PriceID: "prc_in", Quantity: decimal.NewFromInt(1_000_000)},
+				{PriceID: "prc_out", Quantity: decimal.NewFromInt(500_000)},
 			},
 		},
 	}
@@ -81,7 +71,7 @@ func TestBillFinalOnImmediateCancel_MultiDimMeterBilled(t *testing.T) {
 
 	engine := wireBaseTax(NewEngine(&mockSubs{subs: map[string]domain.Subscription{sub.ID: sub}}, usage, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
 
-	inv, err := engine.BillFinalOnImmediateCancel(context.Background(), sub)
+	inv, err := engine.BillFinalOnImmediateCancel(postgres.WithLivemode(context.Background(), true), sub)
 	if err != nil {
 		t.Fatalf("BillFinalOnImmediateCancel: %v", err)
 	}
@@ -103,9 +93,9 @@ func TestBillFinalOnImmediateCancel_MultiDimMeterBilled(t *testing.T) {
 	}
 	byRule := map[string]domain.InvoiceLineItem{}
 	for _, li := range invoices.lineItems {
-		byRule[li.RatingRuleVersionID] = li
+		byRule[li.PriceID] = li
 	}
-	in, out := byRule["rrv_in"], byRule["rrv_out"]
+	in, out := byRule["prc_in"], byRule["prc_out"]
 	if in.AmountCents != 300 {
 		t.Errorf("input line amount: got %d, want 300", in.AmountCents)
 	}
@@ -148,15 +138,14 @@ func TestBillFinalOnImmediateCancel_SingleRuleMeterStillBilled(t *testing.T) {
 		plans: map[string]domain.Plan{
 			"pln_api": {ID: "pln_api", Name: "API", Currency: "USD",
 				BillingInterval: domain.BillingMonthly, BaseAmountCents: 0,
-				BaseBillTiming: domain.BillInArrears, MeterIDs: []string{"mtr_api"}},
+				BaseBillTiming: domain.BillInArrears},
 		},
 		meters: map[string]domain.Meter{
-			"mtr_api": {ID: "mtr_api", Key: "api", Name: "API Calls",
-				Unit: "calls", Aggregation: "sum", RatingRuleVersionID: "rrv_api"},
+			"mtr_api": {ID: "mtr_api", EventName: "api", Name: "API Calls",
+				Unit: "calls", Aggregation: "sum"},
 		},
-		rules: map[string]domain.RatingRuleVersion{
-			"rrv_api": {ID: "rrv_api", RuleKey: "api_calls", Version: 1,
-				Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(2)},
+		prices: map[string][]domain.PlanPrice{
+			"pln_api": {priceOf("prc_api", "mtr_api", domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(2)})},
 		},
 		// No meterPricingRules → single-rule path.
 	}
@@ -165,7 +154,7 @@ func TestBillFinalOnImmediateCancel_SingleRuleMeterStillBilled(t *testing.T) {
 
 	engine := wireBaseTax(NewEngine(&mockSubs{subs: map[string]domain.Subscription{sub.ID: sub}}, usage, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
 
-	inv, err := engine.BillFinalOnImmediateCancel(context.Background(), sub)
+	inv, err := engine.BillFinalOnImmediateCancel(postgres.WithLivemode(context.Background(), true), sub)
 	if err != nil {
 		t.Fatalf("BillFinalOnImmediateCancel: %v", err)
 	}
@@ -208,15 +197,14 @@ func TestBillFinalOnImmediateCancel_HonorsDueOnReceipt(t *testing.T) {
 		plans: map[string]domain.Plan{
 			"pln_api": {ID: "pln_api", Name: "API", Currency: "USD",
 				BillingInterval: domain.BillingMonthly, BaseAmountCents: 0,
-				BaseBillTiming: domain.BillInArrears, MeterIDs: []string{"mtr_api"}},
+				BaseBillTiming: domain.BillInArrears},
 		},
 		meters: map[string]domain.Meter{
-			"mtr_api": {ID: "mtr_api", Key: "api", Name: "API Calls",
-				Unit: "calls", Aggregation: "sum", RatingRuleVersionID: "rrv_api"},
+			"mtr_api": {ID: "mtr_api", EventName: "api", Name: "API Calls",
+				Unit: "calls", Aggregation: "sum"},
 		},
-		rules: map[string]domain.RatingRuleVersion{
-			"rrv_api": {ID: "rrv_api", RuleKey: "api_calls", Version: 1,
-				Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(2)},
+		prices: map[string][]domain.PlanPrice{
+			"pln_api": {priceOf("prc_api", "mtr_api", domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(2)})},
 		},
 	}
 	usage := &mockUsage{totals: map[string]int64{"mtr_api": 500}}
@@ -224,7 +212,7 @@ func TestBillFinalOnImmediateCancel_HonorsDueOnReceipt(t *testing.T) {
 
 	engine := wireBaseTax(NewEngine(&mockSubs{subs: map[string]domain.Subscription{sub.ID: sub}}, usage, pricing, invoices, nil, &zeroTermsSettings{}, nil, nil, billingTestClock()))
 
-	inv, err := engine.BillFinalOnImmediateCancel(context.Background(), sub)
+	inv, err := engine.BillFinalOnImmediateCancel(postgres.WithLivemode(context.Background(), true), sub)
 	if err != nil {
 		t.Fatalf("BillFinalOnImmediateCancel: %v", err)
 	}

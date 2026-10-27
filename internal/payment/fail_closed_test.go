@@ -10,6 +10,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/tenantstripe"
 )
 
@@ -25,7 +26,7 @@ func (f credsFetcher) GetPlaintext(context.Context, string, bool) (tenantstripe.
 // definite "Stripe not configured" that spent a dunning attempt. No
 // credentials is still "not configured".
 func TestStripeClient_CredentialReadErrorIsTransient(t *testing.T) {
-	ctx := auth.WithTenantID(context.Background(), "t1")
+	ctx := auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1")
 	c := NewLiveStripeClient(NewStripeClients(credsFetcher{err: errBlip}))
 	_, err := c.CreatePaymentIntent(ctx, PaymentIntentParams{})
 	if !errors.Is(err, ErrPaymentTransient) || errors.Is(err, ErrStripeNotConfigured) {
@@ -87,7 +88,7 @@ func TestChargeInvoice_CredentialReadErrorLeavesInvoiceUntouched(t *testing.T) {
 	transient := fmt.Errorf("%w: stripe credential lookup: %v", ErrPaymentTransient, errBlip)
 	s := NewStripe(&mockStripeClient{shouldFail: true, failErr: transient}, invoices, newMockWebhookStore(), nil, nil)
 
-	_, err := s.ChargeInvoice(context.Background(), "t1", snapshot, testHold, "cus_stripe", "pm_test")
+	_, err := s.ChargeInvoice(postgres.WithLivemode(context.Background(), true), "t1", snapshot, testHold, "cus_stripe", "pm_test")
 	if !errors.Is(err, ErrPaymentTransient) {
 		t.Fatalf("err = %v, want ErrPaymentTransient", err)
 	}

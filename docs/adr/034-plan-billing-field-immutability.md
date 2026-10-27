@@ -1,8 +1,10 @@
 # ADR-034: Plan billing-field immutability once a live sub attaches
 
-**Status:** Accepted
+**Status:** Accepted; superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md) (the `meter_ids` lock is gone, built in PR-4 #1386; the base-fee lock stays)
 **Date:** 2026-05-15
 **Related**: ADR-031 (per-plan bill_timing), ADR-005 (integer cents for money), industry-reference-first workflow
+
+**Superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23. Built in PR-4 (#1386): the `meter_ids` lock is gone, because a plan's meters are the meters it has prices for, and a base fee can be set to 0. The `base_amount_cents` lock stays: PR-7, which would have made a base edit apply from each subscriber's next period, was cut on 2026-10-27 (ADR-130 section 5). The `base_bill_timing` lock stays, and holds once any subscription has ever used the plan, not only while a live one does (built in PR-4).
 
 ## Summary
 
@@ -27,6 +29,8 @@ Surveyed billing platforms on this exact question:
 | **Zuora** | Product Rate Plans are explicitly versioned. Subscriptions reference a specific version. Mutations create new versions. |
 
 **Common pattern:** every mature billing platform either makes billing-affecting fields **always immutable** (Stripe, Orb) or **snapshots them at sub attach** (Lago, Chargebee, Recurly, Zuora). Velox is the outlier — mutable plans, live-reading engine, no snapshot, no versioning.
+
+**Correction (2026-10-23):** the Lago row and Lago's place in the "snapshot" group are wrong. Lago edits a plan in place. While subscriptions use a plan, its base fee (`amount_cents`) and each charge's prices (`properties`) and filters stay editable. Draft invoices that hold a subscription on that plan are flagged for refresh. The plan's code, interval, currency, trial, `pay_in_advance` and monthly billing of charges and fixed charges lock. Each charge's model, code, `pay_in_advance`, proration and minimum lock too; its display name and tax codes stay editable. `plan_overrides`, which need a premium licence, create a child plan for one subscription. A plan edit sent with `cascade_updates` also changes each child plan that still has the old base fee or charge prices. Checked in lago-api `2e52dfc` (2026-10-22): `app/services/plans/update_service.rb:32-49`, `:101-125` and `:151-190`, `app/services/charges/update_service.rb:27-87`, `app/services/subscriptions/create_service.rb:37`.
 
 ## Decision
 

@@ -5,7 +5,7 @@
 
 ## Summary
 
-Anniversary and yearly billing keep the operator's day of month, clamped to each month's last day: an anchor on the 31st bills Jan 31, Feb 28, Mar 31, Apr 30. The day is stored in `subscriptions.billing_anchor_day` (migration 0120), and every advance starts from it, so a short month no longer shifts later periods. The old code advanced from the previous boundary and drifted for good (Jan 31, Mar 3, Apr 3). A cross-interval swap or a threshold reset recomputes the anchor day, and calendar billing (always the 1st) is unchanged. Status: active; this replaces the "not a bug" note in [ADR-058](058-billing-date-math-tenant-timezone.md).
+Anniversary and yearly billing keep the operator's day of month, clamped to each month's last day: an anchor on the 31st bills Jan 31, Feb 28, Mar 31, Apr 30. The day is stored in `subscriptions.billing_anchor_day` (migration 0120), and every advance starts from it, so a short month no longer shifts later periods. The old code advanced from the previous boundary and drifted for good (Jan 31, Mar 3, Apr 3). A cross-interval swap recomputes the anchor day (the threshold reset did too, until it was removed on 2026-10-23), and calendar billing (always the 1st) is unchanged. Status: active; this replaces the "not a bug" note in [ADR-058](058-billing-date-math-tenant-timezone.md).
 
 ## Context
 

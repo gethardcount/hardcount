@@ -8,13 +8,12 @@ import (
 )
 
 // CheckSchemaReady refuses to let the server start on a database this
-// binary cannot serve. It runs the same state check as `velox migrate`,
-// read-only, on the caller's pool, and returns an error when:
-//
-//   - the state check refuses the database (V08Error, with its next step);
-//   - a migration this binary ships is not applied, including migration
-//     180 on an empty or a v0.8 database. The app would fail on any query
-//     that touches a new column or table.
+// binary cannot serve. It reads goose's record the way `velox migrate`
+// does, read-only, on the caller's pool, and returns an error when a
+// migration this binary ships is not applied, including migration 180 on
+// an empty database, and ErrNoMigrationRecord for Velox tables that goose
+// has no record of. The app would fail on any query that touches a new
+// column or table.
 //
 // Call it at start-up, after Up when RUN_MIGRATIONS_ON_BOOT is on, before
 // serving. Refusing is safer than serving: the orchestrator retries, and
@@ -31,18 +30,16 @@ func CheckSchemaReady(db *sql.DB) error {
 	}
 	p := planFor(st, files)
 	switch p.State {
-	case PlanRefused:
-		return p.Refusal
+	case PlanUnrecorded:
+		return ErrNoMigrationRecord
 	case PlanEmpty, PlanBehind:
 		return fmt.Errorf("schema behind code: %s to apply; run `velox migrate`", countMigrations(len(p.Pending)))
-	case PlanAdopt:
-		return fmt.Errorf("schema behind code: %s to apply; run `velox migrate`", countMigrations(len(p.Pending)+1))
 	case PlanAhead:
 		// This (older) binary runs on a newer schema: a rolling deploy
 		// overlap or a rollback. It WARNs and continues: old code may not
 		// understand new columns or enum values, and no expand/contract
 		// rule is enforced yet. Whether to refuse instead is open; see
-		// docs/records/ha-readiness-2026-07-06.md (item 3) before tightening.
+		// docs/dev/records/ha-readiness-2026-07-06.md (item 3) before tightening.
 		var ahead []int64
 		for _, a := range p.Ahead {
 			ahead = append(ahead, a.Version)

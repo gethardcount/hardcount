@@ -15,7 +15,7 @@ type fakeSettingsReader struct {
 }
 
 func (f fakeSettingsReader) Get(_ context.Context, _ string) (domain.TenantSettings, error) {
-	return domain.TenantSettings{NetPaymentTerms: f.netTerms}, f.err
+	return domain.TenantSettings{DefaultCurrency: "USD", NetPaymentTerms: f.netTerms}, f.err
 }
 
 func intPtr(n int) *int { return &n }

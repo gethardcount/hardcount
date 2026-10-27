@@ -26,13 +26,15 @@ the screen, and that the main things an operator does work end to end.
   trial and collection controls. Each journey checks the page, the toast and
   any invoice the change made against the API.
 - `account-setup.spec.ts` sets up what an operator sells and how they
-  collect. It creates a price, a meter on it and a plan, and checks that a
-  meter with no price is refused. It previews and installs a recipe, then
-  installs it again. It adds and ends a customer's price override and checks
-  the upcoming invoice each time. It creates and edits a dunning policy,
-  assigns it to a customer, tries to delete it and makes it the default. The
-  recipe and dunning journeys run one after the other, because both move the
-  default dunning policy. The dunning journey puts the old default back.
+  collect. It creates a meter and a plan, then adds the plan's price for the
+  meter, which applies at once while no one has subscribed. It saves a
+  graduated and a package price with labels. It previews and installs a
+  recipe, which creates only a meter, a plan and its prices, then installs it
+  again. It adds and ends a customer's price override on a test clock and
+  checks the upcoming invoice each time: each change applies from the next
+  period. It creates and edits a dunning policy, assigns it to a customer,
+  tries to delete it and makes it the default, then puts the old default
+  back.
 - `invoices.spec.ts` takes invoices through their life on screen: a one-off
   invoice from draft to finalized (and Save & send), a credit note before and
   after an offline payment, void and write-off, and the credit notes page.

@@ -10,8 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shopspring/decimal"
-
 	"github.com/sagarsuperuser/velox/internal/audit"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
@@ -107,11 +105,18 @@ type Biller interface {
 
 // DueBiller bills one subscription now, through the same attempt the billing
 // run makes (period CAS, failure record and all). It is the bill half of the
-// operator's retry-billing action (ADR-119). Its own one-method interface, not
-// a method on Biller, so the fakes of that interface do not all grow.
-// Implemented by *billing.Engine.
+// operator's retry-billing action (ADR-119) and of the close every
+// subscription write runs first (closeEndedPeriods). Its own one-method
+// interface, not a method on Biller, so the fakes of that interface do not
+// all grow. Implemented by *billing.Engine.
+//
+// grace is the invoice grace the attempt honours (ADR-120): a due instant
+// counts only once grace has passed after it. 0 closes every ended period
+// now, as the operator's writes do; dunning's final pause and cancel pass
+// INVOICE_GRACE_PERIOD, so a catch-up closes the periods past their grace and
+// leaves the newest to its grace.
 type DueBiller interface {
-	BillDueNow(ctx context.Context, tenantID, subscriptionID string) (invoicesGenerated int, err error)
+	BillDue(ctx context.Context, tenantID, subscriptionID string, grace time.Duration) (invoicesGenerated int, err error)
 }
 
 // PlanReader (defined in handler.go) is also used at sub-lifecycle
@@ -127,11 +132,20 @@ type Service struct {
 	customers CustomerReader
 	profiles  ProfileCurrencyReader
 	plans     PlanReader
-	biller    Biller
-	dueBiller DueBiller
-	resolver  clock.Resolver
-	events    domain.EventDispatcher
-	audit     AuditLogger
+	// planMeters reads each plan's meters for the overlap guard
+	// (rejectMeterOverlap). Unwired (narrow unit tests), the guard is off.
+	planMeters PlanMeterReader
+	biller     Biller
+	dueBiller  DueBiller
+	// invoiceGrace is INVOICE_GRACE_PERIOD (ADR-120). Only dunning's final
+	// pause and cancel wait for it; see SetInvoiceGrace.
+	invoiceGrace time.Duration
+	resolver     clock.Resolver
+	// No event dispatcher: the service sends no webhook itself. A writer's
+	// events are queued in its transaction by the store
+	// (PostgresStore.SetOutboxEnqueuer); the operator's own are sent by
+	// the handler.
+	audit AuditLogger
 }
 
 // AuditLogger is the narrow audit-write interface the service uses to
@@ -204,32 +218,9 @@ func (s *Service) SetPlanReader(r PlanReader) {
 	s.plans = r
 }
 
-// SetEventDispatcher wires the outbound-webhook dispatcher used by
-// the trial-expiry scan paths (ProcessExpiredTrialsForClock +
-// ProcessExpiredTrials) to fire `subscription.trial_ended` events
-// when status flips at trial_end_at. Engine auto-flip path emits
-// the same event from billing/engine.go; this setter brings the
-// catchup-orchestrator and wall-clock-cron paths into parity so
-// webhook consumers see one event per trial transition regardless
-// of which path activated the sub.
-func (s *Service) SetEventDispatcher(d domain.EventDispatcher) {
-	s.events = d
-}
-
-// dispatchEvent enqueues an outbound webhook event and LOGS on failure rather
-// than silently dropping it. Once the enqueue commits the dispatcher delivers
-// durably (ADR-040 outbox); a non-nil error means the enqueue INSERT failed and
-// the event is lost — make that visible (no-silent-fallbacks) instead of the
-// prior `_ =` swallow. In-tx atomicity with the state change (DispatchTx) is the
-// deferred follow-up; this only closes the silent-error vector.
-func (s *Service) dispatchEvent(ctx context.Context, tenantID, eventType string, payload map[string]any) {
-	if s.events == nil {
-		return
-	}
-	if err := s.events.Dispatch(ctx, tenantID, eventType, payload); err != nil {
-		slog.ErrorContext(ctx, "failed to enqueue webhook event",
-			"event_type", eventType, "tenant_id", tenantID, "error", err)
-	}
+// SetPlanMeterReader wires the plan meter read the overlap guard uses.
+func (s *Service) SetPlanMeterReader(r PlanMeterReader) {
+	s.planMeters = r
 }
 
 // SetBiller wires the billing engine for the in_advance first-invoice
@@ -247,6 +238,31 @@ func (s *Service) SetBiller(b Biller) {
 // refused until that run has billed the period.
 func (s *Service) SetDueBiller(b DueBiller) {
 	s.dueBiller = b
+}
+
+// SetInvoiceGrace sets INVOICE_GRACE_PERIOD (ADR-120), the same value the
+// billing engine's runs wait for (billing.Engine.SetInvoiceGrace). Dunning's
+// final pause and cancel (PauseCollectionForDunning, CancelForDunning) do not
+// close a period that ended less than this long ago: dunning is not the
+// operator acting now, so it waits for the grace like the billing run, and
+// usage that arrives inside the grace is on the period's invoice. Every other
+// subscription write closes the ended period at once. Unset (0) waits for
+// nothing.
+func (s *Service) SetInvoiceGrace(d time.Duration) {
+	s.invoiceGrace = d
+}
+
+// InsideInvoiceGraceError is the answer of a dunning final action (pause or
+// cancel) that would close a period still inside its invoice grace. Nothing
+// was billed or changed. Until is when the grace ends (the due instant plus
+// INVOICE_GRACE_PERIOD, truncated to the microsecond the database keeps): the
+// action can run then.
+type InsideInvoiceGraceError struct {
+	Until time.Time
+}
+
+func (e *InsideInvoiceGraceError) Error() string {
+	return "the subscription's ended period is inside its invoice grace until " + e.Until.UTC().Format(time.RFC3339Nano)
 }
 
 // SetResolver wires the unified clock.Resolver used to bind
@@ -358,7 +374,7 @@ func firstPeriodAfterTrial(trialEnd time.Time, billingTime domain.SubscriptionBi
 }
 
 // firstPeriodForActivate computes the first billing period when a sub is
-// activated without a trial — either via StartNow on Create, or via the
+// activated without a trial — either by a start-now Create, or by the
 // operator's Activate on a draft sub.
 //
 // Yearly billing: always anniversary semantics — period begins at `at`
@@ -479,11 +495,11 @@ func (s *Service) guardSwapCurrency(ctx context.Context, tenantID string, sub do
 // label without conversion, so every currency source in a customer's billing
 // must agree: the candidate plans among themselves, the outgoing plan on a
 // swap (proration subtracts old cents from new cents raw), the customer's
-// billing-profile currency (highest-precedence invoice label), and the
-// customer's other non-terminal subs (the credit ledger is a currency-blind
-// per-customer pot — mixed-currency subs would drain it across
-// denominations 1:1). Skipped when PlanReader isn't wired (narrow unit
-// tests), mirroring every sibling guard.
+// billing-profile currency (highest-precedence invoice label, so a mismatch
+// relabels plan prices), and the customer's other non-terminal subs (a
+// customer is billed in one currency; manual invoices take it too, and a
+// credit pays only invoices in its own currency, ADR-129). Skipped when
+// PlanReader isn't wired (narrow unit tests), mirroring every sibling guard.
 func (s *Service) rejectCurrencyMismatch(ctx context.Context, tenantID, customerID, excludeSubID string, planIDs []string, outgoingPlanID string) error {
 	if s.plans == nil {
 		return nil
@@ -545,7 +561,7 @@ func (s *Service) rejectCurrencyMismatch(ctx context.Context, tenantID, customer
 		oc := strings.ToUpper(strings.TrimSpace(o.Currency))
 		if oc != "" && oc != target {
 			return errs.InvalidState(fmt.Sprintf(
-				"this customer already has subscription %q billing in %s — a customer's subscriptions share one currency (credits and balances don't convert); use a %s plan or a separate customer",
+				"this customer already has subscription %q billing in %s — a customer's subscriptions share one currency; use a %s plan or a separate customer",
 				o.SubCode, oc, oc))
 		}
 	}
@@ -571,17 +587,20 @@ func (s *Service) rejectCurrencyMismatch(ctx context.Context, tenantID, customer
 // when PlanReader isn't wired (narrow unit tests) — mirrors every sibling
 // guard.
 func (s *Service) rejectMeterOverlap(ctx context.Context, tenantID, customerID, currentSubID, excludeItemID string, planIDs []string) error {
-	if s.plans == nil {
+	if s.plans == nil || s.planMeters == nil {
 		return nil
 	}
 	meterPlan := make(map[string]string) // meter id → first candidate plan billing it
 	meters := make([]string, 0, len(planIDs))
 	for _, pid := range planIDs {
-		plan, err := s.plans.GetPlan(ctx, tenantID, pid)
-		if err != nil {
+		if _, err := s.plans.GetPlan(ctx, tenantID, pid); err != nil {
 			return errs.Invalid("items", fmt.Sprintf("plan %q not found", pid))
 		}
-		for _, m := range plan.MeterIDs {
+		planMeters, err := s.planMeters.PlanMeterIDs(ctx, tenantID, pid)
+		if err != nil {
+			return fmt.Errorf("read the meters of plan %s: %w", pid, err)
+		}
+		for _, m := range planMeters {
 			if prev, dup := meterPlan[m]; dup {
 				if prev == pid {
 					continue // same plan listing a meter twice — harmless
@@ -655,8 +674,16 @@ type CreateInput struct {
 	Items       []CreateItemInput              `json:"items"`
 	BillingTime domain.SubscriptionBillingTime `json:"billing_time"`
 	TrialDays   int                            `json:"trial_days,omitempty"`
-	StartNow    bool                           `json:"start_now,omitempty"`
+	// Status is empty (the subscription starts now, or starts its trial now)
+	// or "draft" (it bills nothing until Activate). A start is the default,
+	// as in Stripe and Lago, because a forgotten flag used to make a draft
+	// that silently billed nothing (simplification audit D2, 2026-10-23).
+	Status domain.SubscriptionStatus `json:"status,omitempty"`
 }
+
+// createStatusMessage is the 422 for a create's status other than "draft",
+// including one sent empty or null (the handler refuses those).
+const createStatusMessage = `must be "draft" or left out; a subscription starts now unless it is created as a draft`
 
 func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput) (domain.Subscription, error) {
 	code := strings.TrimSpace(input.Code)
@@ -708,11 +735,24 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 	if billingTime != domain.BillingTimeCalendar && billingTime != domain.BillingTimeAnniversary {
 		return domain.Subscription{}, errs.Invalid("billing_time", "must be calendar or anniversary")
 	}
-	// A negative trial_days used to read as "no trial", so with start_now the
-	// customer was charged on day 1. The upper bound is Stripe's: a trial
-	// "can be at most two years". A longer pause in billing is not a trial.
+	// A negative trial_days used to read as "no trial", so the customer was
+	// charged on day 1. The upper bound is Stripe's: a trial "can be at most
+	// two years". A longer pause in billing is not a trial.
 	if input.TrialDays < 0 || input.TrialDays > maxTrialDays {
 		return domain.Subscription{}, errs.Invalid("trial_days", fmt.Sprintf("must be between 0 and %d", maxTrialDays))
+	}
+	draft := false
+	switch input.Status {
+	case "":
+	case domain.SubscriptionDraft:
+		draft = true
+	default:
+		return domain.Subscription{}, errs.Invalid("status", createStatusMessage)
+	}
+	// A draft does not start, so it has no trial to start; Activate starts
+	// billing at once. Refused, not ignored.
+	if draft && input.TrialDays > 0 {
+		return domain.Subscription{}, errs.Invalid("trial_days", "a draft cannot have a trial; leave out status to start the trial now")
 	}
 
 	// Reject mixed billing intervals across items (Stripe / Lago parity).
@@ -838,14 +878,14 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		periodEnd = &pe
 		nextBilling = &pe
 		billingAnchorDay = anchorDay
-	} else if input.StartNow {
+	} else if !draft {
 		status = domain.SubscriptionActive
 		startedAt = &now
 		// Immediate activation IS an activation — stamp activated_at so
 		// the sub is visible to MRR movement / point-in-time / churn,
 		// which key on activated_at as the MRR-start event. The operator
 		// Activate() and trial-end ActivateAfterTrial() paths already do
-		// this; the StartNow create path used to leave it NULL, so
+		// this; the start-now create path used to leave it NULL, so
 		// every no-trial sub was counted in headline MRR (status='active')
 		// but invisible to New/Net movement — the dashboard never
 		// reconciled. Trialing subs are NOT activated here (their
@@ -949,7 +989,7 @@ func (s *Service) Activate(ctx context.Context, tenantID, id string) (domain.Sub
 	ctx = s.bindForSub(ctx, tenantID, id)
 	now := s.clock.Now(ctx)
 
-	// First-period math: same helper as Create's StartNow branch — period
+	// First-period math: same helper as Create's start-now branch — period
 	// begins at `now` (day-snapped) and ends at the next calendar boundary
 	// (calendar billing) or `now + 1 month` (anniversary). (The historical
 	// beginningOfMonth backdating bug and its fix are recorded on
@@ -1152,7 +1192,7 @@ func addItemQuantity(input AddItemInput) (int64, error) {
 // as "added, then archived": an existing item on an archived plan, which
 // keeps billing (ADR-067).
 func (s *Service) validateAddItem(ctx context.Context, tenantID string, sub domain.Subscription, planID string) error {
-	if sub.Status == domain.SubscriptionCanceled || sub.Status == domain.SubscriptionArchived {
+	if sub.Status == domain.SubscriptionCanceled {
 		return errs.InvalidState(fmt.Sprintf("Items can't be added to a %s subscription.", sub.Status))
 	}
 
@@ -1778,7 +1818,7 @@ func (s *Service) applyCrossIntervalPlanSwapTx(
 	// row-locks the subscription and proves the snapshot this request was
 	// planned from — status, period start, watermark — before the refund
 	// drafts, the plan write or the new-period invoice touch anything. A cycle
-	// close, a threshold reset or a sibling swap that committed after the Get
+	// close, a threshold fire or a sibling swap that committed after the Get
 	// in UpdateItemTx makes it 0 rows → ErrWatermarkMoved → 409 here, and the
 	// handler's deferred rollback has nothing to undo. Holding the row
 	// exclusively from the first statement also removes the share→exclusive
@@ -1814,8 +1854,19 @@ func (s *Service) applyCrossIntervalPlanSwapTx(
 	if !sameItems(locked.Items, sub.Items) {
 		return ItemChangeResult{}, errItemChanged()
 	}
+	// The swap references the item's current plan and the new one. Take
+	// both now, before the refund drafts lock invoices and number a credit
+	// note: a swap that waited for a plan while holding the tenant's number
+	// row could deadlock with a meter edit and an activation (lockPlansTx).
+	var currentPlanID string
+	if it, ok := findItem(sub.Items, itemID); ok {
+		currentPlanID = it.PlanID
+	}
+	if err := s.store.LockPlansTx(ctx, tx, []string{currentPlanID, newPlanID}); err != nil {
+		return ItemChangeResult{}, err
+	}
 
-	// Fire-vs-swap residual (ADR-115): a reset=false threshold fire that
+	// Fire-vs-swap residual (ADR-115): a threshold fire that
 	// committed after UpdateItemTx read the sub passes the CAS above — it does
 	// not move the period — but may have billed usage through an instant AFTER
 	// `now`. Re-anchoring the period below that window would re-bill
@@ -2032,29 +2083,27 @@ func (s *Service) RemoveItemTx(ctx context.Context, tx *sql.Tx, tenantID, subscr
 	return ItemChangeResult{Item: item, EffectiveAt: now, pricedFrom: itemChangeBase{sub: sub, item: item}}, nil
 }
 
-// cancelActorLabel derives the timeline's "canceled by …" vocabulary from
-// the request identity (ADR-090 D16): a dashboard session or API key reads
-// as "operator", a stamped customer actor as "customer". Background callers
-// name themselves via WithCancelOrigin (the dunning adapter stamps
-// "dunning"); an unstamped background cancel is honestly "system".
+// cancelActorLabel derives the timeline's "canceled by …" vocabulary
+// (ADR-090 D16). The machinery that decided the cancel names itself via
+// WithCancelOrigin (the dunning adapter stamps "dunning"), and that stamp
+// wins over the request identity: dunning can run inside a request, such as
+// a test-clock advance made with an API key, and the cancel is still
+// dunning's. Without a stamp, a dashboard session or API key reads as
+// "operator", a stamped customer actor as "customer", and a background
+// cancel is honestly "system".
 //
 // The SAME function feeds the outbound subscription.canceled webhook
 // (postgres.go, enqueued in the cancel tx), so the webhook and the audit
 // row can never disagree about who canceled.
 func cancelActorLabel(ctx context.Context) string {
+	if origin := CancelOrigin(ctx); origin != "" {
+		return origin
+	}
 	switch actorType, _ := audit.ResolveActor(ctx); actorType {
 	case "user", "api_key":
 		return "operator"
 	case "customer":
 		return "customer"
-	}
-	// Background caller. The machinery that drove the cancel STAMPS its own
-	// identity (WithCancelOrigin) rather than us inferring it from the
-	// absence of a request actor — an unlabeled background canceller is
-	// honestly "system", never a guess at whichever background path happens
-	// to exist today.
-	if origin := CancelOrigin(ctx); origin != "" {
-		return origin
 	}
 	return "system"
 }
@@ -2165,23 +2214,43 @@ func (s *Service) FireDueScheduledCancel(ctx context.Context, tenantID, id strin
 // skip its proration. So every subscription write runs this first, and then
 // acts on the period that is running, as if the billing run had gone first.
 //
-// The close is the billing run's own attempt (BillDueNow): the period CAS,
-// catch-up over several periods and the failure record (ADR-119). Its error
-// is logged here, not returned: the engine has already logged and saved it,
-// and the caller learns the outcome from the returned row (still due or not).
+// The close is the billing run's own attempt (DueBiller.BillDue): the period
+// CAS, catch-up over several periods and the failure record (ADR-119). Its
+// error is logged here, not returned: the engine has already logged and saved
+// it, and the caller learns the outcome from the returned row (still due or
+// not).
+//
+// grace is the invoice grace the close waits for (ADR-120). The operator's
+// writes pass 0: the operator is acting now, so the ended period closes now.
+// Dunning's final pause and cancel pass INVOICE_GRACE_PERIOD (amendment
+// 2026-10-22): periods past their grace are closed, and a period still
+// inside it is left open and answered with *InsideInvoiceGraceError, so the
+// action runs when the grace ends and usage arriving inside the grace is on
+// the invoice. The close itself honours the grace, and the check after it
+// reads the row at the same now, so no period inside its grace is closed
+// however the boundary and this call interleave. A test clock has no grace
+// (ADR-120): its advance decides when usage arrives.
 //
 // Trialing subscriptions are left to the trial scans, as Cancel always has
 // (ADR-069: a trial cancel is free however late it lands). closed reports
 // whether an attempt ran; sub is the row read after it.
-func (s *Service) closeEndedPeriods(ctx context.Context, tenantID, id string) (sub domain.Subscription, closed bool, err error) {
+func (s *Service) closeEndedPeriods(ctx context.Context, tenantID, id string, grace time.Duration) (sub domain.Subscription, closed bool, err error) {
 	sub, err = s.store.Get(ctx, tenantID, id)
 	if err != nil {
 		return domain.Subscription{}, false, err
 	}
-	if s.dueBiller == nil || sub.Status != domain.SubscriptionActive || !domain.BillingDueAt(sub, s.clock.Now(ctx)) {
+	now := s.clock.Now(ctx)
+	if s.dueBiller == nil || sub.Status != domain.SubscriptionActive || !domain.BillingDueAt(sub, now) {
 		return sub, false, nil
 	}
-	if _, billErr := s.dueBiller.BillDueNow(ctx, tenantID, id); billErr != nil {
+	if sub.TestClockID != "" {
+		grace = 0
+	}
+	// The close honours the grace (BillDue closes no period still inside it),
+	// so the one guard is the check after it: whatever is still due at now but
+	// not at now less the grace waits. A period inside its grace on the first
+	// read is left as it was and answered the same way.
+	if _, billErr := s.dueBiller.BillDue(ctx, tenantID, id, grace); billErr != nil {
 		slog.WarnContext(ctx, "billing the ended period before a subscription write failed",
 			"subscription_id", id, "tenant_id", tenantID, "error", billErr)
 	}
@@ -2189,7 +2258,22 @@ func (s *Service) closeEndedPeriods(ctx context.Context, tenantID, id string) (s
 	if err != nil {
 		return domain.Subscription{}, true, err
 	}
+	if insideInvoiceGrace(sub, now, grace) {
+		// The periods past their grace are closed (none, or several on a
+		// catch-up); the newest waits.
+		return sub, true, graceWait(sub, grace)
+	}
 	return sub, true, nil
+}
+
+// insideInvoiceGrace reports whether sub has a due instant that has come at
+// now but whose grace has not passed.
+func insideInvoiceGrace(sub domain.Subscription, now time.Time, grace time.Duration) bool {
+	return grace > 0 && domain.BillingDueAt(sub, now) && !domain.BillingDueAt(sub, now.Add(-grace))
+}
+
+func graceWait(sub domain.Subscription, grace time.Duration) *InsideInvoiceGraceError {
+	return &InsideInvoiceGraceError{Until: domain.DueInstant(sub).Add(grace).Truncate(time.Microsecond)}
 }
 
 // errUnbilledPeriod is the refusal of a write that would act on a period that
@@ -2217,8 +2301,15 @@ func errUnbilledPeriod(sub domain.Subscription) error {
 // add would leave it unbillable for good, and with nothing to bill there is
 // nothing on the ended period a write could change.
 func (s *Service) CloseEndedPeriodFirst(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
+	return s.closeEndedPeriodFirstWithin(ctx, tenantID, id, 0)
+}
+
+// closeEndedPeriodFirstWithin is CloseEndedPeriodFirst waiting for grace (see
+// closeEndedPeriods). A period inside its grace answers
+// *InsideInvoiceGraceError.
+func (s *Service) closeEndedPeriodFirstWithin(ctx context.Context, tenantID, id string, grace time.Duration) (domain.Subscription, error) {
 	ctx = s.bindForSub(ctx, tenantID, id)
-	sub, _, err := s.closeEndedPeriods(ctx, tenantID, id)
+	sub, _, err := s.closeEndedPeriods(ctx, tenantID, id, grace)
 	if err != nil {
 		return domain.Subscription{}, err
 	}
@@ -2236,7 +2327,22 @@ func (s *Service) CloseEndedPeriodFirst(ctx context.Context, tenantID, id string
 // Prorated credit $X.XX" (industry standard — Stripe / Lago / Chargebee /
 // Orb all surface the credit on the subscription timeline, not just the
 // customer's credit balance).
+//
+// It is the operator's cancel: an ended period is closed now, inside its
+// invoice grace or not. Dunning cancels through CancelForDunning.
 func (s *Service) Cancel(ctx context.Context, tenantID, id string) (domain.Subscription, int64, error) {
+	return s.cancel(ctx, tenantID, id, 0)
+}
+
+// CancelForDunning is dunning's cancel final action. It is Cancel, except
+// that it does not close a period still inside its invoice grace: it answers
+// *InsideInvoiceGraceError and changes nothing, and dunning runs it again
+// when the grace ends (ADR-120 amendment 2026-10-22).
+func (s *Service) CancelForDunning(ctx context.Context, tenantID, id string) (domain.Subscription, int64, error) {
+	return s.cancel(ctx, tenantID, id, s.invoiceGrace)
+}
+
+func (s *Service) cancel(ctx context.Context, tenantID, id string, grace time.Duration) (domain.Subscription, int64, error) {
 	ctx = s.bindForSub(ctx, tenantID, id)
 
 	// A cancel can arrive after the period ended and before the billing run
@@ -2248,7 +2354,7 @@ func (s *Service) Cancel(ctx context.Context, tenantID, id string) (domain.Subsc
 	// The attempt's error is not returned: the engine has logged and saved
 	// it, and the final-invoice step below refuses the cancel (code
 	// unbilled_period) for as long as a period is left unbilled.
-	sub, closed, err := s.closeEndedPeriods(ctx, tenantID, id)
+	sub, closed, err := s.closeEndedPeriods(ctx, tenantID, id, grace)
 	if err != nil {
 		return domain.Subscription{}, 0, err
 	}
@@ -2434,7 +2540,7 @@ func (s *Service) RetryBilling(ctx context.Context, tenantID, id string) (RetryB
 	var res RetryBillingResult
 	var billErr error
 	if s.dueBiller != nil {
-		res.InvoicesGenerated, billErr = s.dueBiller.BillDueNow(ctx, tenantID, id)
+		res.InvoicesGenerated, billErr = s.dueBiller.BillDue(ctx, tenantID, id, 0)
 	}
 
 	res.Subscription, err = s.store.Get(ctx, tenantID, id)
@@ -2547,25 +2653,35 @@ func (s *Service) ScheduleCancel(ctx context.Context, tenantID, id string, input
 }
 
 // ClearScheduledCancel undoes any prior schedule. Idempotent — a row
-// without a schedule returns unchanged.
+// without a schedule returns unchanged, with cleared false, so the caller
+// announces nothing.
 //
 // A schedule whose boundary has passed has already taken effect, even if the
 // billing run has not closed the period yet: the close runs first and fires
 // it, and the clear is then refused rather than reported as a clear.
-func (s *Service) ClearScheduledCancel(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
+func (s *Service) ClearScheduledCancel(ctx context.Context, tenantID, id string) (domain.Subscription, bool, error) {
 	ctx = s.bindForSub(ctx, tenantID, id)
 	before, err := s.store.Get(ctx, tenantID, id)
 	if err != nil {
-		return domain.Subscription{}, err
+		return domain.Subscription{}, false, err
 	}
 	after, err := s.CloseEndedPeriodFirst(ctx, tenantID, id)
 	if err != nil {
-		return domain.Subscription{}, err
+		return domain.Subscription{}, false, err
 	}
 	if before.Status == domain.SubscriptionActive && after.Status == domain.SubscriptionCanceled {
-		return domain.Subscription{}, errs.InvalidState("the scheduled cancel already took effect when the billing period ended; the subscription is canceled")
+		return domain.Subscription{}, false, errs.InvalidState("the scheduled cancel already took effect when the billing period ended; the subscription is canceled")
 	}
-	return s.store.ClearScheduledCancellation(ctx, tenantID, id)
+	sub, err := s.store.ClearScheduledCancellation(ctx, tenantID, id)
+	if errors.Is(err, ErrNoScheduledCancel) {
+		// Idempotent for the operator: nothing changed, nothing announced.
+		sub, err = s.store.Get(ctx, tenantID, id)
+		return sub, false, err
+	}
+	if err != nil {
+		return domain.Subscription{}, false, err
+	}
+	return sub, true, nil
 }
 
 // PauseCollectionInput carries the collection-pause intent. Behavior is
@@ -2573,22 +2689,18 @@ func (s *Service) ClearScheduledCancel(ctx context.Context, tenantID, id string)
 // ResumesAt is optional; when set, the cycle scan auto-clears the pause
 // at the start of the period containing or after that timestamp so that
 // period bills normally. When nil, only an explicit DELETE clears it.
-//
-// TriggeredBy is set by the caller (handler / dunning adapter / future
-// callers) so the audit trail can distinguish operator-driven pauses
-// from system-driven ones. Not exposed in JSON so the field can't be
-// spoofed by an API client. Defaults to "operator" inside the service
-// if empty.
 type PauseCollectionInput struct {
-	Behavior    domain.PauseCollectionBehavior `json:"behavior"`
-	ResumesAt   *time.Time                     `json:"resumes_at,omitempty"`
-	TriggeredBy string                         `json:"-"`
+	Behavior  domain.PauseCollectionBehavior `json:"behavior"`
+	ResumesAt *time.Time                     `json:"resumes_at,omitempty"`
 }
 
-// PauseCollection sets the Stripe-parity collection-pause state. Distinct
-// from Pause (hard freeze on status). The cycle keeps advancing; while
-// pause_collection is non-null the engine generates each new invoice as a
-// draft, so it is not finalized, not charged and starts no dunning run.
+// PauseCollection sets the operator's Stripe-parity collection-pause state.
+// Distinct from Pause (hard freeze on status). The cycle keeps advancing;
+// while pause_collection is non-null the engine generates each new invoice
+// as a draft, so it is not finalized, not charged and starts no dunning run.
+// The pause is the operator's (set_by=operator), also when it replaces a
+// dunning pause, so a payment no longer lifts it. Dunning pauses through
+// PauseCollectionForDunning.
 //
 // It does not stop collection on invoices finalized before the pause. A
 // dunning run already open on one keeps its retry schedule and charges the
@@ -2642,21 +2754,17 @@ func (s *Service) PauseCollection(ctx context.Context, tenantID, id string, inpu
 		pc.ResumesAt = &ts
 	}
 
-	sub, err := s.store.SetPauseCollection(ctx, tenantID, id, pc)
+	sub, err := s.store.SetPauseCollection(ctx, tenantID, id, pc, s.resumeAudit())
 	if err != nil {
 		return domain.Subscription{}, err
 	}
 
 	if s.audit != nil {
-		triggeredBy := input.TriggeredBy
-		if triggeredBy == "" {
-			triggeredBy = "operator"
-		}
 		meta := map[string]any{
 			"action":       domain.SubAuditCollectionPaused,
 			"customer_id":  sub.CustomerID,
 			"behavior":     string(input.Behavior),
-			"triggered_by": triggeredBy,
+			"triggered_by": "operator",
 		}
 		if sub.PauseCollection != nil && sub.PauseCollection.ResumesAt != nil {
 			meta["resumes_at"] = sub.PauseCollection.ResumesAt.UTC()
@@ -2667,30 +2775,88 @@ func (s *Service) PauseCollection(ctx context.Context, tenantID, id string, inpu
 	return sub, nil
 }
 
-// ResumeCollection clears any active collection-pause. Idempotent — a row
-// without an active pause returns unchanged. Distinct from Resume (which
-// flips status from paused back to active).
+// PauseCollectionForDunning is dunning's pause final action for the unpaid
+// invoice invoiceID. applied reports whether collection is paused when it
+// returns: true when this call paused it, and when a pause was already in
+// force (the operator's, which it leaves as it is, this run's earlier
+// attempt, or another invoice's dunning pause). It is false when the invoice
+// was paid before the pause could land; nothing is paused then.
 //
-// All current callers of this method are operator-driven (handler);
-// the engine's cycle-scan auto-resume writes its own audit row with
-// triggered_by="schedule" via Engine.SetAuditLogger and does not call
-// this service method. If a future system path resumes via the service
-// (e.g. webhook callback from PSP), thread a TriggeredBy param the same
-// way PauseCollection does today.
-func (s *Service) ResumeCollection(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
+// The "Collection paused" audit row and the subscription.collection_paused
+// event (triggered_by dunning) are written in the pause's transaction, and
+// only when this call paused collection. A re-attempted exhaustion that
+// finds the pause in force writes neither again. One that finds no pause,
+// because the operator resumed collection after the first attempt, pauses
+// again and writes both again.
+//
+// The pause lifts when invoiceID is paid (ADR-036 amendment 2026-10-22,
+// PostgresStore.ReleaseDunningPauseTx). Dunning never resumes collection
+// itself.
+func (s *Service) PauseCollectionForDunning(ctx context.Context, tenantID, id, invoiceID string) (bool, error) {
+	ctx = s.bindForSub(ctx, tenantID, id)
+	// The ended period's invoice follows the pause state at its end, as
+	// for an operator's pause. Unlike the operator's, this close waits for
+	// the invoice grace: inside it nothing is paused, the answer is
+	// *InsideInvoiceGraceError, and dunning pauses when the grace ends
+	// (ADR-120 amendment 2026-10-22).
+	if _, err := s.closeEndedPeriodFirstWithin(ctx, tenantID, id, s.invoiceGrace); err != nil {
+		return false, err
+	}
+	var auditTx func(tx *sql.Tx, sub domain.Subscription) error
+	if s.audit != nil {
+		auditTx = func(tx *sql.Tx, sub domain.Subscription) error {
+			if err := s.audit.LogInTx(ctx, tx, audit.Entry{
+				Action:        domain.AuditActionUpdate,
+				ResourceType:  "subscription",
+				ResourceID:    sub.ID,
+				ResourceLabel: sub.Code,
+				Metadata: map[string]any{
+					"action":       domain.SubAuditCollectionPaused,
+					"customer_id":  sub.CustomerID,
+					"behavior":     string(domain.PauseCollectionKeepAsDraft),
+					"triggered_by": "dunning",
+					"invoice_id":   invoiceID,
+				},
+			}); err != nil {
+				return fmt.Errorf("audit emission: %w", err)
+			}
+			return nil
+		}
+	}
+	_, outcome, err := s.store.SetDunningPause(ctx, tenantID, id, invoiceID, auditTx, s.resumeAudit())
+	if err != nil {
+		return false, err
+	}
+	return outcome != DunningPauseInvoiceSettled, nil
+}
+
+// ResumeCollection clears any active collection-pause. Idempotent — a row
+// without an active pause returns unchanged, with resumed false, so the
+// caller announces nothing. A pause that had already lifted (a payment
+// released it, or its date came) is resumed as the scheduled resumer would
+// resume it, with that trigger, and resumed is false too. Distinct from
+// Resume (which flips status from paused back to active).
+//
+// Its one caller is the operator (handler). The scheduled resumers write
+// their own row (triggered_by "schedule", or "payment" for a dunning pause
+// a payment released) and do not call this method.
+func (s *Service) ResumeCollection(ctx context.Context, tenantID, id string) (domain.Subscription, bool, error) {
 	ctx = s.bindForSub(ctx, tenantID, id)
 	// A period that ended while paused keeps a draft invoice; the resume
 	// applies from the period that is running.
 	if _, err := s.CloseEndedPeriodFirst(ctx, tenantID, id); err != nil {
-		return domain.Subscription{}, err
+		return domain.Subscription{}, false, err
 	}
-	sub, err := s.store.ClearPauseCollection(ctx, tenantID, id)
-	if errors.Is(err, ErrNotPaused) {
-		// Idempotent for the operator: nothing changed, nothing announced.
-		return s.store.Get(ctx, tenantID, id)
+	sub, err := s.store.ClearPauseCollection(ctx, tenantID, id, s.resumeAudit())
+	if errors.Is(err, ErrNotPaused) || errors.Is(err, ErrPauseLifted) {
+		// Idempotent for the operator: nothing was paused, so the operator
+		// announces nothing. A lifted pause's resume was announced by the
+		// store, with its own trigger.
+		sub, err = s.store.Get(ctx, tenantID, id)
+		return sub, false, err
 	}
 	if err != nil {
-		return domain.Subscription{}, err
+		return domain.Subscription{}, false, err
 	}
 	if s.audit != nil {
 		_ = s.audit.Log(ctx, tenantID, domain.AuditActionUpdate, "subscription", sub.ID, sub.Code, map[string]any{
@@ -2699,7 +2865,7 @@ func (s *Service) ResumeCollection(ctx context.Context, tenantID, id string) (do
 			"triggered_by": "operator",
 		})
 	}
-	return sub, nil
+	return sub, true, nil
 }
 
 // EndTrial transitions a 'trialing' subscription to 'active' immediately,
@@ -2977,7 +3143,10 @@ func (s *Service) ProcessExpiredTrials(ctx context.Context, batch int) (int, []e
 	if batch <= 0 {
 		batch = 100
 	}
-	livemode := postgres.Livemode(ctx)
+	livemode, err := postgres.Livemode(ctx)
+	if err != nil {
+		return 0, []error{err}
+	}
 	now := s.clock.Now(ctx)
 	expired, err := s.store.ListExpiredTrials(ctx, now, livemode, batch)
 	if err != nil {
@@ -3073,12 +3242,11 @@ func (s *Service) ProcessExpiredTrials(ctx context.Context, batch int) (int, []e
 
 // ProcessExpiredPauseCollectionsForClock is the catchup-orchestrator
 // entry point that scans clock-pinned subs whose
-// pause_collection_resumes_at has passed in simulated time, clears the
-// pause, writes audit (triggered_by=schedule), and dispatches
-// `subscription.collection_resumed`. Runs as a catchup phase AFTER
-// cycle billing, and the store query skips a sub that still owes a close
-// before resumes_at: that close bills the pause as it stood at the
-// period's end, so the pause must still be on the row when it runs.
+// pause_collection_resumes_at has passed in simulated time and resumes
+// each (resumeListedPauses). Runs as a catchup phase AFTER cycle billing,
+// and the store query skips a sub that still owes a close before
+// resumes_at: that close bills the pause as it stood at the period's end,
+// so the pause must still be on the row when it runs.
 //
 // Stripe-parity rationale: Stripe resumes collection AT resumes_at,
 // not at the next cycle close. The pre-fix gate inside billOnePeriod
@@ -3091,59 +3259,7 @@ func (s *Service) ProcessExpiredPauseCollectionsForClock(ctx context.Context, te
 	if err != nil {
 		return 0, []error{fmt.Errorf("list expired pause collections: %w", err)}
 	}
-	var (
-		processed int
-		batchErrs []error
-	)
-	for _, sub := range expired {
-		// The resume's instant is the CONTRACTED resumes_at, not wherever
-		// the advance happened to land (same split as trial flips, boundary
-		// cancels, and ADR-097: contractual facts stamp their promised
-		// instant). Pre-fix a Sep 4 auto-resume swept by an advance to
-		// Oct 2 stamped resumed_at/sim_effective_at = Oct 2 — an event
-		// consumer asking "when did collection resume" got a date up to
-		// the whole advance-span late. Fallback to frozen is defensive
-		// (the scan only returns rows with a due resumes_at).
-		resumeAt := frozen
-		if sub.PauseCollection != nil && sub.PauseCollection.ResumesAt != nil {
-			resumeAt = *sub.PauseCollection.ResumesAt
-		}
-		// Override the INSTANT while keeping the CLOCK: WithEffectiveNow
-		// deliberately clears the clock id (it means "time from no clock I
-		// can name"), which stripped sim_effective_at/test_clock_id off the
-		// resume's audit row and cost it the test-clock chip. This phase
-		// runs inside a named clock's catchup — WithSim keeps the pair.
-		bound := clock.WithSim(s.bindForSub(ctx, tenantID, sub.ID), clock.Sim{At: resumeAt, TestClockID: clockID})
-		cleared, err := s.store.ClearPauseCollection(bound, tenantID, sub.ID)
-		if errors.Is(err, ErrNotPaused) {
-			// Another clearer (a sibling leader, an operator) got there
-			// first: it announced the resume; we announce nothing.
-			slog.InfoContext(bound, "pause collection already cleared — skipping resume announcement", "subscription_id", sub.ID)
-			continue
-		}
-		if err != nil {
-			batchErrs = append(batchErrs, fmt.Errorf("clear pause %s: %w", sub.ID, err))
-			continue
-		}
-		if s.audit != nil {
-			_ = s.audit.Log(bound, tenantID, domain.AuditActionUpdate, "subscription", cleared.ID, cleared.Code, map[string]any{
-				"action":       domain.SubAuditCollectionResumed,
-				"customer_id":  cleared.CustomerID,
-				"resumed_at":   resumeAt.UTC(),
-				"triggered_by": "schedule",
-			})
-		}
-		if s.events != nil {
-			s.dispatchEvent(bound, tenantID, domain.EventSubscriptionCollectionResumed, map[string]any{
-				"subscription_id": cleared.ID,
-				"customer_id":     cleared.CustomerID,
-				"resumed_at":      resumeAt.UTC(),
-				"triggered_by":    "schedule",
-			})
-		}
-		processed++
-	}
-	return processed, batchErrs
+	return s.resumeListedPauses(ctx, expired)
 }
 
 // ProcessExpiredPauseCollections is the wall-clock cron counterpart —
@@ -3160,48 +3276,57 @@ func (s *Service) ProcessExpiredPauseCollections(ctx context.Context, batch int)
 	if err != nil {
 		return 0, []error{fmt.Errorf("list expired pause collections: %w", err)}
 	}
+	return s.resumeListedPauses(ctx, expired)
+}
+
+// resumeListedPauses resumes each lifted pause a resumer listed. The clear
+// is a compare-and-set on the pause as listed (Store.ResumeLiftedPause):
+// the "Collection resumed" row and subscription.collection_resumed commit
+// with it, triggered_by "schedule" for an operator's timed pause or
+// "payment" for a dunning pause, resumed_at the CONTRACTED resumes_at (on
+// a test clock, also the audit row's simulated instant), not when the scan
+// ran. When another writer got to the row after the list (a sibling
+// leader, the operator, a new pause), the clear misses and the row is
+// skipped: that writer announced what it did.
+func (s *Service) resumeListedPauses(ctx context.Context, listed []domain.Subscription) (int, []error) {
 	var (
 		processed int
 		batchErrs []error
 	)
-	for _, sub := range expired {
-		// Contracted instant, same rationale as the clock path above. On
-		// the cron this is at most one tick behind wall now, but the
-		// principle holds: resumed_at is when the resume was promised.
-		resumeAt := now
-		if sub.PauseCollection != nil && sub.PauseCollection.ResumesAt != nil {
-			resumeAt = *sub.PauseCollection.ResumesAt
-		}
-		cleared, err := s.store.ClearPauseCollection(ctx, sub.TenantID, sub.ID)
+	for _, sub := range listed {
+		// The store binds a test-clock row's ctx to its resumes_at.
+		_, err := s.store.ResumeLiftedPause(ctx, sub.TenantID, sub, s.resumeAudit())
 		if errors.Is(err, ErrNotPaused) {
-			// Another clearer (a sibling leader in a failover window, an
-			// operator) got there first and announced the resume.
-			slog.InfoContext(ctx, "pause collection already cleared — skipping resume announcement", "subscription_id", sub.ID)
+			slog.InfoContext(ctx, "pause collection changed since the list — skipping resume announcement", "subscription_id", sub.ID)
 			continue
 		}
 		if err != nil {
-			batchErrs = append(batchErrs, fmt.Errorf("clear pause %s: %w", sub.ID, err))
+			batchErrs = append(batchErrs, fmt.Errorf("resume pause %s: %w", sub.ID, err))
 			continue
-		}
-		if s.audit != nil {
-			_ = s.audit.Log(ctx, sub.TenantID, domain.AuditActionUpdate, "subscription", cleared.ID, cleared.Code, map[string]any{
-				"action":       domain.SubAuditCollectionResumed,
-				"customer_id":  cleared.CustomerID,
-				"resumed_at":   resumeAt.UTC(),
-				"triggered_by": "schedule",
-			})
-		}
-		if s.events != nil {
-			s.dispatchEvent(ctx, sub.TenantID, domain.EventSubscriptionCollectionResumed, map[string]any{
-				"subscription_id": cleared.ID,
-				"customer_id":     cleared.CustomerID,
-				"resumed_at":      resumeAt.UTC(),
-				"triggered_by":    "schedule",
-			})
 		}
 		processed++
 	}
 	return processed, batchErrs
+}
+
+// resumeAudit writes the "Collection resumed" audit row of a lifted pause
+// in the store's clearing transaction. Nil without an audit logger.
+func (s *Service) resumeAudit() ResumeAudit {
+	if s.audit == nil {
+		return nil
+	}
+	return func(ctx context.Context, tx *sql.Tx, cleared domain.Subscription, r PauseResume) error {
+		if err := s.audit.LogInTx(ctx, tx, audit.Entry{
+			Action:        domain.AuditActionUpdate,
+			ResourceType:  "subscription",
+			ResourceID:    cleared.ID,
+			ResourceLabel: cleared.Code,
+			Metadata:      r.auditMetadata(cleared),
+		}); err != nil {
+			return fmt.Errorf("audit emission: %w", err)
+		}
+		return nil
+	}
 }
 
 // ExtendTrial pushes a trialing subscription's trial_end_at later. Used
@@ -3273,27 +3398,20 @@ type ItemThresholdInput struct {
 // always-array of per-item caps. Either AmountGTE or ItemThresholds (or both)
 // must be set — a body with neither is rejected as no-op.
 //
-// ResetBillingCycle defaults to FALSE at PATCH time when omitted — the
-// threshold fire bills mid-cycle and the period anchor stays put, which is
-// Stripe's documented default (reset_billing_cycle_anchor=false; the earlier
-// comment claimed the opposite and was verified wrong, 2026-07-10 design
-// review). Keep-anchor is also the safer silent default: it avoids the
-// ADR-066 §5 {in_advance × reset=true} interaction entirely for operators
-// who never chose a value. The pointer-on-field shape lets the handler
-// distinguish "not supplied" (apply default) from an explicit choice.
-// (The 0056 column default remains TRUE — historical and inert: every
-// threshold write flows through this PATCH, which always stores an
-// explicit value.)
+// A threshold fire always keeps the billing period (Stripe's default,
+// reset_billing_cycle_anchor=false). reset_billing_cycle was removed on
+// 2026-10-23: the handler decodes strictly, so a body that still sends it,
+// true or false, is refused with a 422 naming the field.
 type BillingThresholdsInput struct {
-	AmountGTE         int64                `json:"amount_gte,omitempty"`
-	ResetBillingCycle *bool                `json:"reset_billing_cycle,omitempty"`
-	ItemThresholds    []ItemThresholdInput `json:"item_thresholds,omitempty"`
+	AmountGTE      int64                `json:"amount_gte,omitempty"`
+	ItemThresholds []ItemThresholdInput `json:"item_thresholds,omitempty"`
 }
 
-// SetBillingThresholds writes (amount_gte, reset_cycle, item_thresholds) onto
+// SetBillingThresholds writes (amount_gte, item_thresholds) onto
 // a subscription. Validates: at least one of amount_gte or item_thresholds is
 // supplied (a body with neither is a no-op masquerade); amount_gte > 0 if
-// supplied; usage_gte parses as a non-negative decimal; every
+// supplied; usage_gte is a decimal string above 0 inside
+// domain.QuantityLimits; every
 // subscription_item_id in item_thresholds belongs to this subscription;
 // duplicate item ids are rejected so the underlying PK doesn't surface as a
 // mid-tx integrity error. Multi-currency rejection happens upstream at the
@@ -3316,7 +3434,7 @@ func (s *Service) SetBillingThresholds(ctx context.Context, tenantID, id string,
 	if err != nil {
 		return domain.Subscription{}, err
 	}
-	if sub.Status == domain.SubscriptionCanceled || sub.Status == domain.SubscriptionArchived {
+	if sub.Status == domain.SubscriptionCanceled {
 		return domain.Subscription{}, errs.InvalidState(
 			fmt.Sprintf("Spend thresholds can't be set on a %s subscription.", sub.Status))
 	}
@@ -3342,16 +3460,18 @@ func (s *Service) SetBillingThresholds(ctx context.Context, tenantID, id string,
 				fmt.Sprintf("item_thresholds[%d].subscription_item_id", i),
 				fmt.Sprintf("item %q does not belong to this subscription", t.SubscriptionItemID))
 		}
-		usage, derr := decimal.NewFromString(strings.TrimSpace(t.UsageGTE))
-		if derr != nil {
-			return domain.Subscription{}, errs.Invalid(
-				fmt.Sprintf("item_thresholds[%d].usage_gte", i),
-				"must be a numeric string (e.g. \"1000\" or \"3.14\")")
+		// The column is NUMERIC(38,12) with CHECK usage_gte > 0: a 13th
+		// decimal place was rounded away, and 0 or 10^26 failed the write.
+		field := fmt.Sprintf("item_thresholds[%d].usage_gte", i)
+		usage, err := domain.ParseDecimalString(field, t.UsageGTE)
+		if err != nil {
+			return domain.Subscription{}, err
 		}
-		if usage.IsNegative() {
-			return domain.Subscription{}, errs.Invalid(
-				fmt.Sprintf("item_thresholds[%d].usage_gte", i),
-				"must be >= 0")
+		if usage, err = domain.CheckDecimal(field, usage, domain.QuantityLimits); err != nil {
+			return domain.Subscription{}, err
+		}
+		if !usage.IsPositive() {
+			return domain.Subscription{}, errs.Invalid(field, field+" must be greater than 0")
 		}
 		parsed = append(parsed, domain.SubscriptionItemThreshold{
 			SubscriptionItemID: t.SubscriptionItemID,
@@ -3359,15 +3479,9 @@ func (s *Service) SetBillingThresholds(ctx context.Context, tenantID, id string,
 		})
 	}
 
-	resetCycle := false
-	if input.ResetBillingCycle != nil {
-		resetCycle = *input.ResetBillingCycle
-	}
-
 	return s.store.SetBillingThresholds(ctx, tenantID, id, domain.BillingThresholds{
-		AmountGTE:         input.AmountGTE,
-		ResetBillingCycle: resetCycle,
-		ItemThresholds:    parsed,
+		AmountGTE:      input.AmountGTE,
+		ItemThresholds: parsed,
 	})
 }
 

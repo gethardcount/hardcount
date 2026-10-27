@@ -43,10 +43,8 @@ func TestBillOnCancel_PaidPrebillReversesTax(t *testing.T) {
 			ID: "ili_1", InvoiceID: "inv_1", LineType: domain.LineTypeBaseFee, BillingPeriodStart: &ps,
 		}},
 	}
-	g := &fakeCreditGranter{}
 	a := &fakeCreditNoteAdjuster{}
 	e := wireBaseTax(NewEngine(&mockSubs{}, &mockUsage{}, pricing, inv, nil, &mockSettings{}, nil, nil, billingTestClock()))
-	e.SetCreditGranter(g)
 	e.SetCreditNoteAdjuster(a)
 	e.SetCreditHeadroomReader(&fakeCreditHeadroom{})
 
@@ -62,9 +60,6 @@ func TestBillOnCancel_PaidPrebillReversesTax(t *testing.T) {
 	}
 	if len(a.calls) != 1 || a.calls[0].invoiceID != "inv_1" || a.calls[0].gross != grossUnused {
 		t.Errorf("credit-note adjustment = %+v, want one call on inv_1 for gross %d", a.calls, grossUnused)
-	}
-	if len(g.grants) != 0 {
-		t.Errorf("bare ledger grant fired %d times — the paid cancel must route through the CN", len(g.grants))
 	}
 	if cents != grossUnused {
 		t.Errorf("returned cents = %d, want gross %d", cents, grossUnused)

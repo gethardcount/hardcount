@@ -23,7 +23,7 @@ import (
 //     JSON number that would lose precision on large fractional values.
 //
 // This is the merge gate for /v1/invoices/create_preview. See
-// docs/design/create-preview.md.
+// docs/dev/design/create-preview.md.
 func TestWireShape_SnakeCase(t *testing.T) {
 	t.Run("FullyPopulated", func(t *testing.T) {
 		result := PreviewResult{
@@ -42,17 +42,16 @@ func TestWireShape_SnakeCase(t *testing.T) {
 					AmountCents:     0,
 				},
 				{
-					LineType:            "usage",
-					Description:         "Tokens - input (cached)",
-					MeterID:             "vlx_mtr_tokens",
-					RatingRuleVersionID: "vlx_rrv_input",
-					RuleKey:             "gpt4_input_uncached",
-					DimensionMatch:      map[string]any{"model": "gpt-4", "operation": "input", "cached": false},
-					Currency:            "USD",
-					Quantity:            decimal.RequireFromString("1234567.891234"),
-					UnitAmountCents:     0,
-					AmountCents:         3000,
-					PricingMode:         "flat",
+					LineType:        "usage",
+					Description:     "Tokens - input (cached)",
+					MeterID:         "vlx_mtr_tokens",
+					PriceID:         "vlx_prc_input",
+					DimensionMatch:  map[string]string{"model": "gpt-4", "operation": "input", "cached": "false"},
+					Currency:        "USD",
+					Quantity:        decimal.RequireFromString("1234567.891234"),
+					UnitAmountCents: 0,
+					AmountCents:     3000,
+					PricingMode:     "per_unit",
 				},
 			},
 			Totals: []PreviewTotal{
@@ -111,7 +110,7 @@ func TestWireShape_SnakeCase(t *testing.T) {
 			t.Fatalf("expected 2 lines, got %d", len(linesAny))
 		}
 
-		// Per-line snake_case checks. The cost dashboard's per-rule
+		// Per-line snake_case checks. The cost dashboard's per-price
 		// breakdown reads every key on the usage line.
 		baseLine, ok := linesAny[0].(map[string]any)
 		if !ok {
@@ -122,10 +121,10 @@ func TestWireShape_SnakeCase(t *testing.T) {
 				t.Errorf("base line missing %q (keys=%v)", k, mapKeys(baseLine))
 			}
 		}
-		// Optional fields on a base_fee line: meter_id, rating_rule_version_id,
-		// rule_key, dimension_match, pricing_mode. They should be omitted
-		// (omitempty) when empty rather than marshaled as zero values.
-		for _, k := range []string{"meter_id", "rating_rule_version_id", "rule_key", "dimension_match", "pricing_mode"} {
+		// Optional fields on a base_fee line: meter_id, price_id,
+		// dimension_match, pricing_mode. They should be omitted (omitempty)
+		// when empty rather than marshaled as zero values.
+		for _, k := range []string{"meter_id", "price_id", "dimension_match", "pricing_mode"} {
 			if _, ok := baseLine[k]; ok {
 				t.Errorf("base_fee line should omit empty %q (got %v)", k, baseLine[k])
 			}
@@ -135,9 +134,14 @@ func TestWireShape_SnakeCase(t *testing.T) {
 		if !ok {
 			t.Fatalf("usage line not an object: %T", linesAny[1])
 		}
+		for _, k := range []string{"rating_rule_version_id", "rule_key"} {
+			if _, ok := usageLine[k]; ok {
+				t.Errorf("usage line carries the removed field %q", k)
+			}
+		}
 		for _, k := range []string{
-			"line_type", "description", "meter_id", "rating_rule_version_id",
-			"rule_key", "dimension_match", "currency", "quantity",
+			"line_type", "description", "meter_id", "price_id",
+			"dimension_match", "currency", "quantity",
 			"unit_amount_cents", "amount_cents", "pricing_mode",
 		} {
 			if _, ok := usageLine[k]; !ok {
@@ -156,8 +160,8 @@ func TestWireShape_SnakeCase(t *testing.T) {
 		if qtyStr != "1234567.891234" {
 			t.Errorf("quantity precision lost: got %q want %q", qtyStr, "1234567.891234")
 		}
-		// dimension_match must be a JSON object — preserves the rule's
-		// match expression for multi-dim drill-down.
+		// dimension_match must be a JSON object — the price's match, for
+		// the multi-dimension drill-down.
 		if _, isMap := usageLine["dimension_match"].(map[string]any); !isMap {
 			t.Errorf("dimension_match must marshal as JSON object, got %T", usageLine["dimension_match"])
 		}

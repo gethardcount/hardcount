@@ -1,7 +1,6 @@
 # Sign-in says "Too many sign-in attempts"
 
-This page is for an operator whose team member cannot sign in to the
-dashboard because of the sign-in throttle. Back to the
+A team member cannot sign in because of the sign-in throttle. Back to the
 [runbook index](index.md).
 
 ## Symptom
@@ -23,8 +22,8 @@ The wait does not lock the account:
 
 - A browser that signed in to the email before counts on its own, so other
   people's guesses do not slow it.
-- A completed password reset marks the browser that completed it, and that
-  browser can then sign in during the wait.
+- A completed password reset or an accepted invite marks the browser that
+  completed it, and that browser can then sign in during the wait.
 
 A browser that never signed in to the email waits for as long as someone
 keeps guessing.

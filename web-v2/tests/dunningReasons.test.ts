@@ -28,3 +28,7 @@ test('free text (a card decline) is left as written; an unknown token is humanis
   assert.equal(dunningReasonLabel('brand_new_token'), 'Brand new token')
   assert.equal(dunningReasonLabel(''), '')
 })
+
+test('a retry that charged nothing says why', () => {
+  assert.equal(dunningReasonLabel('needs_confirmation'), 'Not charged: the customer must confirm the payment')
+})

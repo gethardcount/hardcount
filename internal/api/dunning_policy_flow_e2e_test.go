@@ -29,7 +29,7 @@ func TestE2E_DunningPolicyDelete(t *testing.T) {
 	newPolicy := func(name string) map[string]any {
 		t.Helper()
 		return call("POST", "/v1/dunning/policies", flowReq{body: map[string]any{
-			"name": name, "enabled": true, "max_retry_attempts": 2, "retry_schedule": []string{"72h", "120h"},
+			"name": name, "enabled": true, "retry_days": []int{3, 3},
 		}}).want(t, 201, "create policy "+name).body
 	}
 	// assigned lists the policies with their "N customers assigned" count,

@@ -9,6 +9,6 @@
  */
 
 /**
- * For a meter with several pricing rules, the dimension values this line's rule matches.
+ * On a usage line, the labels its price takes. Absent for a price that takes every event.
  */
-export type InvoicePreviewLineDimensionMatch = { [key: string]: unknown };
+export type InvoicePreviewLineDimensionMatch = {[key: string]: string};

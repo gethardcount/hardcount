@@ -3,10 +3,11 @@ package billing_test
 import (
 	"context"
 	"database/sql"
-	"github.com/sagarsuperuser/velox/internal/platform/leader"
-	"github.com/sagarsuperuser/velox/internal/platform/leader/leadertest"
 	"testing"
 	"time"
+
+	"github.com/sagarsuperuser/velox/internal/platform/leader"
+	"github.com/sagarsuperuser/velox/internal/platform/leader/leadertest"
 
 	"github.com/shopspring/decimal"
 
@@ -72,7 +73,7 @@ func (a *subStoreAdapter) FireScheduledCancellationTx(ctx context.Context, tx *s
 }
 
 func (a *subStoreAdapter) ClearPauseCollection(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
-	return a.store.ClearPauseCollection(ctx, tenantID, id)
+	return a.store.ClearPauseCollection(ctx, tenantID, id, nil)
 }
 
 func (a *subStoreAdapter) ListWithThresholds(ctx context.Context, livemode bool, afterID string, limit int) ([]domain.Subscription, error) {
@@ -100,20 +101,12 @@ func (a *pricingStoreAdapter) GetMeter(ctx context.Context, tenantID, id string)
 	return a.store.GetMeter(ctx, tenantID, id)
 }
 
-func (a *pricingStoreAdapter) GetRatingRule(ctx context.Context, tenantID, id string) (domain.RatingRuleVersion, error) {
-	return a.store.GetRatingRule(ctx, tenantID, id)
+func (a *pricingStoreAdapter) PlanPricesAt(ctx context.Context, tenantID, planID string, at time.Time, clockID string) ([]domain.PlanPrice, error) {
+	return a.store.PlanPricesAt(ctx, tenantID, planID, at, clockID)
 }
 
-func (a *pricingStoreAdapter) GetRuleByKeyAsOf(ctx context.Context, tenantID, ruleKey string, asOf time.Time) (domain.RatingRuleVersion, error) {
-	return a.store.GetRuleByKeyAsOf(ctx, tenantID, ruleKey, asOf)
-}
-
-func (a *pricingStoreAdapter) GetOverrideByKeyAsOf(ctx context.Context, tenantID, customerID, ruleKey string, asOf time.Time) (domain.CustomerPriceOverride, error) {
-	return a.store.GetOverrideByKeyAsOf(ctx, tenantID, customerID, ruleKey, asOf)
-}
-
-func (a *pricingStoreAdapter) ListMeterPricingRulesByMeter(ctx context.Context, tenantID, meterID string) ([]domain.MeterPricingRule, error) {
-	return a.store.ListMeterPricingRulesByMeter(ctx, tenantID, meterID)
+func (a *pricingStoreAdapter) GetOverrideAt(ctx context.Context, tenantID, customerID, priceID string, at time.Time) (domain.CustomerPriceOverride, error) {
+	return a.store.GetOverrideAt(ctx, tenantID, customerID, priceID, at)
 }
 
 // usageStoreAdapter wraps usage.PostgresStore to implement billing.UsageAggregator
@@ -125,8 +118,8 @@ func (a *usageStoreAdapter) AggregateForBillingPeriodByAgg(ctx context.Context, 
 	return a.store.AggregateForBillingPeriodByAgg(ctx, tenantID, customerID, meters, from, to)
 }
 
-func (a *usageStoreAdapter) AggregateByPricingRules(ctx context.Context, tenantID, customerID, meterID string, defaultMode domain.AggregationMode, from, to time.Time) ([]domain.RuleAggregation, error) {
-	return a.store.AggregateByPricingRules(ctx, tenantID, customerID, meterID, defaultMode, from, to)
+func (a *usageStoreAdapter) AggregateClaims(ctx context.Context, tenantID, customerID, meterID, aggregation string, claims []domain.UsageClaim, from, to time.Time) ([]domain.ClaimedUsage, error) {
+	return a.store.AggregateClaims(ctx, tenantID, customerID, meterID, aggregation, claims, from, to)
 }
 
 // invoiceStoreAdapter wraps invoice.PostgresStore to implement billing.InvoiceWriter
@@ -206,12 +199,16 @@ func (a *invoiceStoreAdapter) GetLatestThresholdInvoiceForCycleTx(ctx context.Co
 	return a.store.GetLatestThresholdInvoiceForCycleTx(ctx, tx, tenantID, subscriptionID, periodStart, periodEnd)
 }
 
+func (a *invoiceStoreAdapter) GetThresholdInvoiceForCycleAnyStatus(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error) {
+	return a.store.GetThresholdInvoiceForCycleAnyStatus(ctx, tenantID, subscriptionID, periodStart, periodEnd)
+}
+
 func (a *invoiceStoreAdapter) GetInvoiceForPeriod(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error) {
 	return a.store.GetInvoiceForPeriod(ctx, tenantID, subscriptionID, periodStart, periodEnd)
 }
 
 // TestFullBillingCycle_E2E tests the complete flow against real Postgres:
-// tenant → customer → meter → rating rule → plan → subscription → usage → billing engine → invoice
+// tenant → customer → meter → plan with prices → subscription → usage → billing engine → invoice
 func TestFullBillingCycle_E2E(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := leadertest.Token(t, testutil.AdminPool(t), postgres.WithLivemode(context.Background(), false), leader.RoleBilling, leader.RoleDunning)
@@ -234,56 +231,33 @@ func TestFullBillingCycle_E2E(t *testing.T) {
 		t.Fatalf("create customer: %v", err)
 	}
 
-	// 3. Create rating rules
-	apiRule, err := pricingStore.CreateRatingRule(ctx, tenantID, domain.RatingRuleVersion{
-		RuleKey: "api_calls", Name: "API Calls Pricing", Version: 1,
-		LifecycleState: domain.RatingRuleActive, Mode: domain.PricingGraduated,
-		Currency: "USD",
-		GraduatedTiers: []domain.RatingTier{
-			{UpTo: 1000, UnitAmountCents: decimal.NewFromInt(10)}, // $0.10 per call up to 1000
-			{UpTo: 0, UnitAmountCents: decimal.NewFromInt(5)},     // $0.05 per call after 1000
-		},
-	})
-	if err != nil {
-		t.Fatalf("create api rule: %v", err)
-	}
-
-	storageRule, err := pricingStore.CreateRatingRule(ctx, tenantID, domain.RatingRuleVersion{
-		RuleKey: "storage_gb", Name: "Storage Pricing", Version: 1,
-		LifecycleState: domain.RatingRuleActive, Mode: domain.PricingFlat,
-		Currency: "USD", FlatAmountCents: decimal.NewFromInt(2500), // $25 flat
-	})
-	if err != nil {
-		t.Fatalf("create storage rule: %v", err)
-	}
-
-	// 4. Create meters
+	// 3. Create meters
 	apiMeter, err := pricingStore.CreateMeter(ctx, tenantID, domain.Meter{
-		Key: "api_calls", Name: "API Calls", Unit: "calls",
-		Aggregation: "sum", RatingRuleVersionID: apiRule.ID,
+		EventName: "api_calls", Name: "API Calls", Unit: "calls", Aggregation: "sum",
 	})
 	if err != nil {
 		t.Fatalf("create api meter: %v", err)
 	}
-
 	storageMeter, err := pricingStore.CreateMeter(ctx, tenantID, domain.Meter{
-		Key: "storage_gb", Name: "Storage", Unit: "GB",
-		Aggregation: "sum", RatingRuleVersionID: storageRule.ID,
+		EventName: "storage_gb", Name: "Storage", Unit: "GB", Aggregation: "sum",
 	})
 	if err != nil {
 		t.Fatalf("create storage meter: %v", err)
 	}
 
-	// 5. Create plan
-	plan, err := pricingStore.CreatePlan(ctx, tenantID, domain.Plan{
+	// 4. Create the plan with its prices: API calls graduated, $0.10 per
+	// call up to 1000 then $0.05; storage $25 per GB.
+	plan, _ := createPlanWithPrices(t, db, ctx, tenantID, domain.Plan{
 		Code: "pro", Name: "Pro Plan", Currency: "USD",
 		BillingInterval: domain.BillingMonthly, Status: domain.PlanActive,
-		BaseAmountCents: 4900, // $49 base
-		MeterIDs:        []string{apiMeter.ID, storageMeter.ID},
-	})
-	if err != nil {
-		t.Fatalf("create plan: %v", err)
-	}
+		BaseAmountCents: 4900, BaseBillTiming: domain.BillInArrears, // $49 base
+	},
+		priceOn{meterID: apiMeter.ID, shape: domain.PriceShape{Mode: domain.PricingGraduated, Tiers: []domain.RatingTier{
+			{UpTo: new(int64(1000)), UnitAmountCents: decimal.NewFromInt(10)},
+			{UpTo: nil, UnitAmountCents: decimal.NewFromInt(5)},
+		}}},
+		catchAll(storageMeter.ID, "2500"),
+	)
 
 	// 6. Create subscription with billing period set
 	periodStart := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
@@ -488,7 +462,6 @@ func TestBillTiming_InAdvance_E2E(t *testing.T) {
 	settingsStore := tenant.NewSettingsStore(db)
 	fakeClk := clock.NewFake(periodStart.Add(time.Hour))
 	engine := newRealEngine(db, fakeClk)
-	engine.SetCreditGranter(creditSvc)
 	// Issuers are REQUIRED post-#442: the paid-source cancel credit routes
 	// through the real creditnote.Service (Issue grants the balance via the
 	// cnGrantAdapter), matching production wiring.
@@ -674,15 +647,7 @@ func TestBillTiming_InAdvance_E2E(t *testing.T) {
 type reliefLedgerGranter struct{ svc *credit.Service }
 
 func (g reliefLedgerGranter) in(i creditnote.CreditGrantInput) credit.GrantInput {
-	return credit.GrantInput{CustomerID: i.CustomerID, AmountCents: i.AmountCents, Description: i.Description, InvoiceID: i.InvoiceID}
-}
-func (g reliefLedgerGranter) Grant(ctx context.Context, tenantID string, i creditnote.CreditGrantInput) error {
-	_, err := g.svc.Grant(ctx, tenantID, g.in(i))
-	return err
-}
-func (g reliefLedgerGranter) GrantForCreditNote(ctx context.Context, tenantID, cnID string, i creditnote.CreditGrantInput) error {
-	_, err := g.svc.GrantForCreditNote(ctx, tenantID, cnID, g.in(i))
-	return err
+	return credit.GrantInput{Currency: i.Currency, CustomerID: i.CustomerID, AmountCents: i.AmountCents, Description: i.Description, InvoiceID: i.InvoiceID}
 }
 func (g reliefLedgerGranter) GrantForCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, cnID string, i creditnote.CreditGrantInput) error {
 	_, err := g.svc.GrantForCreditNoteTx(ctx, tx, tenantID, cnID, g.in(i))
@@ -730,7 +695,6 @@ func TestBillOnCancel_UnpaidPrebillRelief_E2E(t *testing.T) {
 
 	newEngine := func() *billing.Engine {
 		e := newRealEngine(db, clock.NewFake(periodStart.Add(time.Hour)))
-		e.SetCreditGranter(creditSvc)
 		e.SetInvoiceVoider(invoiceSvc)
 		e.SetCreditNoteAdjuster(creditNoteSvc)
 		e.SetCreditHeadroomReader(creditNoteSvc)
@@ -832,7 +796,7 @@ func TestBillOnCancel_UnpaidPrebillRelief_E2E(t *testing.T) {
 	// credits stayed spent on time they never used.
 	t.Run("credits applied before the cancel: the unused share of them comes back", func(t *testing.T) {
 		sub, invID := freshUnpaidSub("cus_credits_first")
-		if _, err := creditSvc.Grant(ctx, tenantID, credit.GrantInput{CustomerID: sub.CustomerID, AmountCents: 3000, Description: "goodwill"}); err != nil {
+		if _, err := creditSvc.Grant(ctx, tenantID, credit.GrantInput{Currency: "USD", CustomerID: sub.CustomerID, AmountCents: 3000, Description: "goodwill"}); err != nil {
 			t.Fatalf("grant: %v", err)
 		}
 		if applied, err := creditSvc.ApplyToInvoice(ctx, tenantID, sub.CustomerID, invID, 4900); err != nil || applied != 3000 {
@@ -858,7 +822,7 @@ func TestBillOnCancel_UnpaidPrebillRelief_E2E(t *testing.T) {
 		if got.AmountDueCents != 0 || got.CreditsAppliedCents != 2450 {
 			t.Errorf("invoice due %d / credits applied %d, want 0 / 2450", got.AmountDueCents, got.CreditsAppliedCents)
 		}
-		bal, err := creditSvc.GetBalance(ctx, tenantID, sub.CustomerID)
+		bal, err := testutil.BalanceUSD(creditSvc.GetBalance(ctx, tenantID, sub.CustomerID))
 		if err != nil {
 			t.Fatalf("balance: %v", err)
 		}

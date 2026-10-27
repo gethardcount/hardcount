@@ -3,7 +3,7 @@ package domain
 import "time"
 
 // ChargeAttemptOutcome is the lifecycle of one charge attempt. Only
-// 'succeeded' is terminal — a 3DS PaymentIntent can go failed →
+// 'succeeded' and 'below_minimum' are terminal — a 3DS PaymentIntent can go failed →
 // succeeded on the customer's second try within one checkout session,
 // so every other transition stays open until provider truth settles it.
 type ChargeAttemptOutcome string
@@ -13,7 +13,19 @@ const (
 	ChargeAttemptUnknown   ChargeAttemptOutcome = "unknown"
 	ChargeAttemptFailed    ChargeAttemptOutcome = "failed"
 	ChargeAttemptSucceeded ChargeAttemptOutcome = "succeeded"
+	// ChargeAttemptBelowMinimum: Stripe refused the charge because the amount
+	// is below its minimum charge (ErrBelowMinimumCharge). Nothing was
+	// charged and Stripe made no PaymentIntent, so it is not a failed
+	// payment, and no later report can name it to change it.
+	ChargeAttemptBelowMinimum ChargeAttemptOutcome = "below_minimum"
 )
+
+// ChargeAttemptOutcomes lists every outcome, so a test can hold the list and
+// invoice_charge_attempts' CHECK constraint equal: an outcome the CHECK does
+// not list fails the attempt's insert.
+func ChargeAttemptOutcomes() []ChargeAttemptOutcome {
+	return []ChargeAttemptOutcome{ChargeAttemptPending, ChargeAttemptUnknown, ChargeAttemptFailed, ChargeAttemptSucceeded, ChargeAttemptBelowMinimum}
+}
 
 // ChargeAttemptTrigger names the writer that made the attempt.
 type ChargeAttemptTrigger string
@@ -62,7 +74,9 @@ type InvoiceChargeAttempt struct {
 	DeclineCode string
 	// StripePaymentMethodID is the card the attempt charged. With
 	// DeclineCode it tells a dunning retry whether the card it is about to
-	// charge was refused for good on this invoice (IsHardDecline).
+	// charge was refused for good on this invoice (IsHardDecline), or whether
+	// the bank asked the customer to confirm its last charge
+	// (IsAuthenticationRequired).
 	StripePaymentMethodID string
 	AmountCents           int64
 	OccurredAt            time.Time  // wall-clock

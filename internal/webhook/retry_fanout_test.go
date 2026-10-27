@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // blockingHTTPClient answers instantly for every endpoint except one, whose
@@ -53,7 +54,7 @@ func TestRetryPendingDeliveries_SlowEndpointDoesNotBlockTheBatch(t *testing.T) {
 	store := newMemStore()
 	client := &blockingHTTPClient{slowURL: "http://localhost:9999/slow", release: make(chan struct{})}
 	svc := NewTestService(store, client)
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	slowEP, err := svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{URL: client.slowURL, Events: []string{"*"}})
 	if err != nil {

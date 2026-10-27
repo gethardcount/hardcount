@@ -2,8 +2,7 @@
 
 LiteLLM is an AI proxy that can send each model call's token usage to
 Velox. If Velox refuses a batch during an outage and LiteLLM runs out of
-retries, that usage is lost. This page is for filling the gap. Back to the
-[runbook index](index.md).
+retries, that usage is lost. Back to the [runbook index](index.md).
 
 ## Symptom
 
@@ -33,15 +32,29 @@ Replay LiteLLM's spend logs for the window to
 `POST /v1/integrations/litellm/spend`.
 
 - Every row carries an idempotency key
-  (`<litellm_call_id>:input|output|cache_read`). So replaying a window that
-  was partly recorded only fills the gap.
+  (`<litellm_call_id>:input|cache_read|cache_write_5m|cache_write_1h|output`),
+  and a call's rows are saved together. The call ID is the spend log's
+  `request_id`; an ID over 240 characters goes into the key as its SHA-256,
+  which Velox works out the same way on the replay. Nothing else goes into
+  the key, so the spend log's millisecond times don't matter. So replaying
+  a window that was partly recorded only fills the gap. A call first saved before cache writes
+  were split (2026-10-22) is saved the old way again, not billed twice.
 - **Deadline:** the replay must reach Velox before the period's invoice is
   built. That is `INVOICE_GRACE_PERIOD` (default 1 hour) after the period
   ends, plus up to one billing tick. A replay after that is stored but not
   billed; bill it with a one-off invoice (see
   [Invoice timing and late usage](invoice-timing-late-usage.md)).
-- `velox_usage_late_event_total` counts only events more than 24 hours old
-  on arrival, so it does not show which rows missed an invoice.
+- A replayed row that missed its period's invoice is counted in the
+  answer's `after_close` and in
+  `velox_usage_unbilled_total{reason="after_close"}`, with a WARN line
+  naming it. Rows on a canceled subscription count as
+  `outside_subscription` instead, and rows before a spend-threshold
+  invoice that is not paid yet are not counted (see
+  [Invoice timing and late usage](invoice-timing-late-usage.md)). These
+  counts are what Velox found when each row arrived; the invoice is the
+  final answer. `velox_usage_late_event_total` counts only events more than
+  24 hours old on arrival, so it does not show which rows missed an
+  invoice.
 
 ## Verify
 

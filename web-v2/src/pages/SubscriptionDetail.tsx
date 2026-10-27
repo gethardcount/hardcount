@@ -25,6 +25,8 @@ import { ExpiryBadge } from '@/components/ExpiryBadge'
 import { effectiveNow } from '@/lib/effectiveNow'
 import { cn } from '@/lib/utils'
 import { statusBadgeVariant } from '@/lib/status'
+import { invoicePaymentChip, invoiceStatus, trialBadgeEndsAt } from '@/lib/statusLabels'
+import { StatusBadge } from '@/components/StatusBadge'
 import { subscriptionWillAutoCharge, hasUsableCard } from '@/lib/paymentReadiness'
 import { invoicePreviewNotes } from '@/lib/invoicePreviewNotes'
 
@@ -142,11 +144,11 @@ export default function SubscriptionDetailPage() {
   })
 
   // Only a subscription with a current period and items has a next invoice
-  // to preview; asking for any other is a server error, not a load failure.
+  // to preview, so the page asks only for those.
   const previewable = !!sub && !!sub.current_billing_period_start && !!sub.current_billing_period_end && (sub.items?.length ?? 0) > 0
   const { data: preview, error: previewError, refetch: refetchPreview, isFetching: previewFetching } = useQuery({
     queryKey: ['subscription-preview', id],
-    queryFn: () => api.invoicePreview(id!),
+    queryFn: () => api.createInvoicePreview({ customer_id: sub!.customer_id, subscription_id: id! }),
     enabled: !!id && previewable,
     retry: false,
   })
@@ -201,7 +203,6 @@ export default function SubscriptionDetailPage() {
       queryClient.invalidateQueries({ queryKey: ['customer-overview', sub.customer_id] })
       queryClient.invalidateQueries({ queryKey: ['customer-subs-upcoming', sub.customer_id] })
     }
-    queryClient.invalidateQueries({ queryKey: ['subscriptions-for-test-clock-chip'] })
     // Plan/quantity changes can credit the customer's balance via
     // proration — refresh the balance-bearing families (2026-07-21 audit).
     invalidateMoneySurfaces(queryClient, { customerId: sub?.customer_id })
@@ -420,9 +421,8 @@ export default function SubscriptionDetailPage() {
           : <NoticeRow tone="amber" title="Cancellation scheduled" action={action}>{sentence}</NoticeRow>
       }
       case 'collection_paused': {
-        // Distinct from the hard pause (status=paused): the sub stays active
-        // but invoices generate as drafts and skip finalize/charge/dunning
-        // until resumed. A deliberate state, so the neutral tone.
+        // The sub stays active, but invoices generate as drafts and skip
+        // finalize/charge/dunning until resumed. A deliberate state, so the neutral tone.
         const action = (
           <Button variant="outline" size="sm" onClick={() => resumeCollectionMutation.mutate()} disabled={acting}>
             {resumeCollectionMutation.isPending ? <><Loader2 size={14} className="animate-spin mr-1.5" />Resuming…</> : 'Resume collection'}
@@ -517,9 +517,7 @@ export default function SubscriptionDetailPage() {
             </>
           )}
           <Badge variant={statusVariant(sub.status)}>{sub.status}</Badge>
-          {sub.status === 'trialing' && sub.trial_end_at && (
-            <ExpiryBadge expiresAt={sub.trial_end_at} label="Trial ends" warningDays={3} now={effectiveNow(sub.test_clock_id ? testClock?.frozen_time : undefined)} />
-          )}
+          <ExpiryBadge expiresAt={trialBadgeEndsAt(sub)} label="Trial ends" warningDays={3} now={effectiveNow(sub.test_clock_id ? testClock?.frozen_time : undefined)} />
         </div>
       </div>
 
@@ -830,10 +828,10 @@ export default function SubscriptionDetailPage() {
           <div className="space-y-1">
             <CardTitle className="text-sm">Spend thresholds</CardTitle>
             <p className="text-xs text-muted-foreground">
-              Issues an invoice early when this period's running total, or an item's usage, reaches a set level. Checked by the hourly billing run. Usage is not stopped.
+              Invoices usage early when this period's usage total, or an item's usage, reaches a set level. Checked by the hourly billing run. Usage is not stopped.
             </p>
           </div>
-          {sub.status !== 'canceled' && sub.status !== 'archived' && (
+          {sub.status !== 'canceled' && (
             <Button size="sm" variant="outline" onClick={() => setShowThresholdsDialog(true)}>
               {sub.billing_thresholds ? 'Edit' : 'Set thresholds'}
             </Button>
@@ -844,12 +842,9 @@ export default function SubscriptionDetailPage() {
             <div className="divide-y divide-border">
               {sub.billing_thresholds.amount_gte != null && (
                 <div className="flex items-center justify-between px-6 py-3">
-                  <span className="text-sm text-muted-foreground w-40 shrink-0">Period total</span>
+                  <span className="text-sm text-muted-foreground w-40 shrink-0">Usage total</span>
                   <span className="text-sm text-foreground">
                     {firstItemPlan ? formatCents(sub.billing_thresholds.amount_gte, firstItemPlan.currency) : formatCentsBare(sub.billing_thresholds.amount_gte)}
-                    <span className="text-xs text-muted-foreground ml-2">
-                      ({sub.billing_thresholds.reset_billing_cycle ? 'starts a new billing period' : 'keeps the billing period'})
-                    </span>
                   </span>
                 </div>
               )}
@@ -954,7 +949,7 @@ export default function SubscriptionDetailPage() {
       {/* Invoice Preview. Hidden on terminal subs — a canceled sub has no
           next invoice, and the full-period estimate read as a real upcoming
           charge (found in the FLOW B14 walk: canceled sub advertising $490). */}
-      {sub.status !== 'canceled' && sub.status !== 'archived' && (() => {
+      {sub.status !== 'canceled' && (() => {
         const view = previewable
           ? previewView(preview, previewError, firstItemPlan?.currency ?? 'USD')
           : { kind: 'none' as const, message: 'Activate the subscription to see its next invoice.' }
@@ -1074,17 +1069,19 @@ export default function SubscriptionDetailPage() {
                         {inv.invoice_number}
                       </Link>
                     </TableCell>
-                    <TableCell><Badge variant={statusVariant(inv.status)}>{inv.status}</Badge></TableCell>
+                    {/* The invoice list's badge and chip: a void reads Void
+                        with no payment chip, never "voided" beside the
+                        "pending" it kept. */}
                     <TableCell>
-                      {/* payment_status is meaningless on drafts — no
-                          PaymentIntent exists yet. Hide the pill (Stripe
-                          parity); show an em dash so the column stays
-                          aligned. */}
-                      {inv.status === 'draft' ? (
-                        <span className="text-sm text-muted-foreground">—</span>
-                      ) : (
-                        <Badge variant={statusVariant(inv.payment_status)}>{inv.payment_status}</Badge>
-                      )}
+                      <StatusBadge status={invoiceStatus(inv, effectiveNow(sub.test_clock_id ? testClock?.frozen_time : undefined))} />
+                    </TableCell>
+                    <TableCell>
+                      {(() => {
+                        const chip = invoicePaymentChip(inv)
+                        return chip
+                          ? <StatusBadge status={chip} />
+                          : <span className="text-sm text-muted-foreground">—</span>
+                      })()}
                     </TableCell>
                     <TableCell className="text-right font-medium">{formatCents(inv.total_amount_cents, inv.currency)}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">{formatDate(inv.created_at)}</TableCell>
@@ -1825,7 +1822,6 @@ function EditBillingThresholdsDialog({ subscription, items, planById, onClose, o
   const [amountStr, setAmountStr] = useState(
     existing?.amount_gte != null ? (existing.amount_gte / 100).toFixed(2) : ''
   )
-  const [resetCycle, setResetCycle] = useState(existing?.reset_billing_cycle ?? false)
   const [perItem, setPerItem] = useState<Record<string, string>>(() => {
     const out: Record<string, string> = {}
     for (const t of existing?.item_thresholds ?? []) {
@@ -1837,15 +1833,13 @@ function EditBillingThresholdsDialog({ subscription, items, planById, onClose, o
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    const body: { amount_gte?: number; reset_billing_cycle?: boolean; item_thresholds?: { subscription_item_id: string; usage_gte: string }[] } = {
-      reset_billing_cycle: resetCycle,
-    }
+    const body: { amount_gte?: number; item_thresholds?: { subscription_item_id: string; usage_gte: string }[] } = {}
 
     const trimmedAmount = amountStr.trim()
     if (trimmedAmount !== '') {
       const amt = Number(trimmedAmount)
       if (!Number.isFinite(amt) || amt <= 0) {
-        toast.error('The period total must be more than zero')
+        toast.error('The usage total must be more than zero')
         return
       }
       body.amount_gte = Math.round(amt * 100)
@@ -1855,8 +1849,8 @@ function EditBillingThresholdsDialog({ subscription, items, planById, onClose, o
     for (const item of items) {
       const raw = (perItem[item.id] ?? '').trim()
       if (raw === '') continue
-      if (!/^\d+(\.\d+)?$/.test(raw)) {
-        toast.error(`The threshold for ${planById(item.plan_id)?.name || 'an item'} must be a number of 0 or more`)
+      if (!/^\d+(\.\d+)?$/.test(raw) || Number(raw) <= 0) {
+        toast.error(`The threshold for ${planById(item.plan_id)?.name || 'an item'} must be a number more than 0`)
         return
       }
       itemThresholds.push({ subscription_item_id: item.id, usage_gte: raw })
@@ -1866,7 +1860,7 @@ function EditBillingThresholdsDialog({ subscription, items, planById, onClose, o
     }
 
     if (body.amount_gte == null && (body.item_thresholds == null || body.item_thresholds.length === 0)) {
-      toast.error('Set a period total or at least one item threshold')
+      toast.error('Set a usage total or at least one item threshold')
       return
     }
 
@@ -1897,12 +1891,12 @@ function EditBillingThresholdsDialog({ subscription, items, planById, onClose, o
         <DialogHeader>
           <DialogTitle>{existing ? 'Edit spend thresholds' : 'Set spend thresholds'}</DialogTitle>
           <DialogDescription>
-            When this period's running total, or an item's usage, reaches a level you set, an invoice is issued early at the next hourly billing run. Usage is not stopped. Set at least one level.
+            When this period's usage total, or an item's usage, reaches a level you set, the usage so far is invoiced early at the next hourly billing run. The period keeps running. The base fee is billed as it would be with no threshold, and the period's next invoice bills the rest of the usage. Usage is not stopped. Set at least one level.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} noValidate className="space-y-5">
           <div className="space-y-2">
-            <Label htmlFor="amount-gte">Period total{subCurrency ? ` (${subCurrency.toUpperCase()})` : ''}</Label>
+            <Label htmlFor="amount-gte">Usage total{subCurrency ? ` (${subCurrency.toUpperCase()})` : ''}</Label>
             <Input
               id="amount-gte"
               type="number"
@@ -1914,22 +1908,8 @@ function EditBillingThresholdsDialog({ subscription, items, planById, onClose, o
               onChange={(e) => setAmountStr(e.target.value)}
             />
             <p className="text-xs text-muted-foreground">
-              An invoice is issued early when the period's total reaches this amount. Leave blank for none.
+              Usage is invoiced early when the period's usage reaches this amount. The base fee is not counted. Leave blank for none.
             </p>
-          </div>
-
-          <div className="flex items-start gap-2">
-            <Checkbox
-              id="reset-cycle"
-              checked={resetCycle}
-              onCheckedChange={(v) => setResetCycle(v === true)}
-            />
-            <div className="space-y-1">
-              <Label htmlFor="reset-cycle" className="font-normal">Start a new billing period when reached</Label>
-              <p className="text-xs text-muted-foreground">
-                Unchecked, the period keeps running and the rest of its usage is billed at its normal end.
-              </p>
-            </div>
           </div>
 
           {items.length > 0 && (

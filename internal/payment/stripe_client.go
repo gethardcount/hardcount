@@ -40,6 +40,10 @@ type PaymentError struct {
 	DeclineCode     string // why the card was refused (insufficient_funds, lost_card, …): see declineCodeOf
 	PaymentIntentID string // set when Stripe returned a PI object alongside the error
 	Unknown         bool
+	// CardMessage is Stripe's message when the error is a card error, the
+	// one kind of message Stripe says can be shown to the customer
+	// (cardErrorMessage); empty otherwise.
+	CardMessage string
 }
 
 func (e *PaymentError) Error() string { return e.Message }
@@ -56,6 +60,11 @@ func (e *PaymentError) Error() string { return e.Message }
 // Stripe SDK strings (idempotency conflicts, validation errors)
 // never reach the operator UI verbatim. ADR-026.
 func (e *PaymentError) OperatorSafeMessage() string {
+	if domain.IsAuthenticationRequired(e.DeclineCode) {
+		// Not a decline: the card works once the customer confirms the
+		// payment, which a charge made without them can't do.
+		return customerMustConfirmMessage
+	}
 	if e.DeclineCode != "" {
 		return "Card was declined: " + declineCodeToOperatorMessage(string(e.DeclineCode))
 	}
@@ -64,6 +73,10 @@ func (e *PaymentError) OperatorSafeMessage() string {
 	}
 	return "Payment provider rejected the request. Please retry; if the problem persists, contact support."
 }
+
+// customerMustConfirmMessage is what Collect payment answers when Stripe
+// returns authentication_required.
+const customerMustConfirmMessage = "The customer's bank needs them to confirm this payment. Email them the payment link; they pay and confirm it on the hosted invoice page."
 
 // OperatorErrorCode gives an unknown outcome its own wire code. Under the
 // shared provider_error a caller could not tell "Stripe refused" (nothing
@@ -157,6 +170,64 @@ func (e *StripeKeyError) OperatorSafeMessage() string {
 // OperatorErrorCode names the fault so a caller can tell it from a decline.
 func (e *StripeKeyError) OperatorErrorCode() string { return "stripe_key_unusable" }
 
+// BelowMinimumError is Stripe refusing a charge, or a payment-mode Checkout
+// Session, because the amount is below Stripe's minimum charge: HTTP 400,
+// invalid_request_error, code amount_too_small (seen on a test-mode account,
+// 2026-10-22: "Amount must be at least $0.50 usd"). Stripe makes no
+// PaymentIntent and no session, so nothing was charged, and asking again
+// gets the same answer with any card. domain.ErrBelowMinimumCharge says what
+// Velox does with it.
+//
+// It must not be or wrap a *PaymentError, for the reason StripeKeyError
+// gives: the auto-charge sweep, the dunning retry and Collect all read a
+// *PaymentError with Unknown=false as a decline. Nor ErrPaymentTransient:
+// that leaves the invoice queued, and the sweep would ask Stripe every tick.
+type BelowMinimumError struct {
+	Message string // Stripe's sentence, scrubbed; it names the minimum
+}
+
+func (e *BelowMinimumError) Error() string {
+	return "below Stripe's minimum charge: " + e.Message
+}
+
+func (e *BelowMinimumError) Unwrap() error { return domain.ErrBelowMinimumCharge }
+
+// belowMinimumOf reads Stripe's amount_too_small refusal off err, or nil.
+// Keyed on the error code, not the message: the code is Stripe's contract.
+func belowMinimumOf(err error) *BelowMinimumError {
+	var se *stripe.Error
+	if errors.As(err, &se) && se.Code == stripe.ErrorCodeAmountTooSmall {
+		return &BelowMinimumError{Message: stripeErrorMessage(err)}
+	}
+	return nil
+}
+
+// BelowMinimumOf is belowMinimumOf for the hosted page's Checkout Session
+// create, which calls stripe-go itself (api/adapters.go).
+func BelowMinimumOf(err error) *BelowMinimumError { return belowMinimumOf(err) }
+
+// IsDefiniteRefusal reports whether Stripe answered a create request with a
+// refusal that proves it created nothing: a 4xx other than 409 (a request
+// with the same idempotency key may still be running, #976) and 429 (it
+// speaks only for this request), and not an idempotency_error (the key was
+// used before, so an earlier request reached Stripe). A network error, a 5xx
+// or anything that is not a Stripe error is not one.
+func IsDefiniteRefusal(err error) bool {
+	var se *stripe.Error
+	if !errors.As(err, &se) {
+		return false
+	}
+	switch {
+	case se.HTTPStatusCode < 400 || se.HTTPStatusCode >= 500:
+		return false
+	case se.HTTPStatusCode == http.StatusConflict || se.HTTPStatusCode == http.StatusTooManyRequests:
+		return false
+	case se.Type == stripe.ErrorTypeIdempotency:
+		return false
+	}
+	return true
+}
+
 // isRateLimited reports whether Stripe refused the request with HTTP 429. A
 // real test-mode reply (2026-10-14) is status 429, type "rate_limit_error",
 // code "rate_limit", with no PaymentIntent. Stripe sends 429 only before it
@@ -182,20 +253,38 @@ func isIdempotencyConflict(err error) bool {
 
 // declineCodeOf is the code that says why Stripe refused a card: the error's
 // decline_code, or, on a card_error that has none, the error's code when that
-// code is a hard decline (domain.IsHardDecline, #966). Stripe sends
-// incorrect_number either way: as the bank's decline code under
-// card_declined, or as its own error code with no decline code
+// code stops dunning from charging the card again: a hard decline
+// (domain.IsHardDecline, #966) or authentication_required
+// (domain.IsAuthenticationRequired). Stripe sends incorrect_number either
+// way: as the bank's decline code under card_declined, or as its own error
+// code with no decline code
 // (https://docs.stripe.com/testing#declined-payments, "Incorrect number
-// decline"). Any other error code stays out, so that decline keeps Stripe's
-// own message and the ordinary retry schedule, as before.
+// decline"). authentication_required is a decline code and an error code
+// too (https://docs.stripe.com/declines/codes,
+// https://docs.stripe.com/error-codes). Any other error code stays out, so
+// that decline keeps Stripe's own message and the ordinary retry schedule,
+// as before.
 func declineCodeOf(errType, code, declineCode string) string {
 	if declineCode != "" {
 		return declineCode
 	}
-	if errType == string(stripe.ErrorTypeCard) && domain.IsHardDecline(code) {
+	if errType == string(stripe.ErrorTypeCard) && domain.RetryBlock(code) != nil {
 		return code
 	}
 	return ""
+}
+
+// cardErrorMessage is Stripe's message for a card error, scrubbed, and ""
+// for any other error type. Stripe: "For card errors, these messages can be
+// shown to your users" (https://docs.stripe.com/api/errors, message). The
+// other types' messages are written for the developer ("This
+// PaymentIntent's payment_method could not be updated"), so the customer's
+// payment-failed email shows only this one (customerFailureReason).
+func cardErrorMessage(errType, msg string) string {
+	if errType != string(stripe.ErrorTypeCard) {
+		return ""
+	}
+	return errs.Scrub(msg)
 }
 
 // classifyStripeError maps a stripe-go SDK error to a PaymentError. Non-Stripe
@@ -213,6 +302,7 @@ func classifyStripeError(err error) *PaymentError {
 	pe := &PaymentError{
 		Message:     stripeErrorMessage(err),
 		DeclineCode: declineCodeOf(string(stripeErr.Type), string(stripeErr.Code), string(stripeErr.DeclineCode)),
+		CardMessage: cardErrorMessage(string(stripeErr.Type), stripeErr.Msg),
 	}
 	if stripeErr.PaymentIntent != nil {
 		pe.PaymentIntentID = stripeErr.PaymentIntent.ID
@@ -231,7 +321,7 @@ func classifyStripeError(err error) *PaymentError {
 		pe.Unknown = true
 		// Not a decline either, whatever its type: Stripe sends declines as
 		// 402. A decline code here would land on the unknown attempt row,
-		// where HardDeclineOnCard reads it and stops dunning from charging
+		// where RetryBlockingDecline reads it and stops dunning from charging
 		// the card (#966), and the API would say "Card was declined".
 		pe.DeclineCode = ""
 		return pe
@@ -401,6 +491,12 @@ func (c *LiveStripeClient) CreatePaymentIntent(ctx context.Context, params Payme
 		if errors.As(err, &se) && (se.HTTPStatusCode == http.StatusUnauthorized || se.HTTPStatusCode == http.StatusForbidden) {
 			return PaymentIntentResult{}, &StripeKeyError{Reason: StripeKeyRejected, Message: errs.Scrub(se.Msg)}
 		}
+		// Below Stripe's minimum charge: an invalid_request_error, so read by
+		// type it was a decline that started dunning and emailed the
+		// customer "declined". Keyed on the code (domain.ErrBelowMinimumCharge).
+		if bm := belowMinimumOf(err); bm != nil {
+			return PaymentIntentResult{}, bm
+		}
 		return PaymentIntentResult{}, classifyStripeError(err)
 	}
 
@@ -539,6 +635,7 @@ func paymentIntentResult(pi *stripe.PaymentIntent) PaymentIntentResult {
 	}
 	if lpe := pi.LastPaymentError; lpe != nil {
 		res.DeclineCode = declineCodeOf(string(lpe.Type), string(lpe.Code), string(lpe.DeclineCode))
+		res.CardMessage = cardErrorMessage(string(lpe.Type), lpe.Msg)
 		if lpe.PaymentMethod != nil {
 			res.PaymentMethodID = lpe.PaymentMethod.ID
 		}

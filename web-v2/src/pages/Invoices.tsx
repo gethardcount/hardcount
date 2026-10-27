@@ -13,8 +13,9 @@ import { useSortable, type SortDir } from '@/hooks/useSortable'
 import { useUrlState } from '@/hooks/useUrlState'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 import { cn } from '@/lib/utils'
-import { paymentStatusLabel, statusBorderColor } from '@/lib/status'
-import { humanizeStatus, invoicePaymentChip, invoiceStatus } from '@/lib/statusLabels'
+import { paymentStatusLabel } from '@/lib/status'
+import { humanizeStatus, invoicePaymentChip, invoiceStatus, toneBorderColor } from '@/lib/statusLabels'
+import { invoiceAmountCents } from '@/lib/invoiceTerminal'
 import { StatusBadge } from '@/components/StatusBadge'
 import { attentionReasonLabel } from '@/lib/attentionLabels'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
@@ -104,6 +105,7 @@ export default function InvoicesPage() {
     dir: 'desc',
   })
   const {
+    // eslint-disable-next-line no-restricted-syntax -- the URL's filter value, not an invoice's field
     search, status: statusFilter, payment_status: paymentStatusFilter,
     customer: customerFilter, overdue: overdueFilter, dateFrom, dateTo, sort: sortKey,
   } = urlState
@@ -173,18 +175,9 @@ export default function InvoicesPage() {
     enabled: customerIds.length > 0,
   })
 
-  // subscriptionsForChip → test_clock_id lookup so each row can carry
-  // a TestClockBadge inline. Fetch is cheap (subs list is small in
-  // practice; the dashboard already pages other lists) and avoids a
-  // backend JOIN in the invoice list query.
-  const { data: subscriptionsData } = useQuery({
-    queryKey: ['subscriptions-for-test-clock-chip'],
-    queryFn: () => api.listSubscriptions(),
-  })
-
   // Test clocks → frozen_time lookup so per-row "Due in N days" badges
-  // read from simulation time when the row's subscription is pinned to a
-  // clock. Without it, the badge defaults to wall-clock and understates
+  // read from simulation time when the row's invoice follows a clock
+  // (inv.test_clock_id, read from its customer by the server). Without it, the badge defaults to wall-clock and understates
   // urgency on test-clock-driven invoices. The hook is mode-gated (no
   // fetch in live, where the server refuses the resource) and returns {}
   // there — every live row correctly falls back to wall time.
@@ -198,12 +191,6 @@ export default function InvoicesPage() {
     ;(customersData?.data ?? []).forEach(c => { cMap[c.id] = c })
     return cMap
   }, [customersData])
-
-  const subTestClockMap = useMemo(() => {
-    const m: Record<string, string> = {}
-    ;(subscriptionsData?.data ?? []).forEach(s => { if (s.test_clock_id) m[s.id] = s.test_clock_id })
-    return m
-  }, [subscriptionsData])
 
   // Search + date range are server-side (search=, from=, to= query
   // params) — the rows arriving here are already filtered across the
@@ -403,24 +390,22 @@ export default function InvoicesPage() {
                     <SortableHead label="Status" sortKey="status" activeSortKey={sortKey} sortDir={sortDir} onSort={onSort} />
                     <SortableHead label="Payment" sortKey="payment_status" activeSortKey={sortKey} sortDir={sortDir} onSort={onSort} />
                     <SortableHead label="Period" sortKey="billing_period_start" activeSortKey={sortKey} sortDir={sortDir} onSort={onSort} />
-                    <SortableHead label="Amount due" sortKey="amount_due_cents" activeSortKey={sortKey} sortDir={sortDir} onSort={onSort} className="text-right" />
+                    <SortableHead label="Amount" sortKey="amount_due_cents" activeSortKey={sortKey} sortDir={sortDir} onSort={onSort} className="text-right" />
                     <TableHead className="text-xs font-medium text-right">PDF</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {sorted.map((inv: Invoice) => {
-                    // The invoice's own "now": a subscription invoice follows the
-                    // sub's clock; a manual one-off follows the customer's
-                    // (ADR-027). Wall-clock invoices resolve to '' → wall time.
-                    const now = effectiveNow(clockFrozenMap[
-                      (inv.subscription_id && subTestClockMap[inv.subscription_id]) ||
-                      customerMap[inv.customer_id]?.test_clock_id ||
-                      ''
-                    ])
+                    // The invoice's own "now": the clock its customer is pinned
+                    // to, which every subscription inherits (ADR-027). The
+                    // server sends it on each row; wall-clock invoices have
+                    // none → wall time.
+                    const now = effectiveNow(clockFrozenMap[inv.test_clock_id ?? ''])
+                    const badge = invoiceStatus(inv, now)
                     return (
                     <TableRow
                       key={inv.id}
-                      className={cn('cursor-pointer hover:bg-muted/50 transition-colors border-l-[3px]', statusBorderColor(inv.payment_status))}
+                      className={cn('cursor-pointer hover:bg-muted/50 transition-colors border-l-[3px]', toneBorderColor(badge.tone))}
                       onClick={(e) => {
                         const target = e.target as HTMLElement
                         if (target.closest('button, a, input, select')) return
@@ -458,7 +443,7 @@ export default function InvoicesPage() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <StatusBadge status={invoiceStatus(inv, now)} />
+                        <StatusBadge status={badge} />
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
@@ -496,7 +481,10 @@ export default function InvoicesPage() {
                         {inv.billing_period_display || '\u2014'}
                       </TableCell>
                       <TableCell className="text-right tabular-nums font-mono text-sm">
-                        {formatCents(inv.amount_due_cents, inv.currency)}
+                        {/* The invoice's amount, as the amount sort orders
+                            it: a void at what it was voided at, a paid
+                            invoice at what paid it. */}
+                        {formatCents(invoiceAmountCents(inv), inv.currency)}
                       </TableCell>
                       <TableCell className="text-right">
                         <Button

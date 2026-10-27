@@ -8,9 +8,10 @@ import { z } from 'zod'
 import { toast } from 'sonner'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
 import { invoiceLineRate } from '@/lib/priceDisplay'
-import { api, downloadPDF, formatCents, formatRate, formatDateTime, formatTaxRate, getCurrencySymbol, type DunningRun, type Invoice as ApiInvoice, type CreditNote } from '@/lib/api'
+import { api, downloadPDF, formatCents, formatRate, formatLineQuantity, formatDateTime, formatTaxRate, getCurrencySymbol, dunningFinalStepNext, type DunningRun, type Invoice as ApiInvoice, type CreditNote } from '@/lib/api'
 import { formatCivilPeriod, formatInvoiceDate, formatYMDInTZ, usageFilterEndYMD } from '@/lib/dates'
-import { creditNoteCeilings, hasCardPayment } from '@/lib/creditNoteCeilings'
+import { canIssueCreditNote } from '@/lib/creditNoteCeilings'
+import { IssueCreditDialog } from '@/components/IssueCreditDialog'
 import { pollIntervalForInvoice } from '@/lib/invoicePolling'
 import { amountInputToCents } from '@/lib/money'
 import { collectOutcome, writeOffOutcome } from '@/lib/actionOutcomes'
@@ -27,7 +28,6 @@ import { useGetInvoice } from '@/lib/gen/queries.gen'
 import type { Invoice } from '@/lib/gen/schemas/invoice'
 import type { InvoiceLineItem as LineItem } from '@/lib/gen/schemas/invoiceLineItem'
 import { applyApiError, showApiError } from '@/lib/formErrors'
-import { useSingleFlight } from '@/hooks/useSingleFlight'
 import { taxReasonLabel } from '@/lib/taxReasons'
 import { DueBadge } from '@/components/DueBadge'
 import { effectiveNow } from '@/lib/effectiveNow'
@@ -35,7 +35,8 @@ import { invoiceStatus } from '@/lib/statusLabels'
 import { StatusBadge } from '@/components/StatusBadge'
 import { Layout } from '@/components/Layout'
 import { cn } from '@/lib/utils'
-import { creditNoteReasonLabel, paymentIsUnresolved } from '@/lib/status'
+import { creditNoteReasonLabel } from '@/lib/status'
+import { invoiceAwaitingPayment, invoiceCanCollect, invoiceDueCents, invoicePaymentInFlight, invoiceShowsCollect } from '@/lib/invoiceTerminal'
 
 import { Button } from '@/components/ui/button'
 import { LoadError } from '@/components/LoadError'
@@ -189,7 +190,7 @@ export default function InvoiceDetailPage() {
   const lineItems: LineItem[] = invoiceData?.line_items ?? []
 
   // Lines sharing a meter mean the drill-down cannot be exact: the filter
-  // scopes to customer + meter + period, so when several pricing rules rate
+  // scopes to customer + meter + period, so when several prices rate
   // the same meter (the multi-dimensional case — input vs output tokens) every
   // one of those lines resolves to the same event set. Counting them lets the
   // link say which it is instead of hedging on every invoice.
@@ -206,9 +207,9 @@ export default function InvoiceDetailPage() {
   // Only usage lines qualify: meter_id is stamped by the billing engine on
   // those alone, and a base fee or tax line has no events behind it to show.
   //
-  // Scope is meter + customer + period rather than the line's pricing rule,
-  // because the rule's dimension_match is not stamped on the line today. That
-  // makes the link exact for single-rule meters and a superset otherwise.
+  // Scope is meter + customer + period, not the labels of the line's price
+  // (its dimension_match). That makes the link exact for a meter with one
+  // price and a superset otherwise.
   const usageEventsHref = (item: LineItem): string | null => {
     if (item.line_type !== 'usage' || !item.meter_id || !invoice) return null
     const startISO = item.billing_period_start || invoice.billing_period_start
@@ -338,14 +339,11 @@ export default function InvoiceDetailPage() {
   //   - uncollectible (operator wrote off as bad debt — Stripe parity
   //     says further diagnosis/resolution framing contradicts the
   //     terminal decision and confuses the page)
-  // Tax pending/failed always shows (independent of status — tax can
+  // Tax pending always shows (independent of status — tax can
   // block finalize on draft, or appear on a finalized invoice).
   const showOperatorContext =
     invoice?.tax_status === 'pending' ||
-    invoice?.tax_status === 'failed' ||
-    (invoice?.status === 'finalized' &&
-      invoice?.payment_status !== 'succeeded' &&
-      invoice?.payment_status !== 'processing')
+    (!!invoice && invoiceAwaitingPayment(invoice))
   const { data: dunningRunsData } = useQuery({
     queryKey: ['invoice-dunning-runs', id],
     queryFn: () => api.listDunningRuns(`invoice_id=${id}`).then(r => r.data || []),
@@ -449,13 +447,12 @@ export default function InvoiceDetailPage() {
   // must not silently change what a live subscription bills.
   const [pauseSubOnWriteOff, setPauseSubOnWriteOff] = useState(false)
   // Only offerable when there IS a subscription still collecting: a one-off
-  // invoice has none, a canceled/archived sub refuses the pause outright
+  // invoice has none, a canceled sub refuses the pause outright
   // (SetPauseCollection rejects terminal rows), and an already-paused one has
   // nothing to pause.
   const canPauseSubOnWriteOff = Boolean(
     subscription &&
     subscription.status !== 'canceled' &&
-    subscription.status !== 'archived' &&
     !subscription.pause_collection
   )
   const markUncollectibleMutation = useMutation({
@@ -606,6 +603,11 @@ export default function InvoiceDetailPage() {
   const noSeller = sellerMissing(invoice, settings, settingsLoaded)
   const dates = issueDates(invoice, (iso) => formatInvoiceDate(iso, invoice.billing_timezone))
   const notice = pickInvoiceNotice(invoice)
+  // The two recovery items in the actions menu. Record offline payment also
+  // serves a write-off (ADR-110: money that already arrived is recorded).
+  // Mark uncollectible is the one action a parked charge allows (ADR-107).
+  const showRecordOffline = invoiceCanCollect(invoice) || invoice.status === 'uncollectible'
+  const showMarkUncollectible = invoiceAwaitingPayment(invoice)
 
   return (
     <Layout>
@@ -661,7 +663,7 @@ export default function InvoiceDetailPage() {
             // Server gates Finalize when tax_status != 'ok'. Mirror
             // the gate on the UI so operators see the constraint
             // before clicking. Stripe Dashboard does the same.
-            const taxBlocked = invoice.tax_status === 'pending' || invoice.tax_status === 'failed'
+            const taxBlocked = invoice.tax_status === 'pending'
             if (!taxBlocked) {
               return (
                 <Button size="sm" onClick={() => finalizeMutation.mutate()} disabled={acting}>
@@ -682,18 +684,16 @@ export default function InvoiceDetailPage() {
             )
           })()}
 
-          {invoice.status === 'finalized' && invoice.payment_status !== 'succeeded' && !paymentIsUnresolved(invoice.payment_status) && invoice.amount_due_cents > 0 && (
-            !hasPaymentMethod ? (
-              // No card → no collect. A greyed-out primary next to the
-              // banner's active primary was competing noise; the banner
-              // owns the next step (2026-07-22 audit, P3-2 — Stripe hides
-              // the collect action when it cannot run).
-              null
-            ) : (
-              <Button size="sm" onClick={() => collectMutation.mutate()} disabled={acting}>
-                {collectMutation.isPending ? <><Loader2 size={14} className="animate-spin mr-1.5" />Collecting…</> : 'Collect payment'}
-              </Button>
-            )
+          {/* No card → no collect. A greyed-out primary next to the
+              banner's active primary was competing noise; the banner owns
+              the next step (2026-07-22 audit, P3-2 — Stripe hides the
+              collect action when it cannot run). A below-minimum invoice
+              keeps it: Collect applies the credit balance there, which
+              needs no card. */}
+          {invoiceShowsCollect(invoice, hasPaymentMethod, invoice.attention?.reason) && (
+            <Button size="sm" onClick={() => collectMutation.mutate()} disabled={acting}>
+              {collectMutation.isPending ? <><Loader2 size={14} className="animate-spin mr-1.5" />Collecting…</> : 'Collect payment'}
+            </Button>
           )}
 
           {/* Terminal states default to Download PDF as the visible
@@ -744,8 +744,7 @@ export default function InvoiceDetailPage() {
                   Retry tax
                 </DropdownMenuItem>
               )}
-              {((invoice.status === 'finalized' && invoice.payment_status !== 'succeeded' && !paymentIsUnresolved(invoice.payment_status) && invoice.amount_due_cents > 0) ||
-                invoice.status === 'uncollectible') && (
+              {showRecordOffline && (
                 <DropdownMenuItem onClick={() => setShowRecordPaymentDialog(true)} disabled={acting}>
                   <Receipt size={14} className="mr-2" />
                   Record offline payment
@@ -758,24 +757,19 @@ export default function InvoiceDetailPage() {
                   the exit when Stripe cannot be asked. A payment that is
                   genuinely still resolving is a different matter and is still
                   excluded. */}
-              {invoice.status === 'finalized' && invoice.payment_status !== 'succeeded' &&
-                invoice.payment_status !== 'processing' && (
+              {showMarkUncollectible && (
                 <DropdownMenuItem onClick={() => setShowMarkUncollectibleConfirm(true)} disabled={acting} className="text-amber-700 dark:text-amber-400">
                   <AlertOctagon size={14} className="mr-2" />
                   Mark uncollectible
                 </DropdownMenuItem>
               )}
-              {((invoice.status === 'finalized' && invoice.payment_status !== 'succeeded' && !paymentIsUnresolved(invoice.payment_status) && invoice.amount_due_cents > 0) ||
-                invoice.status === 'uncollectible' ||
-                (invoice.status === 'finalized' && invoice.payment_status !== 'succeeded' && !paymentIsUnresolved(invoice.payment_status))) && (
-                <DropdownMenuSeparator />
-              )}
+              {(showRecordOffline || showMarkUncollectible) && <DropdownMenuSeparator />}
 
               {/* Hidden while the payment is unresolved: the server refuses it
                   (the email carries a pay call-to-action, and for a parked
                   invoice the hosted page will not even show a Pay button), so
                   offering it here is discovery-by-failure. */}
-              {invoice.status !== 'voided' && !paymentIsUnresolved(invoice.payment_status) && (
+              {invoice.status !== 'voided' && invoicePaymentInFlight(invoice) === null && (
                 <DropdownMenuItem onClick={() => setShowEmailModal(true)} disabled={acting}>
                   <Mail size={14} className="mr-2" />
                   Email invoice
@@ -818,10 +812,10 @@ export default function InvoiceDetailPage() {
                 <Download size={14} className="mr-2" />
                 Download PDF
               </DropdownMenuItem>
-              {/* Refused while the payment is unresolved — crediting could
-                  refund money that was never collected. */}
-              {(invoice.status === 'finalized' || invoice.status === 'paid' || invoice.status === 'uncollectible') &&
-                !paymentIsUnresolved(invoice.payment_status) && (
+              {/* The server's rule: finalized or paid, and refused while the
+                  payment is unresolved — crediting could refund money that
+                  was never collected. */}
+              {canIssueCreditNote(invoice) && (
                 <DropdownMenuItem onClick={() => setShowCreditModal(true)} disabled={acting}>
                   <CreditCard size={14} className="mr-2" />
                   Issue credit note
@@ -833,7 +827,7 @@ export default function InvoiceDetailPage() {
                   in fact paid. Mark uncollectible stays available above — it is
                   the one action allowed on a parked invoice. */}
               {invoice.status !== 'voided' && invoice.status !== 'paid' &&
-                !paymentIsUnresolved(invoice.payment_status) && (
+                invoicePaymentInFlight(invoice) === null && (
                 <>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
@@ -867,7 +861,7 @@ export default function InvoiceDetailPage() {
         const subLine = writtenOffSubscriptionLine(subscription)
         // A card serves new invoices only (ADR-113: a written-off invoice is
         // never charged), so this line exists to set up future collection.
-        const showCardLine = invoice.amount_due_cents > 0 && !hasPaymentMethod
+        const showCardLine = invoiceDueCents(invoice) > 0 && !hasPaymentMethod
         const cardLine = writtenOffCardLine(customer?.email, whoami?.can_email_setup_links)
         return (
           <Callout
@@ -1235,11 +1229,9 @@ export default function InvoiceDetailPage() {
                         )}
                       </TableCell>
                       <TableCell className="text-right font-mono tabular-nums text-sm">
-                        {item.quantity_decimal && Number(item.quantity_decimal) !== 0
-                          ? Number(item.quantity_decimal).toLocaleString(undefined, { maximumFractionDigits: 12 })
-                          : item.quantity.toLocaleString()}
+                        {formatLineQuantity(item.quantity)}
                       </TableCell>
-                      <TableCell className="text-right font-mono tabular-nums text-sm">{invoiceLineRate(item, invoice.currency, formatRate(item.unit_amount_decimal ?? item.unit_amount_cents, invoice.currency))}</TableCell>
+                      <TableCell className="text-right font-mono tabular-nums text-sm">{invoiceLineRate(item, invoice.currency, formatRate(item.unit_amount_decimal, invoice.currency))}</TableCell>
                       <TableCell className="text-right font-mono tabular-nums text-sm font-medium">{formatCents(item.amount_cents, invoice.currency)}</TableCell>
                     </TableRow>
                   )
@@ -1315,7 +1307,7 @@ export default function InvoiceDetailPage() {
                   <Separator />
                   <div className="flex justify-between text-sm font-semibold">
                     <span>Amount due</span>
-                    <span className="font-mono tabular-nums">{formatCents(0, invoice.currency)}</span>
+                    <span className="font-mono tabular-nums">{formatCents(invoiceDueCents(invoice), invoice.currency)}</span>
                   </div>
                 </>
               ) : (() => {
@@ -1362,7 +1354,7 @@ export default function InvoiceDetailPage() {
                     <Separator />
                     <div className="flex justify-between font-semibold text-base pt-1">
                       <span>Amount due</span>
-                      <span className="font-mono tabular-nums">{formatCents(invoice.amount_due_cents, invoice.currency)}</span>
+                      <span className="font-mono tabular-nums">{formatCents(invoiceDueCents(invoice), invoice.currency)}</span>
                     </div>
 
                     {/* Post-payment adjustments */}
@@ -1531,6 +1523,16 @@ export default function InvoiceDetailPage() {
             Void is for an invoice created by mistake. If the customer didn&apos;t pay, mark it uncollectible instead.
           </p>
         )}
+        {/* Whether a later invoice bills a voided threshold invoice's
+            charges depends on when the void lands (before or after the
+            period's invoice is built), which this page does not know; the runbook
+            (invoice-timing-late-usage.md) and ADR-066's 2026-10-23
+            amendment give each case. This line is true in all of them. */}
+        {invoice.billing_reason === 'threshold' && (
+          <p className="text-xs text-muted-foreground">
+            This is a spend-threshold invoice. After a void, its charges may not be billed on any other invoice.
+          </p>
+        )}
       </TypedConfirmDialog>
 
       {/* Mark Uncollectible Confirm — Stripe-parity bad-debt write-off.
@@ -1547,6 +1549,15 @@ export default function InvoiceDetailPage() {
         onConfirm={() => markUncollectibleMutation.mutate()}
         loading={markUncollectibleMutation.isPending}
       >
+        {/* A written-off threshold invoice keeps its charges billed
+            (ADR-066 amendment 2026-10-23). A later void can give them
+            back to the period's invoice (before that invoice is built),
+            so the line names it. */}
+        {invoice.billing_reason === 'threshold' && (
+          <p className="text-xs text-muted-foreground">
+            The charges on this spend-threshold invoice will not be billed again. Voiding it later can change that.
+          </p>
+        )}
         {canPauseSubOnWriteOff ? (
           <div className="rounded-md border p-3 space-y-2">
             <div className="flex items-start gap-2">
@@ -1601,7 +1612,7 @@ export default function InvoiceDetailPage() {
             <div className="space-y-3 py-2">
               <p className="text-sm text-muted-foreground">
                 Mark this invoice paid for money received outside Stripe
-                (cheque, wire, cash). The full {formatCents(invoice.amount_due_cents, invoice.currency)} is
+                (cheque, wire, cash). The full {formatCents(invoiceDueCents(invoice), invoice.currency)} is
                 recorded as paid.
               </p>
               {/* The unreconciled consequence, stated BEFORE the operator
@@ -1713,7 +1724,7 @@ function OperatorContextCard({
   invoice: Invoice
   dunningRun?: DunningRun
 }) {
-  const taxState = invoice.tax_status === 'failed' ? 'Failed' : invoice.tax_status === 'pending' ? 'Retrying' : null
+  const taxState = invoice.tax_status === 'pending' ? 'Retrying' : null
 
   // Nothing to show → no section. A freshly finalized invoice awaiting its
   // first charge has no tax issue, no attempt and no recovery run.
@@ -1774,6 +1785,10 @@ function OperatorContextCard({
               // has escalated, drop the future-step line entirely. Real
               // decline recovery (has-card) keeps "Next retry". attempt 0 is
               // humanized to match the Dunning list's "No retries yet" (P2-2).
+              // With every retry used, the scheduled step is the final
+              // action (waiting for the invoice grace, or tried again after
+              // it failed), never a charge: "Final step", not "Next retry".
+              const finalStep = dunningFinalStepNext(dunningRun)
               const cardless =
                 invoice.attention?.reason === 'no_payment_method' ||
                 invoice.attention?.reason === 'dunning_exhausted'
@@ -1792,10 +1807,13 @@ function OperatorContextCard({
 
                   {dunningRun.next_action_at && !escalated && (
                     <>
-                      <dt className="text-xs text-muted-foreground">{cardless ? 'Next reminder' : 'Next retry'}</dt>
+                      <dt className="text-xs text-muted-foreground">{finalStep ? 'Final step' : cardless ? 'Next reminder' : 'Next retry'}</dt>
                       <dd className="text-foreground">
                         {formatDateTime(dunningRun.next_action_at)}
-                        {cardless && (
+                        {finalStep && (
+                          <span className="block text-xs text-muted-foreground">All retries used. No more charges; the dunning policy's final action runs then.</span>
+                        )}
+                        {cardless && !finalStep && (
                           <span className="block text-xs text-muted-foreground">Won't charge until a card is added.</span>
                         )}
                         {invoice.attention?.code === 'payment.page_open' && (
@@ -1955,297 +1973,3 @@ function EmailInvoiceDialog({ invoiceId, defaultEmail, defaultCc, onClose, onSen
     </Dialog>
   )
 }
-
-function IssueCreditDialog({ invoice, existingCreditNotes, onClose, onCreated }: {
-  invoice: Invoice
-  existingCreditNotes: CreditNote[]
-  onClose: () => void
-  onCreated: () => void
-}) {
-  const isPaid = invoice.status === 'paid'
-
-  // An offline-recorded payment (Record payment) carries a NON-empty PI field
-  // holding a synthetic "out_of_band:<ts>" marker, so `amount_paid_cents > 0`
-  // does not imply a card was charged. Mirrors domain.Invoice.HasCardPayment.
-  const hasCard = hasCardPayment(invoice.stripe_payment_intent_id)
-
-  const [amount, setAmount] = useState('')
-  const [refund, setRefund] = useState('')
-  const [credit, setCredit] = useState('')
-  const [outOfBand, setOutOfBand] = useState('')
-  const [reason, setReason] = useState('')
-  const [submitError, setSubmitError] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-
-  const parseDollarsToCents = (s: string): number => {
-    const n = parseFloat(s || '0')
-    if (!isFinite(n)) return 0
-    return Math.round(n * 100)
-  }
-  const amountCents = parseDollarsToCents(amount)
-  const refundCents = parseDollarsToCents(refund)
-  const creditCents = parseDollarsToCents(credit)
-  const outOfBandCents = parseDollarsToCents(outOfBand)
-  const allocatedCents = refundCents + creditCents + outOfBandCents
-
-  // Every ceiling the dialog advertises, derived in one tested place
-  // (lib/creditNoteCeilings). The refund ceiling depends on `amountCents`, so
-  // it recomputes as the operator types: a refund can never exceed the note it
-  // belongs to, and a `max` that ignores that is a promise the field won't keep.
-  const {
-    alreadyCreditedCents,
-    creditableRemainingCents,
-    cardRefundableCents,
-    refundCeilingCents,
-    refundBoundBy,
-  } = creditNoteCeilings({
-    invoiceTotalCents: invoice.total_amount_cents,
-    amountPaidCents: invoice.amount_paid_cents,
-    stripePaymentIntentId: invoice.stripe_payment_intent_id,
-    creditNotes: existingCreditNotes,
-    amountCents,
-  })
-
-  // Auto-balance: typing in Refund auto-fills Credit with the
-  // remainder so the simple case stays one input + Save. The user
-  // can override by editing Credit directly, which sets the manual
-  // flag and stops auto-fill.
-  const [manualCredit, setManualCredit] = useState(false)
-  const [manualOOB, setManualOOB] = useState(false)
-
-  const handleAmountChange = (v: string) => {
-    setAmount(v)
-    if (!isPaid) return
-    // Default on a paid invoice: full amount → credit balance.
-    if (!manualCredit && !manualOOB && refund === '') {
-      setCredit(v)
-    }
-  }
-  const handleRefundChange = (v: string) => {
-    setRefund(v)
-    if (!isPaid) return
-    if (!manualCredit && !manualOOB) {
-      const remainder = amountCents - parseDollarsToCents(v) - outOfBandCents
-      setCredit(remainder >= 0 ? (remainder / 100).toFixed(2) : '0.00')
-    }
-  }
-  const handleCreditChange = (v: string) => {
-    setCredit(v)
-    setManualCredit(true)
-  }
-  const handleOOBChange = (v: string) => {
-    setOutOfBand(v)
-    setManualOOB(true)
-    if (!manualCredit) {
-      const remainder = amountCents - refundCents - parseDollarsToCents(v)
-      setCredit(remainder >= 0 ? (remainder / 100).toFixed(2) : '0.00')
-    }
-  }
-
-  // Live invariants for the Save gate.
-  const allocationMatches = isPaid ? allocatedCents === amountCents : true
-  const refundOverCap = refundCents > cardRefundableCents
-  const reasonOk = reason.trim().length > 0
-  const amountOk = amountCents > 0
-  const amountOverCreditable = amountCents > creditableRemainingCents
-  const canSubmit =
-    reasonOk && amountOk && allocationMatches && !refundOverCap && !amountOverCreditable && !submitting
-
-  // One Idempotency-Key per dialog open, sent with every submit from it. A
-  // retry after a lost answer (a timeout while Stripe is slow) then gets the
-  // first request's credit note back instead of making a second one. The
-  // dialog unmounts on close, so the next open makes a new key.
-  const [idemKey] = useState(() => crypto.randomUUID())
-
-  // Single-flight: the per-invoice lock only enforces the over-credit CAP, not
-  // dedup — a double-fire that still fits under the remaining creditable amount
-  // issues a SECOND credit note (a real second card refund / balance credit).
-  const onSubmit = useSingleFlight(async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!canSubmit) return
-    setSubmitting(true)
-    setSubmitError('')
-    try {
-      await api.createCreditNote({
-        invoice_id: invoice.id,
-        reason: reason.trim(),
-        ...(isPaid
-          ? {
-              refund_amount_cents: refundCents,
-              credit_amount_cents: creditCents,
-              out_of_band_amount_cents: outOfBandCents,
-            }
-          : {}),
-        auto_issue: true,
-        lines: [{ description: reason.trim(), quantity: 1, unit_amount_cents: amountCents }],
-      }, idemKey)
-      onCreated()
-    } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : 'Failed to create credit note')
-    } finally {
-      setSubmitting(false)
-    }
-  })
-
-  // Every figure in this dialog is an amount of THIS invoice — its currency,
-  // not the workspace default.
-  const fmt = (cents: number) => formatCents(cents, invoice.currency)
-
-  return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Issue credit note</DialogTitle>
-        </DialogHeader>
-        <form onSubmit={onSubmit} noValidate className="space-y-4">
-          <div>
-            <Label>Invoice</Label>
-            <p className="text-sm text-muted-foreground font-mono mt-1">{invoice.invoice_number}</p>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="cn-reason">Reason</Label>
-            <Input
-              id="cn-reason"
-              placeholder="e.g. Service disruption, billing error"
-              maxLength={500}
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="cn-amount" className="flex items-center justify-between">
-              <span>Amount ({getCurrencySymbol(invoice.currency)})</span>
-              <span className="text-xs text-muted-foreground font-normal">
-                max {fmt(creditableRemainingCents)}
-              </span>
-            </Label>
-            <Input
-              id="cn-amount"
-              type="number"
-              step="0.01"
-              min={0.01}
-              max={creditableRemainingCents / 100}
-              value={amount}
-              onChange={(e) => handleAmountChange(e.target.value)}
-            />
-            {amountOverCreditable && (
-              <p className="text-xs text-destructive">
-                Credit note cannot exceed {fmt(creditableRemainingCents)} still creditable
-                {alreadyCreditedCents > 0
-                  ? ` (${fmt(alreadyCreditedCents)} of ${fmt(invoice.total_amount_cents)} already credited)`
-                  : ''}.
-              </p>
-            )}
-            {!amountOverCreditable && alreadyCreditedCents > 0 && (
-              <p className="text-xs text-muted-foreground">
-                {fmt(alreadyCreditedCents)} of {fmt(invoice.total_amount_cents)} already credited by
-                earlier credit notes.
-              </p>
-            )}
-          </div>
-
-          {isPaid && (
-            <div className="space-y-3 rounded-md border bg-muted/30 p-3">
-              <div className="text-xs text-muted-foreground">
-                Allocate the credit note total across these channels. The three amounts must sum to the credit note total.
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="cn-refund" className="flex items-center justify-between">
-                  <span>Refund to card</span>
-                  <span className="text-xs text-muted-foreground font-normal">
-                    {hasCard ? `max ${fmt(refundCeilingCents)}` : 'not paid by card'}
-                  </span>
-                </Label>
-                <Input
-                  id="cn-refund"
-                  type="number"
-                  step="0.01"
-                  min={0}
-                  max={refundCeilingCents / 100}
-                  value={refund}
-                  onChange={(e) => handleRefundChange(e.target.value)}
-                  disabled={!hasCard}
-                />
-                {!hasCard && (
-                  <p className="text-xs text-muted-foreground">
-                    This invoice was paid outside Stripe, so there is no card to refund. Use
-                    Credit balance or Outside Stripe.
-                  </p>
-                )}
-                {/* Name the rule that actually binds. Deliberately NOT phrased
-                    as "$X still refundable to card": when the invoice's
-                    remaining creditable amount is the floor, leftover card
-                    headroom can never be refunded on this invoice at all, and
-                    advertising it as available is the same false-ceiling defect
-                    this field just had. */}
-                {refundBoundBy === 'note-total' && (
-                  <p className="text-xs text-muted-foreground">
-                    Limited by this note&apos;s {fmt(amountCents)} total — raise it to refund up to{' '}
-                    {fmt(creditableRemainingCents)}, all that is still creditable.
-                  </p>
-                )}
-                {refundBoundBy === 'creditable' && (
-                  <p className="text-xs text-muted-foreground">
-                    Limited by the invoice, not the card — {fmt(creditableRemainingCents)} is all
-                    that is still creditable. The {fmt(cardRefundableCents)} left on the card can no
-                    longer be refunded.
-                  </p>
-                )}
-                {hasCard && refundOverCap && (
-                  <p className="text-xs text-destructive">
-                    Refund cannot exceed {fmt(cardRefundableCents)} paid via card
-                    {cardRefundableCents < invoice.amount_paid_cents
-                      ? ` (after ${fmt(invoice.amount_paid_cents - cardRefundableCents)} prior refunds)`
-                      : ''}
-                    .
-                  </p>
-                )}
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="cn-credit">Credit balance</Label>
-                <Input
-                  id="cn-credit"
-                  type="number"
-                  step="0.01"
-                  min={0}
-                  value={credit}
-                  onChange={(e) => handleCreditChange(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="cn-oob">Outside Stripe (cash, ACH, manual)</Label>
-                <Input
-                  id="cn-oob"
-                  type="number"
-                  step="0.01"
-                  min={0}
-                  value={outOfBand}
-                  onChange={(e) => handleOOBChange(e.target.value)}
-                />
-              </div>
-              <div className="flex items-center justify-between pt-2 border-t text-sm">
-                <span className="text-muted-foreground">Allocated</span>
-                <span className={allocationMatches ? 'font-medium text-foreground' : 'font-medium text-destructive'}>
-                  {fmt(allocatedCents)} / {fmt(amountCents)}
-                  {amountCents > 0 && (allocationMatches ? ' ✓' : ' ✗')}
-                </span>
-              </div>
-            </div>
-          )}
-
-          {submitError && (
-            <p className="text-xs text-destructive">{submitError}</p>
-          )}
-
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-            <Button type="submit" disabled={!canSubmit}>
-              {submitting ? <><Loader2 size={14} className="animate-spin mr-2" />Creating...</> : 'Issue credit note'}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  )
-}
-

@@ -10,6 +10,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/tax"
 )
 
@@ -94,7 +95,7 @@ func TestRunCycle_EverySettingsReadFailsClosed(t *testing.T) {
 		engine, subs, _, _, invoices := setupEngine()
 		engine.settings = s
 		engine.SetTaxCalculationStore(taxCalcs)
-		_, runErrs := engine.RunCycle(context.Background(), 50, nil)
+		_, runErrs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil)
 		if len(runErrs) > 0 {
 			if subs.cycleUpdated["sub_1"] {
 				t.Errorf("read %d failed but the billing period advanced", s.failOn)
@@ -111,7 +112,7 @@ func TestRunCycle_HonorsDueOnReceipt(t *testing.T) {
 	ts.NetPaymentTerms = 0
 	engine.settings = &flakySettings{ts: ts}
 
-	if _, runErrs := engine.RunCycle(context.Background(), 50, nil); len(runErrs) > 0 {
+	if _, runErrs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil); len(runErrs) > 0 {
 		t.Fatalf("RunCycle: %v", runErrs)
 	}
 	if len(invoices.invoices) != 1 {
@@ -143,16 +144,14 @@ func cancelFixture(settings SettingsReader) (*Engine, domain.Subscription, *mock
 	pricing := &mockPricing{
 		plans: map[string]domain.Plan{
 			"pln_api": {ID: "pln_api", Name: "API", Currency: "USD",
-				BillingInterval: domain.BillingMonthly, BaseBillTiming: domain.BillInArrears,
-				MeterIDs: []string{"mtr_api"}},
+				BillingInterval: domain.BillingMonthly, BaseBillTiming: domain.BillInArrears},
 		},
 		meters: map[string]domain.Meter{
-			"mtr_api": {ID: "mtr_api", Key: "api", Name: "API Calls",
-				Unit: "calls", Aggregation: "sum", RatingRuleVersionID: "rrv_api"},
+			"mtr_api": {ID: "mtr_api", EventName: "api", Name: "API Calls",
+				Unit: "calls", Aggregation: "sum"},
 		},
-		rules: map[string]domain.RatingRuleVersion{
-			"rrv_api": {ID: "rrv_api", RuleKey: "api_calls", Version: 1,
-				Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(2)},
+		prices: map[string][]domain.PlanPrice{
+			"pln_api": {priceOf("prc_api", "mtr_api", domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(2)})},
 		},
 	}
 	invoices := &mockInvoices{}
@@ -165,7 +164,7 @@ func TestBillFinalOnImmediateCancel_EverySettingsReadFailsClosed(t *testing.T) {
 	failEachSettingsRead(t, func(s *flakySettings, taxCalcs *recordingTaxCalcs) (int, error) {
 		engine, sub, invoices := cancelFixture(s)
 		engine.SetTaxCalculationStore(taxCalcs)
-		_, err := engine.BillFinalOnImmediateCancel(context.Background(), sub)
+		_, err := engine.BillFinalOnImmediateCancel(postgres.WithLivemode(context.Background(), true), sub)
 		return len(invoices.invoices), err
 	})
 }
@@ -236,9 +235,9 @@ func TestRunCycle_UnloadableTimezoneFailsClosed(t *testing.T) {
 
 // thresholdFixture crosses a $500 spend threshold mid-period: 1000 calls at
 // $1 plus the $49 base.
-func thresholdFixture(t *testing.T, reset bool, settings SettingsReader, taxCalcs *recordingTaxCalcs) (*Engine, *mockInvoices) {
+func thresholdFixture(t *testing.T, settings SettingsReader, taxCalcs *recordingTaxCalcs) (*Engine, *mockInvoices) {
 	t.Helper()
-	engine, _, invoices := setupThresholdEngine(&domain.BillingThresholds{AmountGTE: 50000, ResetBillingCycle: reset}, 1000)
+	engine, _, invoices := setupThresholdEngine(&domain.BillingThresholds{AmountGTE: 50000}, 1000)
 	engine.clock = clock.NewFake(time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC))
 	engine.settings = settings
 	if taxCalcs != nil {
@@ -248,26 +247,22 @@ func thresholdFixture(t *testing.T, reset bool, settings SettingsReader, taxCalc
 }
 
 func TestScanThresholds_EverySettingsReadFailsClosed(t *testing.T) {
-	for _, reset := range []bool{false, true} {
-		t.Run(map[bool]string{false: "continue_cycle", true: "reset_cycle"}[reset], func(t *testing.T) {
-			failEachSettingsRead(t, func(s *flakySettings, taxCalcs *recordingTaxCalcs) (int, error) {
-				engine, invoices := thresholdFixture(t, reset, s, taxCalcs)
-				_, errs := engine.ScanThresholds(context.Background(), 50)
-				if len(errs) > 0 {
-					return len(invoices.invoices), errs[0]
-				}
-				return len(invoices.invoices), nil
-			})
-		})
-	}
+	failEachSettingsRead(t, func(s *flakySettings, taxCalcs *recordingTaxCalcs) (int, error) {
+		engine, invoices := thresholdFixture(t, s, taxCalcs)
+		_, errs := engine.ScanThresholds(postgres.WithLivemode(context.Background(), true), 50)
+		if len(errs) > 0 {
+			return len(invoices.invoices), errs[0]
+		}
+		return len(invoices.invoices), nil
+	})
 }
 
 func TestScanThresholds_HonorsDueOnReceipt(t *testing.T) {
 	ts := defaultTermsSettings()
 	ts.NetPaymentTerms = 0
-	engine, invoices := thresholdFixture(t, false, &flakySettings{ts: ts}, nil)
+	engine, invoices := thresholdFixture(t, &flakySettings{ts: ts}, nil)
 
-	if fired, errs := engine.ScanThresholds(context.Background(), 50); fired != 1 || len(errs) > 0 {
+	if fired, errs := engine.ScanThresholds(postgres.WithLivemode(context.Background(), true), 50); fired != 1 || len(errs) > 0 {
 		t.Fatalf("ScanThresholds: fired=%d errs=%v, want one fire", fired, errs)
 	}
 	inv := invoices.invoices[0]

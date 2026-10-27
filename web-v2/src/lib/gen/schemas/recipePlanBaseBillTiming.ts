@@ -9,7 +9,7 @@
  */
 
 /**
- * Optional; empty defaults to in_arrears at plan creation (ADR-031).
+ * Optional when the base fee is 0; the plan is then in_arrears (ADR-031).
  */
 export type RecipePlanBaseBillTiming = typeof RecipePlanBaseBillTiming[keyof typeof RecipePlanBaseBillTiming];
 

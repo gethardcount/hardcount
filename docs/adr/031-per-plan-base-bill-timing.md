@@ -1,8 +1,10 @@
 # ADR-031: Per-plan base bill_timing (in_advance vs in_arrears)
 
-**Status:** Accepted (amended 2026-06-01)
+**Status:** Accepted (amended 2026-06-01); amended by [ADR-130](130-usage-prices-belong-to-the-plan.md) (`base_bill_timing` has no default above a base of 0; `in_advance` at a base of 0 is refused), built in PR-4 (#1386)
 **Date:** 2026-05-14
 **Related**: ADR-028 (period loop), `project_billing_timing_model.md`, `feedback_stripe_parity_framing.md`
+
+**Amended by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23 and built in PR-4 (#1386). Where this ADR differs, ADR-130 describes the code. `base_bill_timing` has no default when the base fee is above 0, so a plan must name it; with a base of 0 it is stored `in_arrears`, and `in_advance` is refused (PR-4). Usage still bills in arrears.
 
 ## Summary
 
@@ -22,6 +24,8 @@ This is the gap the bundle closes. Without it, the very first DP demo collapses 
 | Lago | per-price (`in_advance` \| `in_arrears`) on `charges`, `pay_in_advance` flag on subscriptions | per-charge | yes |
 | Orb | per-price (`fixed_fee_quantity_schedule` + `cadence`) | per-price | yes |
 | Velox today | n/a — single arrears engine | always in_arrears | no — every line is end-of-period |
+
+**Correction (2026-10-23):** Lago's `pay_in_advance` flag is on the plan (for the base fee) and on each charge, not on subscriptions. Checked in lago-api `2e52dfc` (2026-10-22): `app/models/plan.rb:60`, and the `plans` and `charges` tables in `db/structure.sql`.
 
 Stripe / Lago / Orb all converge on the same shape: **recurring is the variable; usage is structurally arrears.** You can't bill in_advance for usage that hasn't happened yet — the quantity is unknown. This isn't a configuration choice, it's a physical constraint.
 

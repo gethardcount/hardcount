@@ -25,6 +25,11 @@ invoice of a cancel scheduled for a date, and to `POST /v1/billing/run`.
   cancel, `POST /v1/subscriptions/{id}/retry-billing` on a subscription
   whose billing is failing, any other change to a subscription whose period
   has ended, and a test-clock advance.
+- **Dunning's final pause or cancel waits for the grace.** When retries run
+  out inside it, the dunning run stays active and is due again when the
+  grace ends. The invoice page shows that time as "Final step" and the
+  Dunning page as "Final step in …": no charge is retried then, the pause or
+  cancel runs.
 - **A cancel or plan change scheduled for a date** takes effect at that
   close, up to the grace after its date. Until then the subscription is
   `active` on its old plan. `subscription.canceled` is sent at the close,
@@ -33,8 +38,45 @@ invoice of a cancel scheduled for a date, and to `POST /v1/billing/run`.
 - **Once the invoice is built it does not change.** Usage stamped inside
   its period that arrives later is stored, but billed on no invoice, now or
   later. After a spend-threshold invoice, usage stamped before it that
-  arrives later is not on the period-end invoice either. Velox does not
-  alert on it, and there is no list of such events yet.
+  arrives later is not on the period-end invoice either (sum and count
+  meters). Velox says so when it writes such an event: the answer carries
+  `billing_status: "after_close"` (an `after_close` count on a batch or a
+  LiteLLM delivery), `velox_usage_unbilled_total{reason="after_close"}`
+  counts it, and a WARN
+  line names the customer, meter and timestamp. There is no list of such
+  events yet.
+- **What is not flagged `after_close`.** Usage on a canceled subscription
+  (it is `outside_subscription`). And usage
+  stamped before a spend-threshold invoice that is not paid yet: if that
+  invoice is voided before the period-end invoice is built, the period-end
+  invoice bills all the period's usage again, late events included. So such an
+  event is flagged only after a paid spend-threshold invoice, which cannot
+  be voided.
+- **Writing off or voiding a spend-threshold invoice.** A spend-threshold
+  invoice bills the usage up to when it fired, and no base fee: the base
+  fee is billed as it would be with no threshold. One issued by a
+  Velox build from before 2026-10-23 also carries the base fee of a plan billed in arrears; the
+  period-end invoice does not bill that base again, and what follows
+  applies to it as to the usage. A threshold invoice leaves out the
+  usage of a `max` or `last` meter: the period-end invoice bills that for
+  the whole period. What happens to the
+  charges on the threshold invoice depends on what you do with it, and
+  when:
+  - **Write it off** (mark uncollectible): they stay billed on it. The
+    period-end invoice does not bill them again, and if the customer pays
+    the written-off invoice later, it simply reads paid. Writing off means
+    you give up the money.
+  - **Void it before the period-end invoice is built**: the period-end
+    invoice bills them instead, from the period start. Do not also bill
+    them with a one-off invoice.
+  - **Void it after the period-end invoice is built**: they are billed
+    nowhere. That invoice does not change. If they should be charged,
+    bill them with a one-off invoice. A void that arrives while that invoice
+    is being saved waits for it, and then counts as after.
+
+  Before 2026-10-23 a write-off behaved like a void here, and the
+  period-end invoice billed the window again. If you relied on that, void
+  the threshold invoice instead, before the period-end invoice is built.
 - **During the grace the subscription still shows the ended period.** Spend
   thresholds and the live credit balance do not count the new period's
   usage until the invoice is built.
@@ -57,6 +99,15 @@ curl -sS "$API/v1/subscriptions/$SUB" -H "Authorization: Bearer $KEY" \
 Due means `next_billing_at` (or a `cancel_at` inside the period) is at
 least `INVOICE_GRACE_PERIOD` in the past. If it is, and `billing_failure`
 is set, go to [Billing failing](billing-failing.md).
+
+For usage that missed an invoice, look for the after-close signal:
+
+```bash
+# How many events arrived after their period's invoice, by origin:
+curl -sS "$API/metrics" -H "Authorization: Bearer $METRICS_TOKEN" | grep '^velox_usage_unbilled_total{' | grep 'reason="after_close"'
+# Which ones: the WARN line per event.
+#   {"level":"WARN","msg":"usage event arrived after its period was invoiced — stored, billed on no invoice","customer_id":...,"meter_id":...,"timestamp":...}
+```
 
 ## Fix
 
@@ -83,6 +134,11 @@ curl -sS "$API/v1/customers/$CUSTOMER/usage?from=$BILLING_PERIOD_START&to=$BILLI
   `POST /v1/invoices/{id}/finalize`.
 - For a max or last meter, the late events may change nothing; check the
   events before you bill.
+- An event flagged `after_close` is billed on no invoice, so bill it if
+  the plan the customer was on in that period priced its meter. The flag
+  does not check that: it says only that the period was invoiced. A late
+  event that is not flagged may still be on the period-end invoice;
+  compare before you bill.
 
 **A pipeline that often delivers later than the grace.** Raise
 `INVOICE_GRACE_PERIOD` above its worst delay (at most `72h`) and restart.

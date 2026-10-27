@@ -1,7 +1,9 @@
 # ADR-123: New accounts start with a default dunning policy that retries three times and changes nothing
 
 **Date:** 2026-10-17
-**Status:** Accepted
+**Status:** Accepted; amended 2026-10-26 by [ADR-130](130-usage-prices-belong-to-the-plan.md): recipes no longer create a dunning policy ([amendment](#amendment-2026-10-26-recipes-create-no-dunning-policy)).
+
+**Amended 2026-10-26 ([ADR-130](130-usage-prices-belong-to-the-plan.md), built in #1389).** A recipe no longer creates a dunning policy, so only an operator's first enabled policy takes over the seeded default. Where this ADR says "by hand or from a recipe", read "by hand". The seeded default and its takeover rule stay.
 
 ## Summary
 
@@ -41,6 +43,15 @@ What other billing engines do (read 2026-10-17):
 - **Lago** creates no dunning campaign by itself. Campaigns are created and
   assigned by hand.
 
+**Correction (2026-10-23):** both rows are true but incomplete. Kill Bill's
+code default is `8,8,8`, but the `killbill-server.properties` in its repo
+sets `1,1,1`. Lago's automatic dunning also needs a premium licence and the
+`auto_dunning` flag. Checked in Kill Bill `3548b02`
+(`util/src/main/java/org/killbill/billing/util/config/definition/PaymentConfig.java:31-32`,
+`profiles/killbill/src/main/resources/killbill-server.properties:91`) and
+lago-api `2e52dfc` (`app/models/organization.rb:152`,
+`app/services/dunning_campaigns/bulk_process_service.rb:8`), both 2026-10-22.
+
 Two of three retry without being asked, and none of them takes a
 subscription or write-off action the account did not choose.
 
@@ -49,6 +60,8 @@ subscription or write-off action the account did not choose.
 - **The policy.** `dunning.DefaultSeedPolicy()`: name `Default retries`,
   enabled, 3 attempts, grace 3 days, `retry_schedule` `["96h","168h"]`
   (retries on day 3, 7 and 14), `final_subscription_action` `none`,
+  *(2026-10-23: the same schedule is now `retry_days` `[3, 4, 7]`; see
+  [ADR-036](036-dunning-campaigns-model.md#amendment-2026-10-23--the-schedule-is-one-list-of-days).)*
   `final_invoice_action` `none`. Both final actions are set explicitly,
   because an empty value normalizes to `pause`.
 - **One writer.** `dunning.Service.SeedDefaultPoliciesTx` validates the
@@ -144,6 +157,20 @@ seed knows nothing about.
   PATCH (which also covers disabling) and set-default. A new route that
   edits a policy must clear it too, or a later create would take over a
   policy the operator customised.
+
+## Amendment 2026-10-26: recipes create no dunning policy
+
+Decided 2026-10-23 with [ADR-130](130-usage-prices-belong-to-the-plan.md)
+(owner call D3) and built in #1389. A recipe holds only meters and plans
+with their prices; its `dunning` section is gone, and a recipe file that
+has one fails to load. Installing a recipe leaves the account's policies
+and its default as they were. So:
+
+- the takeover rule above applies to a policy the operator creates, and
+  to nothing else;
+- the reason in "Why this design" that the rule "keeps recipes working"
+  no longer applies; the rule stands for the operator's first policy;
+- alternatives A and B, which were about a recipe's policy, are moot.
 
 ## References
 

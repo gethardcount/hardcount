@@ -5,7 +5,7 @@
 // card fell back to the workspace default (USD) instead of the plan.
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { resolveCustomerCurrency, settledCustomerCurrency } from '../src/lib/customerCurrency.ts'
+import { invoiceCurrencyPin, resolveCustomerCurrency, settledCustomerCurrency } from '../src/lib/customerCurrency.ts'
 
 const plans = [
   { id: 'pln_eur', currency: 'EUR' },
@@ -108,3 +108,31 @@ test('no currency while any read is loading or has failed', () => {
   assert.equal(settledCustomerCurrency([ok, { isLoading: false, isError: true }], input), undefined)
   assert.deepEqual(settledCustomerCurrency([ok, ok], input), { currency: 'USD', source: 'workspace' })
 })
+
+// Review round 1 (#1361): the New invoice picker offered every currency for a
+// customer whose currency is fixed, and the server refused the other ones
+// only after submit (409 customer_currency_conflict).
+test('a manual invoice is fixed to the profile or live plan currency, not to an invoice or the default', () => {
+  assert.equal(invoiceCurrencyPin({ currency: 'EUR', source: 'billing_profile' }),
+    'This customer is billed in EUR (billing profile), so the invoice is too.')
+  assert.equal(invoiceCurrencyPin({ currency: 'EUR', source: 'subscription' }),
+    'This customer is billed in EUR (subscription plan), so the invoice is too.')
+  assert.equal(invoiceCurrencyPin({ currency: 'EUR', source: 'invoice' }), null)
+  assert.equal(invoiceCurrencyPin({ currency: 'USD', source: 'workspace' }), null)
+})
+
+// Review round 2 (#1361): POST /v1/invoices pins the currency to the plan of a
+// draft, trialing or active subscription. The page counted only active and
+// trialing, so for a customer whose only subscription is a draft in EUR the
+// New invoice picker opened free in USD and submit failed with 409.
+test('a draft subscription sets the currency, as the server pin counts it', () => {
+  const c = resolveCustomerCurrency({
+    subscriptions: [{ status: 'draft', items: [{ plan_id: 'pln_eur' }], created_at: '2026-10-20T00:00:00Z' }],
+    plans,
+    invoices: [{ currency: 'USD', created_at: '2026-10-01T00:00:00Z' }],
+    workspaceDefault: 'USD',
+  })
+  assert.deepEqual(c, { currency: 'EUR', source: 'subscription' })
+  assert.notEqual(invoiceCurrencyPin(c), null)
+})
+

@@ -614,9 +614,33 @@
     ]
   },
   {
-    "case": "subscription.net_negative_usage/legacy key only",
+    "case": "subscription.net_negative_usage/event name only",
     "line": {
-      "id": "subscription.net_negative_usage/legacy key only",
+      "id": "subscription.net_negative_usage/event name only",
+      "kind": "subscription.usage_below_zero",
+      "title": "Usage below zero billed as zero",
+      "problem": "Usage corrections were larger than the usage they offset. If an earlier invoice billed that usage, issue a credit note on it.",
+      "detail": [
+        [
+          {
+            "text": "api_calls -120"
+          }
+        ]
+      ],
+      "tone": "warning",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Usage below zero billed as zero",
+      "problem: Usage corrections were larger than the usage they offset. If an earlier invoice billed that usage, issue a credit note on it.",
+      "meta: api_calls -120",
+      "tone: warning"
+    ]
+  },
+  {
+    "case": "subscription.net_negative_usage/meter_key only",
+    "line": {
+      "id": "subscription.net_negative_usage/meter_key only",
       "kind": "subscription.usage_below_zero",
       "title": "Usage below zero billed as zero",
       "problem": "Usage corrections were larger than the usage they offset. If an earlier invoice billed that usage, issue a credit note on it.",
@@ -877,6 +901,28 @@
     ]
   },
   {
+    "case": "update/collection_resumed/by payment",
+    "line": {
+      "id": "update/collection_resumed/by payment",
+      "kind": "subscription.collection_resumed",
+      "title": "Collection resumed",
+      "detail": [
+        [
+          {
+            "text": "The overdue invoice was paid"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Collection resumed",
+      "meta: The overdue invoice was paid",
+      "tone: neutral"
+    ]
+  },
+  {
     "case": "update/trial_ended/on schedule",
     "line": {
       "id": "update/trial_ended/on schedule",
@@ -1034,7 +1080,7 @@
             }
           },
           {
-            "text": " total"
+            "text": " usage total"
           }
         ],
         [
@@ -1048,7 +1094,7 @@
     },
     "text": [
       "Spend thresholds set",
-      "meta: $50.00 total · 2 item thresholds",
+      "meta: $50.00 usage total · 2 item thresholds",
       "tone: neutral"
     ]
   },
@@ -1067,7 +1113,7 @@
             }
           },
           {
-            "text": " total"
+            "text": " usage total"
           }
         ]
       ],
@@ -1076,7 +1122,7 @@
     },
     "text": [
       "Spend thresholds set",
-      "meta: ₹1,234,567.89 total",
+      "meta: ₹1,234,567.89 usage total",
       "tone: neutral"
     ]
   },
@@ -1117,7 +1163,7 @@
             }
           },
           {
-            "text": " total"
+            "text": " usage total"
           }
         ]
       ],
@@ -1126,7 +1172,7 @@
     },
     "text": [
       "Spend thresholds set",
-      "meta: 50.00 total",
+      "meta: 50.00 usage total",
       "tone: neutral"
     ]
   },

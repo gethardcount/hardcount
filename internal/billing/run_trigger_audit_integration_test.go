@@ -99,7 +99,7 @@ func TestTriggerCycleAudit_OperatorTriggerRow(t *testing.T) {
 		subs.db = db // the closer tx is real too, so the in-tx finalize emission has a handle
 		engine := tenantRunEngineWith(subs, &mockInvoices{db: db})
 		engine.SetAuditLogger(logger)
-		h := NewHandler(engine, subs)
+		h := NewHandler(engine)
 
 		rec := post(t, h)
 		if rec.Code != http.StatusOK {
@@ -156,7 +156,7 @@ func TestTriggerCycleAudit_OperatorTriggerRow(t *testing.T) {
 		engine := tenantRunEngineWith(subs, &mockInvoices{db: db})
 		failing := &erroringRunAudit{}
 		engine.SetAuditLogger(failing)
-		h := NewHandler(engine, subs)
+		h := NewHandler(engine)
 
 		before := len(runRows(t))
 		rec := post(t, h)

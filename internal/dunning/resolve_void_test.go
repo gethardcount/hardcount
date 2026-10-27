@@ -12,7 +12,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/errs"
 )
 
 type recordingVoider struct {
@@ -28,7 +27,7 @@ func (v *recordingVoider) RecordOfflinePayment(_ context.Context, tenantID, id, 
 	if v.err != nil {
 		return domain.Invoice{}, v.err
 	}
-	return domain.Invoice{ID: id, TenantID: tenantID, CustomerID: "cus_1", Status: domain.InvoicePaid, StripePaymentIntentID: "out_of_band:2026-07-26T00:00:00Z"}, nil
+	return domain.Invoice{ID: id, TenantID: tenantID, CustomerID: "cus_1", Status: domain.InvoicePaid, PaidOutOfBand: true}, nil
 }
 
 func (v *recordingVoider) Void(_ context.Context, tenantID, id string) (domain.Invoice, error) {
@@ -36,75 +35,7 @@ func (v *recordingVoider) Void(_ context.Context, tenantID, id string) (domain.I
 	if v.err != nil {
 		return domain.Invoice{}, v.err
 	}
-	// The PI id rides the Void return (the dunning handler cancels it
-	// post-void); the consumed-credit reversal happens inside Void itself.
 	return domain.Invoice{ID: id, TenantID: tenantID, CustomerID: "cus_1", Status: domain.InvoiceVoided, StripePaymentIntentID: "pi_1"}, nil
-}
-
-type recordingCanceler struct{ calls int }
-
-func (c *recordingCanceler) StopCollection(_ context.Context, _ string, _ domain.Invoice) {
-	c.calls++
-}
-
-func resolveManually(t *testing.T, h *Handler, runID string) {
-	t.Helper()
-	body, _ := json.Marshal(ResolveInput{Resolution: string(domain.ResolutionInvoiceVoided)})
-	r := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", runID)
-	ctx := context.WithValue(auth.WithTenantID(r.Context(), "t1"), chi.RouteCtxKey, rctx)
-	r = r.WithContext(ctx)
-	h.resolveRun(httptest.NewRecorder(), r)
-}
-
-// TestResolveRun_ManualVoid_RoutesThroughServiceAndGatesSideEffects pins D5
-// (single void writer, ADR-059): a manually-resolved dunning run voids the
-// invoice through invoice.Service.Void (which reverses the consumed credits
-// atomically + reverses tax + emits the single-writer invoice.voided event +
-// enforces the in-flight guard) instead of the raw store. The post-void
-// PI-cancel must run ONLY when the void SUCCEEDS — otherwise an in-flight
-// invoice (whose void the service refuses) would still get its live
-// PaymentIntent canceled, defeating the in-flight guard.
-func TestResolveRun_ManualVoid_RoutesThroughServiceAndGatesSideEffects(t *testing.T) {
-	ctx := context.Background()
-	newHandler := func(voider *recordingVoider) (*Handler, *recordingCanceler, string) {
-		svc := NewService(newMemStore(), &noopRetrier{}, nil)
-		run, err := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", time.Now(), domain.DunningCausePaymentFailed)
-		if err != nil {
-			t.Fatalf("StartDunning: %v", err)
-		}
-		canceler := &recordingCanceler{}
-		h := NewHandler(svc, HandlerDeps{
-			PaymentCancel: canceler,
-		})
-		h.SetInvoiceVoider(voider)
-		return h, canceler, run.ID
-	}
-
-	t.Run("void succeeds → routes through service voider + cancels PI", func(t *testing.T) {
-		voider := &recordingVoider{}
-		h, canceler, runID := newHandler(voider)
-		resolveManually(t, h, runID)
-		if voider.calls != 1 {
-			t.Errorf("void must route through the invoice service voider; calls=%d, want 1", voider.calls)
-		}
-		if canceler.calls != 1 {
-			t.Errorf("stop-collection should run after a successful void; calls=%d, want 1", canceler.calls)
-		}
-	})
-
-	t.Run("void refused (in-flight) → post-void PI-cancel SKIPPED", func(t *testing.T) {
-		voider := &recordingVoider{err: errs.InvalidState("a charge is in flight on this invoice")}
-		h, canceler, runID := newHandler(voider)
-		resolveManually(t, h, runID)
-		if voider.calls != 1 {
-			t.Errorf("voider should be attempted once; calls=%d", voider.calls)
-		}
-		if canceler.calls != 0 {
-			t.Errorf("stop-collection MUST NOT run when the void was refused — the invoice is still collectible; calls=%d, want 0", canceler.calls)
-		}
-	})
 }
 
 // TestResolveRun_RejectsUnknownResolution pins the operator-input contract
@@ -122,7 +53,7 @@ func TestResolveRun_RejectsUnknownResolution(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartDunning: %v", err)
 	}
-	h := NewHandler(svc, HandlerDeps{})
+	h := NewHandler(svc)
 
 	for _, bad := range []string{"payment_received", "retries_exhausted", "action_failed", "", "whatever"} {
 		body, _ := json.Marshal(ResolveInput{Resolution: bad})
@@ -150,8 +81,8 @@ func TestResolveRun_RejectsUnknownResolution(t *testing.T) {
 // TestResolveRun_PaymentRecovered_RoutesThroughOfflinePaymentWriter pins the
 // single-offline-payment-writer contract (2026-07-26): payment_recovered
 // resolves through invoice.Service.RecordOfflinePayment — the same path as
-// the invoice page's Record-offline-payment dialog — so the recovery carries
-// the out_of_band: PaymentIntent marker, the in-flight guard, and the
+// the invoice page's Record-offline-payment dialog — so the recovery is
+// recorded as paid out of band, with the in-flight guard and the
 // invoice.payment_recorded webhook. Pre-fix it called a raw MarkPaid("")
 // with none of those.
 func TestResolveRun_PaymentRecovered_RoutesThroughOfflinePaymentWriter(t *testing.T) {
@@ -162,7 +93,7 @@ func TestResolveRun_PaymentRecovered_RoutesThroughOfflinePaymentWriter(t *testin
 		t.Fatalf("StartDunning: %v", err)
 	}
 	voider := &recordingVoider{}
-	h := NewHandler(svc, HandlerDeps{})
+	h := NewHandler(svc)
 	h.SetInvoiceVoider(voider)
 
 	body, _ := json.Marshal(ResolveInput{Resolution: string(domain.ResolutionPaymentRecovered)})

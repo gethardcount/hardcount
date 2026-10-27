@@ -13,9 +13,7 @@
  */
 export interface RecipeCreates {
   meters: number;
-  rating_rules: number;
-  pricing_rules: number;
   plans: number;
-  dunning_policies: number;
-  webhook_endpoints: number;
+  /** The prices the install puts on its plans. */
+  prices: number;
 }

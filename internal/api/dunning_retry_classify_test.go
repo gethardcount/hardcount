@@ -19,7 +19,7 @@ import (
 // in, so the PaymentIntent id and the new-card flag reach dunning.
 func TestClassifyDunningRetryResult(t *testing.T) {
 	decline := &payment.PaymentError{Message: "Your card was declined.", DeclineCode: "lost_card", PaymentIntentID: "pi_lost"}
-	wrappedDecline := &dunning.RetryError{PaymentIntentID: "pi_lost", Err: fmt.Errorf("payment failed: %w", decline), CardNeedsReplacing: true}
+	wrappedDecline := &dunning.RetryError{PaymentIntentID: "pi_lost", Err: fmt.Errorf("payment failed: %w", decline), Ask: domain.DeclineAskNewCard}
 	tests := []struct {
 		name    string
 		err     error
@@ -37,6 +37,9 @@ func TestClassifyDunningRetryResult(t *testing.T) {
 		{"definite decline with its PaymentIntent", wrappedDecline, true},
 		{"no card", domain.ErrNoPaymentMethodOnRetry, true},
 		{"card refused for good", domain.ErrCardNeedsReplacing, true},
+		// Not a skip: a skip leaves the run due, and the next tick would ask
+		// Stripe again forever. Dunning ends the run on it.
+		{"below Stripe's minimum charge", &payment.BelowMinimumError{Message: "Amount must be at least $0.50 usd"}, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -55,7 +58,7 @@ func TestClassifyDunningRetryResult(t *testing.T) {
 
 	got := classifyDunningRetryResult(context.Background(), "inv_1", wrappedDecline)
 	var re *dunning.RetryError
-	if !errors.As(got, &re) || re.PaymentIntentID != "pi_lost" || !re.CardNeedsReplacing {
-		t.Fatalf("got %#v, want the RetryError with pi_lost and CardNeedsReplacing", got)
+	if !errors.As(got, &re) || re.PaymentIntentID != "pi_lost" || re.Ask != domain.DeclineAskNewCard {
+		t.Fatalf("got %#v, want the RetryError with pi_lost asking for a new card", got)
 	}
 }

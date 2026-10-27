@@ -7,7 +7,7 @@
 **Amended:** 2026-10-19 (a panic stops one step, not the tick; a panicked tick waits one full interval).
 **Partly superseded:** by [ADR-115](115-one-closer-for-the-billing-period.md) on 2026-08-30 (the billing-period watermark compare-and-swap).
 **Amends:** ADR-006 (background scheduler; the leader gate it assumed), ADR-072 (transport lease model — unchanged, now composed with a leader fence), ADR-073 (boot contract — `VerifyAdvisoryLockTopology` retired)
-**Plan of record:** [docs/records/ha-readiness-2026-07-06.md](../records/ha-readiness-2026-07-06.md) (2026-08-30 header) · velox-ops `ha-program-2026-08-30.md`
+**Plan of record:** [docs/dev/records/ha-readiness-2026-07-06.md](../dev/records/ha-readiness-2026-07-06.md) (2026-08-30 header) · velox-ops `ha-program-2026-08-30.md`
 
 ## Summary
 
@@ -120,7 +120,10 @@ named non-CAS effect-firer reachable from a leader tick —
 `ClearPauseCollection` → `subscription.collection_resumed` — becomes a CAS in
 PR-B (the clear reports whether it changed the row; the event fires only if
 it did), and the subscription period writer is guarded against a resumed
-stale leader's in-memory work. *(Amended 2026-08-30, ADR-115: the monotonic
+stale leader's in-memory work. *(Amended 2026-10-25, #1384: the
+resumers no longer call `ClearPauseCollection`. They clear through
+`ResumeLiftedPause`, a CAS on the pause they listed; see the effect-firer
+table below.)* *(Amended 2026-08-30, ADR-115: the monotonic
 guard this sentence first named — `UpdateBillingCycleTx … AND next_billing_at
 < $new` — never shipped and would have been wrong: a plan swap and a
 threshold reset truncate a period, moving the watermark backward on purpose.
@@ -264,7 +267,8 @@ superseded leader from firing it twice. Enumerated from
 | `invoice.paid`, `payment.succeeded`, `payment.failed` | `invoice/postgres.go:917,1131,1151` | in-tx with the settle CAS (`transitioned` / `firstForThisPI`) |
 | `dunning.*` webhooks, warning/escalation emails, timeline rows | `dunning/service.go` (`fireEvent` callers at :398/:1028/:1269; emails :1476/:1505) | every transition is `UpdateRunIfActive(run) (applied bool)` and the effect fires only when `applied` (:621,:764,:968,:992); the one `_`-ignored call (:652) is the transient-skip **rewind**, which fires nothing — and, since ha-8 (2026-08-31), the same write proves the attempt count it was derived from (`AND attempt_count = $expected`), so a superseded tick's stale write can neither record nor rewind an attempt |
 | `payment.failed` email + `payment_setup_request` email from the auto-charge sweep | `billing/engine.go` collect legs | per-invoice `ClaimAutoCharge` lease (m0141) + the `NoPMNotifiedAt` marker |
-| `subscription.collection_resumed` webhook + audit | `subscription/service.go` `ProcessExpiredPauseCollections[ForClock]` | **was unguarded — fixed in PR-B:** `ClearPauseCollection` is now a CAS (`AND pause_collection_behavior IS NOT NULL`); `ErrNotPaused` → the schedule paths announce nothing, the operator path returns the row unchanged |
+| `subscription.collection_resumed` webhook + audit | `subscription/postgres.go` `clearLiftedPauseTx`, reached by the resumers (`ResumeLiftedPause` from `ProcessExpiredPauseCollections[ForClock]`) and, on the dunning tick, by `SetDunningPause` when the pause it finds has lifted | **was unguarded — fixed in PR-B; changed in #1384:** the clear is a CAS on the pause the caller read (`resumes_at`, still lifted, same setter), and the event and audit row are written in the clear's transaction (ADR-036). A miss writes and announces nothing. *(PR-B's predicate `AND pause_collection_behavior IS NOT NULL` on `ClearPauseCollection` is gone: the operator's clear now takes the row lock first (`lockSubForPauseTx`), and that lock serializes it with every other pause writer.)* |
+| `subscription.collection_paused` webhook + audit (dunning's pause) | `subscription/postgres.go` `SetDunningPause`, from the dunning tick's final action | written in the pause's transaction, after the row lock (`lockSubForPauseTx`); only when this call paused (`DunningPauseWritten`). A superseded tick that retries finds the pause in force (`DunningPauseAlreadyHeld`) or the invoice paid (`DunningPauseInvoiceSettled`) and writes nothing (#1384) |
 | billing-cycle period write | `billing/engine.go` `commitPeriodClose`, `handleTrialState`; `billing/threshold_scan.go` `fireThreshold`; `subscription/service.go` `applyCrossIntervalPlanSwapTx` | **was unguarded — fixed in PR-B, superseded by ADR-115 (2026-08-30):** every period writer runs `ClosePeriodTx`, one UPDATE that row-locks the subscription and proves the (status, period start, watermark) snapshot the writer read, as the FIRST statement of the transaction that also inserts its invoice. Plan swaps and threshold resets go through the same CAS — they truncate from a fresh snapshot, which the CAS accepts; a stale write is refused. `ErrWatermarkMoved` → the loser wrote nothing (the engine re-reads once; the swap returns 409 `subscription_period_moved`) |
 | Stripe calls from reconcilers (tax retry/reversal, payment_unknown, refunds) | `billing/tax_retry.go`, `creditnote/service.go`, `payment/reconciler.go` | idempotency keys per object (`velox_tax_rev_<cn>`, `inv_taxrev_<inv>`, attempt-sequence PI keys) + CAS marks; Stripe dedups the second call |
 | audit rows | everywhere | evidence, not money; a duplicate row is noise the reader tolerates — deliberately not gated |

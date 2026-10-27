@@ -8,17 +8,14 @@
  * OpenAPI spec version: 2026-04-07
  */
 import type { CreditGrantBlock } from './creditGrantBlock';
+import type { CreditGrantsRemainingByCurrencyItem } from './creditGrantsRemainingByCurrencyItem';
 
 /**
  * A customer's credit blocks, newest first, with the remaining credit
- * added up by kind.
+ * added up by currency and kind.
  */
 export interface CreditGrants {
   grants: CreditGrantBlock[];
-  /** Remaining credit the customer paid for (`commit`). */
-  commit_remaining_cents: number;
-  /** Remaining free credit (`promotional`). */
-  promotional_remaining_cents: number;
-  /** Remaining credit with no kind, such as adjustments and proration credits. */
-  other_remaining_cents: number;
+  /** One entry per currency with credit left, ordered by currency. */
+  remaining_by_currency: CreditGrantsRemainingByCurrencyItem[];
 }

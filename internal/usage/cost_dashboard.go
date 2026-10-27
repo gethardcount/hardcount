@@ -3,6 +3,7 @@ package usage
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -44,8 +45,11 @@ func (a *CostDashboardAssembler) SetLiveBalanceReader(r CostDashboardLiveBalance
 // CostDashboardCreditReader is the narrow surface the assembler uses to read
 // a customer's credit position. The credit service implements it through an
 // adapter in internal/api, so this package does not import the credit domain.
+// CreditSummary returns one entry per currency the customer holds credit in
+// (ADR-129), with Currency, BalanceCents and the commit/promotional split
+// set.
 type CostDashboardCreditReader interface {
-	CreditSummary(ctx context.Context, tenantID, customerID string) (CostDashboardCredits, error)
+	CreditSummary(ctx context.Context, tenantID, customerID string) ([]CostDashboardCredits, error)
 }
 
 // CustomerTokenLookup is the narrow surface the assembler uses to
@@ -76,15 +80,15 @@ func NewCostDashboardAssembler(customers CustomerTokenLookup, usageSvc *Customer
 //   - email, display_name, external_id, metadata (customer PII)
 //   - billing_profile (legal name, address, tax_id)
 //   - warnings (operator-facing tech messages from CustomerUsageService)
-//   - plan_id (internal identifier; plan_name is enough for display)
-//   - rating_rule_version_id (internal identifier)
+//   - plan_id and price_id (internal identifiers; plan_name is enough for
+//     display)
 //
 // What's PRESENT:
 //   - customer_id + tenant_id (caller already has the token, so these
 //     are not secrets)
 //   - billing_period { start, end, source }
 //   - subscriptions (id + plan_name + currency + period only)
-//   - usage[] (meter + per-rule breakdown for multi-dim)
+//   - usage[] (meter + per-price breakdown, by the events each price takes)
 //   - totals[] (per-currency rollup)
 //   - projected_total_cents (sum across currencies — Stripe-style
 //     single-number summary the widget surfaces as the headline)
@@ -98,7 +102,9 @@ type CostDashboardProjection struct {
 	Usage               []CostDashboardMeter        `json:"usage"`
 	Totals              []CostDashboardTotal        `json:"totals"`
 	ProjectedTotalCents int64                       `json:"projected_total_cents"`
-	Credits             CostDashboardCredits        `json:"credits"`
+	// Credits is the credit position, one entry per currency (ADR-129),
+	// ordered by currency.
+	Credits []CostDashboardCredits `json:"credits"`
 	// Livemode marks whether this dashboard reflects real-money usage; the
 	// embed shows a "Test mode" banner when false. Shipped in the JSON
 	// contract pre-outreach so partner UIs never face a mid-pilot schema
@@ -106,26 +112,26 @@ type CostDashboardProjection struct {
 	Livemode bool `json:"livemode"`
 }
 
-// CostDashboardCredits is the customer's credit position (issue #86).
+// CostDashboardCredits is the customer's credit position in one currency
+// (issue #86, ADR-129). Amounts in two currencies are never added together.
 //
 // BalanceCents is the ledger balance: credit is drawn down when an invoice is
 // issued, so it does not move during a billing period. EstimatedRemainingCents
 // is the figure a "live balance" widget wants: the balance minus
 // UnbilledUsageCents, never below zero.
 //
-// UnbilledUsageCents is NOT projected_total_cents. The projection is this
-// period's usage over one window; unbilled usage leaves out what a threshold
-// invoice already billed and what a trial will never bill, and counts each
-// subscription over its own period. Subtracting the projection was wrong in
-// exactly those cases (issue #1019), so the three live fields come from
-// CostDashboardLiveBalance and the block adds up on its own:
+// UnbilledUsageCents is NOT projected_total_cents. The projection is the
+// current period's whole usage; unbilled usage leaves out what a threshold
+// invoice already billed. So the three live fields come from
+// CostDashboardLiveBalance (issue #1019) and the block adds up on its own:
 // estimated = max(balance - unbilled, 0).
 type CostDashboardCredits struct {
-	BalanceCents              int64 `json:"balance_cents"`
-	CommitRemainingCents      int64 `json:"commit_remaining_cents"`
-	PromotionalRemainingCents int64 `json:"promotional_remaining_cents"`
-	UnbilledUsageCents        int64 `json:"unbilled_usage_cents"`
-	EstimatedRemainingCents   int64 `json:"estimated_remaining_cents"`
+	Currency                  string `json:"currency"`
+	BalanceCents              int64  `json:"balance_cents"`
+	CommitRemainingCents      int64  `json:"commit_remaining_cents"`
+	PromotionalRemainingCents int64  `json:"promotional_remaining_cents"`
+	UnbilledUsageCents        int64  `json:"unbilled_usage_cents"`
+	EstimatedRemainingCents   int64  `json:"estimated_remaining_cents"`
 }
 
 type CostDashboardPeriod struct {
@@ -143,26 +149,59 @@ type CostDashboardSubscription struct {
 }
 
 type CostDashboardMeter struct {
-	MeterKey         string              `json:"meter_key"`
-	MeterName        string              `json:"meter_name"`
-	Unit             string              `json:"unit"`
-	Currency         string              `json:"currency"`
-	TotalQuantity    string              `json:"total_quantity"`
-	TotalAmountCents int64               `json:"total_amount_cents"`
-	Rules            []CostDashboardRule `json:"rules"`
+	EventName        string               `json:"event_name"`
+	MeterName        string               `json:"meter_name"`
+	Unit             string               `json:"unit"`
+	Currency         string               `json:"currency"`
+	TotalQuantity    string               `json:"total_quantity"`
+	TotalAmountCents int64                `json:"total_amount_cents"`
+	Prices           []CostDashboardPrice `json:"prices"`
 }
 
-type CostDashboardRule struct {
-	RuleKey           string         `json:"rule_key"`
-	DimensionMatch    map[string]any `json:"dimension_match,omitempty"`
-	Quantity          string         `json:"quantity"`
-	AmountCents       int64          `json:"amount_cents"`
-	UnitAmountDecimal *string        `json:"unit_amount_decimal,omitempty"`
+// CostDashboardPrice is the usage one price took this period. A catch-all
+// price has no dimension_match.
+type CostDashboardPrice struct {
+	DimensionMatch    map[string]string `json:"dimension_match,omitempty"`
+	Quantity          string            `json:"quantity"`
+	AmountCents       int64             `json:"amount_cents"`
+	UnitAmountDecimal *string           `json:"unit_amount_decimal,omitempty"`
 }
 
 type CostDashboardTotal struct {
 	Currency    string `json:"currency"`
 	AmountCents int64  `json:"amount_cents"`
+}
+
+// mergeCredits joins the ledger summary and the live figure by currency: the
+// balance, unbilled usage and estimate come from the live read, the
+// commit/promotional split from the summary. The result is ordered by
+// currency and is never nil.
+func mergeCredits(summary []CostDashboardCredits, live domain.CreditLiveBalance) []CostDashboardCredits {
+	byCurrency := map[string]*CostDashboardCredits{}
+	entry := func(c string) *CostDashboardCredits {
+		if byCurrency[c] == nil {
+			byCurrency[c] = &CostDashboardCredits{Currency: c}
+		}
+		return byCurrency[c]
+	}
+	for _, s := range summary {
+		e := entry(s.Currency)
+		e.CommitRemainingCents = s.CommitRemainingCents
+		e.PromotionalRemainingCents = s.PromotionalRemainingCents
+		e.BalanceCents = s.BalanceCents
+	}
+	for _, l := range live.Balances {
+		e := entry(l.Currency)
+		e.BalanceCents = l.BalanceCents
+		e.UnbilledUsageCents = l.UnbilledUsageCents
+		e.EstimatedRemainingCents = l.EstimatedRemainingCents
+	}
+	out := make([]CostDashboardCredits, 0, len(byCurrency))
+	for _, e := range byCurrency {
+		out = append(out, *e)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Currency < out[j].Currency })
+	return out
 }
 
 // GetByToken resolves the token, composes the usage view, sanitizes,
@@ -208,7 +247,7 @@ func (a *CostDashboardAssembler) GetByToken(ctx context.Context, token string) (
 	}
 	// A failed credit read fails the response. Showing a zero balance to a
 	// customer who holds credit would be wrong and silent.
-	credits, err := a.credits.CreditSummary(ctx, cust.TenantID, cust.ID)
+	summary, err := a.credits.CreditSummary(ctx, cust.TenantID, cust.ID)
 	if err != nil {
 		return nil, fmt.Errorf("read credits: %w", err)
 	}
@@ -221,10 +260,9 @@ func (a *CostDashboardAssembler) GetByToken(ctx context.Context, token string) (
 	if err != nil {
 		return nil, fmt.Errorf("read live credit balance: %w", err)
 	}
-	// One read supplies all three so the block is consistent with itself.
-	credits.BalanceCents = live.BalanceCents
-	credits.UnbilledUsageCents = live.UnbilledUsageCents
-	credits.EstimatedRemainingCents = live.EstimatedRemainingCents
+	// One read supplies the three live figures of each currency, so each
+	// entry is consistent with itself.
+	credits := mergeCredits(summary, live)
 
 	activeCount := 0
 	for _, s := range subs {
@@ -275,36 +313,38 @@ func (a *CostDashboardAssembler) GetByToken(ctx context.Context, token string) (
 	}
 
 	for _, m := range res.Meters {
-		rules := make([]CostDashboardRule, 0, len(m.Rules))
-		for _, ru := range m.Rules {
-			if ru.Unmatched {
-				// Unmatched-usage rows are operator information (a
-				// pricing-config gap, ADR-044 matrix); the customer-facing
-				// projection shows only billed usage.
+		prices := make([]CostDashboardPrice, 0, len(m.Prices))
+		for _, p := range m.Prices {
+			if p.NoPrice {
+				// Usage no price took is operator information (a pricing
+				// gap); the customer-facing projection shows only billed
+				// usage.
 				continue
 			}
-			rules = append(rules, CostDashboardRule{
-				RuleKey:           ru.RuleKey,
-				DimensionMatch:    ru.DimensionMatch,
-				Quantity:          ru.Quantity.String(),
-				AmountCents:       ru.AmountCents,
-				UnitAmountDecimal: ru.UnitAmountDecimal,
+			prices = append(prices, CostDashboardPrice{
+				DimensionMatch:    p.DimensionMatch,
+				Quantity:          p.Quantity.String(),
+				AmountCents:       p.AmountCents,
+				UnitAmountDecimal: p.UnitAmountDecimal,
 			})
 		}
 		proj.Usage = append(proj.Usage, CostDashboardMeter{
-			MeterKey:         m.MeterKey,
+			EventName:        m.EventName,
 			MeterName:        m.MeterName,
 			Unit:             m.Unit,
 			Currency:         m.Currency,
 			TotalQuantity:    m.TotalQuantity.String(),
 			TotalAmountCents: m.TotalAmountCents,
-			Rules:            rules,
+			Prices:           prices,
 		})
 	}
 
 	for _, t := range res.Totals {
 		proj.Totals = append(proj.Totals, CostDashboardTotal(t))
-		proj.ProjectedTotalCents += t.AmountCents
+		var err error
+		if proj.ProjectedTotalCents, err = domain.SumCents(proj.ProjectedTotalCents, t.AmountCents); err != nil {
+			return CostDashboardProjection{}, fmt.Errorf("cost dashboard projected total: %w", err)
+		}
 	}
 	proj.Credits = credits
 

@@ -2,7 +2,6 @@ package webhook
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -49,8 +48,6 @@ func (h *Handler) Routes() chi.Router {
 	r.Get("/endpoints/{id}/deliveries", h.listEndpointDeliveries)
 	r.Post("/endpoints/{id}/deliveries/{deliveryID}/replay", h.replayDelivery)
 	r.Get("/events", h.listEvents)
-	r.Get("/events/{id}/deliveries", h.listDeliveries)
-	r.Post("/events/{id}/replay", h.replayEvent)
 	return r
 }
 
@@ -63,7 +60,7 @@ func (h *Handler) Routes() chi.Router {
 // Critical: chi/v5 dispatches by registration order. We register
 // /stream BEFORE /{id} so a literal "stream" path doesn't get captured
 // as an ID and route to the deliveries handler. See
-// docs/design/create-preview.md for the canonical write-up.
+// docs/dev/design/create-preview.md for the canonical write-up.
 //
 // Note: the SSE handler (streamEvents) IS exposed here for tests and
 // dev-time mounting, but the production router mounts /stream
@@ -105,8 +102,7 @@ func (h *Handler) createEndpoint(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
 	var input CreateEndpointInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &input) {
 		return
 	}
 
@@ -143,6 +139,9 @@ func (h *Handler) listEndpoints(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) deleteEndpoint(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
@@ -164,15 +163,13 @@ func (h *Handler) deleteEndpoint(w http.ResponseWriter, r *http.Request) {
 }
 
 // updateEndpoint is the Stripe-shaped PATCH: url / description / events /
-// active mutate WITHOUT rotating the signing secret. Also the surface that
-// makes recipe-created endpoints (inactive + placeholder URL) usable.
+// active mutate WITHOUT rotating the signing secret.
 func (h *Handler) updateEndpoint(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
 	var input UpdateEndpointInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &input) {
 		return
 	}
 
@@ -196,6 +193,9 @@ func (h *Handler) updateEndpoint(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) rotateSecret(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
@@ -234,61 +234,14 @@ func (h *Handler) listEvents(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, r, http.StatusOK, map[string]any{"data": events})
 }
 
-func (h *Handler) listDeliveries(w http.ResponseWriter, r *http.Request) {
-	tenantID := auth.TenantID(r.Context())
-	eventID := chi.URLParam(r, "id")
-
-	deliveries, err := h.svc.ListDeliveries(r.Context(), tenantID, eventID)
-	if err != nil {
-		respond.InternalError(w, r)
-		slog.ErrorContext(r.Context(), "list webhook deliveries", "error", err)
-		return
-	}
-	if deliveries == nil {
-		deliveries = []domain.WebhookDelivery{}
-	}
-
-	respond.JSON(w, r, http.StatusOK, map[string]any{"data": deliveries})
-}
-
-func (h *Handler) replayEvent(w http.ResponseWriter, r *http.Request) {
-	tenantID := auth.TenantID(r.Context())
-	eventID := chi.URLParam(r, "id")
-
-	res, err := h.svc.Replay(r.Context(), tenantID, eventID)
-	if errors.Is(err, errs.ErrNotFound) {
-		respond.NotFound(w, r, "webhook event")
-		return
-	}
-	if err != nil {
-		respond.InternalError(w, r)
-		slog.ErrorContext(r.Context(), "replay webhook event", "error", err)
-		return
-	}
-
-	if h.auditLogger != nil {
-		_ = h.auditLogger.Log(r.Context(), tenantID, domain.AuditActionUpdate, "webhook_event", res.EventID, "", map[string]any{
-			"action":    "replayed",
-			"replay_of": res.ReplayOf,
-		})
-	}
-
-	// Legacy path (under /v1/webhook-endpoints/events/{id}/replay): the
-	// existing dashboard expects a flat {status: "replayed"} envelope
-	// for backwards compatibility. The new Week 6 path returns the
-	// richer {event_id, replay_of, status} struct via replayEventV2.
-	respond.JSON(w, r, http.StatusOK, map[string]any{
-		"status":    "replayed",
-		"event_id":  res.EventID,
-		"replay_of": res.ReplayOf,
-	})
-}
-
 // replayEventV2 is the Week 6 dashboard-facing replay handler. Returns
 // the full ReplayResult ({event_id, replay_of, status: "queued"}) so
 // the dashboard can highlight the new clone in its live tail and toast
 // the audit pivot.
 func (h *Handler) replayEventV2(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	eventID := chi.URLParam(r, "id")
 
@@ -383,6 +336,9 @@ func (h *Handler) listEndpointDeliveries(w http.ResponseWriter, r *http.Request)
 // touches other endpoints, so fixing one broken receiver doesn't spray
 // duplicates at the healthy ones.
 func (h *Handler) replayDelivery(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	endpointID := chi.URLParam(r, "id")
 	deliveryID := chi.URLParam(r, "deliveryID")
@@ -447,11 +403,9 @@ type DeliveriesResponse struct {
 }
 
 // listDeliveriesEnriched is the Week 6 deliveries endpoint at GET
-// /v1/webhook_events/{id}/deliveries. Differs from the legacy
-// /v1/webhook-endpoints/events/{id}/deliveries by returning the
-// enriched view shape (attempt_no, request_payload_sha256, etc.) and
-// stitching the original event + every replay clone into one ordered
-// timeline.
+// /v1/webhook_events/{id}/deliveries. It returns the enriched view shape
+// (attempt_no, request_payload_sha256, etc.) and stitches the original
+// event + every replay clone into one ordered timeline.
 func (h *Handler) listDeliveriesEnriched(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	eventID := chi.URLParam(r, "id")

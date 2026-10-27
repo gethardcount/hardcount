@@ -46,8 +46,8 @@ test('written-off line: paused collection says so, with no button', () => {
   assert.deepEqual(line, { state: 'paused', text: 'Collection on the subscription is paused.', openSubscription: false })
 })
 
-test('written-off line: a canceled or archived subscription says canceled, even if a pause is still recorded', () => {
-  for (const status of ['canceled', 'archived']) {
+test('written-off line: a canceled subscription says canceled, even if a pause is still recorded', () => {
+  for (const status of ['canceled']) {
     const line = writtenOffSubscriptionLine({ status, pause_collection: { behavior: 'keep_as_draft' } })
     assert.equal(line?.state, 'ended')
     assert.equal(line?.text, 'The subscription is canceled.')

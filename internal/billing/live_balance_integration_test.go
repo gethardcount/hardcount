@@ -15,6 +15,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/pricing"
 	"github.com/sagarsuperuser/velox/internal/subscription"
 	"github.com/sagarsuperuser/velox/internal/tax"
+	"github.com/sagarsuperuser/velox/internal/testutil"
 	"github.com/sagarsuperuser/velox/internal/usage"
 )
 
@@ -35,12 +36,16 @@ type liveFixture struct {
 // as internal/api does in production.
 type liveTestCredits struct{ svc *credit.Service }
 
-func (a liveTestCredits) CreditSummary(ctx context.Context, tenantID, customerID string) (usage.CostDashboardCredits, error) {
-	bal, err := a.svc.GetBalance(ctx, tenantID, customerID)
+func (a liveTestCredits) CreditSummary(ctx context.Context, tenantID, customerID string) ([]usage.CostDashboardCredits, error) {
+	balances, err := a.svc.GetBalance(ctx, tenantID, customerID)
 	if err != nil {
-		return usage.CostDashboardCredits{}, err
+		return nil, err
 	}
-	return usage.CostDashboardCredits{BalanceCents: bal.BalanceCents}, nil
+	out := make([]usage.CostDashboardCredits, 0, len(balances))
+	for _, b := range balances {
+		out = append(out, usage.CostDashboardCredits{Currency: b.Currency, BalanceCents: b.BalanceCents})
+	}
+	return out, nil
 }
 
 func newLiveFixture(t *testing.T, name string, grantCents int64) *liveFixture {
@@ -86,6 +91,7 @@ func wireLive(t *testing.T, f *thresholdFixture, ctx context.Context) *liveFixtu
 		t.Fatalf("set dashboard token: %v", err)
 	}
 	usageView := usage.NewCustomerUsageService(f.usageSvc, customerStore, f.subStore, f.pricingSvc)
+	usageView.SetRater(engine)
 	dashboard := usage.NewCostDashboardAssembler(customerStore, usageView, f.subStore, liveTestCredits{creditSvc})
 	dashboard.SetLiveBalanceReader(engine)
 
@@ -95,6 +101,7 @@ func wireLive(t *testing.T, f *thresholdFixture, ctx context.Context) *liveFixtu
 func (lf *liveFixture) grant(t *testing.T, cents int64) {
 	t.Helper()
 	if _, err := lf.creditSvc.Grant(lf.ctx, lf.tenantID, credit.GrantInput{
+		Currency:   "USD",
 		CustomerID: lf.customerID, AmountCents: cents, Description: "prepaid",
 	}); err != nil {
 		t.Fatalf("grant credit: %v", err)
@@ -104,21 +111,48 @@ func (lf *liveFixture) grant(t *testing.T, cents int64) {
 // balance is the settled ledger balance.
 func (lf *liveFixture) balance(t *testing.T) int64 {
 	t.Helper()
-	bal, err := lf.creditSvc.GetBalance(lf.ctx, lf.tenantID, lf.customerID)
+	bal, err := testutil.BalanceUSD(lf.creditSvc.GetBalance(lf.ctx, lf.tenantID, lf.customerID))
 	if err != nil {
 		t.Fatalf("read balance: %v", err)
 	}
 	return bal.BalanceCents
 }
 
-// live is the engine's read, the one GET /v1/credits/balance/{id}/live serves.
-func (lf *liveFixture) live(t *testing.T) domain.CreditLiveBalance {
+// liveAll is the engine's read, the one GET /v1/credits/balance/{id}/live
+// serves: one entry per currency.
+func (lf *liveFixture) liveAll(t *testing.T) domain.CreditLiveBalance {
 	t.Helper()
 	got, err := lf.engine.LiveCreditBalance(lf.ctx, lf.tenantID, lf.customerID)
 	if err != nil {
 		t.Fatalf("live credit balance: %v", err)
 	}
 	return got
+}
+
+// live is the USD entry of the engine's read, the fixture's currency (a zero
+// entry when there is none).
+func (lf *liveFixture) live(t *testing.T) domain.CreditLiveCurrency {
+	t.Helper()
+	all := lf.liveAll(t)
+	if all.ComputedAt.IsZero() {
+		t.Error("computed_at is not set")
+	}
+	for _, b := range all.Balances {
+		if b.Currency == "USD" {
+			return b
+		}
+	}
+	return domain.CreditLiveCurrency{Currency: "USD"}
+}
+
+// dashboardUSD is the USD entry of the public dashboard's credits block.
+func dashboardUSD(credits []usage.CostDashboardCredits) usage.CostDashboardCredits {
+	for _, c := range credits {
+		if c.Currency == "USD" {
+			return c
+		}
+	}
+	return usage.CostDashboardCredits{Currency: "USD"}
 }
 
 // estimated is the estimated remaining credit. It reads both surfaces and
@@ -130,7 +164,7 @@ func (lf *liveFixture) estimated(t *testing.T) int64 {
 	if err != nil {
 		t.Fatalf("dashboard: %v", err)
 	}
-	c := got.(usage.CostDashboardProjection).Credits
+	c := dashboardUSD(got.(usage.CostDashboardProjection).Credits)
 	live := lf.live(t)
 	if c.EstimatedRemainingCents != live.EstimatedRemainingCents || c.BalanceCents != live.BalanceCents || c.UnbilledUsageCents != live.UnbilledUsageCents {
 		t.Errorf("the two surfaces disagree: dashboard balance/unbilled/estimated = %d/%d/%d, live read = %d/%d/%d",
@@ -139,9 +173,6 @@ func (lf *liveFixture) estimated(t *testing.T) int64 {
 	}
 	if want := max(live.BalanceCents-live.UnbilledUsageCents, 0); live.EstimatedRemainingCents != want {
 		t.Errorf("estimated remaining = %d, want max(%d - %d, 0) = %d", live.EstimatedRemainingCents, live.BalanceCents, live.UnbilledUsageCents, want)
-	}
-	if live.ComputedAt.IsZero() {
-		t.Error("computed_at is not set")
 	}
 	return c.EstimatedRemainingCents
 }
@@ -222,9 +253,8 @@ func (lf *liveFixture) closeEveryPeriod(t *testing.T) int {
 // must fire exactly once. Returns the instant the fire billed through.
 func (lf *liveFixture) fire(t *testing.T, amountGTE int64) time.Time {
 	t.Helper()
-	noReset := false
 	if _, err := lf.subSvc.SetBillingThresholds(lf.ctx, lf.tenantID, lf.subID, subscription.BillingThresholdsInput{
-		AmountGTE: amountGTE, ResetBillingCycle: &noReset,
+		AmountGTE: amountGTE,
 	}); err != nil {
 		t.Fatalf("set thresholds: %v", err)
 	}
@@ -272,23 +302,16 @@ func TestLiveBalance_ThresholdFireResetFalse_NotDoubleCounted(t *testing.T) {
 func TestLiveBalance_NonAdditiveBucketDeferredByFire_CountedFullWindow(t *testing.T) {
 	lf := newLiveFixture(t, "Live Balance Deferred Max", 10000)
 
-	rrvMax, err := lf.pricingSvc.CreateRatingRule(lf.ctx, lf.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "gpu_peak", Name: "GPU Peak",
-		Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(100),
-	})
-	if err != nil {
-		t.Fatalf("create max rule: %v", err)
-	}
 	maxMeter, err := lf.pricingSvc.CreateMeter(lf.ctx, lf.tenantID, pricing.CreateMeterInput{
-		Key: "gpu", Name: "GPU Concurrency", Unit: "gpus",
-		Aggregation: "max", RatingRuleVersionID: rrvMax.ID,
+		EventName: "gpu", Name: "GPU Concurrency", Unit: "gpus",
+		Aggregation: "max",
 	})
 	if err != nil {
 		t.Fatalf("create max meter: %v", err)
 	}
-	mixed, err := lf.pricingSvc.CreatePlan(lf.ctx, lf.tenantID, pricing.CreatePlanInput{
+	mixed, _, err := lf.pricingSvc.CreatePlan(lf.ctx, lf.tenantID, pricing.CreatePlanInput{
 		Code: "pln_mixed", Name: "Mixed Plan", Currency: "USD", BillingInterval: domain.BillingMonthly,
-		MeterIDs: []string{lf.meterID, maxMeter.ID},
+		Prices: []pricing.PriceInput{{MeterID: lf.meterID, PriceShape: perUnitShape("1")}, {MeterID: maxMeter.ID, PriceShape: domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(100)}}},
 	})
 	if err != nil {
 		t.Fatalf("create mixed plan: %v", err)
@@ -343,9 +366,9 @@ func TestLiveBalance_GraduatedTiersContinueAcrossFire(t *testing.T) {
 	}
 }
 
-// Usage after a fire is priced with the rule version in force when the PERIOD
+// Usage after a fire is priced with the price version in force when the PERIOD
 // opened, as the close prices it, not the version in force when the post-fire
-// window opened. A price published mid-period applies from the next period.
+// window opened. A price edited mid-period applies from the next period.
 func TestLiveBalance_PricesAtThePeriodOpenAfterAFire(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration: skipped in -short mode")
@@ -354,13 +377,8 @@ func TestLiveBalance_PricesAtThePeriodOpenAfterAFire(t *testing.T) {
 	p := p21FireAt700(t, "Live Balance Period Pin", func(p *p21Fire) {
 		lf = wireLive(t, p.f, p.ctx)
 		lf.grant(t, 20000)
-		// Published now: after the period opened, before the fire.
-		if _, err := p.f.pricingSvc.CreateRatingRule(p.ctx, p.f.tenantID, pricing.CreateRatingRuleInput{
-			RuleKey: "calls_flat", Name: "Calls Repriced", Mode: domain.PricingFlat, Currency: "USD",
-			FlatAmountCents: decimal.NewFromInt(50),
-		}); err != nil {
-			t.Fatalf("publish mid-period version: %v", err)
-		}
+		// Saved now: after the period opened, before the fire.
+		editPrice(t, p.f.db, p.ctx, p.f.tenantID, p.f.planID, p.f.priceID, perUnitShape("50"))
 	})
 	if got := lf.balance(t); got != 13000 {
 		t.Fatalf("settled balance after the fire = %d, want 13000 (the fire prices at the period-open version)", got)
@@ -368,7 +386,7 @@ func TestLiveBalance_PricesAtThePeriodOpenAfterAFire(t *testing.T) {
 	p.seedAfterFire(t, 600, nil)
 
 	if got := lf.estimated(t); got != 9400 {
-		t.Errorf("estimated remaining = %d, want 9400; 0 prices the post-fire usage at the version published mid-period (600 at 50c)", got)
+		t.Errorf("estimated remaining = %d, want 9400; 0 prices the post-fire usage at the version saved mid-period (600 at 50c)", got)
 	}
 	if n := lf.closeEveryPeriod(t); n != 1 {
 		t.Fatalf("cycle close produced %d invoices, want 1", n)
@@ -493,22 +511,15 @@ func TestLiveBalance_TrialSetToCancel_UsageNotSubtracted(t *testing.T) {
 func TestLiveBalance_PlanSwapMidPeriod_OutgoingMeterStillCounted(t *testing.T) {
 	lf := newLiveFixture(t, "Live Balance Plan Swap", 10000)
 
-	rrv, err := lf.pricingSvc.CreateRatingRule(lf.ctx, lf.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "tok_flat", Name: "Tok Flat",
-		Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(1),
-	})
-	if err != nil {
-		t.Fatalf("create rule: %v", err)
-	}
 	tok, err := lf.pricingSvc.CreateMeter(lf.ctx, lf.tenantID, pricing.CreateMeterInput{
-		Key: "tok", Name: "Tok", Unit: "tok", Aggregation: "sum", RatingRuleVersionID: rrv.ID,
+		EventName: "tok", Name: "Tok", Unit: "tok", Aggregation: "sum",
 	})
 	if err != nil {
 		t.Fatalf("create meter: %v", err)
 	}
-	planB, err := lf.pricingSvc.CreatePlan(lf.ctx, lf.tenantID, pricing.CreatePlanInput{
+	planB, _, err := lf.pricingSvc.CreatePlan(lf.ctx, lf.tenantID, pricing.CreatePlanInput{
 		Code: "pln_tok", Name: "Tok Plan", Currency: "USD", BillingInterval: domain.BillingMonthly,
-		MeterIDs: []string{tok.ID},
+		Prices: []pricing.PriceInput{{MeterID: tok.ID, PriceShape: domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(1)}}},
 	})
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
@@ -545,6 +556,7 @@ func TestLiveBalance_ExpiredGrantNotYetSwept_NotSpendable(t *testing.T) {
 
 	expires := time.Now().UTC().Add(2 * time.Second)
 	if _, err := lf.creditSvc.Grant(lf.ctx, lf.tenantID, credit.GrantInput{
+		Currency:   "USD",
 		CustomerID: lf.customerID, AmountCents: 10000, Description: "promo", ExpiresAt: &expires,
 	}); err != nil {
 		t.Fatalf("grant expiring credit: %v", err)
@@ -590,22 +602,15 @@ func TestLiveBalance_ExpiredGrantNotYetSwept_NotSpendable(t *testing.T) {
 func TestLiveBalance_TwoSubscriptionsDifferentCycles_EachOwnWindow(t *testing.T) {
 	lf := newLiveFixture(t, "Live Balance Two Cycles", 10000)
 
-	rrv, err := lf.pricingSvc.CreateRatingRule(lf.ctx, lf.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "tokens_flat", Name: "Tokens Flat",
-		Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(1),
-	})
-	if err != nil {
-		t.Fatalf("create rule: %v", err)
-	}
 	tokens, err := lf.pricingSvc.CreateMeter(lf.ctx, lf.tenantID, pricing.CreateMeterInput{
-		Key: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: "sum", RatingRuleVersionID: rrv.ID,
+		EventName: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: "sum",
 	})
 	if err != nil {
 		t.Fatalf("create meter: %v", err)
 	}
-	planB, err := lf.pricingSvc.CreatePlan(lf.ctx, lf.tenantID, pricing.CreatePlanInput{
+	planB, _, err := lf.pricingSvc.CreatePlan(lf.ctx, lf.tenantID, pricing.CreatePlanInput{
 		Code: "pln_tokens", Name: "Tokens Plan", Currency: "USD", BillingInterval: domain.BillingMonthly,
-		MeterIDs: []string{tokens.ID},
+		Prices: []pricing.PriceInput{{MeterID: tokens.ID, PriceShape: domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(1)}}},
 	})
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
@@ -707,19 +712,24 @@ func TestLiveBalance_DashboardAggregatesOncePerMeter(t *testing.T) {
 		t.Fatalf("dashboard: %v", err)
 	}
 	proj := got.(usage.CostDashboardProjection)
-	if proj.ProjectedTotalCents != 2500 || proj.Credits.EstimatedRemainingCents != 7500 {
-		t.Fatalf("projected = %d, estimated = %d; want 2500 and 7500", proj.ProjectedTotalCents, proj.Credits.EstimatedRemainingCents)
+	if proj.ProjectedTotalCents != 2500 || dashboardUSD(proj.Credits).EstimatedRemainingCents != 7500 {
+		t.Fatalf("projected = %d, estimated = %d; want 2500 and 7500", proj.ProjectedTotalCents, dashboardUSD(proj.Credits).EstimatedRemainingCents)
 	}
 	if memo.Queries() != 1 || memo.Hits() != 1 {
 		t.Errorf("usage aggregations: %d reached the database and %d were reused; want 1 and 1 (one meter, two readers)", memo.Queries(), memo.Hits())
 	}
 
 	// After a threshold invoice the live figure reads only the window since
-	// the invoice, a different (and much shorter) scan than the page's.
+	// the invoice, a different (and much shorter) scan than the page's: the
+	// page still shows the whole period's usage (ADR-130 §10).
 	lf.fire(t, 2000)
 	ctx, memo = usage.WithAggregationMemo(lf.ctx)
-	if _, err := lf.dashboard.GetByToken(ctx, lf.token); err != nil {
+	got, err = lf.dashboard.GetByToken(ctx, lf.token)
+	if err != nil {
 		t.Fatalf("dashboard after fire: %v", err)
+	}
+	if proj := got.(usage.CostDashboardProjection); proj.ProjectedTotalCents != 2500 {
+		t.Errorf("projected after a threshold invoice = %d, want 2500: the whole period", proj.ProjectedTotalCents)
 	}
 	if memo.Queries() != 2 || memo.Hits() != 0 {
 		t.Errorf("after a threshold invoice: %d aggregations reached the database and %d were reused; want 2 and 0", memo.Queries(), memo.Hits())
@@ -732,7 +742,7 @@ func TestLiveBalance_CountsEverySubscriptionPastOnePage(t *testing.T) {
 	lf := newLiveFixture(t, "Live Balance Paging", 10000)
 	lf.ingestUsage(t, lf.ctx, 25, 100) // $25.00 on the fixture subscription
 
-	empty, err := lf.pricingSvc.CreatePlan(lf.ctx, lf.tenantID, pricing.CreatePlanInput{
+	empty, _, err := lf.pricingSvc.CreatePlan(lf.ctx, lf.tenantID, pricing.CreatePlanInput{
 		Code: "pln_no_meters", Name: "No Meters", Currency: "USD", BillingInterval: domain.BillingMonthly,
 	})
 	if err != nil {
@@ -745,5 +755,70 @@ func TestLiveBalance_CountsEverySubscriptionPastOnePage(t *testing.T) {
 	}
 	if got := lf.live(t).UnbilledUsageCents; got != 2500 {
 		t.Errorf("unbilled usage = %d, want 2500; 0 means the read stopped at the first page of subscriptions", got)
+	}
+}
+
+// A customer billed in EUR who also holds USD credit: the subscription's
+// unbilled usage is set against the EUR credit, the credit its next invoice
+// draws, and the USD credit is left whole. This is the stop-serving gate
+// (docs/stop-usage-when-credit-runs-out.md): reading the usage against USD
+// would show EUR credit left that the close will not find. The close then
+// draws exactly what the estimate said, in each currency.
+func TestLiveBalance_UsageCountsAgainstTheInvoiceCurrency(t *testing.T) {
+	lf := newLiveFixture(t, "Live Balance Invoice Currency", 10000) // USD 100.00
+	if _, err := lf.creditSvc.Grant(lf.ctx, lf.tenantID, credit.GrantInput{
+		Currency: "EUR", CustomerID: lf.customerID, AmountCents: 1000, Description: "prepaid EUR",
+	}); err != nil {
+		t.Fatalf("grant EUR credit: %v", err)
+	}
+	// The fixture's plan is moved to EUR, and its prices with it (a price
+	// takes its plan's currency, ADR-130 §11): the subscription bills in EUR.
+	lf.exec(t, `UPDATE plans SET currency = 'EUR' WHERE id = $1`, lf.planID)
+	lf.ingestUsage(t, lf.ctx, 60, 100) // 6,000 calls at 1c = 60.00 EUR
+
+	got, err := lf.dashboard.GetByToken(lf.ctx, lf.token)
+	if err != nil {
+		t.Fatalf("dashboard: %v", err)
+	}
+	dash := map[string]usage.CostDashboardCredits{}
+	for _, c := range got.(usage.CostDashboardProjection).Credits {
+		dash[c.Currency] = c
+	}
+	live := map[string]domain.CreditLiveCurrency{}
+	for _, b := range lf.liveAll(t).Balances {
+		live[b.Currency] = b
+	}
+	want := map[string][3]int64{ // balance, unbilled, estimated remaining
+		"EUR": {1000, 6000, 0},
+		"USD": {10000, 0, 10000},
+	}
+	if len(live) != len(want) || len(dash) != len(want) {
+		t.Fatalf("live entries %v, dashboard entries %v; want exactly EUR and USD", live, dash)
+	}
+	for ccy, w := range want {
+		l, d := live[ccy], dash[ccy]
+		if gotL := [3]int64{l.BalanceCents, l.UnbilledUsageCents, l.EstimatedRemainingCents}; gotL != w {
+			t.Errorf("live %s balance/unbilled/estimated = %v, want %v (the EUR subscription's usage counts against EUR credit only)", ccy, gotL, w)
+		}
+		if gotD := [3]int64{d.BalanceCents, d.UnbilledUsageCents, d.EstimatedRemainingCents}; gotD != w {
+			t.Errorf("dashboard %s balance/unbilled/estimated = %v, want %v", ccy, gotD, w)
+		}
+	}
+
+	if n := lf.closeEveryPeriod(t); n != 1 {
+		t.Fatalf("cycle close produced %d invoices, want 1", n)
+	}
+	settled, err := lf.creditSvc.GetBalance(lf.ctx, lf.tenantID, lf.customerID)
+	if err != nil {
+		t.Fatalf("read balance: %v", err)
+	}
+	after := map[string]int64{}
+	for _, b := range settled {
+		after[b.Currency] = b.BalanceCents
+	}
+	for ccy, w := range want {
+		if after[ccy] != w[2] {
+			t.Errorf("settled %s balance after the close = %d, want %d (what the estimate said)", ccy, after[ccy], w[2])
+		}
 	}
 }

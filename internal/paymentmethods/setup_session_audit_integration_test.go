@@ -19,10 +19,6 @@ type sessionStripe struct {
 	sessionErr error
 }
 
-func (s *sessionStripe) CreateSetupIntent(context.Context, string, map[string]string) (string, string, error) {
-	return "", "", errors.New("not used")
-}
-
 func (s *sessionStripe) CreateSetupCheckoutSession(_ context.Context, _, _, _ string, _ map[string]string) (string, string, error) {
 	if s.sessionErr != nil {
 		return "", "", s.sessionErr

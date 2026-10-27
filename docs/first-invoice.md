@@ -1,29 +1,19 @@
 # Send usage and get your first invoice
 
 This page bills one test customer for AI tokens, using the API from your
-terminal. It takes about ten minutes. At the end, you open the invoice in
-the dashboard.
-
-Think of a taxi meter. Your app reports what the customer used, Velox
-counts it and multiplies it by the price, and the total goes on the
-invoice. Stripe charges the card at the end, once you connect it.
-
-**Who it is for:** developers who want to connect their own product to
-Velox. If you only want to see Velox work, the
-[quick start](quick-start.md) demo does all of this for you.
+terminal. At the end, you open the invoice in the dashboard.
 
 ## Words on this page
 
 | Word | Meaning |
 |---|---|
-| Recipe | A ready-made pricing setup that Velox creates in one call. |
-| Meter | A counter for one kind of usage, here AI tokens. |
-| Plan | What you sell: a currency, a billing period such as monthly, and the meters it charges for. |
+| Plan | What you sell: a currency, a billing period such as monthly, and a price for each kind of usage. |
 | Customer | A person or company you bill. Its external ID is your own ID for it, such as the user ID in your database. |
 | Subscription | Puts a customer on a plan, and says when each billing month starts. |
 | Usage event | One "this customer used this much" record that your app sends. |
 | Idempotency key | A unique ID for one usage event. If you send the same event again with the same key, Velox counts it once. |
-| Test clock | A pretend clock for test customers. Moving it forward makes a month pass in seconds. |
+
+Recipe, meter and test clock: [quick start](quick-start.md#words-on-this-page).
 
 ## Before you start
 
@@ -34,17 +24,28 @@ You need:
 - `curl` and `jq` (a tool that reads JSON). On macOS: `brew install jq`.
   On Debian or Ubuntu: `sudo apt install jq`.
 
+This page matches the newest code on `main`. The quick start starts the
+newest release, v0.8.2, which can answer some steps differently. On v0.8.2,
+follow [this page as of v0.8.2](https://github.com/getvelox/velox/blob/v0.8.2/docs/first-invoice.md).
+
 Open a terminal in the `velox` folder that the quick start downloaded. Save
 the address and your test API key in two variables. Every command below
 uses them.
 
+<!-- docs-run: command -->
 ```bash
 export VELOX=http://localhost:8080
-export VELOX_KEY=$(jq -r .secret_key_test deploy/compose/quickstart-credentials.json)
+VELOX_KEY=$(jq -r .secret_key_test deploy/compose/quickstart-credentials.json)
+export VELOX_KEY
 curl -s "$VELOX/health"
 ```
 
-**You see:** `{"status":"ok"}`
+**You see:**
+
+<!-- docs-run: output -->
+```json
+{"status":"ok"}
+```
 
 The key starts with `vlx_secret_test_`, so everything on this page happens
 in test mode, where no real money moves. Running Velox somewhere else? Set
@@ -58,12 +59,14 @@ variable into the JSON for you.
 ## Steps
 
 1. **Load ready-made prices for Claude tokens.** One call applies the
-   `anthropic_style` recipe. It creates a meter named `tokens`, a price for
-   each Claude model and each kind of token, and a monthly plan named "AI
-   API" with no base fee. The prices start at Anthropic's public list
+   `anthropic_style` recipe. It creates a meter named Tokens, which counts
+   usage events named `tokens`, and a monthly plan named "AI API" with no
+   base fee. The plan has a price for each Claude model and each kind of
+   token. The prices start at Anthropic's public list
    prices. If the recipe is already there (for example, from the demo),
    the call returns the same setup again.
 
+   <!-- docs-run: command -->
    ```bash
    PLAN_ID=$(curl -s -X POST "$VELOX/v1/recipes/anthropic_style/instantiate" \
      -H "Authorization: Bearer $VELOX_KEY" \
@@ -72,10 +75,16 @@ variable into the JSON for you.
    echo "$PLAN_ID"
    ```
 
-   **You see:** the plan ID, such as `vlx_pln_…`.
+   **You see:** the plan ID.
+
+   <!-- docs-run: output -->
+   ```text
+   vlx_pln_…
+   ```
 
 2. **Create a test clock.** It starts at the current time.
 
+   <!-- docs-run: command -->
    ```bash
    CLOCK_ID=$(jq -n --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
        '{name: "first invoice", frozen_time: $now}' \
@@ -86,12 +95,18 @@ variable into the JSON for you.
    echo "$CLOCK_ID"
    ```
 
-   **You see:** the clock ID, such as `vlx_tclk_…`.
+   **You see:** the clock ID.
+
+   <!-- docs-run: output -->
+   ```text
+   vlx_tclk_…
+   ```
 
 3. **Create a customer on the test clock.** `CUSTOMER_REF` is your own ID
    for the customer. Your app sends it with each usage event, so Velox
    knows whose usage it is.
 
+   <!-- docs-run: command -->
    ```bash
    CUSTOMER_REF=acme-1
    CUSTOMER_ID=$(jq -n --arg ref "$CUSTOMER_REF" --arg clock "$CLOCK_ID" \
@@ -104,17 +119,27 @@ variable into the JSON for you.
    echo "$CUSTOMER_ID"
    ```
 
-   **You see:** the customer ID, such as `vlx_cus_…`. ACME Corp is now on
-   the **Customers** page.
+   **You see:** the customer ID.
 
-4. **Put the customer on the plan.** This makes a subscription. Its first
-   month starts at the clock's current time.
+   <!-- docs-run: output -->
+   ```text
+   vlx_cus_…
+   ```
 
+   ACME Corp is now on the **Customers** page.
+
+4. **Put the customer on the plan.** This makes a subscription. It starts
+   when you create it: its first month starts at 00:00 on the clock's day,
+   in your account's billing time zone.
+   (To set one up that bills nothing yet, send `"status": "draft"` and
+   activate it later.)
+
+   <!-- docs-run: command -->
    ```bash
    jq -n --arg ref "$CUSTOMER_REF" --arg cus "$CUSTOMER_ID" --arg plan "$PLAN_ID" \
        '{code: ($ref + "-ai-api"), display_name: "ACME Corp AI API",
          customer_id: $cus, items: [{plan_id: $plan, quantity: 1}],
-         billing_time: "anniversary", start_now: true}' \
+         billing_time: "anniversary"}' \
      | curl -s -X POST "$VELOX/v1/subscriptions" \
        -H "Authorization: Bearer $VELOX_KEY" \
        -H "Content-Type: application/json" \
@@ -123,6 +148,7 @@ variable into the JSON for you.
 
    **You see:**
 
+   <!-- docs-run: output -->
    ```json
    {
      "id": "vlx_sub_…",
@@ -136,11 +162,12 @@ variable into the JSON for you.
    token. Do **5a** to send them yourself, or **5b** if you use a LiteLLM
    proxy. You need only one of them.
 
-   **5a. Send the events yourself.** `event_name` is the meter's key.
-   `dimensions` are labels: the recipe's prices pick events by `model` and
-   `token_type`. Give each event its own idempotency key, and send the same
+   **5a. Send the events yourself.** `event_name` says which meter counts
+   the event: the Tokens meter counts `tokens`. `dimensions` are labels: the
+   plan's prices pick events by `model` and `token_type`. Give each event its own idempotency key, and send the same
    key again when you retry that event.
 
+   <!-- docs-run: command name=5a -->
    ```bash
    send_tokens() {   # send_tokens <token type> <quantity>
      jq -n --arg ref "$CUSTOMER_REF" --arg type "$1" --arg qty "$2" \
@@ -158,6 +185,7 @@ variable into the JSON for you.
 
    **You see:** one line for each event, such as:
 
+   <!-- docs-run: output -->
    ```text
    {"id":"vlx_evt_…","quantity":"1000000","token_type":"input","timestamp":"…"}
    {"id":"vlx_evt_…","quantity":"200000","token_type":"output","timestamp":"…"}
@@ -172,6 +200,7 @@ variable into the JSON for you.
    LiteLLM's `user` is the customer's external ID. To connect a real
    proxy, see [LiteLLM integration](integrations/litellm.md).
 
+   <!-- docs-run: command name=5b -->
    ```bash
    jq -n --arg ref "$CUSTOMER_REF" \
        '{id: ($ref + "-call-1"), call_type: "completion",
@@ -184,10 +213,20 @@ variable into the JSON for you.
        -d @-
    ```
 
-   **You see:** `{"accepted":2,"deduplicated":0,"held":0,"skipped":0}`. That is two
-   new events: input and output.
+   **You see:** two new events, input and output. Every other count is 0.
 
-   Did 5a first? Then you see `{"accepted":0,"deduplicated":2,"held":0,"skipped":0}`.
+   <!-- docs-run: output unless=5a -->
+   ```json
+   {"accepted":2,"deduplicated":0,"held":0,"skipped":0,"cache_hits":0,"after_close":0,"no_price":0,"not_on_plan":0,"outside_subscription":0}
+   ```
+
+   Did 5a first? Then you see:
+
+   <!-- docs-run: output if=5a -->
+   ```json
+   {"accepted":0,"deduplicated":2,"held":0,"skipped":0,"cache_hits":0,"after_close":0,"no_price":0,"not_on_plan":0,"outside_subscription":0}
+   ```
+
    Both ways use the same idempotency keys, so Velox counts the tokens once.
 
    In the dashboard, the **Usage** page lists both events.
@@ -197,6 +236,7 @@ variable into the JSON for you.
    closes that month and makes the invoice. The first `date` form is for
    macOS, the second for Linux.
 
+   <!-- docs-run: command -->
    ```bash
    LATER=$(date -u -v+32d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "+32 days" +%Y-%m-%dT%H:%M:%SZ)
    jq -n --arg t "$LATER" '{frozen_time: $t}' \
@@ -206,31 +246,34 @@ variable into the JSON for you.
        -d @- | jq -r .status
    ```
 
-   **You see:** `advancing`
+   **You see:**
+
+   <!-- docs-run: output -->
+   ```text
+   advancing
+   ```
 
    Run this until it prints `ready`. It takes a few seconds.
 
+   <!-- docs-run: command repeat-until-output -->
    ```bash
    curl -s "$VELOX/v1/test-clocks/$CLOCK_ID" \
      -H "Authorization: Bearer $VELOX_KEY" | jq -r .status
    ```
 
-   **You see:** `ready`
+   **You see:**
 
-   **Testing failed payments later?** When the clock moves, Velox bills
-   every skipped period first, and only then retries failed payments.
-   (Retrying an unpaid invoice on a schedule is called dunning.) If your
-   dunning policy cancels or pauses the subscription when the retries run
-   out, move the clock in two steps. First move it to the time of the
-   invoice's last retry. That is the time the payment failed, plus the
-   policy's grace days and the gaps between its retries. Then move it to
-   the next billing date. Velox dates the cancel or pause at the time you
-   move the clock to, so a move past the last retry dates it late. One
-   longer move also bills a period a real clock would not
-   ([#1276](https://github.com/getvelox/velox/issues/1276)).
+   <!-- docs-run: output -->
+   ```text
+   ready
+   ```
+
+   Testing a dunning policy that pauses or cancels? Move the clock in two
+   steps: see [catch-up](glossary.md#testing-with-simulated-time).
 
 7. **Read the invoice.**
 
+   <!-- docs-run: command -->
    ```bash
    INVOICE_ID=$(curl -s "$VELOX/v1/invoices?customer_id=$CUSTOMER_ID" \
      -H "Authorization: Bearer $VELOX_KEY" | jq -r '.data[0].id')
@@ -243,6 +286,7 @@ variable into the JSON for you.
 
    **You see:**
 
+   <!-- docs-run: output -->
    ```json
    {
      "number": "VLX-…",
@@ -263,18 +307,28 @@ variable into the JSON for you.
 
    The lines are 1,000,000 input tokens at $3.00 per million, and 200,000
    output tokens at $15.00 per million. "Finalized" means issued and no
-   longer a draft. Nothing is charged, because no Stripe account is
-   connected.
+   longer a draft. Nothing is charged: no Stripe account is connected, and
+   ACME Corp has no card.
 
 8. **Open the invoice in the dashboard.** Sign in first.
 
+   <!-- docs-run: command -->
    ```bash
    echo "$VELOX/invoices/$INVOICE_ID"
    ```
 
-   **You see:** a link. Open it, and you see the invoice for ACME Corp,
-   with the two token lines and the $6.00 total. To see the PDF, open the
-   **⋯** menu at the top right and choose **Preview PDF**.
+   **You see:** the invoice's address in the dashboard.
+
+   <!-- docs-run: output -->
+   ```text
+   http://localhost:8080/invoices/vlx_inv_…
+   ```
+
+   Open it, and you see the invoice for ACME Corp, with the two token lines
+   and $6.00 due. The dashboard marks an invoice that is finalized and not
+   paid as **Open**. A yellow **No payment method** notice says the invoice
+   is charged once the customer adds a card. To see the PDF, open the **⋯**
+   menu next to **Audit log** and choose **Preview PDF**.
 
 Home leaves out customers on a test clock, so its totals still read $0.
 That is expected: open the customer from **Customers** instead.
@@ -284,15 +338,11 @@ That is expected: open the customer from **Customers** instead.
 | What you see | What to do |
 |---|---|
 | A step prints `null` | The request failed. Run the same command without the last `jq` part to see the error message. |
-| `customer "acme-1" not found`, or `"held":2` in step 5b | Step 3 did not run, or `CUSTOMER_REF` is not set in this terminal. Step 5a refuses usage for a customer Velox does not know. Step 5b holds it instead: create the customer, then release it from the notice on the **Usage** page. |
+| `external_customer_id is required` in step 5a, or `payload.user is required` in step 5b | `CUSTOMER_REF` is not set. A variable lasts only as long as its terminal. Run the page again from the top in one terminal, with `acme-2` in place of `acme-1` in step 3. |
+| `customer "acme-1" not found`, or `"held":2` in step 5b | Step 3 did not run. Step 5a refuses usage for a customer Velox does not know. Step 5b holds it instead: create the customer, then release it from the notice on the **Usage** page. |
 | `customer with external_id "acme-1" already exists` | You ran this page before. In step 3, change `acme-1` to `acme-2`, then run steps 2 to 8 again. |
 | `INVOICE_ID` is `null`, or the invoice has no token lines | The usage went to another customer, or was sent after the clock moved. Run steps 2 to 8 again with a new name in step 3. |
+| `after_close`, `no_price`, `not_on_plan` or `outside_subscription` is not 0 in step 5b | Velox stored the events but will not bill them. `no_price` means no price of the plan takes their `model` and `token_type`. In step 5a, the same reason is in the event's `billing_status`: run the command without the last `jq` part to see it. |
 
-## Next steps
-
-- **Price a model the recipe does not cover, sell prepaid credit, or see
-  your margin:** [AI pricing reference](ai-pricing.md).
-- **Send usage from a LiteLLM proxy:** [LiteLLM integration](integrations/litellm.md).
-- **Let your app react when an invoice is paid or a payment fails:**
-  [Webhooks](webhooks.md).
-- **Every route:** [API surface](api-surface.md).
+**Next:** price your own models, sell prepaid credit and see your margin:
+[AI pricing](ai-pricing.md).

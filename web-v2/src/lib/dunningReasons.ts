@@ -20,6 +20,10 @@ const LABELS: Record<string, string> = {
   manually_resolved: 'Resolved by hand',
   retries_exhausted: 'All retries used',
   action_failed: 'Final step failed, will try again',
+  amount_below_minimum: 'Below Stripe\u2019s minimum charge',
+  // A retry that charged nothing: the bank wants the customer to confirm the
+  // payment, which a retry made without them can't do.
+  needs_confirmation: 'Not charged: the customer must confirm the payment',
   // Final actions at exhaustion (DunningEscalationOutcome.Reason, joined by "+")
   subscription_paused: 'Subscription paused',
   subscription_canceled: 'Subscription canceled',

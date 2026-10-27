@@ -1,23 +1,19 @@
 # LiteLLM integration
 
 LiteLLM is an open-source proxy that sits between your app and many AI
-providers. This page connects it to Velox, so that every AI call your
-customers make becomes usage in Velox. You write no code: you add a few
-lines to the proxy's config file.
-
-Think of it as a receipt printer on the proxy. After each AI call, LiteLLM
-sends Velox a record of the tokens used, and Velox turns it into usage
-events for that customer.
-
-**Who it is for:** teams that already run a LiteLLM proxy. Not using
-LiteLLM? Send usage with the API instead: see [Send usage and get your
-first invoice](../first-invoice.md).
+providers. This page connects it to Velox, so that your customers' AI calls
+become usage in Velox. You add a few lines to the proxy's config file and
+pass each customer's external ID as `user` on every call (step 3). Not
+using LiteLLM? Send usage with the API instead: see [Send usage and get
+your first invoice](../first-invoice.md).
 
 ## Before you start
 
 Set these up before LiteLLM sends its first call. Usage that arrives
-before the customer or the meter exists is held, not billed: see
-[Usage for a customer Velox does not know yet](#usage-for-a-customer-velox-does-not-know-yet).
+before the customer or the meter exists is held. Once released, usage for a
+customer created after the calls is usually not invoiced, because it
+predates the subscription
+([held usage](#usage-for-a-customer-velox-does-not-know-yet)).
 
 1. **Velox running, and a secret API key.** A publishable key cannot send
    usage. The commands below use the variables from [the first invoice
@@ -35,21 +31,10 @@ before the customer or the meter exists is held, not billed: see
    invoice. [The first invoice page](../first-invoice.md), steps 2 to 4,
    shows both calls.
 
-> **Create the customer first.** If LiteLLM sends usage for a `user` that
-> Velox does not know, Velox holds that usage: it keeps it, does not bill
-> it, and shows it on the **Usage** page. After you create the customer,
-> you release it. Usage from before the customer's subscription started
-> is stored but not invoiced, so creating customers first is still the
-> way to bill every call.
-
 ## 1. Load prices for your models
 
-The easiest way is a recipe: a ready-made pricing setup that Velox creates
-in one call. It creates the `tokens` meter (a counter for tokens), a price
-for each model and kind of token, and a monthly plan. Use
-`anthropic_style` for Claude models or `openai_style` for OpenAI models.
-[AI pricing](../ai-pricing.md#ready-made-recipes) lists the models each one
-prices.
+Apply a recipe: `anthropic_style` for Claude, `openai_style` for OpenAI
+([what each creates and prices](../ai-pricing.md#ready-made-recipes)).
 
 ```bash
 curl -s -X POST "$VELOX/v1/recipes/anthropic_style/instantiate" \
@@ -60,9 +45,6 @@ curl -s -X POST "$VELOX/v1/recipes/anthropic_style/instantiate" \
 
 **You see:** the plan ID, such as `vlx_pln_…`.
 
-The API key picks test or live mode: `vlx_secret_test_…` or
-`vlx_secret_live_…`. There is no `livemode` field in the request.
-
 You can also create the meter by hand. You then also need a price for each
 model and kind of token
 ([how](../ai-pricing.md#price-a-model-a-recipe-does-not-cover)):
@@ -71,7 +53,7 @@ model and kind of token
 curl -s -X POST "$VELOX/v1/meters" \
   -H "Authorization: Bearer $VELOX_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"key":"tokens","name":"Tokens","unit":"tokens","aggregation":"sum"}'
+  -d '{"event_name":"tokens","name":"Tokens","unit":"tokens","aggregation":"sum"}'
 ```
 
 ## 2. Add Velox to the proxy config
@@ -105,8 +87,7 @@ callback_settings:
 - **`max_retries` and `retry_delay`:** keep these. LiteLLM's default is no
   retries, so one failed send loses the batch. Velox answers 503 when its
   database is briefly out of reach, such as during a restart. Four retries
-  5, 10, 20 and 40 seconds apart cover that. Sending a batch again is safe,
-  because Velox counts each record once.
+  5, 10, 20 and 40 seconds apart cover that.
 
 The older form (`success_callback: ["generic"]` with
 `GENERIC_LOGGER_ENDPOINT` and `GENERIC_LOGGER_HEADERS`) still works on
@@ -135,46 +116,152 @@ response = litellm.completion(
 The proxy logs that value as `end_user`, and Velox reads it from there. A
 record you build by hand can send `user` instead.
 
-A call without `user` is refused with `payload.user is required`. The rest
-of the batch is still accepted. The refusal is a row in the `errors` list
-of the 200 response (see [Response](#response)).
+A call without `user` is refused, and the refused row is lost
+([Response](#response)).
+
+### Clients that cannot set `user`: Claude Code and Codex
+
+Claude Code (`/v1/messages`) and Codex-style clients (`/v1/responses`) do
+not send `user`. Have them send the customer's external ID in the
+`x-litellm-customer-id` header instead. LiteLLM logs it as the call's end
+user, which is where Velox reads the customer. For Claude Code, set
+`ANTHROPIC_CUSTOM_HEADERS="x-litellm-customer-id: acme-1"` where it runs.
+
+Without the header:
+
+- Claude Code calls arrive with Claude Code's own user ID (its
+  `metadata.user_id`, which includes the session) as the customer. Velox
+  holds them under that ID, so there is no customer to release them to.
+- A call with no customer at all is refused, as above.
+
+The client chooses this header, so whoever runs the client chooses the
+customer it is billed to. Give the header only to clients you trust.
 
 ## 4. What lands in Velox
 
-Each AI call becomes up to three usage events on the `tokens` meter. The
+Each AI call becomes up to five usage events on the `tokens` meter. The
 `token_type` label tells them apart, and no token is counted twice.
-LiteLLM's `prompt_tokens` already includes tokens read from the cache, so
-Velox takes those out of `input`.
+LiteLLM's `prompt_tokens` already includes the tokens read from and written
+to the cache, so Velox takes those out of `input`.
 
 | `token_type` | Quantity | Idempotency key |
 |---|---|---|
-| `input` | `prompt_tokens` minus the cached tokens | `<litellm_id>:input` |
-| `cache_read` | `prompt_tokens_details.cached_tokens` or `cache_read_input_tokens`, if any | `<litellm_id>:cache_read` |
-| `output` | `usage.completion_tokens` | `<litellm_id>:output` |
+| `input` | `prompt_tokens` minus the cache reads and cache writes | `<call>:input` |
+| `cache_read` | `prompt_tokens_details.cached_tokens` or `cache_read_input_tokens`, if any | `<call>:cache_read` |
+| `cache_write_5m` | cache writes with the 5-minute lifetime, if any | `<call>:cache_write_5m` |
+| `cache_write_1h` | cache writes with the 1-hour lifetime, if any | `<call>:cache_write_1h` |
+| `output` | `usage.completion_tokens` | `<call>:output` |
 
 The idempotency key is a unique ID for each event. If LiteLLM sends the same
-call again, Velox counts it once.
+call again, Velox counts it once. Velox saves a call's events together, or
+none of them.
+
+`<call>` is LiteLLM's call ID, the same ID as the call's row in
+LiteLLM's spend log, so a replay from that log counts each call once.
+When the ID is longer than 240 characters (a `/v1/responses` ID can be
+over 400), `<call>` is `sha256-` followed by the ID's SHA-256 in hex; chat
+completion, text completion and embedding IDs are never changed. On a
+streamed `/v1/messages` call LiteLLM uses the client's `x-litellm-call-id`
+header as the call ID. Two calls that send the same value count once in
+Velox, as in LiteLLM's spend log, so don't reuse that header.
 
 Each event also carries these labels (dimensions):
 
 - `model`: the model family name that prices are set on. Velox turns
   LiteLLM's model name into it, for example `claude-sonnet-4-5-20250929`
-  becomes `claude-sonnet-4.5`.
+  becomes `claude-sonnet-4.5`. It first removes provider and route
+  prefixes such as `bedrock/`, `converse/`, `vertex_ai/`, `azure_ai/` and
+  `anthropic.`, and Bedrock cross-region prefixes (`global.`, `us.`, `eu.`,
+  `apac.`, `jp.`, `au.`, `us-gov.`). So
+  `bedrock/global.anthropic.claude-opus-5-5` and
+  `vertex_ai/claude-opus-4-6@default` become `claude-opus-5.5` and
+  `claude-opus-4.6`. A Claude name matches only the model's id, or the id
+  with a date or version ending. A name Velox does not know, such as
+  `claude-opus-4-9`, keeps its own name here, has no price until you add
+  one, and is logged as a warning
+  ([how to price it](../ai-pricing.md#price-a-claude-model-velox-does-not-know)).
 - `model_raw`: the model name exactly as LiteLLM sent it.
+- `context_tier`, on Claude Haiku 5.5 events only: `prompt_up_to_100k` or
+  `prompt_over_100k`. Haiku 5.5 has a higher price when the prompt (input,
+  cache reads and cache writes) is over 100,000 tokens. Provider costs have
+  no `context_tier`, so one Haiku 5.5 cost covers both prices
+  ([more](../ai-pricing.md#see-your-margin)).
 - `provider`: the provider, from LiteLLM's `custom_llm_provider`.
 - `team_id`, when the call has one in `metadata`.
-- `request_tags`, only when the tags arrive under `metadata`. A current
-  proxy sends its tags outside `metadata`, so they are not a label today.
 
-Each event also keeps the LiteLLM call ID, LiteLLM's own cost figure (for
-reference only), and the call's original metadata under
-`litellm_metadata.*`.
+Velox keeps the call ID only in the idempotency keys (`<call>`, above).
+LiteLLM's `response_cost` and the call's other metadata
+are not stored ([what cost is saved](#things-to-know)).
 
-**Cache-write tokens** (`cache_creation`) have no `token_type` of their own
-yet, because LiteLLM does not say which cache lifetime they used (5 minutes
-or 1 hour). LiteLLM 1.83.9 counts them in `prompt_tokens` for Anthropic and
-Bedrock, so they are in the `input` event and billed at your input price.
-Velox logs a warning when it sees them.
+**Cache writes** (Anthropic prompt caching) cost more than input: 1.25
+times for the 5-minute lifetime and 2 times for the 1-hour one. LiteLLM
+1.83.9 reports how many write tokens used each lifetime, under
+`metadata.usage_object.prompt_tokens_details.cache_creation_token_details`,
+and Velox bills each lifetime as its own `token_type`. The
+`anthropic_style` recipe prices both. If you set your own prices, add a
+`cache_write_5m` and a `cache_write_1h` price for each model, or those
+tokens are billed at $0 and show as unmatched usage.
+
+If a record has cache writes but no usable split, Velox bills them as
+`input`, below what the provider charges, and counts the call in
+`velox_litellm_cache_write_unsplit_total`.
+
+For the cost side (your margin), a call with only 5-minute writes takes
+LiteLLM's own cost figures. A call with 1-hour writes takes its input and
+write costs from your [provider cost rates](../ai-pricing.md#see-your-margin) instead:
+LiteLLM 1.83.9's figures do not price the 1-hour writes correctly.
+
+A call sent again that Velox first saved before this split (as one `input`
+event with the writes inside) is saved the old way again, and a cache-write
+row of it that Velox was holding is not billed when released, so its writes
+are not billed twice.
+
+A streamed Claude call (Claude Code streams) usually arrives without the
+split: LiteLLM 1.83.9 keeps only the usage of the last streamed event,
+which carries no split. Its cache writes bill as `input` and count in
+`velox_litellm_cache_write_unsplit_total`. The same happens to a
+`/v1/responses` call to a Claude model when the proxy has a `post_call`
+guardrail. LiteLLM's record then has a cache-write cost but no cache-write
+count, and the call counts under `reason="no_count"`.
+
+**Calls that bill nothing.** A call LiteLLM reports as failed (`status`
+`failure`) and a call LiteLLM answered from its own response cache
+(`cache_hit` `true`) are skipped: the provider charged nothing for them.
+Prompt-cache reads (`cache_read`) are a different thing, and are billed.
+
+### Which LiteLLM calls bill
+
+Velox bills a call by its token counts. It skips only kinds of calls whose
+tokens it does not price.
+
+- **Billed:** chat completions (`/v1/chat/completions`), text completions,
+  embeddings, `/v1/messages` (Claude Code), `/v1/responses`, Gemini
+  `generateContent` and `streamGenerateContent`, and LiteLLM's provider
+  pass-through routes such as `/anthropic/v1/messages`. Through `/openai/*`
+  pass-through, only chat completions carry tokens.
+- **Not billed:** images, audio (speech, transcription, realtime, Vertex AI
+  Live), moderation, rerank, search, OCR and video. Also batches, files,
+  fine-tuning, assistants, vector stores, containers, evals, MCP tools,
+  agent-to-agent (A2A) messages, and fetching or cancelling a stored
+  response.
+
+A skipped call that carries tokens is logged as a WARN with its
+`call_type`, and counted in
+`velox_litellm_skipped_with_tokens_total{call_type}`. Image calls on
+`gpt-image-*` models do this every time; a call type that is new to you
+there means LiteLLM sent usage that Velox does not bill.
+
+A model you have no price for is not charged: its usage shows as usage
+with no price. Gemini models have no ready-made prices, so Gemini usage
+shows that way until you price it. But if your `tokens` meter has a default
+price, or a price that does not name a `model`, that price charges it.
+
+Known limits:
+
+- LiteLLM 1.83.9's code does not pass a customer on `/vllm/*` and
+  `/azure/*` pass-through calls, so Velox refuses them.
+- A `/v1/responses` call that uses `file_search` on a provider without it
+  makes two model calls, and LiteLLM reports the tokens of the second only.
 
 ## 5. Check that it worked
 
@@ -210,7 +297,12 @@ Velox customer yet, both of its events are held:
   "accepted": 0,
   "deduplicated": 0,
   "held": 2,
-  "skipped": 0
+  "skipped": 0,
+  "cache_hits": 0,
+  "after_close": 0,
+  "no_price": 0,
+  "not_on_plan": 0,
+  "outside_subscription": 0
 }
 ```
 
@@ -219,8 +311,22 @@ Velox customer yet, both of its events are held:
 | `accepted` | New events Velox saved. |
 | `deduplicated` | Events Velox already had, or already held, from an earlier send of the same call. |
 | `held` | Events Velox kept but did not bill, because the customer or the `tokens` meter does not exist yet. See the next section. |
-| `skipped` | Calls with no tokens to bill, such as image generation, moderation, or a failed call with zero tokens. |
+| `skipped` | Calls that bill nothing: a kind of call Velox does not bill (see [Which LiteLLM calls bill](#which-litellm-calls-bill)), a call with zero tokens, a failed call, or a LiteLLM response-cache hit. |
+| `cache_hits` | The LiteLLM response-cache hits among `skipped`. LiteLLM's own spend counts them as $0. |
+| `after_close` | Of `accepted`, events whose time was already invoiced, such as a replay after the invoice was built. Bill them with a one-off invoice if they should be charged. A resent event counted in `deduplicated` is never counted here. |
+| `no_price` | Of `accepted`, events no price of the customer's plan takes: usually a model the plan has no price for. To bill later calls, add a price for the model; it applies from the next billing period. |
+| `not_on_plan` | Of `accepted`, events in a billing period not invoiced yet, of a meter the customer's plan has no price for. |
+| `outside_subscription` | Of `accepted`, events whose time no subscription of the customer bills. For example, there is none yet, or the call was before the day it started, in a free trial, or after it ended or its scheduled cancel. |
 | `errors` | Rows Velox refused and did not keep: a call with no `user` or no `id`, or a record that is not valid. |
+
+These four counts are what Velox found when each event arrived. An event
+in none of them is not promised to be billed. Velox does not check time
+after a period end whose invoice is not built yet, nor time after a
+trial's end before Velox ends the trial. A later change, such as a new
+subscription or an added price, can change the outcome either way. A
+delivery reads the customer's subscriptions once, so a subscription change
+saved during it can make a count wrong. The invoice is the final answer
+([more](../api-surface.md#what-velox-found-when-the-event-arrived)).
 
 A refused row does not fail the batch. LiteLLM sees a 200 and treats the
 batch as delivered, and does not send it again. So a row in `errors` is
@@ -274,21 +380,31 @@ exist, Velox holds the call's events instead of billing them:
   even after you create the customer, it is counted as `deduplicated` and
   not billed.
 
-**What a release bills.** A released event counts toward the billing
+**What a release counts.** A released event counts toward the billing
 period its time falls in, the same rule as any late usage (see
-[ADR-120](../adr/120-invoice-grace-period-for-late-usage.md)):
+[ADR-120](../adr/120-invoice-grace-period-for-late-usage.md)). The release
+answer counts what Velox found for each event when it wrote it, the same
+way as the counts above:
 
-- Inside the customer's current billing period, on a meter the
-  subscription's plan prices: the next invoice for that period includes it.
-- Inside the current billing period, on a meter the plan does not price:
-  no invoice charges it. Add the meter to the plan if it should be charged.
-- Before the subscription started, or in a period whose invoice is already
-  built: stored, but no subscription invoice includes it. For a customer
-  created after the calls, this is the usual case. Bill it with a one-off
-  invoice if it should be charged.
+- `in_open_period`: in a billing period not invoiced yet, and a price of
+  the plan that bills that time takes it. Events Velox does not check
+  count here too: after the end of the subscription's current period, and
+  after a trial's end before Velox ends the trial.
+- `no_price`: in a billing period not invoiced yet, and that plan prices
+  the meter but no price takes the event (a model with no price).
+- `not_on_plan`: in a billing period not invoiced yet, on a meter the plan
+  does not price. Add the meter to the plan if later usage should be
+  charged.
+- `outside_open_period`: before the day the subscription started, in a
+  free trial, after it ended, or in a period whose invoice is already
+  built. For a customer created after the calls, this is the usual case.
+  Bill it with a one-off invoice if it should be charged.
+- `pending_threshold_invoice`: inside the current period, but before the
+  end of a spend-threshold invoice of that period that is not paid yet.
+  The period's invoice includes it only if that invoice is voided first.
+  Once that invoice is paid, such an event counts as `outside_open_period`.
 
-The release answer counts each kind (`in_open_period`, `not_on_plan`,
-`outside_open_period`). Events whose meter still does not exist, or whose
+The invoice is the final answer. Events whose meter still does not exist, or whose
 time is after the customer's current time (a customer on a test clock set
 in the past), stay held, counted in `still_held`.
 
@@ -313,6 +429,10 @@ of them.
     `cache_read_cost` on `input` (LiteLLM's `input_cost` includes cache
     reads and cache writes). If there were cache reads but no
     `cache_read_cost`, `input` and `cache_read` use your provider costs.
+- **A Bedrock application inference-profile ARN, a `bedrock/<region>/`
+  path, or an aggregator's own name** (such as
+  `openrouter/anthropic/claude-sonnet-4.6`) does not match a model. Its
+  usage keeps the raw name and has no price until you add one.
 - **Claude on AWS Bedrock or Google Vertex has a different provider.**
   The `provider` label comes from LiteLLM's `custom_llm_provider`. Claude
   through Bedrock arrives as `bedrock`, and through Vertex as `vertex_ai`,
@@ -327,5 +447,4 @@ of them.
   several tenants must send each tenant's usage with that tenant's key. A
   field in the call's metadata cannot choose the tenant.
 
-Related: [ADR-044](../adr/044-canonical-ai-token-metering-model.md), the
-decision behind one `tokens` meter with a `token_type` label.
+**Next:** [see your margin per customer](../ai-pricing.md#see-your-margin).

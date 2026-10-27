@@ -8,6 +8,16 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * `current_billing_cycle`: no `from` and `to` were sent, and
+ * the amounts are what the period's invoices bill.
+ * `explicit`: the window you sent. Its amounts are an
+ * estimate, so a past window can differ from its invoices.
+ * Only active and trialing subscriptions are counted: the
+ * usage of a canceled subscription is left out. Each
+ * subscription's usage in the window is priced at the
+ * prices of its current billing period.
+ */
 export type CustomerUsagePeriodSource = typeof CustomerUsagePeriodSource[keyof typeof CustomerUsagePeriodSource];
 
 

@@ -10,6 +10,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
+	"github.com/sagarsuperuser/velox/internal/platform/activity"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
 	"github.com/sagarsuperuser/velox/internal/platform/scheduler"
 )
@@ -25,11 +26,13 @@ import (
 type RetryError struct {
 	PaymentIntentID string
 	Err             error
-	// CardNeedsReplacing marks a decline after which the card must not be
-	// charged again for this invoice (domain.IsHardDecline, #966). The
-	// attempt counts as usual; what changes is the customer's warning email,
-	// which asks for a different card instead of promising a retry.
-	CardNeedsReplacing bool
+	// Ask marks a decline after which the card must not be charged again
+	// for this invoice (domain.DeclineAskOf the decline code): the bank
+	// refused it for good (#966), or wants the customer to confirm the
+	// payment. The attempt counts as usual; what changes is the customer's
+	// warning email, which asks for a different card, or for the
+	// confirmation, instead of promising a retry.
+	Ask domain.DeclineAsk
 }
 
 func (e *RetryError) Error() string { return e.Err.Error() }
@@ -38,7 +41,8 @@ func (e *RetryError) Unwrap() error { return e.Err }
 // ErrTransientSkip signals that this tick's retry got no definite answer, so
 // dunning must NOT tick attempt_count or emit a failure event; the next tick
 // retries. The PaymentRetrier returns it for everything except a definite
-// decline, no card, or a card refused for good: the circuit breaker open,
+// decline, no card, a card refused for good, or a card whose payment the
+// bank wants the customer to confirm: the circuit breaker open,
 // Stripe rate limiting or unreachable, an unconfirmed outcome, a database
 // error before or after the charge. The adapter maps payment's errors to
 // this dunning-visible sentinel so peer domains don't import each other.
@@ -56,14 +60,32 @@ type PaymentRetrier interface {
 // dunning until resumed). Pre-amendment this called PauseAtomic
 // (hard pause, no further cycles); that was non-Stripe and silently
 // skipped invoice generation for the affected periods.
+//
+// invoiceID is the run's unpaid invoice. The pause is dunning's and records
+// it: paying that invoice lifts the pause (ADR-036 amendment 2026-10-22). applied reports whether collection is paused on return: an
+// operator's pause already in force counts and is left as it is; an
+// invoice paid before the pause landed does not, and nothing is paused.
 type SubscriptionPauser interface {
-	PauseCollection(ctx context.Context, tenantID, id string) error
+	PauseCollection(ctx context.Context, tenantID, subID, invoiceID string) (applied bool, err error)
 }
 
 // SubscriptionCanceler cancels a subscription when dunning exhausts
 // retries with final_subscription_action='cancel'.
 type SubscriptionCanceler interface {
 	Cancel(ctx context.Context, tenantID, id string) error
+}
+
+// SubscriptionActionNotYet is what a SubscriptionPauser or SubscriptionCanceler
+// returns when the action would close a billing period still inside its
+// invoice grace (ADR-120 amendment 2026-10-22). Nothing was changed. The
+// final actions run again at Until, when the grace has passed; it is a wait,
+// not a failure.
+type SubscriptionActionNotYet struct {
+	Until time.Time
+}
+
+func (e *SubscriptionActionNotYet) Error() string {
+	return "the subscription action waits for the invoice grace until " + e.Until.UTC().Format(time.RFC3339Nano)
 }
 
 // InvoiceUncollectibleMarker writes the unpaid invoice off when dunning
@@ -88,8 +110,8 @@ type ChargeHoldClaimer interface {
 }
 
 // SubscriptionTerminalState reports whether a subscription can still be
-// acted on. Terminated: `canceled` and `archived` are the two states in
-// which BOTH movers refuse.
+// acted on. Terminated: `canceled` is the state in which BOTH movers
+// refuse.
 type SubscriptionTerminalState struct {
 	Terminated bool
 	// PeriodStart is the start of the subscription's current billing
@@ -105,7 +127,7 @@ type SubscriptionTerminalState struct {
 // independently, and a failed exhaustion is re-attempted 24h later. Both
 // subscription movers refuse when the sub is already terminal —
 // cancelSpec() allows only draft/trialing/active, and SetPauseCollection
-// rejects canceled/archived outright — so without a skip-if-done read, a
+// rejects canceled outright — so without a skip-if-done read, a
 // re-attempt after a partial failure would fail forever on the half that
 // already succeeded and never reach the half that did not. Same reason the
 // invoice half checks status==uncollectible first: MarkUncollectible
@@ -132,7 +154,7 @@ type CustomerEmailFetcher interface {
 // (drafts, pre-addendum invoices); the sender gracefully omits the CTA.
 // ctx carries livemode for the underlying enqueue / brand lookup.
 type EmailNotifier interface {
-	SendPaymentFailed(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber, reason, publicToken string) error
+	SendPaymentFailed(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber, reason, publicToken string, ask domain.DeclineAsk) error
 	// SendDunningWarning emails the customer about a failed retry.
 	// failureReason is the latest decline reason (from the retrier's
 	// error message) — surfaced inline so customers can act
@@ -141,11 +163,12 @@ type EmailNotifier interface {
 	// tone exists: the exhausting attempt sends the escalation email
 	// instead of a warning (see the warning-enqueue gate in processRun).
 	//
-	// cardNeedsReplacing selects the "use a different card" copy: the bank
-	// refused the card for good, so dunning will not charge it again and
-	// the email must not promise a retry on a date (#966). failureReason is
-	// empty then.
-	SendDunningWarning(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string, cardNeedsReplacing bool) error
+	// ask selects the copy. DeclineAskNewCard is "use a different card": the
+	// bank refused the card for good (#966). DeclineAskConfirm is "confirm
+	// your payment": the bank wants the customer to confirm it. Either way
+	// dunning retries skip that card, so the email must not promise a retry
+	// on a date, and failureReason is empty.
+	SendDunningWarning(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string, ask domain.DeclineAsk) error
 	// outcome is what exhaustion actually did to THIS invoice, not what
 	// the policy asked for — the copy is composed from it (ADR-112).
 	SendDunningEscalation(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, outcome domain.DunningEscalationOutcome, publicToken string) error
@@ -154,7 +177,7 @@ type EmailNotifier interface {
 	// so a failover between the two can no longer lose the email with the
 	// state standing. The store wraps the call in a SAVEPOINT — returning an
 	// error skips the email, never the money write.
-	SendDunningWarningTx(ctx context.Context, tx *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string, cardNeedsReplacing bool) error
+	SendDunningWarningTx(ctx context.Context, tx *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string, ask domain.DeclineAsk) error
 	SendDunningEscalationTx(ctx context.Context, tx *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber string, outcome domain.DunningEscalationOutcome, publicToken string) error
 }
 
@@ -318,6 +341,23 @@ func (s *Service) fireEvent(ctx context.Context, tenantID, eventType string, pay
 	}
 }
 
+// fireRunEvent sends a dunning.* event carrying the run as
+// GET /v1/dunning/runs/{id} returns it, read after the change committed
+// (ADR-131). When the read fails there is no true resource to send, so the
+// event is left out, loudly.
+func (s *Service) fireRunEvent(ctx context.Context, tenantID, eventType, runID string, extra map[string]any) {
+	if s.events == nil {
+		return
+	}
+	run, err := s.store.GetRun(ctx, tenantID, runID)
+	if err != nil {
+		slog.ErrorContext(ctx, "dunning webhook event not sent: the run could not be read after the change",
+			"event_type", eventType, "tenant_id", tenantID, "run_id", runID, "error", err)
+		return
+	}
+	s.fireEvent(ctx, tenantID, eventType, domain.DunningRunWebhookData(run, extra))
+}
+
 // StartDunning initiates a dunning run for a failed invoice payment.
 //
 // One run per invoice, lifetime — Stripe-parity. The previous behaviour
@@ -334,8 +374,8 @@ func (s *Service) fireEvent(ctx context.Context, tenantID, eventType string, pay
 // race somehow gets past this check, the INSERT in CreateRun fails
 // with a constraint violation.
 //
-// The first retry lands grace_period_days after the moment collection
-// failed, in the invoice's own time domain:
+// The first retry lands the policy's first retry_days entry after the moment
+// collection failed, in the invoice's own time domain:
 //
 //   - A wall-clock invoice: now, the moment the failure is recorded. Not the
 //     invoice's issue date or billing period — an invoice charged (or
@@ -397,19 +437,20 @@ func (s *Service) StartDunning(ctx context.Context, tenantID string, invoiceID, 
 		// a tenant creates is auto-promoted to default — so an API caller
 		// ends up with a policy that is simultaneously the tenant default and
 		// inert, with no error at create, no run, and (before this) no log.
-		// The dashboard is unaffected: its form sends enabled:true, and the
-		// recipe installer sets Enabled explicitly.
+		// The dashboard is unaffected: its form sends enabled:true.
 		slog.WarnContext(ctx, "dunning policy is disabled — skipping enrollment; the invoice will not dun",
 			"tenant_id", tenantID, "invoice_id", invoiceID, "customer_id", customerID,
 			"policy_id", policy.ID, "policy_name", policy.Name, "is_default", policy.IsDefault)
 		return domain.InvoiceDunningRun{}, errs.InvalidState("dunning is disabled (assigned policy or tenant default is not enabled)")
 	}
 
-	// Grace period determines when the first retry happens.
-	// retry_schedule determines the intervals between subsequent retries.
-	firstRetryDelay := time.Duration(policy.GracePeriodDays) * 24 * time.Hour
-	if firstRetryDelay <= 0 {
-		firstRetryDelay = 24 * time.Hour // minimum 1 day before first retry
+	// The first entry of retry_days is the wait before the first retry.
+	firstRetryDelay, ok := policy.WaitBeforeRetry(1)
+	if !ok {
+		// Unreachable while every writer validates and the column's CHECK
+		// holds (at least one entry). Loud: a run with no retry to schedule
+		// would never be due.
+		return domain.InvoiceDunningRun{}, fmt.Errorf("dunning policy %s has no retries", policy.ID)
 	}
 
 	ctx = s.bindForInvoice(ctx, tenantID, invoiceID)
@@ -528,8 +569,8 @@ func anchorInstant(now time.Time, scheduled *time.Time, simulated bool) time.Tim
 // the uninterrupted inline path writes — never the lease or frozen_time.
 // Every other entry records when it ran (attemptAt): an action_failed
 // re-attempt (it carries attempt+24h, not the lease) is its own scheduled
-// action, and a run exhausted because an operator lowered
-// max_retry_attempts was never contracted at its last retry (backdating it
+// action, and a run exhausted because an operator shortened
+// retry_days was never contracted at its last retry (backdating it
 // would show the escalation before the edit that caused it).
 // One residue: a re-drive interrupted AFTER its claim re-leases from its own
 // attempt instant, so a second re-drive records that instant instead.
@@ -625,8 +666,8 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 	// runs, and only the NEXT run picks up the new assignment (Stripe-Lago
 	// shape, ADR-036 research). EDITS to the bound policy do reach
 	// in-flight runs — the row is updated in place and read here every
-	// tick — so lowering max_retry_attempts exhausts a run on its next
-	// tick through the exhaust-on-entry branch below.
+	// tick — so shortening retry_days below the attempts made exhausts a
+	// run on its next tick through the exhaust-on-entry branch below.
 	// Paid-pre-check — the durable backstop for an invoice settled OUT-OF-BAND
 	// (a credit-cover sweep MarkPaids the invoice without resolving its run, or
 	// any settle path the prompt-resolve doesn't instrument). Resolve the run in
@@ -652,6 +693,16 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 				return rerr
 			case inv.Status == domain.InvoiceUncollectible:
 				_, rerr := s.resolveListedRun(ctx, tenantID, run, domain.ResolutionInvoiceNotCollectible, "invoice_"+string(inv.Status), nil)
+				return rerr
+			// Stripe refused the amount as below its minimum charge. The
+			// charge path ends the run itself, but in a separate call after
+			// the stamp commits, which can be lost (a DB blip, the hosted
+			// request's context ending, a restart; on the final retry, a
+			// crash after the exhaustion lease). A card-less or refused-card
+			// retry never asks Stripe again, so without this the run went on
+			// to its reminders and final action.
+			case inv.BelowStripeMinimum():
+				_, rerr := s.resolveListedRun(ctx, tenantID, run, domain.ResolutionAmountBelowMinimum, string(domain.ResolutionAmountBelowMinimum), nil)
 				return rerr
 			}
 		}
@@ -689,10 +740,11 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 
 	// Retries exhausted on entry: an exhaustion that was interrupted after the
 	// final retry (its lease expired), an action_failed re-attempt, or a policy
-	// whose max_retry_attempts was lowered. Claim it before any terminal action
+	// whose retry_days was shortened. Claim it before any terminal action
 	// fires: exactly one processor moves next_action_at from the listed value
 	// to a fresh lease, and only that one exhausts (SB-2). A loser fires nothing.
-	if run.AttemptCount >= policy.MaxRetryAttempts {
+	retries := policy.Retries()
+	if run.AttemptCount >= retries {
 		if run.NextActionAt == nil { // unreachable: both pickers select on next_action_at
 			return fmt.Errorf("exhaust-on-entry: run %s has no next_action_at", run.ID)
 		}
@@ -753,7 +805,7 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 	// finishes it. Under test-clock catchup the lease is in simulated time and
 	// an advance can pass it; there the clock's single-flight advance is the
 	// exclusion, and ClaimExhaustion guards any re-entry.
-	if run.AttemptCount >= policy.MaxRetryAttempts {
+	if run.AttemptCount >= retries {
 		l := leaseFrom(now)
 		run.NextActionAt = &l
 	}
@@ -810,6 +862,30 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 		return nil
 	}
 
+	// Below Stripe's minimum charge: Stripe refused the amount, not the card,
+	// so no retry, card or final action can collect it. The charge path left
+	// the invoice open for the operator; recovery ends here, at this retry's
+	// instant, with no warning email and no final action (which by default
+	// pauses the subscription). The attempt stays counted: Stripe was asked.
+	if errors.Is(retryErr, domain.ErrBelowMinimumCharge) {
+		slog.Info("dunning ended — Stripe refused the amount as below its minimum charge",
+			"run_id", run.ID, "invoice_id", run.InvoiceID, "attempt", run.AttemptCount)
+		if _, eerr := s.store.CreateEvent(ctx, tenantID, domain.InvoiceDunningEvent{
+			RunID:        run.ID,
+			InvoiceID:    run.InvoiceID,
+			EventType:    domain.DunningEventRetryAttempted,
+			State:        domain.DunningResolved,
+			AttemptCount: run.AttemptCount,
+			Reason:       domain.DunningRetryReasonBelowMinimum,
+			CreatedAt:    now,
+		}); eerr != nil {
+			slog.Warn("dunning: could not record the below-minimum retry on the timeline; the run still ends",
+				"run_id", run.ID, "invoice_id", run.InvoiceID, "error", eerr)
+		}
+		_, rerr := s.resolveListedRun(ctx, tenantID, run, domain.ResolutionAmountBelowMinimum, string(domain.ResolutionAmountBelowMinimum), &now)
+		return rerr
+	}
+
 	if retryErr != nil {
 		run.State = domain.DunningActive // Will retry again later
 		slog.Warn("dunning retry failed",
@@ -835,13 +911,17 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 		// vocabulary the start event uses — the timeline renders it as a
 		// reminder tick, not a charge failure. A retry that skipped a card
 		// the bank refused for good charged nothing either, and says so
-		// (#966). Real declines keep their provider reason text.
+		// (#966), as does one that skipped a card whose payment the bank
+		// wants the customer to confirm. Real declines keep their provider
+		// reason text.
 		evtReason := retryErr.Error()
 		switch {
 		case errors.Is(retryErr, domain.ErrNoPaymentMethodOnRetry):
 			evtReason = string(domain.DunningCauseNoPaymentMethod)
 		case errors.Is(retryErr, domain.ErrCardNeedsReplacing):
 			evtReason = domain.DunningRetryReasonCardRefused
+		case errors.Is(retryErr, domain.ErrCardNeedsConfirmation):
+			evtReason = domain.DunningRetryReasonNeedsConfirmation
 		}
 		_, _ = s.store.CreateEvent(ctx, tenantID, domain.InvoiceDunningEvent{
 			RunID:        run.ID,
@@ -886,32 +966,16 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 		return rerr
 	}
 
-	// Schedule next retry.
-	// retry_schedule contains the intervals between retries:
-	//   retry_schedule[0] = gap between retry 1 and retry 2
-	//   retry_schedule[1] = gap between retry 2 and retry 3
-	// Grace period (used in StartDunning) determines when retry 1 happens.
-	//
-	// Save-time validation (Service.UpsertPolicy) guarantees the schedule
-	// has at least (MaxRetryAttempts - 1) entries AND that every entry
-	// parses as a positive Go duration (an unparseable entry here would
-	// error after the attempt persisted but before the reschedule landed,
-	// wedging the run — the FLOW TC5 "3d" livelock). The pre-ADR-036
-	// "reuse last interval when idx out of bounds" runtime fallback was
-	// removed — that was a silent fallback (feedback_no_silent_fallbacks);
-	// out-of-bounds here now indicates a schema invariant violation, so
-	// fail loudly rather than substitute a default.
-	if run.AttemptCount < policy.MaxRetryAttempts {
-		idx := run.AttemptCount - 1 // 1-based; schedule[0] = after retry 1
-		if idx < 0 || idx >= len(policy.RetrySchedule) {
-			return fmt.Errorf("retry_schedule index %d out of bounds for policy %s (schedule has %d entries, max_retry_attempts %d) — save-time validation must enforce schedule length",
-				idx, policy.ID, len(policy.RetrySchedule), policy.MaxRetryAttempts)
+	// Schedule the next retry: retry_days[k] is the wait after retry k
+	// (retry_days[0], the wait before retry 1, was StartDunning's).
+	// The list's length is the retry count, so a retry still to come always
+	// has its entry; there is no count that can disagree with the list.
+	if run.AttemptCount < retries {
+		wait, ok := policy.WaitBeforeRetry(run.AttemptCount + 1)
+		if !ok { // unreachable: AttemptCount+1 <= retries
+			return fmt.Errorf("dunning policy %s has no retry %d", policy.ID, run.AttemptCount+1)
 		}
-		d, err := time.ParseDuration(policy.RetrySchedule[idx])
-		if err != nil {
-			return fmt.Errorf("parse retry_schedule[%d]=%q for policy %s: %w", idx, policy.RetrySchedule[idx], policy.ID, err)
-		}
-		t := now.Add(d)
+		t := now.Add(wait)
 		run.NextActionAt = &t
 	} else {
 		// Never NULL: NULL removes an active run from both due-run pickers for
@@ -932,20 +996,23 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 	// The failure reason renders INSIDE the customer email. A no-PM retry
 	// failure is internal phrasing — mapped to empty so the warning renders
 	// without the diagnostic callout (2026-07-22 payment-surfacing audit,
-	// P2-3); real decline reasons pass through.
+	// P2-3); real decline reasons pass through as the provider's words
+	// alone: the charge path's "payment failed: " wrapper is stripped, as the
+	// timeline strips it (min-charge check 2026-10-22, finding 4.1).
 	//
 	// A card the bank refused for good (#966) gets the "use a different
-	// card" copy, on the retry that drew the decline and on every retry that
-	// then skips the card: "we'll try again on <date>" would promise a charge
-	// that cannot succeed.
+	// card" copy, and a payment the bank wants the customer to confirm the
+	// "confirm your payment" copy, on the retry that drew the decline and
+	// on every retry that then skips the card: "we'll try again on <date>"
+	// would promise a charge that cannot succeed.
 	var warnTx func(tx *sql.Tx) error
-	if run.AttemptCount < policy.MaxRetryAttempts && s.emailNotifier != nil && s.customerEmail != nil {
-		needsNewCard := cardNeedsReplacing(retryErr)
-		reason := retryErr.Error()
-		if errors.Is(retryErr, domain.ErrNoPaymentMethodOnRetry) || needsNewCard {
+	if run.AttemptCount < retries && s.emailNotifier != nil && s.customerEmail != nil {
+		ask := retryAsk(retryErr)
+		reason := activity.StripWrapper(retryErr.Error())
+		if errors.Is(retryErr, domain.ErrNoPaymentMethodOnRetry) || ask != domain.DeclineAskNone {
 			reason = ""
 		}
-		warnTx = s.buildDunningWarningTx(ctx, tenantID, run, policy, reason, needsNewCard)
+		warnTx = s.buildDunningWarningTx(ctx, tenantID, run, policy, reason, ask)
 	}
 	if applied, err := s.store.UpdateRunIfActive(ctx, tenantID, run, run.AttemptCount, warnTx); err != nil {
 		return err
@@ -976,7 +1043,7 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 	// into `now` above) so the escalated event row aligns with the
 	// retry that actually triggered the exhaustion, not orchestrator
 	// frozen_time.
-	if run.AttemptCount >= policy.MaxRetryAttempts {
+	if run.AttemptCount >= retries {
 		return s.exhaustRun(ctx, tenantID, run, policy, now, now)
 	}
 
@@ -1046,6 +1113,12 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 				return rerr
 			case loaded.Status == domain.InvoiceUncollectible:
 				_, rerr := s.resolveListedRun(ctx, tenantID, run, domain.ResolutionInvoiceNotCollectible, "invoice_"+string(loaded.Status), nil)
+				return rerr
+			// Stamped below Stripe's minimum during the final retry (a
+			// hosted Pay click Stripe refused) and its resolve lost: no
+			// final action over an amount Stripe won't charge.
+			case loaded.BelowStripeMinimum():
+				_, rerr := s.resolveListedRun(ctx, tenantID, run, domain.ResolutionAmountBelowMinimum, string(domain.ResolutionAmountBelowMinimum), nil)
 				return rerr
 			case loaded.PaymentInFlight():
 				// A payment that may still take money: neither final action
@@ -1155,14 +1228,22 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 	// invoice (a wholly unused prebill, ADR-118), and that void refuses while
 	// a hold is set unless the caller owns it.
 	subCtx := domain.WithChargeHoldOwner(ctx, run.InvoiceID, hold)
+	// invoiceSettled: the pause found the invoice no longer owed, so a
+	// payment (or a void) committed after the late re-check above.
+	invoiceSettled := false
+	// waitUntil: the subscription action would close a period still inside
+	// its invoice grace, so the whole exhaustion waits until then.
+	var waitUntil time.Time
 	if !actionFailed && policy.FinalSubscriptionAction != domain.SubActionNone {
 		if !invRead {
 			slog.Warn("dunning subscription action skipped — no invoice reader wired, so no subscription to act on",
 				"run_id", run.ID, "invoice_id", run.InvoiceID)
 		} else {
-			subApplied, subFailed := s.applySubscriptionAction(
-				subCtx, tenantID, policy.FinalSubscriptionAction, inv.SubscriptionID)
+			subApplied, subFailed, subSettled, subWait := s.applySubscriptionAction(
+				subCtx, tenantID, policy.FinalSubscriptionAction, inv.SubscriptionID, run.InvoiceID)
 			actionFailed = actionFailed || subFailed
+			invoiceSettled = subSettled
+			waitUntil = subWait
 			switch {
 			case !subApplied:
 			case policy.FinalSubscriptionAction == domain.SubActionPause:
@@ -1184,6 +1265,34 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 		}
 	}
 
+	// The subscription action waits for the invoice grace (ADR-120
+	// amendment 2026-10-22): nothing was changed, so neither the write-off
+	// nor the escalation runs now. The hold is released above, so a payment
+	// can still settle the invoice in the wait.
+	if !waitUntil.IsZero() {
+		return s.waitForInvoiceGrace(ctx, tenantID, run, policy, waitUntil)
+	}
+
+	// The pause found the invoice settled after the late re-check: close the
+	// run from the invoice as it is now, as that re-check would have, rather
+	// than escalate over a paid invoice or leave it action_failed for a day.
+	if invoiceSettled {
+		fresh, err := s.invoiceGet.Get(ctx, tenantID, run.InvoiceID)
+		switch {
+		case err != nil:
+			slog.Warn("failed to re-read the invoice the dunning pause found settled", "invoice_id", run.InvoiceID, "error", err)
+			actionFailed = true
+		case fresh.Status == domain.InvoicePaid || fresh.PaymentStatus == domain.PaymentSucceeded:
+			_, rerr := s.resolveListedRun(ctx, tenantID, run, domain.ResolutionPaymentRecovered, "payment_recovered", nil)
+			return rerr
+		case fresh.Status == domain.InvoiceVoided:
+			_, rerr := s.resolveListedRun(ctx, tenantID, run, domain.ResolutionInvoiceVoided, "invoice_voided", nil)
+			return rerr
+		default:
+			actionFailed = true
+		}
+	}
+
 	// INVOICE second, and ONLY if the subscription half is settled. Writing
 	// the invoice off while the subscription action is still outstanding
 	// would strand it: the late-paid re-check at the top of this function
@@ -1195,9 +1304,11 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 	// write-off is attempted — the pre-ADR-112 behaviour.
 	// The cancel can change the invoice: its relief is written in the cancel's
 	// transaction (ADR-118), and an invoice whose period was wholly unused is
-	// voided there. Re-read it before the write-off, so a voided invoice
-	// resolves the run now (the same end state the 24h re-attempt reached,
-	// after a failed write-off tick) instead of failing MarkUncollectible.
+	// voided there. That void resolves this run itself (invoice AfterVoid),
+	// so with no invoice action the escalation below finds the run resolved
+	// and writes nothing. With one, re-read the invoice before the
+	// write-off: a voided invoice resolves the run here (a no-op CAS when
+	// the void already did) instead of failing MarkUncollectible.
 	if !actionFailed && outcome.SubscriptionCanceled && invRead && policy.FinalInvoiceAction != domain.InvActionNone {
 		fresh, err := s.invoiceGet.Get(ctx, tenantID, run.InvoiceID)
 		if err != nil {
@@ -1297,10 +1408,7 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 		"applied", outcome.Reason(),
 	)
 
-	s.fireEvent(ctx, tenantID, domain.EventDunningEscalated, map[string]any{
-		"run_id":      run.ID,
-		"invoice_id":  run.InvoiceID,
-		"customer_id": run.CustomerID,
+	s.fireRunEvent(ctx, tenantID, domain.EventDunningEscalated, run.ID, map[string]any{
 		// The policy's two configured actions, and separately what actually
 		// landed. Subscribers reconciling their own records need the second:
 		// a one-off invoice under a cancel policy escalates with nothing
@@ -1308,8 +1416,6 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 		"final_subscription_action": string(policy.FinalSubscriptionAction),
 		"final_invoice_action":      string(policy.FinalInvoiceAction),
 		"applied":                   outcome.Reason(),
-		"resolution":                string(run.Resolution),
-		"attempts":                  run.AttemptCount,
 	})
 
 	return nil
@@ -1321,18 +1427,22 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 type appliedActions = domain.DunningEscalationOutcome
 
 // applySubscriptionAction moves the subscription to the policy's terminal
-// state, reporting whether that state now holds and whether the attempt
-// errored. See SubscriptionStateReader for why the skip-if-done read
-// exists rather than tolerating the movers' already-terminal errors.
-func (s *Service) applySubscriptionAction(ctx context.Context, tenantID string, action domain.DunningSubscriptionAction, subID string) (applied, failed bool) {
+// state, reporting whether that state now holds, whether the attempt
+// errored, whether the pause found the invoice no longer owed (paid after
+// the late re-check), and, when the action waits for the invoice grace, the
+// instant the grace ends (waitUntil, zero otherwise; see
+// SubscriptionActionNotYet). See SubscriptionStateReader for why the
+// skip-if-done read exists rather than tolerating the movers'
+// already-terminal errors.
+func (s *Service) applySubscriptionAction(ctx context.Context, tenantID string, action domain.DunningSubscriptionAction, subID, invoiceID string) (applied, failed, invoiceSettled bool, waitUntil time.Time) {
 	if action == domain.SubActionNone {
-		return false, false
+		return false, false, false, time.Time{}
 	}
 	if subID == "" {
 		// One-off invoice — no subscription exists to act on. Not a
 		// failure; there is simply nothing to do, and the escalation email
 		// must not claim otherwise.
-		return false, false
+		return false, false, false, time.Time{}
 	}
 
 	if s.subState != nil {
@@ -1340,16 +1450,16 @@ func (s *Service) applySubscriptionAction(ctx context.Context, tenantID string, 
 		if err != nil {
 			slog.Warn("failed to read subscription state for dunning terminal action",
 				"subscription_id", subID, "error", err)
-			return false, true
+			return false, true, false, time.Time{}
 		}
 		if st.Terminated {
-			// Already canceled or archived — by this run's earlier attempt,
+			// Already canceled — by this run's earlier attempt,
 			// by another flow, or by an operator. A `cancel` request is
 			// satisfied by that (whoever did it, the end state holds). A
 			// `pause` request is NOT: a terminated subscription has no
 			// collection left to pause, so nothing applied and the email
 			// stays silent about it.
-			return action == domain.SubActionCancel, false
+			return action == domain.SubActionCancel, false, false, time.Time{}
 		}
 		// On a test clock the action is dated at the escalation (exhaustRun),
 		// and that can be before the current period began: one advance bills
@@ -1375,29 +1485,45 @@ func (s *Service) applySubscriptionAction(ctx context.Context, tenantID string, 
 			// forever, and the email correctly claims nothing.
 			slog.Warn("dunning pause action skipped — no subscription pauser wired",
 				"subscription_id", subID)
-			return false, false
+			return false, false, false, time.Time{}
 		}
-		if err := s.subPauser.PauseCollection(ctx, tenantID, subID); err != nil {
+		paused, err := s.subPauser.PauseCollection(ctx, tenantID, subID, invoiceID)
+		if until, ok := graceWaitUntil(err); ok {
+			return false, false, false, until
+		}
+		if err != nil {
 			slog.Warn("failed to pause collection after dunning exhausted",
 				"subscription_id", subID, "error", err)
-			return false, true
+			return false, true, false, time.Time{}
+		}
+		if !paused {
+			// The invoice was paid after the late paid re-check and before
+			// the pause could land: nothing is paused, and exhaustRun closes
+			// the run from the invoice instead of escalating it.
+			slog.Info("dunning pause skipped: the invoice was paid first",
+				"subscription_id", subID, "invoice_id", invoiceID)
+			return false, false, true, time.Time{}
 		}
 		slog.Info("collection paused by dunning", "subscription_id", subID)
-		return true, false
+		return true, false, false, time.Time{}
 
 	case domain.SubActionCancel:
 		if s.subCanceler == nil {
 			slog.Warn("dunning cancel action skipped — no subscription canceler wired",
 				"subscription_id", subID)
-			return false, false
+			return false, false, false, time.Time{}
 		}
-		if err := s.subCanceler.Cancel(ctx, tenantID, subID); err != nil {
+		err := s.subCanceler.Cancel(ctx, tenantID, subID)
+		if until, ok := graceWaitUntil(err); ok {
+			return false, false, false, until
+		}
+		if err != nil {
 			slog.Warn("failed to cancel subscription after dunning exhausted",
 				"subscription_id", subID, "error", err)
-			return false, true
+			return false, true, false, time.Time{}
 		}
 		slog.Info("subscription canceled by dunning", "subscription_id", subID)
-		return true, false
+		return true, false, false, time.Time{}
 
 	default:
 		// Unreachable while the CHECK constraint holds. Loud rather than
@@ -1405,8 +1531,58 @@ func (s *Service) applySubscriptionAction(ctx context.Context, tenantID string, 
 		// read as "the operator asked for nothing".
 		slog.Error("unknown dunning final_subscription_action — no action taken",
 			"action", action, "subscription_id", subID)
-		return false, false
+		return false, false, false, time.Time{}
 	}
+}
+
+// graceWaitUntil reports whether err is a SubscriptionActionNotYet, and the
+// instant its grace ends.
+func graceWaitUntil(err error) (time.Time, bool) {
+	var notYet *SubscriptionActionNotYet
+	if errors.As(err, &notYet) {
+		return notYet.Until, true
+	}
+	return time.Time{}, false
+}
+
+// waitForInvoiceGrace defers an exhaustion whose subscription action waits
+// for the invoice grace (SubscriptionActionNotYet): the run's next_action_at
+// moves from this exhaustion's lease to until, the end of the grace, and
+// nothing else is written. The run stays active and keeps its attempt count.
+// A first exhaustion is not labelled action_failed; a re-attempt of an
+// earlier failed action keeps that resolution, which stays true (the last
+// attempt of the action failed, and this wait did not attempt it) until the
+// action runs and replaces it. No write-off, escalation row, email or
+// webhook fires. When until comes, the due-run pickers list the run again and
+// exhaust-on-entry runs both final actions, now closing the period with the
+// usage that arrived inside the grace (ADR-120 amendment 2026-10-22).
+//
+// The write is ClaimExhaustion's compare-and-swap with this exhaustion's
+// lease as the expected value, so it lands only while this processor still
+// holds the run: if the lease ran out and another processor claimed the run
+// again, or a payment resolved it, nothing is written. It touches only
+// next_action_at, never an operator's paused flag. A failed write leaves the
+// lease, which expires into a re-drive.
+func (s *Service) waitForInvoiceGrace(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, policy domain.DunningPolicy, until time.Time) error {
+	if run.NextActionAt == nil { // unreachable: both exhaustion paths set the lease first
+		return fmt.Errorf("dunning exhaust: run %s has no lease to defer from", run.ID)
+	}
+	until = until.Truncate(time.Microsecond)
+	won, err := s.store.ClaimExhaustion(ctx, tenantID, run.ID, run.AttemptCount, *run.NextActionAt, until)
+	if err != nil {
+		return fmt.Errorf("dunning exhaust: defer run %s to the end of the invoice grace: %w", run.ID, err)
+	}
+	if !won {
+		slog.Info("dunning final action waits for the invoice grace, but the run was claimed, resolved or escalated by another processor — leaving it",
+			"run_id", run.ID, "invoice_id", run.InvoiceID)
+		return nil
+	}
+	slog.Info("dunning final action waits for the invoice grace; the run is due again when it ends",
+		"run_id", run.ID, "invoice_id", run.InvoiceID,
+		"final_subscription_action", policy.FinalSubscriptionAction,
+		"final_invoice_action", policy.FinalInvoiceAction,
+		"next_action_at", until)
+	return nil
 }
 
 // applyInvoiceAction writes the unpaid invoice off when the policy asks,
@@ -1572,12 +1748,7 @@ func (s *Service) resolveRunAt(ctx context.Context, tenantID string, run domain.
 		CreatedAt:    now,
 	})
 
-	s.fireEvent(ctx, tenantID, domain.EventDunningResolved, map[string]any{
-		"run_id":      run.ID,
-		"invoice_id":  run.InvoiceID,
-		"customer_id": run.CustomerID,
-		"resolution":  string(run.Resolution),
-	})
+	s.fireRunEvent(ctx, tenantID, domain.EventDunningResolved, run.ID, nil)
 	return run, nil
 }
 
@@ -1638,13 +1809,8 @@ func (s *Service) CountCustomersOnPolicy(ctx context.Context, tenantID, policyID
 }
 
 // UpsertPolicy creates a new policy (when input.ID is empty) or updates
-// an existing one (when input.ID is set). Save-time validation enforces
-// the per-platform invariant that retry_schedule has enough entries to
-// cover the max-attempts count — without this guard a misconfig (max=5
-// with 2-entry schedule) would silently reuse the last interval at
-// runtime, producing back-to-back retries the operator never asked for
-// (a feedback_no_silent_fallbacks violation; the pre-ADR-036 runtime
-// fallback `idx >= len(retryIntervals)` was removed alongside this).
+// an existing one (when input.ID is set), through the save-time validation
+// every writer shares (normalizeAndValidatePolicy).
 func (s *Service) UpsertPolicy(ctx context.Context, tenantID string, policy domain.DunningPolicy) (domain.DunningPolicy, error) {
 	policy, err := normalizeAndValidatePolicy(policy)
 	if err != nil {
@@ -1653,27 +1819,9 @@ func (s *Service) UpsertPolicy(ctx context.Context, tenantID string, policy doma
 	return s.store.UpsertPolicy(ctx, tenantID, policy)
 }
 
-// UpsertPolicyTx is the tx-aware upsert used by the recipe-instantiate path.
-// It runs the SAME normalize+validate as UpsertPolicy — the recipe schema layer
-// validates only the terminal actions (recipe/parse.go), NOT the schedule-length
-// invariant, so skipping validation here let a mismatched recipe (max_retries
-// exceeding its intervals_hours count) persist and stall that campaign at
-// retry-time in a background tick ("retry_schedule index out of bounds")
-// instead of failing loudly at instantiate-time. One validation chokepoint for
-// every writer; a policy the API path would reject must never enter via a
-// recipe. (The pre-fix comment claiming the recipe layer "already validated"
-// was wrong for this invariant.)
-func (s *Service) UpsertPolicyTx(ctx context.Context, tx *sql.Tx, tenantID string, policy domain.DunningPolicy) (domain.DunningPolicy, error) {
-	policy, err := normalizeAndValidatePolicy(policy)
-	if err != nil {
-		return domain.DunningPolicy{}, err
-	}
-	return s.store.UpsertPolicyTx(ctx, tx, tenantID, policy)
-}
-
 // DefaultSeedPolicy is the policy every new account starts with, once per
 // mode (ADR-123, #1152). Three retries on day 3, 7 and 14 after the failed
-// payment: Stripe's recommended two-week window, and its limit of three
+// payment (or the collection that found no card): Stripe's recommended two-week window, and its limit of three
 // retries on a custom schedule. When retries run out it changes nothing:
 // the subscription keeps billing and the invoice stays open and due
 // (Stripe's "leave the subscription overdue"). A machine should not pause,
@@ -1684,9 +1832,7 @@ func DefaultSeedPolicy() domain.DunningPolicy {
 	return domain.DunningPolicy{
 		Name:                    "Default retries",
 		Enabled:                 true,
-		MaxRetryAttempts:        3,
-		GracePeriodDays:         3,
-		RetrySchedule:           []string{"96h", "168h"},
+		RetryDays:               []int{3, 4, 7},
 		FinalSubscriptionAction: domain.SubActionNone,
 		FinalInvoiceAction:      domain.InvActionNone,
 	}
@@ -1710,19 +1856,11 @@ func (s *Service) SeedDefaultPoliciesTx(ctx context.Context, tx *sql.Tx, tenantI
 
 // normalizeAndValidatePolicy applies the save-time defaults and enforces the
 // policy invariants. The single chokepoint shared by UpsertPolicy and
-// UpsertPolicyTx so no writer can persist a policy another path would reject.
+// SeedDefaultPoliciesTx so no writer can persist a policy another path would
+// reject.
 func normalizeAndValidatePolicy(policy domain.DunningPolicy) (domain.DunningPolicy, error) {
-	if policy.MaxRetryAttempts <= 0 {
-		policy.MaxRetryAttempts = 3
-	}
-	if policy.MaxRetryAttempts > 15 {
-		return domain.DunningPolicy{}, errs.Invalid("max_retry_attempts", "cannot exceed 15")
-	}
-	if policy.GracePeriodDays <= 0 {
-		policy.GracePeriodDays = 3
-	}
-	if policy.GracePeriodDays > 30 {
-		return domain.DunningPolicy{}, errs.Invalid("grace_period_days", "cannot exceed 30")
+	if err := validateRetryDays(policy.RetryDays); err != nil {
+		return domain.DunningPolicy{}, err
 	}
 	// Default = pause (Stripe-aligned pause_collection.behavior=
 	// keep_as_draft). Without it the engine keeps generating finalized
@@ -1749,34 +1887,27 @@ func normalizeAndValidatePolicy(policy domain.DunningPolicy) (domain.DunningPoli
 	if err := domain.MaxLen("name", policy.Name, 255); err != nil {
 		return domain.DunningPolicy{}, err
 	}
-	// retry_schedule length must support max_retry_attempts. Retry 1
-	// uses grace_period_days; retries 2..N use retry_schedule[0..N-2].
-	// So schedule must have at least MaxRetryAttempts - 1 entries.
-	needed := policy.MaxRetryAttempts - 1
-	if needed > 0 && len(policy.RetrySchedule) < needed {
-		return domain.DunningPolicy{}, errs.Invalid("retry_schedule",
-			fmt.Sprintf("max_retry_attempts (%d) requires at least %d retry_schedule entries — got %d",
-				policy.MaxRetryAttempts, needed, len(policy.RetrySchedule)))
-	}
-	// Every entry must parse as a positive Go duration NOW: the retry path
-	// calls time.ParseDuration at fire time, and an unparseable entry there
-	// errors AFTER the attempt is persisted but BEFORE the reschedule lands
-	// — wedging the run in a re-attempt livelock at that retry forever
-	// (found live in FLOW TC5 with "3d": Go durations have no day unit).
-	// Rejecting here keeps the retry path's "save-time validation
-	// guarantees the schedule" contract actually true.
-	for i, entry := range policy.RetrySchedule {
-		d, err := time.ParseDuration(entry)
-		if err != nil {
-			return domain.DunningPolicy{}, errs.Invalid("retry_schedule",
-				fmt.Sprintf("entry %d (%q) is not a valid Go duration — use h/m/s units, e.g. \"72h\" for 3 days", i, entry))
-		}
-		if d <= 0 {
-			return domain.DunningPolicy{}, errs.Invalid("retry_schedule",
-				fmt.Sprintf("entry %d (%q) must be a positive duration", i, entry))
-		}
-	}
 	return policy, nil
+}
+
+// validateRetryDays checks the schedule: 1 to MaxDunningRetries waits, each a
+// whole number of days from 1 to MaxDunningRetryWait. There is no default:
+// a policy without a schedule is refused rather than given one the caller
+// did not choose. Whole days are the unit, so a wait of part of a day
+// cannot be written (the JSON decode refuses 1.5 or "36h" before this).
+func validateRetryDays(days []int) error {
+	if len(days) == 0 {
+		return errs.Invalid("retry_days", "retry_days is required: the days to wait before each retry, for example [3, 4, 7]")
+	}
+	if len(days) > domain.MaxDunningRetries {
+		return errs.Invalid("retry_days", fmt.Sprintf("at most %d retries; got %d", domain.MaxDunningRetries, len(days)))
+	}
+	for i, d := range days {
+		if d < 1 || d > domain.MaxDunningRetryWait {
+			return errs.Invalid("retry_days", fmt.Sprintf("entry %d is %d; each wait is a whole number of days from 1 to %d", i, d, domain.MaxDunningRetryWait))
+		}
+	}
+	return nil
 }
 
 // ListRuns returns dunning runs matching the filter.
@@ -1793,7 +1924,7 @@ func (s *Service) GetStats(ctx context.Context, tenantID string) (Stats, error) 
 // hook that enqueues the dunning-warning email on the reschedule's own tx
 // (ADR-040). nil when the recipient cannot be resolved — logged, best-effort,
 // exactly the old posture.
-func (s *Service) buildDunningWarningTx(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, policy domain.DunningPolicy, retryErrMsg string, cardNeedsReplacing bool) func(tx *sql.Tx) error {
+func (s *Service) buildDunningWarningTx(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, policy domain.DunningPolicy, retryErrMsg string, ask domain.DeclineAsk) func(tx *sql.Tx) error {
 	email, name, cc, err := s.customerEmail.GetCustomerEmail(ctx, tenantID, run.CustomerID)
 	if err != nil || email == "" {
 		slog.Warn("skip dunning warning email — cannot resolve customer email",
@@ -1819,20 +1950,27 @@ func (s *Service) buildDunningWarningTx(ctx context.Context, tenantID string, ru
 		nextRetry = run.NextActionAt.In(domain.LoadLocationOrUTC(billTZ)).Format("January 2, 2006")
 	}
 	return func(tx *sql.Tx) error {
-		return s.emailNotifier.SendDunningWarningTx(ctx, tx, tenantID, email, cc, name, invoiceNumber, run.AttemptCount, policy.MaxRetryAttempts, nextRetry, retryErrMsg, publicToken, cardNeedsReplacing)
+		return s.emailNotifier.SendDunningWarningTx(ctx, tx, tenantID, email, cc, name, invoiceNumber, run.AttemptCount, policy.Retries(), nextRetry, retryErrMsg, publicToken, ask)
 	}
 }
 
-// cardNeedsReplacing reports whether a failed retry leaves the customer
-// needing a different card (#966): the retry skipped a card the bank had
-// refused for good (domain.ErrCardNeedsReplacing), or its charge drew such a
-// refusal (RetryError.CardNeedsReplacing).
-func cardNeedsReplacing(retryErr error) bool {
-	if errors.Is(retryErr, domain.ErrCardNeedsReplacing) {
-		return true
+// retryAsk is what a failed retry asks of the customer: a different card
+// (#966) when the retry skipped a card the bank had refused for good
+// (domain.ErrCardNeedsReplacing), the confirmation the bank wants when it
+// skipped a card for that (domain.ErrCardNeedsConfirmation), or what its
+// charge drew (RetryError.Ask).
+func retryAsk(retryErr error) domain.DeclineAsk {
+	switch {
+	case errors.Is(retryErr, domain.ErrCardNeedsReplacing):
+		return domain.DeclineAskNewCard
+	case errors.Is(retryErr, domain.ErrCardNeedsConfirmation):
+		return domain.DeclineAskConfirm
 	}
 	var re *RetryError
-	return errors.As(retryErr, &re) && re.CardNeedsReplacing
+	if errors.As(retryErr, &re) {
+		return re.Ask
+	}
+	return domain.DeclineAskNone
 }
 
 // buildDunningEscalationTx is the escalation counterpart of

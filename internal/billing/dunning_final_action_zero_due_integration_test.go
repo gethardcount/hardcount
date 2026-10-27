@@ -82,7 +82,7 @@ func TestExhaustOnEntry_AfterCreditNoteToZero_NoFinalAction(t *testing.T) {
 // (domain.OwnsChargeHold, as refuseWhileChargeHeld does) → red.
 func TestDunningFinalCancel_ReliefToZeroUnderItsHold_WritesOffNotPaid(t *testing.T) {
 	r := newZeroDueFinalActionRig(t, "Zero Due Final Cancel")
-	if _, err := r.creditSvc.Grant(r.ctx, r.tenantID, credit.GrantInput{CustomerID: r.cust.ID, AmountCents: 4000, Description: "goodwill"}); err != nil {
+	if _, err := r.creditSvc.Grant(r.ctx, r.tenantID, credit.GrantInput{Currency: "USD", CustomerID: r.cust.ID, AmountCents: 4000, Description: "goodwill"}); err != nil {
 		t.Fatalf("grant credit: %v", err)
 	}
 	if applied, err := r.creditSvc.ApplyToInvoice(r.ctx, r.tenantID, r.cust.ID, r.day1.ID, r.day1.AmountDueCents); err != nil || applied != 4000 {
@@ -158,7 +158,7 @@ func newZeroDueFinalActionRig(t *testing.T, name string) *zeroDueFinalActionRig 
 	if err != nil {
 		t.Fatalf("create customer: %v", err)
 	}
-	plan, err := pricing.NewService(pricingStore).CreatePlan(ctx, r.tenantID, pricing.CreatePlanInput{
+	plan, _, err := pricing.NewService(pricingStore).CreatePlan(ctx, r.tenantID, pricing.CreatePlanInput{
 		Code: "pro-adv", Name: "Pro", Currency: "USD", BillingInterval: domain.BillingMonthly,
 		BaseAmountCents: 4900, BaseBillTiming: domain.BillInAdvance,
 	})
@@ -181,7 +181,6 @@ func newZeroDueFinalActionRig(t *testing.T, name string) *zeroDueFinalActionRig 
 	e.SetNoPaymentMethodNotifier(&testNoPMNotifier{})
 	e.SetDunningStarter(testDunningStarter{})
 	e.SetDunningResolver(&testDunningResolver{})
-	e.SetCreditGranter(r.creditSvc)
 	e.SetInvoiceVoider(invoice.NewService(r.invStore, clock.Real(), settings))
 	e.SetCreditNoteAdjuster(r.cnSvc)
 	e.SetCreditHeadroomReader(r.cnSvc)
@@ -219,8 +218,8 @@ func newZeroDueFinalActionRig(t *testing.T, name string) *zeroDueFinalActionRig 
 	r.dsvc.SetEmailNotifier(email.NewOutboxSender(email.NewOutboxStore(db)))
 	r.dsvc.SetCustomerEmailFetcher(customerEmails{customers})
 	r.policy, err = r.dsvc.UpsertPolicy(ctx, r.tenantID, domain.DunningPolicy{
-		Name: "cancel at the end", Enabled: true, RetrySchedule: []string{"72h"}, MaxRetryAttempts: 1,
-		FinalSubscriptionAction: domain.SubActionCancel, FinalInvoiceAction: domain.InvActionMarkUncollectible, GracePeriodDays: 3,
+		Name: "cancel at the end", Enabled: true, RetryDays: []int{3},
+		FinalSubscriptionAction: domain.SubActionCancel, FinalInvoiceAction: domain.InvActionMarkUncollectible,
 	})
 	if err != nil {
 		t.Fatalf("upsert policy: %v", err)

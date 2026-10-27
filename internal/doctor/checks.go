@@ -70,14 +70,34 @@ WHERE (amount_cents > 0 AND consumed_cents > amount_cents)
 	{
 		Name:   "balance_exceeds_block_capacity",
 		Domain: "credit-ledger",
-		Why:    "a customer's materialized balance can never exceed the open capacity of their live blocks",
-		SQL: `SELECT tenant_id, customer_id,
+		Why:    "a customer's materialized balance in a currency can never exceed the open capacity of their live blocks in that currency (ADR-129: a credit drains only in its own currency, so headroom in one cannot cover another)",
+		SQL: `SELECT tenant_id, customer_id, currency,
        SUM(amount_cents) AS balance_cents,
        SUM(CASE WHEN amount_cents > 0 THEN amount_cents - consumed_cents ELSE 0 END) AS block_remaining_cents,
        SUM(amount_cents) - SUM(CASE WHEN amount_cents > 0 THEN amount_cents - consumed_cents ELSE 0 END) AS phantom_cents
 FROM customer_credit_ledger
-GROUP BY tenant_id, customer_id
+GROUP BY tenant_id, customer_id, currency
 HAVING SUM(amount_cents) > SUM(CASE WHEN amount_cents > 0 THEN amount_cents - consumed_cents ELSE 0 END);`,
+	},
+	{
+		Name:   "ledger_currency_matches_invoice",
+		Domain: "credit-ledger",
+		Why:    "a ledger row tied to an invoice (usage, a credit-note grant or a void reversal by invoice_id; a commit grant by source_invoice_id) carries that invoice's currency (ADR-129). A mismatch is credit that moved across currencies. Dev data the 00199 backfill relabeled shows up here too",
+		SQL: `SELECT l.id, l.tenant_id, l.customer_id, l.entry_type, l.currency, i.id AS invoice_id, i.currency AS invoice_currency
+FROM customer_credit_ledger l
+JOIN invoices i ON i.id = COALESCE(l.invoice_id, l.source_invoice_id) AND i.tenant_id = l.tenant_id
+WHERE l.currency <> UPPER(i.currency);`,
+	},
+	{
+		Name:   "drained_block_currency_matches",
+		Domain: "credit-ledger",
+		Why:    "every block a drain names (metadata drained_blocks) has the draining entry's currency (ADR-129): the drain filters blocks by currency, so a mismatch is a block drained for another currency's invoice",
+		SQL: `SELECT e.id, e.tenant_id, e.customer_id, e.entry_type, e.currency, b.id AS block_id, b.currency AS block_currency
+FROM customer_credit_ledger e
+CROSS JOIN LATERAL jsonb_array_elements(
+  CASE WHEN jsonb_typeof(e.metadata->'drained_blocks') = 'array' THEN e.metadata->'drained_blocks' ELSE '[]'::jsonb END) AS d(value)
+JOIN customer_credit_ledger b ON b.id = d.value->>'block_id' AND b.tenant_id = e.tenant_id
+WHERE b.currency <> e.currency;`,
 	},
 	{
 		Name:   "expired_grant_headroom_reopened",
@@ -149,7 +169,7 @@ WHERE g.entry_type = 'grant' AND g.consumed_cents < g.amount_cents;`,
 	{
 		Name:   "dunning_active_run_without_next_action",
 		Domain: "dunning",
-		Why:    "an active run must carry next_action_at: both due-run pickers select on it and the per-invoice UNIQUE blocks re-enrolment, so NULL means collection stopped for good (SB-1). No production writer produces this since 2026-10-08 (StartDunning always sets it; UpdateRunIfActive refuses it); a row here predates that or came from direct SQL. Re-drive deliberately with `UPDATE invoice_dunning_runs SET next_action_at = COALESCE(last_attempt_at, now()) WHERE id = '<id>' AND state = 'active' AND next_action_at IS NULL`: the next tick resumes the run under its CURRENT policy (it exhausts if attempt_count >= max_retry_attempts, otherwise it makes the next retry). Or close it with POST /v1/dunning/runs/{id}/resolve",
+		Why:    "an active run must carry next_action_at: both due-run pickers select on it and the per-invoice UNIQUE blocks re-enrolment, so NULL means collection stopped for good (SB-1). No production writer produces this since 2026-10-08 (StartDunning always sets it; UpdateRunIfActive refuses it); a row here predates that or came from direct SQL. Re-drive deliberately with `UPDATE invoice_dunning_runs SET next_action_at = COALESCE(last_attempt_at, now()) WHERE id = '<id>' AND state = 'active' AND next_action_at IS NULL`: the next tick resumes the run under its CURRENT policy (it exhausts if attempt_count has reached the length of the policy's retry_days, otherwise it makes the next retry). Or close it with POST /v1/dunning/runs/{id}/resolve",
 		SQL:    `SELECT r.id, r.tenant_id, r.invoice_id, r.attempt_count, r.resolution, r.last_attempt_at, r.updated_at FROM invoice_dunning_runs r WHERE r.state = 'active' AND r.paused = false AND r.next_action_at IS NULL`,
 	},
 	{
@@ -178,7 +198,7 @@ WHERE g.entry_type = 'grant' AND g.consumed_cents < g.amount_cents;`,
 	{
 		Name:   "usage_billed_once_per_customer_meter_window",
 		Domain: "invoices",
-		Why:    "the same usage instant of one (customer, meter, rating-rule bucket) must sit on at most one live subscription invoice; a second is a double charge the header-exact check cannot see (threshold + cycle, a rewound period re-billed, or a subscription recreated the same day re-billing its predecessor's usage)",
+		Why:    "the same usage instant of one (customer, meter, price bucket) must sit on at most one live subscription invoice; a second is a double charge the header-exact check cannot see (threshold + cycle, a rewound period re-billed, or a subscription recreated the same day re-billing its predecessor's usage)",
 		// Read-side twin of ADR-115's period CAS and of the usage window's
 		// floors (ADR-012 amendment 2026-10-22): it looks for the money shape
 		// both exist to prevent, two live invoices whose usage windows for
@@ -187,24 +207,28 @@ WHERE g.entry_type = 'grant' AND g.consumed_cents < g.amount_cents;`,
 		// key, so two subscriptions of one customer billing one window bill
 		// the same events. Half-open compare, so a threshold window [P0,t1)
 		// beside its residual [t1,P1), or a predecessor's [P0,t1) beside its
-		// successor's [t1,P1), is clean. Paired per rating-rule bucket, not
-		// per meter: under the ADR-066 §4 deferred-bucket protocol one meter
-		// can carry a sum rule (billed on the threshold invoice) and a max
-		// rule (deferred to the cycle invoice, full window), and the max
-		// bucket's window legitimately overlaps the sum bucket's. That
-		// exemption is one subscription's: across two subscriptions any
-		// overlap on the meter is the same events billed twice, whatever
-		// the bucket (each pins its rules at its own period start, so a
-		// rule published in between gives the two lines different versions).
-		// Lines on one invoice are excluded (i.id < j.id).
-		SQL: `SELECT a.invoice_id, a.tenant_id, i.subscription_id, a.meter_id, a.rating_rule_version_id, a.billing_period_start, a.billing_period_end, b.invoice_id AS other_invoice_id, j.subscription_id AS other_subscription_id
+		// successor's [t1,P1), is clean. Paired per price within one
+		// subscription, not per meter: each of a meter's prices is its own
+		// bucket, and under the ADR-066 §4 deferred-bucket protocol a
+		// deferred bucket's full window legitimately overlaps a fire's line
+		// for another bucket. That exemption is one subscription's: across
+		// two subscriptions any overlap on the meter is the same events
+		// billed twice, whatever the bucket (each subscription's plan has its
+		// own prices).
+		// Lines on one invoice are excluded (i.id < j.id). Live means not
+		// voided: a written-off invoice still billed its window (ADR-066
+		// amendment 2026-10-23, as idx_invoices_billing_idempotency already
+		// counts it), so a second invoice billing that window is the double
+		// charge, paid later or not. Before 2026-10-23 the threshold
+		// watermark re-billed exactly that shape and this check skipped it.
+		SQL: `SELECT a.invoice_id, a.tenant_id, i.subscription_id, a.meter_id, a.price_id, a.billing_period_start, a.billing_period_end, b.invoice_id AS other_invoice_id, j.subscription_id AS other_subscription_id
 		        FROM invoice_line_items a
 		        JOIN invoices i ON i.id = a.invoice_id
 		        JOIN invoices j ON j.customer_id = i.customer_id AND j.tenant_id = i.tenant_id AND j.id <> i.id AND j.subscription_id IS NOT NULL
 		        JOIN invoice_line_items b ON b.invoice_id = j.id AND b.meter_id = a.meter_id AND b.line_type = 'usage'
-		         AND (j.subscription_id <> i.subscription_id OR b.rating_rule_version_id IS NOT DISTINCT FROM a.rating_rule_version_id)
+		         AND (j.subscription_id <> i.subscription_id OR b.price_id IS NOT DISTINCT FROM a.price_id)
 		       WHERE a.line_type = 'usage' AND i.subscription_id IS NOT NULL
-		         AND i.status NOT IN ('voided','uncollectible') AND j.status NOT IN ('voided','uncollectible')
+		         AND i.status <> 'voided' AND j.status <> 'voided'
 		         AND a.billing_period_start IS NOT NULL AND b.billing_period_start IS NOT NULL
 		         AND a.billing_period_start < b.billing_period_end AND b.billing_period_start < a.billing_period_end
 		         AND i.id < j.id;`,

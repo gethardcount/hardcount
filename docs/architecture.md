@@ -4,17 +4,12 @@ Velox is one Go binary on one PostgreSQL database. The code has one package
 per billing domain (customers, pricing, usage, invoices, payments and so on),
 and each package owns its store, service and HTTP handler.
 
-This page is for contributors. It shows how a usage event becomes a paid
-invoice, which package does each part, and what runs in the background. The
-same flow without code is in [How Velox works](how-velox-works.md). The
-decisions behind this layout are in the [ADRs](adr/).
+This page is for contributors: which package does each part, and what runs
+in the background. The same flow without code is in
+[How Velox works](how-velox-works.md). The decisions behind this layout are
+in the [ADRs](adr/).
 
 ## The life of a usage event
-
-Think of a taxi meter: it counts the ride, the fare card sets the price, and
-at the end the driver gives you a receipt and charges your card. In Velox,
-`usage` counts, `pricing` holds the prices, `billing` works out the bill,
-`invoice` is the receipt and `payment` charges the card:
 
 ```
 your app → usage → billing → invoice → payment → paid
@@ -24,36 +19,21 @@ your app → usage → billing → invoice → payment → paid
                                        dunning
 ```
 
-1. **Your app sends a usage event.** `POST /v1/usage-events` (or `/batch`)
-   names the customer by `external_customer_id` and the meter by
-   `event_name`. A meter is a counter for one kind of usage, such as tokens.
-   The `usage` package stores the event and answers `201`.
-   **You see:** the event on the **Usage** page.
-2. **The billing period ends.** The billing scheduler runs every hour (every
-   5 minutes when `APP_ENV=local`). It closes a period on the first run after
-   the period end plus the invoice grace period (`INVOICE_GRACE_PERIOD`,
-   default 1 hour), so usage that arrives a little late still counts.
-3. **Billing prices the usage.** The `billing` engine asks `usage` for the
-   period's totals per meter and asks `pricing` for the rating rules (the
-   price for each meter). It adds the plan's flat fees and builds the
+1. **`usage`** stores each event from `POST /v1/usage-events` (or `/batch`)
+   and answers `201`.
+2. **The billing scheduler** closes a period on its first run after the
+   period end plus `INVOICE_GRACE_PERIOD` (default 1 hour). It runs every
+   hour, or every 5 minutes when `APP_ENV=local`.
+3. **`billing`** asks `usage` for the period's totals per meter and
+   `pricing` for the plan's prices, adds the plan's flat fees, and builds the
    invoice through `invoice`.
-   **You see:** a new invoice on the **Invoices** page and on the customer.
-4. **The invoice is finalized.** Tax is worked out by the tenant's tax
-   provider (see [Tax providers](#tax-providers)). If tax cannot be worked
-   out yet, the invoice waits as a draft and a later run retries. Once
-   finalized, the invoice's amounts are fixed.
-5. **Velox charges the card.** Credits the customer holds are applied
-   first. For the rest, `payment` creates a Stripe PaymentIntent on the
-   customer's saved card. Stripe's answer, or its webhook, tells Velox the
-   result, and a paid invoice moves to `paid`.
-   **You see:** the invoice marked **Paid**, and the payment in your Stripe
-   dashboard.
-6. **A failed payment goes to dunning.** Dunning means retrying a failed
-   card payment on a schedule and emailing the customer. The `dunning`
-   package follows the tenant's dunning policy. If every retry fails, it
-   takes the policy's final action, for example cancel the subscription or
-   mark the invoice uncollectible.
-   **You see:** the invoice on the **Dunning** page, with each retry.
+4. **`invoice`** finalizes it. Tax comes from the tenant's tax provider
+   ([Tax providers](#tax-providers)); if tax cannot be worked out yet, the
+   invoice waits as a draft and a later run retries.
+5. **`payment`** charges what credit did not cover, with a Stripe
+   PaymentIntent on the customer's saved card.
+6. **`dunning`** retries a failed charge on the tenant's dunning policy, and
+   takes the policy's final action if every retry fails.
 
 Along the way, each step queues webhook events (such as an invoice being
 finalized or paid) and emails for the background senders below.
@@ -74,10 +54,19 @@ A paid invoice cannot be voided or written off; issue a credit note instead.
 ## Design rules
 
 - **Per-domain packages.** Each domain owns its store, service, and handler. No peer domain touches another's internals. The imports that legitimately cross domains are listed edge by edge in an allowlist, enforced by an [architecture test](../internal/arch/boundaries_test.go).
-- **Row-Level Security (RLS).** Every tenant-scoped query runs inside a transaction where Postgres enforces tenant isolation. A tenant is one account's data in the shared database. Integration tests prove it.
+- **Row-Level Security (RLS).** Most tenant-scoped work runs inside a transaction where Postgres enforces tenant isolation (`postgres.TxTenant`). A tenant is one account's data in the shared database. Integration tests prove it. Some work runs under `postgres.TxBypass`, where RLS does not apply, and those queries must filter by tenant themselves. A test ([`txbypass_allowlist_test.go`](../internal/arch/txbypass_allowlist_test.go)) fails when code adds a new use without listing it:
+  - background jobs, and the metrics that count their queues;
+  - sign-in, sessions, API key lookup and creating an account;
+  - public links, such as the hosted invoice page;
+  - incoming webhooks;
+  - two signed-in areas: Stripe credential settings (`internal/tenantstripe`) and team members and invites (`internal/dashmembers`);
+  - `velox-bench-seed`, which sets up a database for a benchmark.
+- **Every tenant-scoped operation states its mode.** Test mode and live mode are separate data in one tenant. Each entry point puts the mode on the request context with `postgres.WithLivemode`: the auth middleware from the key or session, public links from their row, background jobs per row or per mode. Nothing guesses a missing mode:
+  - `postgres.Livemode` returns `ErrLivemodeUnset`, and `BeginTx` refuses a `TxTenant` without a mode or a tenant ID;
+  - the database refuses an insert into a table with a `livemode` column when `app.livemode` is not `on` or `off`, and its RLS policies show no row (migrations 00213 and 00214).
 - **PaymentIntent-only Stripe.** No Stripe Billing or Stripe Invoices. Velox owns invoices end to end; Stripe executes the card charge.
 - **Billing engine as coordinator.** `billing` is the one package that works across domains. It calls usage, pricing, invoice, payment and the others only through small interfaces it defines itself (`UsageAggregator`, `PricingReader`, `InvoiceWriter`, `InvoiceCharger` and so on). The other domains do not know about each other, and the engine can be tested with fakes.
-- **Append-only records for money.** Credits, the audit log, and the outbound webhook outbox are written as append-only events.
+- **Ledger and audit records for money.** Credit grants, usage, expiry and adjustments are entries in one credit ledger. The ledger is not strictly append-only: each grant entry keeps a running count of what has been used of it (`consumed_cents`, `cn_retired_cents`), updated in place. The audit log is append-only: the database refuses any change or delete in it.
 
 ## Package layout
 
@@ -86,16 +75,16 @@ cmd/velox/                  — single Go binary
 cmd/velox-doctor/           — read-only money-invariant sweep (see ENGINEERING.md)
 internal/                     (abridged — one package per domain)
   domain/                   — pure domain models, zero deps
-  auth/                     — API key auth (3 key types, per-route permissions)
+  auth/                     — API key auth (3 stored key types plus dashboard sessions, per-route permissions)
   customer/                 — customer CRUD + billing profiles
-  pricing/                  — meters, rating rules, plans, price overrides
-  subscription/             — lifecycle (draft → trialing → active → canceled → archived)
+  pricing/                  — meters, plans and their prices, price overrides
+  subscription/             — lifecycle (created trialing or active, or as a draft until activated; trialing → active → canceled)
   usage/                    — event ingestion + multi-dim aggregation
   invoice/                  — lifecycle (draft → finalized → paid, or voided / uncollectible) + PDF
   billing/                  — billing engine + scheduler + preview
   payment/                  — Stripe PaymentIntent + webhook receiver
   dunning/                  — payment retry state machine
-  credit/                   — event-sourced prepaid balance ledger
+  credit/                   — prepaid credit ledger (grants, usage, expiry, adjustments)
   creditnote/               — credit notes + refunds
   webhook/                  — outbound webhooks (HMAC-signed delivery)
   email/                    — email outbox + sender
@@ -125,15 +114,15 @@ over when a leader dies. The five leased jobs:
 | `webhook_delivery` | Retries webhook deliveries that failed |
 
 An **outbox** is a database table of messages waiting to be sent
-(`webhook_outbox`, `email_outbox`). Most messages are written in the same
-transaction as the change that caused them, so a crash cannot lose them.
+(`webhook_outbox`, `email_outbox`). Many messages are written in the same
+transaction as the change that caused them, so a crash cannot lose those
+([which webhooks](webhooks.md#three-rules-for-your-receiver)).
 
-A **test clock** is a pretend clock for test customers. When you move one
+When you move a [test clock](glossary.md#testing-with-simulated-time)
 forward, a worker in the copy that took the request bills the skipped time
-for that clock's customers, so a month of renewals and retries takes
-seconds.
+for that clock's customers.
 
-More on each term: [glossary](glossary.md#running-velox). When a job is
+More on each term: [Words on these pages](ops/runbook/index.md#words-on-these-pages). When a job is
 stuck: [A background job is stuck](ops/runbook/background-job-stuck.md).
 
 ## Tech stack
@@ -167,12 +156,13 @@ Tax is calculated by one of three providers in `internal/tax`: `none`, `manual` 
 
 ### Failure: defer, never guess
 
-When `stripe_tax` fails, the error propagates, the engine defers the invoice to `tax_status=pending`, and a scheduled retry runs `Calculate` again. It never guesses a rate. The three failure reasons:
+When `stripe_tax` fails, the error propagates, the engine defers the invoice to `tax_status=pending`, and a scheduled retry runs `Calculate` again. It never guesses a rate. The four failure reasons:
 
 | Reason | Meaning |
 |---|---|
 | `no_country` | The customer has no country |
 | `no_client_for_mode` | No Stripe client for the request's mode |
+| `credentials_unreadable` | The tenant's Stripe credentials for the mode could not be read |
 | `api_error` | Stripe Tax returned an error |
 
 Each failure increments `velox_tax_outcome_total{outcome="deferred", reason}` and logs a `warn`. Successful calculations are not counted.
@@ -203,3 +193,5 @@ Tax decisions are recorded on the invoice itself, not in a separate audit table:
 The line fields are what the customer sees on the PDF. The invoice fields link to Stripe: they let `Reverse` find the original `tax_transaction`, and let an operator match a Velox invoice to Stripe's tax reports without reading logs.
 
 `internal/tax/taxid.go` checks the shape of customer tax IDs (VAT, GST and others) and puts the checked ID on the invoice, so the PDF shows the right legal text. It does not ask a tax authority whether the ID exists.
+
+**Next:** set up your machine: [CONTRIBUTING](../CONTRIBUTING.md#development-setup).

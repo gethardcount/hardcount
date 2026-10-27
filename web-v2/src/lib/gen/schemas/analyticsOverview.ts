@@ -8,6 +8,7 @@
  * OpenAPI spec version: 2026-04-07
  */
 import type { AnalyticsMrrMovementTotals } from './analyticsMrrMovementTotals';
+import type { AnalyticsOverviewCreditBalanceByCurrencyItem } from './analyticsOverviewCreditBalanceByCurrencyItem';
 import type { AnalyticsOverviewOutstandingByCurrencyItem } from './analyticsOverviewOutstandingByCurrencyItem';
 import type { AnalyticsPeriod } from './analyticsPeriod';
 
@@ -18,7 +19,7 @@ import type { AnalyticsPeriod } from './analyticsPeriod';
  */
 export interface AnalyticsOverview {
   period: AnalyticsPeriod;
-  /** The tenant's default currency. Every money field uses it, except `credit_balance_total` and `outstanding_by_currency`. */
+  /** The tenant's default currency. Every money field uses it, except `credit_balance_by_currency` and `outstanding_by_currency`, which carry their own. */
   currency: string;
   /** MRR of active subscriptions now. */
   mrr: number;
@@ -42,8 +43,8 @@ export interface AnalyticsOverview {
   outstanding_by_currency: AnalyticsOverviewOutstandingByCurrencyItem[];
   /** Average total of invoices paid in the window. */
   avg_invoice_value: number;
-  /** Sum of all customers' credit balances. Not limited to `currency`. */
-  credit_balance_total: number;
+  /** Customers' credit balances added up per currency, `currency` first, then largest. A currency whose balance is zero is left out. Customers on a test clock are not counted. */
+  credit_balance_by_currency: AnalyticsOverviewCreditBalanceByCurrencyItem[];
   /**
      * Customer records with status `active`. Includes customers with
      * no subscription or only canceled ones; `live_customers` counts
@@ -65,7 +66,7 @@ export interface AnalyticsOverview {
   trialing_subscriptions: number;
   /** Invoices paid in the window. */
   paid_invoices: number;
-  /** Invoices created in the window whose payment failed. All currencies. */
+  /** Open invoices created in the window whose payment failed. A voided or written-off invoice is not counted. All currencies. */
   failed_payments: number;
   /** `failed_payments` for the previous window. */
   failed_payments_prev: number;
@@ -91,7 +92,7 @@ export interface AnalyticsOverview {
      * `mrr_prev` is 0.
      */
   nrr: number;
-  /** Dunning runs opened in the window that are resolved, divided by all runs opened in the window. 0 when none were opened. */
+  /** Dunning runs opened in the window that a payment closed (`resolution` is `payment_recovered` and the invoice has `amount_paid_cents` above 0), divided by all runs opened in the window. A run closed by a void, a write-off, or a credit note or customer credit that left nothing due is not recovered. 0 when none were opened. */
   dunning_recovery_rate: number;
   mrr_movement: AnalyticsMrrMovementTotals;
 }

@@ -4,12 +4,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { useNavigate } from 'react-router-dom'
 import { api, formatDateTime } from '@/lib/api'
+import { meterAggregationLabel } from '@/lib/meterLabels'
 import type { RecipeListItem } from '@/lib/gen/schemas/recipeListItem'
 import type { RecipeDetail } from '@/lib/gen/schemas/recipeDetail'
 import type { RecipeOverride } from '@/lib/gen/schemas/recipeOverride'
 import type { RecipePreviewResult } from '@/lib/gen/schemas/recipePreviewResult'
 import { money, priceRate } from '@/lib/priceDisplay'
-import { recipeRetryNote } from '@/lib/dunningCoverage'
 import { showApiError } from '@/lib/formErrors'
 import { Layout } from '@/components/Layout'
 import { LoadError } from '@/components/LoadError'
@@ -125,10 +125,8 @@ function RecipeCard({ recipe, onConfigure }: { recipe: RecipeListItem; onConfigu
 
         <div className="flex flex-wrap gap-1.5 mt-4">
           {c.meters > 0 && <Chip n={c.meters} label="usage meter" />}
-          {c.rating_rules > 0 && <Chip n={c.rating_rules} label="price" />}
+          {c.prices > 0 && <Chip n={c.prices} label="price" />}
           {c.plans > 0 && <Chip n={c.plans} label="plan" />}
-          {c.dunning_policies > 0 && <Chip n={c.dunning_policies} label="retry policy" />}
-          {c.webhook_endpoints > 0 && <Chip n={c.webhook_endpoints} label="notification endpoint" />}
         </div>
 
         {recipe.instantiated && (
@@ -139,7 +137,7 @@ function RecipeCard({ recipe, onConfigure }: { recipe: RecipeListItem; onConfigu
 
         <div className="mt-5 flex items-center justify-between">
           <span className="text-xs text-muted-foreground">
-            {recipe.overridable.length} setting{recipe.overridable.length !== 1 ? 's' : ''} you can adjust
+            {recipe.overridable.length} setting{recipe.overridable.length !== 1 ? 's' : ''} {installed ? 'set at install' : 'you can adjust'}
           </span>
           <Button size="sm" variant={installed ? 'outline' : 'default'} onClick={onConfigure}>
             {installed ? 'View' : 'Configure'}
@@ -206,8 +204,6 @@ function RecipeDialog({ recipe, onClose }: { recipe: RecipeListItem; onClose: ()
     onSuccess: (res) => {
       toast.success(`Installed ${recipe.name}`)
       queryClient.invalidateQueries({ queryKey: ['recipes'] })
-      // A recipe's retry policy can take over the default (ADR-123).
-      queryClient.invalidateQueries({ queryKey: ['dunning-policies'] })
       onClose()
       // Send the operator straight to the catalog — the new plan is the
       // most likely next thing they want to look at. plan_ids is omitted
@@ -266,7 +262,7 @@ function RecipeDialog({ recipe, onClose }: { recipe: RecipeListItem; onClose: ()
           )}
           {installed && (
             <p className="text-xs text-muted-foreground mt-2">
-              Set at install and fixed here. To change them, edit the plan on its page and the prices on the Pricing page.
+              Set at install and fixed here. On the plan's page you can rename the plan and edit its prices. Its currency and plan ID cannot change.
             </p>
           )}
         </div>
@@ -371,41 +367,26 @@ function OverrideField({
 }
 
 function ObjectsList({ preview }: { preview: RecipePreviewResult }) {
-  const { data: policiesData } = useQuery({
-    queryKey: ['dunning-policies'],
-    queryFn: () => api.listDunningPolicies(),
-    enabled: (preview.objects.dunning_policies?.length ?? 0) > 0,
-  })
-  const currentPolicies = policiesData?.data
-  // Rules don't carry their meter; the bindings do. rule key → meter unit so
-  // each price renders in that meter's units (tokens vs seconds vs calls).
-  const unitByMeterKey = new Map((preview.objects.meters ?? []).map(m => [m.key, m.unit]))
-  const unitByRuleKey = new Map(
-    (preview.objects.pricing_rules ?? []).map(pr => [pr.rating_rule_key, unitByMeterKey.get(pr.meter_key) ?? '']),
-  )
+  // Each price renders in its meter's units (tokens vs seconds vs calls) and
+  // its plan's currency.
+  const plans = preview.objects.plans ?? []
+  const unitByEventName = new Map((preview.objects.meters ?? []).map(m => [m.event_name, m.unit]))
+  const labels = (m: Record<string, string> | undefined) =>
+    Object.entries(m ?? {}).map(([k, v]) => `${k}=${v}`).join(', ')
+  const prices = plans.flatMap(plan => (plan.prices ?? []).map(p =>
+    `${p.meter}${labels(p.dimension_match) ? ` (${labels(p.dimension_match)})` : ''} — ` +
+    priceRate({ ...p, currency: plan.currency }, unitByEventName.get(p.meter) ?? ''),
+  ))
 
   const sections: { label: string; items: string[] }[] = []
-  if (preview.objects.meters?.length) sections.push({ label: 'What gets counted', items: preview.objects.meters.map(m => `${m.name} (${m.aggregation} of ${m.unit})`) })
-  if (preview.objects.rating_rules?.length) sections.push({
-    label: 'Prices',
-    items: preview.objects.rating_rules.map(r => `${r.name || r.key} — ${priceRate(r, unitByRuleKey.get(r.key) ?? '')}`),
-  })
-  if (preview.objects.plans?.length) sections.push({
+  if (preview.objects.meters?.length) sections.push({ label: 'What gets counted', items: preview.objects.meters.map(m => `${m.name} (${meterAggregationLabel(m.aggregation).toLowerCase()} of ${m.unit})`) })
+  if (prices.length) sections.push({ label: 'Prices', items: prices })
+  if (plans.length) sections.push({
     label: 'Plan',
-    items: preview.objects.plans.map(p =>
+    items: plans.map(p =>
       `${p.name} — ${p.billing_interval}, ${p.currency}` + (p.base_amount_cents > 0 ? `, ${money(String(p.base_amount_cents), 0, p.currency)} base` : ''),
     ),
   })
-  // Whether the recipe's policy takes the default: it does when the current
-  // default is the one the account was created with (ADR-123), and the
-  // preview should say so before anything is created.
-  if (preview.objects.dunning_policies?.length) sections.push({
-    label: 'Payment retries',
-    items: preview.objects.dunning_policies.map(d =>
-      `${d.name} — up to ${d.max_retries} retries` + (currentPolicies ? `, ${recipeRetryNote(currentPolicies)}` : ''),
-    ),
-  })
-  if (preview.objects.webhook_endpoints?.length) sections.push({ label: 'Notifications', items: preview.objects.webhook_endpoints.map(w => `${w.url_placeholder} — set your real URL after install`) })
 
   if (sections.length === 0) {
     return <p className="text-xs text-muted-foreground">No objects to preview.</p>

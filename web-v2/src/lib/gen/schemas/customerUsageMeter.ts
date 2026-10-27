@@ -7,17 +7,21 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
-import type { CustomerUsageMeterRulesItem } from './customerUsageMeterRulesItem';
+import type { CustomerUsageMeterPricesItem } from './customerUsageMeterPricesItem';
 
 export interface CustomerUsageMeter {
   meter_id: string;
-  meter_key: string;
+  event_name: string;
   meter_name: string;
   unit: string;
   currency: string;
   /** Decimal string. */
   total_quantity: string;
   total_amount_cents: number;
-  /** One row per pricing rule that claimed events. */
-  rules: CustomerUsageMeterRulesItem[];
+  /**
+     * One row per (plan, price) that took usage, and a `no_price` row
+     * per plan for the usage no price of that plan took. Two plans can
+     * price one meter differently.
+     */
+  prices: CustomerUsageMeterPricesItem[];
 }

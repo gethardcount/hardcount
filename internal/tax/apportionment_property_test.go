@@ -368,7 +368,7 @@ func TestProperty_Apportion_ConservesTheTotal(t *testing.T) {
 	r := taxRand()
 	for i := 0; i < taxIters; i++ {
 		total, nums, den := genExclusiveShares(r)
-		out := distributeLargestRemainder(total, nums, den)
+		out, _ := distributeLargestRemainder(total, nums, 1, den)
 
 		var sum int64
 		for _, v := range out {
@@ -390,7 +390,7 @@ func TestProperty_Apportion_NeverInvertsLineOrder(t *testing.T) {
 	r := taxRand()
 	for i := 0; i < taxIters; i++ {
 		total, nums, den := genExclusiveShares(r)
-		out := distributeLargestRemainder(total, nums, den)
+		out, _ := distributeLargestRemainder(total, nums, 1, den)
 
 		for a := range nums {
 			for b := range nums {
@@ -412,7 +412,7 @@ func TestProperty_Apportion_WithinOneCentOfExactShare(t *testing.T) {
 	r := taxRand()
 	for i := 0; i < taxIters; i++ {
 		total, nums, den := genExclusiveShares(r)
-		out := distributeLargestRemainder(total, nums, den)
+		out, _ := distributeLargestRemainder(total, nums, 1, den)
 
 		for j := range nums {
 			// |out[j]·den − nums[j]| < den ⇔ out[j] is within one whole cent
@@ -445,7 +445,7 @@ func TestProperty_Apportion_WithinOneCentOfExactShare(t *testing.T) {
 // Result was byte-identical with and without them.
 func TestApportion_TiesGoToTheLowestIndex(t *testing.T) {
 	// Three identical shares of 1/3 each, one cent of residual: line 0 takes it.
-	got := distributeLargestRemainder(1, []int64{100, 100, 100}, 300)
+	got, _ := distributeLargestRemainder(1, []int64{100, 100, 100}, 1, 300)
 	want := []int64{1, 0, 0}
 	for i := range want {
 		if got[i] != want[i] {
@@ -458,11 +458,11 @@ func TestApportion_TiesGoToTheLowestIndex(t *testing.T) {
 // non-positive denominator. Both must return a zeroed result rather than
 // dividing by zero.
 func TestProperty_Apportion_DegenerateInputs(t *testing.T) {
-	if got := distributeLargestRemainder(100, nil, 10); len(got) != 0 {
+	if got, _ := distributeLargestRemainder(100, nil, 1, 10); len(got) != 0 {
 		t.Fatalf("no lines must yield no allocations, got %v", got)
 	}
 	for _, den := range []int64{0, -1, -1000} {
-		got := distributeLargestRemainder(100, []int64{5, 5}, den)
+		got, _ := distributeLargestRemainder(100, []int64{5, 5}, 1, den)
 		for _, v := range got {
 			if v != 0 {
 				t.Fatalf("non-positive denominator %d must allocate nothing, got %v", den, got)

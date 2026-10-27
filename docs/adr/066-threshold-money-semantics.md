@@ -1,11 +1,13 @@
 # ADR-066: Threshold money semantics — prorated reset base, atomic fire→reset, $0 auto-pay, max/last deferral
 
 **Date:** 2026-07-02
-**Status:** Accepted (fixes 4/atomicity/6 shipped in P1b #339; fix 5 + the immediate-cancel watermark shipped in P1c; amended 2026-10-11)
+**Status:** Accepted (fixes 4/atomicity/6 shipped in P1b #339; fix 5 + the immediate-cancel watermark shipped in P1c; amended 2026-10-11 and 2026-10-23; `reset_billing_cycle` removed 2026-10-23, see [that amendment](#amendment-2026-10-23-reset_billing_cycle-is-removed); a fire bills usage only since 2026-10-23, see the [last amendment](#amendment-2026-10-23-a-fire-bills-usage-only)); superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md) (decision 4's rule-bucket granularity, built in PR-2; the package clamp, removed in PR-3; the ladder seed key and the flat threshold window, not built yet)
+
+**Superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23. Until each part is built, this ADR describes the code. In decision 4, "granularity is the rule bucket, not the meter" goes, because a meter has one aggregation and `last_ever` is dropped (PR-2, built in #1376: a max or last meter's buckets are deferred, a sum or count meter's are not). In the 2026-10-11 amendment, the ladder seed keys on the price id instead of the resolved rule version. The ambiguous-config failure goes, because lines carry the price id the seed keys on (PR-4). The non-monotone package clamp goes, because a package always rounds up with no overage (PR-3, built in #1381: a slice that would be negative is an error, not a clamp). The threshold invoice prices each plan window instead of one flat window (PR-4). ADR-130 leaves the one-transaction fire, the $0 rule and the write-off amendment as they are. Removing `reset_billing_cycle=true` (and with it the prorated reset base) was a separate change, approved and made on 2026-10-23 ([amendment](#amendment-2026-10-23-reset_billing_cycle-is-removed)).
 
 ## Summary
 
-A usage threshold (a spend cap) bills an early invoice mid-period, and the cycle close and an immediate cancel skip what that invoice already billed. With `reset_billing_cycle=true`, the fire bills the base fee prorated by days over the plan's full interval, and the invoice and the cycle reset commit in one transaction. With `false`, the default when the field is omitted, peak and last-value usage stays off the fire and is billed once at period end. Amended 2026-10-11: under `false`, graduated and package tiers continue across the fire instead of restarting, so the whole period is priced on one ladder. Status: active, amended 2026-10-11; a threshold or cycle invoice that totals $0 is marked paid at once.
+A usage threshold (a spend cap) bills an early invoice mid-period, and the cycle close and an immediate cancel skip what that invoice already billed. The period keeps its dates. The fire bills usage only: peak and last-value usage stays off it and is billed once at period end, and the base fee is billed by the period's own invoice (amended 2026-10-23; the fire billed the full in_arrears base before). Amended 2026-10-11: graduated and package tiers continue across the fire instead of restarting, so the whole period is priced on one ladder. A threshold or cycle invoice that totals $0 is marked paid at once. Amended 2026-10-23: a written-off threshold invoice keeps its window billed; only a void gives it back to the period's invoice. Removed 2026-10-23: `reset_billing_cycle`, which started a new period at the fire and billed a prorated base on it (decisions 1 and 2 describe it as it was). Status: active.
 
 ## Context
 
@@ -19,6 +21,8 @@ materially amended the plan's §4.1 sketch; plan doc updated same-day).
 ## Decisions
 
 ### 1. reset=true fires bill a PRORATED in_arrears base (shipped, P1b)
+
+*(Removed 2026-10-23 with `reset_billing_cycle`: a fire always keeps the period. See the [amendment](#amendment-2026-10-23-reset_billing_cycle-is-removed). Since the [next amendment](#amendment-2026-10-23-a-fire-bills-usage-only) a fire bills no base at all.)*
 
 With `reset_billing_cycle=true` the fire re-anchors the cycle at the fire
 instant, so the cycle close never true-ups the fired window's base — the
@@ -148,6 +152,8 @@ now so P1c implements against them without re-litigating:
   is never re-billed; calendar subs snap back and are unaffected).
   Customer-favored, rare, pre-existing. DOCUMENTED, not fixed in-window;
   trigger to revisit = first DP configuring reset=true on in_advance plans.
+  *(Ended 2026-10-23: `reset_billing_cycle` is removed, so no fire starts a
+  period. See the [amendment](#amendment-2026-10-23-reset_billing_cycle-is-removed).)*
 
 ## Test locks (mutation- or fault-injection-verified)
 
@@ -173,6 +179,13 @@ fire and 600 after, billed $70 + $60. Pricing the whole period gives $70 +
 $36. Stripe, OpenMeter (#4298 fixed the same bug), Lago and Kill Bill all keep
 one ladder across a mid-period threshold invoice. Cycle resets
 (`reset=true`) still restart tiers, as they restart the cycle.
+
+**Correction (2026-10-23):** drop Kill Bill from that list: its core has no
+threshold billing (no match for "threshold" in the non-test `invoice/` or
+`usage/` code). OpenMeter's open-source collector turns progressive billing
+off, so for OpenMeter this holds only when a mid-period invoice is
+requested. Checked in Kill Bill `3548b02` and OpenMeter `f04b561f`
+(`openmeter/billing/worker/collect/collect.go:89-99`), both 2026-10-22.
 
 **Decision: marginal pricing per additive bucket, seeded from the fire.**
 The closers (cycle close and immediate cancel, multi-dim and single-rule)
@@ -225,3 +238,295 @@ share is F(seed) recomputed under the rule.
   was cut (#973).
 - An authoring guard against the ambiguous configs.
 - Package monotonicity validation.
+
+## Amendment 2026-10-23: a write-off keeps the window billed
+
+**The defect.** Under `reset=false` the fire bills the in_arrears base and
+the additive usage of `[periodStart, fire)` (§4 keeps max and last-value
+buckets off it; the close bills them full-period). Since #243 every reader of that watermark skipped a
+threshold invoice in status `voided` **or `uncollectible`**. So after a
+write-off, the period's next closer billed the window again from the
+period start: the base and the pre-fire usage, a second time. A
+written-off invoice can still be paid (`uncollectible → paid`: an offline
+payment, or a card charge the webhook, the reconciler, the stale-hold
+sweep or ADR-108 adoption settles late), and the credit applied to it
+stays applied. Reproduced on real Postgres in three forms: write-off →
+close → offline payment; → card settle; and credit applied before the
+write-off with no payment at all. No operator mistake is needed: an unclear
+charge parks the invoice, the attention banner advises a write-off, the
+close re-bills, and the stale-hold sweep then finds the charge succeeded.
+
+**Decision (Option A, product owner 2026-10-23).** The watermark counts
+every threshold invoice except a voided one. A write-off ends collection,
+not the sale (ADR-111: it "changes who PAID, not what was SOLD"; ADR-113:
+"a write-off is the give-up assertion"), so its window stays billed. Only
+a void, which can never be paid, gives the window back. Lago is the one
+peer whose code shows the answer, and it agrees: progressive billing counts
+`finalized` and `failed` invoices, so only a void re-bills
+(`progressive_billed_amount.rb`, read 2026-10-23). Rejected: refusing the
+late payment (breaks "never refuse to RECORD", leaves the credit form
+unfixed) and refunding the overlap after the paid flip (most code, on the
+paid chokepoint, undoing a re-bill that should not happen).
+
+**Void timing (`reset=false`).** A void before the period's invoice is
+built gives the window back to it. A void after that forgives the window:
+the built invoice never changes (ADR-120), and nothing else bills it. The
+operator bills it with a one-off invoice if wanted. The late-usage runbook
+says so.
+
+**`reset=true` is unchanged.** *(Removed later on 2026-10-23 with the
+option itself; the test named here went with it.)* The fire starts a new
+period at the fire instant, so the threshold invoice is outside every later watermark window
+and no later invoice bills `[periodStart, fire)`: a write-off keeps it
+billed, and a void at any time forgives it. Locked by
+`TestThresholdResetTrue_VoidOrWriteOff_CloseBillsOnlyTheNewPeriod`. The
+dashboard's void and write-off dialogs do not know the setting the fire
+ran under or whether the period's invoice is built, so they carry one line
+true in every case ("After a void, its charges may not be billed on any
+other invoice"; "The charges on this spend-threshold invoice will not be
+billed again. Voiding it later can change that"), and the runbook gives
+each case.
+
+**A void racing a closer lands before or after it.** The closers read the
+watermark after their tx locked the subscription row, but before this
+amendment nothing locked the threshold invoice, and `Void` never takes the
+subscription lock. A void committing after the read and before the
+closer's commit was billed by neither: it came first, yet the closer
+committed the residual it had planned. Reproduced for the cycle close (its
+in-tx re-read), the immediate cancel (which read on its own connection)
+and the cross-interval swap. `GetLatestThresholdInvoiceForCycleTx` now
+holds the threshold invoice `FOR KEY SHARE` until the closer's tx ends, and
+the immediate cancel reads on its tx (`loadThresholdWatermarkTx`). `Void`
+locks the invoice `FOR UPDATE`, which conflicts with it. A void that
+arrives after the read waits for the commit and lands after the period's
+invoice (forgiven). A void that holds the row at the read is waited for;
+Postgres re-checks the row after it commits, a voided row no longer
+matches, and the closer bills the window (the cycle close through the
+`ErrWatermarkMoved` re-plan). A write-off also waits; it does not change
+the watermark. On the immediate cancel and the cross-interval swap the
+lock is held across the tax provider call that follows in the same tx, so
+a void, write-off, charge claim or payment failure on that invoice waits
+for that call too.
+
+Payments do not wait for this lock. Every paid flip (card settle, offline payment,
+credit note, zero-due settle) locks the invoice `FOR NO KEY UPDATE`, which
+`FOR KEY SHARE` does not conflict with. This matters because a paid flip
+can need the subscription row while it holds the invoice: it lifts a
+dunning pause set for that invoice (`ReleaseDunningPauseTx`), and
+`LockDunningPauseTx` takes the subscription first only for a pause already
+committed when it reads. A `SetDunningPause` that holds the invoice at that
+read and commits after it leaves the payment holding the invoice and
+waiting for the subscription. With `FOR SHARE` here, a closer holding the
+subscription then waited for the payment, and Postgres failed one of them
+(40P01; `TestThresholdPayment_vs_Close_DunningPauseInFlight`). Writers that
+lock the invoice `FOR UPDATE` (void, write-off, charge claims, payment
+failures) take no subscription lock in that transaction, except the
+cancel's and swap's own prebill void, which already holds it. Test-clock
+teardown is the exception: it deletes the clock's invoices before its
+subscriptions, so a teardown overlapping a closer on that clock now fails
+one side with a deadlock error (40P01) where it could fail the teardown on
+a foreign key. Simulation data only; a retry succeeds. The live balance,
+the preview and the after_close classifier read without a lock: they
+display or flag, and never write an invoice.
+
+**One predicate.** `thresholdBillsWindow` (`status <> 'voided'`,
+`invoice/postgres.go`) is the only copy. Its readers, all checked:
+
+| Reader | Effect |
+|---|---|
+| cycle close build (`buildLineItems`) and its in-tx re-read (`commitPeriodClose`) | bills only the residual after a write-off; a void committed before the re-read moves the watermark, so the close re-plans and bills the window; the re-read holds the row `FOR KEY SHARE` |
+| immediate cancel (`billFinalOnImmediateCancelImpl`) | same, read on the cancel's tx `FOR KEY SHARE` (was its own connection) |
+| cross-interval swap (`BillOnPlanSwapTx`) | same, read on the swap's tx `FOR KEY SHARE` |
+| swap re-anchor guard (`ThresholdBilledThroughTx`) | still refuses to re-anchor below a written-off fire; first `FOR KEY SHARE` read of the swap's tx |
+| operator preview, live balance | agree with the close |
+| after_close classifier (`ThresholdWatermarks`, #1350) | see below |
+
+`LatestThresholdPeriodEnd` had no production caller and carried a third
+copy of the predicate; it is removed.
+
+**The after_close classifier.** `billedThrough` now falls back only on a
+void, and a void is final (one threshold invoice per cycle). `paidThrough`
+is unchanged. An event before a written-off invoice's end stays
+`Unsettled` (not flagged; `pending_threshold_invoice` on a held release),
+because that invoice can still be voided. If it is never voided, the event
+is billed nowhere and was not flagged: a missed flag, never a wrong one,
+as #1350 accepts. The edge #1350's review noted (the watermark going back
+on a write-off and forward on a later payment) no longer exists.
+
+**The fire-once probe (ADR-065 §2) reads every status.** The partial
+unique index holds the cycle's one threshold slot whatever the status, so
+after a void (or, before this change, a write-off) the probe found nothing,
+and every tick re-evaluated the crossing and ran a paid tax calculation
+before the index refused the insert. The probe now uses
+`GetThresholdInvoiceForCycleAnyStatus`; it is never a watermark. After a
+void under `reset=false` the cap does not fire again this cycle, as before
+(the index already refused it); the period's invoice bills the window.
+
+**`recovery_superseded` is removed.** It warned that a payment on a
+written-off threshold invoice would double-collect. That is no longer true,
+so the `RecoveryWarning.code` value is gone (pre-launch; ADR-110's table
+row and "Still deferred" item are closed).
+
+**Read-side alarm.** velox-doctor's
+`usage_billed_once_per_customer_meter_window` now counts a written-off
+invoice as live (as `idx_invoices_billing_idempotency` already did). A
+cycle invoice billing a written-off threshold window again is flagged,
+which is how any double billed before this change shows up.
+
+**Investigated, unchanged: the in_advance funding lookups.**
+`FindBaseInvoiceForPeriod` and `FindFundingInvoicesForPeriod` also skip
+`uncollectible`, but they ask a different question: is there a
+collectible charge to relieve (cancel, swap, downgrade credit) or to gate
+an upgrade on. They never decide what is billed twice. A relief draft on a
+written-off invoice would be voided as an orphan before it issued
+(`creditnote` `holdIssue`), so skipping it is right. Two edges remain,
+neither a double charge, both registered: an upgrade over a written-off
+base issues no proration charge for the rest of the period (the
+"no base invoice yet" branch); and a customer who cancels mid-period and
+later pays the written-off base gets no relief for the unused time.
+*(Changed 2026-10-23: both lookups now keep a written-off invoice, as
+billed but unpaid, so both edges are closed. See the
+[ADR-050 amendment](050-unpaid-source-proration-policy.md#amendment-2026-10-23-a-written-off-invoice-is-unpaid).)*
+
+**Not changed: Stripe Checkout on a write-off.** A write-off closes
+Velox's Checkout claim but does not expire the session at Stripe; only a
+void calls `StopCollection`. Under this decision a payment through a page
+the customer still has open settles the invoice once and cleanly, so it
+is hygiene, not part of this fix. Separate follow-up.
+*(Changed 2026-10-23: a write-off now expires the invoice's open Checkout
+sessions at Stripe, the same call and handling a void uses, without the
+PaymentIntent cancel.)*
+
+**Upgrade note.** At deploy, an open cycle whose threshold invoice is
+written off no longer re-bills that window at its close. An operator who
+wrote a threshold invoice off to have the usage billed again voids it
+instead, before the period's invoice is built.
+
+**Tests** (each red on the code before this change):
+`TestThresholdWriteOff_CloseBillsOnlyTheResidual` (offline payment, card
+settle, credit; real server over HTTP),
+`TestThresholdWriteOff_ImmediateCancelBillsOnlyTheResidual`,
+`TestThresholdWriteOff_CrossIntervalSwapBillsOnlyTheResidual`,
+`TestThresholdBilledThroughTx_WriteOffKeepsVoidDrops`,
+`TestThresholdScan_FireOnceProbe_SeesWrittenOffAndVoided`,
+`TestThresholdWatermarkReads_WriteOffKeepsWindow` (per status, per read),
+`TestUsageAfterClose_HeldReleaseUnderWrittenOffThresholdInvoice`,
+`TestUsageAfterClose_ThresholdWatermark_Unpaid` (write-off case now 5c),
+the doctor's seeded `doc_wo`/`doc_vd` pair and
+`TestRecoveryWarnsOnOfflinePayment`. The race, each red before the row
+lock: `TestThresholdVoid_vs_Close_VoidAfterReRead`,
+`TestThresholdVoid_vs_ImmediateCancel_VoidAfterRead`,
+`TestThresholdVoid_vs_PlanSwap_VoidAfterRead`. Controls that must not
+change: `TestThresholdWriteOff_VoidStillReopensTheWindow` (void, and
+write-off then void, still re-bill), `TestThresholdVoid_vs_Close_VoidInFlight`,
+`TestThresholdVoid_vs_Close_VoidHoldsTheRow` (the void holds the row at the
+re-read; the close waits and bills the window),
+`TestThresholdPayment_vs_Close_PaymentAfterReRead` (a payment after the
+re-read waits, no deadlock, the close bills the residual), and the
+`reset=true` test above.
+
+## Amendment 2026-10-23: `reset_billing_cycle` is removed
+
+A spend threshold always keeps the billing period. The option to start a
+new period at each fire is removed from the API, the dashboard and the
+database (migration 00205), approved by the product owner on 2026-10-23.
+Only Stripe has it; no open-source peer does.
+
+**The under-bill this ends.** §5's `{in_advance base × reset=true}`: on an
+anniversary subscription the fire started a period at the fire instant,
+the prepaid base covered it only to the old period's end, and the
+re-anchored period's close prepaid from its own end. The stretch between
+was billed by no invoice, once per fire. Reproduced on real Postgres before
+the removal: a sub starting April 1 on a 3000c in_advance base, a fire on
+April 20, closes through June. 6000c of base was billed where 9000c was
+owed, and May 1-20 was on no invoice. Locked by
+`TestThresholdInAdvanceBase_FireThenCloseBillsEveryMonth`: the API now
+refuses the option with 422, and the same scenario bills April, May and
+June in full.
+
+**What goes with it.** Decision 1 (the prorated base on a reset fire); the
+re-anchor arm of decision 2 (the fire keeps its one transaction, opened by
+the verify-only period CAS of ADR-115); the reset halves of decision 4 (a
+max or last bucket rode the fire and did not count toward the cap); and the
+`reset=true` paragraph of the write-off amendment. Everything this ADR
+says about `reset=false` is now what every fire does, except the base fee:
+see the [next amendment](#amendment-2026-10-23-a-fire-bills-usage-only).
+
+**Keep-anchor results do not change.** `TestThresholdKeepAnchor_InvoicesUnchanged`
+compares every invoice and line of four keep-anchor cases (an in_arrears
+base with sum and max meters closed by the cycle and by an immediate
+cancel, an in_advance base, an item threshold) with a golden file written
+on the code before the removal.
+
+**Tests.** Removed with the path: `TestEvaluateThresholds_ResetProratesBase`
+and its three denominator tests, `TestThresholdFire_ResetProratesBase_RealStore`,
+`TestFireThreshold_ResetTrue_MaxRides_ButExcludedFromCap` and
+`TestThresholdResetTrue_VoidOrWriteOff_CloseBillsOnlyTheNewPeriod`.
+Converted to the keep-anchor fire:
+`TestThresholdFire_ResetAtomic_RollsBackOnAdvanceFailure` is now
+`TestThresholdFire_Atomic_RollsBackOnInsertFailure`, and
+`TestScanThresholds_ResetAdvanceFailure_IsLoud` is now
+`TestScanThresholds_PeriodCASFailure_IsLoud`.
+
+**Data.** There is no upgrade from 0.8.x, but an install that ran a build
+of `main` from the switch to goose (#1198) on can upgrade, and those builds
+accepted `reset_billing_cycle: true`. The migration drops the column; it
+does not refuse. The value was configuration read only
+when a threshold fired, so no issued invoice changes, and keep-anchor is a
+true value for every such subscription from its next fire on. Its open
+period stays consistent: a fire that had re-anchored it left no threshold
+invoice in the new period, so the next fire or close bills it as any
+keep-anchor period. One gap stays: on an anniversary subscription with an
+in_advance base, a fire before the upgrade that started its current period
+left §5's slice unbilled (a fire on April 20 in an April period: May 1 to
+20). The migration does not move the period, so that period's close still
+bills from its own end. Seen in the code, not reproduced: the old fire
+cannot run on this code. The CHANGELOG has the query that lists such
+subscriptions before upgrading and says to bill the slice with a one-off
+invoice if wanted.
+
+## Amendment 2026-10-23: a fire bills usage only
+
+**The defect.** A fire billed the full in_arrears base for the period, and
+the period's closer skipped the base behind the watermark. The cycle close
+then billed the base once, but an immediate cancel billed none, so a
+cancel after a fire charged the whole period's base. Reproduced on real
+Postgres: a 3000c in_arrears base from April 1, a fire on April 20, an
+immediate cancel on April 25. The same cancel with no threshold bills 24 of
+30 days, 2400c; with the fire the customer paid 3000c. The same skip left
+an item added after the fire without its partial base (decision 5's
+"known imprecision").
+
+**Decision.** A threshold counts and bills usage only. The base fee, in
+advance or in arrears, never rides the fire and never counts toward
+`amount_gte`; it is billed as with no fire. An in_arrears base: the full
+base at the close, the used days on an immediate cancel, per segment after
+a plan or item change. An in_advance base stays on the invoice that billed
+the period in advance. Lago's progressive billing also
+counts usage-based charges billed in arrears toward its threshold and
+invoices the period's usage (docs.getlago.com, read 2026-10-23). An
+in_advance base was already left out of both. Rejected: prorating the base
+on the fire and billing the rest at the close (two roundings that need not add up to the base, and a residual base
+per segment), and crediting the unused base on cancel (a credit note for a
+charge that need not have been made).
+
+**What changes for operators.** An `amount_gte` that counted the base is
+reached later, by the base fee. A cap below the base no longer fires on the
+first scan of every period with the base alone. The threshold invoice is
+smaller by the base, and the period's invoice larger by it.
+
+**A fire made before this change** carries the full in_arrears base. The
+closers skip the base when the threshold invoice has a base line
+(`thresholdWatermark.billedBase`), keyed on the invoice like the §4
+exemption, so a period open across the upgrade bills its base once.
+
+**Tests.** `TestThresholdInArrearsBase_FireThenCancelBillsTheUsedDays`
+(red before: 3000c against 2400c),
+`TestThresholdInArrearsBase_FireThenCloseBillsTheBaseOnClose`,
+`TestThresholdInArrearsBase_LegacyFireWithBase_BilledOnce`,
+`TestEvaluateThresholds_InArrearsBaseExcluded`,
+`TestEvaluateThresholds_InArrearsBaseAloneDoesNotCross` and
+`TestCycleClose_AfterLegacyThresholdFireWithBase_SkipsBase`.
+`TestThresholdKeepAnchor_InvoicesUnchanged`'s golden file was rewritten on
+purpose: the threshold invoices lost their base line, the close and the
+cancel gained it, and every usage line stayed the same.

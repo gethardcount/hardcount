@@ -13,23 +13,22 @@ export interface MarginReport {
   customer_id: string;
   from: string;
   to: string;
-  /** Total rated usage revenue in the window. */
+  /** Total rated usage revenue in the window, an estimate at each subscription's current prices. Only active and trialing subscriptions are counted. */
   revenue_cents: number;
   /** Currency of revenue_cents (the customer's price rules). Omitted when the window's revenue spans more than one currency or the customer has no priced meter. */
   revenue_currency?: string;
-  /** Total stamped provider cost, micro-dollars. */
-  cost_micros: number;
-  /** Currency of cost_micros. Always USD. */
+  /** Total stamped provider cost in US cents, as a decimal string (e.g. "275.75"). */
+  cost_cents: string;
+  /** Currency of cost_cents. Always USD. */
   cost_currency: string;
   /** (revenue − cost) / revenue in basis points. Omitted when revenue is 0, when revenue_currency is not cost_currency, when costed_events is 0 (no provider cost known), or when unresolved_events is above 0 (part of the cost unknown, so the margin would read too high). */
   margin_bps?: number;
   by_model: MarginReportByModelItem[];
   unattributed_revenue_cents: number;
-  /** Token events with costable dims but no matching rate — add a rate to cost new events. */
+  /** Token events with costable dims but no cost — no rate matched (add a rate to cost new events), or the cost, quantity × `unit_cost_cents`, was too large to record (about $9.2 trillion or more, either sign). */
   unresolved_events: number;
   /** Events in the window that carry a stamped provider cost (zero cost included). 0 means the cost side is unknown. */
   costed_events: number;
   /** Whether the tenant has any provider cost rate. False with costed_events 0 means no rates are set up. */
   cost_rates_configured: boolean;
-  cache_write_excluded?: boolean;
 }

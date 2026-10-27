@@ -7,12 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net"
-	"os"
-	"runtime"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -48,92 +44,55 @@ const (
 // Context key for livemode propagation. Owned by the postgres package because
 // BeginTx is the single choke point that needs to read it — having the key
 // live here avoids circular imports between auth and postgres.
+// The value is stored as *bool so an explicit false can be told apart from
+// "never set".
 type livemodeCtxKey struct{}
 
-// Stored as *bool so BeginTx can distinguish "caller explicitly chose live"
-// from "nobody set this, defaulting to live". The public Livemode() still
-// returns a plain bool and keeps the default-to-live fallback — only BeginTx
-// and WithRequiredLivemode need to care about the set/unset distinction.
-
-// WithLivemode returns a derived context carrying the mode flag. BeginTx
-// reads this to set app.livemode on the tx session, which the RLS policy
-// uses to filter rows by mode alongside tenant.
+// WithLivemode returns a derived context carrying the mode flag. Every entry
+// point sets it: the auth middleware from the key or session, public links
+// from their token's row, and background workers per row or per mode. BeginTx
+// reads it to set app.livemode, which the RLS policy filters on alongside
+// tenant.
 func WithLivemode(ctx context.Context, live bool) context.Context {
 	return context.WithValue(ctx, livemodeCtxKey{}, &live)
 }
 
-// Livemode reads the livemode flag from ctx. Absent a value, defaults to
-// true — the RLS policy interprets unset as "live mode" so background
-// workers and bootstrap tooling that don't propagate mode operate safely
-// against production data by default. Callers that need to know whether
-// the value was set explicitly should use WithRequiredLivemode at their
-// entry point instead of inspecting the return value here.
-func Livemode(ctx context.Context) bool {
+// ErrLivemodeUnset means ctx carries no livemode. Every entry point sets one
+// with WithLivemode, so this is a bug at the entry point. Nothing guesses a
+// mode in its place: the database refuses an insert, and shows no row, when
+// app.livemode is unset (migrations 00213 and 00214).
+var ErrLivemodeUnset = errors.New("postgres: livemode was never set on ctx (set postgres.WithLivemode at the entry point)")
+
+// ErrTenantUnset means a tenant-scoped transaction was asked for with no
+// tenant ID.
+var ErrTenantUnset = errors.New("postgres: TxTenant opened with no tenant ID")
+
+// Livemode reads the livemode flag from ctx, or returns ErrLivemodeUnset.
+func Livemode(ctx context.Context) (bool, error) {
 	p, ok := ctx.Value(livemodeCtxKey{}).(*bool)
 	if !ok || p == nil {
-		return true
+		return false, ErrLivemodeUnset
 	}
-	return *p
-}
-
-// livemodeSet reports whether ctx had WithLivemode called on it anywhere up
-// the chain. Package-private because it's a diagnostic for BeginTx and
-// WithRequiredLivemode — callers that want the mode should use Livemode().
-func livemodeSet(ctx context.Context) bool {
-	p, ok := ctx.Value(livemodeCtxKey{}).(*bool)
-	return ok && p != nil
-}
-
-// WithRequiredLivemode asserts that ctx has an explicit livemode set, and
-// returns ctx unchanged if so. Panics otherwise. Call at the top of any
-// background worker or scheduler path that opens a TxTenant — it catches
-// "I forgot to fan out per mode" at the fan-out site instead of 30 frames
-// deeper, where the bug would surface as silent test-mode data loss.
-func WithRequiredLivemode(ctx context.Context) context.Context {
-	if !livemodeSet(ctx) {
-		panic("velox: background worker entered a mode-aware path without explicit livemode — wrap ctx with postgres.WithLivemode(ctx, true/false) at the fan-out site")
-	}
-	return ctx
-}
-
-// livemodeStrict reports whether the process should escalate unset-livemode
-// warnings to panics. Enabled in tests (via VELOX_LIVEMODE_STRICT=true) so
-// any test that opens a TxTenant without setting a mode fails loudly
-// instead of silently routing to live. Default off in production — the
-// warning is the signal, crashing a live install over a forgotten
-// propagation is not.
-func livemodeStrict() bool {
-	return strings.EqualFold(os.Getenv("VELOX_LIVEMODE_STRICT"), "true")
-}
-
-// unsetLivemodeSeen tracks call sites that have already logged the
-// "TxTenant opened without ctx livemode" warning. The warning is valuable
-// the first time per site but noisy if fired for every tick of a long-
-// running scheduler — dedup on caller file:line so operators get one log
-// line per forgotten propagation, not one per request.
-var unsetLivemodeSeen sync.Map // map[string]struct{}
-
-// reportUnsetLivemode logs (or panics under strict mode) when a TxTenant
-// opens without ctx livemode. Skip is the number of stack frames above
-// this function to attribute the warning to — 2 lands on the caller of
-// BeginTx, which is the interesting site.
-func reportUnsetLivemode(skip int) {
-	_, file, line, ok := runtime.Caller(skip)
-	site := "unknown"
-	if ok {
-		site = fmt.Sprintf("%s:%d", file, line)
-	}
-	msg := "TxTenant opened without ctx livemode; defaulting to live. Wrap ctx with postgres.WithLivemode(ctx, true/false) at the entry point."
-	if livemodeStrict() {
-		panic(fmt.Sprintf("velox (VELOX_LIVEMODE_STRICT): %s caller=%s", msg, site))
-	}
-	if _, loaded := unsetLivemodeSeen.LoadOrStore(site, struct{}{}); loaded {
-		return
-	}
-	slog.Warn("velox: livemode propagation missing", "caller", site, "detail", msg)
+	return *p, nil
 }
 
 func (db *DB) BeginTx(ctx context.Context, mode TxMode, tenantID string) (*sql.Tx, error) {
+	var tid, lm string
+	if mode == TxTenant {
+		tid = strings.TrimSpace(tenantID)
+		if tid == "" {
+			return nil, ErrTenantUnset
+		}
+		live, err := Livemode(ctx)
+		if err != nil {
+			return nil, err
+		}
+		lm = "off"
+		if live {
+			lm = "on"
+		}
+	}
+
 	tx, err := db.Pool.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -141,45 +100,15 @@ func (db *DB) BeginTx(ctx context.Context, mode TxMode, tenantID string) (*sql.T
 
 	switch mode {
 	case TxTenant:
-		// Every TxTenant MUST carry an explicit livemode. Silent default-
-		// to-live is exactly the no-silent-fallbacks rule's failure mode —
-		// a forgotten propagation in test-mode code would route the
-		// operation against live data and corrupt accounting.
-		//
-		// Test-mode escalation: under VELOX_LIVEMODE_STRICT (set by
-		// `make test*`) a missing propagation panics, so any new code
-		// without a WithLivemode wrap fails the suite at PR time.
-		//
-		// Production: refuse to open the transaction. The handler bubbles
-		// the error up as a 500 — loud and immediately visible to the
-		// operator, never silently corrupting data. The Makefile-strict
-		// test gate is what keeps this safe; the audit on 2026-05-07
-		// fixed every known site, so a regression here means a NEW
-		// missed propagation that bypassed tests.
-		//
-		// skip=3: runtime.Caller → reportUnsetLivemode → BeginTx → caller.
-		if !livemodeSet(ctx) {
-			reportUnsetLivemode(3)
-			_ = tx.Rollback()
-			return nil, fmt.Errorf("postgres: TxTenant opened without ctx livemode (set postgres.WithLivemode at the entry point)")
-		}
 		if _, err := tx.ExecContext(ctx, `SELECT set_config('app.bypass_rls', 'off', true)`); err != nil {
 			_ = tx.Rollback()
 			return nil, err
-		}
-		tid := strings.TrimSpace(tenantID)
-		if tid == "" {
-			tid = "default"
 		}
 		if _, err := tx.ExecContext(ctx, `SELECT set_config('app.tenant_id', $1, true)`, tid); err != nil {
 			_ = tx.Rollback()
 			return nil, err
 		}
-		mode := "on"
-		if !Livemode(ctx) {
-			mode = "off"
-		}
-		if _, err := tx.ExecContext(ctx, `SELECT set_config('app.livemode', $1, true)`, mode); err != nil {
+		if _, err := tx.ExecContext(ctx, `SELECT set_config('app.livemode', $1, true)`, lm); err != nil {
 			_ = tx.Rollback()
 			return nil, err
 		}
@@ -235,17 +164,12 @@ func IsUniqueViolation(err error) bool {
 	return false
 }
 
-// IsExclusionViolation reports whether err is a Postgres EXCLUDE-constraint
-// violation (SQLSTATE 23P01) — the signature of two writers reconstructing
-// the same range, e.g. two replicas running the boot-time billing_intervals
-// backfill on one partition; the second committer sees this after the first
-// commits, and the table is already correct.
-func IsExclusionViolation(err error) bool {
+// IsDeadlock reports whether err is Postgres aborting the transaction to
+// break a deadlock (SQLSTATE 40P01). Nothing the transaction wrote is kept,
+// so running it again from the start is safe.
+func IsDeadlock(err error) bool {
 	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) {
-		return pgErr.Code == "23P01"
-	}
-	return false
+	return errors.As(err, &pgErr) && pgErr.Code == "40P01"
 }
 
 // UniqueViolationConstraint returns the constraint name if err is a Postgres
@@ -361,86 +285,4 @@ func NullableTime(v *time.Time) any {
 		return nil
 	}
 	return *v
-}
-
-// StringArray is a []string that implements sql.Scanner and driver.Valuer
-// for PostgreSQL TEXT[] columns.
-type StringArray []string
-
-// Value converts the StringArray to a PostgreSQL array literal.
-//
-// Observed with the pgx stdlib driver: a nil StringArray reaches Postgres as
-// NULL, not '{}', despite the nil branch below. For a negated test that
-// matters: NOT (x = ANY(NULL)) is NULL and filters out every row. COALESCE
-// the parameter in SQL when nil can reach a NOT ANY / <> ALL
-// (TestDueScans_ExcludeAppliesBeforeLimit fails without it).
-func (a StringArray) Value() (interface{}, error) {
-	if a == nil {
-		return "{}", nil
-	}
-	if len(a) == 0 {
-		return "{}", nil
-	}
-	elements := make([]string, len(a))
-	for i, s := range a {
-		// Escape double quotes and backslashes inside elements
-		escaped := strings.ReplaceAll(s, `\`, `\\`)
-		escaped = strings.ReplaceAll(escaped, `"`, `\"`)
-		elements[i] = `"` + escaped + `"`
-	}
-	return "{" + strings.Join(elements, ",") + "}", nil
-}
-
-// Scan parses a PostgreSQL TEXT[] value into a StringArray.
-func (a *StringArray) Scan(src interface{}) error {
-	if src == nil {
-		*a = StringArray{}
-		return nil
-	}
-	var s string
-	switch v := src.(type) {
-	case string:
-		s = v
-	case []byte:
-		s = string(v)
-	default:
-		return fmt.Errorf("StringArray.Scan: unsupported type %T", src)
-	}
-	// Trim outer braces
-	s = strings.TrimSpace(s)
-	if s == "{}" || s == "" {
-		*a = StringArray{}
-		return nil
-	}
-	s = s[1 : len(s)-1] // Remove { and }
-	var result []string
-	var current strings.Builder
-	inQuote := false
-	escaped := false
-	for _, ch := range s {
-		if escaped {
-			current.WriteRune(ch)
-			escaped = false
-			continue
-		}
-		if ch == '\\' {
-			escaped = true
-			continue
-		}
-		if ch == '"' {
-			inQuote = !inQuote
-			continue
-		}
-		if ch == ',' && !inQuote {
-			result = append(result, current.String())
-			current.Reset()
-			continue
-		}
-		current.WriteRune(ch)
-	}
-	if current.Len() > 0 {
-		result = append(result, current.String())
-	}
-	*a = result
-	return nil
 }

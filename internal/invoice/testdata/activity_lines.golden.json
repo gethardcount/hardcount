@@ -754,6 +754,94 @@
     ]
   },
   {
+    "case": "attempt/below_minimum/auto_charge",
+    "line": {
+      "id": "attempt/below_minimum/auto_charge",
+      "kind": "payment.below_minimum",
+      "title": "Charge refused by Stripe",
+      "amount": {
+        "cents": 4900,
+        "currency": "USD"
+      },
+      "problem": "The amount is below Stripe's minimum charge. Nothing was charged.",
+      "detail": [],
+      "tone": "warning",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Charge refused by Stripe · $49.00",
+      "problem: The amount is below Stripe's minimum charge. Nothing was charged.",
+      "tone: warning"
+    ]
+  },
+  {
+    "case": "attempt/below_minimum/charge_now",
+    "line": {
+      "id": "attempt/below_minimum/charge_now",
+      "kind": "payment.below_minimum",
+      "title": "Charge refused by Stripe",
+      "amount": {
+        "cents": 4900,
+        "currency": "USD"
+      },
+      "problem": "The amount is below Stripe's minimum charge. Nothing was charged.",
+      "detail": [],
+      "tone": "warning",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Charge refused by Stripe · $49.00",
+      "problem: The amount is below Stripe's minimum charge. Nothing was charged.",
+      "tone: warning"
+    ]
+  },
+  {
+    "case": "attempt/below_minimum/dunning_retry",
+    "line": {
+      "id": "attempt/below_minimum/dunning_retry",
+      "kind": "payment.below_minimum",
+      "title": "Charge refused by Stripe",
+      "amount": {
+        "cents": 4900,
+        "currency": "USD"
+      },
+      "problem": "The amount is below Stripe's minimum charge. Nothing was charged.",
+      "detail": [],
+      "actor": {
+        "kind": "automatic"
+      },
+      "tone": "warning",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Charge refused by Stripe · $49.00",
+      "problem: The amount is below Stripe's minimum charge. Nothing was charged.",
+      "meta: Automatic",
+      "tone: warning"
+    ]
+  },
+  {
+    "case": "attempt/below_minimum/external",
+    "line": {
+      "id": "attempt/below_minimum/external",
+      "kind": "payment.below_minimum",
+      "title": "Charge refused by Stripe",
+      "amount": {
+        "cents": 4900,
+        "currency": "USD"
+      },
+      "problem": "The amount is below Stripe's minimum charge. Nothing was charged.",
+      "detail": [],
+      "tone": "warning",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Charge refused by Stripe · $49.00",
+      "problem: The amount is below Stripe's minimum charge. Nothing was charged.",
+      "tone: warning"
+    ]
+  },
+  {
     "case": "attempt/failed/auto_charge",
     "line": {
       "id": "attempt/failed/auto_charge",
@@ -1095,6 +1183,27 @@
       "Payment result unknown · $49.00",
       "problem: The payment provider has not confirmed whether this charge went through.",
       "tone: warning"
+    ]
+  },
+  {
+    "case": "decline/authentication_required",
+    "line": {
+      "id": "decline/authentication_required",
+      "kind": "payment.failed",
+      "title": "Payment failed",
+      "amount": {
+        "cents": 4900,
+        "currency": "USD"
+      },
+      "problem": "The bank asked the customer to confirm this payment",
+      "detail": [],
+      "tone": "failure",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Payment failed · $49.00",
+      "problem: The bank asked the customer to confirm this payment",
+      "tone: failure"
     ]
   },
   {
@@ -7413,25 +7522,6 @@
     ]
   },
   {
-    "case": "dunning/type/paused",
-    "line": {
-      "id": "dunning/type/paused",
-      "kind": "payment_recovery.updated",
-      "title": "Payment recovery updated",
-      "detail": [],
-      "actor": {
-        "kind": "automatic"
-      },
-      "tone": "neutral",
-      "occurred_at": "2027-02-01T04:30:00Z"
-    },
-    "text": [
-      "Payment recovery updated",
-      "meta: Automatic",
-      "tone: neutral"
-    ]
-  },
-  {
     "case": "dunning/type/resolved",
     "line": {
       "id": "dunning/type/resolved",
@@ -7446,25 +7536,6 @@
     },
     "text": [
       "Payment recovery ended",
-      "meta: Automatic",
-      "tone: neutral"
-    ]
-  },
-  {
-    "case": "dunning/type/resumed",
-    "line": {
-      "id": "dunning/type/resumed",
-      "kind": "payment_recovery.updated",
-      "title": "Payment recovery updated",
-      "detail": [],
-      "actor": {
-        "kind": "automatic"
-      },
-      "tone": "neutral",
-      "occurred_at": "2027-02-01T04:30:00Z"
-    },
-    "text": [
-      "Payment recovery updated",
       "meta: Automatic",
       "tone: neutral"
     ]
@@ -7486,63 +7557,6 @@
       "Payment retry 1 failed",
       "meta: Automatic",
       "tone: failure"
-    ]
-  },
-  {
-    "case": "dunning/type/retry_failed",
-    "line": {
-      "id": "dunning/type/retry_failed",
-      "kind": "payment_recovery.updated",
-      "title": "Payment recovery updated",
-      "detail": [],
-      "actor": {
-        "kind": "automatic"
-      },
-      "tone": "neutral",
-      "occurred_at": "2027-02-01T04:30:00Z"
-    },
-    "text": [
-      "Payment recovery updated",
-      "meta: Automatic",
-      "tone: neutral"
-    ]
-  },
-  {
-    "case": "dunning/type/retry_scheduled",
-    "line": {
-      "id": "dunning/type/retry_scheduled",
-      "kind": "payment_recovery.updated",
-      "title": "Payment recovery updated",
-      "detail": [],
-      "actor": {
-        "kind": "automatic"
-      },
-      "tone": "neutral",
-      "occurred_at": "2027-02-01T04:30:00Z"
-    },
-    "text": [
-      "Payment recovery updated",
-      "meta: Automatic",
-      "tone: neutral"
-    ]
-  },
-  {
-    "case": "dunning/type/retry_succeeded",
-    "line": {
-      "id": "dunning/type/retry_succeeded",
-      "kind": "payment_recovery.updated",
-      "title": "Payment recovery updated",
-      "detail": [],
-      "actor": {
-        "kind": "automatic"
-      },
-      "tone": "neutral",
-      "occurred_at": "2027-02-01T04:30:00Z"
-    },
-    "text": [
-      "Payment recovery updated",
-      "meta: Automatic",
-      "tone: neutral"
     ]
   },
   {
@@ -7708,6 +7722,33 @@
     "text": [
       "Payment retry 2 not attempted",
       "problem: The bank refused this card for good. The customer needs to add a different card.",
+      "meta: Payment reminder email delivered · Automatic",
+      "tone: warning"
+    ]
+  },
+  {
+    "case": "dunning/retry/needs_confirmation",
+    "line": {
+      "id": "dunning/retry/needs_confirmation",
+      "kind": "payment_recovery.retry_not_attempted",
+      "title": "Payment retry 2 not attempted",
+      "problem": "The bank asked the customer to confirm this payment. They can pay and confirm it on the hosted invoice page.",
+      "detail": [
+        [
+          {
+            "text": "Payment reminder email delivered"
+          }
+        ]
+      ],
+      "actor": {
+        "kind": "automatic"
+      },
+      "tone": "warning",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Payment retry 2 not attempted",
+      "problem: The bank asked the customer to confirm this payment. They can pay and confirm it on the hosted invoice page.",
       "meta: Payment reminder email delivered · Automatic",
       "tone: warning"
     ]

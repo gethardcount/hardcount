@@ -40,8 +40,9 @@ type Config struct {
 	// flipping /health/ready to 503 'draining' on SIGTERM, so a health-check
 	// driven load balancer stops routing to it before in-flight requests are
 	// drained. Env SHUTDOWN_DRAIN_DELAY (Go duration). Default 5s outside
-	// local, 0 in local. Part of the published 90s shutdown budget
-	// (cmd/velox/main.go).
+	// local, 0 in local. It comes before the published 90s three-stage
+	// shutdown budget (cmd/velox/main.go), so the worst case is this delay
+	// plus 90s.
 	ShutdownDrainDelay time.Duration
 
 	// InvoiceGracePeriod is how long after a billing period ends (or after a

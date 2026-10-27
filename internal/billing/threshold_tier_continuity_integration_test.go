@@ -2,7 +2,7 @@ package billing_test
 
 import (
 	"context"
-	"strings"
+	"github.com/sagarsuperuser/velox/internal/usage"
 	"testing"
 	"time"
 
@@ -10,7 +10,6 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
-	"github.com/sagarsuperuser/velox/internal/pricing"
 	"github.com/sagarsuperuser/velox/internal/subscription"
 )
 
@@ -22,14 +21,13 @@ import (
 // the block usage cap that did (#973: under a 1,000-unit cap the close
 // billed $46.15, so fire + close was $116.15 for F(1300) = $106) is cut.
 //
-// The graduated version is published under the meter's rule key BEFORE the
-// period opened while the meter's binding still pins the flat v1 — so both
-// invoices resolve to v2 and the seed must be looked up by the RESOLVED id;
-// a key on the binding finds nothing and restarts the tiers.
+// The fixture's price is edited to the graduated ladder in a version in
+// force from before the period opened, so both invoices price at it; the
+// ladder's seed is looked up by the price's id (ADR-130 §9), which the edit
+// keeps.
 type p21Fire struct {
 	f         *thresholdFixture
 	ctx       context.Context
-	v1, v2    domain.RatingRuleVersion
 	fireID    string
 	fireTotal int64
 	fireUpper time.Time
@@ -41,27 +39,17 @@ func p21FireAt700(t *testing.T, name string, beforeFire func(p *p21Fire)) *p21Fi
 	ctx := postgres.WithLivemode(context.Background(), false)
 	p := &p21Fire{f: f, ctx: ctx}
 
-	p.v1 = f.seededRule(t, ctx)
-	backdateRuleVersion(t, f, ctx, p.v1.ID, f.cycleStart.Add(-3*time.Hour))
-	v2, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "calls_flat", Name: "Calls Graduated", Mode: domain.PricingGraduated, Currency: "USD",
-		GraduatedTiers: []domain.RatingTier{
-			{UpTo: 1000, UnitAmountCents: decimal.NewFromInt(10)},
-			{UpTo: 0, UnitAmountCents: decimal.NewFromInt(2)},
-		},
-	})
-	if err != nil {
-		t.Fatalf("publish graduated v2: %v", err)
-	}
-	backdateRuleVersion(t, f, ctx, v2.ID, f.cycleStart.Add(-2*time.Hour))
-	p.v2 = v2
+	editPrice(t, f.db, ctx, f.tenantID, f.planID, f.priceID, domain.PriceShape{Mode: domain.PricingGraduated, Tiers: []domain.RatingTier{
+		{UpTo: new(int64(1000)), UnitAmountCents: decimal.NewFromInt(10)},
+		{UpTo: nil, UnitAmountCents: decimal.NewFromInt(2)},
+	}})
+	backdateLatestVersion(t, f.db, ctx, f.priceID, f.cycleStart.Add(-2*time.Hour))
 	if beforeFire != nil {
 		beforeFire(p)
 	}
 
-	noReset := false
 	if _, err := f.subSvc.SetBillingThresholds(ctx, f.tenantID, f.subID, subscription.BillingThresholdsInput{
-		AmountGTE: 5000, ResetBillingCycle: &noReset,
+		AmountGTE: 5000,
 	}); err != nil {
 		t.Fatalf("set thresholds: %v", err)
 	}
@@ -169,63 +157,27 @@ func TestImmediateCancel_GraduatedTiersContinueAcrossFire_RealStore(t *testing.T
 	}
 }
 
-// A pricing rule whose version resolves to the same version as the meter's
-// default binding makes the fire's line ambiguous (lines carry no
-// pricing-rule id): the close refuses loudly instead of guessing whose tiers
-// to continue. Pinned to v1 (the binding itself) and to v2 (a different pin
-// that resolves to the same graduated version) — the guard must compare
-// RESOLVED versions.
-func TestThresholdCycle_AmbiguousSeedFailsLoud_RealStore(t *testing.T) {
-	for _, pin := range []string{"v1", "v2"} {
-		t.Run("rule pinned to "+pin, func(t *testing.T) {
-			p := p21FireAt700(t, "P21 Ambiguous Seed "+pin, func(p *p21Fire) {
-				id := p.v1.ID
-				if pin == "v2" {
-					id = p.v2.ID
-				}
-				if _, err := p.f.pricingSvc.UpsertMeterPricingRule(p.ctx, p.f.tenantID, pricing.UpsertMeterPricingRuleInput{
-					MeterID: p.f.meterID, RatingRuleVersionID: id,
-					DimensionMatch: map[string]any{"model": "gpt"}, AggregationMode: domain.AggSum,
-				}); err != nil {
-					t.Fatalf("pricing rule: %v", err)
-				}
-			})
-			newEnd := p.fireUpper.Add(2 * time.Second).Truncate(time.Microsecond)
-			p.seedAfterFire(t, 600, &newEnd)
-			if wait := time.Until(newEnd.Add(500 * time.Millisecond)); wait > 0 {
-				time.Sleep(wait)
-			}
-			generated, failures := p.f.engine.RunCycleForTenant(p.ctx, p.f.tenantID, 50)
-			if generated != 0 || len(failures) == 0 || !strings.Contains(failures[0].Error(), "resolve to rating rule") {
-				t.Fatalf("cycle: generated=%d failures=%v, want the ambiguous-seed error and no invoice", generated, failures)
-			}
-		})
-	}
-}
-
-// The multi-dim close path (a meter with pricing rules) continues the
-// unclaimed bucket's ladder too: a pricing rule on a DIFFERENT graduated rule
-// key keeps the buckets unambiguous, so the default bucket (no dimensions)
-// continues from the fire's 700 units.
-func TestThresholdCycle_MultiDimBucketContinuesAcrossFire_RealStore(t *testing.T) {
-	p := p21FireAt700(t, "P21 Multi-dim", func(p *p21Fire) {
-		other, err := p.f.pricingSvc.CreateRatingRule(p.ctx, p.f.tenantID, pricing.CreateRatingRuleInput{
-			RuleKey: "gpt_calls", Name: "GPT Calls", Mode: domain.PricingGraduated, Currency: "USD",
-			GraduatedTiers: []domain.RatingTier{{UpTo: 100, UnitAmountCents: decimal.NewFromInt(50)}, {UpTo: 0, UnitAmountCents: decimal.NewFromInt(5)}},
-		})
-		if err != nil {
-			t.Fatalf("other rule: %v", err)
-		}
-		backdateRuleVersion(t, p.f, p.ctx, other.ID, p.f.cycleStart.Add(-2*time.Hour))
-		if _, err := p.f.pricingSvc.UpsertMeterPricingRule(p.ctx, p.f.tenantID, pricing.UpsertMeterPricingRuleInput{
-			MeterID: p.f.meterID, RatingRuleVersionID: other.ID,
-			DimensionMatch: map[string]any{"model": "gpt"}, AggregationMode: domain.AggSum,
+// A meter with several prices is read per price (AggregateClaims); each
+// price's ladder continues there. The ladder is keyed by price id (ADR-130
+// §9): the fire bills two lines on the meter, the catch-all's 700 units and
+// a graduated model=gpt price's 50, and the close seeds each price from its
+// own line. Keyed by meter, the close could not tell the two lines apart.
+func TestThresholdCycle_MultiPriceBucketContinuesAcrossFire_RealStore(t *testing.T) {
+	p := p21FireAt700(t, "P21 Multi-price", func(p *p21Fire) {
+		other := addPrice(t, p.f.db, p.ctx, p.f.tenantID, p.f.planID, priceOn{meterID: p.f.meterID, match: map[string]string{"model": "gpt"},
+			shape: domain.PriceShape{Mode: domain.PricingGraduated, Tiers: []domain.RatingTier{{UpTo: new(int64(100)), UnitAmountCents: decimal.NewFromInt(50)}, {UpTo: nil, UnitAmountCents: decimal.NewFromInt(5)}}}})
+		backdatePriceVersions(t, p.f.db, p.ctx, other.ID, p.f.cycleStart.Add(-2*time.Hour))
+		// 50 gpt units: 50 × 50 = 2500, inside the first tier.
+		ts := p.f.cycleStart.Add(30 * time.Second)
+		if _, err := p.f.usageSvc.Ingest(p.ctx, p.f.tenantID, usage.IngestInput{
+			CustomerID: p.f.customerID, MeterID: p.f.meterID, Quantity: decimal.NewFromInt(50),
+			Timestamp: &ts, Dimensions: map[string]any{"model": "gpt"},
 		}); err != nil {
-			t.Fatalf("pricing rule: %v", err)
+			t.Fatalf("ingest gpt usage: %v", err)
 		}
 	})
-	if p.fireTotal != 7000 {
-		t.Fatalf("fire usage = %d, want 7000 (the unclaimed bucket on v2)", p.fireTotal)
+	if p.fireTotal != 9500 {
+		t.Fatalf("fire usage = %d, want 9500 (7000 for the catch-all bucket, 2500 for gpt)", p.fireTotal)
 	}
 	newEnd := p.fireUpper.Add(2 * time.Second).Truncate(time.Microsecond)
 	p.seedAfterFire(t, 600, &newEnd)
@@ -241,7 +193,7 @@ func TestThresholdCycle_MultiDimBucketContinuesAcrossFire_RealStore(t *testing.T
 			continue
 		}
 		if got, _ := usageLineTotal(t, p.f, p.ctx, inv.ID); got != 3600 {
-			t.Errorf("multi-dim close usage = %d, want 3600 (continuing the ladder); 6000 is the restarted ladder", got)
+			t.Errorf("multi-price close usage = %d, want 3600 (the catch-all continuing its ladder, gpt adding nothing); 6000 is the restarted ladder", got)
 		}
 	}
 }

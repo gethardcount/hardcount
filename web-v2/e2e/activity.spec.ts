@@ -80,9 +80,7 @@ function planBilledInAdvance(): Promise<Plan> {
 async function ownRetryPolicy(customerId: string) {
   const policy = {
     name: `E2E Activity retries ${uniq()}`,
-    max_retry_attempts: 3,
-    grace_period_days: 3,
-    retry_schedule: ['96h', '168h'],
+    retry_days: [3, 4, 7],
     final_subscription_action: 'pause',
     final_invoice_action: 'none',
   }
@@ -99,7 +97,6 @@ function subscribe(customerId: string, planId: string, extra: Record<string, unk
     customer_id: customerId,
     items: [{ plan_id: planId, quantity: 1 }],
     billing_time: 'anniversary',
-    start_now: true,
     ...extra,
   })
 }
@@ -138,7 +135,7 @@ async function shootCard(page: Page, target: Locator, name: string) {
   await atEachWidth(page, name, file => target.screenshot({ path: file, animations: 'disabled' }))
 }
 
-const STATE_FILTER: Record<string, string> = { active: 'Active', escalated: 'Escalated', resolved: 'Recovered' }
+const STATE_FILTER: Record<string, string> = { active: 'Active', escalated: 'Escalated', resolved: 'Resolved' }
 const RUNS_PAGE_SIZE = 25
 
 // The Dunning page has no link to a single run and reads no URL parameters,

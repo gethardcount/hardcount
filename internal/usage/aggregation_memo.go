@@ -2,6 +2,7 @@ package usage
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"sync"
@@ -10,9 +11,9 @@ import (
 	"github.com/sagarsuperuser/velox/internal/domain"
 )
 
-// AggregationMemo remembers AggregateByPricingRules results for the length of
-// one request, so two readers that need the same (customer, meter, window)
-// run the scan once.
+// AggregationMemo remembers AggregateClaims results for the length of one
+// request, so two readers that need the same (customer, meter, claims,
+// window) run the scan once.
 //
 // It exists for the public cost dashboard: the page shows this period's usage
 // (CustomerUsageService) and an estimated remaining credit
@@ -31,7 +32,7 @@ import (
 // see usage that arrives later.
 type AggregationMemo struct {
 	mu      sync.Mutex
-	results map[string][]domain.RuleAggregation
+	results map[string][]domain.ClaimedUsage
 	queries int
 	hits    int
 }
@@ -45,7 +46,7 @@ func WithAggregationMemo(ctx context.Context) (context.Context, *AggregationMemo
 	if m, ok := ctx.Value(aggregationMemoKey{}).(*AggregationMemo); ok {
 		return ctx, m
 	}
-	m := &AggregationMemo{results: map[string][]domain.RuleAggregation{}}
+	m := &AggregationMemo{results: map[string][]domain.ClaimedUsage{}}
 	return context.WithValue(ctx, aggregationMemoKey{}, m), m
 }
 
@@ -66,7 +67,7 @@ func (m *AggregationMemo) Hits() int {
 // through answers from the memo, or runs query and remembers its result.
 // Errors are not remembered. Results are copied in and out so a caller that
 // rewrites its slice cannot change what the next reader gets.
-func (m *AggregationMemo) through(key string, query func() ([]domain.RuleAggregation, error)) ([]domain.RuleAggregation, error) {
+func (m *AggregationMemo) through(key string, query func() ([]domain.ClaimedUsage, error)) ([]domain.ClaimedUsage, error) {
 	m.mu.Lock()
 	if got, ok := m.results[key]; ok {
 		m.hits++
@@ -86,6 +87,14 @@ func (m *AggregationMemo) through(key string, query func() ([]domain.RuleAggrega
 	return got, nil
 }
 
-func aggregationMemoKeyFor(tenantID, customerID, meterID string, defaultMode domain.AggregationMode, from, to time.Time) string {
-	return fmt.Sprintf("%s|%s|%s|%s|%d|%d", tenantID, customerID, meterID, defaultMode, from.UnixNano(), to.UnixNano())
+// aggregationMemoKeyFor keys a result by everything that decides it,
+// the claims included: two readers that claim a meter's events differently
+// get different buckets.
+func aggregationMemoKeyFor(tenantID, customerID, meterID, aggregation string, claims []domain.UsageClaim, from, to time.Time) string {
+	c, err := json.Marshal(claims)
+	if err != nil {
+		// Unmarshalable claims fail the query itself; never share a result.
+		c = []byte(fmt.Sprintf("unkeyable:%p", &claims))
+	}
+	return fmt.Sprintf("%s|%s|%s|%s|%d|%d|%s", tenantID, customerID, meterID, aggregation, from.UnixNano(), to.UnixNano(), c)
 }

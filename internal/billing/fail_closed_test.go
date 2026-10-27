@@ -9,6 +9,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/tax"
 )
 
@@ -119,21 +120,19 @@ func TestRunCycle_MeterReadBlipFailsTheClose(t *testing.T) {
 	}
 }
 
-// A threshold fire's lines come from the preview path. A meter whose pinned
-// rating rule is missing used to be skipped with a warning, so the fire
-// invoice under-billed while the cycle close failed loudly on the same rule.
-// Now the evaluation fails like the close does.
-func TestEvaluateThresholds_MissingRuleFails(t *testing.T) {
-	thresholds := &domain.BillingThresholds{AmountGTE: 100, ResetBillingCycle: false}
+// A threshold fire's lines come from the rater. A meter whose price could
+// not be read used to be skipped with a warning, so the fire invoice
+// under-billed while the cycle close failed loudly on the same read. Now the
+// evaluation fails like the close does.
+func TestEvaluateThresholds_PriceReadFails(t *testing.T) {
+	thresholds := &domain.BillingThresholds{AmountGTE: 100}
 	engine, _, _ := setupThresholdEngine(thresholds, 1500)
 	mp := engine.pricing.(*mockPricing)
-	for id := range mp.rules {
-		delete(mp.rules, id) // every pinned rule is now missing
-	}
+	mp.pricesErr = errors.New("db down")
 	sub, _ := engine.subs.Get(context.Background(), "t1", "sub_1")
 	periodStart := *sub.CurrentBillingPeriodStart
 	if _, err := engine.evaluateThresholds(context.Background(), sub, periodStart, periodStart.AddDate(0, 0, 5)); err == nil {
-		t.Fatal("evaluateThresholds with a missing pinned rule must fail, not drop the line")
+		t.Fatal("evaluateThresholds with a failed price read must fail, not drop the line")
 	}
 }
 
@@ -175,7 +174,7 @@ func TestCheckTaxCalculationUsable_ResolveErrorFails(t *testing.T) {
 // negative mid-period. That must not abort the threshold evaluation (which
 // would stop every threshold on the subscription from firing): it counts as 0.
 func TestEvaluateThresholds_NegativeRunningUsageCountsAsZero(t *testing.T) {
-	thresholds := &domain.BillingThresholds{AmountGTE: 100, ResetBillingCycle: false}
+	thresholds := &domain.BillingThresholds{AmountGTE: 100}
 	engine, _, _ := setupThresholdEngine(thresholds, -500)
 	sub, _ := engine.subs.Get(context.Background(), "t1", "sub_1")
 	periodStart := *sub.CurrentBillingPeriodStart
@@ -226,13 +225,13 @@ func TestRunCycle_CurrencyProfileReadErrorFails(t *testing.T) {
 	// before tax — so a later read (tax) succeeds and only the currency
 	// fix can stop the invoice.
 	engine.profiles = &blipFirstProfile{taxProfiles: &taxProfiles{profiles: map[string]domain.CustomerBillingProfile{}}}
-	if count, errs := engine.RunCycle(context.Background(), 50, nil); count != 0 || len(errs) == 0 || len(invoices.invoices) != 0 {
+	if count, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil); count != 0 || len(errs) == 0 || len(invoices.invoices) != 0 {
 		t.Fatalf("RunCycle = %d invoice(s), stored=%d, errs %v; want none and an error", count, len(invoices.invoices), errs)
 	}
 
 	engine, _, _, _, invoices = setupEngine()
 	engine.profiles = &taxProfiles{profiles: map[string]domain.CustomerBillingProfile{}}
-	if count, errs := engine.RunCycle(context.Background(), 50, nil); count != 1 || len(errs) != 0 {
+	if count, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil); count != 1 || len(errs) != 0 {
 		t.Fatalf("no profile: RunCycle = %d, %v; want 1 invoice", count, errs)
 	}
 	if got := invoices.invoices[0].Currency; got != "USD" {

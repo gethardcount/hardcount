@@ -110,9 +110,6 @@ type dedupeFakeStripe struct {
 func (f *dedupeFakeStripe) EnsureStripeCustomer(_ context.Context, _, _ string) (string, error) {
 	return "cus_stripe_dedupe", nil
 }
-func (f *dedupeFakeStripe) CreateSetupIntent(_ context.Context, _ string, _ map[string]string) (string, string, error) {
-	return "seti_secret_dedupe", "seti_dedupe", nil
-}
 func (f *dedupeFakeStripe) CreateSetupCheckoutSession(_ context.Context, _, _, _ string, _ map[string]string) (string, string, error) {
 	return "https://checkout.stripe.com/dedupe", "cs_dedupe", nil
 }

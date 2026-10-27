@@ -477,6 +477,11 @@ func newMockInvoiceUpdaterH() *mockInvoiceUpdaterHandler {
 
 // StampChargeOutcome: the webhook-handler tests never run the charge path,
 // so this fake does not model the attempt-seq CAS (see mockInvoiceUpdater).
+// StampBelowMinimum: the webhook handler tests never charge.
+func (m *mockInvoiceUpdaterHandler) StampBelowMinimum(context.Context, string, string, int64, string) (domain.Invoice, bool, error) {
+	return domain.Invoice{}, false, fmt.Errorf("mockInvoiceUpdaterHandler: StampBelowMinimum not expected")
+}
+
 func (m *mockInvoiceUpdaterHandler) StampChargeOutcome(_ context.Context, tenantID, id string, _ int64, ps domain.InvoicePaymentStatus, piID, errMsg string) (domain.Invoice, bool, error) {
 	inv, ok := m.invoices[id]
 	if !ok {

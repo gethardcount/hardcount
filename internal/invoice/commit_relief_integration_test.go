@@ -21,16 +21,8 @@ import (
 // ADR-080 relief pair (the production adapter is package-private).
 type reliefGranterAdapter struct{ svc *credit.Service }
 
-func (a reliefGranterAdapter) Grant(ctx context.Context, tenantID string, in creditnote.CreditGrantInput) error {
-	_, err := a.svc.Grant(ctx, tenantID, credit.GrantInput{CustomerID: in.CustomerID, AmountCents: in.AmountCents, Description: in.Description, InvoiceID: in.InvoiceID})
-	return err
-}
-func (a reliefGranterAdapter) GrantForCreditNote(ctx context.Context, tenantID, cnID string, in creditnote.CreditGrantInput) error {
-	_, err := a.svc.GrantForCreditNote(ctx, tenantID, cnID, credit.GrantInput{CustomerID: in.CustomerID, AmountCents: in.AmountCents, Description: in.Description, InvoiceID: in.InvoiceID})
-	return err
-}
 func (a reliefGranterAdapter) GrantForCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, cnID string, in creditnote.CreditGrantInput) error {
-	_, err := a.svc.GrantForCreditNoteTx(ctx, tx, tenantID, cnID, credit.GrantInput{CustomerID: in.CustomerID, AmountCents: in.AmountCents, Description: in.Description, InvoiceID: in.InvoiceID})
+	_, err := a.svc.GrantForCreditNoteTx(ctx, tx, tenantID, cnID, credit.GrantInput{Currency: in.Currency, CustomerID: in.CustomerID, AmountCents: in.AmountCents, Description: in.Description, InvoiceID: in.InvoiceID})
 	return err
 }
 func (a reliefGranterAdapter) LockCommitGrantForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string) (int64, int64, int64, bool, error) {
@@ -55,10 +47,11 @@ func newReliefCNService(h *commitHarness) *creditnote.Service {
 	return cnSvc
 }
 
-// payOffline marks the commit invoice paid out-of-band (the migration norm).
+// payOffline marks the commit invoice paid out-of-band (the migration norm),
+// as Record offline payment does.
 func payOffline(t *testing.T, h *commitHarness, ctx context.Context, invoiceID string) {
 	t.Helper()
-	if _, err := h.invStore.MarkPaid(ctx, h.tenantID, invoiceID, "out_of_band:test", time.Now().UTC()); err != nil {
+	if _, err := h.invStore.MarkPaidOffline(ctx, h.tenantID, invoiceID, time.Now().UTC(), nil); err != nil {
 		t.Fatalf("mark paid: %v", err)
 	}
 }

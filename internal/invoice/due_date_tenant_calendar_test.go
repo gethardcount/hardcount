@@ -16,7 +16,7 @@ type tzSettingsReader struct {
 }
 
 func (f tzSettingsReader) Get(_ context.Context, _ string) (domain.TenantSettings, error) {
-	return domain.TenantSettings{Timezone: f.tz, NetPaymentTerms: f.netDays}, nil
+	return domain.TenantSettings{DefaultCurrency: "USD", Timezone: f.tz, NetPaymentTerms: f.netDays}, nil
 }
 
 // A manual Net 30 invoice for an America/New_York tenant, created and then

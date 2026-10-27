@@ -107,12 +107,27 @@ clamp is applied only to adds inside the current open period, against
 CurrentBillingPeriodStart; historical precision is immaterial (only
 intervals intersecting the current period forward are ever billed).
 
+**Amended 2026-10-23 (B5, [#1374](https://github.com/getvelox/velox/pull/1374)):
+the backfill is deleted.** It existed only for items written before the
+dual-write. Velox 0.9.0 cannot take over a 0.8.x database, so every
+database it runs on was created from the goose baseline, long after the
+dual-write shipped (2026-07-27), and every item already has its intervals
+(`TestIntervals_FreshDatabaseNeedsNoBackfill`). A database that ran any
+build from 2026-07-27 on had the backfill run at each start, so it has
+nothing left to rebuild either. The boot-time run was not
+free: two copies starting together raced on it, which deadlocked behind
+PgBouncer ([#1364](https://github.com/getvelox/velox/issues/1364)), and on a
+fresh database it gave a trial canceled before it converted an interval it
+never had (`source = 'backfill'`). Nothing reconstructs the table now; a
+live item with no interval still fails its subscription's billing loudly.
+
 ## Rollout
 
 1. **Dual-write** (unconditional — writers are NEVER gated by the
    flag; that is what keeps every later state reversible).
    **SHIPPED 2026-07-27** (migration 0159 + store writers + boot-time
-   state-grounded backfill). The 0129 trigger's un-delete branch now
+   state-grounded backfill; the backfill was deleted 2026-10-23, see
+   Backfill). The 0129 trigger's un-delete branch now
    RAISEs — resurrection has no interval writer, so the write is
    refused rather than left to silently un-bill after cutover.
 2. **Shadow parity**: cycle close computes both ways **in one

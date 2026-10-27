@@ -23,6 +23,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // tzSettings is mockSettings with a tenant timezone, so tenantLocation
@@ -82,15 +83,14 @@ func TestRunCycle_FirstPeriod_CreationAddRow_BillsFullBase(t *testing.T) {
 		plans: map[string]domain.Plan{
 			"pln_i1": {ID: "pln_i1", Name: "I1 Multi-Meter", Currency: "USD",
 				BillingInterval: domain.BillingMonthly, BaseAmountCents: 2900,
-				BaseBillTiming: domain.BillInArrears, MeterIDs: []string{"mtr_api"}},
+				BaseBillTiming: domain.BillInArrears},
 		},
 		meters: map[string]domain.Meter{
-			"mtr_api": {ID: "mtr_api", Key: "i1_api", Name: "I1 API Calls",
-				Unit: "calls", Aggregation: "sum", RatingRuleVersionID: "rrv_api"},
+			"mtr_api": {ID: "mtr_api", EventName: "i1_api", Name: "I1 API Calls",
+				Unit: "calls", Aggregation: "sum"},
 		},
-		rules: map[string]domain.RatingRuleVersion{
-			"rrv_api": {ID: "rrv_api", RuleKey: "i1_api_rate", Version: 1,
-				Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(1)},
+		prices: map[string][]domain.PlanPrice{
+			"pln_i1": {priceOf("prc_api", "mtr_api", domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(1)})},
 		},
 	}
 	usage := &mockUsage{totals: map[string]int64{"mtr_api": 2000}}
@@ -99,7 +99,7 @@ func TestRunCycle_FirstPeriod_CreationAddRow_BillsFullBase(t *testing.T) {
 		&tzSettings{tz: "Asia/Kolkata"}, nil, nil,
 		clock.NewFake(periodEnd.Add(time.Second))))
 
-	count, errs := engine.RunCycle(context.Background(), 50, nil)
+	count, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
@@ -187,7 +187,7 @@ func TestBillFinalOnImmediateCancel_FirstPeriod_SameDayCancel(t *testing.T) {
 		pricing, invoices, nil, &tzSettings{tz: "Asia/Kolkata"}, nil, nil,
 		clock.NewFake(cancelAt.Add(time.Minute))))
 
-	inv, err := engine.BillFinalOnImmediateCancel(context.Background(), sub)
+	inv, err := engine.BillFinalOnImmediateCancel(postgres.WithLivemode(context.Background(), true), sub)
 	if err != nil {
 		t.Fatalf("BillFinalOnImmediateCancel: %v", err)
 	}

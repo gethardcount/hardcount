@@ -7,27 +7,22 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
-import type { CreatePriceOverrideBodyGraduatedTiersItem } from './createPriceOverrideBodyGraduatedTiersItem';
 import type { CreatePriceOverrideBodyMode } from './createPriceOverrideBodyMode';
+import type { CreatePriceOverrideBodyTiersItem } from './createPriceOverrideBodyTiersItem';
 
 export type CreatePriceOverrideBody = {
   customer_id: string;
-  /** Any version of the rule to override. */
-  rating_rule_version_id: string;
+  /** The plan price to override. */
+  price_id: string;
+  /** As on PriceShape, also for the fields a mode does not use. */
   mode: CreatePriceOverrideBodyMode;
-  /** Per-unit rate in cents, as a decimal string. Used when `mode` is `flat`. 0 or more. */
-  flat_amount_cents?: string;
-  /**
-     * Used when `mode` is `graduated`. Each `up_to` must be larger
-     * than the one before, and the last tier must have
-     * `up_to: 0` (no upper bound).
-     */
-  graduated_tiers?: CreatePriceOverrideBodyGraduatedTiersItem[];
+  /** Price per unit in cents, as a decimal string. Used when `mode` is `per_unit`. 0 or more, under 10^18, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. A value outside them is refused with 422 and `param` naming the field. */
+  unit_amount_cents?: string;
+  /** Used when `mode` is `graduated`. Each `up_to` is a whole number above the one before. The last tier has `up_to: null` (no upper bound), and only the last. Otherwise 422 with `param` `tiers`. */
+  tiers?: CreatePriceOverrideBodyTiersItem[];
   /** Used when `mode` is `package`. Must be above 0. */
   package_size?: number;
-  /** Price of one package in cents. Used when `mode` is `package`. */
-  package_amount_cents?: number;
-  /** Package-mode per-unit overage rate in cents, as a decimal string. */
-  overage_unit_amount_cents?: string;
+  /** Price of one package in cents, as a decimal string, with the limits of `unit_amount_cents`. Used when `mode` is `package`. */
+  package_amount_cents?: string;
   reason?: string;
 };

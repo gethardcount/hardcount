@@ -3,6 +3,7 @@ package invoice
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/audit"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/tax"
 )
 
@@ -202,33 +204,6 @@ func (m *memStore) ListChargeAttemptsByInvoice(_ context.Context, _, _ string) (
 	return nil, nil
 }
 
-func (m *memStore) LatestThresholdPeriodEnd(_ context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (time.Time, error) {
-	var latest time.Time
-	found := false
-	for _, inv := range m.invoices {
-		if inv.TenantID != tenantID || inv.SubscriptionID != subscriptionID {
-			continue
-		}
-		if inv.BillingReason != domain.BillingReasonThreshold {
-			continue
-		}
-		if inv.Status == domain.InvoiceVoided || inv.Status == domain.InvoiceUncollectible {
-			continue
-		}
-		if inv.BillingPeriodStart.Before(periodStart) || !inv.BillingPeriodStart.Before(periodEnd) {
-			continue
-		}
-		if !found || inv.BillingPeriodEnd.After(latest) {
-			latest = inv.BillingPeriodEnd
-			found = true
-		}
-	}
-	if !found {
-		return time.Time{}, errs.ErrNotFound
-	}
-	return latest, nil
-}
-
 func (m *memStore) UpdateStatus(_ context.Context, tenantID, id string, status domain.InvoiceStatus) (domain.Invoice, error) {
 	inv, ok := m.invoices[id]
 	if !ok || inv.TenantID != tenantID {
@@ -267,13 +242,21 @@ func (m *memStore) ChargeHoldStateOf(_ context.Context, _, _ string) (domain.Cha
 }
 
 // MarkPaidOffline: check sees the current in-memory invoice as the locked row.
-func (m *memStore) MarkPaidOffline(ctx context.Context, tenantID, id, stripeID string, paidAt time.Time, check func(tx *sql.Tx, locked domain.Invoice) error) (domain.Invoice, error) {
+// Like the real store, the paid flip sets paid_out_of_band and no PaymentIntent.
+func (m *memStore) MarkPaidOffline(ctx context.Context, tenantID, id string, paidAt time.Time, check func(tx *sql.Tx, locked domain.Invoice) error) (domain.Invoice, error) {
 	if inv, ok := m.invoices[id]; ok && inv.TenantID == tenantID && check != nil {
 		if err := check(nil, inv); err != nil {
 			return domain.Invoice{}, err
 		}
 	}
-	return m.MarkPaid(ctx, tenantID, id, stripeID, paidAt)
+	wasPaid := m.invoices[id].Status == domain.InvoicePaid
+	inv, err := m.MarkPaid(ctx, tenantID, id, "", paidAt)
+	if err != nil || wasPaid {
+		return inv, err
+	}
+	inv.PaidOutOfBand = true
+	m.invoices[id] = inv
+	return inv, nil
 }
 
 // Tx variant: the fake ignores tx; the closure sees the current in-memory
@@ -473,7 +456,7 @@ func (m *memStore) UpdateTaxAtomic(_ context.Context, tenantID, invoiceID string
 	if inv.Status != domain.InvoiceDraft {
 		return domain.Invoice{}, errs.InvalidState("not draft")
 	}
-	if inv.TaxStatus != domain.InvoiceTaxPending && inv.TaxStatus != domain.InvoiceTaxFailed {
+	if inv.TaxStatus != domain.InvoiceTaxPending {
 		return domain.Invoice{}, errs.InvalidState("tax not retryable")
 	}
 	byID := make(map[string]domain.InvoiceLineItem, len(lineItems))
@@ -539,7 +522,7 @@ func TestRetryProviderConfigErrors_FlushesStuckRows(t *testing.T) {
 		ID: "inv_stuck_b", TenantID: "t1", CustomerID: "cus_b",
 		Status: domain.InvoiceDraft,
 		TaxFacts: domain.TaxFacts{
-			TaxStatus: domain.InvoiceTaxFailed, TaxErrorCode: "provider_auth",
+			TaxStatus: domain.InvoiceTaxPending, TaxErrorCode: "provider_auth",
 		},
 		BillingReason: "subscription_cycle",
 		Currency:      "USD", CreatedAt: now,
@@ -622,7 +605,7 @@ func (m *memStore) ListCustomerDataInvalidErrors(_ context.Context, tenantID, cu
 		if inv.Status != domain.InvoiceDraft {
 			continue
 		}
-		if inv.TaxStatus != domain.InvoiceTaxPending && inv.TaxStatus != domain.InvoiceTaxFailed {
+		if inv.TaxStatus != domain.InvoiceTaxPending {
 			continue
 		}
 		if inv.TaxErrorCode != "customer_data_invalid" {
@@ -644,7 +627,7 @@ func (m *memStore) ListProviderConfigErrors(_ context.Context, tenantID string, 
 		if inv.Status != domain.InvoiceDraft {
 			continue
 		}
-		if inv.TaxStatus != domain.InvoiceTaxPending && inv.TaxStatus != domain.InvoiceTaxFailed {
+		if inv.TaxStatus != domain.InvoiceTaxPending {
 			continue
 		}
 		if inv.TaxErrorCode != "provider_not_configured" && inv.TaxErrorCode != "provider_auth" {
@@ -677,7 +660,7 @@ func (m *memStore) ListPendingTaxRetry(_ context.Context, batch int, retryableCo
 		if inv.Status != domain.InvoiceDraft {
 			continue
 		}
-		if inv.TaxStatus != domain.InvoiceTaxPending && inv.TaxStatus != domain.InvoiceTaxFailed {
+		if inv.TaxStatus != domain.InvoiceTaxPending {
 			continue
 		}
 		if _, ok := allowed[inv.TaxErrorCode]; !ok {
@@ -1599,9 +1582,20 @@ func TestRecordOfflinePayment(t *testing.T) {
 			t.Errorf("audit amount_cents: got %v, want 4200 (booked amount, not the zeroed amount_due)",
 				audit.entries[0].metadata["amount_cents"])
 		}
-		if len(events.events) != 1 || events.events[0].payload["amount_cents"] != int64(4200) {
-			t.Errorf("event amount_cents: got %v, want 4200 (integrators must see the real payment value)",
-				events.events[0].payload["amount_cents"])
+		if len(events.events) != 1 {
+			t.Fatalf("events: got %+v, want one invoice.payment_recorded", events.events)
+		}
+		data := events.events[0].payload
+		if err := domain.CheckWebhookData(domain.EventInvoicePaymentRecorded, data); err != nil {
+			t.Fatal(err)
+		}
+		got := data[domain.WebhookResourceInvoice].(map[string]any)
+		if got["amount_paid_cents"] != json.Number("4200") || got["amount_due_cents"] != json.Number("0") {
+			t.Errorf("event invoice: amount_paid_cents %v amount_due_cents %v, want 4200 and 0 (integrators must see the real payment value)",
+				got["amount_paid_cents"], got["amount_due_cents"])
+		}
+		if data["recovered_from"] != string(domain.InvoiceFinalized) {
+			t.Errorf("event recovered_from: got %v, want finalized", data["recovered_from"])
 		}
 	})
 }
@@ -1723,7 +1717,7 @@ func TestRetryPendingTaxCommit(t *testing.T) {
 	svc := NewService(store, nil, nil)
 	committer := &recordingTaxCommitter{}
 	svc.SetTaxCommitter(committer)
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	// The orphan: commit succeeded at Stripe, local tax_transaction_id lost.
 	store.invoices["orphan"] = domain.Invoice{

@@ -9,10 +9,6 @@ Think of a taxi meter. It counts the distance, the fare card says what each
 kilometre costs, and at the end you get a receipt and pay by card. Velox
 does the same for usage, such as AI tokens or API calls.
 
-**Who it is for:** anyone who wants the big picture before reading the API
-or running Velox. Each word is explained where it first appears, and again
-in the [glossary](glossary.md).
-
 ```mermaid
 flowchart LR
     A["Your app"] -->|"usage event"| B["Meter<br/>counts it"]
@@ -36,16 +32,17 @@ flowchart LR
    under **Customers**.
 
 2. **A meter counts it.** A meter is a counter for one kind of usage,
-   such as tokens. Rules on the meter (pricing rules) pick events by their
-   labels. So one Tokens meter can keep a separate count for each model and token type.
+   such as tokens.
 
-   **You see:** **Pricing**, then the meter. Its page shows the default
-   price and the prices for specific values, such as one model.
+   **You see:** **Pricing**, then the meter. Its page lists the plans that
+   price it.
 
-3. **A price turns the count into money.** Each price is a rating
-   rule: a rate per unit, tiers, or packages. A plan puts a base fee and
-   the meters it charges together. A subscription puts a customer on a plan
-   and sets their billing period, such as each month.
+3. **A plan's prices turn the count into money.** A plan has a base fee
+   and a price for each meter it charges: a rate per unit, tiers, or
+   packages. A price can take only the events with certain labels, so one
+   Tokens meter can have a rate for each model and token type. A
+   subscription puts a customer on a plan and sets their billing period,
+   such as each month.
 
    **You see:** the plan under **Pricing**, the subscription under
    **Subscriptions**, and the bill so far under "Upcoming invoices" on the
@@ -67,10 +64,9 @@ flowchart LR
    `invoice.finalized` webhook shows the amount before credit. If credit
    covers it all, the invoice is marked paid with no charge. Otherwise, if
    the customer has a saved card and your Stripe account is connected,
-   Velox asks Stripe to charge that card for what is left. Velox, not
-   Stripe Billing, keeps the invoice, so Stripe Billing's fee does not
-   apply. With no saved card, Velox can email the customer a link to add
-   one, once email is set up.
+   Velox asks Stripe to charge that card for what is left. With no saved
+   card, Velox can email the customer a link to add one, once email is set
+   up.
 
    **You see:** the invoice reads **Paid**, with a "Credits applied" line
    if credit paid part of it. The payment shows in your Stripe dashboard.
@@ -80,7 +76,10 @@ flowchart LR
    emails the customer. Each retry first uses any credit the customer got
    since the last try, so credit added later can pay an older invoice. If
    every retry fails, it does what your dunning policy says: pause or
-   cancel the subscription, write off the invoice, both, or neither.
+   cancel the subscription, write off the invoice, both, or neither. A
+   pause from dunning lifts by itself once the customer pays that
+   invoice, unless the subscription was canceled; a pause you set stays
+   until you resume it.
 
    **You see:** the invoice on the **Dunning** page while it is being
    retried. The schedule is under **Dunning policies**. A new account
@@ -89,13 +88,9 @@ flowchart LR
 
 ## See it without waiting a month
 
-A test clock is a pretend clock for test customers. Move it forward a
-month, and steps 4 to 6 happen in seconds. The [quick start](quick-start.md)
-does this for a demo customer, up to the invoice: it connects no Stripe
-account, so nothing is charged. To rehearse a dunning policy that pauses
-or cancels, move the clock in two steps instead, as the
-[glossary's catch-up entry](glossary.md#testing-with-simulated-time) says.
+Move a customer's [test clock](glossary.md#testing-with-simulated-time)
+forward a month, and steps 4 to 6 happen in seconds. The quick start does
+this for a demo customer, up to the invoice: it connects no Stripe account,
+so nothing is charged.
 
-## Related
-
-[Architecture](architecture.md): how the code is laid out.
+**Next:** see these six steps run on your computer: [quick start](quick-start.md).

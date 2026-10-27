@@ -6,8 +6,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/shopspring/decimal"
-
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
 )
@@ -20,7 +18,7 @@ func (stubCustomer) GetByExternalID(_ context.Context, _, _ string) (domain.Cust
 
 type stubMeter struct{}
 
-func (stubMeter) GetMeterByKey(_ context.Context, _, _ string) (domain.Meter, error) {
+func (stubMeter) GetMeterByEventName(_ context.Context, _, _ string) (domain.Meter, error) {
 	return domain.Meter{ID: "mtr_1"}, nil
 }
 
@@ -39,7 +37,7 @@ func TestResolve_MalformedTimestampRejected(t *testing.T) {
 	h := NewHandler(NewService(newMemStore()), stubCustomer{}, stubMeter{})
 	ctx := context.Background()
 
-	base := APIEvent{ExternalCustomerID: "cus_ext", EventName: "api_call", Quantity: decimal.NewFromInt(1), IdempotencyKey: "evt_ts"}
+	base := APIEvent{ExternalCustomerID: "cus_ext", EventName: "api_call", Quantity: json.RawMessage("1"), IdempotencyKey: "evt_ts"}
 
 	t.Run("valid RFC3339 honored", func(t *testing.T) {
 		evt := base

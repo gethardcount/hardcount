@@ -7,6 +7,7 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
+import type { UsageBillingStatus } from './usageBillingStatus';
 import type { UsageEventDimensions } from './usageEventDimensions';
 import type { UsageEventOrigin } from './usageEventOrigin';
 import type { UsageEventProviderCostSource } from './usageEventProviderCostSource';
@@ -25,17 +26,19 @@ export interface UsageEvent {
   /** How the event arrived. `backfill` means `POST /v1/usage-events/backfill`. */
   origin?: UsageEventOrigin;
   /**
-     * What serving this event cost you at your provider, in millionths
-     * of a dollar, priced from your provider cost rates when the event
-     * arrived. Absent when no rate matched or the event has no costed
-     * dimensions.
+     * What serving this event cost you at your provider, in US cents as
+     * a decimal string (e.g. "0.45"), set when the event arrived: from
+     * your provider cost rates, or the cost the sender reported (see
+     * `provider_cost_source`). Absent when the cost is unknown or the
+     * event has no costed dimensions.
      */
-  provider_cost_micros?: number;
+  provider_cost_cents?: string;
   /**
-     * Where `provider_cost_micros` came from: `table` (your provider
+     * Where `provider_cost_cents` came from: `table` (your provider
      * cost rates), `observed` (the cost the sender reported), or
      * `not_applicable` (the meter has no costed dimensions). Absent when
      * the cost is unknown.
      */
   provider_cost_source?: UsageEventProviderCostSource;
+  billing_status?: UsageBillingStatus;
 }

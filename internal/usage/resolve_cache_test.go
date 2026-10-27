@@ -2,9 +2,8 @@ package usage
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
-
-	"github.com/shopspring/decimal"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
 )
@@ -22,7 +21,7 @@ func (c *countingCustomer) GetByExternalID(_ context.Context, _, externalID stri
 
 type countingMeter struct{ calls int }
 
-func (m *countingMeter) GetMeterByKey(_ context.Context, _, key string) (domain.Meter, error) {
+func (m *countingMeter) GetMeterByEventName(_ context.Context, _, key string) (domain.Meter, error) {
 	m.calls++
 	return domain.Meter{ID: "mtr_" + key}, nil
 }
@@ -31,7 +30,7 @@ func evt(extCust, eventName string) APIEvent {
 	return APIEvent{
 		ExternalCustomerID: extCust,
 		EventName:          eventName,
-		Quantity:           decimal.NewFromInt(1),
+		Quantity:           json.RawMessage("1"),
 		IdempotencyKey:     "evt_" + extCust + "_" + eventName,
 	}
 }

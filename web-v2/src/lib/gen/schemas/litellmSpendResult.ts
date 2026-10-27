@@ -20,8 +20,34 @@ export interface LitellmSpendResult {
      * `POST /v1/usage-events/held/release`.
      */
   held: number;
-  /** Records that carry no billable tokens. */
+  /** Records that bill nothing - a call type with no tokens, zero tokens, a failed call (`status` `failure`) or a LiteLLM response-cache hit. */
   skipped: number;
-  /** One entry per event or record that was not recorded. A record can appear more than once. */
+  /** The LiteLLM response-cache hits among `skipped`. LiteLLM's own spend counts them as $0. */
+  cache_hits: number;
+  /**
+     * Of `accepted`, the events answered `billing_status:
+     * after_close`: their time was already invoiced. A replay never
+     * counts here.
+     */
+  after_close: number;
+  /**
+     * Of `accepted`, the events no price of the subscription's plan
+     * takes (`billing_status: no_price`), such as a model no price
+     * names. A replay never counts here.
+     */
+  no_price: number;
+  /**
+     * Of `accepted`, the events whose meter the subscription's plan
+     * does not price (`billing_status: not_on_plan`). A replay never
+     * counts here.
+     */
+  not_on_plan: number;
+  /**
+     * Of `accepted`, the events whose time no subscription of the
+     * customer bills (`billing_status: outside_subscription`). A replay
+     * never counts here.
+     */
+  outside_subscription: number;
+  /** One entry per record that was not recorded. A record's events are recorded together or not at all. */
   errors?: LitellmSpendResultErrorsItem[];
 }

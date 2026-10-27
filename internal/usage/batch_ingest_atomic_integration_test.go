@@ -64,7 +64,7 @@ func TestBatchIngest_Atomic(t *testing.T) {
 	bad.MeterID = "mtr_does_not_exist"
 	if _, _, err := store.IngestBatch(ctx, tenantID, []domain.UsageEvent{
 		evt("", 1), evt("", 2), bad,
-	}); err == nil {
+	}, nil); err == nil {
 		t.Fatal("batch with an FK-violating row must fail")
 	}
 	if got := countEvents(); got != 0 {
@@ -81,12 +81,12 @@ func TestBatchIngest_Atomic(t *testing.T) {
 		evt("key-b", 20), // fresh
 		evt("key-c", 30), // fresh…
 		evt("key-c", 30), // …and its intra-batch duplicate
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("dedup batch must succeed: %v", err)
 	}
-	if inserted != 2 || deduped != 2 {
-		t.Fatalf("got inserted=%d deduped=%d, want 2/2", inserted, deduped)
+	if len(inserted) != 2 || inserted[0] != 1 || inserted[1] != 2 || deduped != 2 {
+		t.Fatalf("got inserted=%v deduped=%d, want indices [1 2] and 2 deduplicated", inserted, deduped)
 	}
 	if got := countEvents(); got != 3 { // seed + key-b + key-c
 		t.Fatalf("event count: got %d, want 3 (no duplicate rows)", got)
@@ -96,9 +96,9 @@ func TestBatchIngest_Atomic(t *testing.T) {
 	// keyless rows are two distinct usage facts.
 	inserted, deduped, err = store.IngestBatch(ctx, tenantID, []domain.UsageEvent{
 		evt("", 5), evt("", 5),
-	})
-	if err != nil || inserted != 2 || deduped != 0 {
-		t.Fatalf("keyless batch: got inserted=%d deduped=%d err=%v, want 2/0/nil", inserted, deduped, err)
+	}, nil)
+	if err != nil || len(inserted) != 2 || deduped != 0 {
+		t.Fatalf("keyless batch: got inserted=%v deduped=%d err=%v, want 2/0/nil", inserted, deduped, err)
 	}
 
 	// (3) GetByIdempotencyKey returns the original row for
@@ -119,8 +119,8 @@ func TestBatchIngest_Atomic(t *testing.T) {
 		t.Fatalf("begin rate tx: %v", err)
 	}
 	if _, err := rateTx.ExecContext(ctx, `
-		INSERT INTO provider_cost_rates (id, tenant_id, livemode, provider, model, token_type, cost_per_token)
-		VALUES ('vlx_pcr_batchtest', $1, false, 'anthropic', 'claude-x', 'input', 0.000002)`,
+		INSERT INTO provider_cost_rates (id, tenant_id, livemode, provider, model, token_type, unit_cost_cents)
+		VALUES ('vlx_pcr_batchtest', $1, false, 'anthropic', 'claude-x', 'input', 0.0002)`,
 		tenantID); err != nil {
 		t.Fatalf("seed cost rate: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestBatchIngest_Atomic(t *testing.T) {
 	}
 	costed := evt("key-cogs", 1000)
 	costed.Dimensions = map[string]any{"provider": "anthropic", "model": "claude-x", "token_type": "input"}
-	if _, _, err := store.IngestBatch(ctx, tenantID, []domain.UsageEvent{costed}); err != nil {
+	if _, _, err := store.IngestBatch(ctx, tenantID, []domain.UsageEvent{costed}, nil); err != nil {
 		t.Fatalf("costed batch: %v", err)
 	}
 	stamped, err := store.GetByIdempotencyKey(ctx, tenantID, "key-cogs")
@@ -137,6 +137,6 @@ func TestBatchIngest_Atomic(t *testing.T) {
 		t.Fatalf("get costed event: %v", err)
 	}
 	if stamped.ProviderCostMicros == nil || *stamped.ProviderCostMicros != 2000 {
-		t.Fatalf("provider_cost_micros: got %v, want 2000 (0.000002 × 1000 × 1e6)", stamped.ProviderCostMicros)
+		t.Fatalf("provider_cost_micros: got %v, want 2000 (0.0002¢ × 1000 × 1e4)", stamped.ProviderCostMicros)
 	}
 }

@@ -8,6 +8,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // The contracted-instant anchor (ADR-030 rule, timeline-audit finding 1
@@ -23,7 +24,7 @@ import (
 
 func TestChargeInvoice_SimBoundCtx_AnchorsPaidAtAndPIMetadata(t *testing.T) {
 	contracted := time.Date(2027, 3, 7, 18, 30, 0, 0, time.UTC)
-	ctx := clock.WithSim(context.Background(), clock.Sim{At: contracted, TestClockID: "clk_1"})
+	ctx := clock.WithSim(postgres.WithLivemode(context.Background(), true), clock.Sim{At: contracted, TestClockID: "clk_1"})
 
 	client := &mockStripeClient{piID: "pi_anchor", chargeStatus: "succeeded"}
 	invoices := newMockInvoiceUpdater()
@@ -53,7 +54,7 @@ func TestChargeInvoice_WallCtx_NoAnchor(t *testing.T) {
 	s := NewStripe(client, invoices, newMockWebhookStore(), nil, &recordingDunningStarter{})
 
 	before := time.Now().UTC()
-	if _, err := s.ChargeInvoice(context.Background(), "t1", invoices.invoices["inv_1"], testHold, "cus_stripe_abc", "pm_test"); err != nil {
+	if _, err := s.ChargeInvoice(postgres.WithLivemode(context.Background(), true), "t1", invoices.invoices["inv_1"], testHold, "cus_stripe_abc", "pm_test"); err != nil {
 		t.Fatalf("ChargeInvoice: %v", err)
 	}
 	if _, present := client.lastParams.Metadata["velox_anchor_at"]; present {
@@ -160,7 +161,7 @@ func TestReconciler_RecoversChargeAnchorFromPI(t *testing.T) {
 	r := NewReconciler(client, store, time.Second)
 	r.SetSettler(settler)
 
-	if _, errs := r.Run(context.Background(), 10); len(errs) != 0 {
+	if _, errs := r.Run(postgres.WithLivemode(context.Background(), true), 10); len(errs) != 0 {
 		t.Fatalf("errs: %v", errs)
 	}
 	if settler.calls != 1 {
@@ -188,7 +189,7 @@ func TestReconciler_WallChargeSettlesWithoutAnchor(t *testing.T) {
 	r := NewReconciler(client, store, time.Second)
 	r.SetSettler(settler)
 
-	if _, errs := r.Run(context.Background(), 10); len(errs) != 0 {
+	if _, errs := r.Run(postgres.WithLivemode(context.Background(), true), 10); len(errs) != 0 {
 		t.Fatalf("errs: %v", errs)
 	}
 	if settler.hadAnchor {

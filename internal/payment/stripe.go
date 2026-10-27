@@ -85,9 +85,12 @@ type CustomerEmailResolver interface {
 // no PM on file at finalize (no charge was ever attempted). Same
 // signature as dunning.EmailNotifier so OutboxSender satisfies both.
 type EmailPaymentFailed interface {
-	SendPaymentFailed(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber, reason, publicToken string) error
+	// ask selects the copy (domain.DeclineAskOf the decline code):
+	// DeclineAskConfirm is the "confirm your payment" email, sent when the
+	// bank wants the customer to confirm the payment.
+	SendPaymentFailed(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber, reason, publicToken string, ask domain.DeclineAsk) error
 	// SendPaymentFailedTx enqueues on the settle transaction (ADR-040 amendment).
-	SendPaymentFailedTx(ctx context.Context, tx *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber, reason, publicToken string) error
+	SendPaymentFailedTx(ctx context.Context, tx *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber, reason, publicToken string, ask domain.DeclineAsk) error
 }
 
 // Stripe is the payment adapter. It creates PaymentIntents for finalized invoices
@@ -256,6 +259,9 @@ type PaymentIntentResult struct {
 	// learn of still stops dunning from charging that card (#966).
 	DeclineCode     string
 	PaymentMethodID string
+	// CardMessage is last_payment_error's message when it is a card error
+	// (cardErrorMessage), for the customer's payment-failed email.
+	CardMessage string
 	// InvoiceID is the velox_invoice_id metadata every Velox PaymentIntent
 	// carries (the off-session charge and the hosted page alike). The
 	// stale-hold sweep matches on it. Populated by the read paths.
@@ -269,6 +275,11 @@ type PaymentIntentResult struct {
 // InvoiceUpdater updates invoice payment status.
 type InvoiceUpdater interface {
 	StampChargeOutcome(ctx context.Context, tenantID, id string, attemptSeq int64, paymentStatus domain.InvoicePaymentStatus, stripePaymentIntentID, lastPaymentError string) (domain.Invoice, bool, error)
+	// StampBelowMinimum records Stripe's "below the minimum charge" refusal
+	// (domain.ErrBelowMinimumCharge): payment_status 'pending', the
+	// auto-charge queue cleared, below_minimum_at and Stripe's sentence, under
+	// the same seq CAS as StampChargeOutcome.
+	StampBelowMinimum(ctx context.Context, tenantID, id string, attemptSeq int64, lastPaymentError string) (domain.Invoice, bool, error)
 	UpdateStatus(ctx context.Context, tenantID, id string, status domain.InvoiceStatus) (domain.Invoice, error)
 	MarkPaid(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time) (domain.Invoice, error)
 	// MarkPaidReportingTransition is MarkPaid plus a `transitioned` flag —
@@ -404,9 +415,11 @@ func (s *Stripe) SetBreaker(b *breaker.Breaker) {
 // The method name is AttachForWebhook (not AttachFromSetupIntent) so
 // paymentmethods.Service can keep its richer AttachFromSetupIntent
 // method — returning (PaymentMethod, error) — for tests and direct
-// callers, while this package imports nothing from paymentmethods.
+// callers, while this package imports nothing from paymentmethods. It
+// returns the card as the API shows it, which payment_method.* carries, or
+// nil when the card was already removed and stays removed (a late event).
 type PaymentMethodAttacher interface {
-	AttachForWebhook(ctx context.Context, tenantID, customerID, stripePaymentMethodID string, makeDefault bool) error
+	AttachForWebhook(ctx context.Context, tenantID, customerID, stripePaymentMethodID string, makeDefault bool) (*domain.PaymentMethodView, error)
 }
 
 // SetPaymentMethodAttacher configures the handler that processes
@@ -479,6 +492,10 @@ func IsUnknownPaymentFailure(err error) bool {
 	}
 	if errors.Is(err, ErrPaymentTransient) {
 		return false // nothing reached Stripe: not an incident signal
+	}
+	var bm *BelowMinimumError
+	if errors.As(err, &bm) {
+		return false // Stripe answered at once: the amount, not an outage
 	}
 	var pe *PaymentError
 	if errors.As(err, &pe) {
@@ -620,12 +637,16 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 	if stripePaymentMethodID == "" {
 		return domain.Invoice{}, fmt.Errorf("stripe payment method ID is required")
 	}
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return domain.Invoice{}, err
+	}
 
 	// Seed tenantID on ctx so the per-tenant Stripe client resolver
 	// (payment.StripeClients) can look it up. Scheduler / billing-engine
 	// driven charges arrive on background ctx without tenant stamped.
-	// Livemode is already carried on ctx by authenticated callers; for
-	// background workers it defaults to live (postgres.Livemode default).
+	// Livemode is already carried on ctx: authenticated callers set it from
+	// the key, and background workers per row or per mode.
 	ctx = veloxauth.WithTenantID(ctx, tenantID)
 
 	// Stable business metadata only — nothing per-HTTP-request. The
@@ -707,7 +728,6 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 	defer cancelSend()
 
 	var result PaymentIntentResult
-	var err error
 	if s.breaker != nil {
 		var out any
 		out, err = s.breaker.Execute(sendCtx, func(ctx context.Context) (any, error) {
@@ -758,13 +778,17 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 		var ke *StripeKeyError
 		if errors.As(err, &ke) {
 			s.releaseUnsentHold(ctx, tenantID, inv.ID, hold, "stripe key unusable")
-			s.reportUnusableKey(ctx, tenantID, inv.ID, ke)
+			s.reportUnusableKey(ctx, tenantID, live, inv.ID, ke)
 			return domain.Invoice{}, err
 		}
 		return domain.Invoice{}, ErrPaymentTransient
 	}
+	var bm *BelowMinimumError
+	if errors.As(err, &bm) {
+		return domain.Invoice{}, s.recordBelowMinimum(ctx, tenantID, inv, hold, bm, trigger, stripePaymentMethodID)
+	}
 	if err == nil {
-		s.clearRejectedKey(ctx, tenantID)
+		s.clearRejectedKey(ctx, tenantID, live)
 	}
 	if err != nil {
 		// Categorise the error so ambiguous (5xx/timeout/network) outcomes are
@@ -882,6 +906,7 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 				// skips this card (#966).
 				DeclineCode:     pe.DeclineCode,
 				PaymentMethodID: stripePaymentMethodID,
+				CardMessage:     pe.CardMessage,
 			})
 			switch {
 			case serr != nil:
@@ -954,8 +979,9 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 	// methods; or a non-terminal PI Stripe can return because
 	// error_on_requires_action is not set, see ADR-107) stay `processing` and
 	// await the webhook. NOT "off-session SCA": that raises the
-	// authentication_required DECLINE (a card error → definite failure), it
-	// does not park a PI here — the phrase was retracted 2026-07-31.
+	// authentication_required DECLINE (a card error → definite failure,
+	// domain.IsAuthenticationRequired), it does not park a PI here — the
+	// phrase was retracted 2026-07-31.
 	if result.Status == "succeeded" {
 		if serr := s.SettleSucceeded(withChargeAnchor(ctx), tenantID, inv, result.ID, inv.AmountDueCents, SourceChargeResponse); serr != nil {
 			return domain.Invoice{}, fmt.Errorf("settle succeeded inline: %w", serr)
@@ -994,6 +1020,114 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 	return current, nil
 }
 
+// recordBelowMinimum handles Stripe's "below the minimum charge" refusal
+// (domain.ErrBelowMinimumCharge), whichever charge got it: auto-charge,
+// Collect payment or a dunning retry. Stripe made no PaymentIntent, so
+// nothing was charged and no webhook or reconciler will report anything.
+// Unlike a decline it marks nothing failed, starts no dunning and sends no
+// email:
+//   - the attempt row records the try and Stripe's sentence (ADR-102), with
+//     outcome below_minimum, which the timeline shows as a refusal, not a
+//     failed payment;
+//   - markBelowMinimum stamps the invoice and ends a payment recovery
+//     running on it, and then the charge hold is released: the answer is
+//     final. A dunning retry's own run is ended by dunning
+//     (processRun), which owns that run's instant; any other charge ends it
+//     there, through the resolver.
+//
+// It returns the refusal for the caller (Collect answers 409
+// amount_below_minimum).
+func (s *Stripe) recordBelowMinimum(ctx context.Context, tenantID string, inv domain.Invoice, hold domain.ChargeHold, bm *BelowMinimumError, trigger domain.ChargeAttemptTrigger, stripePaymentMethodID string) error {
+	recordChargeAttempt(ctx, s.invoices, tenantID, inv, "", trigger, domain.ChargeAttemptBelowMinimum, bm.Message,
+		chargedCard{paymentMethodID: stripePaymentMethodID})
+	// Stamped before the hold is released, so the sweep cannot claim the
+	// still-queued invoice in between and ask Stripe again.
+	s.markBelowMinimum(ctx, tenantID, inv, bm, trigger != domain.ChargeTriggerDunningRetry)
+	if rerr := s.invoices.ReleaseChargeHold(ctx, tenantID, inv.ID, hold); rerr != nil {
+		slog.WarnContext(ctx, "release charge hold after a below-minimum refusal failed — the stale-hold sweep clears it",
+			"invoice_id", inv.ID, "error", rerr)
+	}
+	return bm
+}
+
+// RecordCheckoutBelowMinimum records Stripe refusing the hosted page's
+// Checkout Session because the amount is below its minimum charge. For a
+// customer with no card it is the first time Velox learns this, so it is
+// recorded as a charge's refusal is: the invoice is stamped (no Pay button,
+// the operator's notice, out of the auto-charge queue) and the payment
+// recovery the card-less finalize started ends, so no reminder or final
+// action follows. No charge attempt row: no charge was made. inv is the
+// invoice as read for the Pay click; its charge_attempt_seq is the CAS.
+func (s *Stripe) RecordCheckoutBelowMinimum(ctx context.Context, tenantID string, inv domain.Invoice, bm *BelowMinimumError) {
+	s.markBelowMinimum(ctx, tenantID, inv, bm, true)
+}
+
+// markBelowMinimum is StampBelowMinimum plus, when endRecovery is set,
+// ending the invoice's payment recovery with resolution
+// amount_below_minimum.
+func (s *Stripe) markBelowMinimum(ctx context.Context, tenantID string, inv domain.Invoice, bm *BelowMinimumError, endRecovery bool) {
+	current, applied, serr := stampBelowMinimumWithRetry(ctx, s.invoices, tenantID, inv, bm.Message)
+	switch {
+	case serr != nil:
+		// Nothing was charged, but the invoice does not say so. A queued
+		// invoice stays queued, and the auto-charge sweep's next charge gets
+		// the same answer and records it. An invoice out of the queue (a
+		// dunning retry, Collect on a failed invoice, a card-less invoice's
+		// Pay click) keeps its earlier state, and its payment recovery keeps
+		// running, until it is charged or paid for again; this line is the
+		// record.
+		slog.ErrorContext(ctx, "could not record that Stripe refused a charge as below its minimum; the invoice keeps its earlier payment state until it is charged again",
+			"invoice_id", inv.ID, "tenant_id", tenantID, "error", serr)
+		return
+	case !applied:
+		slog.InfoContext(ctx, "below-minimum refusal not recorded: another outcome was recorded on this invoice during the call, or it is no longer finalized",
+			"invoice_id", inv.ID, "payment_status", current.PaymentStatus, "status", current.Status)
+		return
+	}
+	slog.WarnContext(ctx, "Stripe refused to charge this invoice because the amount is below its minimum charge; it stays open and unpaid, with no payment recovery or customer email, until the operator voids it or records a payment",
+		"invoice_id", inv.ID, "tenant_id", tenantID, "invoice_number", inv.InvoiceNumber,
+		"amount_due_cents", inv.AmountDueCents, "currency", inv.Currency, "stripe_message", bm.Message)
+
+	if endRecovery && s.dunningResolver != nil {
+		if derr := s.dunningResolver.ResolveByInvoice(ctx, tenantID, inv.ID, domain.ResolutionAmountBelowMinimum); derr != nil {
+			// The stamp above is committed, and dunning reads it at the
+			// run's next tick (domain.Invoice.BelowStripeMinimum) and ends
+			// the run there, before any retry or final action.
+			slog.ErrorContext(ctx, "could not end the invoice's payment recovery after a below-minimum refusal; its next dunning tick ends it",
+				"invoice_id", inv.ID, "error", derr)
+		}
+	}
+}
+
+// stampBelowMinimumWithRetry is StampBelowMinimum with the bounded retry of
+// persistChargeOutcomeWithRetry. A retry after a commit-ambiguous error is
+// refused by the first attempt's own seq bump; a refused retry whose row
+// carries this stamp at seq+1 is that first attempt, and counts as applied.
+func stampBelowMinimumWithRetry(ctx context.Context, invoices InvoiceUpdater, tenantID string, inv domain.Invoice, message string) (domain.Invoice, bool, error) {
+	delays := []time.Duration{0, 100 * time.Millisecond, 500 * time.Millisecond}
+	var lastErr error
+	for i, d := range delays {
+		if d > 0 {
+			select {
+			case <-time.After(d):
+			case <-ctx.Done():
+				return domain.Invoice{}, false, fmt.Errorf("ctx canceled recording a below-minimum refusal (attempt %d): %w", i+1, ctx.Err())
+			}
+		}
+		current, applied, err := invoices.StampBelowMinimum(ctx, tenantID, inv.ID, inv.ChargeAttemptSeq, message)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if !applied && i > 0 && current.ChargeAttemptSeq == inv.ChargeAttemptSeq+1 && current.BelowMinimumAt != nil &&
+			current.PaymentStatus == domain.PaymentPending {
+			applied = true
+		}
+		return current, applied, nil
+	}
+	return domain.Invoice{}, false, fmt.Errorf("record below-minimum refusal failed after %d attempts: %w", len(delays), lastErr)
+}
+
 // releaseUnsentHold frees the hold of a charge that provably sent nothing to
 // Stripe (the re-check refused, the breaker was open, the credentials could
 // not be read, the key was refused), so the invoice does not wait for the stale-hold sweep. The
@@ -1012,8 +1146,7 @@ func (s *Stripe) releaseUnsentHold(ctx context.Context, tenantID, invoiceID stri
 // Connect check writes; reconnecting, or a charge that goes through, clears
 // it). A key that is not connected
 // has no row to mark. A lost mark is written again by the next charge.
-func (s *Stripe) reportUnusableKey(ctx context.Context, tenantID, invoiceID string, ke *StripeKeyError) {
-	livemode := postgres.Livemode(ctx)
+func (s *Stripe) reportUnusableKey(ctx context.Context, tenantID string, livemode bool, invoiceID string, ke *StripeKeyError) {
 	mw.RecordStripeKeyUnusable(ke.Reason)
 	slog.ErrorContext(ctx, "charge not sent: Stripe refused this tenant's API key, or none is connected for this mode. Charges for this tenant and mode are paused (not failed) until the key is fixed under Settings → Payments",
 		"tenant_id", tenantID, "livemode", livemode, "invoice_id", invoiceID,
@@ -1041,11 +1174,10 @@ func (s *Stripe) reportUnusableKey(ctx context.Context, tenantID, invoiceID stri
 // connected. Only a "rejected" mark is cleared; a row without one matches
 // nothing. A failed clear is logged; the next charge that goes through
 // clears it.
-func (s *Stripe) clearRejectedKey(ctx context.Context, tenantID string) {
+func (s *Stripe) clearRejectedKey(ctx context.Context, tenantID string, livemode bool) {
 	if s.keyHealth == nil {
 		return
 	}
-	livemode := postgres.Livemode(ctx)
 	clearCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	if err := s.keyHealth.ClearKeyRejected(clearCtx, tenantID, livemode); err != nil {
@@ -1075,6 +1207,7 @@ func logRefusedChargeOutcome(ctx context.Context, current domain.Invoice, attemp
 		"attempt_payment_intent_id", attemptPI,
 		"recorded_payment_status", current.PaymentStatus,
 		"recorded_payment_intent_id", current.StripePaymentIntentID,
+		"paid_out_of_band", current.PaidOutOfBand,
 		"invoice_status", current.Status,
 		"idempotency_key", idempotencyKey,
 	)
@@ -1508,11 +1641,10 @@ func (s *Stripe) handleSetupIntentSucceeded(ctx context.Context, tenantID string
 
 	customerID := parsed.Data.Object.Metadata["velox_customer_id"]
 	pmID := parsed.Data.Object.PaymentMethod
-	// A SetupIntent Velox created (all three of its Checkout setup sessions
-	// stamp velox_customer_id in setup_intent_data.metadata: the operator's
-	// Add payment method link, the customer's payment-update link, legacy
-	// POST /v1/checkout/setup) saved a card to be charged: it becomes the
-	// default (ADR-021). Read before the resolver fallback below, which also
+	// A SetupIntent Velox created (both of its Checkout setup sessions stamp
+	// velox_customer_id in setup_intent_data.metadata: the operator's Add
+	// payment method link and the customer's payment-update link) saved a
+	// card to be charged: it becomes the default (ADR-021). Read before the resolver fallback below, which also
 	// lets in SetupIntents Velox did not create; their card is added beside.
 	fromVeloxSetup := customerID != ""
 
@@ -1562,18 +1694,27 @@ func (s *Stripe) handleSetupIntentSucceeded(ctx context.Context, tenantID string
 	// Attribute the attach to the CUSTOMER when this SetupIntent came from the
 	// customer-driven payment-update token link (velox_purpose set on the
 	// public flow's setup_intent_data.metadata). Operator-driven attaches
-	// (portal "Add payment method" → "portal_add_payment_method", or the
-	// inline-Elements flow → empty purpose) are left as-is so ResolveActor
-	// keeps them as system/operator. Without the gate every webhook-attach
-	// row — operator and customer alike — resolved to "System", so a
-	// customer self-serving a card was indistinguishable from an operator
-	// adding one in the audit log.
+	// (portal "Add payment method" → "portal_add_payment_method", or a
+	// session from the removed POST /v1/checkout/setup → empty purpose) are
+	// left as-is so ResolveActor keeps them as system/operator. Without the
+	// gate every webhook-attach row — operator and customer alike — resolved
+	// to "System", so a customer self-serving a card was indistinguishable
+	// from an operator adding one in the audit log.
 	if parsed.Data.Object.Metadata["velox_purpose"] == purposePaymentUpdateToken {
 		ctx = veloxauth.WithCustomerActor(ctx, customerID)
 	}
 
-	if err := s.pmAttacher.AttachForWebhook(ctx, tenantID, customerID, pmID, fromVeloxSetup); err != nil {
+	pm, err := s.pmAttacher.AttachForWebhook(ctx, tenantID, customerID, pmID, fromVeloxSetup)
+	if err != nil {
 		return fmt.Errorf("attach payment method: %w", err)
+	}
+
+	if pm == nil {
+		// The operator removed this card before the event arrived. It stays
+		// removed, so nothing was attached and no event names it.
+		slog.InfoContext(ctx, "setup_intent.succeeded for a removed card: left removed, no payment_method.attached",
+			"stripe_event_id", event.StripeEventID, "customer_id", customerID, "stripe_pm_id", pmID)
+		return nil
 	}
 
 	slog.Info("payment method attached via setup_intent",
@@ -1582,10 +1723,9 @@ func (s *Stripe) handleSetupIntentSucceeded(ctx context.Context, tenantID string
 		"stripe_pm_id", pmID,
 	)
 
-	s.fireEvent(ctx, tenantID, domain.EventPaymentMethodAttached, map[string]any{
-		"customer_id":              customerID,
+	s.fireEvent(ctx, tenantID, domain.EventPaymentMethodAttached, domain.PaymentMethodWebhookData(*pm, map[string]any{
 		"stripe_payment_method_id": pmID,
-	})
+	}))
 
 	return nil
 }
@@ -1818,9 +1958,13 @@ func (s *Stripe) handlePaymentSucceeded(ctx context.Context, tenantID string, ev
 	// than the invoice now claims — report-only tripwire via the standard
 	// anomaly channel; the settle itself proceeds (the money already moved,
 	// absorbing silently is the one wrong option).
+	// The event names the charge's currency in upper case, as Velox writes
+	// every currency; the invoice beside it carries its own.
 	if event.Currency != "" && !strings.EqualFold(event.Currency, inv.Currency) {
+		chargeCurrency := strings.ToUpper(event.Currency)
 		s.escalatePaymentAnomaly(ctx, tenantID, inv, domain.EventPaymentCurrencyMismatch, event.PaymentIntentID, captured,
-			fmt.Sprintf("charge settled in %s but the invoice is labeled %s", strings.ToUpper(event.Currency), strings.ToUpper(inv.Currency)))
+			map[string]any{"charge_currency": chargeCurrency},
+			fmt.Sprintf("charge settled in %s but the invoice is labeled %s", chargeCurrency, strings.ToUpper(inv.Currency)))
 	}
 	return s.SettleSucceeded(ctx, tenantID, inv, event.PaymentIntentID, captured, SourceWebhook)
 }
@@ -1857,30 +2001,38 @@ func (s *Stripe) handlePaymentFailed(ctx context.Context, tenantID string, event
 	if err != nil {
 		return fmt.Errorf("decode payment_intent.payment_failed metadata: %w", err)
 	}
-	declineCode, declinedCard := declineFromEventPayload(event.Payload)
+	d := declineFromEventPayload(event.Payload)
 	return s.SettleFailed(ctx, tenantID, inv, PaymentFailure{
 		PaymentIntentID: event.PaymentIntentID,
 		Message:         event.FailureMessage,
 		Purpose:         md["velox_purpose"],
-		DeclineCode:     declineCode,
-		PaymentMethodID: declinedCard,
+		DeclineCode:     d.code,
+		PaymentMethodID: d.paymentMethodID,
+		CardMessage:     d.cardMessage,
 	}, SourceWebhook)
 }
 
-// declineFromEventPayload reads the bank's decline code and the declined card
-// from data.object.last_payment_error of a payment_intent.payment_failed body
-// (decline_code, payment_method.id — Stripe's PaymentIntent object; the code
-// and type too, for a hard decline Stripe sends as the error code, see
-// declineCodeOf). They
-// matter only to a later dunning retry (#966), so anything unreadable yields
-// empty values rather than an error: a decline the webhook could not label
-// is retried on schedule, as every decline was before, and the settlement
-// itself must not wait on it. payment_method is an object in the PaymentIntent
-// API; a bare id string is accepted too.
-func declineFromEventPayload(payload map[string]any) (declineCode, paymentMethodID string) {
+// eventDecline is what declineFromEventPayload reads.
+type eventDecline struct {
+	code, paymentMethodID, cardMessage string
+}
+
+// declineFromEventPayload reads the bank's decline code, the declined card
+// and the customer-safe message from data.object.last_payment_error of a
+// payment_intent.payment_failed body (decline_code, payment_method.id,
+// message — Stripe's PaymentIntent object; the code and type too, for a
+// hard decline Stripe sends as the error code, see declineCodeOf, and for
+// the message, which only a card error's is, see cardErrorMessage). The
+// code and card matter only to a later dunning retry (#966), the message
+// only to the customer's email, so anything unreadable yields empty values
+// rather than an error: a decline the webhook could not label is retried on
+// schedule, as every decline was before, and the settlement itself must not
+// wait on it. payment_method is an object in the PaymentIntent API; a bare
+// id string is accepted too.
+func declineFromEventPayload(payload map[string]any) eventDecline {
 	rawStr, ok := payload["raw"].(string)
 	if !ok {
-		return "", ""
+		return eventDecline{}
 	}
 	var parsed struct {
 		Data struct {
@@ -1889,16 +2041,21 @@ func declineFromEventPayload(payload map[string]any) (declineCode, paymentMethod
 					Type          string          `json:"type"`
 					Code          string          `json:"code"`
 					DeclineCode   string          `json:"decline_code"`
+					Message       string          `json:"message"`
 					PaymentMethod json.RawMessage `json:"payment_method"`
 				} `json:"last_payment_error"`
 			} `json:"object"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal([]byte(rawStr), &parsed); err != nil || parsed.Data.Object.LastPaymentError == nil {
-		return "", ""
+		return eventDecline{}
 	}
 	lpe := parsed.Data.Object.LastPaymentError
-	return declineCodeOf(lpe.Type, lpe.Code, lpe.DeclineCode), stripeObjectID(lpe.PaymentMethod)
+	return eventDecline{
+		code:            declineCodeOf(lpe.Type, lpe.Code, lpe.DeclineCode),
+		paymentMethodID: stripeObjectID(lpe.PaymentMethod),
+		cardMessage:     cardErrorMessage(lpe.Type, lpe.Message),
+	}
 }
 
 // stripeObjectID returns the id of a Stripe field that is either an expanded
@@ -2071,10 +2228,14 @@ func (s *Stripe) RecordCheckoutCard(ctx context.Context, tenantID, customerID, s
 	// the newest on the Stripe customer, so it never takes the default by
 	// itself: for a setup-mode session, setup_intent.succeeded carries the
 	// exact card and is the one writer that makes it the default.
+	var recorded *domain.PaymentMethodView
+	cardRemoved := false
 	if s.pmAttacher != nil && card.PaymentMethodID != "" {
-		if err := s.pmAttacher.AttachForWebhook(ctx, tenantID, customerID, card.PaymentMethodID, false); err != nil {
+		pm, err := s.pmAttacher.AttachForWebhook(ctx, tenantID, customerID, card.PaymentMethodID, false)
+		if err != nil {
 			return fmt.Errorf("record the checkout's card: %w", err)
 		}
+		recorded, cardRemoved = pm, pm == nil
 	}
 
 	now := time.Now().UTC()
@@ -2148,12 +2309,25 @@ func (s *Stripe) RecordCheckoutCard(ctx context.Context, tenantID, customerID, s
 		"card_last4", setup.CardLast4,
 	)
 
-	s.fireEvent(ctx, tenantID, domain.EventPaymentMethodUpdated, map[string]any{
-		"customer_id":        customerID,
+	// payment_method.updated carries the card as recorded above (ADR-131).
+	// Every production wiring records one: the attacher is always wired, and
+	// Stripe names the card it lists. Without a recorded card there is no
+	// resource to send, so the event is left out, loudly. A card the
+	// operator removed before this event arrived stays removed: the API does
+	// not list it, so no event names it either.
+	if cardRemoved {
+		slog.InfoContext(ctx, "payment_method.updated not sent: the checkout's card was removed and stays removed",
+			"customer_id", customerID, "stripe_customer_id", stripeCustomerID, "stripe_pm_id", card.PaymentMethodID)
+		return nil
+	}
+	if recorded == nil {
+		slog.ErrorContext(ctx, "payment_method.updated not sent: the checkout's card was not recorded as a payment method",
+			"customer_id", customerID, "stripe_customer_id", stripeCustomerID, "attacher_wired", s.pmAttacher != nil)
+		return nil
+	}
+	s.fireEvent(ctx, tenantID, domain.EventPaymentMethodUpdated, domain.PaymentMethodWebhookData(*recorded, map[string]any{
 		"stripe_customer_id": stripeCustomerID,
-		"card_brand":         setup.CardBrand,
-		"card_last4":         setup.CardLast4,
-	})
+	}))
 
 	return nil
 }

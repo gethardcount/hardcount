@@ -41,7 +41,9 @@ func TestEmitBaseSegmentLine_DenominatorFromPeriodAnchor(t *testing.T) {
 			seg := baseSegment{start: tc.periodStart, end: tc.periodStart.Add(15 * 24 * time.Hour), quantity: 1}
 			var lines []domain.InvoiceLineItem
 			var subtotal int64
-			emitBaseSegmentLine(seg, plan, tc.periodStart, 15, "USD", ist, tc.billingTime, &lines, &subtotal)
+			if err := emitBaseSegmentLine(seg, plan, tc.periodStart, 15, "USD", ist, tc.billingTime, &lines, &subtotal); err != nil {
+				t.Fatalf("emitBaseSegmentLine: %v", err)
+			}
 			if len(lines) != 1 {
 				t.Fatalf("lines: got %d, want 1", len(lines))
 			}

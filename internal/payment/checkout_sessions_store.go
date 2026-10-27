@@ -347,6 +347,27 @@ func (s *CheckoutSessionStore) MarkExpired(ctx context.Context, tenantID, claimI
 	return tx.Commit()
 }
 
+// ReleaseRefused closes a claim whose Checkout Session create Stripe refused
+// outright (payment.IsDefiniteRefusal): no session exists, so nothing can be
+// paid on it. It becomes 'expired', which domain.HostedCheckoutLiveSQL does
+// not count, so charges on the invoice are no longer held for it. Only an
+// open claim with no session moves: one a concurrent create filled is a real
+// page and stays.
+func (s *CheckoutSessionStore) ReleaseRefused(ctx context.Context, tenantID, claimID string) error {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return err
+	}
+	defer postgres.Rollback(tx)
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE checkout_sessions SET status = 'expired', updated_at = now()
+		WHERE id = $1 AND status = 'open' AND stripe_session_id IS NULL
+	`, claimID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // ErrSessionCompleted: a Stripe expire attempt found the session COMPLETED —
 // the customer already paid it. The caller must NOT mint a replacement (a
 // second payable vehicle = the double charge); the webhook settle is in
@@ -371,6 +392,10 @@ var ErrSessionCompleted = errors.New("checkout session already completed")
 // Cross-tenant (TxBypass) for the ctx's mode, least recently looked at first
 // so a session that keeps erroring cannot hold the head of the queue.
 func (s *CheckoutSessionStore) ListHostedToReconcile(ctx context.Context, checkedBefore time.Time, limit int) ([]CheckoutClaim, error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return nil, err
+	}
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		return nil, err
@@ -398,7 +423,7 @@ func (s *CheckoutSessionStore) ListHostedToReconcile(ctx context.Context, checke
 		  )
 		ORDER BY cs.updated_at ASC
 		LIMIT $3
-	`, checkedBefore, postgres.Livemode(ctx), limit)
+	`, checkedBefore, live, limit)
 	if err != nil {
 		return nil, err
 	}

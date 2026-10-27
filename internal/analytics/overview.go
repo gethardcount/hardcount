@@ -3,8 +3,10 @@ package analytics
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"log/slog"
+	"math/big"
 	"net/http"
 
 	"github.com/sagarsuperuser/velox/internal/api/respond"
@@ -33,13 +35,18 @@ type OverviewResponse struct {
 	RevenuePrev     int64 `json:"revenue_prev"`
 	OutstandingAR   int64 `json:"outstanding_ar"`
 	AvgInvoiceValue int64 `json:"avg_invoice_value"`
-	CreditBalance   int64 `json:"credit_balance_total"`
 
 	// OutstandingByCurrency is the amount still due on the same open invoices
 	// OpenInvoices counts, one row per currency. OutstandingAR covers the
 	// default currency only, so on its own it under-reports a tenant that
 	// bills in more than one currency. Default currency first, then largest.
 	OutstandingByCurrency []CurrencyAmount `json:"outstanding_by_currency"`
+
+	// CreditBalanceByCurrency is the credit customers hold, one row per
+	// currency (ADR-129): each ledger row stores its own currency, and
+	// balances in two currencies are never added together. Default currency
+	// first, then largest. Test-clock customers are left out.
+	CreditBalanceByCurrency []CurrencyAmount `json:"credit_balance_by_currency"`
 
 	// Counts
 	ActiveCustomers int `json:"active_customers"`
@@ -179,13 +186,16 @@ func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 		{"paid_invoices", &resp.PaidInvoices,
 			`SELECT COUNT(*) FROM invoices WHERE status = 'paid' AND currency = $1 AND paid_at >= $2 AND paid_at < $3` + notSimInvoice,
 			[]any{defaultCurrency, period.Start, period.End}},
+		// Open invoices only: a void or write-off keeps its last
+		// payment_status, so it counted as a failed payment nobody was
+		// collecting any more (sweep A7/E1, 2026-10-21).
 		{"failed_payments", &resp.FailedPayments,
-			`SELECT COUNT(*) FROM invoices WHERE payment_status = 'failed' AND created_at >= $1 AND created_at < $2` + notSimInvoice,
+			`SELECT COUNT(*) FROM invoices WHERE status = 'finalized' AND payment_status = 'failed' AND created_at >= $1 AND created_at < $2` + notSimInvoice,
 			[]any{period.Start, period.End}},
 		// Same predicate over the previous window, so the trend compares like
 		// with like (the dashboard used to compare against a hard-coded 0).
 		{"failed_payments_prev", &resp.FailedPaymentsPrev,
-			`SELECT COUNT(*) FROM invoices WHERE payment_status = 'failed' AND created_at >= $1 AND created_at < $2` + notSimInvoice,
+			`SELECT COUNT(*) FROM invoices WHERE status = 'finalized' AND payment_status = 'failed' AND created_at >= $1 AND created_at < $2` + notSimInvoice,
 			[]any{period.PrevStart, period.PrevEnd}},
 		{"open_invoices", &resp.OpenInvoices,
 			`SELECT COUNT(*) FROM invoices WHERE status = 'finalized' AND payment_status != 'succeeded'` + notSimInvoice, nil},
@@ -230,17 +240,7 @@ func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Credit balance: authoritative SUM(amount_cents) over the whole ledger,
-	// matching credit.GetBalance. The previous DISTINCT ON (customer_id)
-	// balance_after read the denormalized running balance of the latest row
-	// BY created_at — but catchup / late-cron expiry entries can be inserted
-	// out of created_at order, so "latest row" wasn't the true latest balance
-	// and total credit liability was mis-reported. Summing amount_cents is
-	// order-independent and exact.
-	err = tx.QueryRowContext(ctx, `
-		SELECT COALESCE(SUM(amount_cents), 0) FROM customer_credit_ledger
-		WHERE customer_id IN (SELECT id FROM customers WHERE test_clock_id IS NULL)
-	`).Scan(&resp.CreditBalance)
+	resp.CreditBalanceByCurrency, err = creditBalanceByCurrency(ctx, tx, defaultCurrency)
 	if err != nil {
 		slog.Error("analytics overview: credit balance", "error", err)
 		respond.InternalError(w, r)
@@ -387,6 +387,38 @@ func outstandingByCurrency(ctx context.Context, tx *sql.Tx, defaultCurrency stri
 	return out, rows.Err()
 }
 
+// creditBalanceByCurrency is the credit customers hold per currency:
+// authoritative SUM(amount_cents) over the ledger, matching
+// credit.GetBalance. (A DISTINCT ON (customer_id) read of the latest row's
+// balance_after mis-reported it: catchup / late-cron expiry entries can be
+// inserted out of created_at order. Summing amount_cents is order-independent
+// and exact.) Grouped by the currency each row stores (ADR-129); a currency
+// whose balance is zero is left out. Ordered like outstandingByCurrency.
+// Test-clock customers are left out.
+func creditBalanceByCurrency(ctx context.Context, tx *sql.Tx, defaultCurrency string) ([]CurrencyAmount, error) {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT currency, COALESCE(SUM(amount_cents), 0)
+		FROM customer_credit_ledger
+		WHERE customer_id IN (SELECT id FROM customers WHERE test_clock_id IS NULL)
+		GROUP BY currency
+		HAVING SUM(amount_cents) <> 0
+		ORDER BY (currency = $1) DESC, SUM(amount_cents) DESC, currency
+	`, defaultCurrency)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := []CurrencyAmount{}
+	for rows.Next() {
+		var a CurrencyAmount
+		if err := rows.Scan(&a.Currency, &a.AmountCents); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
 // defaultCurrencyFor returns the tenant's configured default currency, or
 // "USD" when unset. Analytics money totals are scoped to this currency —
 // invoices in other currencies are excluded rather than summed into a corrupt
@@ -501,8 +533,25 @@ func computeMRRMovement(ctx context.Context, tx *sql.Tx, start, end any, currenc
 		return m, err
 	}
 
-	m.Net = m.New + m.Expansion - m.Contraction - m.Churned
+	if m.Net, err = netMRR(m); err != nil {
+		return m, err
+	}
 	return m, nil
+}
+
+// netMRR is New + Expansion − Contraction − Churned, each step checked: a
+// total past int64 is an error, never a wrapped figure. The four parts are
+// SQL sums of non-negative amounts.
+func netMRR(m MRRMovementTotals) (int64, error) {
+	// Summed in big integers so only the net must fit int64, not each step.
+	net := new(big.Int).SetInt64(m.New)
+	net.Add(net, big.NewInt(m.Expansion))
+	net.Sub(net, big.NewInt(m.Contraction))
+	net.Sub(net, big.NewInt(m.Churned))
+	if !net.IsInt64() {
+		return 0, fmt.Errorf("net MRR: %w", domain.ErrAmountOverflow)
+	}
+	return net.Int64(), nil
 }
 
 // churnRate = canceled-in-period / active-at-period-start.
@@ -531,9 +580,13 @@ func churnRate(ctx context.Context, tx *sql.Tx, start, end any, _ bool) float64 
 	return float64(canceled) / float64(activeAtStart)
 }
 
-// dunningRecoveryRate = resolved-in-period / opened-in-period. Only counts
-// resolutions that landed on 'resolved' (successful recovery), ignoring
-// 'exhausted' / 'written_off' outcomes.
+// dunningRecoveryRate = recovered / opened, over the runs opened in the
+// period. A run is recovered when a payment closed it: resolution
+// payment_recovered, with money paid on the invoice (amount_paid_cents > 0).
+// A run resolved by a void or a write-off is resolved but not recovered, and
+// used to raise the rate (sweep E7b, 2026-10-21); so is a run closed by a
+// credit note or customer credit that left nothing due, which is
+// payment_recovered with nothing paid (review of #1328).
 func dunningRecoveryRate(ctx context.Context, tx *sql.Tx, start, end any) float64 {
 	var opened, recovered int
 	if err := tx.QueryRowContext(ctx, `
@@ -544,8 +597,8 @@ func dunningRecoveryRate(ctx context.Context, tx *sql.Tx, start, end any) float6
 	}
 	if err := tx.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM invoice_dunning_runs
-		WHERE created_at >= $1 AND created_at < $2 AND state = 'resolved' AND invoice_id IN (SELECT id FROM invoices WHERE is_simulated = false)
-	`, start, end).Scan(&recovered); err != nil {
+		WHERE created_at >= $1 AND created_at < $2 AND state = 'resolved' AND resolution = $3 AND invoice_id IN (SELECT id FROM invoices WHERE is_simulated = false AND amount_paid_cents > 0)
+	`, start, end, string(domain.ResolutionPaymentRecovered)).Scan(&recovered); err != nil {
 		return 0
 	}
 	if opened == 0 {

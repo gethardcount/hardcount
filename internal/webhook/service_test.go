@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -20,6 +19,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	"github.com/sagarsuperuser/velox/internal/testutil"
 )
 
 // ---------------------------------------------------------------------------
@@ -30,7 +30,7 @@ type memStore struct {
 	endpoints  map[string]domain.WebhookEndpoint
 	events     []domain.WebhookEvent
 	deliveries []domain.WebhookDelivery
-	// deliveryLivemodes records postgres.Livemode(ctx) for each
+	// deliveryLivemodes records the mode on ctx (testutil.MustLivemode) for each
 	// CreateDelivery call so tests can assert the delivery write landed
 	// on the right RLS mode partition (H5: the Replay goroutine path
 	// used a bare ctx and wrote test-mode replays to the live partition).
@@ -52,16 +52,12 @@ func newMemStore() *memStore {
 func (m *memStore) CreateEndpoint(ctx context.Context, tenantID string, ep domain.WebhookEndpoint) (domain.WebhookEndpoint, error) {
 	ep.ID = fmt.Sprintf("vlx_whe_%d", len(m.endpoints)+1)
 	ep.TenantID = tenantID
-	ep.Livemode = postgres.Livemode(ctx)
+	ep.Livemode = testutil.MustLivemode(ctx)
 	ep.CreatedAt = time.Now().UTC()
 	ep.UpdatedAt = ep.CreatedAt
 	ep.SecretLast4 = lastFour(ep.Secret)
 	m.endpoints[ep.ID] = ep
 	return ep, nil
-}
-
-func (m *memStore) CreateEndpointTx(ctx context.Context, _ *sql.Tx, tenantID string, ep domain.WebhookEndpoint) (domain.WebhookEndpoint, error) {
-	return m.CreateEndpoint(ctx, tenantID, ep)
 }
 
 func (m *memStore) GetEndpoint(_ context.Context, tenantID, id string) (domain.WebhookEndpoint, error) {
@@ -89,7 +85,7 @@ func (m *memStore) UpdateEndpoint(_ context.Context, tenantID string, ep domain.
 // store since the FLOW W0 fix (dispatch filters ep.Active in its own match
 // loop; the list must show inactive rows or they're unreachable from the UI).
 func (m *memStore) ListEndpoints(ctx context.Context, tenantID string) ([]domain.WebhookEndpoint, error) {
-	live := postgres.Livemode(ctx)
+	live := testutil.MustLivemode(ctx)
 	var result []domain.WebhookEndpoint
 	for _, ep := range m.endpoints {
 		if ep.TenantID == tenantID && ep.Livemode == live {
@@ -133,7 +129,7 @@ func (m *memStore) RotateEndpointSecret(_ context.Context, tenantID, id, newSecr
 func (m *memStore) CreateEvent(ctx context.Context, tenantID string, event domain.WebhookEvent) (domain.WebhookEvent, error) {
 	event.ID = fmt.Sprintf("vlx_whevt_%d", len(m.events)+1)
 	event.TenantID = tenantID
-	event.Livemode = postgres.Livemode(ctx)
+	event.Livemode = testutil.MustLivemode(ctx)
 	event.CreatedAt = time.Now().UTC()
 	m.events = append(m.events, event)
 	return event, nil
@@ -245,7 +241,7 @@ func (m *memStore) CreateDelivery(ctx context.Context, tenantID string, d domain
 	d.ID = fmt.Sprintf("vlx_whd_%d", len(m.deliveries)+1)
 	d.TenantID = tenantID
 	d.CreatedAt = time.Now().UTC()
-	lm := postgres.Livemode(ctx)
+	lm := testutil.MustLivemode(ctx)
 	// Mirror the real store: the 0021 trigger stamps livemode from the
 	// session GUC and the INSERT hydrates it via RETURNING — a fake row
 	// frozen at the zero value would trip (or mask) livemode guards the
@@ -486,7 +482,7 @@ func TestEndpointSuccessRate(t *testing.T) {
 
 func TestCreateEndpoint(t *testing.T) {
 	svc := NewService(newMemStore(), nil, "local")
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	t.Run("valid localhost", func(t *testing.T) {
 		result, err := svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{
@@ -557,7 +553,7 @@ func TestDispatch(t *testing.T) {
 	store := newMemStore()
 	httpClient := &mockHTTPClient{statusCode: 200}
 	svc := NewTestService(store, httpClient)
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	// Register an endpoint (localhost to bypass SSRF DNS check in tests)
 	result, _ := svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{
@@ -652,7 +648,7 @@ func TestDispatch(t *testing.T) {
 func TestInactiveEndpoint_ListedButNeverDispatched(t *testing.T) {
 	store := newMemStore()
 	svc := NewTestService(store, &mockHTTPClient{statusCode: 200})
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	if _, err := svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{
 		URL: "http://localhost:9901/hook", Events: []string{"*"},
@@ -708,7 +704,7 @@ func TestDispatch_NonMatchingEvent(t *testing.T) {
 	store := newMemStore()
 	httpClient := &mockHTTPClient{statusCode: 200}
 	svc := NewTestService(store, httpClient)
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	// Register endpoint for invoice events only
 	_, _ = svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{
@@ -730,7 +726,7 @@ func TestDispatch_WildcardEndpoint(t *testing.T) {
 	store := newMemStore()
 	httpClient := &mockHTTPClient{statusCode: 200}
 	svc := NewTestService(store, httpClient)
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	// Register endpoint for all events
 	_, _ = svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{
@@ -774,7 +770,7 @@ func TestDelivery_FailedHTTP(t *testing.T) {
 	store := newMemStore()
 	httpClient := &mockHTTPClient{statusCode: 500}
 	svc := NewTestService(store, httpClient)
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	_, _ = svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{URL: "http://localhost:9999/hook"})
 	before := time.Now()
@@ -887,7 +883,7 @@ func TestReplay(t *testing.T) {
 	store := newMemStore()
 	httpClient := &mockHTTPClient{statusCode: 200}
 	svc := NewTestService(store, httpClient)
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	// Setup: create endpoint + dispatch event
 	_, _ = svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{
@@ -981,7 +977,7 @@ func TestReplay_PinsLivemodeOnDelivery(t *testing.T) {
 func TestReplayDelivery_ScopedToOneEndpoint(t *testing.T) {
 	store := newMemStore()
 	svc := NewTestService(store, &mockHTTPClient{statusCode: 200})
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	epA, _ := svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{
 		URL: "http://localhost:9999/a", Events: []string{"invoice.finalized"},
@@ -1039,7 +1035,7 @@ func TestReplayDelivery_ScopedToOneEndpoint(t *testing.T) {
 func TestReplayDelivery_PausedEndpointRejected_NoOrphanClone(t *testing.T) {
 	store := newMemStore()
 	svc := NewTestService(store, &mockHTTPClient{statusCode: 200})
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	ep, _ := svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{
 		URL: "http://localhost:9999/hook", Events: []string{"invoice.finalized"},
@@ -1079,7 +1075,7 @@ func TestReplayDelivery_PausedEndpointRejected_NoOrphanClone(t *testing.T) {
 func TestRetryPending_DeletedEndpointResolvesDelivery(t *testing.T) {
 	store := newMemStore()
 	svc := NewTestService(store, &mockHTTPClient{statusCode: 500})
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	ep, _ := svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{
 		URL: "http://localhost:9999/hook", Events: []string{"invoice.finalized"},
@@ -1120,7 +1116,7 @@ func TestRetryPending_DeletedEndpointResolvesDelivery(t *testing.T) {
 func TestReplayDelivery_WrongEndpointPath404s(t *testing.T) {
 	store := newMemStore()
 	svc := NewTestService(store, &mockHTTPClient{statusCode: 200})
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	epA, _ := svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{
 		URL: "http://localhost:9999/a", Events: []string{"invoice.finalized"},
@@ -1313,7 +1309,7 @@ func TestBuildSignatureHeader(t *testing.T) {
 // rotate returns a secondary_valid_until, a follow-up dispatch signs with
 // both secrets, and after the window the header drops back to one.
 func TestRotateSecret_GracePeriod(t *testing.T) {
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 	store := newMemStore()
 	httpClient := &mockHTTPClient{statusCode: 200}
 	svc := NewTestService(store, httpClient)
@@ -1380,7 +1376,7 @@ func TestRetryPendingDeliveries_OldEventResolvable(t *testing.T) {
 	store := newMemStore()
 	httpClient := &mockHTTPClient{statusCode: 200}
 	svc := NewTestService(store, httpClient)
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	ep, err := svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{
 		URL:    "http://localhost:9999/hook",
@@ -1459,7 +1455,7 @@ func TestRetryPendingDeliveries_DeletedEventFails(t *testing.T) {
 	store := newMemStore()
 	httpClient := &mockHTTPClient{statusCode: 200}
 	svc := NewTestService(store, httpClient)
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	ep, err := svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{
 		URL:    "http://localhost:9999/hook",
@@ -1748,7 +1744,7 @@ func TestValidateWebhookURL_JudgesAddressesLikeTheDialer(t *testing.T) {
 // A public IPv6 address is the negative control.
 func TestCreateAndUpdateEndpoint_RefuseIPv6PrivateAddresses(t *testing.T) {
 	svc := NewService(newMemStore(), nil, "local")
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	existing, err := svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{URL: "https://[2606:4700:4700::1111]/hook"})
 	if err != nil {
@@ -1792,7 +1788,7 @@ func TestCreateAndUpdateEndpoint_RefuseIPv6PrivateAddresses(t *testing.T) {
 // shipped two phantom names: invoice.payment_failed, subscription.updated).
 func TestCreateEndpoint_RejectsUnknownEventNames(t *testing.T) {
 	svc := NewService(newMemStore(), nil, "local")
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	for _, bad := range []string{"invoice.payment_failed", "subscription.updated", "totally.made_up"} {
 		if _, err := svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{
@@ -1828,7 +1824,7 @@ func TestCreateEndpoint_RejectsUnknownEventNames(t *testing.T) {
 // URL) were permanently dead.
 func TestUpdateEndpoint(t *testing.T) {
 	svc := NewService(newMemStore(), nil, "local")
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	created, err := svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{
 		URL: "http://localhost:9099/old", Events: []string{"invoice.finalized"},

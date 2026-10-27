@@ -1,7 +1,7 @@
 # ADR-036: Dunning campaigns model (multi-policy-per-tenant)
 
 **Date:** 2026-05-16
-**Status:** Accepted (amended 2026-05-16 — terminal-action set + pause-semantics fix; amended 2026-07-05 — initial-default-at-first-create + no-policy = deliberate skip; amended 2026-10-17 — new accounts start with a seeded default, [ADR-123](123-new-accounts-start-with-a-default-dunning-policy.md); amended 2026-10-22 — a collection pause does not stop open runs; **the terminal-action half is SUPERSEDED by [ADR-112](112-dunning-exhaustion-settles-two-questions.md), 2026-08-05**; see Amendment sections below)
+**Status:** Accepted (amended 2026-05-16 — terminal-action set + pause-semantics fix; amended 2026-07-05 — initial-default-at-first-create + no-policy = deliberate skip; amended 2026-10-17 — new accounts start with a seeded default, [ADR-123](123-new-accounts-start-with-a-default-dunning-policy.md); amended 2026-10-22 — a collection pause does not stop open runs; amended 2026-10-22 — a dunning pause lifts when its invoice is paid; amended 2026-10-23 — the schedule is one list of days, `retry_days`; **the terminal-action half is SUPERSEDED by [ADR-112](112-dunning-exhaustion-settles-two-questions.md), 2026-08-05**; see Amendment sections below)
 
 > ⚠️ **The 2026-05-16 amendment below describes a `final_action` column that no
 > longer exists.** [ADR-112](112-dunning-exhaustion-settles-two-questions.md)
@@ -56,6 +56,11 @@ Two structural problems surfaced during the 2026-05 dogfood pass:
    rule-match). Velox's partial-field override is a one-off shape with
    no precedent.
 
+   **Correction (2026-10-23):** Lago's campaigns run automatically only with
+   a premium licence and the `auto_dunning` flag. Checked in lago-api
+   `2e52dfc` (2026-10-22): `app/services/dunning_campaigns/bulk_process_service.rb:8`,
+   `app/models/organization.rb:152`.
+
 Sources:
 - [Stripe — Smart Retries](https://docs.stripe.com/billing/revenue-recovery/smart-retries)
 - [Lago — Automatic dunning](https://doc.getlago.com/guide/dunning/automatic-dunning)
@@ -100,6 +105,10 @@ policy** even if the customer's assignment changes. The new
 assignment takes effect on the NEXT run.
 
 ### Save-time validation (closes the silent-fallback gap)
+
+*(2026-10-23: replaced. The schedule is one list, `retry_days`, whose length
+is the retry count, so there is no count to check it against. See
+[the amendment](#amendment-2026-10-23--the-schedule-is-one-list-of-days).)*
 
 `UpsertPolicy` now rejects when `max_retry_attempts > len(retry_schedule) + 1`.
 The runtime `idx >= len(retryIntervals)` reuse-last-interval branch is
@@ -220,6 +229,8 @@ Sources:
 - [Orb — advanced dunning](https://docs.withorb.com/invoicing/advanced-dunning) (no state-change actions documented)
 - [Recurly — dunning management](https://docs.recurly.com/recurly-subscriptions/docs/dunning-management)
 
+**Correction (2026-10-23):** Lago's "Cancel subscription ✓ (terminate)" cell is wrong; it should read ✗ (requested, not built). The source above is a feature request. A Lago dunning campaign has thresholds, `bcc_emails`, `days_between_attempts` and `max_attempts`, and no final action. Automatic dunning also needs a premium licence. Checked in lago-api `2e52dfc` (2026-10-22): `app/models/dunning_campaign.rb:59-69`, `app/services/dunning_campaigns/process_attempt_service.rb:17-33`, `app/services/dunning_campaigns/bulk_process_service.rb:8`.
+
 ### Decision
 
 Velox supports all four actions; semantics aligned with Stripe.
@@ -230,7 +241,7 @@ but two independent choices. The behaviours described are unchanged.)*
 | Velox enum (2026-05-16 amendment; column split by ADR-112) | Behavior |
 |---|---|
 | `manual_review` | Run lands state=escalated. No sub/invoice mutation. Operator handles via dashboard. Maps to Stripe "Keep active." |
-| `pause` | **Calls `subscription.Service.PauseCollection(behavior=keep_as_draft)`** — not the pre-amendment hard `PauseAtomic`. Cycle keeps drafting invoices; invoices drafted during the pause are not charged and start no dunning, and they stay drafts after the operator resumes (only later cycles finalize). Runs already open on earlier invoices keep retrying (see the 2026-10-22 amendment). Matches Stripe's `pause_collection.behavior=keep_as_draft`. The hard-pause path silently skipped invoice generation for the affected periods (per ADR-035 analysis) — non-Stripe and destructive. |
+| `pause` | **Calls `subscription.Service.PauseCollection(behavior=keep_as_draft)`** — not the pre-amendment hard `PauseAtomic`. Cycle keeps drafting invoices; invoices drafted during the pause are not charged and start no dunning, and they stay drafts after collection resumes (only later cycles finalize). Collection resumes when the operator resumes it or, for a pause dunning set, when the invoice whose dunning set it is paid (amendment 2026-10-22, "a dunning pause lifts when its invoice is paid"). Runs already open on earlier invoices keep retrying (amendment 2026-10-22, "a collection pause does not stop open runs"). Matches Stripe's `pause_collection.behavior=keep_as_draft`. The hard-pause path silently skipped invoice generation for the affected periods (per ADR-035 analysis) — non-Stripe and destructive. |
 | `mark_uncollectible` | Calls `invoice.Service.MarkUncollectible` — flips the unpaid invoice to status='uncollectible' (new status, migration 0089). Stripe-standard semantics: receivable closed but invoice stays in financial reporting. Distinct from voided. |
 | `cancel_subscription` | Calls `subscription.Service.Cancel`. Stripe-default terminal action; supported by 3 of 4 reference platforms. Previously missing — operator workflow required a manual cancel step after escalation. |
 
@@ -405,3 +416,149 @@ subscription's other unpaid invoices keep retrying.
 
 There is no control that pauses one run. The `paused` column on
 `invoice_dunning_runs` is read by `processRun`, but nothing sets it.
+
+## Amendment 2026-10-22 — a dunning pause lifts when its invoice is paid
+
+The `pause` final action used to hold "until the operator resumes". A
+customer who then paid the overdue invoice (by card, offline, or through a
+credit note that left nothing due) stayed paused. Their new invoices stayed
+drafts and nothing charged them, with no sign of why. Found as A3 in the
+2026-10-21 product sweep. The rule below is Sagar's decision of 2026-10-21:
+paying the invoice whose dunning paused collection resumes it.
+
+**Decision.**
+
+1. A dunning pause records the invoice whose dunning set it:
+   `subscriptions.pause_collection_invoice_id` (migrations 193 and 194).
+   NULL is an operator's pause, set through the API or the dashboard. The
+   API shows it as `pause_collection.set_by`: `dunning` or `operator`.
+   Pauses set before the migration have no invoice, so they stay the
+   operator's: they were set under the old rule. A CHECK refuses an invoice
+   on a row with no pause, so a writer that clears the pause and forgets the
+   column fails.
+2. Paying that invoice resumes collection, even if another invoice on the
+   subscription is still owed. Paying any other invoice changes nothing.
+   That other invoice has its own dunning run; if its dunning exhausts while
+   collection is still paused, the pause stays the first invoice's (point
+   5). The trade is deliberate. A wider rule ("resume once nothing is
+   owed") can leave a subscription paused after its overdue invoice is
+   paid, which is the A3 harm itself. It also needs a re-check on every
+   void and write-off. Under this rule, paying the overdue invoice always
+   resumes collection.
+3. The release rides the paid transaction. Every paid flip goes through the
+   invoice store's `markPaidLockedTx` (ADR-068's choke point), so card,
+   offline, credit-note and credits-cover payments release it the same
+   way. Each transaction that can reach that flip first locks the
+   subscription row when its dunning pause waits for this invoice
+   (`LockDunningPauseTx`), before the invoice row. Every writer of both rows
+   locks the subscription first, so a cancel or plan swap that holds the
+   subscription and then relieves the invoice cannot deadlock with the
+   payment.
+4. The release does not clear the pause. It sets `resumes_at` to the time
+   Velox records the payment, and the scheduled resumer does the rest, as
+   for an operator's timed pause:
+   - a period that ended under the pause still closes as a draft;
+   - the resumer's compare-and-clear announces the resume once;
+   - the resumer writes the "Collection resumed" row (detail "The overdue
+     invoice was paid") and sends `subscription.collection_resumed`, both
+     with `triggered_by=payment`.
+
+   Every reader already treats a `resumes_at` in the past as resumed.
+5. Dunning never overrides a pause in force. The pause write locks the
+   subscription, then the unpaid invoice, and pauses only while that invoice
+   is still owed, so a payment that commits first wins and the run closes as
+   recovered. It leaves an operator's pause, with its `resumes_at`, as it
+   is, and a dunning pause keeps the invoice it was set for. A second
+   exhaustion on a subscription dunning already paused writes no second
+   "Collection paused" row. This closes ADR-112's deferred "pause has no
+   skip-if-done" item.
+6. An operator pause never lifts on a payment. An operator who pauses a
+   subscription dunning paused takes the pause over (`set_by=operator`).
+
+**Kept as today.** Drafts from paused periods stay drafts; only periods
+that end after the payment finalize and charge (Stripe: after a resume you
+turn automatic collection back on for each draft). A void or a write-off of
+the invoice does not lift the pause; only its payment does. A canceled
+subscription keeps its pause.
+
+**Built later.** A dunning pause sends `subscription.collection_paused`
+with `triggered_by: dunning`, queued in the pause's transaction (#1384,
+2026-10-25); the operator's pause carries `triggered_by: operator`. The
+operator's resume sends nothing when nothing was paused (#1377).
+
+**Built later (#1384, 2026-10-25): a lifted pause is resumed once, by
+whoever removes it.** A lifted pause is one whose `resumes_at` has passed
+but which the resumer has not cleared yet. Four writers can remove it: the
+scheduled resumer, dunning's pause, the operator's pause and the
+operator's resume call. All four clear it through one store helper
+(`clearLiftedPauseTx`). That helper writes the "Collection resumed" row
+and queues `subscription.collection_resumed` in the clear's transaction,
+with the pause's own trigger (`payment` or `schedule`) and its
+`resumes_at`. So a new pause no longer drops the resume of the pause it
+replaces, and a resume call on a lifted pause sends no `operator` resume.
+
+The resumer's clear is a compare-and-set on the pause it listed. The row
+must still hold a lifted pause with the same `resumes_at` and the same
+setter (operator or dunning). If dunning pauses again between the list and
+the clear, the clear misses: the new pause stays and nothing is sent.
+`resumes_at` changes whenever the pause does, with one exception. On a test
+clock, a payment can lift a new dunning pause at the very instant an
+operator's timed pause reached its date. The setter tells those two apart,
+and with it the trigger. The invoice id is not in the key: two dunning
+pauses lifted at the same instant resume the same way.
+
+## Amendment 2026-10-23 — the schedule is one list of days
+
+**Decision.** A policy's schedule is one ordered list, `retry_days`: the
+whole days to wait before each retry. The first wait counts from the failed
+payment, or, with no card on file (ADR-060), from the collection that found
+none. Each later one counts from the retry before it, so `[3, 4, 7]` retries
+on day 3, 7 and 14. The number of retries is the list's length. It replaces
+three fields that had to agree: `grace_period_days` (the wait before retry
+1), `retry_schedule` (Go durations for retries 2 to N) and
+`max_retry_attempts` (N). The save-time check above existed only because
+they could disagree, and the retry path still carried an out-of-bounds
+error for the case. Simplification audit item B8, decided under the owner's
+delegation.
+
+**Why one list.** Kill Bill's `org.killbill.payment.retry.days` is the same
+shape: a list of days, its length the retry count, the first entry counted
+from the failed payment (`PaymentConfig.java:31-34`,
+`InvoicePaymentControlPluginApi.java:591-609`, killbill `3548b02`).
+Stripe's custom retry schedule is up to three retries "each with a specific
+number of days after the previous attempt"
+([Automate payment retries](https://docs.stripe.com/billing/revenue-recovery/smart-retries#custom-retry-schedule),
+read 2026-10-23). Lago has one `days_between_attempts` and a separate
+`max_attempts` (lago-api `2e52dfc`, `app/models/dunning_campaign.rb:23-24, 62-65`,
+`app/services/dunning_campaigns/process_customer_service.rb:99-105`).
+
+**The grace period is the first entry.** It was only ever the wait before
+the first retry: `StartDunning` was its one reader. ADR-112 and ADR-113
+give it no other meaning, and the invoice grace of ADR-120 (late usage
+before a period closes) is a different thing that shared the word.
+
+**Days, not hours.** Every peer above counts in days. The seed, the recipes
+and the dashboard's defaults all wrote whole days; no Velox writer asks for
+a shorter wait. A day is 24 hours, as `grace_period_days` was. Each
+wait is 1 to 30 days and a policy has 1 to 15 retries. Before, only the
+first wait had an upper bound (30 days); a later wait over 30 days is now
+refused.
+
+**Kept as it was.** When a run starts (ADR-064), the card-less enrollment
+(ADR-060), exhaustion and its two questions (ADR-112), the final actions,
+the run's `paused` flag and test clocks. A run still reads its bound
+policy every tick, so shortening `retry_days` below a run's attempts
+exhausts it on its next tick, as lowering `max_retry_attempts` did.
+`GET /v1/dunning/runs` keeps a run's `max_retry_attempts`, now the length
+of the policy's list.
+
+**Stored policies.** Migration 00206 converts each one exactly: the first
+wait, then the waits its retries used, in days. Entries past the last
+retry were never used and are dropped. A schedule left out (one retry
+needed none) was stored as JSON null and read as an empty list, so it
+converts as one. A policy whose retries used a wait
+that is not whole days from 1 to 30 stops the migration, named in the
+error: rounding would retry on a day nobody chose, and under the clean
+break from 0.8.x only local databases can hold one. The API refuses the
+three old fields by name with a 422.
+

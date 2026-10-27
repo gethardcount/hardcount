@@ -16,6 +16,11 @@ export interface DunningRun {
   invoice_id: string;
   customer_id?: string;
   policy_id: string;
+  /**
+     * `active`: retries are running. `escalated`: retries ran out
+     * (`resolution` is `retries_exhausted`). `resolved`: the run ended
+     * another way; see `resolution`.
+     */
   state: DunningRunState;
   reason?: string;
   attempt_count: number;
@@ -28,7 +33,9 @@ export interface DunningRun {
      * `action_failed` is set on a run that is still `active`. The
      * final action (pause, cancel or mark uncollectible) failed and
      * will be retried at `next_action_at`. `manually_resolved` appears
-     * only on older runs.
+     * only on older runs. `amount_below_minimum`: a charge on the
+     * invoice was refused by Stripe because the amount is below its
+     * minimum charge, so the run ended without its final action.
      */
   resolution?: DunningRunResolution;
   created_at: string;
@@ -43,4 +50,12 @@ export interface DunningRun {
   effective_now?: string;
   /** Filled in on list responses. */
   test_clock_id?: string;
+  /**
+     * How many retries the run's policy makes: the length of its
+     * `retry_days`. Filled in on list responses.
+     * When `attempt_count` has reached it, no charge is retried:
+     * `next_action_at` is when the final action (pause, cancel or
+     * mark uncollectible) runs.
+     */
+  max_retry_attempts?: number;
 }

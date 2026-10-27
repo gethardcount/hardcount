@@ -10,16 +10,17 @@ import (
 	"github.com/sagarsuperuser/velox/internal/errs"
 )
 
-// ADR-101 Phase 1: billing_intervals dual-write.
+// ADR-101: billing_intervals writers.
 //
 // Every item mutation records its policy-applied billable lifetime
 // [starts_at, ends_at) in the SAME transaction as the item write. The
 // subscription_item_changes fact log is untouched — facts stay raw; the
 // day-grade policy (ADR-012 + its 2026-07-26 'add'-clamp amendment) is
 // applied HERE, once, at write time, instead of re-derived at every read.
-// Nothing reads this table yet; the cycle reader cuts over in Phase 3
-// behind VELOX_BILLING_INTERVALS_READER. Writers are NEVER gated by that
-// flag — the table must be complete from the moment this ships.
+// The billing reader reads only this table, and nothing reconstructs it:
+// every database starts from the goose baseline with these writers in
+// place, so the table is complete from an item's first billable instant
+// (TestIntervals_FreshDatabaseNeedsNoBackfill).
 //
 // Interval writers run on the caller's tx and are loud: a failed interval
 // write fails the whole item mutation. The table's exclusion constraints
@@ -46,7 +47,8 @@ type intervalSubCtx struct {
 // mutation can't thread an open interval under a committing cancel's
 // close-all sweep. The share lock here is then the tx's own row and does
 // not wait. Lock order everywhere is subscription row → item rows →
-// interval rows.
+// interval rows. A writer that references more than one plan takes them
+// right after the subscription row (lockPlansTx).
 func intervalSubContext(ctx context.Context, tx *sql.Tx, subscriptionID string) (intervalSubCtx, error) {
 	ic := intervalSubCtx{subID: subscriptionID}
 	var status, tz string

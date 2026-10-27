@@ -35,7 +35,7 @@ func (c *tenantTxCounter) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQue
 
 type stripeAlwaysConnected struct{}
 
-func (stripeAlwaysConnected) HasFor(context.Context, string, bool) bool { return true }
+func (stripeAlwaysConnected) HasFor(context.Context, string, bool) (bool, error) { return true, nil }
 
 // Issue #1142: GET /v1/invoices took ~110 ms for 25 rows because every row
 // read its own attention facts (payment setup, Stripe credentials, and for
@@ -116,7 +116,7 @@ func TestInvoiceList_AttentionCostIsPerPage_RealStore(t *testing.T) {
 
 	escalatedCust := newCustomer("escalated", "esc@acme.test", false)
 	escalated := newInvoice("escalated", escalatedCust, "", domain.InvoiceFinalized, domain.PaymentPending)
-	exec(`INSERT INTO dunning_policies (id, tenant_id, name) VALUES ('vlx_dpol_1142', $1, 'p')`, tenantID)
+	exec(`INSERT INTO dunning_policies (id, tenant_id, name, retry_days) VALUES ('vlx_dpol_1142', $1, 'p', '[3, 3, 3]')`, tenantID)
 	exec(`INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, policy_id, state, attempt_count, last_attempt_at, resolved_at, resolution)
 		VALUES ('vlx_drun_1142', $1, $2, $3, 'vlx_dpol_1142', 'escalated', 3, now(), now(), 'retries_exhausted')`, tenantID, escalated, escalatedCust)
 

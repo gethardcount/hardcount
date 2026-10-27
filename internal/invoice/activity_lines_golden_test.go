@@ -351,7 +351,7 @@ func buildGoldenCases(t *testing.T, w writerTokens) []goldenCase {
 	credits.AmountPaidCents, credits.CreditsAppliedCents = 0, 4900
 	add("paid/with credits", paidLine(credits, 0, "", auto, nil))
 	offline := inv
-	offline.AmountPaidCents, offline.StripePaymentIntentID = 3900, "out_of_band:abc"
+	offline.AmountPaidCents, offline.PaidOutOfBand = 3900, true
 	add("paid/offline with reference", paidLine(offline, 0, "Wire 1042", person, nil))
 	add("paid/offline without reference", paidLine(offline, 0, "", key, nil))
 	cad := paid
@@ -470,7 +470,7 @@ func buildGoldenCases(t *testing.T, w writerTokens) []goldenCase {
 	}
 	reminder := EmailEventRow{EmailType: "dunning_warning", Status: "dispatched", DeliveryState: "delivered"}
 	for _, reason := range []string{"payment failed: Your card has insufficient funds.", string(domain.DunningCauseNoPaymentMethod),
-		domain.ErrNoPaymentMethodOnRetry.Error(), domain.DunningRetryReasonCardRefused, "succeeded"} {
+		domain.ErrNoPaymentMethodOnRetry.Error(), domain.DunningRetryReasonCardRefused, domain.DunningRetryReasonNeedsConfirmation, "succeeded"} {
 		add("dunning/retry/"+reason, dunningLine(domain.InvoiceDunningEvent{EventType: domain.DunningEventRetryAttempted, AttemptCount: 2, Reason: reason}, dunningContext{email: &reminder}))
 	}
 	// The retry that recovered a paid invoice: folded into "Invoice paid" on

@@ -23,7 +23,7 @@
 // the difference between a benchmark and a pathological case: with a single
 // customer every event lands on one customer_id, so the resolve cache never
 // misses, the btrees append to one hot edge, and — worst — the responsiveness
-// probe's usage-summary aggregates EVERY row in the table for its one customer,
+// probe's per-customer usage aggregate reads EVERY row in the table for its one customer,
 // which at 1.1M rows already costs ~180ms on a warm laptop and would report the
 // product as DEGRADED on the AWS rig for a reason no real tenant would hit.
 // Customers are numbered NNN so the load generator can pick one arithmetically.
@@ -119,7 +119,7 @@ func main() {
 		"customer_id_prefix":          benchCustomerIDPrefix,
 		"external_customer_id_prefix": benchCustomerExternalPrefix,
 		// The first customer, for callers that only need one (bringup's smoke
-		// test). The INTERNAL id is what /v1/usage-summary/{id} is keyed by.
+		// test). The INTERNAL id is what /v1/usage-events/aggregate?customer_id= takes.
 		"external_customer_id": fmt.Sprintf("%s%03d", benchCustomerExternalPrefix, 0),
 		"customer_id":          fmt.Sprintf("%s%03d", benchCustomerIDPrefix, 0),
 	}
@@ -141,19 +141,17 @@ func bootstrapFixtures(ctx context.Context, db *postgres.DB, customers int, live
 	// app.livemode MUST be set on this transaction explicitly.
 	//
 	// `customers` and `meters` carry the same BEFORE INSERT set_livemode
-	// trigger as usage_events: it overwrites whatever the INSERT supplied,
-	// reading the app.livemode GUC, which defaults to LIVE when unset. And
-	// BeginTx sets that GUC only for TxTenant — the TxBypass branch sets
-	// app.bypass_rls and nothing else. So postgres.WithLivemode on the context
-	// is silently INERT here, and the fixtures land live-mode next to a
-	// test-mode key, after which every ingest answers 422
-	// `customer "bench-customer" not found`.
+	// trigger as usage_events: it overwrites whatever the INSERT supplied
+	// with the app.livemode GUC, and refuses the insert when the GUC is unset
+	// (migration 00213). BeginTx sets that GUC only for TxTenant — the
+	// TxBypass branch sets app.bypass_rls and nothing else. So
+	// postgres.WithLivemode on the context is INERT here.
 	//
-	// Two things conspire to hide it. The trigger is INSERT-only, so the
-	// ON CONFLICT DO UPDATE path below writes livemode=false correctly — which
-	// means a SECOND run against the same database repairs it and looks fine.
-	// A fresh database is the only one that shows the bug, and a fresh database
-	// is exactly what a benchmark rig provisions.
+	// Before 00213 an unset GUC meant LIVE, and this seeder once wrote its
+	// fixtures live next to a test-mode key; every ingest then answered 422
+	// `customer "bench-customer" not found`. The ON CONFLICT DO UPDATE path
+	// below hid it on a reused database: the trigger is INSERT-only, so a
+	// second run wrote livemode=false and looked fine.
 	mode := "off"
 	if live {
 		mode = "on"
@@ -185,10 +183,10 @@ func bootstrapFixtures(ctx context.Context, db *postgres.DB, customers int, live
 	}
 
 	if _, err = tx.ExecContext(ctx, `
-		INSERT INTO meters (id, tenant_id, name, key, unit, aggregation, livemode)
+		INSERT INTO meters (id, tenant_id, name, event_name, unit, aggregation, livemode)
 		VALUES ($1, $2, 'Bench Tokens', $3, 'tokens', $4, $5)
 		ON CONFLICT (id) DO UPDATE SET livemode = $5
-	`, benchMeter, benchTenant, benchMeterKey, string(domain.AggSum), live); err != nil {
+	`, benchMeter, benchTenant, benchMeterKey, domain.AggregationSum, live); err != nil {
 		log.Fatalf("upsert meter: %v", err)
 	}
 
@@ -205,7 +203,7 @@ func mintBenchAPIKey(ctx context.Context, db *postgres.DB, live bool) string {
 	svc := auth.NewService(auth.NewPostgresStore(db))
 	// The key MUST be minted in the same mode as the fixtures, or it
 	// authenticates into the other partition and sees no bench data.
-	res, err := svc.CreateKey(auth.WithLivemode(ctx, live), benchTenant, auth.CreateKeyInput{
+	res, err := svc.CreateKey(postgres.WithLivemode(ctx, live), benchTenant, auth.CreateKeyInput{
 		Name: "velox-bench", KeyType: auth.KeyTypeSecret,
 	})
 	if err != nil {

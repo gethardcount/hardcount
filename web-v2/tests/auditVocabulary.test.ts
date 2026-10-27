@@ -159,8 +159,8 @@ test('a row whose subject was torn down offers no link', () => {
 
 // The audit log printed every *_cents value with the workspace symbol, so a
 // EUR invoice's total read "$". A row that records its currency is shown in
-// it; a credit row records none (the ledger has no currency, ADR-100), so its
-// amount is shown without a symbol rather than with a guessed one.
+// it (credit rows record theirs since ADR-129); a row that records none is
+// shown without a symbol rather than with a guessed one.
 test('audit amounts use the currency the row recorded, and no symbol when it recorded none', () => {
   assert.equal(auditAmount(2000, 'EUR'), '€20.00')
   assert.equal(auditAmount('0.0003', 'GBP'), '£0.000003')

@@ -16,7 +16,7 @@ func TestGetPlan_LiveSubscriptionCount(t *testing.T) {
 	for _, live := range []int{0, 2} {
 		svc := NewService(newMemStore())
 		svc.SetSubscriptionPlanUsageReader(&fakePlanUsage{count: live})
-		p, err := svc.CreatePlan(context.Background(), "tnt_test", CreatePlanInput{
+		p, _, err := svc.CreatePlan(context.Background(), "tnt_test", CreatePlanInput{
 			Code: "pro", Name: "Pro", Currency: "USD", BillingInterval: domain.BillingMonthly,
 		})
 		if err != nil {

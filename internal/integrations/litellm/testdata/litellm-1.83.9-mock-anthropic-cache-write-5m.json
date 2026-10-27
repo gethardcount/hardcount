@@ -1,0 +1,288 @@
+{
+ "api_base": "http://127.0.0.1:64187/v1/messages",
+ "cache_hit": null,
+ "cache_key": null,
+ "call_type": "acompletion",
+ "completionStartTime": 1792671446.796701,
+ "completion_tokens": 500,
+ "cost_breakdown": {
+  "cache_creation_cost": 0.15,
+  "discount_amount": 0.0,
+  "discount_percent": 0.0,
+  "input_cost": 0.153,
+  "margin_fixed_amount": 0.0,
+  "margin_percent": 0.0,
+  "margin_total_amount": 0.0,
+  "original_cost": 0.1605,
+  "output_cost": 0.007500000000000001,
+  "tool_usage_cost": 0.0,
+  "total_cost": 0.1605
+ },
+ "custom_llm_provider": "anthropic",
+ "endTime": 1792671446.796701,
+ "end_user": "cus_acme_corp",
+ "error_information": {
+  "error_class": "",
+  "error_code": "",
+  "error_message": "",
+  "llm_provider": "",
+  "traceback": ""
+ },
+ "error_str": null,
+ "guardrail_information": null,
+ "hidden_params": {
+  "additional_headers": {
+   "llm_provider-content-type": "application/json",
+   "llm_provider-date": "Thu, 22 Oct 2026 12:17:26 GMT",
+   "llm_provider-server": "BaseHTTP/0.6 Python/3.9.6"
+  },
+  "api_base": "http://127.0.0.1:64187",
+  "batch_models": null,
+  "cache_key": null,
+  "litellm_model_name": "anthropic/claude-sonnet-4-5-20250929",
+  "litellm_overhead_time_ms": 6.695,
+  "model_id": null,
+  "response_cost": 0.1605,
+  "usage_object": null
+ },
+ "id": "chatcmpl-6cd4b5aa-43d6-49e5-ac52-8940d9ae5ef4",
+ "messages": [
+  {
+   "content": "split5m",
+   "role": "user"
+  }
+ ],
+ "metadata": {
+  "applied_guardrails": [],
+  "cold_storage_object_key": null,
+  "mcp_tool_call_metadata": null,
+  "prompt_management_metadata": null,
+  "requester_custom_headers": null,
+  "requester_ip_address": null,
+  "requester_metadata": null,
+  "spend_logs_metadata": null,
+  "team_alias": null,
+  "team_id": null,
+  "usage_object": {
+   "cache_creation_input_tokens": 40000,
+   "cache_read_input_tokens": 0,
+   "completion_tokens": 500,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0,
+    "text_tokens": 500
+   },
+   "inference_geo": null,
+   "prompt_tokens": 41000,
+   "prompt_tokens_details": {
+    "audio_tokens": null,
+    "cache_creation_token_details": {
+     "ephemeral_1h_input_tokens": 0,
+     "ephemeral_5m_input_tokens": 40000
+    },
+    "cache_creation_tokens": 40000,
+    "cached_tokens": 0,
+    "image_tokens": null,
+    "text_tokens": 1000,
+    "video_tokens": null
+   },
+   "speed": null,
+   "total_tokens": 41500
+  },
+  "user_agent": null,
+  "user_api_key_alias": null,
+  "user_api_key_auth_metadata": null,
+  "user_api_key_budget_reset_at": null,
+  "user_api_key_end_user_id": "cus_acme_corp",
+  "user_api_key_hash": null,
+  "user_api_key_max_budget": null,
+  "user_api_key_org_alias": null,
+  "user_api_key_org_id": null,
+  "user_api_key_project_alias": null,
+  "user_api_key_project_id": null,
+  "user_api_key_request_route": null,
+  "user_api_key_spend": null,
+  "user_api_key_team_alias": null,
+  "user_api_key_team_id": null,
+  "user_api_key_user_email": null,
+  "user_api_key_user_id": null,
+  "vector_store_request_metadata": null
+ },
+ "model": "claude-sonnet-4-5-20250929",
+ "model_group": "",
+ "model_id": "",
+ "model_map_information": {
+  "model_map_key": "claude-sonnet-4-5-20250929",
+  "model_map_value": {
+   "annotation_cost_per_page": null,
+   "cache_creation_input_token_cost": 3.75e-06,
+   "cache_creation_input_token_cost_above_1hr": null,
+   "cache_creation_input_token_cost_above_200k_tokens": 7.5e-06,
+   "cache_read_input_token_cost": 3e-07,
+   "cache_read_input_token_cost_above_200k_tokens": 6e-07,
+   "cache_read_input_token_cost_above_272k_tokens": null,
+   "cache_read_input_token_cost_flex": null,
+   "cache_read_input_token_cost_priority": null,
+   "citation_cost_per_token": null,
+   "input_cost_per_audio_per_second": null,
+   "input_cost_per_audio_token": null,
+   "input_cost_per_character": null,
+   "input_cost_per_image": null,
+   "input_cost_per_image_token": null,
+   "input_cost_per_query": null,
+   "input_cost_per_second": null,
+   "input_cost_per_token": 3e-06,
+   "input_cost_per_token_above_128k_tokens": null,
+   "input_cost_per_token_above_200k_tokens": 6e-06,
+   "input_cost_per_token_above_272k_tokens": null,
+   "input_cost_per_token_batches": null,
+   "input_cost_per_token_flex": null,
+   "input_cost_per_token_priority": null,
+   "input_cost_per_video_per_second": null,
+   "key": "claude-sonnet-4-5-20250929",
+   "litellm_provider": "anthropic",
+   "max_input_tokens": 200000,
+   "max_output_tokens": 64000,
+   "max_tokens": 64000,
+   "mode": "chat",
+   "ocr_cost_per_page": null,
+   "output_cost_per_audio_token": null,
+   "output_cost_per_character": null,
+   "output_cost_per_character_above_128k_tokens": null,
+   "output_cost_per_image": null,
+   "output_cost_per_image_token": null,
+   "output_cost_per_reasoning_token": null,
+   "output_cost_per_second": null,
+   "output_cost_per_second_1080p": null,
+   "output_cost_per_token": 1.5e-05,
+   "output_cost_per_token_above_128k_tokens": null,
+   "output_cost_per_token_above_200k_tokens": 2.25e-05,
+   "output_cost_per_token_above_272k_tokens": null,
+   "output_cost_per_token_batches": null,
+   "output_cost_per_token_flex": null,
+   "output_cost_per_token_priority": null,
+   "output_cost_per_video_per_second": null,
+   "output_vector_size": null,
+   "provider_specific_entry": null,
+   "rpm": null,
+   "search_context_cost_per_query": {
+    "search_context_size_high": 0.01,
+    "search_context_size_low": 0.01,
+    "search_context_size_medium": 0.01
+   },
+   "supported_openai_params": [
+    "stream",
+    "stop",
+    "temperature",
+    "top_p",
+    "max_tokens",
+    "max_completion_tokens",
+    "tools",
+    "tool_choice",
+    "extra_headers",
+    "parallel_tool_calls",
+    "response_format",
+    "user",
+    "web_search_options",
+    "speed",
+    "context_management",
+    "cache_control",
+    "thinking",
+    "reasoning_effort"
+   ],
+   "supports_assistant_prefill": true,
+   "supports_audio_input": null,
+   "supports_audio_output": null,
+   "supports_computer_use": true,
+   "supports_embedding_image_input": null,
+   "supports_function_calling": true,
+   "supports_native_streaming": null,
+   "supports_native_structured_output": null,
+   "supports_none_reasoning_effort": null,
+   "supports_pdf_input": true,
+   "supports_prompt_caching": true,
+   "supports_reasoning": true,
+   "supports_response_schema": true,
+   "supports_system_messages": null,
+   "supports_tool_choice": true,
+   "supports_url_context": null,
+   "supports_vision": true,
+   "supports_web_search": true,
+   "supports_xhigh_reasoning_effort": null,
+   "tiered_pricing": null,
+   "tpm": null,
+   "uses_embed_content": null
+  }
+ },
+ "model_parameters": {
+  "user": "cus_acme_corp"
+ },
+ "prompt_tokens": 41000,
+ "request_tags": [],
+ "requester_ip_address": null,
+ "response": {
+  "choices": [
+   {
+    "finish_reason": "stop",
+    "index": 0,
+    "message": {
+     "content": "ok",
+     "function_call": null,
+     "provider_specific_fields": {
+      "citations": null,
+      "thinking_blocks": null
+     },
+     "role": "assistant",
+     "tool_calls": null
+    }
+   }
+  ],
+  "created": 1792671446,
+  "id": "chatcmpl-6cd4b5aa-43d6-49e5-ac52-8940d9ae5ef4",
+  "model": "claude-sonnet-4-5-20250929",
+  "object": "chat.completion",
+  "system_fingerprint": null,
+  "usage": {
+   "cache_creation_input_tokens": 40000,
+   "cache_read_input_tokens": 0,
+   "completion_tokens": 500,
+   "completion_tokens_details": {
+    "reasoning_tokens": 0,
+    "text_tokens": 500
+   },
+   "inference_geo": null,
+   "prompt_tokens": 41000,
+   "prompt_tokens_details": {
+    "audio_tokens": null,
+    "cache_creation_token_details": {
+     "ephemeral_1h_input_tokens": 0,
+     "ephemeral_5m_input_tokens": 40000
+    },
+    "cache_creation_tokens": 40000,
+    "cached_tokens": 0,
+    "image_tokens": null,
+    "text_tokens": 1000,
+    "video_tokens": null
+   },
+   "speed": null,
+   "total_tokens": 41500
+  }
+ },
+ "response_cost": 0.1605,
+ "response_cost_failure_debug_info": null,
+ "response_time": 0.01574397087097168,
+ "saved_cache_cost": 0.0,
+ "standard_built_in_tools_params": {
+  "file_search": null,
+  "web_search_options": null
+ },
+ "startTime": 1792671446.780957,
+ "status": "success",
+ "status_fields": {
+  "guardrail_status": "not_run",
+  "llm_api_status": "success"
+ },
+ "stream": null,
+ "total_tokens": 41500,
+ "trace_id": "ea863a5d-59a6-476d-96d7-adc60b8b0c75",
+ "user_agent": null
+}

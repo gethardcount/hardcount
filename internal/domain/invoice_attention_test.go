@@ -30,7 +30,7 @@ func TestClassifyInvoiceAttention_TerminalStatesReturnNil(t *testing.T) {
 			inv := draft()
 			inv.Status = status
 			// Even with active failure modes, terminal status must suppress.
-			inv.TaxStatus = InvoiceTaxFailed
+			inv.TaxStatus = InvoiceTaxPending
 			inv.TaxErrorCode = "customer_data_invalid"
 			inv.PaymentStatus = PaymentFailed
 			if got := ClassifyInvoiceAttention(inv, AttentionContext{}); got != nil {
@@ -40,6 +40,9 @@ func TestClassifyInvoiceAttention_TerminalStatesReturnNil(t *testing.T) {
 	}
 }
 
+// Each code on a pending invoice whose automatic retries are used up (or
+// never ran, for a code that is not retried) reads critical, with its own
+// reason and action.
 func TestClassifyInvoiceAttention_TaxFailedSubcodes(t *testing.T) {
 	cases := []struct {
 		errorCode   string
@@ -57,7 +60,8 @@ func TestClassifyInvoiceAttention_TaxFailedSubcodes(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.errorCode, func(t *testing.T) {
 			inv := draft()
-			inv.TaxStatus = InvoiceTaxFailed
+			inv.TaxStatus = InvoiceTaxPending
+			inv.TaxRetryCount = MaxTaxRetryAttempts
 			inv.TaxErrorCode = tc.errorCode
 			inv.TaxPendingReason = "raw provider response"
 			now := time.Now()
@@ -115,7 +119,7 @@ func TestClassifyInvoiceAttention_TaxFailedSubcodes(t *testing.T) {
 // mislead operators into thinking a 4xx came back from Stripe.
 func TestClassifyInvoiceAttention_ProviderNotConfiguredEmptyResponse(t *testing.T) {
 	inv := draft()
-	inv.TaxStatus = InvoiceTaxFailed
+	inv.TaxStatus = InvoiceTaxPending
 	inv.TaxErrorCode = "provider_not_configured"
 	inv.TaxPendingReason = "no client configured for livemode=false" // Velox-internal, NOT a provider response
 	now := time.Now()
@@ -143,7 +147,7 @@ func TestClassifyInvoiceAttention_ProviderNotConfiguredEmptyResponse(t *testing.
 // instead.
 func TestClassifyInvoiceAttention_ProviderNotConfigured_StripeConnectedSwapsCopy(t *testing.T) {
 	inv := draft()
-	inv.TaxStatus = InvoiceTaxFailed
+	inv.TaxStatus = InvoiceTaxPending
 	inv.TaxErrorCode = "provider_not_configured"
 
 	t.Run("not connected → connect-stripe action", func(t *testing.T) {
@@ -265,30 +269,27 @@ func TestClassifyInvoiceAttention_PaymentUnknownIsInfo(t *testing.T) {
 }
 
 func TestClassifyInvoiceAttention_PriorityOrder(t *testing.T) {
-	// Tax_failed must beat payment_failed must beat payment_unknown.
+	// payment_failed beats tax pending, which beats payment_unknown.
 	inv := draft()
-	inv.TaxStatus = InvoiceTaxFailed
+	inv.TaxStatus = InvoiceTaxPending
 	inv.TaxErrorCode = "customer_data_invalid"
 	inv.PaymentStatus = PaymentFailed // also bad
 
 	att := ClassifyInvoiceAttention(inv, AttentionContext{})
-	if att == nil {
-		t.Fatalf("expected attention")
-	}
-	if att.Reason != AttentionReasonTaxLocationRequired {
-		t.Errorf("priority broken: tax_failed should win, got %s", att.Reason)
+	if att == nil || att.Reason != AttentionReasonPaymentFailed {
+		t.Errorf("priority broken: payment_failed should win, got %+v", att)
 	}
 
-	// Drop tax — payment_failed should now win over payment_unknown.
+	// payment_unknown instead of failed — tax pending now wins.
+	inv.PaymentStatus = PaymentUnknown
+	att = ClassifyInvoiceAttention(inv, AttentionContext{})
+	if att == nil || att.Reason != AttentionReasonTaxLocationRequired {
+		t.Errorf("priority broken: tax pending should beat payment_unknown, got %+v", att)
+	}
+
+	// Drop tax — payment_unknown remains.
 	inv.TaxStatus = InvoiceTaxOK
 	inv.TaxErrorCode = ""
-	att = ClassifyInvoiceAttention(inv, AttentionContext{})
-	if att == nil || att.Reason != AttentionReasonPaymentFailed {
-		t.Errorf("priority broken: payment_failed should beat payment_unknown, got %+v", att)
-	}
-
-	// Drop payment_failed — payment_unknown remains.
-	inv.PaymentStatus = PaymentUnknown
 	att = ClassifyInvoiceAttention(inv, AttentionContext{})
 	if att == nil || att.Reason != AttentionReasonPaymentUnconfirmed {
 		t.Errorf("priority broken: payment_unknown should remain, got %+v", att)
@@ -1072,12 +1073,15 @@ func TestRecoveryWarnsOnOfflinePayment(t *testing.T) {
 		}
 	})
 
-	t.Run("threshold warns", func(t *testing.T) {
+	t.Run("a written-off threshold invoice says nothing", func(t *testing.T) {
+		// A written-off threshold invoice keeps its window billed (ADR-066
+		// amendment 2026-10-23): no later invoice bills that usage again, so
+		// a payment on it settles the window once. The old
+		// recovery_superseded warning said the opposite.
 		i := writtenOff()
 		i.BillingReason = BillingReasonThreshold
-		w := RecoveryWarnsOnOfflinePayment(i, 0)
-		if w == nil || w.Code != "recovery_superseded" {
-			t.Fatalf("got %+v, want a recovery_superseded warning", w)
+		if w := RecoveryWarnsOnOfflinePayment(i, 0); w != nil {
+			t.Fatalf("warned on a written-off threshold invoice: %+v — its usage is billed nowhere else", w)
 		}
 	})
 

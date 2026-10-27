@@ -29,18 +29,16 @@ type CustomerResolver interface {
 	GetByExternalID(ctx context.Context, tenantID, externalID string) (domain.Customer, error)
 }
 
-// MeterResolver looks up a meter by key.
+// MeterResolver looks up a meter by the event_name its events send.
 type MeterResolver interface {
-	GetMeterByKey(ctx context.Context, tenantID, key string) (domain.Meter, error)
+	GetMeterByEventName(ctx context.Context, tenantID, eventName string) (domain.Meter, error)
 }
 
-// MeterLister lists the tenant's meters and their pricing rules. The
-// aggregate endpoint works out each meter's aggregation from them (see
-// BillingModes) so a Maximum meter reports its peak, not a sum of
-// readings. Wired in router.go (pricing.Service).
+// MeterLister lists the tenant's meters. The aggregate endpoint reads each
+// meter's aggregation from them (see BillingModes) so a Maximum meter reports
+// its peak, not a sum of readings. Wired in router.go (pricing.Service).
 type MeterLister interface {
 	ListMeters(ctx context.Context, tenantID string) ([]domain.Meter, error)
-	ListMeterPricingRules(ctx context.Context, tenantID string) ([]domain.MeterPricingRule, error)
 }
 
 type Handler struct {
@@ -48,24 +46,14 @@ type Handler struct {
 	customers  CustomerResolver
 	meters     MeterResolver
 	meterModes MeterLister
-	// summaryCustomers is the by-id customer read the usage summary runs
-	// first; see SetSummaryCustomerLookup.
-	summaryCustomers CustomerLookup
 	// Held-usage routes only (#1044); see SetHeldDeps.
 	heldCustomers CustomerLookup
-	heldSubs      SubscriptionLister
-	heldPlans     PlanReader
 }
 
 // SetMeterLister wires the meter list the aggregate endpoint reads modes
 // from. Unwired, every by_meter value is the plain sum with an empty
 // aggregation.
 func (h *Handler) SetMeterLister(l MeterLister) { h.meterModes = l }
-
-// SetSummaryCustomerLookup wires the customer read the usage summary runs
-// before it adds anything up. The events table holds nothing for an unknown
-// id, so without it a typo'd or other-mode id answered 200 with zero totals.
-func (h *Handler) SetSummaryCustomerLookup(c CustomerLookup) { h.summaryCustomers = c }
 
 func NewHandler(svc *Service, customers CustomerResolver, meters MeterResolver) *Handler {
 	return &Handler{svc: svc, customers: customers, meters: meters}
@@ -100,24 +88,50 @@ func (h *Handler) Backfill(w http.ResponseWriter, r *http.Request) {
 }
 
 // APIEvent is the public API input — developers send external identifiers.
-// Quantity accepts both number (5) and string ("5.5") forms via shopspring's
-// UnmarshalJSON; the response side serializes as a string for precision.
 //
-// Dimensions: per docs/design/multi-dim-meters.md, AI-native ingest uses
-// `dimensions` as the field name for the JSONB filter that pricing rules
-// dispatch on. Properties is the original name and is kept as an alias
-// for backward compatibility — if both are present, dimensions wins (it
-// is the documented v1 field; properties was an internal name leaked
-// into the wire). The two collapse onto the same usage_events.properties
-// column at the storage layer.
+// Quantity is kept raw so parseQuantity can answer every bad value with a 422
+// naming the field (a decode error would be a 400 for the whole body, and a
+// whole batch). The response side serializes it as a decimal string.
+//
+// Properties is not a field. It was the old name of Dimensions, removed
+// before 0.9.0, and is decoded only so an event that still sends it with a
+// key is refused: stored without its dimensions it would be priced by the
+// wrong rule, silently. A null or empty properties is taken as absent.
 type APIEvent struct {
 	ExternalCustomerID string           `json:"external_customer_id"`
 	EventName          string           `json:"event_name"`
-	Quantity           decimal.Decimal  `json:"quantity,omitempty"`
-	Properties         map[string]any   `json:"properties,omitempty"`
+	Quantity           json.RawMessage  `json:"quantity,omitempty"`
 	Dimensions         map[string]any   `json:"dimensions,omitempty"`
 	IdempotencyKey     string           `json:"idempotency_key,omitempty"`
 	Timestamp          *json.RawMessage `json:"timestamp,omitempty"`
+	Properties         json.RawMessage  `json:"properties,omitempty"`
+}
+
+// hasProperties reports whether an event sent a properties value that could
+// carry dimensions. null and {} carry none (null decodes to an empty map), so
+// they are taken as if absent: clients generated from the old spec may send
+// either for an unset field. Any other value is refused.
+func hasProperties(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	var obj map[string]json.RawMessage
+	return json.Unmarshal(raw, &obj) != nil || len(obj) > 0
+}
+
+// parseQuantity reads the event's quantity the way the spec states it: a JSON
+// number, or a string holding one, and present (domain.ParseDecimal). The
+// scale and size limits are the service's (checkQuantity), so every ingest
+// path shares them.
+func parseQuantity(raw json.RawMessage) (decimal.Decimal, error) {
+	q, ok, err := domain.ParseDecimal("quantity", raw)
+	if err != nil {
+		return decimal.Decimal{}, err
+	}
+	if !ok {
+		return decimal.Decimal{}, errs.Required("quantity")
+	}
+	return q, nil
 }
 
 // resolveCache memoizes the customer and meter lookups for the lifetime of
@@ -132,7 +146,7 @@ type APIEvent struct {
 // request that staleness window does not exist.
 type resolveCache struct {
 	customers map[string]string // external customer id -> internal id
-	meters    map[string]string // meter key -> meter id
+	meters    map[string]string // event name -> meter id
 }
 
 func newResolveCache() *resolveCache {
@@ -210,6 +224,14 @@ func (h *Handler) resolve(ctx context.Context, tenantID string, evt APIEvent, ca
 		return IngestInput{}, errs.Invalid("idempotency_key", longKeyMessage)
 	}
 
+	if hasProperties(evt.Properties) {
+		return IngestInput{}, errs.Invalid("properties", "properties was renamed dimensions; send the event's dimensions as dimensions")
+	}
+	quantity, err := parseQuantity(evt.Quantity)
+	if err != nil {
+		return IngestInput{}, err
+	}
+
 	// A miss is cached only on success: caching the "not found" verdict would
 	// turn one bad index in a batch into a repeated failure for every later
 	// event naming the same customer, which is the same answer but a slower
@@ -233,7 +255,7 @@ func (h *Handler) resolve(ctx context.Context, tenantID string, evt APIEvent, ca
 
 	meterID, ok := cache.meter(eventName)
 	if !ok {
-		meter, err := h.meters.GetMeterByKey(ctx, tenantID, eventName)
+		meter, err := h.meters.GetMeterByEventName(ctx, tenantID, eventName)
 		if err != nil {
 			if !errors.Is(err, errs.ErrNotFound) {
 				return IngestInput{}, fmt.Errorf("%w: meter lookup: %w", errIngestUnavailable, err)
@@ -244,17 +266,11 @@ func (h *Handler) resolve(ctx context.Context, tenantID string, evt APIEvent, ca
 		cache.putMeter(eventName, meterID)
 	}
 
-	// dimensions takes precedence over properties — see APIEvent doc.
-	dims := evt.Dimensions
-	if dims == nil {
-		dims = evt.Properties
-	}
-
 	input := IngestInput{
 		CustomerID:     custID,
 		MeterID:        meterID,
-		Quantity:       evt.Quantity,
-		Dimensions:     dims,
+		Quantity:       quantity,
+		Dimensions:     evt.Dimensions,
 		IdempotencyKey: evt.IdempotencyKey,
 	}
 
@@ -285,8 +301,7 @@ func (h *Handler) ingest(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
 	var evt APIEvent
-	if err := json.NewDecoder(r.Body).Decode(&evt); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &evt) {
 		return
 	}
 
@@ -309,15 +324,18 @@ func (h *Handler) ingest(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, r, http.StatusCreated, event)
 }
 
-// errIngestUnavailable marks a NON-verdict from resolve: a customer or meter
-// lookup the store could not answer (failover, a lost pool, a cancelled
-// request). The three ingest doors answer it with 503 so the client retries,
-// the same contract as the LiteLLM door. Never returned to the caller as text.
+// errIngestUnavailable marks a NON-verdict: a customer or meter lookup from
+// resolve, or the service's open-period or aggregation read (open_period.go),
+// that the store could not answer (failover, a lost pool, a cancelled request). The
+// three ingest doors answer it with 503 so the client retries, the same
+// contract as the LiteLLM door. Never returned to the caller as text.
 var errIngestUnavailable = errors.New("usage: lookup store unavailable")
 
 // respondIngestUnavailable writes the 503 for errIngestUnavailable. The raw
 // error is logged, never sent to the caller (ADR-026). "Nothing was recorded"
-// holds at every door because resolve runs before any write.
+// holds at every door because resolve and the open-period read run before
+// any write, and the aggregation read runs on the write's transaction, so a
+// failed one rolls the write back.
 func respondIngestUnavailable(w http.ResponseWriter, r *http.Request, tenantID string, err error) {
 	slog.ErrorContext(r.Context(), "usage ingest: lookup store unavailable — request refused for client retry",
 		"tenant_id", tenantID,
@@ -336,6 +354,11 @@ func respondIngestUnavailable(w http.ResponseWriter, r *http.Request, tenantID s
 // silent-success contract. Falls back to the plain error mapping if the
 // original row can't be read.
 func (h *Handler) respondIngestError(w http.ResponseWriter, r *http.Request, tenantID, idempotencyKey string, err error) {
+	if errors.Is(err, errIngestUnavailable) {
+		// An open-period or aggregation read failed: nothing recorded.
+		respondIngestUnavailable(w, r, tenantID, err)
+		return
+	}
 	if errors.Is(err, errs.ErrDuplicateKey) && idempotencyKey != "" {
 		if original, gerr := h.svc.GetByIdempotencyKey(r.Context(), tenantID, idempotencyKey); gerr == nil {
 			// A replay MUTATES NOTHING — it hands back the row the original
@@ -363,8 +386,7 @@ func (h *Handler) backfill(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
 	var evt APIEvent
-	if err := json.NewDecoder(r.Body).Decode(&evt); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &evt) {
 		return
 	}
 
@@ -528,13 +550,7 @@ func (h *Handler) aggregate(w http.ResponseWriter, r *http.Request) {
 			slog.ErrorContext(r.Context(), "aggregate usage events: list meters", "error", err)
 			return
 		}
-		rules, err := h.meterModes.ListMeterPricingRules(r.Context(), filter.TenantID)
-		if err != nil {
-			respond.InternalError(w, r)
-			slog.ErrorContext(r.Context(), "aggregate usage events: list pricing rules", "error", err)
-			return
-		}
-		modes = BillingModes(meters, rules)
+		modes = BillingModes(meters)
 	}
 
 	agg, err := h.svc.Aggregate(r.Context(), filter, modes)
@@ -561,8 +577,8 @@ func (h *Handler) aggregate(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) batchIngest(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
-	var events []APIEvent
-	if err := json.NewDecoder(r.Body).Decode(&events); err != nil {
+	var raws []json.RawMessage
+	if err := respond.DecodeBody(r, &raws); err != nil {
 		// The router caps request bodies via MaxBytesReader; a too-big
 		// batch must read as "split your batch" (413), not as malformed
 		// JSON (400) — the byte cap fires mid-array on valid JSON.
@@ -576,13 +592,29 @@ func (h *Handler) batchIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(events) == 0 {
+	if len(raws) == 0 {
 		respond.BadRequest(w, r, "at least one event is required")
 		return
 	}
-	if len(events) > 1000 {
+	if len(raws) > 1000 {
 		respond.BadRequest(w, r, "maximum 1000 events per batch")
 		return
+	}
+	// Each event follows the one body rule. An unknown key is that event's
+	// failure, named in errors[] with its index like every other; a value
+	// of the wrong JSON type is a 400 for the body, as before.
+	events := make([]APIEvent, len(raws))
+	keyErrs := make([]error, len(raws))
+	for i, raw := range raws {
+		if err := respond.DecodeValue(raw, &events[i]); err != nil {
+			var bodyErr *respond.BodyError
+			if errors.As(err, &bodyErr) && bodyErr.Field != "" {
+				keyErrs[i] = err
+				continue
+			}
+			respond.BadRequest(w, r, "expected JSON array of events")
+			return
+		}
 	}
 
 	// Resolve-stage failures (missing fields, unknown customer/meter,
@@ -596,6 +628,10 @@ func (h *Handler) batchIngest(w http.ResponseWriter, r *http.Request) {
 	// customer and one meter now costs two lookups instead of 2N.
 	cache := newResolveCache()
 	for i, evt := range events {
+		if keyErrs[i] != nil {
+			resolveErrs = append(resolveErrs, fmt.Sprintf("event[%d]: %s", i, keyErrs[i].Error()))
+			continue
+		}
 		input, err := h.resolve(r.Context(), tenantID, evt, cache)
 		if err != nil {
 			// A store that cannot answer is not a verdict on this event, so
@@ -615,9 +651,18 @@ func (h *Handler) batchIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	inserted, deduped, ingestErrs := h.svc.BatchIngest(r.Context(), tenantID, inputs)
+	res, ingestErrs := h.svc.BatchIngest(r.Context(), tenantID, inputs)
 
 	if len(ingestErrs) > 0 {
+		// A store that gave no answer refuses the batch for retry; nothing
+		// was written (the open-period read runs before the write, and a
+		// failed aggregation read rolls the batch back).
+		for _, e := range ingestErrs {
+			if errors.Is(e, errIngestUnavailable) {
+				respondIngestUnavailable(w, r, tenantID, e)
+				return
+			}
+		}
 		errStrings := make([]string, len(ingestErrs))
 		for i, e := range ingestErrs {
 			errStrings[i] = e.Error()
@@ -626,11 +671,24 @@ func (h *Handler) batchIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respond.JSON(w, r, http.StatusCreated, map[string]any{
-		"ingested":     inserted,
-		"deduplicated": deduped,
-		"total":        len(events),
+	respond.JSON(w, r, http.StatusCreated, batchResponse{
+		Ingested:       res.Inserted,
+		Deduplicated:   res.Deduplicated,
+		Total:          len(events),
+		UnbilledCounts: res.Unbilled,
+		Results:        res.Results,
 	})
+}
+
+// batchResponse is the batch 201. The counts by billing_status count written
+// rows answered with each status (open_period.go); results holds each event's
+// result at its index in the request.
+type batchResponse struct {
+	Ingested     int `json:"ingested"`
+	Deduplicated int `json:"deduplicated"`
+	Total        int `json:"total"`
+	UnbilledCounts
+	Results []BatchEventResult `json:"results"`
 }
 
 // respondBatchRejected writes the batch 422 the spec documents: every

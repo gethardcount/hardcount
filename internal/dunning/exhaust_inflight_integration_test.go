@@ -42,11 +42,8 @@ import (
 // subscription ports, the same calls internal/api/adapters.go makes.
 type dunningMovers struct{ svc *subscription.Service }
 
-func (m dunningMovers) PauseCollection(ctx context.Context, tenantID, id string) error {
-	_, err := m.svc.PauseCollection(ctx, tenantID, id, subscription.PauseCollectionInput{
-		Behavior: domain.PauseCollectionKeepAsDraft, TriggeredBy: "dunning",
-	})
-	return err
+func (m dunningMovers) PauseCollection(ctx context.Context, tenantID, subID, invoiceID string) (bool, error) {
+	return m.svc.PauseCollectionForDunning(ctx, tenantID, subID, invoiceID)
 }
 
 func (m dunningMovers) Cancel(ctx context.Context, tenantID, id string) error {
@@ -60,7 +57,7 @@ func (m dunningMovers) GetTerminalState(ctx context.Context, tenantID, id string
 		return dunning.SubscriptionTerminalState{}, err
 	}
 	st := dunning.SubscriptionTerminalState{
-		Terminated: sub.Status == domain.SubscriptionCanceled || sub.Status == domain.SubscriptionArchived,
+		Terminated: sub.Status == domain.SubscriptionCanceled,
 	}
 	if sub.CurrentBillingPeriodStart != nil {
 		st.PeriodStart = *sub.CurrentBillingPeriodStart
@@ -186,8 +183,8 @@ func newExhaustFixture(t *testing.T, db *postgres.DB, name string, acts finalAct
 	}
 	svc := dunning.NewService(st, retrier, clk)
 	policy, err := svc.UpsertPolicy(ctx, tenantID, domain.DunningPolicy{
-		Name: "two retries", Enabled: true, RetrySchedule: []string{"72h"}, MaxRetryAttempts: 2,
-		FinalSubscriptionAction: acts.sub, FinalInvoiceAction: acts.inv, GracePeriodDays: 3,
+		Name: "two retries", Enabled: true, RetryDays: []int{3, 3},
+		FinalSubscriptionAction: acts.sub, FinalInvoiceAction: acts.inv,
 	})
 	if err != nil {
 		t.Fatalf("upsert policy: %v", err)

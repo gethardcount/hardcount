@@ -33,7 +33,7 @@ func (s *scriptedRetrier) RetryPayment(context.Context, string, string, string) 
 // hardDecline is the adapter's report of a retry whose charge the bank
 // refused for good: the declined PaymentIntent, Stripe's message, and the flag.
 func hardDecline(pi string) error {
-	return &RetryError{PaymentIntentID: pi, Err: errors.New("payment failed: Your card was declined."), CardNeedsReplacing: true}
+	return &RetryError{PaymentIntentID: pi, Err: errors.New("payment failed: Your card was declined."), Ask: domain.DeclineAskNewCard}
 }
 
 type hardDeclineHarness struct {
@@ -105,9 +105,9 @@ func TestProcessRun_RefusedCardSkip_CountsAndAsksForADifferentCard(t *testing.T)
 	if _, ok := evt.Metadata["payment_intent_id"]; ok {
 		t.Errorf("retry event metadata %v names a PaymentIntent, but nothing was charged", evt.Metadata)
 	}
-	if h.emails.warnings != 1 || !h.emails.lastWarnCardRefused || h.emails.lastWarnReason != "" {
-		t.Errorf("warnings %d (card refused %v, reason %q), want 1 card-refused warning with no reason",
-			h.emails.warnings, h.emails.lastWarnCardRefused, h.emails.lastWarnReason)
+	if h.emails.warnings != 1 || h.emails.lastWarnAsk != domain.DeclineAskNewCard || h.emails.lastWarnReason != "" {
+		t.Errorf("warnings %d (ask %q, reason %q), want 1 card-refused warning with no reason",
+			h.emails.warnings, h.emails.lastWarnAsk, h.emails.lastWarnReason)
 	}
 }
 
@@ -130,14 +130,16 @@ func TestProcessRun_HardDeclineOnRetry_AsksForADifferentCard(t *testing.T) {
 	if pi, _ := evt.Metadata["payment_intent_id"].(string); pi != "pi_lost" {
 		t.Errorf("retry event PaymentIntent %q, want pi_lost", pi)
 	}
-	if h.emails.warnings != 1 || !h.emails.lastWarnCardRefused || h.emails.lastWarnReason != "" {
-		t.Errorf("warnings %d (card refused %v, reason %q), want 1 card-refused warning with no reason",
-			h.emails.warnings, h.emails.lastWarnCardRefused, h.emails.lastWarnReason)
+	if h.emails.warnings != 1 || h.emails.lastWarnAsk != domain.DeclineAskNewCard || h.emails.lastWarnReason != "" {
+		t.Errorf("warnings %d (ask %q, reason %q), want 1 card-refused warning with no reason",
+			h.emails.warnings, h.emails.lastWarnAsk, h.emails.lastWarnReason)
 	}
 }
 
 // Control: any other decline keeps the ordinary warning, with its reason and
-// a promised retry date.
+// a promised retry date. The reason is Stripe's sentence alone: "payment
+// failed: " is the charge path's own wrapper, and the customer read it in
+// the email (min-charge check 2026-10-22, finding 4.1).
 func TestProcessRun_OrdinaryDecline_KeepsTheRetryWarning(t *testing.T) {
 	h := newHardDeclineHarness(t, &scriptedRetrier{results: []error{
 		&RetryError{PaymentIntentID: "pi_nsf", Err: errors.New("payment failed: Your card has insufficient funds.")},
@@ -145,9 +147,9 @@ func TestProcessRun_OrdinaryDecline_KeepsTheRetryWarning(t *testing.T) {
 
 	h.tick()
 
-	if h.emails.warnings != 1 || h.emails.lastWarnCardRefused || h.emails.lastWarnReason != "payment failed: Your card has insufficient funds." {
-		t.Errorf("warnings %d (card refused %v, reason %q), want 1 ordinary warning carrying the decline reason",
-			h.emails.warnings, h.emails.lastWarnCardRefused, h.emails.lastWarnReason)
+	if h.emails.warnings != 1 || h.emails.lastWarnAsk != domain.DeclineAskNone || h.emails.lastWarnReason != "Your card has insufficient funds." {
+		t.Errorf("warnings %d (ask %q, reason %q), want 1 ordinary warning carrying the decline reason",
+			h.emails.warnings, h.emails.lastWarnAsk, h.emails.lastWarnReason)
 	}
 }
 
@@ -190,8 +192,8 @@ func TestProcessRun_RefusedCardNeverReplaced_StillExhausts(t *testing.T) {
 	if run.State != domain.DunningEscalated || run.Resolution != domain.ResolutionRetriesExhausted || run.AttemptCount != 3 {
 		t.Fatalf("run %s/%s after %d attempts, want escalated/retries_exhausted after 3", run.State, run.Resolution, run.AttemptCount)
 	}
-	if h.emails.warnings != 2 || !h.emails.lastWarnCardRefused {
-		t.Errorf("warnings %d (last card refused %v), want 2 card-refused warnings", h.emails.warnings, h.emails.lastWarnCardRefused)
+	if h.emails.warnings != 2 || h.emails.lastWarnAsk != domain.DeclineAskNewCard {
+		t.Errorf("warnings %d (last ask %q), want 2 card-refused warnings", h.emails.warnings, h.emails.lastWarnAsk)
 	}
 	if h.emails.escalations != 1 {
 		t.Errorf("escalation emails %d, want 1", h.emails.escalations)

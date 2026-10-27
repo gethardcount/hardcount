@@ -2,19 +2,14 @@ package recipe
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"maps"
-	"strconv"
-	"time"
 
 	"github.com/sagarsuperuser/velox/internal/audit"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
-	"github.com/sagarsuperuser/velox/internal/platform/clock"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
@@ -22,39 +17,16 @@ import (
 // pricing.Service. Defined here so the recipe package owns no cross-domain
 // state and can be exercised with fakes in unit tests.
 type PricingWriter interface {
-	CreateRatingRuleTx(ctx context.Context, tx *sql.Tx, tenantID string, rule domain.RatingRuleVersion) (domain.RatingRuleVersion, error)
 	CreateMeterTx(ctx context.Context, tx *sql.Tx, tenantID string, m domain.Meter) (domain.Meter, error)
-	CreatePlanTx(ctx context.Context, tx *sql.Tx, tenantID string, p domain.Plan) (domain.Plan, error)
-	UpsertMeterPricingRuleTx(ctx context.Context, tx *sql.Tx, tenantID string, rule domain.MeterPricingRule) (domain.MeterPricingRule, error)
-
-	// Adoption reads (ADR-070/ADR-085): the catalog (meter + rating rules)
-	// is shared reference data the operator owns, so apply RECONNECTS to an
-	// existing graph by natural key instead of duplicating it. Reads run on
-	// their own conn (the objects may pre-date this apply's tx). Adoption
-	// never clobbers: an operator's edits to a rule/meter survive a re-apply
-	// untouched — and the plan is always generated fresh, never adopted.
-	GetRuleByKeyAsOf(ctx context.Context, tenantID, ruleKey string, asOf time.Time) (domain.RatingRuleVersion, error)
-	GetMeterByKey(ctx context.Context, tenantID, key string) (domain.Meter, error)
+	// GetMeterByEventNameTx reads a meter the install would adopt on the
+	// install's own transaction, FOR KEY SHARE, so an aggregation PATCH
+	// cannot land between the conformance check and the prices that use the
+	// meter (ADR-130 §15).
+	GetMeterByEventNameTx(ctx context.Context, tx *sql.Tx, eventName string) (domain.Meter, error)
+	// CreatePlanWithPricesTx creates a plan and its prices on tx, with the
+	// checks POST /v1/plans runs.
+	CreatePlanWithPricesTx(ctx context.Context, tx *sql.Tx, tenantID string, p domain.Plan, prices []domain.PlanPrice) (domain.Plan, []domain.PlanPrice, error)
 	ListPlans(ctx context.Context, tenantID string) ([]domain.Plan, error)
-
-	// AdoptedMeterCurrencyConflict is the ADR-100 probe run when adopting an
-	// existing meter: "" when the meter's already-bound prices share the
-	// recipe's currency, else a description of the conflict. Committed-state
-	// read (pool, not tx) — correct here because adoption by definition
-	// concerns pre-existing objects.
-	AdoptedMeterCurrencyConflict(ctx context.Context, tenantID, meterID, wantCurrency string) (string, error)
-}
-
-// DunningWriter is the narrow tx-aware surface recipe.Service needs from
-// dunning.Service.
-type DunningWriter interface {
-	UpsertPolicyTx(ctx context.Context, tx *sql.Tx, tenantID string, policy domain.DunningPolicy) (domain.DunningPolicy, error)
-}
-
-// WebhookWriter is the narrow tx-aware surface recipe.Service needs from
-// webhook.Service.
-type WebhookWriter interface {
-	CreateEndpointTx(ctx context.Context, tx *sql.Tx, tenantID string, ep domain.WebhookEndpoint) (domain.WebhookEndpoint, error)
 }
 
 // AuditEmitter is the narrow in-tx audit seam (ADR-090). Instantiate owns the
@@ -67,17 +39,15 @@ type AuditEmitter interface {
 
 // Service is the orchestrator for the recipes feature: it answers
 // "list recipes", "preview", and "instantiate" (idempotent apply). The
-// canonical entities a recipe creates (meters, rating rules, plans,
-// dunning policy, webhook endpoint) live in their own per-domain stores;
-// this service threads a single transaction across the cross-domain
-// writes so a recipe is either fully applied or not applied at all.
+// entities a recipe creates (meters, plans and their prices) live in the
+// pricing domain's store; this service threads a single transaction across
+// those writes and the install record, so a recipe is either fully applied
+// or not applied at all. A recipe touches only the catalog (ADR-130 §15).
 type Service struct {
 	db          *postgres.DB
 	store       Store
 	registry    *Registry
 	pricing     PricingWriter
-	dunning     DunningWriter
-	webhook     WebhookWriter
 	auditLogger AuditEmitter
 }
 
@@ -88,16 +58,12 @@ func NewService(
 	store Store,
 	registry *Registry,
 	pricing PricingWriter,
-	dunning DunningWriter,
-	webhook WebhookWriter,
 ) *Service {
 	return &Service{
 		db:       db,
 		store:    store,
 		registry: registry,
 		pricing:  pricing,
-		dunning:  dunning,
-		webhook:  webhook,
 	}
 }
 
@@ -109,8 +75,8 @@ func (s *Service) SetAuditLogger(a AuditEmitter) { s.auditLogger = a }
 
 // RecipeListItem is one entry in the GET /v1/recipes response — the
 // canonical recipe metadata plus per-tenant installation state and a
-// creates summary so the picker UI can render "1 meter · 9 pricing
-// rules · monthly billing" without an extra preview round-trip. The
+// creates summary so the picker UI can render "1 meter · 9 prices ·
+// monthly billing" without an extra preview round-trip. The
 // dashboard uses Instantiated to render an "Installed" badge instead of
 // the "Install" CTA — re-apply is an idempotent no-op and there is no
 // uninstall (ADR-085).
@@ -126,29 +92,16 @@ type RecipeListItem struct {
 // Counts mirror the shape of domain.CreatedObjects (which is per-ID),
 // scaled down to integers for display.
 type RecipeCreates struct {
-	Meters           int `json:"meters"`
-	RatingRules      int `json:"rating_rules"`
-	PricingRules     int `json:"pricing_rules"`
-	Plans            int `json:"plans"`
-	DunningPolicies  int `json:"dunning_policies"`
-	WebhookEndpoints int `json:"webhook_endpoints"`
+	Meters int `json:"meters"`
+	Plans  int `json:"plans"`
+	Prices int `json:"prices"`
 }
 
 // countCreates derives a RecipeCreates summary from a parsed recipe.
-// Optional sections (DunningPolicy, Webhook) count as 1 when present, 0
-// when absent — they're singletons in the YAML schema, not slices.
 func countCreates(r domain.Recipe) RecipeCreates {
-	c := RecipeCreates{
-		Meters:       len(r.Meters),
-		RatingRules:  len(r.RatingRules),
-		PricingRules: len(r.PricingRules),
-		Plans:        len(r.Plans),
-	}
-	if r.DunningPolicy != nil {
-		c.DunningPolicies = 1
-	}
-	if r.Webhook != nil {
-		c.WebhookEndpoints = 1
+	c := RecipeCreates{Meters: len(r.Meters), Plans: len(r.Plans)}
+	for _, p := range r.Plans {
+		c.Prices += len(p.Prices)
 	}
 	return c
 }
@@ -229,11 +182,9 @@ func (s *Service) ListInstances(ctx context.Context, tenantID string) ([]domain.
 }
 
 // PreviewResult is the wire shape of POST /v1/recipes/{key}/preview.
-// `objects` groups the would-be-created entities by role so the
-// dashboard's preview panel renders one collapsible card per type.
-// `warnings` surfaces non-fatal conditions (currency-vs-Stripe-account
-// mismatches, placeholder webhook URLs, etc.); empty array in v1 — slot
-// is in place so the contract stays stable when richer warnings land.
+// `objects` lists what an install creates: the meters, and each plan with
+// its prices. `warnings` is a slot for non-fatal conditions; it is always
+// empty today, and stays so the contract is stable when one lands.
 type PreviewResult struct {
 	Key      string         `json:"key"`
 	Version  string         `json:"version"`
@@ -241,17 +192,13 @@ type PreviewResult struct {
 	Warnings []string       `json:"warnings"`
 }
 
-// PreviewObjects mirrors the recipe's object-graph sections. Optional
-// pieces (DunningPolicy, Webhook) are emitted as 0-or-1-length slices so
-// the wire shape is uniform — picker UI iterates without null guards.
-// Empty arrays are emitted (no `omitempty`) for the same reason.
+// PreviewObjects is what an install creates. Empty arrays are emitted (no
+// `omitempty`) so the picker UI iterates without null guards. An install
+// reuses a meter that already exists with the same event_name and
+// aggregation; the preview lists it either way.
 type PreviewObjects struct {
-	Meters           []domain.RecipeMeter         `json:"meters"`
-	RatingRules      []domain.RecipeRatingRule    `json:"rating_rules"`
-	PricingRules     []domain.RecipePricingRule   `json:"pricing_rules"`
-	Plans            []domain.RecipePlan          `json:"plans"`
-	DunningPolicies  []domain.RecipeDunningPolicy `json:"dunning_policies"`
-	WebhookEndpoints []domain.RecipeWebhook       `json:"webhook_endpoints"`
+	Meters []domain.RecipeMeter `json:"meters"`
+	Plans  []domain.RecipePlan  `json:"plans"`
 }
 
 // Preview renders a recipe with caller-supplied overrides and returns
@@ -274,35 +221,19 @@ func (s *Service) Preview(_ context.Context, recipeKey string, overrides map[str
 // emits `[]` rather than `null` — picker UI maps without guards.
 func previewResultFrom(r domain.Recipe) PreviewResult {
 	out := PreviewResult{
-		Key:     r.Key,
-		Version: r.Version,
-		Objects: PreviewObjects{
-			Meters:           r.Meters,
-			RatingRules:      r.RatingRules,
-			PricingRules:     r.PricingRules,
-			Plans:            r.Plans,
-			DunningPolicies:  []domain.RecipeDunningPolicy{},
-			WebhookEndpoints: []domain.RecipeWebhook{},
-		},
+		Key:      r.Key,
+		Version:  r.Version,
+		Objects:  PreviewObjects{Meters: r.Meters, Plans: make([]domain.RecipePlan, 0, len(r.Plans))},
 		Warnings: []string{},
 	}
 	if out.Objects.Meters == nil {
 		out.Objects.Meters = []domain.RecipeMeter{}
 	}
-	if out.Objects.RatingRules == nil {
-		out.Objects.RatingRules = []domain.RecipeRatingRule{}
-	}
-	if out.Objects.PricingRules == nil {
-		out.Objects.PricingRules = []domain.RecipePricingRule{}
-	}
-	if out.Objects.Plans == nil {
-		out.Objects.Plans = []domain.RecipePlan{}
-	}
-	if r.DunningPolicy != nil {
-		out.Objects.DunningPolicies = []domain.RecipeDunningPolicy{*r.DunningPolicy}
-	}
-	if r.Webhook != nil {
-		out.Objects.WebhookEndpoints = []domain.RecipeWebhook{*r.Webhook}
+	for _, p := range r.Plans {
+		if p.Prices == nil {
+			p.Prices = []domain.RecipePrice{}
+		}
+		out.Objects.Plans = append(out.Objects.Plans, p)
 	}
 	return out
 }
@@ -315,9 +246,9 @@ type InstantiateOptions struct {
 }
 
 // Instantiate applies a recipe for tenantID under one transaction. Order:
-// rating rules → meters → pricing rules → plan → (optional) dunning policy →
-// (optional) webhook endpoint → instance row. Any failure rolls back the whole
-// graph; partial state never reaches the tenant. Apply is an idempotent EVENT
+// meters → each plan with its prices → instance row → audit row. Any
+// failure rolls back the whole graph; partial state never reaches the
+// tenant. It writes only the catalog (ADR-130 §15). Apply is an idempotent EVENT
 // (ADR-085): a second call on an already-installed recipe is a no-op that
 // returns the existing instance — never a 409, never a duplicate plan.
 func (s *Service) Instantiate(
@@ -349,7 +280,7 @@ func (s *Service) Instantiate(
 	// happened (the fabricated-record class ADR-090 exists to kill). The
 	// original apply's row is the truthful record. Everything the badge
 	// recorded is still present (plans are
-	// ON DELETE RESTRICT with no hard-delete; the catalog is shared reference
+	// ON DELETE RESTRICT with no hard-delete; meters are shared reference
 	// data), so there is nothing to re-create and never a second plan to mint
 	// on a double-submit — the badge IS the idempotency gate. The badge is
 	// mode-scoped like the objects it records (0157): RLS partitions this read
@@ -371,120 +302,46 @@ func (s *Service) Instantiate(
 
 	objs := domain.CreatedObjects{}
 
-	// Rating rules first — meters and pricing rules reference them by ID. An
-	// existing key is ADOPTED at its current version, NEVER republished: usage
-	// bills the latest active version of a key as-of period start (engine
-	// resolveRatedRule → GetRuleByKeyAsOf), so publishing a new version would
-	// reprice every live sub on that key. Adopt-not-republish is the
-	// load-bearing no-reprice invariant (ADR-085/ADR-070) — and adoption is
-	// gated on the money fields matching (ruleConformanceDiff): binding the
-	// plan to a same-key rule with DIFFERENT rates would make the preview lie
-	// about what the install bills, so a divergent match refuses loud instead.
-	// The plan below inherits its currency from these rules so it can't be
-	// minted in a currency that mismatches the rates it bills against.
-	ratingRuleIDByKey := make(map[string]string, len(rendered.RatingRules))
-	ruleCurrency := ""
-	for _, rr := range rendered.RatingRules {
-		if existing, err := s.pricing.GetRuleByKeyAsOf(ctx, tenantID, rr.Key, clock.Now(ctx)); err == nil {
-			if diffs := ruleConformanceDiff(existing, rr); len(diffs) > 0 {
-				return domain.RecipeInstance{}, errs.AlreadyExists("rating_rule", priceConflictMessage(rr.Key, diffs))
-			}
-			ratingRuleIDByKey[rr.Key] = existing.ID
-			objs.RatingRuleIDs = append(objs.RatingRuleIDs, existing.ID)
-			if ruleCurrency == "" {
-				ruleCurrency = existing.Currency
-			}
-			continue
-		} else if !errors.Is(err, errs.ErrNotFound) {
-			return domain.RecipeInstance{}, fmt.Errorf("rating_rule %q: adoption check: %w", rr.Key, err)
-		}
-		created, err := s.pricing.CreateRatingRuleTx(ctx, tx, tenantID, ratingRuleFromRecipe(rr))
-		if err != nil {
-			return domain.RecipeInstance{}, fmt.Errorf("rating_rule %q: %w", rr.Key, err)
-		}
-		ratingRuleIDByKey[rr.Key] = created.ID
-		objs.RatingRuleIDs = append(objs.RatingRuleIDs, created.ID)
-		if ruleCurrency == "" {
-			ruleCurrency = created.Currency
-		}
-	}
-
-	// Meters — adopt an existing key only if its AGGREGATION matches (the sole
-	// billing-consulted field; sum vs max/count/last silently mis-rolls-up
-	// usage), else refuse LOUD. No live-sub clause: adoption only READS the
-	// meter to wire a fresh plan and append disjoint pricing bindings — it
-	// never mutates the meter — so aggregation-match is the complete safety
-	// condition, and it lets a second AI recipe adopt the shared ADR-044
-	// `tokens` meter after go-live (ADR-085).
+	// Meters — adopt an existing event name only if its AGGREGATION matches
+	// (the sole billing-consulted field; sum vs max/count/last silently
+	// mis-rolls-up usage), else refuse LOUD. The read runs on the install's
+	// transaction FOR KEY SHARE, so an aggregation PATCH waits for the
+	// install. Adoption never changes the meter: a meter only counts, and
+	// the prices go on the new plan (ADR-130 §15), so adopting a meter other
+	// plans price changes none of their prices.
 	meterIDByKey := make(map[string]string, len(rendered.Meters))
 	for _, m := range rendered.Meters {
-		if existing, err := s.pricing.GetMeterByKey(ctx, tenantID, m.Key); err == nil {
+		if existing, err := s.pricing.GetMeterByEventNameTx(ctx, tx, m.EventName); err == nil {
 			if diffs := meterConformanceDiff(existing, m); len(diffs) > 0 {
-				return domain.RecipeInstance{}, errs.AlreadyExists("meter", meterConflictMessage(m.Key, diffs))
+				return domain.RecipeInstance{}, errs.AlreadyExists("meter", meterConflictMessage(m.EventName, diffs))
 			}
-			// ADR-100: adopting a shared meter must not stack this recipe's
-			// rules (in ruleCurrency) onto a meter whose EXISTING rules bill
-			// another currency — disjoint keys pass conformance, but the
-			// resulting plan graph would mix denominations on one meter.
-			if ruleCurrency != "" {
-				conflict, err := s.pricing.AdoptedMeterCurrencyConflict(ctx, tenantID, existing.ID, ruleCurrency)
-				if err != nil {
-					return domain.RecipeInstance{}, fmt.Errorf("meter %q: currency probe: %w", m.Key, err)
-				}
-				if conflict != "" {
-					return domain.RecipeInstance{}, errs.AlreadyExists("meter", meterCurrencyConflictMessage(m.Key, conflict, ruleCurrency))
-				}
-			}
-			meterIDByKey[m.Key] = existing.ID
+			meterIDByKey[m.EventName] = existing.ID
 			objs.MeterIDs = append(objs.MeterIDs, existing.ID)
 			continue
 		} else if !errors.Is(err, errs.ErrNotFound) {
-			return domain.RecipeInstance{}, fmt.Errorf("meter %q: adoption check: %w", m.Key, err)
+			return domain.RecipeInstance{}, fmt.Errorf("meter %q: adoption check: %w", m.EventName, err)
 		}
 		created, err := s.pricing.CreateMeterTx(ctx, tx, tenantID, domain.Meter{
-			Key:         m.Key,
+			EventName:   m.EventName,
 			Name:        m.Name,
 			Unit:        m.Unit,
 			Aggregation: m.Aggregation,
 		})
 		if err != nil {
-			return domain.RecipeInstance{}, fmt.Errorf("meter %q: %w", m.Key, err)
+			return domain.RecipeInstance{}, fmt.Errorf("meter %q: %w", m.EventName, err)
 		}
-		meterIDByKey[m.Key] = created.ID
+		meterIDByKey[m.EventName] = created.ID
 		objs.MeterIDs = append(objs.MeterIDs, created.ID)
 	}
 
-	// Pricing rules — bind each (meter, dimension_match) tuple to a rating
-	// rule. The recipe parser already verified meter_key and rating_rule_key
-	// resolve, so the lookups here are safe.
-	for i, pr := range rendered.PricingRules {
-		meterID := meterIDByKey[pr.MeterKey]
-		ruleID := ratingRuleIDByKey[pr.RatingRuleKey]
-		created, err := s.pricing.UpsertMeterPricingRuleTx(ctx, tx, tenantID, domain.MeterPricingRule{
-			MeterID:             meterID,
-			RatingRuleVersionID: ruleID,
-			DimensionMatch:      pr.DimensionMatch,
-			AggregationMode:     pr.AggregationMode,
-			Priority:            pr.Priority,
-		})
-		if err != nil {
-			return domain.RecipeInstance{}, fmt.Errorf("pricing_rules[%d]: %w", i, err)
-		}
-		objs.PricingRuleIDs = append(objs.PricingRuleIDs, created.ID)
-	}
-
-	// Plan — GENERATE a fresh plan; NEVER adopt an existing plan by code. A
-	// freshly built plan is always wired to the recipe's meter, so silent-$0
-	// from under-wiring is impossible, and there is no "does this existing plan
-	// match?" question — dissolving the whole collision / conformance /
-	// provenance family (ADR-085 supersedes ADR-083/084). The operator owns the
-	// plan once created; the recipe never mutates or reuses one. On a code
-	// collision (a prior recipe's plan, or a foreign plan) the NEW plan is
-	// uniquified (`_2`, `_3`, …) — the incumbent is never renamed (k8s
-	// generateName pattern); the immutable id is the identity, the code a
-	// display slug with no functional readers (subscriptions bind by plan id).
-	// Currency is inherited from the adopted rules so the plan can't be minted
-	// in a currency that mismatches the rates it bills.
+	// Plan — GENERATE a fresh plan; NEVER adopt an existing plan by code
+	// (ADR-085). The plan is created with its prices, so silent-$0 from
+	// under-wiring is impossible, and there is no "does this existing plan
+	// match?" question. The operator owns the plan once created; the recipe
+	// never mutates or reuses one. On a code collision (a prior recipe's
+	// plan, or a foreign plan) the NEW plan is uniquified (`_2`, `_3`, …) —
+	// the incumbent is never renamed. The plan's currency is the recipe's,
+	// and its prices take it.
 	existingPlans, err := s.pricing.ListPlans(ctx, tenantID)
 	if err != nil {
 		return domain.RecipeInstance{}, fmt.Errorf("list plans: %w", err)
@@ -494,62 +351,32 @@ func (s *Service) Instantiate(
 		takenCodes[ep.Code] = true
 	}
 	for _, p := range rendered.Plans {
-		meterIDs := make([]string, 0, len(p.MeterKeys))
-		for _, mk := range p.MeterKeys {
-			meterIDs = append(meterIDs, meterIDByKey[mk])
-		}
-		currency := p.Currency
-		if ruleCurrency != "" {
-			currency = ruleCurrency
+		planPrices := make([]domain.PlanPrice, 0, len(p.Prices))
+		for _, rp := range p.Prices {
+			planPrices = append(planPrices, domain.PlanPrice{
+				MeterID:        meterIDByKey[rp.Meter],
+				DimensionMatch: rp.DimensionMatch,
+				PriceShape:     rp.PriceShape,
+			})
 		}
 		code := freePlanCode(p.Code, takenCodes)
 		takenCodes[code] = true
-		created, err := s.pricing.CreatePlanTx(ctx, tx, tenantID, domain.Plan{
+		created, createdPrices, err := s.pricing.CreatePlanWithPricesTx(ctx, tx, tenantID, domain.Plan{
 			Code:            code,
 			Name:            p.Name,
-			Currency:        currency,
+			Currency:        p.Currency,
 			BillingInterval: p.BillingInterval,
 			Status:          domain.PlanActive,
 			BaseAmountCents: p.BaseAmountCents,
 			BaseBillTiming:  p.BaseBillTiming,
-			MeterIDs:        meterIDs,
-		})
+		}, planPrices)
 		if err != nil {
 			return domain.RecipeInstance{}, fmt.Errorf("plan %q: %w", code, err)
 		}
 		objs.PlanIDs = append(objs.PlanIDs, created.ID)
-	}
-
-	// Optional dunning policy.
-	if rendered.DunningPolicy != nil {
-		dp := dunningFromRecipe(*rendered.DunningPolicy)
-		created, err := s.dunning.UpsertPolicyTx(ctx, tx, tenantID, dp)
-		if err != nil {
-			return domain.RecipeInstance{}, fmt.Errorf("dunning policy: %w", err)
+		for _, cp := range createdPrices {
+			objs.PriceIDs = append(objs.PriceIDs, cp.ID)
 		}
-		objs.DunningPolicyID = created.ID
-	}
-
-	// Optional webhook endpoint. Created inactive with the YAML's
-	// url_placeholder; the operator points it at a real URL and activates
-	// it via PATCH /v1/webhook-endpoints/endpoints/{id} (or the dashboard's Edit) —
-	// a surface that didn't exist until 2026-07-05, which left every
-	// recipe endpoint permanently dead.
-	if rendered.Webhook != nil {
-		secret, err := newWebhookSecret()
-		if err != nil {
-			return domain.RecipeInstance{}, err
-		}
-		created, err := s.webhook.CreateEndpointTx(ctx, tx, tenantID, domain.WebhookEndpoint{
-			URL:    rendered.Webhook.URLPlaceholder,
-			Secret: secret,
-			Events: rendered.Webhook.Events,
-			Active: false,
-		})
-		if err != nil {
-			return domain.RecipeInstance{}, fmt.Errorf("webhook endpoint: %w", err)
-		}
-		objs.WebhookEndpointID = created.ID
 	}
 
 	inst, err := s.store.CreateTx(ctx, tx, domain.RecipeInstance{
@@ -589,9 +416,9 @@ func (s *Service) Instantiate(
 // Metadata is the answer to "what did this recipe install?", which nothing
 // else can answer once the operator starts editing the objects: it mirrors the
 // instance row's created-object ids. Per ADR-085 those ids include ADOPTED
-// meters/rating rules (apply reconnects to an existing catalog rather than
-// duplicating it) — i.e. the graph this apply wired, which is exactly the
-// question an auditor asks.
+// meters (apply reconnects to an existing meter rather than duplicating it)
+// — i.e. the graph this apply wired, which is exactly the question an
+// auditor asks.
 func (s *Service) emitInstantiated(ctx context.Context, tx *sql.Tx, rendered domain.Recipe, inst domain.RecipeInstance) error {
 	if s.auditLogger == nil {
 		return nil
@@ -608,17 +435,8 @@ func (s *Service) emitInstantiated(ctx context.Context, tx *sql.Tx, rendered dom
 	if len(objs.MeterIDs) > 0 {
 		meta["meter_ids"] = objs.MeterIDs
 	}
-	if len(objs.RatingRuleIDs) > 0 {
-		meta["rating_rule_ids"] = objs.RatingRuleIDs
-	}
-	if len(objs.PricingRuleIDs) > 0 {
-		meta["pricing_rule_ids"] = objs.PricingRuleIDs
-	}
-	if objs.DunningPolicyID != "" {
-		meta["dunning_policy_id"] = objs.DunningPolicyID
-	}
-	if objs.WebhookEndpointID != "" {
-		meta["webhook_endpoint_id"] = objs.WebhookEndpointID
+	if len(objs.PriceIDs) > 0 {
+		meta["price_ids"] = objs.PriceIDs
 	}
 	if err := s.auditLogger.LogInTx(ctx, tx, audit.Entry{
 		Action:        domain.AuditActionCreate,
@@ -630,68 +448,6 @@ func (s *Service) emitInstantiated(ctx context.Context, tx *sql.Tx, rendered dom
 		return fmt.Errorf("audit emission: %w", err)
 	}
 	return nil
-}
-
-// ratingRuleFromRecipe maps the recipe's rating-rule shape to the
-// canonical domain.RatingRuleVersion. The version number is allocated by
-// the store in SQL (MAX+1 per key) — a recipe only CREATES a rule when the
-// key doesn't already exist (an existing key is adopted, never republished;
-// ADR-085/ADR-070), so the recipe's rules land as version 1 on a fresh
-// tenant. Existing customer overrides keep applying — they follow the
-// rule_key.
-func ratingRuleFromRecipe(r domain.RecipeRatingRule) domain.RatingRuleVersion {
-	name := r.Name
-	if name == "" {
-		name = r.Key
-	}
-	return domain.RatingRuleVersion{
-		RuleKey:                r.Key,
-		Name:                   name,
-		LifecycleState:         domain.RatingRuleActive,
-		Mode:                   r.Mode,
-		Currency:               r.Currency,
-		FlatAmountCents:        r.FlatAmountCents,
-		GraduatedTiers:         r.GraduatedTiers,
-		PackageSize:            r.PackageSize,
-		PackageAmountCents:     r.PackageAmountCents,
-		OverageUnitAmountCents: r.OverageUnitAmountCents,
-	}
-}
-
-// dunningFromRecipe converts the recipe's dunning shape (max_retries +
-// intervals_hours) to the engine's DunningPolicy (MaxRetryAttempts +
-// retry_schedule of duration strings). intervals_hours is an int slice
-// in the recipe so YAML stays human-friendly; the policy stores
-// "Xh"-style strings to match how operators author policies in the API.
-func dunningFromRecipe(p domain.RecipeDunningPolicy) domain.DunningPolicy {
-	schedule := make([]string, 0, len(p.IntervalsHours))
-	for _, h := range p.IntervalsHours {
-		schedule = append(schedule, strconv.Itoa(h)+"h")
-	}
-	// Both are required and validated at parse time, so no defaulting here
-	// — a recipe silently falling back to a terminal action its author did
-	// not write is exactly what parse.go now refuses.
-	return domain.DunningPolicy{
-		Name:                    p.Name,
-		Enabled:                 true,
-		RetrySchedule:           schedule,
-		MaxRetryAttempts:        p.MaxRetries,
-		FinalSubscriptionAction: domain.DunningSubscriptionAction(p.FinalSubscriptionAction),
-		FinalInvoiceAction:      domain.DunningInvoiceAction(p.FinalInvoiceAction),
-		GracePeriodDays:         3,
-	}
-}
-
-// newWebhookSecret mints a fresh whsec_-prefixed signing key. Same
-// length and prefix as webhook.Service.CreateEndpoint so a recipe-created
-// endpoint is indistinguishable from a hand-created one once the
-// operator activates it.
-func newWebhookSecret() (string, error) {
-	buf := make([]byte, 24)
-	if _, err := rand.Read(buf); err != nil {
-		return "", fmt.Errorf("generate webhook secret: %w", err)
-	}
-	return "whsec_" + hex.EncodeToString(buf), nil
 }
 
 // copyOverrides returns a defensive shallow copy of the caller-provided

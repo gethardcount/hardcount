@@ -2,10 +2,12 @@ package billing
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/payment"
 )
 
 // Labels for the no-payment-method email, read back by the invoice email
@@ -55,9 +57,28 @@ func (e *Engine) CollectInvoice(ctx context.Context, tenantID, invoiceID string,
 	}
 	if _, errs := e.processAutoCharge(ctx, []domain.Invoice{inv}, at, noPMTriggerFinalize); len(errs) > 0 {
 		for _, cerr := range errs {
-			slog.WarnContext(ctx, "collect: did not complete; the auto-charge sweep will retry",
+			slog.WarnContext(ctx, "collect: did not complete; "+collectFailureNext(cerr),
 				"invoice_id", invoiceID, "error", cerr)
 		}
+	}
+}
+
+// collectFailureNext says what happens next to an invoice the finalize-time
+// collect did not finish. "The auto-charge sweep will retry" is true only
+// while the invoice is still queued: a definite refusal took it out of the
+// queue (ClaimAutoCharge needs payment_status 'pending', and processAutoCharge
+// cleared the flag), and an unclear answer moved it to 'unknown'. Saying it
+// for those sent the reader to a sweep that would never touch the invoice
+// (min-charge check 2026-10-22, finding 4.2).
+func collectFailureNext(err error) string {
+	var pe *payment.PaymentError
+	switch {
+	case errors.As(err, &pe) && !pe.Unknown:
+		return "Stripe refused the charge, so the invoice is marked failed and out of the auto-charge queue; payment recovery retries it if the account has it on"
+	case errors.As(err, &pe):
+		return "Stripe's answer was unclear, so Velox asks Stripe what happened before anything charges the invoice again"
+	default:
+		return "the invoice is still queued, and the auto-charge sweep will retry"
 	}
 }
 

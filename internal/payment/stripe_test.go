@@ -11,6 +11,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/audit"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // ---------------------------------------------------------------------------
@@ -129,6 +130,27 @@ func (m *mockInvoiceUpdater) StampChargeOutcome(_ context.Context, tenantID, id 
 	if piID != "" {
 		m.byPI[piID] = id
 	}
+	return inv, true, nil
+}
+
+// StampBelowMinimum mirrors the store: the seq CAS, finalized only, and the
+// invoice left pending, out of the auto-charge queue, with the stamp.
+func (m *mockInvoiceUpdater) StampBelowMinimum(_ context.Context, _, id string, attemptSeq int64, errMsg string) (domain.Invoice, bool, error) {
+	inv, ok := m.invoices[id]
+	if !ok {
+		return domain.Invoice{}, false, errs.ErrNotFound
+	}
+	if inv.ChargeAttemptSeq != attemptSeq || inv.Status != domain.InvoiceFinalized {
+		return inv, false, nil
+	}
+	now := time.Now().UTC()
+	inv.PaymentStatus = domain.PaymentPending
+	inv.StripePaymentIntentID = ""
+	inv.LastPaymentError = errMsg
+	inv.AutoChargePending = false
+	inv.BelowMinimumAt = &now
+	inv.ChargeAttemptSeq++
+	m.invoices[id] = inv
 	return inv, true, nil
 }
 
@@ -393,7 +415,7 @@ func TestChargeInvoice_Success(t *testing.T) {
 	invoices.invoices["inv_1"] = inv
 
 	stripe := NewStripe(client, invoices, webhooks, nil)
-	result, err := stripe.ChargeInvoice(context.Background(), "t1", inv, testHold, "cus_stripe_abc", "pm_test")
+	result, err := stripe.ChargeInvoice(postgres.WithLivemode(context.Background(), true), "t1", inv, testHold, "cus_stripe_abc", "pm_test")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -484,7 +506,7 @@ func TestChargeInvoice_StripeFailure(t *testing.T) {
 	}
 
 	stripe := NewStripe(client, invoices, newMockWebhookStore(), nil)
-	_, err := stripe.ChargeInvoice(context.Background(), "t1", invoices.invoices["inv_1"], testHold, "cus_stripe", "pm_test")
+	_, err := stripe.ChargeInvoice(postgres.WithLivemode(context.Background(), true), "t1", invoices.invoices["inv_1"], testHold, "cus_stripe", "pm_test")
 	if err == nil {
 		t.Fatal("expected error when Stripe fails")
 	}
@@ -551,7 +573,7 @@ func TestChargeInvoice_DefiniteFailure_InlineStartsDunning(t *testing.T) {
 	dunning := &recordingDunningStarter{}
 	stripe := NewStripe(client, invoices, newMockWebhookStore(), nil, dunning)
 
-	_, err := stripe.ChargeInvoice(context.Background(), "t1", invoices.invoices["inv_1"], testHold, "cus_stripe_abc", "pm_test")
+	_, err := stripe.ChargeInvoice(postgres.WithLivemode(context.Background(), true), "t1", invoices.invoices["inv_1"], testHold, "cus_stripe_abc", "pm_test")
 	if err == nil {
 		t.Fatal("expected definitive failure error")
 	}
@@ -619,7 +641,7 @@ func TestChargeInvoice_UnknownOutcome(t *testing.T) {
 	}
 
 	stripe := NewStripe(client, invoices, newMockWebhookStore(), nil)
-	_, err := stripe.ChargeInvoice(context.Background(), "t1", invoices.invoices["inv_1"], testHold, "cus_stripe", "pm_test")
+	_, err := stripe.ChargeInvoice(postgres.WithLivemode(context.Background(), true), "t1", invoices.invoices["inv_1"], testHold, "cus_stripe", "pm_test")
 	if err == nil {
 		t.Fatal("expected error on ambiguous Stripe outcome")
 	}
@@ -647,7 +669,7 @@ func TestChargeInvoice_PlainErrorTreatedAsUnknown(t *testing.T) {
 	}
 
 	stripe := NewStripe(client, invoices, newMockWebhookStore(), nil)
-	_, err := stripe.ChargeInvoice(context.Background(), "t1", invoices.invoices["inv_1"], testHold, "cus_stripe", "pm_test")
+	_, err := stripe.ChargeInvoice(postgres.WithLivemode(context.Background(), true), "t1", invoices.invoices["inv_1"], testHold, "cus_stripe", "pm_test")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -945,12 +967,15 @@ type recordingAttacher struct {
 	makeDefault bool
 }
 
-func (r *recordingAttacher) AttachForWebhook(ctx context.Context, tenantID, customerID, pmID string, makeDefault bool) error {
+func (r *recordingAttacher) AttachForWebhook(ctx context.Context, tenantID, customerID, pmID string, makeDefault bool) (*domain.PaymentMethodView, error) {
 	r.called++
 	r.tenantID, r.customerID, r.pmID = tenantID, customerID, pmID
 	r.makeDefault = makeDefault
 	r.actorType, r.actorID = audit.ResolveActor(ctx)
-	return r.err
+	if r.err != nil {
+		return nil, r.err
+	}
+	return &domain.PaymentMethodView{ID: "vlx_pm_" + pmID, CustomerID: customerID, Type: "card", IsDefault: makeDefault}, nil
 }
 
 // TestHandleWebhook_SetupIntentSucceeded — a setup_intent.succeeded event
@@ -994,8 +1019,9 @@ func TestHandleWebhook_SetupIntentSucceeded(t *testing.T) {
 	if attacher.actorType != "system" {
 		t.Errorf("purpose-less attach must resolve to system actor, got %q/%q", attacher.actorType, attacher.actorID)
 	}
-	// velox_customer_id on the SetupIntent: Velox created it (legacy
-	// POST /v1/checkout/setup sets no purpose), so its card becomes the default.
+	// velox_customer_id on the SetupIntent: Velox created it, so its card
+	// becomes the default. No purpose: a session from the removed
+	// POST /v1/checkout/setup, made before the upgrade and finished after.
 	if !attacher.makeDefault {
 		t.Error("a SetupIntent carrying velox_customer_id must attach its card as the default")
 	}

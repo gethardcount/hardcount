@@ -293,7 +293,7 @@ func (s *PostgresStore) GetMany(ctx context.Context, tenantID string, ids []stri
 	defer postgres.Rollback(tx)
 
 	rows, err := tx.QueryContext(ctx,
-		`SELECT `+customerFullCols+` FROM customers WHERE id = ANY($1::text[])`, postgres.StringArray(ids))
+		`SELECT `+customerFullCols+` FROM customers WHERE id = ANY($1::text[])`, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -322,8 +322,7 @@ func (s *PostgresStore) GetMany(ctx context.Context, tenantID string, ids []stri
 // Single writer for customers.stripe_customer_id since the
 // customer_payment_setups summary table was retired (migration
 // 0097). Called by paymentmethods.StripeAdapter.EnsureStripeCustomer
-// on the lazy-create path and by the legacy /v1/checkout/setup
-// operator flow on initial bootstrap.
+// on the lazy-create path.
 func (s *PostgresStore) SetStripeCustomerID(ctx context.Context, tenantID, customerID, stripeCustomerID string) error {
 	return s.SetStripeCustomerIDAudited(ctx, tenantID, customerID, stripeCustomerID, nil)
 }
@@ -360,10 +359,12 @@ func (s *PostgresStore) SetStripeCustomerIDAudited(ctx context.Context, tenantID
 	// customer Velox does not have.
 	//
 	// The two callers want opposite handling and BOTH are correct, so the
-	// store reports the fact and lets them decide: the operator checkout route
-	// turns it into a 404, while the checkout.session.completed webhook
-	// tolerates it (acking the event rather than looping Stripe's retries
-	// forever against a customer that no longer exists).
+	// store reports the fact and lets them decide: EnsureStripeCustomer
+	// (paymentmethods, the lazy create behind the operator's setup session)
+	// re-reads the customer and returns an error, so no session is made,
+	// while the checkout.session.completed webhook tolerates it (acking the
+	// event rather than looping Stripe's retries forever against a customer
+	// that no longer exists).
 	n, err := res.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("set stripe_customer_id: rows affected: %w", err)

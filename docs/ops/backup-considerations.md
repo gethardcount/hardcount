@@ -1,8 +1,6 @@
 # Back up Velox
 
-Back up two things: the Postgres database and the encryption key. This page is for the engineer who runs Velox. It shows how to back up with the scripts in this repository, how to restore, and how to prove a restore works.
-
-Think of the encryption key as the key to a safe, and the backup as the safe. A backup without its key cannot be opened, so the two must be kept apart, and both must be kept.
+Back up two things, and keep them apart: the Postgres database and the encryption key. A backup cannot be read without its key.
 
 On the one-VM Docker Compose install, follow [Production on one VM, step 7](../production-one-vm.md#7-back-up-every-night): it runs these scripts in a container, every night.
 
@@ -73,7 +71,7 @@ The dump travels through standard output, so the container needs no mounted fold
 
 `scripts/restore.sh` replaces the objects in the backup, in the target database, in one transaction: either all of it is restored, or nothing changes. Each restored table gets the access rights it has in the backup, even when the target database gives new tables more, as a new Compose install does. It needs `pg_restore` and `psql` on the machine that runs it. `psql` runs the SQL that `pg_restore` writes, so it must be at least as recent as `pg_restore`: an older `psql` stops at `invalid command \restrict`, and nothing changes.
 
-**Restore into an empty database when you can.** The script leaves alone what the backup does not hold. Restored over a newer database, that includes its migration record and any table a newer migration created. When such a table refers to a table in the backup, the restore cannot replace that table, so it stops and changes nothing: `invoice_disputes` (migration 185) refers to `invoices` and `tenants`. A backup from v0.8.x must go into an empty database. Over a database that v0.9.0 or newer has upgraded, the restore stops there, or Velox refuses to start (see [Two migration records](runbook/migration-failed-midway.md#two-migration-records)). A backup from before v0.8.0 goes into an empty database, then through v0.8.1's `velox migrate`, then the new release's.
+**Restore into an empty database when you can.** The script replaces what the backup holds, the migration record included, and leaves alone what it does not hold, such as a table a newer migration created. When such a table refers to a table in the backup, the restore cannot replace that table, so it stops and changes nothing. When it refers to none, the restore keeps it and takes the migration record back to the backup's version: the next upgrade runs that migration again, which can stop on `already exists`.
 
 1. On a new Postgres server, create the limited user first. Users and their settings belong to the server, not to the database, so a dump cannot carry them. Without the user the restore fails, and the script stops before it starts. The second line sets the timeout that [Postgres requirements](postgres-requirements.md#timeouts-on-the-limited-user) calls required.
 
@@ -133,6 +131,8 @@ Each run adds one line to `~/.velox/drill.log`, so you can see how long backups 
 Exit codes: `0` passed, `1` a setting is wrong, `2` the backup failed, `3` the restore failed, `4` row counts differ, `5` the container did not start.
 
 After a drill passes, you can also start Velox against a restored copy, check that `/health/ready` answers 200, and run `go run ./cmd/velox-doctor` against it. It should report no problems.
+Run it as the database owner. The app role (`velox_app`) sees no rows and
+reports clean.
 
 ## Checks after a restore
 
@@ -142,15 +142,13 @@ Run these before you let traffic back in.
 
 Run the `velox migrate status` of the release you will start, against the restored database.
 
-**You see:** `state:        up to date, nothing to apply`. Another state lists what `velox migrate` will do, or, for `refused`, what to do first. A database restored from a v0.8.x backup says `ready to move`: `velox migrate` takes it over without changing a table.
+**You see:** `state:        up to date, nothing to apply`. `behind` lists what `velox migrate` will do. `no migration record` means the backup was restored without its migration table: restore it again, with the table, into an empty database. A backup from Velox 0.8.x gives the same state, and it cannot be upgraded: install fresh.
 
 The record itself, if you want to look:
 
 ```sql
 SELECT max(version_id) FROM public.goose_db_version;
 ```
-
-A backup from v0.8.x has `schema_migrations` instead: `SELECT version, dirty FROM schema_migrations;` must show `180 | f`.
 
 ### 2. Row-Level Security is on
 
@@ -240,7 +238,7 @@ Some tables matter more than others when you decide what a restore must bring ba
 | `tenants` | Every other row belongs to an account |
 | `customers`, `customer_billing_profiles` | Who the customers are, with tax details and personal data |
 | `subscriptions`, `subscription_items` | What each customer is billed for |
-| `plans`, `meters`, `rating_rule_versions` | Prices. Invoice amounts depend on them. |
+| `plans`, `meters`, `plan_prices`, `plan_price_versions`, `customer_price_overrides` | Prices, with each price's past rates and each customer's negotiated rates. Invoice amounts depend on them. |
 | `invoices`, `invoice_line_items` | Issued invoices: a financial record |
 | `credit_notes`, `credit_note_line_items` | Refunds and adjustments: a financial record |
 | `customer_credit_ledger` | Customer credit balances. Every entry is needed to work out a balance. |
@@ -254,10 +252,10 @@ Some tables matter more than others when you decide what a restore must bring ba
 | `api_keys` | API keys |
 | `tenant_settings`, `stripe_provider_credentials` | Account settings, including the encrypted Stripe keys |
 | `webhook_endpoints` | Where Velox sends webhooks, with their signing secrets |
+| `webhook_events`, `webhook_deliveries` | Webhooks Velox sent, with every try. Replay and timelines read them. |
 | `recipe_instances` | Installed pricing recipes |
 | `test_clocks`, `dashboard_sessions` | Not money, but losing them disrupts the people using the dashboard |
 | `goose_db_version` | The schema version. Velox does not start without it. |
-| `schema_migrations` | On a database taken over from v0.8.x: v0.8's version record, frozen at 180. Keep it with `goose_db_version`; Velox checks that the two agree. |
 
 `usage_events` for billing periods that are still open belong here too: the next invoice needs every one of them.
 
@@ -267,8 +265,7 @@ Some tables matter more than others when you decide what a restore must bring ba
 |---|---|---|
 | `email_outbox` | Queued emails are not sent | Later changes send new emails. A lost email is an annoyance, not lost money. |
 | `webhook_outbox` | Queued webhooks are not sent | Receivers should handle replays; send events again if needed |
-| `webhook_events` (Stripe, incoming) | Some history is lost | Stripe holds the original events and its API returns them |
-| `stripe_webhook_events` | Same as above | Same |
+| `stripe_webhook_events` | Some history of Stripe's events is lost | Stripe holds the original events and its API returns them |
 
 ### Old usage: can be dropped
 
@@ -279,13 +276,7 @@ Some tables matter more than others when you decide what a restore must bring ba
 These do not need a database backup:
 
 - Velox itself and its container images: download or build them again.
-- Settings and secrets (the `.env` file or your secrets manager): back them up separately, together with the encryption key.
+- Settings and secrets (the `.env` file or your secrets manager): back them up separately.
 - Invoice PDFs: Velox builds them again from the invoice.
 
-## Background
-
-The first restore drill, on 2026-08-11, failed and found four defects in the scripts. All four were fixed the same day, and the drill then passed.
-
-| Date | Result | Notes |
-|---|---|---|
-| 2026-08-11 | **FAIL → 4 defects → PASS** (7s total: backup 1s, restore 3s; 5 critical tables count-matched) | First-ever run. Found: (1) host `pg_dump` 18 vs server 16 → unrestorable archive; (2) host `pg_restore` 18 vs target 16 → client `SET transaction_timeout` rolled restore back; (3) fresh-cluster restore rolled back on missing `velox_app` role — the DR path had never worked; (4) restore.sh's validation query referenced a nonexistent column (`table_name` vs `relname`) — broken since birth. All four fixed same day; drill re-run green. |
+**Next:** [Health checks, alerts and logs](runbook/monitoring.md).

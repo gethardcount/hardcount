@@ -13,6 +13,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/tax"
 )
 
@@ -64,7 +65,7 @@ func TestRetryTax_FinalizeFailureIsAnError(t *testing.T) {
 		svc := NewService(finalizeFailingStore{mem}, nil, nil)
 		svc.SetTaxRetrier(&stubTaxRetrier{store: mem})
 
-		processed, errs := svc.RetryPendingTax(context.Background(), 50)
+		processed, errs := svc.RetryPendingTax(postgres.WithLivemode(context.Background(), true), 50)
 		if processed != 0 || len(errs) != 1 {
 			t.Errorf("RetryPendingTax = %d processed, %d errors; want 0 and 1", processed, len(errs))
 		}
@@ -271,7 +272,7 @@ func TestTaxRetryLoops_StopBetweenRowsOnceCtxIsDone(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithCancel(postgres.WithLivemode(context.Background(), true))
 			defer cancel()
 			processed, errs, calls := c.run(ctx, cancel)
 			if calls != 1 {

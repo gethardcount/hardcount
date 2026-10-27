@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // recordingDunningStarter records every StartDunning call so a test can
@@ -62,7 +63,7 @@ func TestCollector_NoCard_StartsNoPaymentDunningOnce(t *testing.T) {
 	starter := &recordingDunningStarter{}
 	engine.SetDunningStarter(starter)
 
-	if _, errs := engine.RetryPendingCharges(context.Background(), 10, nil); len(errs) != 0 {
+	if _, errs := engine.RetryPendingCharges(postgres.WithLivemode(context.Background(), true), 10, nil); len(errs) != 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
 	if len(starter.started) != 1 || starter.started[0] != "inv_1" {
@@ -81,7 +82,7 @@ func TestCollector_NoCard_StartFailureIsRetried(t *testing.T) {
 	engine := noPMEngine(t, inv)
 	engine.SetDunningStarter(&recordingDunningStarter{err: errors.New("create run failed")})
 
-	if _, errs := engine.RetryPendingCharges(context.Background(), 10, nil); len(errs) != 1 {
+	if _, errs := engine.RetryPendingCharges(postgres.WithLivemode(context.Background(), true), 10, nil); len(errs) != 1 {
 		t.Fatalf("errors = %v, want the start failure surfaced", errs)
 	}
 	if !inv.invoices[0].AutoChargePending {
@@ -120,7 +121,7 @@ func TestCollector_NoDunningUnlessOwedAndCardless(t *testing.T) {
 			engine.SetDunningStarter(starter)
 			tc.setup(engine, inv)
 
-			_, _ = engine.RetryPendingCharges(context.Background(), 10, nil)
+			_, _ = engine.RetryPendingCharges(postgres.WithLivemode(context.Background(), true), 10, nil)
 			if len(starter.causes) != 0 {
 				t.Fatalf("StartDunning called (%v); must not be", starter.causes)
 			}
@@ -146,7 +147,7 @@ func TestCollector_PaymentMethodReadErrorIsReported(t *testing.T) {
 	blip := errors.New("db blip")
 	engine.paymentSetups = &erroringPaymentSetups{err: blip}
 
-	_, errs := engine.RetryPendingCharges(context.Background(), 10, nil)
+	_, errs := engine.RetryPendingCharges(postgres.WithLivemode(context.Background(), true), 10, nil)
 
 	if len(errs) != 1 || !errors.Is(errs[0], blip) {
 		t.Fatalf("errors = %v, want one error wrapping the read failure", errs)

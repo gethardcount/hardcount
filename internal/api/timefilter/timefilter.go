@@ -23,10 +23,10 @@
 //   - inclusive (`<= to`): invoice list and invoices.csv, customers.csv,
 //     subscriptions.csv, usage-events.csv, the audit log and
 //     audit-log.csv (both created_at and sim_effective_at).
-//   - exclusive (`< to`): the usage summary (/v1/usage-summary), the usage
-//     event list and aggregate (/v1/usage-events, /v1/usage-events/aggregate),
+//   - exclusive (`< to`): the usage event list and aggregate
+//     (/v1/usage-events, /v1/usage-events/aggregate),
 //     all via usage.buildUsageWhere, and customer usage
-//     (/v1/customers/{id}/usage, via usage.AggregateByPricingRules).
+//     (/v1/customers/{id}/usage, via usage.AggregateClaims).
 //
 // For a date-only `to` both read the same in practice: the exclusive
 // consumers miss only a row stamped at exactly 23:59:59.999999.
@@ -72,7 +72,8 @@ func ParseRange(r *http.Request, fromParam, toParam string) (from, to time.Time,
 	// quantized to advance targets and cycle boundaries (found on the FLOW
 	// P2 walk: the flow's own single-instant example 422'd against the
 	// stricter check). The exclusive consumers apply their own check:
-	// customer usage rejects from==to; the usage summary returns nothing.
+	// customer usage rejects from==to; the usage event list and aggregate
+	// return nothing.
 	if !from.IsZero() && !to.IsZero() && to.Before(from) {
 		return time.Time{}, time.Time{}, errs.Invalid(toParam, "must not be before `"+fromParam+"`")
 	}

@@ -15,6 +15,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/audit"
 	veloxauth "github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
@@ -202,11 +203,23 @@ func (h *PublicPaymentHandler) validateToken(w http.ResponseWriter, r *http.Requ
 	})
 }
 
+// writeOnlinePaymentUnavailable answers a checkout when the seller has no
+// Stripe keys for the mode: a state, not an outage, so a 409 the page
+// explains (the hosted invoice page's code for the same state), not a 502.
+// Stripe was never called.
+func writeOnlinePaymentUnavailable(w http.ResponseWriter, r *http.Request) {
+	respond.Error(w, r, http.StatusConflict, "invalid_request_error", errs.CodeOnlinePaymentUnavailable,
+		"Adding a card online isn't available for this account right now. Please contact your billing administrator.")
+}
+
 type checkoutResponse struct {
 	URL string `json:"url"`
 }
 
 func (h *PublicPaymentHandler) createCheckoutSession(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	rawToken := chi.URLParam(r, "token")
 	if rawToken == "" {
 		respond.BadRequest(w, r, "token is required")
@@ -238,6 +251,10 @@ func (h *PublicPaymentHandler) createCheckoutSession(w http.ResponseWriter, r *h
 	// EnsureStripeCustomer is idempotent (short-circuits on the persisted id),
 	// so a replay/retry doesn't mint duplicate Stripe Customers.
 	stripeCustomerID, err := h.ensurer.EnsureStripeCustomer(scopedCtx, token.TenantID, token.CustomerID)
+	if errs.Code(err) == errs.CodeStripeNotConnected {
+		writeOnlinePaymentUnavailable(w, r)
+		return
+	}
 	if err != nil {
 		slog.ErrorContext(scopedCtx, "public payment: ensure stripe customer",
 			"customer_id", token.CustomerID, "error", err)
@@ -248,12 +265,19 @@ func (h *PublicPaymentHandler) createCheckoutSession(w http.ResponseWriter, r *h
 		return
 	}
 
-	sc := h.clients.For(scopedCtx, token.TenantID, token.Livemode)
-	if sc == nil {
-		// EnsureStripeCustomer just succeeded for this (tenant, mode), so a nil
-		// client here would be a config change between the two calls.
+	sc, err := h.clients.Resolve(scopedCtx, token.TenantID, token.Livemode)
+	if err != nil {
+		slog.ErrorContext(scopedCtx, "public payment: read stripe credentials",
+			"customer_id", token.CustomerID, "error", err)
 		respond.Error(w, r, http.StatusBadGateway, "api_error", "stripe_error",
 			"We couldn't start the payment update right now. Please contact your billing administrator if the problem persists.")
+		return
+	}
+	if sc == nil {
+		// Not connected for this mode. EnsureStripeCustomer reads no keys
+		// when the customer already has a Stripe customer, so this is where
+		// a disconnected mode shows for that customer.
+		writeOnlinePaymentUnavailable(w, r)
 		return
 	}
 

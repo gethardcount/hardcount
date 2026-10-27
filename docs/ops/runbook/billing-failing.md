@@ -2,8 +2,7 @@
 
 When Velox cannot bill a subscription at the end of its period, it saves
 the failure on the subscription and tries again later, waiting longer each
-time. This page is for finding why and billing it. Back to the
-[runbook index](index.md).
+time. Back to the [runbook index](index.md).
 
 ## Symptom
 
@@ -88,11 +87,8 @@ ladder.
 
 ## Fix
 
-1. **Fix the cause.** Until the period is billed, every change to the
-   subscription (items, plan, a scheduled cancel, a collection pause) is
-   refused with 409 `unbilled_period`. The exception is a subscription with
-   no items: there, add an item (`POST /v1/subscriptions/{id}/items`) and
-   retry.
+1. **Fix the cause.** For a subscription with no items, add one
+   (`POST /v1/subscriptions/{id}/items`).
 2. **Retry the subscription.** This clears the saved failure, writes an
    audit log entry, and bills at once:
 
@@ -118,11 +114,8 @@ ladder.
    `still_due: true` left the list without being billed. The next billing
    run attempts it.
 
-A cancel does not clear a park. An immediate cancel of a subscription whose
-ended period is not invoiced answers 409 with code `unbilled_period`, and
-the subscription stays active. Fix the cause, retry billing as above, then
-cancel again. A cancel that arrives after the period end on a healthy
-subscription bills the ended period itself and needs no retry.
+A cancel that arrives after the period end on a healthy subscription bills
+the ended period itself and needs no retry.
 
 `POST /v1/billing/run` is not a retry. It skips subscriptions that are
 waiting or parked.

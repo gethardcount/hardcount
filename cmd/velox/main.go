@@ -25,7 +25,6 @@ import (
 	"github.com/sagarsuperuser/velox/internal/platform/migrate"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/platform/telemetry"
-	"github.com/sagarsuperuser/velox/internal/subscription"
 	"github.com/sagarsuperuser/velox/internal/testclock"
 	"github.com/sagarsuperuser/velox/internal/version"
 	"github.com/sagarsuperuser/velox/internal/webhook"
@@ -62,8 +61,6 @@ func main() {
 			runMigrateStatus()
 		case "rollback":
 			runMigrateRollback()
-		case "force":
-			runMigrateForce()
 		case "":
 			runMigrate()
 		default:
@@ -171,17 +168,6 @@ func serve() {
 		return out, nil
 	})
 
-	// ADR-101 Phase 1: reconstruct billing_intervals for items that predate
-	// the dual-write (idempotent — items with rows are skipped, so this is
-	// a no-op on every boot after the first). Runs BEFORE serving so no
-	// item mutation can race the reconstruction of its own history.
-	if n, err := subscription.NewPostgresStore(db).BackfillBillingIntervals(context.Background()); err != nil {
-		slog.Error("billing-intervals backfill failed", "error", err)
-		os.Exit(1)
-	} else if n > 0 {
-		slog.Info("billing-intervals backfill complete", "intervals", n)
-	}
-
 	// Redis: production refuses to boot without a reachable one (the
 	// general and hosted-invoice rate limiters fail CLOSED without Redis,
 	// so a Redis-less replica would boot green and answer 429 to 1/N of
@@ -277,11 +263,13 @@ func serve() {
 		MaxHeaderBytes:    1 << 13, // 8 KB
 	}
 
-	// Shutdown is a published three-stage budget — 90s worst case, typically
-	// under two seconds — and every stage's bound abandons only work that is
-	// designed to be resumed. Configure the orchestrator's grace period at
-	// 120s (docs/ops/high-availability.md 'What happens when a copy stops'; compose sets
-	// stop_grace_period). Docker's 10s default SIGKILLs mid-drain.
+	// Shutdown is a published three-stage budget — 90s worst case after the
+	// SHUTDOWN_DRAIN_DELAY readiness drain, typically under two seconds — and
+	// every stage's bound abandons only work that is designed to be resumed.
+	// Set the orchestrator's grace period above the drain delay plus 90s:
+	// 120s with the 5s default (docs/ops/high-availability.md 'What happens
+	// when a copy stops'; compose sets stop_grace_period). Docker's 10s
+	// default SIGKILLs mid-drain.
 	const (
 		shutdownHTTPDrain   = 30 * time.Second // stage 1: in-flight requests
 		shutdownCatchupWait = 30 * time.Second // stage 2: an in-flight test-clock advance
@@ -441,7 +429,7 @@ func runMigrate() {
 // release's, the state, the files still to apply and whether a migration
 // is running now. It reads only, takes no lock and creates nothing, so it
 // is safe to run with the new release before an upgrade. It exits 0 when
-// it could read the state, refused states included.
+// it could read the state.
 func runMigrateStatus() {
 	p, err := migrate.ReadPlan(loadDSN())
 	if err != nil {
@@ -451,25 +439,13 @@ func runMigrateStatus() {
 	fmt.Print(migrate.FormatPlan(p, version.Version))
 }
 
-// migrateForceRemoved is what `velox migrate force` prints since v0.9.0.
-// The stub stays for one release, so a script or habit that still runs it
-// gets a pointer instead of "unknown subcommand".
-const migrateForceRemoved = `velox migrate force was removed in v0.9.0: goose leaves no half-applied state, so there is nothing to force.
-After a failed upgrade, fix the cause and run "velox migrate" again. Steps: ` + migrate.RunbookPath + `
-For a dirty v0.8.x database, repair it with Velox v0.8.1: https://github.com/getvelox/velox/blob/v0.8.1/docs/ops/runbook/migration-failed-midway.md`
-
-func runMigrateForce() {
-	fmt.Fprintln(os.Stderr, migrateForceRemoved)
-	os.Exit(2)
-}
-
 // rollbackRefused is what `velox migrate rollback` prints outside local.
 const rollbackRefused = `velox migrate rollback runs only with APP_ENV=local.
 Rolling back in staging or production loses data the newer release wrote. To go back, restore the backup taken before the upgrade: docs/production-one-vm.md#going-back`
 
 // runMigrateRollback undoes the latest migration, one step, on a local
 // database: the loop for writing a new migration. Migration 180, the
-// v0.8.1 baseline, never rolls back.
+// baseline, never rolls back.
 func runMigrateRollback() {
 	if config.AppEnv() != "local" {
 		fmt.Fprintln(os.Stderr, rollbackRefused)
@@ -492,7 +468,7 @@ Commands:
   migrate status       Show the upgrade plan: the database's version, the
                        migrations still to apply, and whether one is running
   migrate rollback     Undo the latest migration (APP_ENV=local only; never
-                       below 180, the v0.8.1 baseline)
+                       below 180, the baseline)
   version              Print version
   help                 Show this help
 
@@ -555,7 +531,7 @@ func resolveAppURL(env, adminURL, appURL string) (url, fallbackWarn string, err 
 	}
 
 	if !local {
-		return "", "", fmt.Errorf("APP_DATABASE_URL is required in %s: the runtime pool must be a least-privilege role with its own password, not one derived from DATABASE_URL with the documented default — see docs/self-host.md", env)
+		return "", "", fmt.Errorf("APP_DATABASE_URL is required in %s: the runtime pool must be a least-privilege role with its own password, not one derived from DATABASE_URL with the documented default — see docs/ops/postgres-requirements.md#the-two-database-users", env)
 	}
 
 	derived := deriveAppURL(adminURL)
@@ -604,7 +580,7 @@ func openAppPool(cfg config.Config, adminPool *sql.DB) (*sql.DB, func()) {
 		// every env — explicit config never silently degrades. Only the
 		// local derived URL keeps warn-and-fallback (role not created).
 		if cfg.DB.AppURL != "" || cfg.Env != "local" {
-			slog.Error("refusing to start: could not open the app database connection, so RLS would not be enforced and tenants would not be isolated. Check APP_DATABASE_URL and that the role exists with LOGIN — see docs/self-host.md.", "error", err, "env", cfg.Env)
+			slog.Error("refusing to start: could not open the app database connection, so RLS would not be enforced and tenants would not be isolated. Check APP_DATABASE_URL and that the role exists with LOGIN — see docs/ops/postgres-requirements.md#the-two-database-users.", "error", err, "env", cfg.Env)
 			os.Exit(1)
 		}
 		slog.Warn("could not open app database connection, falling back to admin", "error", err)
@@ -618,7 +594,7 @@ func openAppPool(cfg config.Config, adminPool *sql.DB) (*sql.DB, func()) {
 	}
 	if canBypass {
 		if cfg.Env != "local" {
-			slog.Error("refusing to start: the APP_DATABASE_URL role can BYPASS row-level security (superuser or BYPASSRLS) — tenants would not be isolated. Point APP_DATABASE_URL at a least-privilege role like velox_app, not the admin role — see docs/self-host.md.", "role", role, "env", cfg.Env)
+			slog.Error("refusing to start: the APP_DATABASE_URL role can BYPASS row-level security (superuser or BYPASSRLS) — tenants would not be isolated. Point APP_DATABASE_URL at a least-privilege role like velox_app, not the admin role — see docs/ops/postgres-requirements.md#the-two-database-users.", "role", role, "env", cfg.Env)
 			os.Exit(1)
 		}
 		slog.Warn("app database role can bypass RLS — acceptable in local dev only", "role", role)

@@ -39,15 +39,11 @@ func TestMeterOverlapGuard(t *testing.T) {
 
 	pricingStore := pricing.NewPostgresStore(db)
 	newPlan := func(code string, meterIDs []string) domain.Plan {
-		p, err := pricingStore.CreatePlan(ctx, tenantID, domain.Plan{
+		return createPlanPricing(t, db, ctx, tenantID, domain.Plan{
 			Code: code, Name: code, Currency: "USD",
 			BillingInterval: domain.BillingMonthly, BaseBillTiming: domain.BillInArrears,
-			BaseAmountCents: 1000, Status: domain.PlanActive, MeterIDs: meterIDs,
-		})
-		if err != nil {
-			t.Fatalf("create plan %s: %v", code, err)
-		}
-		return p
+			BaseAmountCents: 1000, Status: domain.PlanActive,
+		}, meterIDs...)
 	}
 	const meterTokens = "mtr_guard_tokens"
 	const meterSeats = "mtr_guard_seats"
@@ -59,6 +55,7 @@ func TestMeterOverlapGuard(t *testing.T) {
 
 	svc := NewService(NewPostgresStore(db), nil)
 	svc.SetPlanReader(pricingStore)
+	svc.SetPlanMeterReader(pricingStore)
 
 	create := func(code string, planIDs ...string) (domain.Subscription, error) {
 		items := make([]CreateItemInput, 0, len(planIDs))
@@ -67,7 +64,7 @@ func TestMeterOverlapGuard(t *testing.T) {
 		}
 		return svc.Create(ctx, tenantID, CreateInput{
 			Code: code, DisplayName: code, CustomerID: cust.ID,
-			Items: items, BillingTime: domain.BillingTimeAnniversary, StartNow: true,
+			Items: items, BillingTime: domain.BillingTimeAnniversary,
 		})
 	}
 	wantConflict := func(err error, wantSub string) {

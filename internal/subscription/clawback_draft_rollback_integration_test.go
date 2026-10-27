@@ -110,7 +110,6 @@ func TestRemoveItem_ClawbackDraftCreateFailure_RealTxRollsBackItemDelete(t *test
 			CreatedAt: proPeriodStart,
 		},
 	}
-	credits := &creditsMock{}
 	// fakeCNIssuer.err fails CreateAdjustmentDraftTx in-tx — the exact failure
 	// the atomic remove path must roll the item delete back from. CreditedCents
 	// stays 0 (full headroom) so the clawback resolves a non-empty piece first.
@@ -118,7 +117,7 @@ func TestRemoveItem_ClawbackDraftCreateFailure_RealTxRollsBackItemDelete(t *test
 
 	h := NewHandler(svcWithStore(store))
 	h.SetDB(db)
-	h.SetProrationDeps(plans, invoices, credits)
+	h.SetProrationDeps(plans, invoices)
 	h.SetCreditNoteIssuer(cn)
 
 	// Mid-period instant so remainingPeriodRatio > 0 → atomic clawback path taken.
@@ -156,11 +155,6 @@ func TestRemoveItem_ClawbackDraftCreateFailure_RealTxRollsBackItemDelete(t *test
 	}
 	if !found {
 		t.Errorf("the removed item (%s) must still exist after rollback", removeItemID)
-	}
-	// No bare net ledger grant either — the downgrade/removal credit routes
-	// exclusively through the CN draft, which failed and rolled back.
-	if len(credits.grantCalls) != 0 {
-		t.Errorf("GrantProration must not have fired on the clawback path: got %d calls", len(credits.grantCalls))
 	}
 }
 

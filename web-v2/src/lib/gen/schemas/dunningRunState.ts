@@ -8,12 +8,16 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * `active`: retries are running. `escalated`: retries ran out
+ * (`resolution` is `retries_exhausted`). `resolved`: the run ended
+ * another way; see `resolution`.
+ */
 export type DunningRunState = typeof DunningRunState[keyof typeof DunningRunState];
 
 
 export const DunningRunState = {
   active: 'active',
-  paused: 'paused',
   escalated: 'escalated',
   resolved: 'resolved',
 } as const;

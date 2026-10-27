@@ -72,13 +72,14 @@ func (s *SettingsStore) ListTenantIDs(ctx context.Context) ([]string, error) {
 // ErrNotFound and silently zero-taxed instead.
 func DefaultSettings(tenantID string) domain.TenantSettings {
 	return domain.TenantSettings{
-		TenantID:        tenantID,
-		DefaultCurrency: "USD",
-		Timezone:        "UTC",
-		InvoicePrefix:   "VLX",
-		NetPaymentTerms: 30,
-		TaxProvider:     "manual",
-		TaxOnFailure:    "block",
+		TenantID:         tenantID,
+		DefaultCurrency:  "USD",
+		Timezone:         "UTC",
+		InvoicePrefix:    "VLX",
+		CreditNotePrefix: "CN",
+		NetPaymentTerms:  30,
+		TaxProvider:      "manual",
+		TaxOnFailure:     "block",
 	}
 }
 
@@ -91,7 +92,7 @@ func (s *SettingsStore) Get(ctx context.Context, tenantID string) (domain.Tenant
 
 	var ts domain.TenantSettings
 	err = tx.QueryRowContext(ctx, `
-		SELECT tenant_id, default_currency, timezone, invoice_prefix,
+		SELECT tenant_id, default_currency, timezone, invoice_prefix, credit_note_prefix,
 			net_payment_terms, tax_provider, tax_rate, COALESCE(tax_name,''), tax_inclusive,
 			COALESCE(default_product_tax_code,''), tax_on_failure,
 			COALESCE(company_name,''),
@@ -103,7 +104,7 @@ func (s *SettingsStore) Get(ctx context.Context, tenantID string) (domain.Tenant
 			COALESCE(tax_id,''), COALESCE(support_url,''), COALESCE(invoice_footer,''),
 			credit_balance_low_threshold_cents, created_at, updated_at
 		FROM tenant_settings WHERE tenant_id = $1
-	`, tenantID).Scan(&ts.TenantID, &ts.DefaultCurrency, &ts.Timezone, &ts.InvoicePrefix,
+	`, tenantID).Scan(&ts.TenantID, &ts.DefaultCurrency, &ts.Timezone, &ts.InvoicePrefix, &ts.CreditNotePrefix,
 		&ts.NetPaymentTerms, &ts.TaxProvider, &ts.TaxRate, &ts.TaxName, &ts.TaxInclusive,
 		&ts.DefaultProductTaxCode, &ts.TaxOnFailure,
 		&ts.CompanyName,
@@ -149,11 +150,12 @@ func (s *SettingsStore) Upsert(ctx context.Context, ts domain.TenantSettings) (d
 			company_postal_code, company_country,
 			company_email, company_phone,
 			logo_url, brand_color, tax_id, support_url, invoice_footer,
-			credit_balance_low_threshold_cents, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$27)
+			credit_balance_low_threshold_cents, created_at, updated_at, credit_note_prefix)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$27,$28)
 		ON CONFLICT (tenant_id) DO UPDATE SET
 			default_currency = EXCLUDED.default_currency, timezone = EXCLUDED.timezone,
-			invoice_prefix = EXCLUDED.invoice_prefix, net_payment_terms = EXCLUDED.net_payment_terms,
+			invoice_prefix = EXCLUDED.invoice_prefix, credit_note_prefix = EXCLUDED.credit_note_prefix,
+			net_payment_terms = EXCLUDED.net_payment_terms,
 			tax_provider = EXCLUDED.tax_provider,
 			tax_rate = EXCLUDED.tax_rate,
 			tax_name = EXCLUDED.tax_name,
@@ -173,7 +175,7 @@ func (s *SettingsStore) Upsert(ctx context.Context, ts domain.TenantSettings) (d
 			invoice_footer = EXCLUDED.invoice_footer,
 			credit_balance_low_threshold_cents = EXCLUDED.credit_balance_low_threshold_cents,
 			updated_at = EXCLUDED.updated_at
-		RETURNING tenant_id, default_currency, timezone, invoice_prefix,
+		RETURNING tenant_id, default_currency, timezone, invoice_prefix, credit_note_prefix,
 			net_payment_terms, tax_provider, tax_rate, COALESCE(tax_name,''), tax_inclusive,
 			COALESCE(default_product_tax_code,''), tax_on_failure,
 			COALESCE(company_name,''),
@@ -196,8 +198,8 @@ func (s *SettingsStore) Upsert(ctx context.Context, ts domain.TenantSettings) (d
 		postgres.NullableString(ts.BrandColor),
 		postgres.NullableString(ts.TaxID), postgres.NullableString(ts.SupportURL),
 		postgres.NullableString(ts.InvoiceFooter),
-		ts.CreditBalanceLowThresholdCents, now,
-	).Scan(&ts.TenantID, &ts.DefaultCurrency, &ts.Timezone, &ts.InvoicePrefix,
+		ts.CreditBalanceLowThresholdCents, now, ts.CreditNotePrefix,
+	).Scan(&ts.TenantID, &ts.DefaultCurrency, &ts.Timezone, &ts.InvoicePrefix, &ts.CreditNotePrefix,
 		&ts.NetPaymentTerms, &ts.TaxProvider, &ts.TaxRate, &ts.TaxName, &ts.TaxInclusive,
 		&ts.DefaultProductTaxCode, &ts.TaxOnFailure,
 		&ts.CompanyName,
@@ -259,8 +261,12 @@ func (s *SettingsStore) NextInvoiceNumberTx(ctx context.Context, tx *sql.Tx, ten
 }
 
 func (s *SettingsStore) nextInvoiceNumberInTx(ctx context.Context, tx *sql.Tx, tenantID string) (string, error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return "", err
+	}
 	col := "invoice_next_seq_test"
-	if postgres.Livemode(ctx) {
+	if live {
 		col = "invoice_next_seq_live"
 	}
 	// SQL is built from a fixed allow-list of column names above —
@@ -287,13 +293,17 @@ func (s *SettingsStore) nextInvoiceNumberInTx(ctx context.Context, tx *sql.Tx, t
 // is 1 (the column default). Read-only, so a concurrent allocation can make it
 // stale by the time it is shown; it is a preview, not a reservation.
 func (s *SettingsStore) NextInvoiceSequence(ctx context.Context, tenantID string) (int, error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return 0, err
+	}
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return 0, err
 	}
 	defer postgres.Rollback(tx)
 	col := "invoice_next_seq_test"
-	if postgres.Livemode(ctx) {
+	if live {
 		col = "invoice_next_seq_live"
 	}
 	// col is one of the two fixed names above, never caller input.
@@ -315,8 +325,12 @@ func (s *SettingsStore) NextInvoiceSequence(ctx context.Context, tenantID string
 // NextInvoiceNumberTx keeps for invoices. Same per-mode-column rationale as
 // NextInvoiceNumber above.
 func (s *SettingsStore) NextCreditNoteNumberTx(ctx context.Context, tx *sql.Tx, tenantID string) (string, error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return "", err
+	}
 	col := "credit_note_next_seq_test"
-	if postgres.Livemode(ctx) {
+	if live {
 		col = "credit_note_next_seq_live"
 	}
 	q := `
@@ -452,8 +466,7 @@ func (h *SettingsHandler) upsert(w http.ResponseWriter, r *http.Request) {
 	before := ts
 	haveBefore := h.auditLogger != nil
 
-	if err := json.NewDecoder(r.Body).Decode(&ts); err != nil {
-		respond.BadRequest(w, r, "invalid JSON")
+	if !respond.DecodeStrict(w, r, &ts, respond.ReadOnly("tenant_id", "created_at", "updated_at")) {
 		return
 	}
 	ts.TenantID = tenantID
@@ -571,6 +584,10 @@ func validateSettings(ts *domain.TenantSettings) error {
 	if ts.InvoicePrefix == "" {
 		ts.InvoicePrefix = "VLX"
 	}
+	ts.CreditNotePrefix = strings.TrimSpace(ts.CreditNotePrefix)
+	if ts.CreditNotePrefix == "" {
+		ts.CreditNotePrefix = "CN"
+	}
 	// Net 0 (due immediately) is a legal, industry-standard term — the
 	// old `<= 0 → 30` coercion made it inexpressible. Only negatives
 	// are invalid.
@@ -605,9 +622,21 @@ func validateSettings(ts *domain.TenantSettings) error {
 	// The prefix flows verbatim into invoice numbers (INV filenames,
 	// PDF headers, emails) — control chars, slashes, or spaces there
 	// corrupt Content-Disposition filenames and number parsing.
-	ts.InvoicePrefix = strings.TrimSpace(ts.InvoicePrefix)
+	// Stored in capitals: numbers print it in capitals, and the Settings
+	// form refuses a lowercase value, so a stored "acme" blocked every save.
+	ts.InvoicePrefix = strings.ToUpper(strings.TrimSpace(ts.InvoicePrefix))
 	if !invoicePrefixPattern.MatchString(ts.InvoicePrefix) {
 		return errs.Invalid("invoice_prefix", "must be 1-20 characters: letters, digits, and hyphens only")
+	}
+	// Same rule for credit note numbers: they go into the same places.
+	ts.CreditNotePrefix = strings.ToUpper(ts.CreditNotePrefix)
+	if !invoicePrefixPattern.MatchString(ts.CreditNotePrefix) {
+		return errs.Invalid("credit_note_prefix", "must be 1-20 characters: letters, digits, and hyphens only")
+	}
+	// Invoices and credit notes count separately, so one prefix for both
+	// would give an invoice and a credit note the same number.
+	if ts.CreditNotePrefix == ts.InvoicePrefix {
+		return errs.Invalid("credit_note_prefix", "must differ from the invoice prefix")
 	}
 	if ts.NetPaymentTerms > 365 {
 		return errs.Invalid("net_payment_terms", "cannot exceed 365 days")

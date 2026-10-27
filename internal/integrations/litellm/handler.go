@@ -26,26 +26,27 @@ type CustomerLookup interface {
 }
 
 // MeterLookup is the narrow surface the adapter uses to resolve the
-// meter_key ("tokens_input" / "tokens_output") to a Velox internal
+// event_name ("tokens_input" / "tokens_output") to a Velox internal
 // meter_id. Implemented by *pricing.Service.
 type MeterLookup interface {
-	GetMeterByKey(ctx context.Context, tenantID, key string) (domain.Meter, error)
+	GetMeterByEventName(ctx context.Context, tenantID, key string) (domain.Meter, error)
 }
 
-// Ingester is the narrow surface the adapter calls to actually
-// persist resolved events. Implemented by *usage.Service. It refuses a row
-// whose key was held and then discarded (errs.ErrDuplicateKey), so a
-// LiteLLM resend after the customer exists cannot bill a discarded row, and
-// it marks a row whose key is still held released (#1044).
+// Ingester is the narrow surface the adapter calls to persist one call's
+// resolved events. Implemented by *usage.Service. It writes the call in ONE
+// transaction: a key held and then discarded is not written, a key still
+// held is written and marked released (#1044), and a call first recorded
+// before the cache-write split is written the old way (see
+// usage.PostgresStore.IngestCallResolvingHeld).
 type Ingester interface {
-	IngestResolvingHeld(ctx context.Context, tenantID string, input usage.IngestInput) (domain.UsageEvent, error)
+	IngestCall(ctx context.Context, tenantID string, in usage.CallInput) (usage.CallResult, error)
 }
 
-// Holder keeps a row whose customer or meter does not exist yet, so it is
-// not lost (#1044, ADR-122). Implemented by *usage.Service. Returns
-// errs.ErrDuplicateKey when the row is already held.
+// Holder keeps a call whose customer or meter does not exist yet, so it is
+// not lost (#1044, ADR-122), in one transaction. Implemented by
+// *usage.Service. A key already held is counted as deduplicated.
 type Holder interface {
-	Hold(ctx context.Context, tenantID string, in usage.HoldInput) (domain.HeldUsageEvent, error)
+	HoldCall(ctx context.Context, tenantID string, in usage.HoldCallInput) (usage.CallResult, error)
 }
 
 // Handler exposes POST /v1/integrations/litellm/spend. Auth is the
@@ -84,7 +85,14 @@ func (h *Handler) Routes() chi.Router {
 // the existing /v1/usage-events/batch response so partners using
 // both surfaces see one shape:
 //
-//	{ "accepted": N, "deduplicated": D, "held": H, "skipped": M, "errors": [{ "id": "...", "error": "..." }] }
+//	{ "accepted": N, "deduplicated": D, "held": H, "skipped": M, "cache_hits": C,
+//	  "after_close": A, "no_price": P, "not_on_plan": O, "outside_subscription": S,
+//	  "errors": [{ "id": "...", "error": "..." }] }
+//
+// after_close, no_price, not_on_plan and outside_subscription count accepted
+// rows by the billing_status a single ingest would
+// answer them with (usage open_period.go). They are stored all the same. A
+// replay never counts.
 //
 // held counts rows whose customer or meter does not exist yet. They are
 // kept in usage_held_events, not billed, and shown to the operator, who
@@ -97,12 +105,20 @@ func (h *Handler) Routes() chi.Router {
 // accepted, so a pure replay reported the same number as the original
 // delivery and an operator reconciling spend could not tell a retry from
 // fresh consumption. /v1/usage-events/batch already separated the two.
+//
+// skipped counts CALLS that bill nothing: a call type on the skip list
+// (image generation, moderation, ...), a call with zero tokens, a failed
+// call, and a LiteLLM response-cache hit.
+// cache_hits counts the cache hits among them, so an operator can
+// reconcile against LiteLLM's own spend, which counts a hit as $0.
 type SpendResponse struct {
-	Accepted     int             `json:"accepted"`
-	Deduplicated int             `json:"deduplicated"`
-	Held         int             `json:"held"`
-	Skipped      int             `json:"skipped"`
-	Errors       []SpendRowError `json:"errors,omitempty"`
+	Accepted     int `json:"accepted"`
+	Deduplicated int `json:"deduplicated"`
+	Held         int `json:"held"`
+	Skipped      int `json:"skipped"`
+	CacheHits    int `json:"cache_hits"`
+	usage.UnbilledCounts
+	Errors []SpendRowError `json:"errors,omitempty"`
 }
 
 // SpendRowError carries the per-payload reason a particular row was
@@ -121,12 +137,13 @@ type SpendRowError struct {
 //
 // Flow:
 //  1. Decode body; normalize single | batch to []StandardLoggingPayload
-//  2. For each payload: MapPayload → 0/1/2 ExternalIngest events
-//  3. Resolve external_customer_id + meter_key per event
-//  4. Call usage.Service.Ingest per event (idempotent via the
-//     usage_events UNIQUE (tenant_id, livemode, idempotency_key) —
+//  2. For each payload: MapPayload → the call's events, or a skip
+//  3. Resolve external_customer_id + event_name once for the call
+//  4. Write the call in one transaction (usage.Service.IngestCall, or
+//     HoldCall when the customer or meter does not exist yet), idempotent
+//     via the usage_events UNIQUE (tenant_id, livemode, idempotency_key) —
 //     tenant-wide, NOT per customer/meter, which is why the mapper
-//     suffixes the key per token type)
+//     suffixes the key per token type
 //  5. Tally accepted / deduplicated / held / skipped / errors; return 200
 //
 // The status code answers ONE question: did Velox reach a verdict on
@@ -157,9 +174,11 @@ func (h *Handler) spend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := SpendResponse{Errors: []SpendRowError{}}
+	// One open-period read per customer for the whole request.
+	ctx := usage.WithPeriodCache(r.Context())
 
 	for _, payload := range body {
-		ingests, err := MapPayload(payload)
+		m, err := MapPayload(payload)
 		if err != nil {
 			resp.Errors = append(resp.Errors, SpendRowError{
 				ID:    payload.ID,
@@ -167,44 +186,48 @@ func (h *Handler) spend(w http.ResponseWriter, r *http.Request) {
 			})
 			continue
 		}
-		if len(ingests) == 0 {
-			// Non-token-bearing call (image gen, moderation, etc.)
-			// or zero-token completion (error response). Counted as
-			// skipped — not rejected — so the operator's spend
-			// dashboard reconciles.
+		if m.Skip == SkipCacheHit {
+			resp.CacheHits++
+		}
+		if len(m.Events) == 0 {
+			// A call that bills nothing: a call type on the skip list (image
+			// generation, moderation, ...), zero tokens, a failed call, or a
+			// LiteLLM response-cache hit. Counted as skipped — not rejected — so
+			// the operator's spend dashboard reconciles.
 			resp.Skipped++
 			continue
 		}
-		for _, ing := range ingests {
-			switch err := h.persist(r.Context(), tenantID, ing); {
-			case err == nil:
-				resp.Accepted++
-			case errors.Is(err, errHeldRow):
-				resp.Held++
-			case errors.Is(err, errDuplicateRow):
-				// Already held by the store. Still a success — LiteLLM
-				// retrying a delivered batch is the happy path — but
-				// counting it as accepted told an operator reconciling
-				// spend that a replay had recorded fresh usage.
-				resp.Deduplicated++
-			case errors.Is(err, errIngestUnavailable):
-				// Non-verdict: abort the whole batch for client retry.
-				// The raw error is logged, never sent to the caller (ADR-026).
-				slog.ErrorContext(r.Context(), "litellm spend: usage store unavailable — batch aborted for client retry",
-					"tenant_id", tenantID,
-					"accepted", resp.Accepted,
-					"deduplicated", resp.Deduplicated,
-					"error", err,
-				)
-				respond.Error(w, r, http.StatusServiceUnavailable, "api_error", "ingest_unavailable",
-					"usage store temporarily unavailable — retry the whole batch; rows already recorded replay as deduplicated")
-				return
-			default:
-				resp.Errors = append(resp.Errors, SpendRowError{
-					ID:    payload.ID,
-					Error: err.Error(),
-				})
+		res, err := h.persist(ctx, tenantID, m)
+		switch {
+		case err == nil:
+			if res.held {
+				resp.Held += res.Inserted
+			} else {
+				resp.Accepted += res.Inserted
+				resp.UnbilledCounts = resp.Plus(res.Unbilled)
 			}
+			// Rows the store already had, or already held. Still a
+			// success — LiteLLM retrying a delivered batch is the happy
+			// path — but counting them as accepted told an operator
+			// reconciling spend that a replay had recorded fresh usage.
+			resp.Deduplicated += res.Deduplicated
+		case errors.Is(err, errIngestUnavailable):
+			// Non-verdict: abort the whole batch for client retry.
+			// The raw error is logged, never sent to the caller (ADR-026).
+			slog.ErrorContext(r.Context(), "litellm spend: usage store unavailable — batch aborted for client retry",
+				"tenant_id", tenantID,
+				"accepted", resp.Accepted,
+				"deduplicated", resp.Deduplicated,
+				"error", err,
+			)
+			respond.Error(w, r, http.StatusServiceUnavailable, "api_error", "ingest_unavailable",
+				"usage store temporarily unavailable — retry the whole batch; rows already recorded replay as deduplicated")
+			return
+		default:
+			resp.Errors = append(resp.Errors, SpendRowError{
+				ID:    payload.ID,
+				Error: err.Error(),
+			})
 		}
 	}
 
@@ -221,115 +244,114 @@ func (h *Handler) spend(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, r, http.StatusOK, resp)
 }
 
-// persist resolves an ExternalIngest (external IDs) to the internal
-// shape and calls the existing usage Ingest path. It classifies every
-// error into a VERDICT (returned as a per-row error: operator
-// misconfiguration such as an unmapped customer or meter, a validation
-// failure, or a duplicate) or a NON-VERDICT (wrapped in
-// errIngestUnavailable: the store could not be reached or could not
-// commit). Both lookup stores return errs.ErrNotFound only on
-// sql.ErrNoRows and the raw driver error otherwise, which is what makes
-// this split honest — a BeginTx failure used to be reported as
-// "customer not found".
-func (h *Handler) persist(ctx context.Context, tenantID string, ing ExternalIngest) error {
-	cust, err := h.customers.GetByExternalID(ctx, tenantID, ing.ExternalCustomerID)
+// callOutcome is what persist did with one call.
+type callOutcome struct {
+	usage.CallResult
+	// held is true when the call's rows were held, not ingested.
+	held bool
+}
+
+// persist resolves the call's customer and meter once and writes all its
+// events in one transaction. Every event of a call has the same customer
+// and the same `tokens` meter, so a call is ingested whole or held whole.
+// It classifies every error into a VERDICT (returned as a per-row error:
+// a validation failure) or a NON-VERDICT (wrapped in errIngestUnavailable:
+// the store could not be reached or could not commit). Both lookup stores
+// return errs.ErrNotFound only on sql.ErrNoRows and the raw driver error
+// otherwise, which is what makes this split honest — a BeginTx failure
+// used to be reported as "customer not found".
+func (h *Handler) persist(ctx context.Context, tenantID string, m Mapping) (callOutcome, error) {
+	first := m.Events[0]
+	cust, err := h.customers.GetByExternalID(ctx, tenantID, first.ExternalCustomerID)
 	if err != nil {
 		if errors.Is(err, errs.ErrNotFound) {
-			return h.hold(ctx, tenantID, ing, domain.HeldReasonCustomerNotFound)
+			return h.hold(ctx, tenantID, m, domain.HeldReasonCustomerNotFound)
 		}
-		return fmt.Errorf("%w: customer lookup: %w", errIngestUnavailable, err)
+		return callOutcome{}, fmt.Errorf("%w: customer lookup: %w", errIngestUnavailable, err)
 	}
-	meter, err := h.meters.GetMeterByKey(ctx, tenantID, ing.MeterKey)
+	meter, err := h.meters.GetMeterByEventName(ctx, tenantID, first.EventName)
 	if err != nil {
 		if errors.Is(err, errs.ErrNotFound) {
-			return h.hold(ctx, tenantID, ing, domain.HeldReasonMeterNotFound)
+			return h.hold(ctx, tenantID, m, domain.HeldReasonMeterNotFound)
 		}
-		return fmt.Errorf("%w: meter lookup: %w", errIngestUnavailable, err)
+		return callOutcome{}, fmt.Errorf("%w: meter lookup: %w", errIngestUnavailable, err)
 	}
 
-	input := usage.IngestInput{
-		CustomerID:     cust.ID,
-		MeterID:        meter.ID,
-		Quantity:       ing.Quantity,
-		Dimensions:     ing.Dimensions,
-		IdempotencyKey: ing.IdempotencyKey,
-		Timestamp:      ing.Timestamp,
-		// ADR-079 D4: the provider's own per-half cost, already filtered by
-		// observedCostMicros to the halves D4 allows. nil leaves rate-table
-		// inference in charge, which is every pre-existing ingest path.
-		ObservedCostMicros: ing.ObservedCostMicros,
-	}
-
-	if _, err := h.ingester.IngestResolvingHeld(ctx, tenantID, input); err != nil {
-		// Idempotency replay is silent success: the usage store returns
-		// ErrDuplicateKey on the (tenant_id, livemode, idempotency_key) UNIQUE — a
-		// LiteLLM network-retry redelivering an already-ingested batch is
-		// the happy path, not a failure. Pre-fix this matched only
-		// ErrAlreadyExists (which the store never returns here), so every
-		// replay filled errors[] + WARN logs while the DB dedup was in
-		// fact working (front-door audit 2026-07-05). Any other error is
-		// a real persistence problem and bubbles to the partial-failure
-		// accounting.
-		if errors.Is(err, errs.ErrDuplicateKey) || errors.Is(err, errs.ErrAlreadyExists) {
-			return errDuplicateRow
-		}
-		// Verdicts on the row itself stay per-row: a bad payload must
+	res, err := h.ingester.IngestCall(ctx, tenantID, usage.CallInput{
+		CustomerID: cust.ID,
+		MeterID:    meter.ID,
+		Events:     callEvents(m.Events),
+		Legacy:     callEvents(m.Legacy),
+		LegacyKey:  m.LegacyKey,
+	})
+	if err != nil {
+		// Verdicts on the call itself stay per-row: a bad payload must
 		// never 503, or LiteLLM retries it until max_retries is spent.
 		// Classified on Kind sentinels only — a DomainError's Code is not
 		// a verdict signal (a future infra error carrying a code would be
-		// misfiled as per-row).
+		// misfiled as per-row). A failed open-period or aggregation read is
+		// neither, so it is a non-verdict: 503, nothing written.
 		if errors.Is(err, errs.ErrValidation) || errors.Is(err, errs.ErrNotFound) {
-			return err
+			return callOutcome{}, err
 		}
-		return fmt.Errorf("%w: ingest: %w", errIngestUnavailable, err)
+		return callOutcome{}, fmt.Errorf("%w: ingest: %w", errIngestUnavailable, err)
 	}
-	return nil
+	return callOutcome{CallResult: res}, nil
 }
 
-// hold keeps a row whose customer or meter does not exist yet (#1044,
-// ADR-122). The row keeps its idempotency key, so a release later writes it
-// at most once, and a LiteLLM resend of a row already held is counted as
-// deduplicated. A hold that cannot be written is a NON-verdict: 503, so
+// hold keeps a call whose customer or meter does not exist yet (#1044,
+// ADR-122). The rows keep their idempotency keys, so a release later writes
+// each at most once, and a LiteLLM resend of a call already held is counted
+// as deduplicated. A hold that cannot be written is a NON-verdict: 503, so
 // LiteLLM resends the batch rather than reading a 200 as delivered.
-func (h *Handler) hold(ctx context.Context, tenantID string, ing ExternalIngest, reason domain.HeldUsageReason) error {
-	_, err := h.holder.Hold(ctx, tenantID, usage.HoldInput{
+func (h *Handler) hold(ctx context.Context, tenantID string, m Mapping, reason domain.HeldUsageReason) (callOutcome, error) {
+	first := m.Events[0]
+	res, err := h.holder.HoldCall(ctx, tenantID, usage.HoldCallInput{
 		Source:             domain.HeldUsageSourceLiteLLM,
-		ExternalCustomerID: ing.ExternalCustomerID,
-		MeterKey:           ing.MeterKey,
-		Quantity:           ing.Quantity,
-		Dimensions:         ing.Dimensions,
-		IdempotencyKey:     ing.IdempotencyKey,
-		EventAt:            ing.Timestamp,
-		ObservedCostMicros: ing.ObservedCostMicros,
+		ExternalCustomerID: first.ExternalCustomerID,
+		EventName:          first.EventName,
 		Reason:             reason,
+		Events:             callEvents(m.Events),
+		Legacy:             callEvents(m.Legacy),
+		LegacyKey:          m.LegacyKey,
 	})
 	switch {
 	case err == nil:
-		return errHeldRow
-	case errors.Is(err, errs.ErrDuplicateKey):
-		return errDuplicateRow
+		return callOutcome{CallResult: res, held: true}, nil
 	case errors.Is(err, errs.ErrValidation):
-		// The row itself is bad; holding it would only fail later.
-		return err
+		// The call itself is bad; holding it would only fail later.
+		return callOutcome{}, err
 	default:
-		return fmt.Errorf("%w: hold: %w", errIngestUnavailable, err)
+		return callOutcome{}, fmt.Errorf("%w: hold: %w", errIngestUnavailable, err)
 	}
 }
 
-// errHeldRow marks a row kept in usage_held_events: not billed yet, not
-// lost. Never returned to the caller.
-var errHeldRow = errors.New("litellm: row held")
+// callEvents drops the per-event customer and meter, which persist resolved
+// once for the call.
+func callEvents(in []ExternalIngest) []usage.CallEvent {
+	if in == nil {
+		return nil
+	}
+	out := make([]usage.CallEvent, 0, len(in))
+	for _, e := range in {
+		out = append(out, usage.CallEvent{
+			Quantity:       e.Quantity,
+			Dimensions:     e.Dimensions,
+			IdempotencyKey: e.IdempotencyKey,
+			Timestamp:      e.Timestamp,
+			// ADR-079 D4: the provider's own per-role cost, already
+			// filtered by observedCostMicros to the roles D4 allows. nil
+			// leaves rate-table inference in charge.
+			ObservedCostMicros: e.ObservedCostMicros,
+		})
+	}
+	return out
+}
 
 // errIngestUnavailable marks a NON-verdict: the usage store could not be
 // reached or could not commit. spend aborts the batch with 503 so the
 // client retries it; never returned to the caller as text.
 var errIngestUnavailable = errors.New("litellm: usage store unavailable")
-
-// errDuplicateRow marks a row the store already held. It is a successful
-// outcome, not a failure — it just must not be counted as newly recorded,
-// so a replayed batch reports what it actually changed. Never returned to
-// the caller.
-var errDuplicateRow = errors.New("litellm: row already ingested")
 
 // decodeBody normalizes the request body into a slice of payloads.
 // Accepts:

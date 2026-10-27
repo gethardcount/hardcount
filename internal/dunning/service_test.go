@@ -32,8 +32,7 @@ func newMemStore() *memStore {
 	policy := domain.DunningPolicy{
 		ID: "dpol_1", TenantID: "t1", Name: "Default",
 		Enabled: true, IsDefault: true,
-		MaxRetryAttempts: 3, GracePeriodDays: 3,
-		RetrySchedule:           []string{"72h", "120h"},
+		RetryDays:               []int{3, 3, 5},
 		FinalSubscriptionAction: domain.SubActionNone,
 		FinalInvoiceAction:      domain.InvActionNone,
 	}
@@ -118,10 +117,6 @@ func (m *memStore) UpsertPolicy(_ context.Context, tenantID string, p domain.Dun
 	}
 	m.policies[p.ID] = p
 	return p, nil
-}
-
-func (m *memStore) UpsertPolicyTx(ctx context.Context, _ *sql.Tx, tenantID string, p domain.DunningPolicy) (domain.DunningPolicy, error) {
-	return m.UpsertPolicy(ctx, tenantID, p)
 }
 
 // SeedDefaultPoliciesTx records the policy it was handed (one mode only —
@@ -698,21 +693,21 @@ type recordingEmailNotifier struct {
 	paymentFails int
 	// What the latest warning said (#966): its decline reason, and whether
 	// it was the "use a different card" variant.
-	lastWarnReason      string
-	lastWarnCardRefused bool
+	lastWarnReason string
+	lastWarnAsk    domain.DeclineAsk
 }
 
-func (r *recordingEmailNotifier) SendPaymentFailed(context.Context, string, string, []string, string, string, string, string) error {
+func (r *recordingEmailNotifier) SendPaymentFailed(context.Context, string, string, []string, string, string, string, string, domain.DeclineAsk) error {
 	r.paymentFails++
 	return nil
 }
-func (r *recordingEmailNotifier) SendDunningWarning(_ context.Context, _, _ string, _ []string, _, _ string, _, _ int, _, failureReason, _ string, cardNeedsReplacing bool) error {
+func (r *recordingEmailNotifier) SendDunningWarning(_ context.Context, _, _ string, _ []string, _, _ string, _, _ int, _, failureReason, _ string, ask domain.DeclineAsk) error {
 	r.warnings++
-	r.lastWarnReason, r.lastWarnCardRefused = failureReason, cardNeedsReplacing
+	r.lastWarnReason, r.lastWarnAsk = failureReason, ask
 	return nil
 }
-func (r *recordingEmailNotifier) SendDunningWarningTx(ctx context.Context, _ *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string, cardNeedsReplacing bool) error {
-	return r.SendDunningWarning(ctx, tenantID, to, cc, customerName, invoiceNumber, attemptNumber, maxAttempts, nextRetryDate, failureReason, publicToken, cardNeedsReplacing)
+func (r *recordingEmailNotifier) SendDunningWarningTx(ctx context.Context, _ *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string, ask domain.DeclineAsk) error {
+	return r.SendDunningWarning(ctx, tenantID, to, cc, customerName, invoiceNumber, attemptNumber, maxAttempts, nextRetryDate, failureReason, publicToken, ask)
 }
 
 func (r *recordingEmailNotifier) SendDunningEscalation(context.Context, string, string, []string, string, string, domain.DunningEscalationOutcome, string) error {
@@ -876,21 +871,16 @@ func TestUpsertPolicy(t *testing.T) {
 	svc := NewService(store, &noopRetrier{}, nil)
 	ctx := context.Background()
 
-	// Save-time validation (ADR-036) requires the retry_schedule to have
-	// at least MaxRetryAttempts-1 entries. Defaults: max=3 → need 2.
 	policy, err := svc.UpsertPolicy(ctx, "t1", domain.DunningPolicy{
-		Name:          "Custom",
-		Enabled:       true,
-		RetrySchedule: []string{"72h", "120h"},
+		Name:      "Custom",
+		Enabled:   true,
+		RetryDays: []int{3, 3, 5},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if policy.MaxRetryAttempts != 3 {
-		t.Errorf("default max_retry: got %d, want 3", policy.MaxRetryAttempts)
-	}
-	if policy.GracePeriodDays != 3 {
-		t.Errorf("default grace_period: got %d, want 3", policy.GracePeriodDays)
+	if policy.Retries() != 3 {
+		t.Errorf("retries: got %d, want 3 (the length of retry_days)", policy.Retries())
 	}
 	// Default flipped from manual_review → pause in migration 0071 so
 	// dunning-exhausted subs go into pause_collection.keep_as_draft
@@ -906,97 +896,55 @@ func TestUpsertPolicy(t *testing.T) {
 		t.Errorf("default final_invoice_action: got %q, want none — defaulting to a write-off would assert bad debt on the tenant's behalf", policy.FinalInvoiceAction)
 	}
 
-	// Save-time validation rejects under-spec'd schedules — drops the
-	// pre-ADR-036 "reuse last interval" silent fallback.
-	_, err = svc.UpsertPolicy(ctx, "t1", domain.DunningPolicy{
-		Name:             "Bad",
-		Enabled:          true,
-		MaxRetryAttempts: 5,
-		RetrySchedule:    []string{"72h", "120h"}, // need 4, got 2
-	})
-	if err == nil {
-		t.Error("expected error for max_retry_attempts > schedule length + 1")
+	// No schedule is no policy: there is no default schedule to fall back to.
+	if _, err := svc.UpsertPolicy(ctx, "t1", domain.DunningPolicy{Name: "Bad", Enabled: true}); err == nil {
+		t.Error("expected an error for a policy with no retry_days")
 	}
 }
 
-// TestUpsertPolicy_RejectsUnparseableSchedule is the regression for the
-// FLOW TC5 "3d" livelock (2026-07-18): save-time validation checked only
-// schedule LENGTH, so an entry time.ParseDuration can't read ("3d" — Go
-// has no day unit) persisted fine and then wedged the run at retry-time:
-// the parse error fired after the attempt persisted but before the
-// reschedule landed, so next_action_at never advanced and every later
-// tick re-attempted into the no-progress guard. Every entry must parse
-// as a positive duration at save.
-func TestUpsertPolicy_RejectsUnparseableSchedule(t *testing.T) {
+// TestUpsertPolicy_RetryDaysBounds: every entry is a whole number of days
+// from 1 to 30 and there are 1 to 15 of them, on every writer. A wait the
+// retry path could not schedule must be refused at save (the FLOW TC5 "3d"
+// livelock, 2026-07-18, was an entry that saved fine and wedged the run at
+// retry time).
+func TestUpsertPolicy_RetryDaysBounds(t *testing.T) {
 	store := newMemStore()
 	svc := NewService(store, &noopRetrier{}, nil)
 	ctx := context.Background()
 
+	fifteen := []int{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}
 	cases := []struct {
-		name     string
-		schedule []string
-		wantErr  bool
+		name    string
+		days    []int
+		wantErr bool
 	}{
-		{"day shorthand rejected", []string{"3d", "5d"}, true},
-		{"garbage rejected", []string{"soon"}, true},
-		{"negative rejected", []string{"-72h", "120h"}, true},
-		{"zero rejected", []string{"0s", "120h"}, true},
-		{"go durations accepted", []string{"72h", "120h"}, false},
-		{"mixed units accepted", []string{"72h30m", "120h"}, false},
+		{"none", nil, true},
+		{"empty", []int{}, true},
+		{"zero wait", []int{3, 0}, true},
+		{"negative wait", []int{-3}, true},
+		{"over 30 days", []int{3, 31}, true},
+		{"sixteen retries", append(append([]int(nil), fifteen...), 1), true},
+		{"one day", []int{1}, false},
+		{"thirty days", []int{30}, false},
+		{"fifteen retries", fifteen, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := svc.UpsertPolicy(ctx, "t1", domain.DunningPolicy{
-				Name: "P", Enabled: true, MaxRetryAttempts: 2, RetrySchedule: tc.schedule,
-			})
-			if tc.wantErr && err == nil {
-				t.Errorf("schedule %v: expected save-time rejection, got nil", tc.schedule)
-			}
-			if !tc.wantErr && err != nil {
-				t.Errorf("schedule %v: unexpected error: %v", tc.schedule, err)
+			for writer, upsert := range map[string]func() error{
+				"UpsertPolicy": func() error {
+					_, err := svc.UpsertPolicy(ctx, "t1", domain.DunningPolicy{Name: "P", Enabled: true, RetryDays: tc.days})
+					return err
+				},
+			} {
+				err := upsert()
+				if tc.wantErr && (err == nil || errs.Field(err) != "retry_days") {
+					t.Errorf("%s %v: got %v, want a retry_days validation error", writer, tc.days, err)
+				}
+				if !tc.wantErr && err != nil {
+					t.Errorf("%s %v: unexpected error: %v", writer, tc.days, err)
+				}
 			}
 		})
-	}
-}
-
-// TestUpsertPolicyTx_ValidationParity locks the recipe-path (tx) upsert to the
-// SAME save-time invariants as the API path. Pre-fix UpsertPolicyTx forwarded
-// straight to the store — its comment claimed "the recipe template layer
-// already validated," but recipe/parse.go validates only the terminal actions, so a
-// mismatched recipe (max_retries exceeding intervals_hours) persisted fine and
-// stalled its campaign at retry-time ("retry_schedule index out of bounds" in a
-// background tick) instead of failing loudly at instantiate-time.
-func TestUpsertPolicyTx_ValidationParity(t *testing.T) {
-	store := newMemStore()
-	svc := NewService(store, &noopRetrier{}, nil)
-	ctx := context.Background()
-
-	// The invariant the recipe layer does NOT check: under-length schedule.
-	_, err := svc.UpsertPolicyTx(ctx, nil, "t1", domain.DunningPolicy{
-		Name:             "Bad Recipe",
-		Enabled:          true,
-		MaxRetryAttempts: 4,
-		RetrySchedule:    []string{"24h", "72h"}, // need 3, got 2
-	})
-	if err == nil {
-		t.Error("UpsertPolicyTx must reject an under-length retry_schedule exactly like UpsertPolicy (a mismatched recipe must fail at instantiate-time, not stall a campaign at retry-time)")
-	}
-
-	// A valid recipe-shaped policy (the embedded recipes' 4/4 shape) still
-	// persists, and the shared normalize applies the same defaults.
-	p, err := svc.UpsertPolicyTx(ctx, nil, "t1", domain.DunningPolicy{
-		Name:                    "Good Recipe",
-		Enabled:                 true,
-		RetrySchedule:           []string{"24h", "72h", "168h", "336h"},
-		FinalSubscriptionAction: domain.SubActionPause,
-		FinalInvoiceAction:      domain.InvActionNone,
-		// MaxRetryAttempts / GracePeriodDays unset → shared defaults (3 / 3).
-	})
-	if err != nil {
-		t.Fatalf("valid recipe policy rejected: %v", err)
-	}
-	if p.MaxRetryAttempts != 3 || p.GracePeriodDays != 3 {
-		t.Errorf("tx path must apply the same defaults: max=%d grace=%d, want 3/3", p.MaxRetryAttempts, p.GracePeriodDays)
 	}
 }
 

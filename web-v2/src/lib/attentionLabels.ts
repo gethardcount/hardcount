@@ -22,6 +22,9 @@ const REASON_LABELS: Record<string, string> = {
   // ADR and the schema use; a finance operator reading a chip needs the plain
   // fact — an invoice went unpaid and the credit it bought is already live.
   commit_exposure: 'Unpaid prepaid credit',
+  // Stripe refused the amount, not the card: no automatic step will collect
+  // it, so the operator voids it or records a payment.
+  amount_below_minimum: 'Below Stripe\u2019s minimum charge',
 }
 
 export function attentionReasonLabel(reason: string, code?: string): string {
@@ -34,6 +37,9 @@ export function attentionReasonLabel(reason: string, code?: string): string {
   // page, or a payment on a written-off invoice is being confirmed.
   if (code === 'payment.page_open') return 'Customer is paying'
   if (code === 'payment.recovery_processing') return 'Payment in progress'
+  // A failed payment the customer's bank wants them to confirm (3-D Secure):
+  // the card is not refused, the customer has to act.
+  if (code === 'payment.authentication_required') return 'Customer must confirm payment'
   return REASON_LABELS[reason] ?? 'Needs attention'
 }
 

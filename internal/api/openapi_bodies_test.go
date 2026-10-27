@@ -21,7 +21,6 @@ import (
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/dunning"
 	"github.com/sagarsuperuser/velox/internal/invoice"
-	"github.com/sagarsuperuser/velox/internal/payment"
 	"github.com/sagarsuperuser/velox/internal/paymentmethods"
 	"github.com/sagarsuperuser/velox/internal/pricing"
 	"github.com/sagarsuperuser/velox/internal/recipe"
@@ -44,9 +43,14 @@ type requestBody struct {
 }
 
 // serverSet is why a field of a type the handler also returns is not in the
-// request schema: the handler decodes the whole type, and the server sets or
-// ignores the field.
-const serverSet = "Read-only. The handler decodes the type it returns, so a body read back from GET is accepted; the server sets or ignores this field."
+// request schema: the handler decodes the whole type, and the server sets the
+// field, so a body that sends it is refused with 422 naming it
+// (respond.ReadOnly).
+const serverSet = "Read-only. The handler decodes the type it returns; the server sets this field, and a body that sends it is refused with 422."
+
+// propertiesRefused is why a usage event decodes `properties`: it was the old
+// name of `dimensions`, and an event that still sends it is refused with 422.
+const propertiesRefused = "Not a field: the old name of dimensions. The handler decodes it only to refuse the event with 422."
 
 // readOnly maps each name to serverSet.
 func readOnly(names ...string) map[string]string {
@@ -66,10 +70,8 @@ var requestBodies = map[string]requestBody{
 	"PUT /v1/customers/{id}/billing-profile":                            {body: domain.CustomerBillingProfile{}, undocumented: readOnly("customer_id", "tenant_id", "profile_status", "created_at", "updated_at")},
 	"POST /v1/customers/{customer_id}/payment-methods/send-setup-email": {body: paymentmethods.SendSetupEmailRequest{}},
 	"POST /v1/customers/{customer_id}/payment-methods/setup-session":    {body: paymentmethods.SetupSessionRequest{}},
-	"POST /v1/checkout/setup":                                           {body: payment.SetupRequest{}},
 	"POST /v1/meters":                                                   {body: pricing.CreateMeterInput{}},
 	"PATCH /v1/meters/{id}":                                             {body: pricing.UpdateMeterInput{}},
-	"POST /v1/meters/{meter_id}/pricing-rules":                          {body: pricing.UpsertMeterPricingRuleInput{}, undocumented: map[string]string{"meter_id": "The URL's meter_id wins over the body's."}},
 	"POST /v1/credit-notes":                                             {body: creditnote.CreateRequest{}},
 	"POST /v1/credit-notes/{id}/send":                                   {body: creditnote.SendEmailRequest{}},
 	"POST /v1/credits/grant":                                            {body: credit.GrantRequest{}},
@@ -78,7 +80,8 @@ var requestBodies = map[string]requestBody{
 	"PATCH /v1/webhook-endpoints/endpoints/{id}":                        {body: webhook.UpdateEndpointInput{}},
 	"POST /v1/plans":                                                    {body: pricing.CreatePlanInput{}},
 	"PATCH /v1/plans/{id}":                                              {body: pricing.UpdatePlanInput{}},
-	"POST /v1/rating-rules":                                             {body: pricing.CreateRatingRuleInput{}},
+	"POST /v1/plans/{id}/prices":                                        {body: pricing.PriceInput{}},
+	"PATCH /v1/plans/{id}/prices/{price_id}":                            {body: domain.PriceShape{}},
 	"POST /v1/price-overrides":                                          {body: pricing.CreateOverrideInput{}},
 	"POST /v1/subscriptions":                                            {body: subscription.CreateInput{}},
 	"POST /v1/subscriptions/{id}/schedule-cancel":                       {body: subscription.ScheduleCancelInput{}},
@@ -87,12 +90,12 @@ var requestBodies = map[string]requestBody{
 	"PUT /v1/subscriptions/{id}/billing-thresholds":                     {body: subscription.BillingThresholdsInput{}},
 	"POST /v1/subscriptions/{id}/items":                                 {body: subscription.AddItemInput{}},
 	"PATCH /v1/subscriptions/{id}/items/{itemID}":                       {body: subscription.UpdateItemInput{}},
-	"POST /v1/usage-events":                                             {body: usage.APIEvent{}},
-	"POST /v1/usage-events/batch":                                       {body: []usage.APIEvent{}},
-	"POST /v1/usage-events/backfill":                                    {body: usage.APIEvent{}},
+	"POST /v1/usage-events":                                             {body: usage.APIEvent{}, undocumented: map[string]string{"properties": propertiesRefused}},
+	"POST /v1/usage-events/batch":                                       {body: []usage.APIEvent{}, undocumented: map[string]string{"[].properties": propertiesRefused}},
+	"POST /v1/usage-events/backfill":                                    {body: usage.APIEvent{}, undocumented: map[string]string{"properties": propertiesRefused}},
 	"POST /v1/usage-events/held/release":                                {body: usage.ReleaseHeldRequest{}},
 	"POST /v1/usage-events/held/discard":                                {body: usage.DiscardHeldRequest{}},
-	"PUT /v1/provider-costs":                                            {body: domain.ProviderCostRate{}, undocumented: readOnly("id", "tenant_id", "created_at", "updated_at")},
+	"PUT /v1/provider-costs":                                            {body: usage.ProviderCostRequest{}},
 	"POST /v1/invoices":                                                 {body: invoice.CreateInput{}},
 	"POST /v1/invoices/create_preview":                                  {body: billing.CreatePreviewWireRequest{}},
 	"POST /v1/invoices/{id}/send":                                       {body: invoice.SendEmailInput{}},

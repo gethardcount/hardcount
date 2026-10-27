@@ -6,7 +6,6 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -402,10 +401,7 @@ type UpdateEndpointInput struct {
 }
 
 // UpdateEndpoint mutates url/description/events/active without rotating
-// the signing secret (Stripe's update shape). This is also what makes
-// recipe-created endpoints usable: they are created inactive with a
-// placeholder URL, and this is the "point it at a real URL and activate"
-// surface that previously didn't exist.
+// the signing secret (Stripe's update shape).
 func (s *Service) UpdateEndpoint(ctx context.Context, tenantID, id string, input UpdateEndpointInput) (domain.WebhookEndpoint, error) {
 	ep, err := s.store.GetEndpoint(ctx, tenantID, id)
 	if err != nil {
@@ -484,13 +480,6 @@ func (s *Service) CreateEndpoint(ctx context.Context, tenantID string, input Cre
 	}
 
 	return CreateEndpointResult{Endpoint: ep, Secret: secret}, nil
-}
-
-// CreateEndpointTx forwards to the store's tx-aware insert. Used by
-// recipe.Service.Instantiate so a recipe with a default outbound endpoint
-// commits atomically with the rest of the recipe.
-func (s *Service) CreateEndpointTx(ctx context.Context, tx *sql.Tx, tenantID string, ep domain.WebhookEndpoint) (domain.WebhookEndpoint, error) {
-	return s.store.CreateEndpointTx(ctx, tx, tenantID, ep)
 }
 
 // SecretRotationGracePeriod is how long a rotated-out secret keeps
@@ -580,7 +569,10 @@ func (s *Service) DispatchFromOutbox(ctx context.Context, outboxRowID, tenantID,
 	if err != nil {
 		return fmt.Errorf("list endpoints: %w", err)
 	}
-	evLivemode := postgres.Livemode(ctx)
+	evLivemode, err := postgres.Livemode(ctx)
+	if err != nil {
+		return err
+	}
 	var matched []domain.WebhookEndpoint
 	for _, ep := range endpoints {
 		if !ep.Active || ep.Livemode != evLivemode || !matchesEvent(ep.Events, eventType) {

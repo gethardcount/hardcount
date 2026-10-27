@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import {
   api,
   formatDateTime,
+  dunningFinalStepNext,
   type DunningRun,
   type DunningEvent,
   type Invoice,
@@ -19,7 +20,8 @@ import { dunningReasonLabel } from '@/lib/dunningReasons'
 import { retriesOffNotice } from '@/lib/dunningCoverage'
 import { Callout } from '@/components/Callout'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
-import { atRiskText, dunningAmountDue } from '@/lib/money'
+import { atRiskText } from '@/lib/money'
+import { dunningAmountDue, dunningRunAmount } from '@/lib/invoiceTerminal'
 import { cn } from '@/lib/utils'
 import { statusBadgeVariant, statusBorderColor } from '@/lib/status'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
@@ -77,6 +79,8 @@ const RESOLUTION_LABELS: Record<string, string> = {
   invoice_not_collectible: 'Written off',
   retries_exhausted: 'Retries exhausted',
   action_failed: 'Final action failed',
+  // A retry Stripe refused because the amount is below its minimum charge.
+  amount_below_minimum: 'Below Stripe\u2019s minimum',
   // LEGACY, pre-0170: meant voided OR written off. Rows that could not be
   // mapped from their invoice's status keep it, so the label must too.
   manually_resolved: 'Closed unpaid',
@@ -202,7 +206,7 @@ function RunsTab() {
   })
 
   // Aggregate stats for the dashboard cards. Comes from a backend
-  // COUNT(*) GROUP BY state + SUM(amount_due_cents) query — accurate
+  // COUNT(*) GROUP BY state + at-risk SUM query — accurate
   // regardless of pagination or filter on the runs list. Deriving
   // counts from the paginated `runs` slice silently undercounts as
   // soon as total runs exceed the page size.
@@ -238,7 +242,10 @@ function RunsTab() {
   const statCards = [
     { label: 'Active', value: stats?.active_count ?? 0, color: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-500/10', ring: 'ring-blue-200 dark:ring-blue-500/20' },
     { label: 'Escalated', value: stats?.escalated_count ?? 0, color: 'text-violet-600', bg: 'bg-violet-50 dark:bg-violet-500/10', ring: 'ring-violet-200 dark:ring-violet-500/20' },
-    { label: 'Recovered', value: stats?.resolved_count ?? 0, color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-500/10', ring: 'ring-emerald-200 dark:ring-emerald-500/20' },
+    // Recovered = closed by a payment. A run closed by a void, a write-off or
+    // a credit that left nothing due is resolved but recovered nothing (sweep
+    // A6/E7; the server decides).
+    { label: 'Recovered', value: stats?.recovered_count ?? 0, color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-500/10', ring: 'ring-emerald-200 dark:ring-emerald-500/20' },
     // One figure per currency (mixed currencies cannot be added). A
     // default-only figure read "At risk (CAD) CA$0.00" while USD runs were
     // active once the workspace default changed.
@@ -274,7 +281,9 @@ function RunsTab() {
               { value: '', label: 'All' },
               { value: 'active', label: 'Active' },
               { value: 'escalated', label: 'Escalated' },
-              { value: 'resolved', label: 'Recovered' },
+              // Every resolved run, however it closed; each row's badge says
+              // how (Payment recovered, Voided, Written off).
+              { value: 'resolved', label: 'Resolved' },
             ].map(f => (
               <button key={f.value} type="button" onClick={() => { setFilterStatus(f.value); setPage(1) }}
                 className={cn(
@@ -305,7 +314,7 @@ function RunsTab() {
               {filterStatus ? (
                 <>
                   <p className="text-sm font-medium text-foreground">
-                    No {filterStatus === 'resolved' ? 'recovered' : filterStatus} runs
+                    No {filterStatus} runs
                   </p>
                   <p className="text-sm text-muted-foreground mt-1">
                     Try a different filter to see other dunning runs.
@@ -331,10 +340,10 @@ function RunsTab() {
                     <TableHead className="w-8"></TableHead>
                     <TableHead>Customer</TableHead>
                     <TableHead>Invoice</TableHead>
-                    <TableHead className="text-right">Amount Due</TableHead>
+                    <TableHead className="text-right">Amount</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Progress</TableHead>
-                    <TableHead>Next Retry</TableHead>
+                    <TableHead>Next step</TableHead>
                     <TableHead>Started</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -381,11 +390,10 @@ function RunsTab() {
                             </div>
                           </TableCell>
                           <TableCell className="text-right tabular-nums font-mono text-sm">
-                            {/* Prefer the backend-embedded denormalised
-                                amount (server-side JOIN). Falls back to
-                                the invoiceMap lookup for rows where the
-                                join failed (rare RLS gap). */}
-                            {dunningAmountDue(run, inv) ?? '\u2014'}
+                            {/* The invoice's amount, a void's included; the
+                                server-side join is the fallback when the
+                                invoice did not load. */}
+                            {dunningRunAmount(run, inv) ?? '\u2014'}
                           </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-2">
@@ -408,7 +416,7 @@ function RunsTab() {
                           </TableCell>
                           <TableCell>
                             {run.next_action_at
-                              ? <span className="text-xs text-muted-foreground" title={formatDateTime(run.next_action_at)}>{futureRelativeTime(run.next_action_at, effectiveNow(run.effective_now))}</span>
+                              ? <span className="text-xs text-muted-foreground" title={formatDateTime(run.next_action_at)}>{dunningFinalStepNext(run) ? 'Final step ' : ''}{futureRelativeTime(run.next_action_at, effectiveNow(run.effective_now))}</span>
                               : <span className="text-xs text-muted-foreground">{'\u2014'}</span>
                             }
                           </TableCell>
@@ -515,12 +523,7 @@ function RunsTab() {
 
 const EVENT_LABELS: Record<string, { label: string; color: string }> = {
   dunning_started: { label: 'Dunning started', color: 'bg-blue-400' },
-  retry_scheduled: { label: 'Retry scheduled', color: 'bg-muted-foreground' },
   retry_attempted: { label: 'Retry attempted', color: 'bg-blue-400' },
-  retry_succeeded: { label: 'Payment recovered', color: 'bg-emerald-500' },
-  retry_failed: { label: 'Retry failed', color: 'bg-red-400' },
-  paused: { label: 'Dunning paused', color: 'bg-amber-400' },
-  resumed: { label: 'Dunning resumed', color: 'bg-blue-400' },
   escalated: { label: 'Escalated', color: 'bg-violet-500' },
   resolved: { label: 'Resolved', color: 'bg-emerald-500' },
 }

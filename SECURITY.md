@@ -15,6 +15,15 @@ We commit to:
 | Patch landed in main | within 30 days for high/critical, 90 days for medium, best-effort for low |
 | Public disclosure (with credit) | after a fixed release is available, coordinated with the reporter |
 
+## Supported versions
+
+Velox is pre-1.0. Only the latest release gets security fixes.
+
+- A fix lands in `main` and ships in the next release, a patch or a minor release.
+- Older releases get no backported fixes. To get a fix, upgrade to the latest release.
+- The next release, 0.9.0, cannot take over a 0.8.x database: you install it fresh. So on 0.8.x, a fix released after 0.8.2 needs a fresh install.
+- Before 1.0, an upgrade can need more than a restart: read **Before upgrading** in the [CHANGELOG](CHANGELOG.md) first. See [Versioning before 1.0](docs/versioning.md).
+
 ## In scope
 
 - The Velox Go binary (`cmd/velox`, `cmd/velox-bootstrap`, `cmd/velox-bench-seed`, `cmd/velox-doctor`)
@@ -35,7 +44,7 @@ We commit to:
 
 ## Hardening status
 
-Velox is **pre-launch** and pre-audit. Encryption-at-rest, RLS, audit log immutability, HMAC webhook signing, bcrypt (cost 12) passwords, SHA-256 session/API-key/token hashing, security headers, GCRA rate limiting (a leaky-bucket-style algorithm), and TLS-only intent (secure cookies + HSTS; TLS termination itself is left to the operator's proxy) are all implemented. (A SOC 2 control mapping is deferred until a design partner requires it — see the deferred list in the README.)
+Velox is **pre-launch** and pre-audit. Encryption-at-rest, RLS on most API requests (the exceptions are listed in [Architecture](docs/architecture.md#design-rules)), audit log immutability, HMAC webhook signing, bcrypt (cost 12) passwords, SHA-256 session/API-key/token hashing, security headers, GCRA rate limiting (a leaky-bucket-style algorithm), and TLS-only intent (secure cookies + HSTS; TLS termination itself is left to the operator's proxy) are all implemented. (A SOC 2 control mapping waits until a design partner requires it: see [Later](docs/roadmap.md#later) in the roadmap.)
 
 Known gaps, documented openly:
 

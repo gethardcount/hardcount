@@ -13,6 +13,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // memStore is an in-memory Store implementation used across the subscription
@@ -20,7 +21,7 @@ import (
 // does — it covers just the behaviour the service layer depends on (item CRUD,
 // atomic transitions, and pending-item bookkeeping).
 type memStore struct {
-	// clearPauseOverride, when set, is what ClearPauseCollection returns —
+	// clearPauseOverride, when set, is what ResumeLiftedPause returns —
 	// simulates a sibling leader having cleared the pause between the list
 	// and the clear (HA hazard 5).
 	clearPauseOverride error
@@ -200,7 +201,7 @@ func (m *memStore) CancelAtomic(ctx context.Context, tenantID, id string) (domai
 	if !ok || s.TenantID != tenantID {
 		return domain.Subscription{}, errs.ErrNotFound
 	}
-	if s.Status == domain.SubscriptionCanceled || s.Status == domain.SubscriptionArchived {
+	if s.Status == domain.SubscriptionCanceled {
 		return domain.Subscription{}, errs.InvalidState(fmt.Sprintf("cannot cancel %s subscription (already terminated)", s.Status))
 	}
 	now := clock.Now(ctx)
@@ -209,6 +210,25 @@ func (m *memStore) CancelAtomic(ctx context.Context, tenantID, id string) (domai
 	s.UpdatedAt = now
 	m.subs[id] = s
 	return s, nil
+}
+
+// retireLiveOnlyState mirrors the store's retireLiveOnlyStateTx: the last
+// write of every cancel writer clears the schedule and the items' pending
+// plan changes, and keeps the pause.
+func (m *memStore) retireLiveOnlyState(id string) domain.Subscription {
+	s := m.subs[id]
+	s.CancelAt = nil
+	s.CancelAtPeriodEnd = false
+	m.subs[id] = s
+	for itemID, it := range m.items {
+		if it.SubscriptionID == id && it.PendingPlanID != "" {
+			it.PendingPlanID = ""
+			it.PendingPlanEffectiveAt = nil
+			m.items[itemID] = it
+		}
+	}
+	s.Items = m.hydrateItems(id)
+	return s
 }
 
 func (m *memStore) CancelAtomicWithBill(ctx context.Context, tenantID, id string, billFn func(tx *sql.Tx, canceled domain.Subscription) error) (domain.Subscription, error) {
@@ -226,7 +246,7 @@ func (m *memStore) CancelAtomicWithBill(ctx context.Context, tenantID, id string
 			return domain.Subscription{}, err
 		}
 	}
-	return canceled, nil
+	return m.retireLiveOnlyState(id), nil
 }
 
 func (m *memStore) ScheduleCancellation(ctx context.Context, tenantID, id string, cancelAt *time.Time, cancelAtPeriodEnd bool, observedStatus domain.SubscriptionStatus) (domain.Subscription, error) {
@@ -234,7 +254,7 @@ func (m *memStore) ScheduleCancellation(ctx context.Context, tenantID, id string
 	if !ok || s.TenantID != tenantID {
 		return domain.Subscription{}, errs.ErrNotFound
 	}
-	if s.Status == domain.SubscriptionCanceled || s.Status == domain.SubscriptionArchived {
+	if s.Status == domain.SubscriptionCanceled {
 		return domain.Subscription{}, fmt.Errorf("A %s subscription can't be scheduled to cancel.", s.Status)
 	}
 	// Mirror the store's ADR-069 status CAS.
@@ -255,6 +275,9 @@ func (m *memStore) ClearScheduledCancellation(ctx context.Context, tenantID, id 
 	s, ok := m.subs[id]
 	if !ok || s.TenantID != tenantID {
 		return domain.Subscription{}, errs.ErrNotFound
+	}
+	if s.CancelAt == nil && !s.CancelAtPeriodEnd {
+		return domain.Subscription{}, ErrNoScheduledCancel // mirrors the real store's CAS
 	}
 	s.CancelAt = nil
 	s.CancelAtPeriodEnd = false
@@ -278,8 +301,7 @@ func (m *memStore) FireScheduledCancellationTx(_ context.Context, _ *sql.Tx, ten
 	s.CancelAtPeriodEnd = false
 	s.UpdatedAt = at
 	m.subs[id] = s
-	s.Items = m.hydrateItems(id)
-	return s, nil
+	return m.retireLiveOnlyState(id), nil
 }
 
 func (m *memStore) FireScheduledCancellationWithBill(ctx context.Context, tenantID, id string, at time.Time, billFn func(tx *sql.Tx, canceled domain.Subscription) error) (domain.Subscription, error) {
@@ -307,22 +329,81 @@ func (m *memStore) FireScheduledCancellationWithBill(ctx context.Context, tenant
 		}
 	}
 	m.subs[id] = s
-	return s, nil
+	return m.retireLiveOnlyState(id), nil
 }
 
-func (m *memStore) SetPauseCollection(ctx context.Context, tenantID, id string, pc domain.PauseCollection) (domain.Subscription, error) {
+// resumeLifted mirrors PostgresStore.clearLiftedPauseTx: a CAS on listed's
+// pause (its resumes_at and setter), then the resume's audit hook.
+func (m *memStore) resumeLifted(ctx context.Context, listed domain.Subscription, onResume ResumeAudit) (domain.Subscription, bool, error) {
+	s, ok := m.subs[listed.ID]
+	pc := listed.PauseCollection
+	if !ok || pc == nil || pc.ResumesAt == nil || s.PauseCollection == nil || s.PauseCollection.ResumesAt == nil ||
+		!s.PauseCollection.ResumesAt.Equal(*pc.ResumesAt) || s.PauseCollection.SetBy != pc.SetBy {
+		return domain.Subscription{}, false, nil
+	}
+	r := liftedPauseResume(*pc)
+	ctx = r.bind(ctx, listed)
+	if pc.ResumesAt.After(clock.Now(ctx)) {
+		return domain.Subscription{}, false, nil
+	}
+	s.PauseCollection = nil
+	s.UpdatedAt = clock.Now(ctx)
+	out := s
+	out.Items = m.hydrateItems(s.ID)
+	if onResume != nil {
+		if err := onResume(ctx, nil, out, r); err != nil {
+			return domain.Subscription{}, false, err
+		}
+	}
+	m.subs[s.ID] = s
+	return out, true, nil
+}
+
+// resumeIfLifted mirrors PostgresStore.resumeIfLiftedTx.
+func (m *memStore) resumeIfLifted(ctx context.Context, id string, onResume ResumeAudit) error {
+	s := m.subs[id]
+	if s.PauseCollection == nil || s.PauseCollection.InForceAt(clock.Now(ctx)) {
+		return nil
+	}
+	_, _, err := m.resumeLifted(ctx, s, onResume)
+	return err
+}
+
+func (m *memStore) ResumeLiftedPause(ctx context.Context, tenantID string, listed domain.Subscription, onResume ResumeAudit) (domain.Subscription, error) {
+	if m.clearPauseOverride != nil {
+		return domain.Subscription{}, m.clearPauseOverride
+	}
+	if s, ok := m.subs[listed.ID]; !ok || s.TenantID != tenantID {
+		return domain.Subscription{}, ErrNotPaused
+	}
+	out, ok, err := m.resumeLifted(ctx, listed, onResume)
+	if err != nil {
+		return domain.Subscription{}, err
+	}
+	if !ok {
+		return domain.Subscription{}, ErrNotPaused
+	}
+	return out, nil
+}
+
+func (m *memStore) SetPauseCollection(ctx context.Context, tenantID, id string, pc domain.PauseCollection, onResume ResumeAudit) (domain.Subscription, error) {
 	s, ok := m.subs[id]
 	if !ok || s.TenantID != tenantID {
 		return domain.Subscription{}, errs.ErrNotFound
 	}
-	if s.Status == domain.SubscriptionCanceled || s.Status == domain.SubscriptionArchived {
+	if s.Status == domain.SubscriptionCanceled {
 		return domain.Subscription{}, fmt.Errorf("Collection can't be paused on a %s subscription.", s.Status)
 	}
+	if err := m.resumeIfLifted(ctx, id, onResume); err != nil {
+		return domain.Subscription{}, err
+	}
+	s = m.subs[id]
 	pcCopy := pc
 	if pc.ResumesAt != nil {
 		t := *pc.ResumesAt
 		pcCopy.ResumesAt = &t
 	}
+	pcCopy.SetBy = domain.PauseSetByOperator
 	s.PauseCollection = &pcCopy
 	s.UpdatedAt = clock.Now(ctx)
 	m.subs[id] = s
@@ -330,16 +411,49 @@ func (m *memStore) SetPauseCollection(ctx context.Context, tenantID, id string, 
 	return s, nil
 }
 
-func (m *memStore) ClearPauseCollection(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
-	if m.clearPauseOverride != nil {
-		return domain.Subscription{}, m.clearPauseOverride
+// SetDunningPause mirrors the real store's write rule (the invoice gate is
+// the real store's alone: memStore has no invoices).
+func (m *memStore) SetDunningPause(ctx context.Context, tenantID, subID, _ string, inTx func(tx *sql.Tx, sub domain.Subscription) error, onResume ResumeAudit) (domain.Subscription, DunningPauseOutcome, error) {
+	s, ok := m.subs[subID]
+	if !ok || s.TenantID != tenantID {
+		return domain.Subscription{}, 0, errs.ErrNotFound
 	}
+	if s.Status == domain.SubscriptionCanceled {
+		return domain.Subscription{}, 0, errs.InvalidState("terminal")
+	}
+	if s.PauseCollection.InForceAt(clock.Now(ctx)) {
+		return domain.Subscription{}, DunningPauseAlreadyHeld, nil
+	}
+	if err := m.resumeIfLifted(ctx, subID, onResume); err != nil {
+		return domain.Subscription{}, 0, err
+	}
+	s = m.subs[subID]
+	s.PauseCollection = &domain.PauseCollection{Behavior: domain.PauseCollectionKeepAsDraft, SetBy: domain.PauseSetByDunning}
+	s.UpdatedAt = clock.Now(ctx)
+	out := s
+	out.Items = m.hydrateItems(subID)
+	if inTx != nil {
+		if err := inTx(nil, out); err != nil {
+			return domain.Subscription{}, 0, err
+		}
+	}
+	m.subs[subID] = s
+	return out, DunningPauseWritten, nil
+}
+
+func (m *memStore) ClearPauseCollection(ctx context.Context, tenantID, id string, onResume ResumeAudit) (domain.Subscription, error) {
 	s, ok := m.subs[id]
 	if !ok || s.TenantID != tenantID {
 		return domain.Subscription{}, errs.ErrNotFound
 	}
 	if s.PauseCollection == nil {
 		return domain.Subscription{}, ErrNotPaused // mirrors the real store's CAS
+	}
+	if !s.PauseCollection.InForceAt(clock.Now(ctx)) {
+		if err := m.resumeIfLifted(ctx, id, onResume); err != nil {
+			return domain.Subscription{}, err
+		}
+		return domain.Subscription{}, ErrPauseLifted
 	}
 	s.PauseCollection = nil
 	s.UpdatedAt = clock.Now(ctx)
@@ -596,6 +710,10 @@ func (m *memStore) LockForItemChangeTx(ctx context.Context, _ *sql.Tx, tenantID,
 	return m.Get(ctx, tenantID, subscriptionID)
 }
 
+// LockPlansTx: no locks in memory. The order is proven against real Postgres
+// in plan_lock_order_integration_test.go.
+func (m *memStore) LockPlansTx(context.Context, *sql.Tx, []string) error { return nil }
+
 // WithTenantTx: no transactions in memory; the *Tx methods ignore the tx.
 func (m *memStore) WithTenantTx(_ context.Context, _ string, fn func(tx *sql.Tx) error) error {
 	return fn(nil)
@@ -751,7 +869,7 @@ func (m *memStore) SetBillingThresholds(ctx context.Context, tenantID, id string
 	if !ok || s.TenantID != tenantID {
 		return domain.Subscription{}, errs.ErrNotFound
 	}
-	if s.Status == domain.SubscriptionCanceled || s.Status == domain.SubscriptionArchived {
+	if s.Status == domain.SubscriptionCanceled {
 		return domain.Subscription{}, errs.InvalidState("cannot configure billing thresholds on terminated subscription")
 	}
 	bt := t
@@ -833,17 +951,21 @@ func TestCreate(t *testing.T) {
 	svc := NewService(newMemStore(), nil)
 	ctx := context.Background()
 
-	t.Run("draft by default", func(t *testing.T) {
+	t.Run("draft only when asked", func(t *testing.T) {
 		sub, err := svc.Create(ctx, "t1", CreateInput{
 			Code: "sub-001", DisplayName: "Pro Monthly",
 			CustomerID: "cus_1",
 			Items:      []CreateItemInput{{PlanID: "pln_1"}},
+			Status:     domain.SubscriptionDraft,
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if sub.Status != domain.SubscriptionDraft {
 			t.Errorf("got status %q, want draft", sub.Status)
+		}
+		if sub.StartedAt != nil || sub.ActivatedAt != nil || sub.CurrentBillingPeriodStart != nil || sub.NextBillingAt != nil {
+			t.Errorf("a draft must not start: started %v activated %v period %v next %v", sub.StartedAt, sub.ActivatedAt, sub.CurrentBillingPeriodStart, sub.NextBillingAt)
 		}
 		if sub.BillingTime != domain.BillingTimeCalendar {
 			t.Errorf("got billing_time %q, want calendar", sub.BillingTime)
@@ -870,12 +992,35 @@ func TestCreate(t *testing.T) {
 		}
 	})
 
-	t.Run("start_now activates immediately", func(t *testing.T) {
+	t.Run("status other than draft is refused", func(t *testing.T) {
+		for _, st := range []domain.SubscriptionStatus{domain.SubscriptionActive, domain.SubscriptionTrialing, domain.SubscriptionCanceled, "later"} {
+			_, err := svc.Create(ctx, "t1", CreateInput{
+				Code: "sub-bad-status", DisplayName: "Bad", CustomerID: "cus_1",
+				Items: []CreateItemInput{{PlanID: "pln_1"}}, Status: st,
+			})
+			var de *errs.DomainError
+			if !errors.As(err, &de) || de.Field != "status" {
+				t.Errorf("status %q: got %v, want a validation error on status", st, err)
+			}
+		}
+	})
+
+	t.Run("a draft with a trial is refused", func(t *testing.T) {
+		_, err := svc.Create(ctx, "t1", CreateInput{
+			Code: "sub-draft-trial", DisplayName: "Draft trial", CustomerID: "cus_1",
+			Items: []CreateItemInput{{PlanID: "pln_1"}}, Status: domain.SubscriptionDraft, TrialDays: 14,
+		})
+		var de *errs.DomainError
+		if !errors.As(err, &de) || de.Field != "trial_days" {
+			t.Errorf("got %v, want a validation error on trial_days", err)
+		}
+	})
+
+	t.Run("starts now by default", func(t *testing.T) {
 		sub, err := svc.Create(ctx, "t1", CreateInput{
 			Code: "sub-002", DisplayName: "Active",
 			CustomerID: "cus_1",
 			Items:      []CreateItemInput{{PlanID: "pln_1"}},
-			StartNow:   true,
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -891,9 +1036,9 @@ func TestCreate(t *testing.T) {
 		// here (the old bug) makes the sub count in headline MRR but
 		// vanish from New/Net movement, so the dashboard never reconciles.
 		if sub.ActivatedAt == nil {
-			t.Error("start_now must stamp activated_at (else invisible to MRR movement)")
+			t.Error("a start-now create must stamp activated_at (else invisible to MRR movement)")
 		} else if sub.StartedAt != nil && !sub.ActivatedAt.Equal(*sub.StartedAt) {
-			t.Errorf("activated_at %v should equal started_at %v for start_now", *sub.ActivatedAt, *sub.StartedAt)
+			t.Errorf("activated_at %v should equal started_at %v on a start-now create", *sub.ActivatedAt, *sub.StartedAt)
 		}
 	})
 
@@ -948,7 +1093,6 @@ func TestCreate(t *testing.T) {
 			Code: "sub-bill-active", DisplayName: "Active",
 			CustomerID: "cus_1",
 			Items:      []CreateItemInput{{PlanID: "pln_1"}},
-			StartNow:   true,
 		})
 		if err != nil {
 			t.Fatalf("unexpected: %v", err)
@@ -1051,7 +1195,6 @@ func TestCreate(t *testing.T) {
 			Code: "sub-cancel-mid", DisplayName: "Mid-period cancel",
 			CustomerID: "cus_1",
 			Items:      []CreateItemInput{{PlanID: "pln_1"}},
-			StartNow:   true,
 		})
 		if err != nil {
 			t.Fatalf("create: %v", err)
@@ -1084,7 +1227,6 @@ func TestCreate(t *testing.T) {
 			Code: "sub-cancel-final-err", DisplayName: "Final errpath",
 			CustomerID: "cus_1",
 			Items:      []CreateItemInput{{PlanID: "pln_1"}},
-			StartNow:   true,
 		})
 		if err != nil {
 			t.Fatalf("create: %v", err)
@@ -1114,7 +1256,6 @@ func TestCreate(t *testing.T) {
 			Code: "sub-cancel-active", DisplayName: "Active to cancel",
 			CustomerID: "cus_1",
 			Items:      []CreateItemInput{{PlanID: "pln_1"}},
-			StartNow:   true,
 		})
 		if err != nil {
 			t.Fatalf("create: %v", err)
@@ -1139,7 +1280,6 @@ func TestCreate(t *testing.T) {
 			Code: "sub-cancel-errpath", DisplayName: "Error on cancel",
 			CustomerID: "cus_1",
 			Items:      []CreateItemInput{{PlanID: "pln_1"}},
-			StartNow:   true,
 		})
 		if err != nil {
 			t.Fatalf("create: %v", err)
@@ -1175,7 +1315,6 @@ func TestCreate(t *testing.T) {
 			Code: "sub-bill-err", DisplayName: "Error path",
 			CustomerID: "cus_1",
 			Items:      []CreateItemInput{{PlanID: "pln_1"}},
-			StartNow:   true,
 		})
 		if err == nil {
 			t.Fatal("a day-1 billing failure must fail Create (atomic), not orphan a sub with no first-period invoice")
@@ -1310,24 +1449,6 @@ func (f *fakeBiller) FinalizeOnCreateInvoice(ctx context.Context, _ domain.Subsc
 	f.postCommitCtxErr = append(f.postCommitCtxErr, ctx.Err())
 }
 
-// fakeDispatcher captures outbound-webhook Dispatch calls so tests
-// can assert on the event type + payload without standing up the
-// webhook outbox.
-type fakeDispatcher struct {
-	events []struct {
-		eventType string
-		payload   map[string]any
-	}
-}
-
-func (f *fakeDispatcher) Dispatch(_ context.Context, _ string, eventType string, payload map[string]any) error {
-	f.events = append(f.events, struct {
-		eventType string
-		payload   map[string]any
-	}{eventType, payload})
-	return nil
-}
-
 // fakePlanReader returns plans by id — lets tests stub plan intervals
 // for the yearly-vs-monthly period-anchoring branches without standing
 // up the full pricing package.
@@ -1380,7 +1501,6 @@ func TestPeriod_DayGradeSnap(t *testing.T) {
 		Code: "sub-snap-calendar", DisplayName: "Snap Calendar",
 		CustomerID: "cus_1",
 		Items:      []CreateItemInput{{PlanID: "pln_1"}},
-		StartNow:   true,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1401,7 +1521,6 @@ func TestPeriod_DayGradeSnap(t *testing.T) {
 		Code: "sub-snap-anniversary", DisplayName: "Snap Anniversary",
 		CustomerID:  "cus_1",
 		Items:       []CreateItemInput{{PlanID: "pln_1"}},
-		StartNow:    true,
 		BillingTime: domain.BillingTimeAnniversary,
 	})
 	if err != nil {
@@ -1423,7 +1542,6 @@ func TestPeriod_DayGradeSnap(t *testing.T) {
 		Code: "sub-snap-utc", DisplayName: "Snap UTC",
 		CustomerID: "cus_1",
 		Items:      []CreateItemInput{{PlanID: "pln_1"}},
-		StartNow:   true,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1444,7 +1562,7 @@ func TestActivateAndCancel(t *testing.T) {
 
 	sub, _ := svc.Create(ctx, "t1", CreateInput{
 		Code: "sub-act", DisplayName: "Test", CustomerID: "c",
-		Items: []CreateItemInput{{PlanID: "p"}},
+		Items: []CreateItemInput{{PlanID: "p"}}, Status: domain.SubscriptionDraft,
 	})
 
 	t.Run("activate draft", func(t *testing.T) {
@@ -1473,7 +1591,7 @@ func TestActivateAndCancel(t *testing.T) {
 		svcB.SetBiller(fb)
 		draft, err := svcB.Create(ctx, "t1", CreateInput{
 			Code: "sub-act-bill", DisplayName: "ActBill", CustomerID: "c",
-			Items: []CreateItemInput{{PlanID: "p"}},
+			Items: []CreateItemInput{{PlanID: "p"}}, Status: domain.SubscriptionDraft,
 		})
 		if err != nil {
 			t.Fatalf("create draft: %v", err)
@@ -1502,7 +1620,7 @@ func TestActivateAndCancel(t *testing.T) {
 		svcB.SetBiller(fb)
 		draft, err := svcB.Create(ctx, "t1", CreateInput{
 			Code: "sub-act-fail", DisplayName: "ActFail", CustomerID: "c",
-			Items: []CreateItemInput{{PlanID: "p"}},
+			Items: []CreateItemInput{{PlanID: "p"}}, Status: domain.SubscriptionDraft,
 		})
 		if err != nil {
 			t.Fatalf("create draft: %v", err)
@@ -1550,8 +1668,8 @@ func TestCancel_NonTerminalStatuses(t *testing.T) {
 		svc := NewService(newMemStore(), nil)
 		sub, _ := svc.Create(ctx, "t1", CreateInput{
 			Code: "sub-draft", DisplayName: "Draft", CustomerID: "c",
-			Items: []CreateItemInput{{PlanID: "p"}},
-			// No StartNow, no TrialDays → status defaults to draft.
+			Items:  []CreateItemInput{{PlanID: "p"}},
+			Status: domain.SubscriptionDraft,
 		})
 		if sub.Status != domain.SubscriptionDraft {
 			t.Fatalf("setup: expected draft, got %q", sub.Status)
@@ -1597,7 +1715,7 @@ func TestCancel_NonTerminalStatuses(t *testing.T) {
 		svc := NewService(newMemStore(), nil)
 		sub, _ := svc.Create(ctx, "t1", CreateInput{
 			Code: "sub-2x", DisplayName: "Twice", CustomerID: "c",
-			Items: []CreateItemInput{{PlanID: "p"}}, StartNow: true,
+			Items: []CreateItemInput{{PlanID: "p"}},
 		})
 		_, _, _ = svc.Cancel(ctx, "t1", sub.ID)
 		_, _, err := svc.Cancel(ctx, "t1", sub.ID)
@@ -1618,8 +1736,7 @@ func TestUpdateItem_PlanChange(t *testing.T) {
 
 	sub, _ := svc.Create(ctx, "t1", CreateInput{
 		Code: "sub-change", DisplayName: "Test", CustomerID: "c",
-		Items:    []CreateItemInput{{PlanID: "plan_old"}},
-		StartNow: true,
+		Items: []CreateItemInput{{PlanID: "plan_old"}},
 	})
 
 	// Set billing period so scheduled-change effective_at lines up with it.
@@ -1681,8 +1798,7 @@ func TestUpdateItem_Scheduled(t *testing.T) {
 
 	sub, _ := svc.Create(ctx, "t1", CreateInput{
 		Code: "sub-sched", DisplayName: "Test", CustomerID: "c",
-		Items:    []CreateItemInput{{PlanID: "plan_old"}},
-		StartNow: true,
+		Items: []CreateItemInput{{PlanID: "plan_old"}},
 	})
 
 	store := svc.store.(*memStore)
@@ -1773,8 +1889,7 @@ func TestAddRemoveItem(t *testing.T) {
 
 	sub, _ := svc.Create(ctx, "t1", CreateInput{
 		Code: "sub-items", DisplayName: "Test", CustomerID: "c",
-		Items:    []CreateItemInput{{PlanID: "plan_base"}},
-		StartNow: true,
+		Items: []CreateItemInput{{PlanID: "plan_base"}},
 	})
 
 	t.Run("add second item", func(t *testing.T) {
@@ -1835,8 +1950,7 @@ func TestScheduleCancel(t *testing.T) {
 		svc := NewService(newMemStore(), clock.NewFake(now))
 		sub, _ := svc.Create(context.Background(), "t1", CreateInput{
 			Code: "sub-sched", DisplayName: "Test", CustomerID: "c",
-			Items:    []CreateItemInput{{PlanID: "p"}},
-			StartNow: true,
+			Items: []CreateItemInput{{PlanID: "p"}},
 		})
 		_, _ = svc.Activate(context.Background(), "t1", sub.ID)
 		// Stamp a billing period so cancel_at validation has something to compare against.
@@ -1917,9 +2031,12 @@ func TestScheduleCancel(t *testing.T) {
 		if err != nil {
 			t.Fatalf("schedule: %v", err)
 		}
-		out, err := svc.ClearScheduledCancel(context.Background(), "t1", sub.ID)
+		out, cleared, err := svc.ClearScheduledCancel(context.Background(), "t1", sub.ID)
 		if err != nil {
 			t.Fatalf("clear: %v", err)
+		}
+		if !cleared {
+			t.Error("cleared = false, want true: a schedule was removed")
 		}
 		if out.CancelAtPeriodEnd {
 			t.Error("cancel_at_period_end should be false after clear")
@@ -1958,8 +2075,7 @@ func TestPauseCollection(t *testing.T) {
 		svc := NewService(newMemStore(), clock.NewFake(now))
 		sub, _ := svc.Create(context.Background(), "t1", CreateInput{
 			Code: "sub-pause", DisplayName: "Test", CustomerID: "c",
-			Items:    []CreateItemInput{{PlanID: "p"}},
-			StartNow: true,
+			Items: []CreateItemInput{{PlanID: "p"}},
 		})
 		_, _ = svc.Activate(context.Background(), "t1", sub.ID)
 		stored, _ := svc.Get(context.Background(), "t1", sub.ID)
@@ -2035,16 +2151,22 @@ func TestPauseCollection(t *testing.T) {
 
 	t.Run("resume clears the pause", func(t *testing.T) {
 		svc, sub := mkSvc()
-		future := now.Add(time.Hour)
+		// In force on the store's clock too (the ctx clock, wall time here):
+		// a pause lifted by then resumes with its own trigger, not the
+		// operator's (TestLiftedPause_AResumeCallAnnouncesTheLift).
+		future := time.Now().Add(time.Hour)
 		if _, err := svc.PauseCollection(context.Background(), "t1", sub.ID, PauseCollectionInput{
 			Behavior:  domain.PauseCollectionKeepAsDraft,
 			ResumesAt: &future,
 		}); err != nil {
 			t.Fatalf("pause: %v", err)
 		}
-		out, err := svc.ResumeCollection(context.Background(), "t1", sub.ID)
+		out, resumed, err := svc.ResumeCollection(context.Background(), "t1", sub.ID)
 		if err != nil {
 			t.Fatalf("resume: %v", err)
+		}
+		if !resumed {
+			t.Error("resumed = false, want true: a pause was cleared")
 		}
 		if out.PauseCollection != nil {
 			t.Errorf("PauseCollection should be nil after resume, got %+v", out.PauseCollection)
@@ -2116,8 +2238,7 @@ func TestEndTrial(t *testing.T) {
 		svc := NewService(newMemStore(), clock.NewFake(now))
 		sub, _ := svc.Create(context.Background(), "t1", CreateInput{
 			Code: "sub-active", DisplayName: "Active", CustomerID: "c",
-			Items:    []CreateItemInput{{PlanID: "p"}},
-			StartNow: true,
+			Items: []CreateItemInput{{PlanID: "p"}},
 		})
 		_, err := svc.EndTrial(context.Background(), "t1", sub.ID)
 		if err == nil {
@@ -2194,8 +2315,7 @@ func TestExtendTrial(t *testing.T) {
 		svc := NewService(newMemStore(), clock.NewFake(now))
 		sub, _ := svc.Create(context.Background(), "t1", CreateInput{
 			Code: "sub-active", DisplayName: "Active", CustomerID: "c",
-			Items:    []CreateItemInput{{PlanID: "p"}},
-			StartNow: true,
+			Items: []CreateItemInput{{PlanID: "p"}},
 		})
 		future := now.AddDate(0, 0, 30)
 		if _, err := svc.ExtendTrial(context.Background(), "t1", sub.ID, future); err == nil {
@@ -2348,37 +2468,6 @@ func TestProcessExpiredTrialsForClock(t *testing.T) {
 		}
 	})
 
-	t.Run("fires subscription.trial_ended webhook on activation", func(t *testing.T) {
-		// Mirrors the engine auto-flip path's webhook dispatch so
-		// consumers see one event per trial transition regardless of
-		// which path activated the sub.
-		svc := NewService(newMemStore(), clock.NewFake(createdAt))
-		svc.SetBiller(&fakeBiller{})
-		fd := &fakeDispatcher{}
-		svc.SetEventDispatcher(fd)
-		sub, _ := svc.Create(ctx, "t1", CreateInput{
-			Code: "sub-webhook", DisplayName: "Webhook", CustomerID: "c",
-			Items: []CreateItemInput{{PlanID: "p"}}, TrialDays: 14,
-		})
-		mem := svc.store.(*memStore)
-		seeded := mem.subs[sub.ID]
-		seeded.TestClockID = "tclk_1"
-		mem.subs[sub.ID] = seeded
-		frozen := sub.TrialEndAt.Add(24 * time.Hour)
-		if _, errs := svc.ProcessExpiredTrialsForClock(ctx, "t1", "tclk_1", frozen); len(errs) != 0 {
-			t.Fatalf("unexpected errors: %v", errs)
-		}
-		// subscription.trial_ended moved IN-TX to the store's
-		// ActivateAfterTrial writer (DispatchTx subscription subset,
-		// 2026-07-05) — the service must NOT also dispatch it. In-tx
-		// enqueue + payload proven by lifecycle_outbox_integration_test.go.
-		for _, ev := range fd.events {
-			if ev.eventType == domain.EventSubscriptionTrialEnded {
-				t.Fatalf("%s must not be dispatched post-commit — it is enqueued in the activation tx", domain.EventSubscriptionTrialEnded)
-			}
-		}
-	})
-
 	t.Run("operator-EndTrial race: row already active is silently skipped", func(t *testing.T) {
 		// The scan's SELECT and the per-sub UPDATE aren't in the same
 		// tx; an operator EndTrial between them moves the row out of
@@ -2423,7 +2512,7 @@ func TestProcessExpiredTrialsForClock(t *testing.T) {
 // (no test_clock_id) path.
 func TestProcessExpiredTrials(t *testing.T) {
 	createdAt := time.Date(2025, 11, 29, 12, 0, 0, 0, time.UTC)
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	t.Run("wall-clock: flips trialing → active at trial_end_at past now", func(t *testing.T) {
 		svc := NewService(newMemStore(), clock.NewFake(createdAt))
@@ -2501,7 +2590,7 @@ func TestProcessExpiredTrials(t *testing.T) {
 
 // TestPeriodAnchoring locks in the post-Bug-1/2/11 contract for how the
 // first billing period anchors across every entry point (Create with
-// trial / Create with start_now / Activate from draft / EndTrial-early /
+// trial / Create that starts now / Activate from draft / EndTrial-early /
 // ExtendTrial). Calendar billing must produce a stub period bounded by
 // the next calendar month; anniversary must produce a full cycle from
 // the anchor instant. Pre-fix Create+trial+calendar dropped the stub
@@ -2590,8 +2679,9 @@ func TestPeriodAnchoring(t *testing.T) {
 		svc := NewService(newMemStore(), clock.NewFake(now))
 		sub, _ := svc.Create(ctx, "t1", CreateInput{
 			Code: "s", DisplayName: "n", CustomerID: "c",
-			Items:       []CreateItemInput{{PlanID: "p"}}, // no StartNow, no TrialDays → draft
+			Items:       []CreateItemInput{{PlanID: "p"}},
 			BillingTime: domain.BillingTimeCalendar,
+			Status:      domain.SubscriptionDraft,
 		})
 		if sub.Status != domain.SubscriptionDraft {
 			t.Fatalf("precondition: want draft, got %q", sub.Status)
@@ -2621,6 +2711,7 @@ func TestPeriodAnchoring(t *testing.T) {
 			Code: "s", DisplayName: "n", CustomerID: "c",
 			Items:       []CreateItemInput{{PlanID: "p"}},
 			BillingTime: domain.BillingTimeAnniversary,
+			Status:      domain.SubscriptionDraft,
 		})
 		activated, _ := svc.Activate(ctx, "t1", sub.ID)
 		wantPeriodStart := time.Date(2025, 11, 29, 0, 0, 0, 0, time.UTC)
@@ -2753,7 +2844,6 @@ func TestPeriodAnchoring(t *testing.T) {
 				{PlanID: "p_monthly"},
 				{PlanID: "p_yearly"},
 			},
-			StartNow: true,
 		})
 		if err == nil {
 			t.Fatal("expected error for mixed monthly + yearly items")
@@ -2768,8 +2858,7 @@ func TestPeriodAnchoring(t *testing.T) {
 		}})
 		_, err := svc.Create(ctx, "t1", CreateInput{
 			Code: "s", DisplayName: "n", CustomerID: "c",
-			Items:    []CreateItemInput{{PlanID: "p1"}, {PlanID: "p2"}},
-			StartNow: true,
+			Items: []CreateItemInput{{PlanID: "p1"}, {PlanID: "p2"}},
 		})
 		if err != nil {
 			t.Errorf("expected success for matching-interval items: %v", err)
@@ -2790,8 +2879,7 @@ func TestPeriodAnchoring(t *testing.T) {
 		}})
 		sub, err := svc.Create(ctx, "t1", CreateInput{
 			Code: "s", DisplayName: "n", CustomerID: "c",
-			Items:    []CreateItemInput{{PlanID: "p_monthly_a"}, {PlanID: "p_monthly_b"}},
-			StartNow: true,
+			Items: []CreateItemInput{{PlanID: "p_monthly_a"}, {PlanID: "p_monthly_b"}},
 		})
 		if err != nil {
 			t.Fatalf("Create: %v", err)
@@ -2824,8 +2912,7 @@ func TestPeriodAnchoring(t *testing.T) {
 		}})
 		sub, err := svc.Create(ctx, "t1", CreateInput{
 			Code: "s", DisplayName: "n", CustomerID: "c",
-			Items:    []CreateItemInput{{PlanID: "p_monthly"}},
-			StartNow: true,
+			Items: []CreateItemInput{{PlanID: "p_monthly"}},
 		})
 		if err != nil {
 			t.Fatalf("Create: %v", err)
@@ -2852,7 +2939,6 @@ func TestPeriodAnchoring(t *testing.T) {
 				{PlanID: "p_arrears"},
 				{PlanID: "p_advance"},
 			},
-			StartNow: true,
 		})
 		if err == nil {
 			t.Fatal("expected error for mixed in_arrears + in_advance items")
@@ -2872,8 +2958,7 @@ func TestPeriodAnchoring(t *testing.T) {
 		}})
 		sub, err := svc.Create(ctx, "t1", CreateInput{
 			Code: "s", DisplayName: "n", CustomerID: "c",
-			Items:    []CreateItemInput{{PlanID: "p_arrears"}},
-			StartNow: true,
+			Items: []CreateItemInput{{PlanID: "p_arrears"}},
 		})
 		if err != nil {
 			t.Fatalf("Create: %v", err)
@@ -2902,8 +2987,7 @@ func TestPeriodAnchoring(t *testing.T) {
 		}})
 		sub, err := svc.Create(ctx, "t1", CreateInput{
 			Code: "s", DisplayName: "n", CustomerID: "c",
-			Items:    []CreateItemInput{{PlanID: "p_arrears"}},
-			StartNow: true,
+			Items: []CreateItemInput{{PlanID: "p_arrears"}},
 		})
 		if err != nil {
 			t.Fatalf("Create: %v", err)
@@ -2934,7 +3018,6 @@ func TestPeriodAnchoring(t *testing.T) {
 			Code: "s", DisplayName: "n", CustomerID: "c",
 			Items:       []CreateItemInput{{PlanID: "p_monthly"}},
 			BillingTime: domain.BillingTimeAnniversary,
-			StartNow:    true,
 		})
 		if err != nil {
 			t.Fatalf("Create: %v", err)
@@ -3002,7 +3085,6 @@ func TestPeriodAnchoring(t *testing.T) {
 			Code: "s", DisplayName: "n", CustomerID: "c",
 			Items:       []CreateItemInput{{PlanID: "p_yearly_adv"}},
 			BillingTime: domain.BillingTimeAnniversary,
-			StartNow:    true,
 		})
 		if err != nil {
 			t.Fatalf("Create: %v", err)
@@ -3053,8 +3135,7 @@ func TestPeriodAnchoring(t *testing.T) {
 		}})
 		sub, err := svc.Create(ctx, "t1", CreateInput{
 			Code: "s", DisplayName: "n", CustomerID: "c",
-			Items:    []CreateItemInput{{PlanID: "p_arrears_a"}},
-			StartNow: true,
+			Items: []CreateItemInput{{PlanID: "p_arrears_a"}},
 		})
 		if err != nil {
 			t.Fatalf("Create: %v", err)
@@ -3068,7 +3149,7 @@ func TestPeriodAnchoring(t *testing.T) {
 		}
 	})
 
-	t.Run("Create + start_now + yearly plan → first period is 1 year from now (no calendar stub)", func(t *testing.T) {
+	t.Run("Create (starts now) + yearly plan → first period is 1 year from now (no calendar stub)", func(t *testing.T) {
 		// Yearly billing ignores billing_time — Stripe doesn't ship
 		// calendar yearly either. Even with billing_time=calendar, a
 		// yearly plan anchors anniversary-style.
@@ -3078,7 +3159,7 @@ func TestPeriodAnchoring(t *testing.T) {
 		}})
 		sub, _ := svc.Create(ctx, "t1", CreateInput{
 			Code: "s", DisplayName: "n", CustomerID: "c",
-			Items: []CreateItemInput{{PlanID: "p"}}, StartNow: true,
+			Items:       []CreateItemInput{{PlanID: "p"}},
 			BillingTime: domain.BillingTimeCalendar, // intentionally calendar
 		})
 		wantPeriodStart := time.Date(2025, 11, 29, 0, 0, 0, 0, time.UTC)
@@ -3141,7 +3222,6 @@ func TestUpdateItemTx_CrossIntervalAtomic(t *testing.T) {
 			Code: "s", DisplayName: "n", CustomerID: "c",
 			Items:       []CreateItemInput{{PlanID: "p_yearly_adv"}},
 			BillingTime: domain.BillingTimeAnniversary,
-			StartNow:    true,
 		})
 		if err != nil {
 			t.Fatalf("Create: %v", err)
@@ -3259,7 +3339,6 @@ func TestUpdateItemTx_CrossIntervalAtomic(t *testing.T) {
 			Code: "s", DisplayName: "n", CustomerID: "c",
 			Items:       []CreateItemInput{{PlanID: "p_m1"}, {PlanID: "p_m2"}},
 			BillingTime: domain.BillingTimeAnniversary,
-			StartNow:    true,
 		})
 		if err != nil {
 			t.Fatalf("Create multi-item: %v", err)
@@ -3316,33 +3395,12 @@ func TestSetBillingThresholds(t *testing.T) {
 				{PlanID: "plan_base"},
 				{PlanID: "plan_addon"},
 			},
-			StartNow: true,
 		})
 		if err != nil {
 			t.Fatalf("create sub: %v", err)
 		}
 		return svc, sub
 	}
-
-	t.Run("omitted reset_billing_cycle defaults to FALSE (keep-anchor, Stripe parity)", func(t *testing.T) {
-		// 2026-07-10 design review: the old default was true behind a
-		// comment claiming Stripe parity — verified wrong (Stripe's
-		// reset_billing_cycle_anchor defaults to false). Silent-default
-		// operators also stay clear of the ADR-066 §5 {in_advance ×
-		// reset=true} interaction.
-		store := newMemStore()
-		subID, _ := seedSubWithItem(t, store, "t1", "cus_1", "plan_old")
-		svc := NewService(store, nil)
-		sub, err := svc.SetBillingThresholds(context.Background(), "t1", subID, BillingThresholdsInput{
-			AmountGTE: 100000,
-		})
-		if err != nil {
-			t.Fatalf("SetBillingThresholds: %v", err)
-		}
-		if sub.BillingThresholds == nil || sub.BillingThresholds.ResetBillingCycle {
-			t.Errorf("omitted reset_billing_cycle must default to false, got %+v", sub.BillingThresholds)
-		}
-	})
 
 	t.Run("rejects empty body", func(t *testing.T) {
 		svc, sub := newSubFixture(t)
@@ -3465,9 +3523,6 @@ func TestSetBillingThresholds(t *testing.T) {
 		if updated.BillingThresholds.AmountGTE != 500000 {
 			t.Errorf("amount_gte: got %d, want 500000", updated.BillingThresholds.AmountGTE)
 		}
-		if updated.BillingThresholds.ResetBillingCycle {
-			t.Error("reset_billing_cycle must default to FALSE when omitted (keep-anchor, Stripe parity — 2026-07-10)")
-		}
 	})
 
 	t.Run("accepts item-only configuration", func(t *testing.T) {
@@ -3488,21 +3543,6 @@ func TestSetBillingThresholds(t *testing.T) {
 			t.Fatalf("expected 1 item threshold, got %d", len(updated.BillingThresholds.ItemThresholds))
 		}
 	})
-
-	t.Run("accepts explicit reset_billing_cycle=false", func(t *testing.T) {
-		svc, sub := newSubFixture(t)
-		falseV := false
-		updated, err := svc.SetBillingThresholds(ctx, "t1", sub.ID, BillingThresholdsInput{
-			AmountGTE:         500000,
-			ResetBillingCycle: &falseV,
-		})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if updated.BillingThresholds.ResetBillingCycle {
-			t.Error("reset_billing_cycle: explicit false should be respected")
-		}
-	})
 }
 
 // TestClearBillingThresholds is idempotent and unconditional — the service
@@ -3514,8 +3554,7 @@ func TestClearBillingThresholds(t *testing.T) {
 
 	sub, err := svc.Create(ctx, "t1", CreateInput{
 		Code: "sub-clear", DisplayName: "Test", CustomerID: "c",
-		Items:    []CreateItemInput{{PlanID: "plan_base"}},
-		StartNow: true,
+		Items: []CreateItemInput{{PlanID: "plan_base"}},
 	})
 	if err != nil {
 		t.Fatalf("create sub: %v", err)
@@ -3607,7 +3646,6 @@ func TestClockResolver_StampsFrozenDomain(t *testing.T) {
 			DisplayName: "Pinned",
 			CustomerID:  "cus_pinned",
 			Items:       []CreateItemInput{{PlanID: "pln_1"}},
-			StartNow:    true,
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -3620,7 +3658,7 @@ func TestClockResolver_StampsFrozenDomain(t *testing.T) {
 		if !sub.StartedAt.Equal(frozen) {
 			t.Errorf("started_at: got %v, want %v (frozen)", *sub.StartedAt, frozen)
 		}
-		// Calendar + StartNow: ps = beginningOfDayIn(now, UTC); pe =
+		// Calendar + start now: ps = beginningOfDayIn(now, UTC); pe =
 		// beginningOfMonthIn(now+1mo, UTC). Plus 1 month from 2024-04-15
 		// = 2024-05-15 → first of May 2024.
 		wantPeriodStart := time.Date(2024, 4, 15, 0, 0, 0, 0, time.UTC)
@@ -3650,7 +3688,6 @@ func TestClockResolver_NotWired(t *testing.T) {
 		DisplayName: "Fallback",
 		CustomerID:  "cus_fallback",
 		Items:       []CreateItemInput{{PlanID: "pln_1"}},
-		StartNow:    true,
 	})
 	after := time.Now().UTC()
 	if err != nil {
@@ -3776,10 +3813,13 @@ type captureAudit struct {
 	entries []capturedAuditEntry
 }
 
-// LogInTx captures like Log (nil tx fine for content-level unit tests).
-func (c *captureAudit) LogInTx(_ context.Context, _ *sql.Tx, e audit.Entry) error {
+// LogInTx captures like Log, ctx clock binding included (nil tx fine for
+// content-level unit tests).
+func (c *captureAudit) LogInTx(ctx context.Context, _ *sql.Tx, e audit.Entry) error {
+	sim, bound := clock.SimOf(ctx)
 	c.entries = append(c.entries, capturedAuditEntry{
 		action: e.Action, resourceID: e.ResourceID, resourceType: e.ResourceType, metadata: e.Metadata,
+		sim: sim, bound: bound,
 	})
 	return nil
 }
@@ -3830,8 +3870,7 @@ func TestProcessExpiredPauseCollections(t *testing.T) {
 		future := now.Add(24 * time.Hour)
 		ctx := context.Background()
 		mkSub := func(code string, pc *domain.PauseCollection) string {
-			s, _ := svc.Create(ctx, "t1", CreateInput{Code: code, DisplayName: code, CustomerID: "c", Items: []CreateItemInput{{PlanID: "p"}}, StartNow: true})
-			_, _ = svc.Activate(ctx, "t1", s.ID)
+			s, _ := svc.Create(ctx, "t1", CreateInput{Code: code, DisplayName: code, CustomerID: "c", Items: []CreateItemInput{{PlanID: "p"}}})
 			if pc != nil {
 				row := mem.subs[s.ID]
 				row.PauseCollection = pc
@@ -3893,8 +3932,7 @@ func TestProcessExpiredPauseCollections(t *testing.T) {
 		svc.SetAuditLogger(audit)
 
 		ctx := context.Background()
-		s, _ := svc.Create(ctx, "t1", CreateInput{Code: "clkpause", DisplayName: "clkpause", CustomerID: "c", Items: []CreateItemInput{{PlanID: "p"}}, StartNow: true})
-		_, _ = svc.Activate(ctx, "t1", s.ID)
+		s, _ := svc.Create(ctx, "t1", CreateInput{Code: "clkpause", DisplayName: "clkpause", CustomerID: "c", Items: []CreateItemInput{{PlanID: "p"}}})
 		contracted := time.Date(2028, 9, 3, 18, 30, 0, 0, time.UTC) // Sep 4 IST
 		row := mem.subs[s.ID]
 		row.TestClockID = "clk_1"
@@ -3954,8 +3992,7 @@ func (m *memStore) CancelAtTrialEnd(ctx context.Context, tenantID, id string, ob
 	s.CancelAtPeriodEnd = false
 	s.UpdatedAt = clock.Now(ctx)
 	m.subs[id] = s
-	s.Items = m.hydrateItems(id)
-	return s, nil
+	return m.retireLiveOnlyState(id), nil
 }
 
 // CustomerSubPlanCurrencies (ADR-100 pin) — the fake has no plan table, so
@@ -3967,20 +4004,20 @@ func (m *memStore) CustomerSubPlanCurrencies(_ context.Context, _, _, _ string) 
 
 // TestProcessExpiredPauseCollections_AlreadyClearedAnnouncesNothing pins the
 // hazard-5 root fix at the service seam: when the store reports the pause was
-// already cleared (a sibling leader won the CAS), the cron must fire NO
-// `subscription.collection_resumed` and write NO audit row. Mutation-verify:
-// remove the ErrNotPaused branch in ProcessExpiredPauseCollections → the
-// batch reports an error and, with the branch turned into a fall-through, the
-// event fires.
+// already cleared (a sibling leader won the CAS), the cron counts nothing and
+// reports no error. The event and the audit row are the store's, written only
+// when its clear wins (TestClearPauseCollection_CASOneWinner). Mutation-verify:
+// remove the ErrNotPaused branch in resumeListedPauses → the batch reports an
+// error.
 func TestProcessExpiredPauseCollections_AlreadyClearedAnnouncesNothing(t *testing.T) {
 	store := newMemStore()
 	resumes := time.Now().Add(-time.Hour)
 	store.subs["sub_paused"] = domain.Subscription{ID: "sub_paused", TenantID: "t1", CustomerID: "cus_1", Status: domain.SubscriptionActive,
 		PauseCollection: &domain.PauseCollection{Behavior: "keep_as_draft", ResumesAt: &resumes}}
 	store.clearPauseOverride = ErrNotPaused // the sibling got there first
-	events := &fakeDispatcher{}
 	svc := NewService(store, nil)
-	svc.SetEventDispatcher(events)
+	audit := &captureAudit{}
+	svc.SetAuditLogger(audit)
 
 	processed, errsOut := svc.ProcessExpiredPauseCollections(context.Background(), 10)
 	if len(errsOut) != 0 {
@@ -3989,7 +4026,7 @@ func TestProcessExpiredPauseCollections_AlreadyClearedAnnouncesNothing(t *testin
 	if processed != 0 {
 		t.Fatalf("processed=%d, want 0 — nothing was resumed by this leader", processed)
 	}
-	if len(events.events) != 0 {
-		t.Fatalf("dispatched %d events, want 0 — a second collection_resumed is the hazard-5 duplicate", len(events.events))
+	if len(audit.entries) != 0 {
+		t.Fatalf("wrote %d audit rows, want 0", len(audit.entries))
 	}
 }

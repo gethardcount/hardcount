@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // recordingClient answers the n-th POST with statuses[n] (the last entry
@@ -53,7 +54,7 @@ func replayFixture(t *testing.T, statuses ...int) (*memStore, *recordingClient, 
 	store := newMemStore()
 	client := &recordingClient{statuses: statuses}
 	svc := NewTestService(store, client)
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 	if _, err := svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{
 		URL: "http://localhost:9999/hook", Events: []string{"invoice.paid"},
 	}); err != nil {
@@ -81,7 +82,7 @@ func assertSentAs(t *testing.T, body map[string]any, root domain.WebhookEvent) {
 
 func TestReplay_SendsRootEventIDAndCreatedAt(t *testing.T) {
 	_, client, svc, orig := replayFixture(t, 200)
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	res, err := svc.Replay(ctx, "t1", orig.ID)
 	if err != nil {
@@ -103,7 +104,7 @@ func TestReplay_SendsRootEventIDAndCreatedAt(t *testing.T) {
 
 func TestReplayDelivery_SendsRootEventIDAndCreatedAt(t *testing.T) {
 	store, client, svc, orig := replayFixture(t, 200)
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 	first := store.deliveries[0]
 
 	res, err := svc.ReplayDelivery(ctx, "t1", first.WebhookEndpointID, first.ID)
@@ -125,7 +126,7 @@ func TestReplay_RetriedReplaySendsRootEventIDAndCreatedAt(t *testing.T) {
 	// 200 for the original send, 500 for the replay's first try, 200 for
 	// its retry.
 	store, client, svc, orig := replayFixture(t, 200, 500, 200)
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	if _, err := svc.Replay(ctx, "t1", orig.ID); err != nil {
 		t.Fatalf("replay: %v", err)
@@ -174,7 +175,7 @@ func TestDelivery_RedirectIsAFailure(t *testing.T) {
 
 			store := newMemStore()
 			svc := NewTestService(store, nil) // nil = the production HTTP client
-			ctx := context.Background()
+			ctx := postgres.WithLivemode(context.Background(), true)
 			if _, err := svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{
 				URL: srv.URL + "/hook", Events: []string{"invoice.paid"},
 			}); err != nil {

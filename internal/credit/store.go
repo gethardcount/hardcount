@@ -18,7 +18,7 @@ type Store interface {
 	// receives the persisted entry so the audit row can reference the
 	// store-assigned id. nil emit = unaudited write.
 	AppendEntryAudited(ctx context.Context, tenantID string, entry domain.CreditLedgerEntry, emit func(tx *sql.Tx, out domain.CreditLedgerEntry) error) (domain.CreditLedgerEntry, error)
-	AdjustAtomicAudited(ctx context.Context, tenantID, customerID, description string, amountCents int64, emit func(tx *sql.Tx, out domain.CreditLedgerEntry) error) (domain.CreditLedgerEntry, error)
+	AdjustAtomicAudited(ctx context.Context, tenantID, customerID, currency, description string, amountCents int64, emit func(tx *sql.Tx, out domain.CreditLedgerEntry) error) (domain.CreditLedgerEntry, error)
 	// ListGrantSummaries returns the customer's positive blocks with
 	// per-block remaining (amount - consumed) — the commit/promo burndown
 	// rows. includeExhausted=false returns live blocks only.
@@ -36,24 +36,20 @@ type Store interface {
 	// to fall back to clock.Now() at the postgres layer.
 	ApplyToInvoiceAtomic(ctx context.Context, tenantID, customerID, invoiceID, invoiceDesc string, invoiceAmountCents int64, at time.Time) (int64, error)
 
-	// AdjustAtomic appends a manual adjustment entry with the balance check
-	// performed inside the same locked tx. Closes the TOCTOU race where two
-	// concurrent deductions each observe the current balance, each pass the
-	// "balance + amount >= 0" check, and both commit — overdrafting the
-	// ledger. Returns ErrInsufficientBalance if the locked balance plus the
-	// amount would be negative.
-	AdjustAtomic(ctx context.Context, tenantID, customerID, description string, amountCents int64) (domain.CreditLedgerEntry, error)
-	GetBalance(ctx context.Context, tenantID, customerID string) (domain.CreditBalance, error)
-	// GetSpendableBalance is the balance less what is left of grants already
-	// past their expiry at `at` that the expiry sweep has not written off:
-	// the amount a draw at that instant could use.
-	GetSpendableBalance(ctx context.Context, tenantID, customerID string, at time.Time) (int64, error)
-	GetByProrationSource(ctx context.Context, tenantID, subscriptionID, subscriptionItemID string, changeType domain.ItemChangeType, changeAt time.Time) (domain.CreditLedgerEntry, error)
-	// GetByCreditNoteSource fetches the grant row created by a specific
-	// credit-note Issue(). Used by GrantForCreditNote to recover from
-	// ErrAlreadyExists on retry (the partial unique index from migration
-	// 0093 enforces one grant per (tenant, CN)).
-	GetByCreditNoteSource(ctx context.Context, tenantID, creditNoteID string) (domain.CreditLedgerEntry, error)
+	// AdjustAtomic appends a manual adjustment entry in `currency` with the
+	// balance check performed inside the same locked tx. Closes the TOCTOU
+	// race where two concurrent deductions each observe the current balance,
+	// each pass the "balance + amount >= 0" check, and both commit —
+	// overdrafting the ledger. A deduction larger than the balance in that
+	// currency is refused (errs.Invalid on amount_cents).
+	AdjustAtomic(ctx context.Context, tenantID, customerID, currency, description string, amountCents int64) (domain.CreditLedgerEntry, error)
+	// GetBalance returns one balance per currency the customer's ledger
+	// holds, ordered by currency; none for an empty ledger (ADR-129).
+	GetBalance(ctx context.Context, tenantID, customerID string) ([]domain.CreditBalance, error)
+	// GetSpendableBalance is the balance per currency less what is left of
+	// grants already past their expiry at `at` that the expiry sweep has not
+	// written off: the amount a draw at that instant could use.
+	GetSpendableBalance(ctx context.Context, tenantID, customerID string, at time.Time) (map[string]int64, error)
 	ListBalances(ctx context.Context, tenantID string) ([]domain.CreditBalance, error)
 	ListEntries(ctx context.Context, filter ListFilter) ([]domain.CreditLedgerEntry, error)
 	// CountEntries returns the TOTAL rows matching the filter (limit/

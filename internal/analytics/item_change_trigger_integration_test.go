@@ -7,8 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shopspring/decimal"
-
 	"github.com/sagarsuperuser/velox/internal/customer"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
@@ -39,7 +37,7 @@ func TestItemChangeTrigger_SoftDeleteEmitsRemove(t *testing.T) {
 	plan, err := pricing.NewPostgresStore(db).CreatePlan(ctx, tenantID, domain.Plan{
 		Code: "pln-sic", Name: "SIC Plan", Currency: "USD",
 		BillingInterval: domain.BillingMonthly, Status: domain.PlanActive,
-		BaseAmountCents: 1000, MeterIDs: []string{},
+		BaseAmountCents: 1000,
 	})
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
@@ -186,15 +184,8 @@ func TestP9Indexes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create customer: %v", err)
 	}
-	rrv, err := pricing.NewPostgresStore(db).CreateRatingRule(ctx, tenantID, domain.RatingRuleVersion{
-		RuleKey: "idx_calls", Name: "Idx", LifecycleState: domain.RatingRuleActive,
-		Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(1),
-	})
-	if err != nil {
-		t.Fatalf("create rrv: %v", err)
-	}
 	meter, err := pricing.NewPostgresStore(db).CreateMeter(ctx, tenantID, domain.Meter{
-		Key: "idx_calls", Name: "Idx", Unit: "calls", Aggregation: "sum", RatingRuleVersionID: rrv.ID,
+		EventName: "idx_calls", Name: "Idx", Unit: "calls", Aggregation: "sum",
 	})
 	if err != nil {
 		t.Fatalf("create meter: %v", err)

@@ -58,8 +58,8 @@ func TestListDueRunsForClock_IncludesOneOffInvoiceRuns(t *testing.T) {
 		VALUES ('cus_dun_wall', $1, 'dun_wall', 'Wall', '', $2, $2)`, tenantID, frozen)
 	mustExec(`INSERT INTO subscriptions (id, tenant_id, code, display_name, customer_id, status, livemode, test_clock_id)
 		VALUES ('sub_dun_pin', $1, 'dun-pin', 'dun-pin', 'cus_dun_pin', 'active', false, $2)`, tenantID, clockID)
-	mustExec(`INSERT INTO dunning_policies (id, tenant_id, name, enabled, is_default, retry_schedule, max_retry_attempts, final_subscription_action, final_invoice_action, grace_period_days, livemode)
-		VALUES ('dpol_oneoff', $1, 'P', true, true, '["72h"]', 3, 'pause', 'none', 3, false)`, tenantID)
+	mustExec(`INSERT INTO dunning_policies (id, tenant_id, name, enabled, is_default, retry_days, final_subscription_action, final_invoice_action, livemode)
+		VALUES ('dpol_oneoff', $1, 'P', true, true, '[3, 3, 3]', 'pause', 'none', false)`, tenantID)
 	seedInvRun := func(invID, custID, subID, runID string, due time.Time) {
 		sub := any(nil)
 		if subID != "" {
@@ -141,7 +141,7 @@ func TestListDueRunsForClock_IncludesOneOffInvoiceRuns(t *testing.T) {
 		// creation-ordered in production; here we pin it explicitly).
 		for _, ev := range []struct{ id, typ string }{
 			{"devt_a_started", "dunning_started"},
-			{"devt_b_retry", "retry_scheduled"},
+			{"devt_b_retry", "retry_attempted"},
 		} {
 			if _, err := tx2.ExecContext(ctx, `INSERT INTO invoice_dunning_events (id, run_id, tenant_id, invoice_id, event_type, state, attempt_count, created_at, livemode)
 				VALUES ($1, 'run_oneoff_pin', $2, 'inv_dun_oneoff', $3, 'active', 0, $4, false)`,
@@ -159,7 +159,7 @@ func TestListDueRunsForClock_IncludesOneOffInvoiceRuns(t *testing.T) {
 		if len(evts) != 2 {
 			t.Fatalf("events: got %d, want 2", len(evts))
 		}
-		if evts[0].EventType != "dunning_started" || evts[1].EventType != "retry_scheduled" {
+		if evts[0].EventType != "dunning_started" || evts[1].EventType != "retry_attempted" {
 			t.Errorf("equal created_at must order by id (causal): got %s then %s", evts[0].EventType, evts[1].EventType)
 		}
 	})

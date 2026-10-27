@@ -8,11 +8,14 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * As on PriceShape.
+ */
 export type CustomerPriceOverrideMode = typeof CustomerPriceOverrideMode[keyof typeof CustomerPriceOverrideMode];
 
 
 export const CustomerPriceOverrideMode = {
-  flat: 'flat',
+  per_unit: 'per_unit',
   graduated: 'graduated',
   package: 'package',
 } as const;

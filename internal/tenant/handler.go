@@ -1,7 +1,6 @@
 package tenant
 
 import (
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -31,8 +30,7 @@ func (h *Handler) Routes() chi.Router {
 
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	var input CreateInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &input) {
 		return
 	}
 

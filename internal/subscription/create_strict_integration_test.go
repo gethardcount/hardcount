@@ -40,8 +40,8 @@ func (f fixedZoneSettings) Get(context.Context, string) (domain.TenantSettings, 
 }
 
 // strictCreateFixture is POST /v1/subscriptions through the real router, the
-// idempotency middleware and Postgres, for an in_advance plan (a start_now
-// create bills day 1).
+// idempotency middleware and Postgres, for an in_advance plan (a create that
+// starts now bills day 1).
 type strictCreateFixture struct {
 	t      *testing.T
 	db     *postgres.DB
@@ -150,7 +150,7 @@ func decodeSub(t *testing.T, rr *httptest.ResponseRecorder) domain.Subscription 
 func TestCreateSubscription_UnknownFieldRefused(t *testing.T) {
 	f := newStrictCreateFixture(t, "Strict Create Unknown Field")
 
-	rr := f.post(f.body("strict-1", `"trial_period_days":14,"start_now":true`), "idem-strict-1")
+	rr := f.post(f.body("strict-1", `"trial_period_days":14`), "idem-strict-1")
 	if rr.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("trial_period_days: status %d, want 422; body %s", rr.Code, rr.Body.String())
 	}
@@ -193,13 +193,13 @@ func TestCreateSubscription_UnknownFieldRefused(t *testing.T) {
 }
 
 // TestCreateSubscription_TrialDaysBounds is D-03: a negative trial_days was
-// read as "no trial" (charged on day 1 with start_now) and any size was
+// read as "no trial" (charged on day 1) and any size was
 // accepted. trial_days is 0..730 (Stripe: a trial "can be at most two years").
 func TestCreateSubscription_TrialDaysBounds(t *testing.T) {
 	f := newStrictCreateFixture(t, "Strict Create Trial Bounds")
 
 	for _, days := range []string{"-1", "731"} {
-		rr := f.post(f.body("bound-"+strings.TrimPrefix(days, "-"), `"trial_days":`+days+`,"start_now":true`), "")
+		rr := f.post(f.body("bound-"+strings.TrimPrefix(days, "-"), `"trial_days":`+days+``), "")
 		if rr.Code != http.StatusUnprocessableEntity {
 			t.Fatalf("trial_days %s: status %d, want 422; body %s", days, rr.Code, rr.Body.String())
 		}
@@ -226,7 +226,7 @@ func TestCreateSubscription_TrialDaysBounds(t *testing.T) {
 		t.Errorf("trial_end_at: got %s, want %s", s.TrialEndAt, want)
 	}
 
-	rr = f.post(f.body("bound-0", `"trial_days":0,"start_now":true`), "")
+	rr = f.post(f.body("bound-0", `"trial_days":0`), "")
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("trial_days 0: status %d, want 201; body %s", rr.Code, rr.Body.String())
 	}

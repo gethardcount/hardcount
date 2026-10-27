@@ -1,8 +1,8 @@
 # How we test Velox
 
-Every change ships with a test at the right layer. This page says which test
-to write for a change, how to run each kind, and what is checked by hand
-before a release.
+Each code change should ship with a test at the right layer. This page says
+which test to write for a change, how to run each kind, and what is checked
+by hand before a release.
 
 ## The four layers
 
@@ -105,7 +105,7 @@ the built dashboard (`vite preview`, which forwards `/v1` to the API).
   test-mode secret key from `velox-bootstrap`. Each test uses its own unique
   names, so the suite can run many times against the same database. Use a
   database of your own anyway, so the tests never touch your dev data.
-- **In CI:** the `e2e` job runs on every PR. It is not a required check yet.
+- **In CI:** the `e2e` job runs on every PR. It is not a required check.
   On a failure, download the `playwright-report` artifact and open its trace
   with `npx playwright show-trace`.
 
@@ -139,20 +139,37 @@ habits have caught real bugs here:
 
 ## Before a release
 
-Run the [release checklist](dev/release-checklist.md). It covers what only a
-real provider can show: a Stripe charge, refund and webhook, an email you
-open and read, the LiteLLM callback, and the invoice PDF.
+Run the [release checklist](dev/release-checklist.md) before each tag.
 
 The golden-path demo (`scripts/demo.sh`) and the `velox-doctor` sweep also
 run in CI on every PR. The doctor checks the money invariants over the rows
 the golden path left behind.
 
-## Old flow IDs
-
-Until October 2026, hand-run test steps lived in `MANUAL_TEST.md`, with flow
-IDs such as `FLOW TC4` or `FLOW B10`. Some code comments and ADRs still name
-them. To read the last version of the file:
+The [first-invoice tutorial](first-invoice.md) runs in the same CI job.
+`cmd/velox-docs-run` runs each code block the page marks
+`<!-- docs-run: command -->` in one shell, in order, and checks the block
+marked `<!-- docs-run: output -->` below it. Every code block on the page
+needs one of the two markers, and every command needs an output block. A
+code block the runner cannot read, such as one in a blockquote, is an
+error. So is a marked block that GitHub does not show as a code block, such
+as one inside `<details>` with no blank line before it. A unit test checks
+that each command runs in at least one of the job's passes. To run the page
+yourself, start Velox on
+port 8080 and save your test key in a file such as `~/velox-key.json`, as
+`{"secret_key_test": "vlx_secret_test_…"}`. Then run:
 
 ```bash
-git show "$(git log -1 --format=%H --diff-filter=D -- MANUAL_TEST.md)^:MANUAL_TEST.md" | less
+go run ./cmd/velox-docs-run \
+  -replace deploy/compose/quickstart-credentials.json=$HOME/velox-key.json \
+  -replace acme-1=acme-$RANDOM docs/first-invoice.md
 ```
+
+The second `-replace` gives the customer a new external ID, so the page can
+run again on the same database.
+
+Step 8 only prints the invoice's dashboard link. The link opens on the
+quick-start stack, which serves the dashboard and the API on one address.
+When the API runs on its own, as in CI, the dashboard is elsewhere: the
+dashboard's dev server (`npm run dev` in `web-v2`) is on port 5173.
+
+**Next:** set up your machine: [CONTRIBUTING](../CONTRIBUTING.md#development-setup).

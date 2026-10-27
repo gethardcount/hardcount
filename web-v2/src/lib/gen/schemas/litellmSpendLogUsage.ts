@@ -16,6 +16,6 @@ export type LitellmSpendLogUsage = {
   total_tokens?: number;
   prompt_tokens_details?: LitellmSpendLogUsagePromptTokensDetails;
   cache_read_input_tokens?: number;
-  /** Not billed on its own; billed as input only when included in prompt_tokens. */
+  /** Cache-write tokens, included in prompt_tokens. Split into `cache_write_5m` and `cache_write_1h` by `prompt_tokens_details.cache_creation_token_details`. */
   cache_creation_input_tokens?: number;
 };

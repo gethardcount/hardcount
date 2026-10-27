@@ -35,7 +35,7 @@ import (
 func TestCreditNoteToZero_ResolvesEscalatedRun(t *testing.T) {
 	t.Run("escalated run", func(t *testing.T) {
 		r := newZeroDueDunningRig(t, "CN Zero Due Escalated")
-		run := r.run(r.policy.MaxRetryAttempts, time.Now().UTC().Add(-time.Minute))
+		run := r.run(r.policy.Retries(), time.Now().UTC().Add(-time.Minute))
 		if _, errs := r.srv.DunningSvc.ProcessDueRuns(r.ctx, r.tenantID, 20); len(errs) > 0 {
 			t.Fatalf("dunning tick: %v", errs)
 		}
@@ -65,7 +65,7 @@ func TestCreditNoteToZero_ResolvesEscalatedRun(t *testing.T) {
 // row → the paid row names the retries again.
 func TestCreditNoteToZero_PaidRowNamesTheNote(t *testing.T) {
 	r := newZeroDueDunningRig(t, "CN Zero Due Activity")
-	r.run(r.policy.MaxRetryAttempts, time.Now().UTC().Add(-time.Minute))
+	r.run(r.policy.Retries(), time.Now().UTC().Add(-time.Minute))
 	if _, errs := r.srv.DunningSvc.ProcessDueRuns(r.ctx, r.tenantID, 20); len(errs) > 0 {
 		t.Fatalf("dunning tick: %v", errs)
 	}

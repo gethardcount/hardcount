@@ -12,17 +12,22 @@ const (
 )
 
 type CreditLedgerEntry struct {
-	ID           string          `json:"id"`
-	TenantID     string          `json:"tenant_id,omitempty"`
-	CustomerID   string          `json:"customer_id"`
-	EntryType    CreditEntryType `json:"entry_type"`
-	AmountCents  int64           `json:"amount_cents"`
-	BalanceAfter int64           `json:"balance_after"`
-	Description  string          `json:"description"`
-	InvoiceID    string          `json:"invoice_id,omitempty"`
-	ExpiresAt    *time.Time      `json:"expires_at,omitempty"`
-	Metadata     map[string]any  `json:"metadata,omitempty"`
-	CreatedAt    time.Time       `json:"created_at"`
+	ID         string          `json:"id"`
+	TenantID   string          `json:"tenant_id,omitempty"`
+	CustomerID string          `json:"customer_id"`
+	EntryType  CreditEntryType `json:"entry_type"`
+	// Currency is the row's own ISO-4217 code, uppercase (ADR-129). A credit
+	// pays only invoices in its currency.
+	Currency    string `json:"currency"`
+	AmountCents int64  `json:"amount_cents"`
+	// BalanceAfter is the customer's balance in this row's currency after
+	// the row.
+	BalanceAfter int64          `json:"balance_after"`
+	Description  string         `json:"description"`
+	InvoiceID    string         `json:"invoice_id,omitempty"`
+	ExpiresAt    *time.Time     `json:"expires_at,omitempty"`
+	Metadata     map[string]any `json:"metadata,omitempty"`
+	CreatedAt    time.Time      `json:"created_at"`
 	// ConsumedCents tracks how much of a positive block's amount has
 	// been RETIRED — drained by FIFO-attributed usage/clawback entries
 	// plus the portion written off by expiry (Orb's credit-block
@@ -51,18 +56,19 @@ type CreditLedgerEntry struct {
 	// SourceCreditNoteID dedups grants created by credit-note Issue().
 	// Set on every grant the CN refund-routing path appends; the
 	// partial unique index idx_credit_ledger_credit_note_dedup
-	// (migration 0093) enforces one grant per (tenant, CN). A retry
-	// after partial-failure of CN Issue() hits the index, store
-	// returns ErrAlreadyExists, service fetches the existing grant.
+	// (migration 0093) enforces one grant per (tenant, CN). A second
+	// grant for the same CN hits the index and the store returns
+	// ErrAlreadyExists.
 	SourceCreditNoteID string `json:"source_credit_note_id,omitempty"`
 
-	// SourceInvoiceReversalID dedups invoice-void credit reversals. credit.
-	// ReverseForInvoice (invoice void / dunning manual-resolve) stamps the
-	// voided invoice's id here; the partial unique index
-	// idx_credit_ledger_reversal_dedup (migration 0106) enforces one reversal
-	// grant per (tenant, invoice). A second void/resolve of the same invoice
-	// hits the index, the store returns ErrAlreadyExists, and ReverseForInvoice
-	// treats it as an idempotent no-op instead of double-crediting.
+	// SourceInvoiceReversalID dedups invoice-void credit reversals.
+	// credit.ReverseForInvoiceTx (invoice void) stamps the voided invoice's
+	// id here; the partial unique index idx_credit_ledger_reversal_dedup
+	// (migration 0106) enforces one reversal grant per (tenant, invoice). A
+	// second reversal of the same invoice hits the index, the store returns
+	// ErrAlreadyExists, and ReverseForInvoiceTx returns that error: the
+	// conflict aborts the caller's tx, so the void fails instead of
+	// crediting twice.
 	SourceInvoiceReversalID string `json:"source_invoice_reversal_id,omitempty"`
 
 	// GrantKind classifies a grant's cost basis (ADR-078). 'commit' =
@@ -98,7 +104,11 @@ const (
 )
 
 type CreditBalance struct {
-	CustomerID   string `json:"customer_id"`
+	CustomerID string `json:"customer_id"`
+	// Currency is the stored currency of the ledger rows this balance sums
+	// (ADR-129). A customer with credit in two currencies has two balances;
+	// they are never added together or converted.
+	Currency     string `json:"currency"`
 	BalanceCents int64  `json:"balance_cents"`
 	TotalGranted int64  `json:"total_granted"`
 	TotalUsed    int64  `json:"total_used"`
@@ -111,26 +121,27 @@ type CreditBalance struct {
 	// + BalanceCents.
 	TotalRetired  int64 `json:"total_retired"`
 	TotalDeducted int64 `json:"total_deducted"`
-	// Currency is the currency the customer is billed in. The ledger has
-	// none of its own (ADR-100): credit is drawn 1:1 against the customer's
-	// invoices, so its amounts read in theirs. Read, not stored; the order is
-	// the engine's (billing profile, then the plan of the live subscription),
-	// then the newest invoice, then the workspace default.
-	Currency string `json:"currency"`
 }
 
-// CreditLiveBalance is a customer's credit position right now (issue #1019):
-// the credit that can be spent (the settled ledger balance, without any grant
-// past its expiry that the sweep has not written off), the usage of the
-// current period(s) that no invoice has billed yet, and the difference,
-// floored at zero. The parts are
-// returned beside the result so a caller can see how far past zero a customer
-// is (BalanceCents - UnbilledUsageCents) and so the arithmetic on a page adds
-// up. Computed on read by billing.Engine.LiveCreditBalance; nothing is stored.
+// CreditLiveBalance is a customer's credit position right now (issue #1019),
+// one entry per currency (ADR-129). Computed on read by
+// billing.Engine.LiveCreditBalance; nothing is stored.
 type CreditLiveBalance struct {
-	CustomerID              string    `json:"customer_id"`
-	BalanceCents            int64     `json:"balance_cents"`
-	UnbilledUsageCents      int64     `json:"unbilled_usage_cents"`
-	EstimatedRemainingCents int64     `json:"estimated_remaining_cents"`
-	ComputedAt              time.Time `json:"computed_at"`
+	CustomerID string               `json:"customer_id"`
+	Balances   []CreditLiveCurrency `json:"balances"`
+	ComputedAt time.Time            `json:"computed_at"`
+}
+
+// CreditLiveCurrency is the live position in one currency: the credit that
+// can be spent (the settled ledger balance, without any grant past its expiry
+// that the sweep has not written off), the usage of the current period(s)
+// that no invoice has billed yet and that will be invoiced in this currency,
+// and the difference, floored at zero. The parts are returned beside the
+// result so a caller can see how far past zero a customer is
+// (BalanceCents - UnbilledUsageCents) and so the arithmetic on a page adds up.
+type CreditLiveCurrency struct {
+	Currency                string `json:"currency"`
+	BalanceCents            int64  `json:"balance_cents"`
+	UnbilledUsageCents      int64  `json:"unbilled_usage_cents"`
+	EstimatedRemainingCents int64  `json:"estimated_remaining_cents"`
 }

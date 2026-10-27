@@ -135,13 +135,17 @@ func TestCreditNoteSendEmail(t *testing.T) {
 		t.Error("draft/voided sends must not reach the sender")
 	}
 
-	// Unknown id → 404; missing email → 400; no sender wired → 409.
+	// Unknown id → 404; missing email → 422 naming it; an unknown key → 422
+	// naming it; no sender wired → 409.
 	h, _ = newH()
 	if rr := cnSendReq(t, h, "vlx_cn_missing", `{"email":"a@b.co"}`); rr.Code != http.StatusNotFound {
 		t.Fatalf("unknown id: status %d, want 404", rr.Code)
 	}
-	if rr := cnSendReq(t, h, issued.ID, `{}`); rr.Code != http.StatusBadRequest {
-		t.Fatalf("missing email: status %d, want 400", rr.Code)
+	if rr := cnSendReq(t, h, issued.ID, `{}`); rr.Code != http.StatusUnprocessableEntity || !strings.Contains(rr.Body.String(), `"param":"email"`) {
+		t.Fatalf("missing email: status %d %s, want 422 on email", rr.Code, rr.Body.String())
+	}
+	if rr := cnSendReq(t, h, issued.ID, `{"email":"a@b.co","cc":["c@d.co"]}`); rr.Code != http.StatusUnprocessableEntity || !strings.Contains(rr.Body.String(), `"param":"cc"`) {
+		t.Fatalf("unknown key: status %d %s, want 422 on cc", rr.Code, rr.Body.String())
 	}
 	bare := NewHandler(NewService(store, nil, nil))
 	if rr := cnSendReq(t, bare, issued.ID, `{"email":"a@b.co"}`); rr.Code != http.StatusConflict {

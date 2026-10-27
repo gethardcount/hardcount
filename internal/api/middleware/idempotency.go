@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sagarsuperuser/velox/internal/api/respond"
 	"github.com/sagarsuperuser/velox/internal/audit"
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
@@ -67,17 +68,19 @@ const (
 //     (protects against client bugs that recycle a key across operations —
 //     e.g., retrying POST /invoices with a changed amount under the old key).
 //
-// releaseServerErrors (nil = never) names the requests whose 5xx must NOT
-// pin the key: routes whose handlers are single-transaction writers with
-// DB-level dedup (`ON CONFLICT … DO NOTHING` per event), so re-execution
-// after a failure is exactly what the client is told to do ("non-2xx means
-// not recorded — retry; replays are dedup-safe"). For everything else a 5xx
-// stays cached on purpose — the first call may have committed a side effect
-// (a Stripe charge) the client cannot observe, and a re-run would double it.
-func Idempotency(db *postgres.DB, releaseServerErrors func(*http.Request) bool) func(http.Handler) http.Handler {
+// ignore (nil = none) names the requests that skip this middleware: the
+// usage routes, whose dedup rule is the idempotency_key each event carries
+// (stored once, forever). A second, header-level cache on top of it only
+// added a 24 h answer replay and a 1 MB body read for the fingerprint, so
+// those routes run as if no header was sent.
+func Idempotency(db *postgres.DB, ignore func(*http.Request) bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != "POST" && r.Method != "PUT" && r.Method != "PATCH" {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if ignore != nil && ignore(r) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -101,7 +104,11 @@ func Idempotency(db *postgres.DB, releaseServerErrors func(*http.Request) bool) 
 			// defaults to live mode and a test-mode response gets stamped
 			// with livemode=true on its cached row — corrupting future
 			// replays for the test partition.
-			livemode := postgres.Livemode(r.Context())
+			livemode, err := postgres.Livemode(r.Context())
+			if err != nil {
+				respond.FromError(w, r, err, "idempotency")
+				return
+			}
 
 			// Read the body so we can (a) hash it for the fingerprint and
 			// (b) hand a fresh reader to the downstream handler.
@@ -186,14 +193,6 @@ func Idempotency(db *postgres.DB, releaseServerErrors func(*http.Request) bool) 
 			// reservation instead, freeing the key for a clean retry.
 			if recorder.statusCode == http.StatusConflict ||
 				recorder.statusCode == http.StatusUnprocessableEntity {
-				releaseKey(bgCtx, db, tenantID, key, recorder.statusCode)
-				return
-			}
-			// Ingest-only (ha-11, 2026-08-31): a 5xx on a dedup-safe ingest
-			// route is released, not pinned — pinning it for the 24 h TTL
-			// turned "retry with the same key" into 24 h of replayed failure
-			// and unrecorded usage.
-			if recorder.statusCode >= 500 && releaseServerErrors != nil && releaseServerErrors(r) {
 				releaseKey(bgCtx, db, tenantID, key, recorder.statusCode)
 				return
 			}

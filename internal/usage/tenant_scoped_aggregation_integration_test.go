@@ -7,7 +7,6 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/testutil"
 	"github.com/sagarsuperuser/velox/internal/usage"
@@ -173,72 +172,6 @@ func TestAggregateForBillingPeriodByAgg(t *testing.T) {
 		if len(crossed) != 0 {
 			t.Errorf("cross-tenant aggregate returned %v, want empty", crossed)
 		}
-	})
-}
-
-// TestAggregateByPricingRules_LastEverProbe pins the guard that made the
-// method's own doc comment true. The last_ever pass is deliberately unbounded
-// in time, and it used to run on every call — including for the overwhelming
-// majority of meters that have no last_ever rule. Skipping it must not change
-// a single returned row.
-func TestAggregateByPricingRules_LastEverProbe(t *testing.T) {
-	db := testutil.SetupTestDB(t)
-	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 30*time.Second)
-	defer cancel()
-
-	store := usage.NewPostgresStore(db)
-	from := time.Now().Add(-1 * time.Hour)
-	to := time.Now().Add(1 * time.Hour)
-
-	t.Run("meter without last_ever rules is unaffected", func(t *testing.T) {
-		tenantID := testutil.CreateTestTenant(t, db, "Probe No LastEver")
-		customerID := insertTestCustomer(t, db, tenantID, "cus_probe")
-		meterID := insertTestMeter(t, db, tenantID, "mtr_probe", "k_probe")
-		rrvID := insertTestRatingRule(t, db, tenantID, "rate_probe")
-		insertTestPricingRule(t, db, tenantID, meterID, rrvID,
-			map[string]any{"model": "gpt-4"}, domain.AggSum, 100)
-
-		ingest(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(10), map[string]any{"model": "gpt-4"})
-		ingest(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(5), map[string]any{"model": "claude"})
-
-		got, err := store.AggregateByPricingRules(ctx, tenantID, customerID, meterID, domain.AggSum, from, to)
-		if err != nil {
-			t.Fatalf("aggregate: %v", err)
-		}
-		assertRuleAggregations(t, got, map[string]decimal.Decimal{
-			rrvID: decimal.NewFromInt(10),
-			"":    decimal.NewFromInt(5),
-		})
-		for _, r := range got {
-			if r.AggregationMode == domain.AggLastEver {
-				t.Errorf("last_ever row returned for a meter with no last_ever rule: %+v", r)
-			}
-		}
-	})
-
-	// Positive control: with a last_ever rule present the probe must let the
-	// pass run, and the value must come from OUTSIDE the period — that is the
-	// whole point of the mode, and a probe that skipped wrongly would silently
-	// drop the line.
-	t.Run("meter with a last_ever rule still gets it", func(t *testing.T) {
-		tenantID := testutil.CreateTestTenant(t, db, "Probe LastEver")
-		customerID := insertTestCustomer(t, db, tenantID, "cus_probe2")
-		meterID := insertTestMeter(t, db, tenantID, "mtr_probe2", "k_probe2")
-		rrvID := insertTestRatingRule(t, db, tenantID, "rate_probe2")
-		insertTestPricingRule(t, db, tenantID, meterID, rrvID,
-			map[string]any{"plan": "seat"}, domain.AggLastEver, 100)
-
-		// Both events are BEFORE the period window.
-		ingestAt(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(3), map[string]any{"plan": "seat"}, from.Add(-48*time.Hour))
-		ingestAt(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(9), map[string]any{"plan": "seat"}, from.Add(-24*time.Hour))
-
-		got, err := store.AggregateByPricingRules(ctx, tenantID, customerID, meterID, domain.AggSum, from, to)
-		if err != nil {
-			t.Fatalf("aggregate: %v", err)
-		}
-		assertRuleAggregations(t, got, map[string]decimal.Decimal{
-			rrvID: decimal.NewFromInt(9), // most recent across all time
-		})
 	})
 }
 

@@ -353,7 +353,7 @@ not a rounding error; it is a row the clock filter cannot see):
   and bind at the handler; the axis then follows from ctx with NO further audit
   change.**
 - **Payment-method routes** and **public checkout rows** (hosted-invoice Pay
-  click, payment-update link, checkout setup) emit no sim axis. Neither
+  click, payment-update link) emit no sim axis. Neither
   path binds a pin: both stamp wall-clock and drive REAL Stripe, so their rows are
   wall-clock facts about a real-world effect. (Note what is NOT the reason:
   "payment methods are outside the clock domain" is false — payment_methods is
@@ -481,3 +481,13 @@ and `SUM()` breaks.
   mixed-era vocabulary in a long-lived dev DB is cosmetic.
 - `velox_audit_write_errors_total` narrows to residual own-tx callers as
   migration proceeds; covered paths ride the mutation's own error SLO.
+
+## Note (2026-10-22): why `velox_audit_write_errors_total` carries no `tenant_id` label
+
+Moved here from the audit-write-errors runbook page. Prometheus client
+counters never age out. So a tenant label would create a permanent time
+series for every tenant that ever had a single failure. That is unbounded
+cardinality: it grows with the customer base and outlives the incident. One
+shared database blip during a busy hour could create thousands. The tenant is
+in the **error log**, which you can search and which expires. The metric
+answers only *"is evidence at risk, and in which direction"*.

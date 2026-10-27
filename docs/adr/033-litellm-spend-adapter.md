@@ -43,7 +43,7 @@ Each LiteLLM call maps to up to two Velox usage events on the single `tokens` me
 | `user`                | (resolves to `external_customer_id`)           | (same)                                          |
 | `id`                  | `idempotency_key = id + ":input"`              | `idempotency_key = id + ":output"`              |
 
-Cache roles (`cache_read`, `cache_write_5m`, `cache_write_1h`) are a fast-follow once the payload parser reads `prompt_tokens_details.cached_tokens` / Anthropic `cache_creation` and normalizes them to additive-disjoint quantities (ADR-044).
+Cache roles (`cache_read`, `cache_write_5m`, `cache_write_1h`) are emitted too, as additive-disjoint quantities taken out of `input`: `cache_read` from `prompt_tokens_details.cached_tokens`, and the two write roles from `prompt_tokens_details.cache_creation_token_details` (ADR-044, amended 2026-10-22). Failed calls (`status: failure`) and LiteLLM response-cache hits (`cache_hit: true`) emit nothing.
 
 ### Customer resolution
 
@@ -75,7 +75,7 @@ The handler returns 200 with `{accepted, skipped, errors[]}` even when some rows
 > close) the window. Recovery is operator replay of LiteLLM's spend
 > logs — deterministic idempotency keys make it a pure gap-fill, with a
 > hard deadline at period finalize. Full analysis:
-> `docs/records/ha-readiness-2026-07-06.md` ("Downtime = money?").
+> `docs/dev/records/ha-readiness-2026-07-06.md` ("Downtime = money?").
 
 > **Amendment (2026-08-30): a store failure is a 503, not a 200 with
 > `errors[]`.** The status code answers one question — did Velox reach a
@@ -91,6 +91,43 @@ The handler returns 200 with `{accepted, skipped, errors[]}` even when some rows
 > retry is safe by construction: rows are idempotency-keyed and the store
 > dedups on `(tenant_id, livemode, idempotency_key)`. Pair it with
 > `max_retries: 4` in the callback config (`docs/integrations/litellm.md`).
+
+> **Amendment (2026-10-22): a replay that misses the deadline is counted.**
+> The 2026-07-06 correction's "hard deadline at period finalize" stands:
+> a row replayed after its period's invoice is built (the grace,
+> ADR-120) is stored and billed on no invoice. It is no longer silent.
+> The 200 counts such rows in `after_close`, and
+> `velox_usage_after_close_total` counts them with a WARN line each
+> (ADR-120 amendment 2026-10-22). A row that comes back as
+> `deduplicated` is never counted. A call first saved before the
+> cache-write split is written the old way, and only the old-way rows
+> that call writes are counted.
+
+> **Amendment (2026-10-27): rows are counted by what Velox found.** Beside
+> `after_close`, the 200 counts accepted rows no price of the plan takes
+> (`no_price`, such as a model no price names), rows whose meter the plan
+> does not price (`not_on_plan`) and rows no subscription covered
+> (`outside_subscription`). The counter is now
+> `velox_usage_unbilled_total{reason, origin}`; only `after_close` rows log
+> a WARN line ([ADR-120 amendment 2026-10-27](120-invoice-grace-period-for-late-usage.md#amendment-2026-10-27-an-events-answer-says-what-velox-found-adr-130-pr-6-d07)).
+
+> **Amendment (2026-10-22): bill on token counts, not call type.** The
+> adapter billed only eight call types (chat, text completion, embedding)
+> and answered 200 for the rest, so `/v1/messages` (Claude Code),
+> `/v1/responses`, Gemini and pass-through usage was never billed. Now a
+> record bills on its token counts. It is skipped only when its call type
+> is one whose tokens Velox does not price (images, audio, realtime,
+> batches, A2A, ...), from a list of LiteLLM 1.83.9's call types. A skipped
+> record that carries tokens is logged and counted in
+> `velox_litellm_skipped_with_tokens_total`. Every event key starts with
+> LiteLLM's call id, the primary key of LiteLLM's own spend log, so a
+> replay from that log deduplicates. A key with the call's `startTime` in
+> it was tried and dropped: the spend log keeps milliseconds only, so a
+> replayed call billed again. For the newly billed call types an id longer
+> than 240 characters is replaced by its SHA-256. LiteLLM gives a streamed
+> `/v1/messages` record the client's `x-litellm-call-id` as its id, so two
+> calls that send the same header bill once, as LiteLLM's spend log
+> records them (decision D6, 2026-10-23: never bill twice).
 
 ### What's NOT in scope (deferred)
 

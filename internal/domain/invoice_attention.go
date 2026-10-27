@@ -90,7 +90,7 @@ const (
 	// permanently lost. Nothing surfaced the state, so nobody could void in
 	// time — observed live on VLX-000060: $96.52 invoiced, $0.00 collected,
 	// $100.00 still drawable, dunning since Jul 30, and no surface said so.
-	// docs/design/prepaid-commits.md D3 named this exact surfacing a
+	// docs/dev/design/prepaid-commits.md D3 named this exact surfacing a
 	// "fast-follow candidate"; this is that fast-follow.
 	//
 	// This reason is only ever SYNTHESIZED when nothing else fired — see
@@ -181,6 +181,14 @@ const (
 	// own books). Critical, and surfaced on paid invoices, which is where
 	// every dispute lands. Lago parity.
 	AttentionReasonDisputeLost AttentionReason = "dispute_lost"
+
+	// AttentionReasonAmountBelowMinimum: Stripe refused to charge the invoice
+	// because its amount is below Stripe's minimum charge
+	// (ErrBelowMinimumCharge). Nothing was charged, no automatic step will
+	// collect it, and the customer was not told, so the operator decides:
+	// void it, record a payment made another way, or add the amount to the
+	// next invoice by hand. Lago parity (the invoice stays pending).
+	AttentionReasonAmountBelowMinimum AttentionReason = BelowMinimumCode
 )
 
 // AttentionAction names the operator's recommended next step. Closed
@@ -234,8 +242,10 @@ const (
 	// AttentionActionVoidInvoice opens the invoice's void confirmation. It is
 	// the ONLY recovery for an unpaid invoice whose prepaid credit is still
 	// live: voiding retires the unspent balance inside the void tx (ADR-078
-	// D3). Offered on commit exposure alone — void destroys an invoice, so it
-	// must never become a generic "something is wrong here" suggestion.
+	// D3). Offered on commit exposure and on an amount below Stripe's minimum
+	// charge (which Stripe will never charge) only — void destroys an
+	// invoice, so it must never become a generic "something is wrong here"
+	// suggestion.
 	//
 	// Reusing an existing code with a relabelled button was rejected: audit
 	// logs key off the code, so an action reading `add_payment_method` on a
@@ -479,22 +489,23 @@ type AttentionContext struct {
 	// finalized, unpaid invoices only.
 	PaymentPageOpen bool
 
-	// RefusedCardDeclineCode is set when the bank refused the customer's
-	// current default card for good on this invoice: Stripe's decline code
-	// (one IsHardDecline accepts), recorded on one of the invoice's charge
-	// attempts with that card. Dunning retries skip that card, so the
-	// payment-failure notice says the customer needs a different card and
-	// does not offer Retry. Empty once another card is the default — a card
-	// the customer saves now becomes the default by itself (ADR-126) — and
-	// the ordinary decline notice comes back. The invoice service reads it
-	// for failed invoices only.
-	RefusedCardDeclineCode string
+	// RetryBlockingDeclineCode is set when dunning retries skip the
+	// customer's current default card on this invoice: Stripe's decline code,
+	// recorded on the invoice's charge attempts with that card. Either the
+	// bank refused the card for good (IsHardDecline), so the notice says the
+	// customer needs a different card, or the bank asked the customer to
+	// confirm the payment (IsAuthenticationRequired), so the notice offers
+	// the payment link. Neither offers Retry. Empty once another card is the
+	// default — a card the customer saves now becomes the default by itself
+	// (ADR-126) — and the ordinary decline notice comes back. The invoice
+	// service reads it for failed invoices only.
+	RetryBlockingDeclineCode string
 
-	// DunningRetrying is true when the invoice's dunning run is active, not
-	// paused and not waiting on a failed final action, so a scheduled retry
-	// is still to come (except a run at or above a max_retry_attempts lowered
-	// after it started, whose next tick only runs the final action). After the run exhausts (including a final action that
-	// failed and is being re-attempted), while it is paused, or with no run at
+	// DunningRetrying is true when a charge retry on the invoice's dunning
+	// run is still to come (InvoiceDunningRun.RetryScheduled: active, not
+	// paused, attempts left under its policy). Once every attempt is used
+	// (the final action waiting for the invoice grace, re-attempted after it
+	// failed, or the run escalated), while it is paused, or with no run at
 	// all (dunning off), no retry runs whatever card becomes the default. Read by the refused-card
 	// notice ("dunning keeps its schedule" is true only then) and by the two
 	// paused-collection notices: a collection pause does not stop an open
@@ -626,8 +637,6 @@ func classifyAttentionCause(inv Invoice, atc AttentionContext) *Attention {
 		return nil
 	}
 	switch {
-	case inv.TaxStatus == InvoiceTaxFailed:
-		return classifyTaxAttention(inv, atc, AttentionSeverityCritical)
 	// Before the failure and pending states: while the customer's payment page
 	// is open no Velox charge can start, so their banners' Retry / Charge now
 	// would be refused, and a dunning retry date reads as overdue when it is
@@ -637,11 +646,16 @@ func classifyAttentionCause(inv Invoice, atc AttentionContext) *Attention {
 	case inv.PaymentStatus == PaymentFailed:
 		return classifyPaymentFailure(inv, atc)
 	case inv.TaxStatus == InvoiceTaxPending:
-		return classifyTaxAttention(inv, atc, AttentionSeverityWarning)
+		return classifyTaxAttention(inv, atc)
 	case inv.PaymentStatus == PaymentUnknown:
 		return classifyPaymentUnconfirmed(inv)
 	case inv.PaymentStatus == PaymentProcessing:
 		return classifyPaymentProcessing(inv, atc)
+	// Before every pending state: Stripe refused this amount, so the
+	// no-card, scheduled and awaiting notices would each promise a charge
+	// that cannot happen.
+	case inv.BelowStripeMinimum():
+		return classifyAmountBelowMinimum(inv)
 	// no_payment_method beats payment_scheduled: when both flags are
 	// set (engine queued for retry but PM is still missing), the
 	// scheduler will keep skipping until a PM is attached. The
@@ -664,6 +678,37 @@ func classifyAttentionCause(inv Invoice, atc AttentionContext) *Attention {
 		return classifyAwaitingPayment(inv)
 	}
 	return nil
+}
+
+// classifyAmountBelowMinimum is the notice for an invoice Stripe refused to
+// charge because its amount is below Stripe's minimum (ErrBelowMinimumCharge).
+// Warning, not Critical: no money was lost and nothing is failing, but no
+// automatic step will ever collect it, so it waits on the operator. Void is
+// the one button; Record offline payment is already in the page's menu, and
+// Collect payment stays on the page: it applies the customer's credit
+// balance first and pays the invoice when that covers it, and otherwise asks
+// Stripe again (its answer can change with the account's settlement
+// currency; it answers at once and charges nothing if not). Stripe's sentence,
+// which names the minimum, goes in ProviderResponse; the detail names no
+// figure, because the minimum depends on the account's settlement currency.
+func classifyAmountBelowMinimum(inv Invoice) *Attention {
+	since := *inv.BelowMinimumAt
+	return &Attention{
+		Severity: AttentionSeverityWarning,
+		Reason:   AttentionReasonAmountBelowMinimum,
+		Code:     "payment.amount_too_small",
+		Message:  "This amount is below Stripe's minimum charge, so Velox won't charge it; void the invoice or record a payment made another way.",
+		Detail: "Stripe won't charge this amount because it is below Stripe's minimum, which depends on the currency your Stripe account settles in; " +
+			"Stripe's reply under Provider response names it. Nothing was charged. " +
+			"Velox doesn't retry it on its own, ends any payment recovery on it, and doesn't email the customer about it. " +
+			"Collect payment applies the customer's credit balance and pays the invoice if that covers it; otherwise it asks Stripe again. " +
+			"To collect it later, add the amount to the customer's next invoice by hand, then void this one. Record offline payment is in the ⋯ menu.",
+		DocURL:           docURL("amount-below-minimum"),
+		Actions:          []AttentionActionItem{{Code: AttentionActionVoidInvoice, Label: "Void invoice"}},
+		ProviderResponse: inv.LastPaymentError,
+		Since:            &since,
+		DueBy:            inv.DueAt,
+	}
 }
 
 // classifyRecoveryInFlight surfaces a bad-debt recovery charge that an operator
@@ -813,8 +858,24 @@ func withCommitExposure(att *Attention, inv Invoice, atc AttentionContext) *Atte
 	// Appended, never prepended: the cause banner's first action is its primary
 	// CTA (fix the card, add a payment method), and that is still the right
 	// first move. Void is the fallback for when collection has failed.
-	folded.Actions = append(append([]AttentionActionItem{}, folded.Actions...), voidAction...)
+	// A cause that already offers Void (an amount below Stripe's minimum)
+	// keeps its one button.
+	folded.Actions = append([]AttentionActionItem{}, folded.Actions...)
+	for _, a := range voidAction {
+		if !hasAttentionAction(folded.Actions, a.Code) {
+			folded.Actions = append(folded.Actions, a)
+		}
+	}
 	return &folded
+}
+
+func hasAttentionAction(actions []AttentionActionItem, code AttentionAction) bool {
+	for _, a := range actions {
+		if a.Code == code {
+			return true
+		}
+	}
+	return false
 }
 
 // classifyTaxAttention branches on the typed tax_error_code persisted
@@ -869,14 +930,14 @@ func TaxErrorCodeRetryable(code string) bool {
 	return false
 }
 
-func classifyTaxAttention(inv Invoice, atc AttentionContext, severity AttentionSeverity) *Attention {
+func classifyTaxAttention(inv Invoice, atc AttentionContext) *Attention {
 	errorCode := inv.TaxErrorCode
 	if errorCode == "" {
 		errorCode = "unknown"
 	}
 
 	att := &Attention{
-		Severity: severity,
+		Severity: AttentionSeverityWarning,
 		Since:    inv.TaxDeferredAt,
 		Code:     "tax." + errorCode,
 	}
@@ -1026,8 +1087,11 @@ func classifyPaymentFailure(inv Invoice, atc AttentionContext) *Attention {
 	if atc.LastFailedChargeAt != nil {
 		since = *atc.LastFailedChargeAt
 	}
-	if atc.RefusedCardDeclineCode != "" {
-		return classifyRefusedCard(inv, atc.RefusedCardDeclineCode, atc.DunningRetrying, since)
+	switch code := atc.RetryBlockingDeclineCode; {
+	case IsHardDecline(code):
+		return classifyRefusedCard(inv, code, atc.DunningRetrying, since)
+	case IsAuthenticationRequired(code):
+		return classifyNeedsConfirmation(inv, atc.DunningRetrying, since)
 	}
 	// Update Payment Method is the primary action: the card on file
 	// is broken, retrying with the same card will decline again.
@@ -1097,6 +1161,46 @@ func classifyRefusedCard(inv Invoice, declineCode string, retrying bool, since t
 	}
 }
 
+// classifyNeedsConfirmation is the payment-failure notice when the bank asked
+// the customer to confirm the last charge of their default card on this
+// invoice (authentication_required, usually 3-D Secure). The card is not
+// refused: the customer confirms the payment on the hosted invoice page,
+// where Stripe runs 3-D Secure. So the one action is emailing them the
+// payment link. Retry payment is not offered: it charges without the
+// customer, and the bank asks again. Dunning retries skip the card, as
+// Stripe Billing does for this code, and each reminder email carries the
+// payment link.
+//
+// Warning, not Critical: nothing is broken, the customer has to act, as on
+// the no-payment-method notice.
+func classifyNeedsConfirmation(inv Invoice, retrying bool, since time.Time) *Attention {
+	const (
+		why     = "Stripe's code is authentication_required: the bank wants the customer to confirm this payment, usually with 3-D Secure, and a charge made without the customer can't do that. "
+		howPay  = "The customer pays on the hosted invoice page, where their bank may ask them to confirm. "
+		newCard = "A different card the customer saves through a setup or update link becomes the default; "
+	)
+	detail := why + howPay +
+		"Dunning keeps its schedule and counts each retry, but doesn't charge this card; each reminder email carries the payment link. " +
+		newCard + "the next retry charges it."
+	if !retrying {
+		detail = why + howPay + "No automatic retry is scheduled. " +
+			newCard + "Collect payment charges it."
+	}
+	return &Attention{
+		Severity: AttentionSeverityWarning,
+		Reason:   AttentionReasonPaymentFailed,
+		Code:     "payment.authentication_required",
+		Message:  "The customer's bank needs them to confirm this payment; email them the payment link to pay and confirm it.",
+		Detail:   detail,
+		DocURL:   docURL("payment-failed"),
+		Actions: []AttentionActionItem{
+			{Code: AttentionActionSendReminder, Label: "Email payment link"},
+		},
+		ProviderResponse: inv.LastPaymentError,
+		Since:            &since,
+	}
+}
+
 func classifyPaymentUnconfirmed(inv Invoice) *Attention {
 	since := attentionSince(inv)
 	// No operator action: the reconciler re-queries the provider on the next
@@ -1148,8 +1252,8 @@ func classifyPaymentUnconfirmed(inv Invoice) *Attention {
 		// into ADR-107 before anyone checked it: it blamed "off-session SCA
 		// nobody completes". Off-session SCA is a DECLINE — Stripe's
 		// authentication_required is a decline code, which arrives as a card
-		// error and settles the invoice FAILED with dunning started, never
-		// reaching this banner. A live requires_action PaymentIntent comes from
+		// error and settles the invoice FAILED (classifyNeedsConfirmation),
+		// never reaching this banner. A live requires_action PaymentIntent comes from
 		// the hosted checkout, where the customer is present and mid-3DS, and
 		// that one expires with its session inside the hour.
 		Message: "Stripe hasn't confirmed this charge yet, and Velox re-checks automatically until it does.",
@@ -1476,6 +1580,8 @@ func classifyPaymentAnomaly(inv Invoice) *Attention {
 		detail = "Extra payment: " + pi + "."
 		if inv.StripePaymentIntentID != "" {
 			detail += " Original payment: " + inv.StripePaymentIntentID + "."
+		} else if inv.PaidOutOfBand {
+			detail += " Original payment: recorded as paid outside Velox."
 		}
 		detail += " The extra charge exists only in Stripe; Velox records one payment."
 	case EventPaymentAmountMismatch:

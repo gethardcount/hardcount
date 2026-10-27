@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/table'
 import { formatCents, formatDate, getCurrencySymbol } from '@/lib/api'
 import { formatCivilPeriod } from '@/lib/dates'
+import { USAGE_ESTIMATE_NOTE } from '@/lib/activityPeriod'
 import { marginCardView } from '@/lib/actionOutcomes'
 import { formatMarginBps, marginCostNote, marginCostState } from '@/lib/marginCost'
 import {
@@ -23,7 +24,7 @@ import { useCurrentCycleUsage, useLastInvoicedPeriod, useLatestUsageAt } from '@
 // Margin (ADR-079): rated usage revenue vs stamped provider COGS over an
 // operator-picked window. Operator-only surface — COGS never renders on
 // customer-facing pages. Attribution is honest by design: per-model margin
-// shows only where pricing rules pin the model; everything else appears as
+// shows only where the price that billed the usage names the model; everything else appears as
 // "not model-attributed" rather than being split by heuristic.
 //
 // The card opens on the customer's current billing period, with the last
@@ -95,9 +96,12 @@ export function MarginCard({ customerId, customerTestClockId, currency }: { cust
   const currencyMismatch = !!rep && !!revenueCurrency && revenueCurrency !== costCurrency && rep.revenue_cents > 0
   const shownCurrency = revenueCurrency || currency
   const billed = (cents: number) => (mixedRevenue || !shownCurrency ? '—' : formatCents(cents, shownCurrency))
-  // micros (1e-6 of the currency unit) → display amount.
-  const cost = (micros: number) =>
-    `${getCurrencySymbol(costCurrency)}${(micros / 1_000_000).toFixed(micros >= 100_000 ? 2 : 4)}`
+  // cost_cents is a decimal string of cents → display amount, to the cent
+  // from $0.10 up and to 4 places below it.
+  const cost = (cents: string) => {
+    const dollars = Number(cents) / 100
+    return `${getCurrencySymbol(costCurrency)}${dollars.toFixed(dollars >= 0.1 ? 2 : 4)}`
+  }
   // No event carries a provider cost: the cost is unknown, not $0, and the
   // margin is not 100% (the server leaves margin_bps out).
   const costState = rep ? marginCostState(rep) : 'measured'
@@ -119,6 +123,10 @@ export function MarginCard({ customerId, customerTestClockId, currency }: { cust
                 {formatCivilPeriod(marginWindow.from, marginWindow.to, undefined)}
               </p>
             )}
+            {/* The report always prices a window the card sends, so its
+                "Usage billed" is an estimate at current prices, without
+                canceled subscriptions (ADR-130 §10). */}
+            <p className="text-xs text-muted-foreground mt-1">{USAGE_ESTIMATE_NOTE}</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <select
@@ -175,7 +183,7 @@ export function MarginCard({ customerId, customerTestClockId, currency }: { cust
               </div>
               <div>
                 <p className="text-xs text-muted-foreground uppercase tracking-wide">Provider cost</p>
-                <p className="text-lg font-semibold text-foreground mt-0.5">{costKnown ? cost(rep.cost_micros) : '—'}</p>
+                <p className="text-lg font-semibold text-foreground mt-0.5">{costKnown ? cost(rep.cost_cents) : '—'}</p>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground uppercase tracking-wide">Margin</p>
@@ -228,7 +236,7 @@ export function MarginCard({ customerId, customerTestClockId, currency }: { cust
                           ? billed(m.revenue_cents ?? 0)
                           : <Badge variant="outline">not model-priced</Badge>}
                       </TableCell>
-                      <TableCell className="text-sm text-right">{cost(m.cost_micros)}</TableCell>
+                      <TableCell className="text-sm text-right">{cost(m.cost_cents)}</TableCell>
                       <TableCell className="text-sm text-right">{formatMarginBps(m.margin_bps)}</TableCell>
                     </TableRow>
                   ))}
@@ -249,8 +257,8 @@ export function MarginCard({ customerId, customerTestClockId, currency }: { cust
                 {rep.unresolved_events === 1
                   ? '1 usage event has no provider cost'
                   : `${rep.unresolved_events.toLocaleString()} usage events have no provider cost`}
-                : no rate in Provider costs matched it when it arrived. Events that arrive
-                after you add a matching rate are costed.
+                : no rate in Provider costs matched it when it arrived, or its cost was too
+                large to record. Events that arrive after you add a matching rate are costed.
               </p>
             )}
             {empty && latestAt ? (

@@ -6,13 +6,13 @@ import (
 	"testing"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	"github.com/sagarsuperuser/velox/internal/testutil"
 )
 
 // fakeCredits answers the credit summary for one customer and records the
 // tenant, customer and mode it was asked for.
 type fakeCredits struct {
-	summary     CostDashboardCredits
+	summary     []CostDashboardCredits
 	err         error
 	gotTenant   string
 	gotCustomer string
@@ -20,9 +20,9 @@ type fakeCredits struct {
 	calls       int
 }
 
-func (f *fakeCredits) CreditSummary(ctx context.Context, tenantID, customerID string) (CostDashboardCredits, error) {
+func (f *fakeCredits) CreditSummary(ctx context.Context, tenantID, customerID string) ([]CostDashboardCredits, error) {
 	f.calls++
-	f.gotTenant, f.gotCustomer, f.gotLivemode = tenantID, customerID, postgres.Livemode(ctx)
+	f.gotTenant, f.gotCustomer, f.gotLivemode = tenantID, customerID, testutil.MustLivemode(ctx)
 	return f.summary, f.err
 }
 
@@ -36,7 +36,7 @@ type fakeLive struct {
 }
 
 func (f *fakeLive) LiveCreditBalance(ctx context.Context, tenantID, customerID string) (domain.CreditLiveBalance, error) {
-	f.gotTenant, f.gotCustomer, f.gotLivemode = tenantID, customerID, postgres.Livemode(ctx)
+	f.gotTenant, f.gotCustomer, f.gotLivemode = tenantID, customerID, testutil.MustLivemode(ctx)
 	return f.live, f.err
 }
 
@@ -47,17 +47,22 @@ func TestCostDashboard_CarriesCreditBalance(t *testing.T) {
 	lookup := fakeTokenLookup{cust: domain.Customer{ID: "vlx_cus_1", TenantID: "vlx_ten_1", Livemode: false}}
 
 	t.Run("a customer with no subscription still sees the balance", func(t *testing.T) {
-		credits := &fakeCredits{summary: CostDashboardCredits{BalanceCents: 7500, CommitRemainingCents: 5000, PromotionalRemainingCents: 2500}}
+		credits := &fakeCredits{summary: []CostDashboardCredits{{Currency: "USD", BalanceCents: 7500, CommitRemainingCents: 5000, PromotionalRemainingCents: 2500}}}
 		a := NewCostDashboardAssembler(lookup, nil, &recordingLister{}, credits)
-		a.SetLiveBalanceReader(&fakeLive{live: domain.CreditLiveBalance{BalanceCents: 7500, EstimatedRemainingCents: 7500}})
+		a.SetLiveBalanceReader(&fakeLive{live: domain.CreditLiveBalance{Balances: []domain.CreditLiveCurrency{
+			{Currency: "USD", BalanceCents: 7500, EstimatedRemainingCents: 7500},
+		}}})
 
 		got, err := a.GetByToken(context.Background(), "vlx_pcd_x")
 		if err != nil {
 			t.Fatalf("GetByToken: %v", err)
 		}
 		proj := got.(CostDashboardProjection)
-		if proj.Credits.BalanceCents != 7500 || proj.Credits.CommitRemainingCents != 5000 || proj.Credits.PromotionalRemainingCents != 2500 {
-			t.Errorf("credits = %+v, want balance 7500, commit 5000, promotional 2500", proj.Credits)
+		if len(proj.Credits) != 1 {
+			t.Fatalf("credits = %+v, want one USD entry", proj.Credits)
+		}
+		if c := proj.Credits[0]; c.Currency != "USD" || c.BalanceCents != 7500 || c.CommitRemainingCents != 5000 || c.PromotionalRemainingCents != 2500 {
+			t.Errorf("credits = %+v, want USD balance 7500, commit 5000, promotional 2500", c)
 		}
 		if credits.gotTenant != "vlx_ten_1" || credits.gotCustomer != "vlx_cus_1" {
 			t.Errorf("asked for tenant %q customer %q, want the token's own", credits.gotTenant, credits.gotCustomer)
@@ -91,8 +96,11 @@ func TestCostDashboard_LiveFiguresComeFromTheLiveRead(t *testing.T) {
 	t.Run("the three live fields are the live read's", func(t *testing.T) {
 		// The credit summary's own balance (9999) is stale on purpose: the
 		// block must be consistent with itself, so the live read's wins.
-		credits := &fakeCredits{summary: CostDashboardCredits{BalanceCents: 9999, CommitRemainingCents: 5000}}
-		live := &fakeLive{live: domain.CreditLiveBalance{BalanceCents: 4000, UnbilledUsageCents: 1000, EstimatedRemainingCents: 3000}}
+		credits := &fakeCredits{summary: []CostDashboardCredits{{Currency: "USD", BalanceCents: 9999, CommitRemainingCents: 5000}}}
+		live := &fakeLive{live: domain.CreditLiveBalance{Balances: []domain.CreditLiveCurrency{
+			{Currency: "EUR", BalanceCents: 0, UnbilledUsageCents: 700, EstimatedRemainingCents: 0},
+			{Currency: "USD", BalanceCents: 4000, UnbilledUsageCents: 1000, EstimatedRemainingCents: 3000},
+		}}}
 		a := NewCostDashboardAssembler(lookup, nil, &recordingLister{}, credits)
 		a.SetLiveBalanceReader(live)
 
@@ -100,7 +108,16 @@ func TestCostDashboard_LiveFiguresComeFromTheLiveRead(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GetByToken: %v", err)
 		}
-		c := got.(CostDashboardProjection).Credits
+		all := got.(CostDashboardProjection).Credits
+		// One entry per currency, ordered: EUR has unbilled usage and no
+		// credit, USD has both.
+		if len(all) != 2 || all[0].Currency != "EUR" || all[1].Currency != "USD" {
+			t.Fatalf("credits = %+v, want EUR then USD", all)
+		}
+		if all[0].UnbilledUsageCents != 700 || all[0].BalanceCents != 0 {
+			t.Errorf("EUR = %+v, want unbilled 700 and no balance", all[0])
+		}
+		c := all[1]
 		if c.BalanceCents != 4000 || c.UnbilledUsageCents != 1000 || c.EstimatedRemainingCents != 3000 {
 			t.Errorf("credits = %+v, want balance 4000, unbilled 1000, estimated 3000", c)
 		}

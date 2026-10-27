@@ -10,6 +10,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/sagarsuperuser/velox/internal/auth"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // A charge Stripe refuses for the key, not the card, is "not attempted"
@@ -64,7 +65,7 @@ func TestCreatePaymentIntent_RefusedKeyIsNotADecline(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			stub := withCannedStripe(t, tc.status, tc.body)
 			c := NewLiveStripeClient(NewStripeClients(fixedCreds{}))
-			_, err := c.CreatePaymentIntent(auth.WithTenantID(context.Background(), "t1"), createParams())
+			_, err := c.CreatePaymentIntent(auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1"), createParams())
 			assertKeyError(t, err, StripeKeyRejected)
 			var ke *StripeKeyError
 			if errors.As(err, &ke) && !strings.Contains(ke.Message, tc.inMsg) {
@@ -81,7 +82,7 @@ func TestCreatePaymentIntent_NoKeyIsNotADecline(t *testing.T) {
 	t.Run("no credentials for the mode", func(t *testing.T) {
 		stub := withCannedStripe(t, http.StatusOK, `{}`)
 		c := NewLiveStripeClient(NewStripeClients(&stubCredentials{}))
-		_, err := c.CreatePaymentIntent(auth.WithTenantID(context.Background(), "t1"), createParams())
+		_, err := c.CreatePaymentIntent(auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1"), createParams())
 		assertKeyError(t, err, StripeKeyNotConfigured)
 		if stub.calls != 0 {
 			t.Errorf("Stripe called %d times with no key", stub.calls)
@@ -97,7 +98,7 @@ func TestCreatePaymentIntent_NoKeyIsNotADecline(t *testing.T) {
 // Controls: a decline stays a definite failure with its code, a 429 stays a
 // plain skip, a 500 stays unknown.
 func TestCreatePaymentIntent_RefusedKeyControls(t *testing.T) {
-	ctx := auth.WithTenantID(context.Background(), "t1")
+	ctx := auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1")
 	t.Run("402 decline", func(t *testing.T) {
 		withCannedStripe(t, http.StatusPaymentRequired, stripeDecline)
 		_, err := NewLiveStripeClient(NewStripeClients(fixedCreds{})).CreatePaymentIntent(ctx, createParams())
@@ -190,7 +191,7 @@ func TestChargeInvoice_RefusedKey_WritesNothingAndTellsTheOperator(t *testing.T)
 	s.SetKeyHealth(health)
 	before := keyUnusableCount(t, StripeKeyRejected)
 
-	_, err := s.ChargeInvoice(auth.WithTenantID(context.Background(), "t1"), "t1", inv, testHold, "cus_stripe", "pm_test")
+	_, err := s.ChargeInvoice(auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1"), "t1", inv, testHold, "cus_stripe", "pm_test")
 	assertKeyError(t, err, StripeKeyRejected)
 
 	if n := len(invoices.chargeAttempts); n != 0 {
@@ -232,7 +233,7 @@ func TestChargeInvoice_AcceptedCharge_ClearsRefusedKeyNotice(t *testing.T) {
 	s := NewStripe(NewLiveStripeClient(NewStripeClients(fixedCreds{})), invoices, newMockWebhookStore(), nil, &recordingDunningStarter{})
 	s.SetKeyHealth(health)
 
-	if _, err := s.ChargeInvoice(auth.WithTenantID(context.Background(), "t1"), "t1", inv, testHold, "cus_stripe", "pm_test"); err != nil {
+	if _, err := s.ChargeInvoice(auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1"), "t1", inv, testHold, "cus_stripe", "pm_test"); err != nil {
 		t.Fatalf("charge: %v", err)
 	}
 	if len(health.clears) != 1 || health.clears[0] != "t1|live" {
@@ -255,7 +256,7 @@ func TestChargeInvoice_NoKey_WritesNothing(t *testing.T) {
 	s.SetKeyHealth(health)
 	before := keyUnusableCount(t, StripeKeyNotConfigured)
 
-	_, err := s.ChargeInvoice(auth.WithTenantID(context.Background(), "t1"), "t1", inv, testHold, "cus_stripe", "pm_test")
+	_, err := s.ChargeInvoice(auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1"), "t1", inv, testHold, "cus_stripe", "pm_test")
 	assertKeyError(t, err, StripeKeyNotConfigured)
 	if n := len(invoices.chargeAttempts); n != 0 {
 		t.Errorf("charge attempt rows = %d, want 0", n)

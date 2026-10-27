@@ -72,7 +72,7 @@ func TestActivityLines_SubscriptionWire(t *testing.T) {
 		{"aud_crossed", "subscription.threshold_crossed", "system", "", map[string]any{
 			"invoice_id": "vlx_inv_1", "invoice_number": "VLX-000123", "amount_cents": float64(5000), "currency": "USD"}},
 		{"aud_below_zero", "subscription.net_negative_usage", "system", "", map[string]any{
-			"meters": []any{map[string]any{"meter_id": "mtr_1", "meter_key": "api_calls", "meter_name": "API calls", "quantity": "-120"}}}},
+			"meters": []any{map[string]any{"meter_id": "mtr_1", "event_name": "api_calls", "meter_name": "API calls", "quantity": "-120"}}}},
 		{"aud_canceled", domain.AuditActionCancel, "system", "", map[string]any{
 			"canceled_by": "schedule", "prorated_credit_cents": float64(1200), "currency": "USD"}},
 		{"aud_trial_end_cancel", domain.AuditActionCancel, "system", "", map[string]any{
@@ -129,7 +129,7 @@ func TestActivityLines_SubscriptionWire(t *testing.T) {
 	cases := map[string]want{
 		"aud_created":    {title: "Subscription created", status: "neutral", actor: "api_key/billing-sync"},
 		"aud_extended":   {title: "Trial extended", status: "neutral", detail: "Trial now ends", detailTS: trialEnd.Format(time.RFC3339), actor: "person/alice@example.com"},
-		"aud_thresholds": {title: "Spend thresholds set", status: "neutral", detail: "$500.00 total · 2 item thresholds", actor: "api_key/billing-sync"},
+		"aud_thresholds": {title: "Spend thresholds set", status: "neutral", detail: "$500.00 usage total · 2 item thresholds", actor: "api_key/billing-sync"},
 		"aud_cancel_sched": {title: "Cancellation scheduled", status: "neutral", detail: "At the end of the current period",
 			detailTS: periodEnd.Format(time.RFC3339), actor: "person/alice@example.com"},
 		"aud_trial_ran_out":       {title: "Trial ended", status: "neutral", detail: "Subscription is now active", actor: "automatic/"},

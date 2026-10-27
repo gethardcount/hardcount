@@ -12,6 +12,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 type memStore struct {
@@ -106,7 +107,7 @@ func (m *memStore) TouchLastUsed(_ context.Context, id string, usedAt time.Time)
 
 func TestCreateKey_Secret(t *testing.T) {
 	svc := NewService(newMemStore())
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	result, err := svc.CreateKey(ctx, "tenant1", CreateKeyInput{
 		Name:    "Backend Key",
@@ -149,7 +150,7 @@ func TestCreateKey_Secret(t *testing.T) {
 func TestCreateKey_Publishable(t *testing.T) {
 	svc := NewService(newMemStore())
 
-	result, err := svc.CreateKey(context.Background(), "tenant1", CreateKeyInput{
+	result, err := svc.CreateKey(postgres.WithLivemode(context.Background(), true), "tenant1", CreateKeyInput{
 		Name:    "Frontend Key",
 		KeyType: KeyTypePublishable,
 	})
@@ -169,7 +170,7 @@ func TestCreateKey_Platform(t *testing.T) {
 
 	// Platform keys may only be minted by an existing platform principal, so
 	// the caller ctx must carry KeyTypePlatform.
-	ctx := WithKeyType(context.Background(), KeyTypePlatform)
+	ctx := WithKeyType(postgres.WithLivemode(context.Background(), true), KeyTypePlatform)
 	result, err := svc.CreateKey(ctx, "tenant1", CreateKeyInput{
 		Name:    "Platform Key",
 		KeyType: KeyTypePlatform,
@@ -218,7 +219,7 @@ func TestCreateKey_Platform_RejectedForNonPlatformCaller(t *testing.T) {
 func TestCreateKey_DefaultsToSecret(t *testing.T) {
 	svc := NewService(newMemStore())
 
-	result, _ := svc.CreateKey(context.Background(), "t1", CreateKeyInput{Name: "Default"})
+	result, _ := svc.CreateKey(postgres.WithLivemode(context.Background(), true), "t1", CreateKeyInput{Name: "Default"})
 	if result.Key.KeyType != "secret" {
 		t.Errorf("default key_type: got %q, want secret", result.Key.KeyType)
 	}
@@ -249,7 +250,7 @@ func TestCreateKey_MissingName(t *testing.T) {
 // (Stripe rejects past expiry on credentials).
 func TestCreateKey_PastExpiresAt(t *testing.T) {
 	svc := NewService(newMemStore())
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	t.Run("past expires_at rejected", func(t *testing.T) {
 		past := time.Now().Add(-24 * time.Hour)
@@ -297,7 +298,7 @@ func TestCreateKey_PastExpiresAt(t *testing.T) {
 
 func TestValidateKey_AllTypes(t *testing.T) {
 	svc := NewService(newMemStore())
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	// A platform principal may mint any key type; use it so the platform
 	// iteration passes the privileged-mint guard (secret/publishable are
@@ -344,7 +345,7 @@ func TestValidateKey_InvalidFormat(t *testing.T) {
 
 func TestValidateKey_WrongSecret(t *testing.T) {
 	svc := NewService(newMemStore())
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	result, _ := svc.CreateKey(ctx, "t1", CreateKeyInput{Name: "Real", KeyType: KeyTypeSecret})
 
@@ -378,7 +379,7 @@ func TestValidateKey_Expired(t *testing.T) {
 
 func TestValidateKey_Revoked(t *testing.T) {
 	svc := NewService(newMemStore())
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	// Create a spare so the last-key safeguard doesn't refuse the revoke.
 	if _, err := svc.CreateKey(ctx, "t1", CreateKeyInput{Name: "Spare", KeyType: KeyTypeSecret}); err != nil {
@@ -397,7 +398,7 @@ func TestValidateKey_Revoked(t *testing.T) {
 
 func TestCreateKey_TestModeFromCtx(t *testing.T) {
 	svc := NewService(newMemStore())
-	ctx := WithLivemode(context.Background(), false)
+	ctx := postgres.WithLivemode(context.Background(), false)
 
 	result, err := svc.CreateKey(ctx, "t1", CreateKeyInput{Name: "Sandbox", KeyType: KeyTypeSecret})
 	if err != nil {
@@ -453,7 +454,7 @@ func TestValidateKey_LegacyFormat(t *testing.T) {
 
 func TestRevokeKey_WrongTenant(t *testing.T) {
 	svc := NewService(newMemStore())
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	result, _ := svc.CreateKey(ctx, "t1", CreateKeyInput{Name: "Test", KeyType: KeyTypeSecret})
 	_, err := svc.RevokeKey(ctx, "wrong_tenant", result.Key.ID)
@@ -467,7 +468,7 @@ func TestRevokeKey_WrongTenant(t *testing.T) {
 // new key inherits the old's type/name/livemode/expires_at.
 func TestRotateKey_ImmediateRevoke(t *testing.T) {
 	svc := NewService(newMemStore())
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	expiry := time.Now().UTC().Add(90 * 24 * time.Hour)
 	original, err := svc.CreateKey(ctx, "t1", CreateKeyInput{
@@ -526,7 +527,7 @@ func TestRotateKey_ImmediateRevoke(t *testing.T) {
 // and both can authenticate concurrently within the window.
 func TestRotateKey_WithGracePeriod(t *testing.T) {
 	svc := NewService(newMemStore())
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	original, _ := svc.CreateKey(ctx, "t1", CreateKeyInput{Name: "App", KeyType: KeyTypeSecret})
 
@@ -557,7 +558,7 @@ func TestRotateKey_WithGracePeriod(t *testing.T) {
 
 func TestRotateKey_RejectsNegativeGrace(t *testing.T) {
 	svc := NewService(newMemStore())
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	result, _ := svc.CreateKey(ctx, "t1", CreateKeyInput{Name: "K", KeyType: KeyTypeSecret})
 
@@ -569,7 +570,7 @@ func TestRotateKey_RejectsNegativeGrace(t *testing.T) {
 
 func TestRotateKey_RejectsExcessiveGrace(t *testing.T) {
 	svc := NewService(newMemStore())
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	result, _ := svc.CreateKey(ctx, "t1", CreateKeyInput{Name: "K", KeyType: KeyTypeSecret})
 
@@ -581,7 +582,7 @@ func TestRotateKey_RejectsExcessiveGrace(t *testing.T) {
 
 func TestRotateKey_RejectsAlreadyRevoked(t *testing.T) {
 	svc := NewService(newMemStore())
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	// Spare so the last-key safeguard allows the revoke below.
 	if _, err := svc.CreateKey(ctx, "t1", CreateKeyInput{Name: "Spare", KeyType: KeyTypeSecret}); err != nil {
@@ -600,7 +601,7 @@ func TestRotateKey_RejectsAlreadyRevoked(t *testing.T) {
 
 func TestRotateKey_WrongTenant(t *testing.T) {
 	svc := NewService(newMemStore())
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	result, _ := svc.CreateKey(ctx, "t1", CreateKeyInput{Name: "K", KeyType: KeyTypeSecret})
 
@@ -618,14 +619,14 @@ func TestRotateKey_WrongTenant(t *testing.T) {
 func TestRotateKey_PreservesTestmode(t *testing.T) {
 	svc := NewService(newMemStore())
 
-	testCtx := WithLivemode(context.Background(), false)
+	testCtx := postgres.WithLivemode(context.Background(), false)
 	original, _ := svc.CreateKey(testCtx, "t1", CreateKeyInput{Name: "Sandbox", KeyType: KeyTypeSecret})
 	if original.Key.Livemode {
 		t.Fatal("seed should be test-mode")
 	}
 
 	// Caller context is LIVE here — the mismatch is intentional.
-	liveCtx := context.Background()
+	liveCtx := postgres.WithLivemode(context.Background(), true)
 	rotated, err := svc.RotateKey(liveCtx, "t1", original.Key.ID, RotateKeyInput{})
 	if err != nil {
 		t.Fatalf("rotate: %v", err)

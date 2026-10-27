@@ -65,7 +65,7 @@ func TestMRRQueries_RemoveAware_CurrencyScoped_AddRemoveMovement(t *testing.T) {
 		p, err := pstore.CreatePlan(ctx, tenantID, domain.Plan{
 			Code: code, Name: code, Currency: currency,
 			BillingInterval: domain.BillingMonthly, Status: domain.PlanActive,
-			BaseAmountCents: cents, MeterIDs: []string{},
+			BaseAmountCents: cents,
 		})
 		if err != nil {
 			t.Fatalf("create plan %s: %v", code, err)

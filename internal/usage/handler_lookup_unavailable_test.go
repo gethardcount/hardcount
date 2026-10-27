@@ -30,7 +30,7 @@ func (s *stubCustomers) GetByExternalID(_ context.Context, _, externalID string)
 
 type stubMeters struct{ err error }
 
-func (s *stubMeters) GetMeterByKey(_ context.Context, _, key string) (domain.Meter, error) {
+func (s *stubMeters) GetMeterByEventName(_ context.Context, _, key string) (domain.Meter, error) {
 	if s.err != nil {
 		return domain.Meter{}, s.err
 	}

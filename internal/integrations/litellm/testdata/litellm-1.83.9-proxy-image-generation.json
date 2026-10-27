@@ -1,0 +1,156 @@
+[
+  {
+    "api_base": "",
+    "cache_hit": null,
+    "cache_key": null,
+    "call_type": "aimage_generation",
+    "completionStartTime": 1792686050.195944,
+    "completion_tokens": 4160,
+    "cost_breakdown": null,
+    "custom_llm_provider": "openai",
+    "endTime": 1792686050.195944,
+    "end_user": "cus_f10-image-generation",
+    "error_information": {
+      "error_class": "",
+      "error_code": "",
+      "error_message": "",
+      "llm_provider": "",
+      "traceback": ""
+    },
+    "error_str": null,
+    "guardrail_information": null,
+    "hidden_params": {
+      "additional_headers": {
+        "x-litellm-attempted-fallbacks": 0,
+        "x-litellm-attempted-retries": 0,
+        "x-litellm-model-group": "gpt-image-1"
+      },
+      "api_base": "http://127.0.0.1:18101/v1",
+      "batch_models": null,
+      "cache_key": null,
+      "litellm_model_name": "openai/gpt-image-1",
+      "litellm_overhead_time_ms": null,
+      "model_id": "11e18d301507947909f6c92a43bd3d1729260306d261ae06812f55bf678a5783",
+      "response_cost": 0.16665000000000002,
+      "usage_object": null
+    },
+    "id": "37a2356c-c7b8-4c56-bd82-16d52f261a93",
+    "messages": [
+      {
+        "content": "a cat",
+        "role": "user"
+      }
+    ],
+    "metadata": {
+      "applied_guardrails": [],
+      "cold_storage_object_key": null,
+      "mcp_tool_call_metadata": null,
+      "prompt_management_metadata": null,
+      "requester_custom_headers": {
+        "x-litellm-customer-id": "cus_f10-image-generation"
+      },
+      "requester_ip_address": "127.0.0.1",
+      "requester_metadata": {
+        "headers": {
+          "accept-encoding": "identity",
+          "connection": "close",
+          "content-length": "43",
+          "content-type": "application/json",
+          "host": "127.0.0.1:18100",
+          "user-agent": "Python-urllib/3.13",
+          "x-litellm-customer-id": "cus_f10-image-generation"
+        }
+      },
+      "spend_logs_metadata": null,
+      "team_alias": null,
+      "team_id": null,
+      "usage_object": {
+        "completion_tokens": 4160,
+        "completion_tokens_details": null,
+        "prompt_tokens": 50,
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 0,
+          "image_tokens": 0,
+          "text_tokens": 50,
+          "video_tokens": null
+        },
+        "total_tokens": 4210
+      },
+      "user_agent": "Python-urllib/3.13",
+      "user_api_key_alias": null,
+      "user_api_key_auth_metadata": {},
+      "user_api_key_budget_reset_at": null,
+      "user_api_key_end_user_id": "cus_f10-image-generation",
+      "user_api_key_hash": "40bf555e953071ec7126ecc8f134488be77bdc785fad7aa4fb884807c9ac4ed6",
+      "user_api_key_max_budget": null,
+      "user_api_key_org_alias": null,
+      "user_api_key_org_id": null,
+      "user_api_key_project_alias": null,
+      "user_api_key_project_id": null,
+      "user_api_key_request_route": "/v1/images/generations",
+      "user_api_key_spend": 0.0,
+      "user_api_key_team_alias": null,
+      "user_api_key_team_id": null,
+      "user_api_key_user_email": null,
+      "user_api_key_user_id": "default_user_id",
+      "vector_store_request_metadata": null
+    },
+    "model": "openai/gpt-image-1",
+    "model_group": "gpt-image-1",
+    "model_id": "11e18d301507947909f6c92a43bd3d1729260306d261ae06812f55bf678a5783",
+    "model_map_information": {
+      "model_map_key": "",
+      "model_map_value": null
+    },
+    "model_parameters": {},
+    "prompt_tokens": 50,
+    "request_tags": [
+      "User-Agent: Python-urllib",
+      "User-Agent: Python-urllib/3.13"
+    ],
+    "requester_ip_address": "127.0.0.1",
+    "response": {
+      "background": null,
+      "created": 1792686050,
+      "data": [
+        {
+          "b64_json": "aGVsbG8=",
+          "revised_prompt": null,
+          "url": null
+        }
+      ],
+      "output_format": null,
+      "quality": null,
+      "size": null,
+      "usage": {
+        "input_tokens": 50,
+        "input_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 50
+        },
+        "output_tokens": 4160,
+        "output_tokens_details": null,
+        "total_tokens": 4210
+      }
+    },
+    "response_cost": 0.16665000000000002,
+    "response_cost_failure_debug_info": null,
+    "response_time": 0.35869503021240234,
+    "saved_cache_cost": 0.0,
+    "standard_built_in_tools_params": {
+      "file_search": null,
+      "web_search_options": null
+    },
+    "startTime": 1792686049.837249,
+    "status": "success",
+    "status_fields": {
+      "guardrail_status": "not_run",
+      "llm_api_status": "success"
+    },
+    "stream": null,
+    "total_tokens": 4210,
+    "trace_id": "eeafb04f-a790-480c-aa9f-cb5e28d5e237",
+    "user_agent": "Python-urllib/3.13"
+  }
+]

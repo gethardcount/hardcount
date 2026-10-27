@@ -9,6 +9,6 @@
  */
 
 /**
- * Scalar dimension values used to pick the pricing rule.
+ * Scalar labels of the event. A price takes an event whose labels include the price's `dimension_match`.
  */
 export type BackfillUsageEventBodyDimensions = { [key: string]: unknown };

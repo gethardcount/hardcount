@@ -24,14 +24,24 @@ export interface TenantSettingsInput {
      */
   invoice_prefix?: string;
   /**
+     * Starts every credit note number, such as `CN-000001`. A change
+     * applies to new credit notes only. Issued notes keep their
+     * numbers. It must differ from `invoice_prefix`, or an invoice and
+     * a credit note would get the same number.
+     * @pattern ^[A-Za-z0-9-]{1,20}$
+     */
+  credit_note_prefix?: string;
+  /**
      * Days until an invoice is due. 0 means due on issue.
      * @minimum 0
      * @maximum 365
      */
   net_payment_terms?: number;
   /**
-     * When a customer's credit balance drops below this amount, the
-     * `credit.balance_low` webhook fires. null turns it off.
+     * When a customer's credit in one currency drops below this
+     * amount, in that currency's minor units, the `credit.balance_low`
+     * webhook fires: 1000 means $10.00 of USD credit and €10.00 of EUR
+     * credit. null turns it off.
      * @minimum 1
      * @nullable
      */

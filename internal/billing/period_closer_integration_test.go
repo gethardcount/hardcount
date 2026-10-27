@@ -15,8 +15,6 @@ import (
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
-	"github.com/sagarsuperuser/velox/internal/platform/leader"
-	"github.com/sagarsuperuser/velox/internal/platform/leader/leadertest"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/pricing"
 	"github.com/sagarsuperuser/velox/internal/subscription"
@@ -78,7 +76,7 @@ type s1Rig struct {
 	closer *periodWriter
 }
 
-func newS1Rig(t *testing.T, name string, amountGTE int64, reset bool) *s1Rig {
+func newS1Rig(t *testing.T, name string, amountGTE int64) *s1Rig {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("integration: skipped in -short mode")
@@ -88,7 +86,7 @@ func newS1Rig(t *testing.T, name string, amountGTE int64, reset bool) *s1Rig {
 	t.Cleanup(cancel)
 	f.ingestUsage(t, ctx, 100, 10)
 	if _, err := f.subSvc.SetBillingThresholds(ctx, f.tenantID, f.subID, subscription.BillingThresholdsInput{
-		AmountGTE: amountGTE, ResetBillingCycle: &reset,
+		AmountGTE: amountGTE,
 	}); err != nil {
 		t.Fatalf("set threshold: %v", err)
 	}
@@ -200,61 +198,20 @@ func assertUsageBilledOnce(t *testing.T, ctx context.Context) {
 }
 
 // ---------------------------------------------------------------------------
-// T2 — S1-A / S2: operator close commits while a reset=true fire is in flight.
-// ---------------------------------------------------------------------------
-
-// TestThresholdFire_vs_OperatorClose_CloseFirst_ResetTrue: the leader's
-// threshold-reset fire has read its page, evaluated and taxed; before its tx
-// opens, an operator POST /v1/billing/run closes the period. The fire's CAS
-// (expected next = P1) finds P2 → 0 rows → nothing written, no rewind. Both
-// writers hold the SAME live billing lease: the lease is not what closes this
-// (ADR-114 §97 keeps the operator path unfenced); the row CAS is.
-//
-// Mutation-verify: make ClosePeriodTx's WHERE id-only (each predicate `OR
-// TRUE`) → the fire re-anchors after the close and T lands beside I1.
-func TestThresholdFire_vs_OperatorClose_CloseFirst_ResetTrue(t *testing.T) {
-	r := newS1Rig(t, "S1 close-first reset", 200, true)
-	r.base = leadertest.Token(t, testutil.AdminPool(t), r.base, leader.RoleBilling)
-
-	var closeGen int
-	r.fire.subs.beforeTx = func() {
-		r.fire.subs.beforeTx = nil
-		closeGen = r.runClose(t)
-	}
-	if fired := r.runFire(t); fired != 0 {
-		t.Fatalf("fire reported %d after losing the CAS, want 0", fired)
-	}
-	if closeGen != 1 {
-		t.Fatalf("operator close generated %d, want 1", closeGen)
-	}
-
-	cycle, threshold, other := r.liveInvoices(t)
-	if len(cycle) != 1 || len(threshold) != 0 || len(other) != 0 {
-		t.Fatalf("invoices: cycle=%d threshold=%d other=%d, want exactly one cycle invoice", len(cycle), len(threshold), len(other))
-	}
-	if !cycle[0].BillingPeriodStart.Equal(r.f.cycleStart) || !cycle[0].BillingPeriodEnd.Equal(r.f.cycleEnd) {
-		t.Fatalf("cycle invoice period [%v, %v), want [%v, %v)", cycle[0].BillingPeriodStart, cycle[0].BillingPeriodEnd, r.f.cycleStart, r.f.cycleEnd)
-	}
-	if cycle[0].SubtotalCents != 1000 {
-		t.Fatalf("cycle invoice subtotal = %d, want 1000 (every usage instant once)", cycle[0].SubtotalCents)
-	}
-	r.assertPeriod(t, r.f.cycleEnd, nil) // [P1, P2): the close's advance stands
-	assertUsageBilledOnce(t, r.base)
-}
-
-// ---------------------------------------------------------------------------
 // T2b — barrier form: both writers finish pre-tx work, then race for real.
 // ---------------------------------------------------------------------------
 
-// TestCloseVsThresholdFire_BothOrders_BillsUsageOnce races the reset=true fire
-// and the operator close from a rendezvous inside both WithTenantTx wrappers,
-// 20 iterations on fresh fixtures, with a per-iteration bias so BOTH lock
-// orders are observed. Whoever takes the row lock second loses its CAS: one
-// invoice, no usage instant billed twice, next_billing_at == period end.
+// TestCloseVsThresholdFire_BothOrders_BillsUsageOnce races the fire and the
+// operator close from a rendezvous inside both WithTenantTx wrappers, 20
+// iterations on fresh fixtures, with a per-iteration bias so BOTH lock orders
+// are observed. Close first: the fire's verify-only CAS loses and the close's
+// one invoice bills all 1000c. Fire first: the fire bills [P0, t1) (300c),
+// the close's CAS passes (the period did not move), its in-tx watermark
+// re-read sees the fire, and its retry bills [t1, P1) (700c). Either way no
+// usage instant is billed twice and the period ends at [P1, P2).
 //
 // Mutation-verify: WHERE id-only CAS → in the close-first order the fire
-// re-anchors after the close and bills [P0, t1) again (two invoices, doctor
-// overlap).
+// lands after the close and bills [P0, t1) again (doctor overlap).
 func TestCloseVsThresholdFire_BothOrders_BillsUsageOnce(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration: skipped in -short mode")
@@ -262,17 +219,22 @@ func TestCloseVsThresholdFire_BothOrders_BillsUsageOnce(t *testing.T) {
 	const iterations = 20
 	var fireWon, closeWon int
 	for i := range iterations {
-		r := newS1Rig(t, fmt.Sprintf("S1 barrier %d", i), 200, true)
+		r := newS1Rig(t, fmt.Sprintf("S1 barrier %d", i), 200)
 
 		var arrive sync.WaitGroup
 		arrive.Add(2)
+		// Once per writer: when the fire wins, the close's re-plan opens a
+		// second transaction, which must not rendezvous again.
 		rendezvous := func(delay bool) func() {
+			var once sync.Once
 			return func() {
-				arrive.Done()
-				arrive.Wait() // both writers are past their reads, tax and line build
-				if delay {
-					time.Sleep(3 * time.Millisecond) // bias the lock order this iteration
-				}
+				once.Do(func() {
+					arrive.Done()
+					arrive.Wait() // both writers are past their reads, tax and line build
+					if delay {
+						time.Sleep(3 * time.Millisecond) // bias the lock order this iteration
+					}
+				})
 			}
 		}
 		r.fire.subs.beforeTx = rendezvous(i%2 == 0)
@@ -287,24 +249,22 @@ func TestCloseVsThresholdFire_BothOrders_BillsUsageOnce(t *testing.T) {
 		cycle, threshold, other := r.liveInvoices(t)
 		total := len(cycle) + len(threshold) + len(other)
 		switch {
-		case fired == 1 && closeGen == 0 && len(threshold) == 1 && total == 1:
+		case fired == 1 && closeGen == 1 && len(threshold) == 1 && len(cycle) == 1 && total == 2:
 			fireWon++
-			// The reset re-anchored to [t1, t1+1mo): the close re-read and was caught up.
-			r.assertPeriod(t, r.t1, nil)
 		case fired == 0 && closeGen == 1 && len(cycle) == 1 && total == 1:
 			closeWon++
-			r.assertPeriod(t, r.f.cycleEnd, nil)
 		default:
-			t.Fatalf("iteration %d: fired=%d closeGen=%d cycle=%d threshold=%d other=%d — want exactly one writer, one invoice", i, fired, closeGen, len(cycle), len(threshold), len(other))
+			t.Fatalf("iteration %d: fired=%d closeGen=%d cycle=%d threshold=%d other=%d — want the close's invoice, plus the fire's when the fire took the lock first", i, fired, closeGen, len(cycle), len(threshold), len(other))
 		}
+		r.assertPeriod(t, r.f.cycleEnd, nil)
 		var usageCents int64
 		for _, inv := range append(cycle, threshold...) {
 			for _, li := range r.usageLines(t, inv.ID) {
 				usageCents += li.AmountCents
 			}
 		}
-		if usageCents != 1000 && usageCents != 300 {
-			t.Fatalf("iteration %d: usage billed = %dc, want 1000 (close won) or 300 (fire won: [P0,t1) only)", i, usageCents)
+		if usageCents != 1000 {
+			t.Fatalf("iteration %d: usage billed = %dc, want 1000 (every usage instant once)", i, usageCents)
 		}
 		assertUsageBilledOnce(t, r.base)
 	}
@@ -315,51 +275,11 @@ func TestCloseVsThresholdFire_BothOrders_BillsUsageOnce(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// T3 — S1-B: reset=true fire commits while the close is in flight.
+// T4a — S1-C: the fire commits while the close is in flight.
 // ---------------------------------------------------------------------------
 
-// TestThresholdFire_vs_Close_FireFirst_ResetTrue: the close has read the sub
-// and built [P0, P1) from the full usage; before its tx opens, the reset=true
-// fire commits T [P0, t1) and re-anchors to [t1, t1+1mo). The close's CAS
-// (expected next = P1) finds t1+1mo → nothing written; the retry re-reads,
-// is caught up, and RunCycleForTenant reports 0 with no error. The pre-fix
-// shape committed I1 for [P0, P1) beside T and then rewound the watermark.
-//
-// Mutation-verify: this schedule is caught by BOTH the CAS and the in-tx
-// watermark re-read, so a single guard removed is not enough — WHERE id-only
-// CAS + `sameInstant(...) || true` together → I1 lands beside T.
-func TestThresholdFire_vs_Close_FireFirst_ResetTrue(t *testing.T) {
-	r := newS1Rig(t, "S1 fire-first reset", 200, true)
-
-	var fired int
-	r.closer.subs.beforeTx = func() {
-		r.closer.subs.beforeTx = nil
-		fired = r.runFire(t)
-	}
-	if gen := r.runClose(t); gen != 0 {
-		t.Fatalf("close generated %d after the fire re-anchored, want 0", gen)
-	}
-	if fired != 1 {
-		t.Fatalf("fire reported %d, want 1", fired)
-	}
-
-	cycle, threshold, other := r.liveInvoices(t)
-	if len(threshold) != 1 || len(cycle) != 0 || len(other) != 0 {
-		t.Fatalf("invoices: cycle=%d threshold=%d other=%d, want only the threshold invoice", len(cycle), len(threshold), len(other))
-	}
-	if threshold[0].SubtotalCents != 300 || !threshold[0].BillingPeriodEnd.Equal(r.t1) {
-		t.Fatalf("threshold invoice = %dc through %v, want 300c through %v", threshold[0].SubtotalCents, threshold[0].BillingPeriodEnd, r.t1)
-	}
-	r.assertPeriod(t, r.t1, nil) // [t1, t1+1mo): the fire's re-anchor stands
-	assertUsageBilledOnce(t, r.base)
-}
-
-// ---------------------------------------------------------------------------
-// T4a — S1-C: reset=false fire commits while the close is in flight.
-// ---------------------------------------------------------------------------
-
-// TestThresholdFire_vs_Close_ResetFalse_FireFirst: the reset=false fire does
-// NOT move the period, so the close's CAS passes — the in-tx watermark
+// TestThresholdFire_vs_Close_ResetFalse_FireFirst: the fire does NOT move
+// the period, so the close's CAS passes — the in-tx watermark
 // re-read is what catches it: the close built its lines against "no fire",
 // the tx now sees T through t1, so it rolls back; the retry rebuilds with the
 // watermark and bills only the residual [t1, P1).
@@ -368,7 +288,7 @@ func TestThresholdFire_vs_Close_FireFirst_ResetTrue(t *testing.T) {
 // commitPeriodClose → the close commits its full-period lines: the usage
 // line starts at P0 and 1300c is billed for 1000c of usage.
 func TestThresholdFire_vs_Close_ResetFalse_FireFirst(t *testing.T) {
-	r := newS1Rig(t, "S1 fire-first keep-anchor", 200, false)
+	r := newS1Rig(t, "S1 fire-first keep-anchor", 200)
 
 	r.closer.subs.beforeTx = func() {
 		r.closer.subs.beforeTx = nil
@@ -399,19 +319,19 @@ func TestThresholdFire_vs_Close_ResetFalse_FireFirst(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// T4b — S1-C, close first: the verify-only CAS of a reset=false fire.
+// T4b — S1-C, close first: the verify-only CAS of the fire.
 // ---------------------------------------------------------------------------
 
-// TestThresholdFire_vs_Close_ResetFalse_CloseFirst: the reset=false fire
-// writes the row verify-only (same values) — that UPDATE is what takes the
-// lock and proves the snapshot. The operator close commits first; the fire's
-// verify-only CAS finds next = P2 → nothing written. Pre-fix the reset=false
-// arm never touched the row and T [P0, t1) landed after I1 [P0, P1).
+// TestThresholdFire_vs_Close_ResetFalse_CloseFirst: the fire writes the row
+// verify-only (same values) — that UPDATE is what takes the lock and proves
+// the snapshot. The operator close commits first; the fire's verify-only CAS
+// finds next = P2 → nothing written. Pre-fix the fire never touched the row
+// and T [P0, t1) landed after I1 [P0, P1).
 //
 // Mutation-verify: ignore the verify-only CAS result in fireThreshold
 // (`err != nil && false`) → T lands after I1.
 func TestThresholdFire_vs_Close_ResetFalse_CloseFirst(t *testing.T) {
-	r := newS1Rig(t, "S1 close-first keep-anchor", 200, false)
+	r := newS1Rig(t, "S1 close-first keep-anchor", 200)
 
 	r.fire.subs.beforeTx = func() {
 		r.fire.subs.beforeTx = nil
@@ -442,54 +362,48 @@ func TestThresholdFire_vs_Close_ResetFalse_CloseFirst(t *testing.T) {
 // X-locks the row from its first statement; the fire's CAS blocks behind it,
 // then re-evaluates against the committed row (status=canceled) → 0 rows. The
 // final-on-cancel invoice F bills [P0, tc); no T; the canceled sub keeps its
-// ORIGINAL period (a reset=true fire used to re-anchor a canceled sub, a
-// reset=false fire used to land T beside F).
+// ORIGINAL period (the fire used to land T beside F).
 //
-// Mutation-verify: `status = $7 OR TRUE` → reset=true re-anchors the
-// canceled sub; reset=false lands T on F.
+// Mutation-verify: `status = $7 OR TRUE` → T lands on F.
 func TestImmediateCancel_vs_ThresholdFire_Concurrent(t *testing.T) {
-	for _, reset := range []bool{true, false} {
-		t.Run(fmt.Sprintf("reset=%v", reset), func(t *testing.T) {
-			r := newS1Rig(t, fmt.Sprintf("S1 cancel-vs-fire reset=%v", reset), 200, reset)
-			admin := testutil.AdminPool(t)
+	r := newS1Rig(t, "S1 cancel-vs-fire", 200)
+	admin := testutil.AdminPool(t)
 
-			type fireOut struct {
-				fired int
-				errs  []error
-			}
-			done := make(chan fireOut, 1)
-			ctxCancel := r.at(r.tc)
-			if _, err := r.f.subStore.CancelAtomicWithBill(ctxCancel, r.f.tenantID, r.f.subID, func(tx *sql.Tx, canceled domain.Subscription) error {
-				go func() {
-					fired, errs := r.fire.engine.ScanThresholds(r.at(r.t1), 50)
-					done <- fireOut{fired, errs}
-				}()
-				// The fire's CAS blocked behind the cancel's row lock.
-				testutil.WaitForLockWaiter(t, r.base, admin, "UPDATE subscriptions")
-				_, _, err := r.closer.engine.BillFinalOnImmediateCancelTx(ctxCancel, tx, canceled)
-				return err
-			}); err != nil {
-				t.Fatalf("cancel: %v", err)
-			}
-			out := <-done
-			if out.fired != 0 || len(out.errs) != 0 {
-				t.Fatalf("fire after the cancel committed: fired=%d errs=%v, want 0 and no error", out.fired, out.errs)
-			}
-
-			cycle, threshold, other := r.liveInvoices(t)
-			if len(other) != 1 || other[0].BillingReason != domain.BillingReasonSubscriptionCancel || len(threshold) != 0 || len(cycle) != 0 {
-				t.Fatalf("invoices: cycle=%d threshold=%d other=%d (%v), want only the final-on-cancel invoice", len(cycle), len(threshold), len(other), other)
-			}
-			if other[0].SubtotalCents != 400 {
-				t.Fatalf("final invoice = %dc, want 400 (usage before the cancel instant)", other[0].SubtotalCents)
-			}
-			sub := r.sub(t)
-			if sub.Status != domain.SubscriptionCanceled || !sub.CurrentBillingPeriodStart.Equal(r.f.cycleStart) || sub.NextBillingAt == nil || !sub.NextBillingAt.Equal(r.f.cycleEnd) {
-				t.Fatalf("canceled sub period must be untouched: status=%s [%v, next %v)", sub.Status, sub.CurrentBillingPeriodStart, sub.NextBillingAt)
-			}
-			assertUsageBilledOnce(t, r.base)
-		})
+	type fireOut struct {
+		fired int
+		errs  []error
 	}
+	done := make(chan fireOut, 1)
+	ctxCancel := r.at(r.tc)
+	if _, err := r.f.subStore.CancelAtomicWithBill(ctxCancel, r.f.tenantID, r.f.subID, func(tx *sql.Tx, canceled domain.Subscription) error {
+		go func() {
+			fired, errs := r.fire.engine.ScanThresholds(r.at(r.t1), 50)
+			done <- fireOut{fired, errs}
+		}()
+		// The fire's CAS blocked behind the cancel's row lock.
+		testutil.WaitForLockWaiter(t, r.base, admin, "UPDATE subscriptions")
+		_, _, err := r.closer.engine.BillFinalOnImmediateCancelTx(ctxCancel, tx, canceled)
+		return err
+	}); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	out := <-done
+	if out.fired != 0 || len(out.errs) != 0 {
+		t.Fatalf("fire after the cancel committed: fired=%d errs=%v, want 0 and no error", out.fired, out.errs)
+	}
+
+	cycle, threshold, other := r.liveInvoices(t)
+	if len(other) != 1 || other[0].BillingReason != domain.BillingReasonSubscriptionCancel || len(threshold) != 0 || len(cycle) != 0 {
+		t.Fatalf("invoices: cycle=%d threshold=%d other=%d (%v), want only the final-on-cancel invoice", len(cycle), len(threshold), len(other), other)
+	}
+	if other[0].SubtotalCents != 400 {
+		t.Fatalf("final invoice = %dc, want 400 (usage before the cancel instant)", other[0].SubtotalCents)
+	}
+	sub := r.sub(t)
+	if sub.Status != domain.SubscriptionCanceled || !sub.CurrentBillingPeriodStart.Equal(r.f.cycleStart) || sub.NextBillingAt == nil || !sub.NextBillingAt.Equal(r.f.cycleEnd) {
+		t.Fatalf("canceled sub period must be untouched: status=%s [%v, next %v)", sub.Status, sub.CurrentBillingPeriodStart, sub.NextBillingAt)
+	}
+	assertUsageBilledOnce(t, r.base)
 }
 
 // ---------------------------------------------------------------------------
@@ -535,10 +449,10 @@ func newSwapRig(t *testing.T, r *s1Rig) *swapRig {
 	if err != nil {
 		t.Fatalf("get plan: %v", err)
 	}
-	newPlan, err := r.f.pricingSvc.CreatePlan(r.base, r.f.tenantID, pricing.CreatePlanInput{
+	newPlan, _, err := r.f.pricingSvc.CreatePlan(r.base, r.f.tenantID, pricing.CreatePlanInput{
 		Code: "pln_thresh_yearly", Name: "Threshold Plan Yearly",
 		Currency: "USD", BillingInterval: domain.BillingYearly,
-		BaseAmountCents: 0, MeterIDs: []string{r.f.meterID},
+		BaseAmountCents: 0, Prices: []pricing.PriceInput{{MeterID: r.f.meterID, PriceShape: perUnitShape("1")}},
 	})
 	if err != nil {
 		t.Fatalf("create yearly plan: %v", err)
@@ -576,16 +490,16 @@ func (s *swapRig) swap(t *testing.T, r *s1Rig, at time.Time) error {
 // plan is the monthly one the sub now runs on.
 func newInAdvanceSwapRig(t *testing.T, r *s1Rig) (*swapRig, domain.Plan) {
 	t.Helper()
-	advMonthly, err := r.f.pricingSvc.CreatePlan(r.base, r.f.tenantID, pricing.CreatePlanInput{
+	advMonthly, _, err := r.f.pricingSvc.CreatePlan(r.base, r.f.tenantID, pricing.CreatePlanInput{
 		Code: "pln_adv_m", Name: "Adv Monthly", Currency: "USD", BillingInterval: domain.BillingMonthly,
-		BaseAmountCents: 1000, BaseBillTiming: domain.BillInAdvance, MeterIDs: []string{r.f.meterID},
+		BaseAmountCents: 1000, BaseBillTiming: domain.BillInAdvance, Prices: []pricing.PriceInput{{MeterID: r.f.meterID, PriceShape: perUnitShape("1")}},
 	})
 	if err != nil {
 		t.Fatalf("create in_advance monthly: %v", err)
 	}
-	advYearly, err := r.f.pricingSvc.CreatePlan(r.base, r.f.tenantID, pricing.CreatePlanInput{
+	advYearly, _, err := r.f.pricingSvc.CreatePlan(r.base, r.f.tenantID, pricing.CreatePlanInput{
 		Code: "pln_adv_y", Name: "Adv Yearly", Currency: "USD", BillingInterval: domain.BillingYearly,
-		BaseAmountCents: 10000, BaseBillTiming: domain.BillInAdvance, MeterIDs: []string{r.f.meterID},
+		BaseAmountCents: 10000, BaseBillTiming: domain.BillInAdvance, Prices: []pricing.PriceInput{{MeterID: r.f.meterID, PriceShape: perUnitShape("1")}},
 	})
 	if err != nil {
 		t.Fatalf("create in_advance yearly: %v", err)
@@ -642,7 +556,7 @@ func (r *s1Rig) itemPlan(t *testing.T) string {
 // the period below the close.
 func TestPlanSwap_StaleSnapshot_RejectedAfterClose(t *testing.T) {
 	t.Run("in_arrears: operator close wins, stale swap 409, retry succeeds", func(t *testing.T) {
-		r := newS1Rig(t, "S1 swap-after-close", 200, false)
+		r := newS1Rig(t, "S1 swap-after-close", 200)
 		sw := newSwapRig(t, r)
 		sw.plans.onSecond = func() {
 			if gen := r.runClose(t); gen != 1 {
@@ -673,7 +587,7 @@ func TestPlanSwap_StaleSnapshot_RejectedAfterClose(t *testing.T) {
 	})
 
 	t.Run("in_advance: operator close wins, stale swap 409", func(t *testing.T) {
-		r := newS1Rig(t, "S1 swap-after-close in_advance", 200, false)
+		r := newS1Rig(t, "S1 swap-after-close in_advance", 200)
 		sw, advMonthly := newInAdvanceSwapRig(t, r)
 
 		sw.plans.onSecond = func() {
@@ -692,29 +606,10 @@ func TestPlanSwap_StaleSnapshot_RejectedAfterClose(t *testing.T) {
 		r.assertPeriod(t, r.f.cycleEnd, nil)
 	})
 
-	t.Run("reset=true fire vs swap: the second committer is refused, both orders", func(t *testing.T) {
-		// Fire commits between the swap's read and its CAS → swap 409, the
-		// fire's re-anchor stands.
-		r := newS1Rig(t, "S1 fire-then-swap", 200, true)
-		sw := newSwapRig(t, r)
-		sw.plans.onSecond = func() {
-			if fired := r.runFire(t); fired != 1 {
-				t.Fatalf("fire reported %d, want 1", fired)
-			}
-		}
-		assertPeriodMoved409(t, sw.swap(t, r, r.f.cycleStart.Add(20*time.Minute)), "")
-		if got := r.itemPlan(t); got != r.f.planID {
-			t.Fatalf("item plan = %s after a refused swap, want unchanged", got)
-		}
-		_, threshold, _ := r.liveInvoices(t)
-		if len(threshold) != 1 {
-			t.Fatalf("threshold invoices = %d, want 1", len(threshold))
-		}
-		r.assertPeriod(t, r.t1, nil) // [t1, t1+1mo): the fire's re-anchor stands
-
-		// Swap commits between the fire's page read and its CAS → fire skipped,
-		// the swap's truncation stands.
-		r2 := newS1Rig(t, "S1 swap-then-fire", 200, true)
+	t.Run("swap commits between the fire's page read and its CAS: the fire is skipped", func(t *testing.T) {
+		// The swap's truncation stands. (A fire that commits first is the
+		// next case: the swap is refused when the fire billed past it.)
+		r2 := newS1Rig(t, "S1 swap-then-fire", 200)
 		sw2 := newSwapRig(t, r2)
 		swapAt := r2.f.cycleStart.Add(20 * time.Minute)
 		r2.fire.subs.beforeTx = func() {
@@ -732,7 +627,7 @@ func TestPlanSwap_StaleSnapshot_RejectedAfterClose(t *testing.T) {
 		r2.assertPeriod(t, r2.f.cycleStart, &swapAt) // [P0, swapAt): the truncation stands
 	})
 
-	t.Run("reset=false fire billed past the swap instant: swap refused, not silently moved", func(t *testing.T) {
+	t.Run("fire billed past the swap instant: swap refused, not silently moved", func(t *testing.T) {
 		// The fire (t1 = P0+30min) commits T [P0, t1) between the swap's read
 		// and its CAS; the swap's instant is P0+20min < t1. The period did not
 		// move, so the CAS passes — the watermark read under the row lock is
@@ -742,7 +637,7 @@ func TestPlanSwap_StaleSnapshot_RejectedAfterClose(t *testing.T) {
 		// Mutation-verify: `billedThrough.After(now) && false` in
 		// applyCrossIntervalPlanSwapTx → the swap commits and rewinds the period
 		// below the fire's window.
-		r := newS1Rig(t, "S1 fire-vs-swap residual", 200, false)
+		r := newS1Rig(t, "S1 fire-vs-swap residual", 200)
 		sw := newSwapRig(t, r)
 		sw.plans.onSecond = func() {
 			if fired := r.runFire(t); fired != 1 {
@@ -785,7 +680,7 @@ func TestPlanSwap_InAdvance_AfterResetFalseFire_BillsResidualOnce(t *testing.T) 
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			r := newS1Rig(t, "S1 fire-then-swap in_advance "+c.name, 200, false)
+			r := newS1Rig(t, "S1 fire-then-swap in_advance "+c.name, 200)
 			sw, _ := newInAdvanceSwapRig(t, r)
 			swapAt := r.f.cycleStart.Add(3 * time.Hour)
 			if c.concurrent {
@@ -852,7 +747,7 @@ func (f *failingTaxResolver) Resolve(ctx context.Context, ts domain.TenantSettin
 // fails. The whole swap rolls back: the plan, the period, no invoice, no
 // invoice number taken. The retry bills the old window's usage once.
 func TestPlanSwap_InAdvance_TaxFailureRollsBack_RetryBillsUsageOnce(t *testing.T) {
-	r := newS1Rig(t, "S1 swap tax failure in_advance", 1_000_000, false)
+	r := newS1Rig(t, "S1 swap tax failure in_advance", 1_000_000)
 	sw, advMonthly := newInAdvanceSwapRig(t, r)
 	taxes := &failingTaxResolver{fail: true, inner: tax.NewResolver(nil)}
 	r.closer.engine.SetTaxProviderResolver(taxes)
@@ -906,7 +801,7 @@ func TestPlanSwap_InAdvance_TaxFailureRollsBack_RetryBillsUsageOnce(t *testing.T
 // Mutation-verify: `status = $7 OR TRUE` → the period is unchanged by the
 // cancel, so the CAS passes and I1 [P0, P1) lands beside F.
 func TestImmediateCancel_vs_BoundaryClose_NoDoubleBill(t *testing.T) {
-	r := newS1Rig(t, "S1 cancel-vs-close", 200, false)
+	r := newS1Rig(t, "S1 cancel-vs-close", 200)
 
 	r.closer.subs.beforeTx = func() {
 		r.closer.subs.beforeTx = nil
@@ -966,7 +861,7 @@ func nextInvoiceSeq(t *testing.T, r *s1Rig) int {
 // `e.subs.ClosePeriodTx(ctx, tx, …)` inside commitPeriodClose) → the period
 // advances although the invoice failed.
 func TestCycleClose_InvoiceAndAdvance_ShareFate(t *testing.T) {
-	r := newS1Rig(t, "S1 close share-fate", 200, false)
+	r := newS1Rig(t, "S1 close share-fate", 200)
 	seqBefore := nextInvoiceSeq(t, r)
 
 	r.closer.invs.createTxErr = errors.New("injected: invoice insert failed inside the closer tx")
@@ -1039,70 +934,6 @@ func calendarize(t *testing.T, r *s1Rig, p0, p1 time.Time) {
 	subscriptiontest.SetBillingCycle(t, r.base, r.f.db, r.f.tenantID, r.f.subID, p0, p1, p1, 1)
 }
 
-// TestThresholdFire_vs_Close_FireFirst_ResetTrue_CalendarStartOnly: a
-// calendar-billed sub on [Jun 1, Jul 1); the close has read it and built its
-// lines; before its tx opens a reset=true fire at t1 = Jun 15 commits T
-// [Jun 1, t1) and re-anchors to [t1, Jul 1) — NextBillingPeriodEnd snaps back
-// to Jul 1, so ONLY current_billing_period_start moved and next_billing_at
-// still equals the close's snapshot (asserted: the premise). The close's CAS
-// misses on the start predicate; the retry re-reads [t1, Jul 1), which is
-// itself due at the close instant, and closes it: usage lands once, split
-// [Jun 1, t1) on T and [t1, Jul 1) on the residual cycle invoice, and no
-// invoice covers [Jun 1, Jul 1).
-//
-// Mutation-verify: this schedule is covered by BOTH the start predicate and
-// the in-tx threshold re-read (T sits in [Jun 1, Jul 1), so the re-read sees
-// it even when the CAS passes). Dropping ONLY `current_billing_period_start …
-// $8` stays green; `$8` + `sameInstant(...) || true` together → the close
-// commits I1 for [Jun 1, Jul 1) beside T. The schedule where `$8` alone is
-// load-bearing is the calendar plan swap below (no threshold invoice for the
-// re-read to see).
-func TestThresholdFire_vs_Close_FireFirst_ResetTrue_CalendarStartOnly(t *testing.T) {
-	r := newS1Rig(t, "S1 calendar start-only fire", 200, true)
-	p0 := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-	p1 := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
-	usageBase := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
-	r.t1 = usageBase.Add(30 * time.Minute) // 30 events (300c) before the fire, 70 (700c) after
-	r.close = p1.Add(time.Nanosecond)
-	calendarize(t, r, p0, p1)
-	ingestAt(t, r, usageBase, 100, 10)
-
-	var afterFire domain.Subscription
-	r.closer.subs.beforeTx = func() {
-		r.closer.subs.beforeTx = nil
-		if fired := r.runFire(t); fired != 1 {
-			t.Fatalf("fire reported %d, want 1", fired)
-		}
-		afterFire = r.sub(t)
-	}
-	gen := r.runClose(t)
-
-	// The premise: the fire moved ONLY the period start.
-	if afterFire.CurrentBillingPeriodStart == nil || !afterFire.CurrentBillingPeriodStart.Equal(r.t1) ||
-		afterFire.CurrentBillingPeriodEnd == nil || !afterFire.CurrentBillingPeriodEnd.Equal(p1) ||
-		afterFire.NextBillingAt == nil || !afterFire.NextBillingAt.Equal(p1) {
-		t.Fatalf("after the calendar fire: [%v, %v) next %v, want [t1=%v, %v) next %v (start moves, next does not)",
-			afterFire.CurrentBillingPeriodStart, afterFire.CurrentBillingPeriodEnd, afterFire.NextBillingAt, r.t1, p1, p1)
-	}
-
-	cycle, threshold, other := r.liveInvoices(t)
-	if len(threshold) != 1 || len(cycle) != 1 || len(other) != 0 {
-		t.Fatalf("invoices: cycle=%d threshold=%d other=%d, want T plus the residual cycle invoice", len(cycle), len(threshold), len(other))
-	}
-	if !threshold[0].BillingPeriodStart.Equal(p0) || !threshold[0].BillingPeriodEnd.Equal(r.t1) || threshold[0].SubtotalCents != 300 {
-		t.Fatalf("T = [%v, %v) %dc, want [Jun 1, t1) 300c", threshold[0].BillingPeriodStart, threshold[0].BillingPeriodEnd, threshold[0].SubtotalCents)
-	}
-	if !cycle[0].BillingPeriodStart.Equal(r.t1) || !cycle[0].BillingPeriodEnd.Equal(p1) || cycle[0].SubtotalCents != 700 {
-		t.Fatalf("cycle invoice = [%v, %v) %dc, want the residual [t1, Jul 1) 700c — never [Jun 1, Jul 1) beside T",
-			cycle[0].BillingPeriodStart, cycle[0].BillingPeriodEnd, cycle[0].SubtotalCents)
-	}
-	if gen != 1 {
-		t.Fatalf("close generated %d, want 1 (the re-anchored [t1, Jul 1) is itself due at Jul 1)", gen)
-	}
-	r.assertPeriod(t, p1, nil) // [Jul 1, Aug 1)
-	assertUsageBilledOnce(t, r.base)
-}
-
 // TestPlanSwap_vs_Close_SwapFirst_InAdvanceCalendar_StartOnly: the schedule
 // where the `current_billing_period_start` predicate is load-bearing ON ITS
 // OWN. A calendar-billed in_advance YEARLY sub on [Jan 1 2025, Jan 1 2026)
@@ -1123,23 +954,23 @@ func TestThresholdFire_vs_Close_FireFirst_ResetTrue_CalendarStartOnly(t *testing
 // Drop the swap invoice's carried usage lines → the old year's 100c is never
 // billed.
 func TestPlanSwap_vs_Close_SwapFirst_InAdvanceCalendar_StartOnly(t *testing.T) {
-	r := newS1Rig(t, "S1 calendar start-only swap", 200, false)
+	r := newS1Rig(t, "S1 calendar start-only swap", 200)
 	p0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	p1 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	swapAt := time.Date(2025, 12, 10, 0, 0, 0, 0, time.UTC)
 	feb1 := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
 	r.close = p1.Add(time.Nanosecond)
 
-	yearly, err := r.f.pricingSvc.CreatePlan(r.base, r.f.tenantID, pricing.CreatePlanInput{
+	yearly, _, err := r.f.pricingSvc.CreatePlan(r.base, r.f.tenantID, pricing.CreatePlanInput{
 		Code: "pln_adv_yearly", Name: "Adv Yearly", Currency: "USD", BillingInterval: domain.BillingYearly,
-		BaseAmountCents: 12000, BaseBillTiming: domain.BillInAdvance, MeterIDs: []string{r.f.meterID},
+		BaseAmountCents: 12000, BaseBillTiming: domain.BillInAdvance, Prices: []pricing.PriceInput{{MeterID: r.f.meterID, PriceShape: perUnitShape("1")}},
 	})
 	if err != nil {
 		t.Fatalf("create yearly: %v", err)
 	}
-	monthly, err := r.f.pricingSvc.CreatePlan(r.base, r.f.tenantID, pricing.CreatePlanInput{
+	monthly, _, err := r.f.pricingSvc.CreatePlan(r.base, r.f.tenantID, pricing.CreatePlanInput{
 		Code: "pln_adv_monthly", Name: "Adv Monthly", Currency: "USD", BillingInterval: domain.BillingMonthly,
-		BaseAmountCents: 1000, BaseBillTiming: domain.BillInAdvance, MeterIDs: []string{r.f.meterID},
+		BaseAmountCents: 1000, BaseBillTiming: domain.BillInAdvance, Prices: []pricing.PriceInput{{MeterID: r.f.meterID, PriceShape: perUnitShape("1")}},
 	})
 	if err != nil {
 		t.Fatalf("create monthly: %v", err)

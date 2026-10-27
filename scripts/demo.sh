@@ -40,10 +40,10 @@ green() { printf "\033[32m%s\033[0m\n" "$1"; }
 blue()  { printf "\033[34m%s\033[0m\n" "$1"; }
 step()  { echo ""; blue "━━━ $1 ━━━"; }
 # Cents to dollars with two decimals ("$1.20", not jq's "$1.2").
-# usd_micros does the same for provider cost, which is in millionths of a
-# dollar: it rounds half up to the cent first (2757500 is "$2.76").
+# usd_cents does the same for provider cost, a decimal string of cents: it
+# rounds half up to the cent first ("275.75" is "$2.76").
 # pct1 turns basis points into a percent with one decimal (6707 is "67.1%").
-USD='def usd: (if . < 0 then "-" else "" end) + "$" + ((fabs / 100 | floor) | tostring) + "." + ((fabs % 100) | tostring | if length < 2 then "0" + . else . end); def usd_micros: (if . < 0 then -1 else 1 end) * ((fabs + 5000) / 10000 | floor) | usd; def pct1: (if . < 0 then "-" else "" end) + ((fabs + 5) / 10 | floor | ((. / 10 | floor | tostring) + "." + (. % 10 | tostring))) + "%"; '
+USD='def usd: (if . < 0 then "-" else "" end) + "$" + ((fabs / 100 | floor) | tostring) + "." + ((fabs % 100) | tostring | if length < 2 then "0" + . else . end); def usd_cents: tonumber | (if . < 0 then -1 else 1 end) * ((fabs + 0.5) | floor) | usd; def pct1: (if . < 0 then "-" else "" end) + ((fabs + 5) / 10 | floor | ((. / 10 | floor | tostring) + "." + (. % 10 | tostring))) + "%"; '
 
 
 # req METHOD PATH [JSON_BODY] — curl with auth, fail-fast on non-2xx,
@@ -117,8 +117,7 @@ SUB=$(req POST "/v1/subscriptions" "{
   \"display_name\": \"ACME — usage\",
   \"customer_id\": \"$CUST_ID\",
   \"items\": [{\"plan_id\": \"$PLAN_ID\", \"quantity\": 1}],
-  \"billing_time\": \"anniversary\",
-  \"start_now\": true
+  \"billing_time\": \"anniversary\"
 }")
 SUB_ID=$(echo "$SUB" | jq -r '.id')
 [ "$SUB_ID" != "null" ] || { echo "✗ subscription create failed"; echo "$SUB" | jq .; exit 1; }
@@ -128,14 +127,14 @@ step "5. Save what the AI provider charges you per token"
 # Made-up costs, below the list prices the recipe bills at. Haiku's sit
 # closer to its price than Sonnet's, so the two models earn different margins.
 for rate in \
-  '{"provider": "anthropic", "model": "claude-sonnet-4.5", "token_type": "input",      "cost_per_token": "0.0000012"}' \
-  '{"provider": "anthropic", "model": "claude-sonnet-4.5", "token_type": "output",     "cost_per_token": "0.0000045"}' \
-  '{"provider": "anthropic", "model": "claude-sonnet-4.5", "token_type": "cache_read", "cost_per_token": "0.00000005"}' \
-  '{"provider": "anthropic", "model": "claude-haiku-4.5",  "token_type": "input",      "cost_per_token": "0.0000008"}' \
-  '{"provider": "anthropic", "model": "claude-haiku-4.5",  "token_type": "output",     "cost_per_token": "0.000004"}' ; do
+  '{"provider": "anthropic", "model": "claude-sonnet-4.5", "token_type": "input",      "unit_cost_cents": "0.00012"}' \
+  '{"provider": "anthropic", "model": "claude-sonnet-4.5", "token_type": "output",     "unit_cost_cents": "0.00045"}' \
+  '{"provider": "anthropic", "model": "claude-sonnet-4.5", "token_type": "cache_read", "unit_cost_cents": "0.000005"}' \
+  '{"provider": "anthropic", "model": "claude-haiku-4.5",  "token_type": "input",      "unit_cost_cents": "0.00008"}' \
+  '{"provider": "anthropic", "model": "claude-haiku-4.5",  "token_type": "output",     "unit_cost_cents": "0.0004"}' ; do
   req PUT "/v1/provider-costs" "$rate" >/dev/null
 done
-green "✓ Saved 5 costs for two models. Velox now records your cost on each new usage record."
+green "✓ Saved 5 costs for two models. Velox now records your cost on each new usage event."
 
 step "6. Send token usage, the way a LiteLLM proxy sends it"
 # One LiteLLM StandardLoggingPayload = one API call by ACME's end user.
@@ -172,7 +171,7 @@ for i in 1 2 3 4 5; do
 done
 EVENTS=$(req GET "/v1/usage-events?customer_id=$CUST_ID&limit=100" | jq '.data | length')
 [ "$EVENTS" -ge 25 ] || { echo "✗ expected ≥25 token events (5 Sonnet calls × 3 + 5 Haiku calls × 2), got $EVENTS"; exit 1; }
-green "✓ 10 AI calls became $EVENTS usage records, one for each token type in each call"
+green "✓ 10 AI calls became $EVENTS usage events, one for each token type in each call"
 
 step "7. Move the test clock forward one month"
 ADV_TO=$(date -u -v+32d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "+32 days" +%Y-%m-%dT%H:%M:%SZ)
@@ -209,16 +208,16 @@ green "✓ One invoice line per model and token type, and the PDF renders ($PDF_
 
 step "9. Your margin: what you billed against what the provider charged you (only you see this)"
 MARGIN=$(req GET "/v1/customers/$CUST_ID/margin?from=$NOW&to=$ADV_TO")
-echo "$MARGIN" | jq -r "$USD"'"  billed  \(.revenue_cents | usd)\n  cost    \(.cost_micros | usd_micros)\n  margin  \((.margin_bps // 0) | pct1)"'
+echo "$MARGIN" | jq -r "$USD"'"  billed  \(.revenue_cents | usd)\n  cost    \(.cost_cents | usd_cents)\n  margin  \((.margin_bps // 0) | pct1)"'
 # Per model: billed, cost, and the margin on that model. The server works
 # each model's margin out with the same formula as the total.
-echo "$MARGIN" | jq -r "$USD"'.by_model | sort_by(.model) | .[] | "    \(.model): cost \(.cost_micros | usd_micros)" + (if .attributed then "  billed \((.revenue_cents // 0) | usd)" else "" end) + (if .margin_bps != null then "  margin \(.margin_bps | pct1)" else "" end)'
+echo "$MARGIN" | jq -r "$USD"'.by_model | sort_by(.model) | .[] | "    \(.model): cost \(.cost_cents | usd_cents)" + (if .attributed then "  billed \((.revenue_cents // 0) | usd)" else "" end) + (if .margin_bps != null then "  margin \(.margin_bps | pct1)" else "" end)'
 # The cost follows from this script's own inputs (the token counts in step 6
 # and the rates in step 5), and the billed amount must match the invoice.
-echo "$MARGIN" | jq -e '.cost_micros == 2757500' >/dev/null \
-  || { echo "✗ provider cost is $(echo "$MARGIN" | jq '.cost_micros') micros, expected 2757500"; exit 1; }
-echo "$MARGIN" | jq -e '([.by_model[] | {(.model): .cost_micros}] | add) == {"claude-sonnet-4.5": 1277500, "claude-haiku-4.5": 1480000}' >/dev/null \
-  || { echo "✗ cost by model is $(echo "$MARGIN" | jq -c '[.by_model[] | {(.model): .cost_micros}] | add'), expected Sonnet 1277500 and Haiku 1480000 micros"; exit 1; }
+echo "$MARGIN" | jq -e '.cost_cents == "275.75"' >/dev/null \
+  || { echo "✗ provider cost is $(echo "$MARGIN" | jq '.cost_cents') cents, expected 275.75"; exit 1; }
+echo "$MARGIN" | jq -e '([.by_model[] | {(.model): .cost_cents}] | add) == {"claude-sonnet-4.5": "127.75", "claude-haiku-4.5": "148"}' >/dev/null \
+  || { echo "✗ cost by model is $(echo "$MARGIN" | jq -c '[.by_model[] | {(.model): .cost_cents}] | add'), expected Sonnet 127.75 and Haiku 148 cents"; exit 1; }
 echo "$MARGIN" | jq -e '[.by_model[] | select(.margin_bps == null)] | length == 0' >/dev/null \
   || { echo "✗ a model has no margin: $(echo "$MARGIN" | jq -c '[.by_model[] | {model, margin_bps}]')"; exit 1; }
 echo "$MARGIN" | jq -e --argjson s "$SUBTOTAL" '.revenue_cents == $s' >/dev/null \
@@ -229,8 +228,8 @@ echo ""
 blue "━━━ Done: every step above ran and was checked ━━━"
 echo ""
 echo "  ✓ One call loaded a price for each model and token type"
-echo "  ✓ LiteLLM-shaped calls to two models became usage records, with no SDK"
-echo "  ✓ Velox recorded what each usage record cost you"
+echo "  ✓ LiteLLM-shaped calls to two models became usage events, with no SDK"
+echo "  ✓ Velox recorded what each usage event cost you"
 echo "  ✓ A test clock moved one month, and Velox made the invoice and its PDF"
 echo "  ✓ Your margin on this customer, by model"
 echo ""

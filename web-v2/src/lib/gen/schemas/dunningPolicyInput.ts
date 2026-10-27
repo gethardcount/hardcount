@@ -16,24 +16,29 @@ export interface DunningPolicyInput {
   /** A disabled policy starts no dunning. */
   enabled?: boolean;
   /**
-     * 0 or less means the default, 3.
-     * @minimum 1
-     * @maximum 15
+     * Days to wait before each retry. The first counts from the failed
+     * payment, or, with no card on file, from the collection that found
+     * none. Each later one counts from the retry before it: `[3, 4, 7]`
+     * retries on day 3, 7 and 14. The number of retries is the length
+     * of the list. A day is 24 hours. `retry_schedule`,
+     * `max_retry_attempts` and `grace_period_days` are refused.
+     * @minItems 1
+     * @maxItems 15
+     * @items.minimum 1
+     * @items.maximum 30
      */
-  max_retry_attempts?: number;
+  retry_days: number[];
   /**
-     * Days before the first retry. 0 or less means the default, 3.
-     * @minimum 1
-     * @maximum 30
+     * What happens to the subscription when retries run out. `pause`
+     * pauses collection and sends `subscription.collection_paused`
+     * with `triggered_by: dunning`. It does nothing if collection is
+     * already paused, the subscription is canceled, or the invoice
+     * was paid first. `cancel` cancels the subscription and sends
+     * `subscription.canceled` with `canceled_by: dunning`. It does
+     * nothing if the subscription is already canceled. If a scheduled
+     * cancel was already due, that cancel happens instead, and its
+     * event says `canceled_by: schedule`.
      */
-  grace_period_days?: number;
-  /**
-     * Waits before retries 2 to N, as Go durations (h, m, s units; no
-     * days, so 3 days is "72h"). Needs at least
-     * `max_retry_attempts - 1` entries, each above zero.
-     */
-  retry_schedule?: string[];
-  /** What happens to the subscription when retries run out. */
   final_subscription_action?: DunningPolicyInputFinalSubscriptionAction;
   /** What happens to the invoice when retries run out. */
   final_invoice_action?: DunningPolicyInputFinalInvoiceAction;

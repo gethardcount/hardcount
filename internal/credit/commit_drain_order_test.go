@@ -84,12 +84,14 @@ func TestDrainOrder_PromotionalFirst_NullSafe(t *testing.T) {
 	// Legacy NULL-kind grant FIRST (oldest) — the trap bait: under the buggy
 	// clause it would drain before the promo.
 	legacy, err := svc.Grant(ctx, tenantID, credit.GrantInput{
+		Currency:   "USD",
 		CustomerID: custID, AmountCents: 20000, Description: "legacy proration credit",
 	})
 	if err != nil {
 		t.Fatalf("legacy grant: %v", err)
 	}
 	promo, err := svc.Grant(ctx, tenantID, credit.GrantInput{
+		Currency:   "USD",
 		CustomerID: custID, AmountCents: 10000, Description: "promo credits",
 		GrantKind: domain.GrantKindPromotional,
 	})
@@ -104,7 +106,7 @@ func TestDrainOrder_PromotionalFirst_NullSafe(t *testing.T) {
 		if err != nil {
 			t.Fatalf("begin: %v", err)
 		}
-		commitEntry, err = svc.GrantCommitForInvoiceTx(ctx, tx, tenantID, custID, fundingInv, "VLX-DRAIN-FUND", 30000, nil)
+		commitEntry, err = svc.GrantCommitForInvoiceTx(ctx, tx, tenantID, custID, fundingInv, "VLX-DRAIN-FUND", "USD", 30000, nil)
 		if err != nil {
 			t.Fatalf("commit grant: %v", err)
 		}
@@ -149,12 +151,14 @@ func TestAdjustClawback_PromotionalFirst(t *testing.T) {
 	custID := seedCustomer(t, db, ctx, tenantID, "cus_clawback_order")
 
 	legacy, err := svc.Grant(ctx, tenantID, credit.GrantInput{
+		Currency:   "USD",
 		CustomerID: custID, AmountCents: 5000, Description: "legacy",
 	})
 	if err != nil {
 		t.Fatalf("legacy grant: %v", err)
 	}
 	promo, err := svc.Grant(ctx, tenantID, credit.GrantInput{
+		Currency:   "USD",
 		CustomerID: custID, AmountCents: 5000, Description: "promo",
 		GrantKind: domain.GrantKindPromotional,
 	})
@@ -163,6 +167,7 @@ func TestAdjustClawback_PromotionalFirst(t *testing.T) {
 	}
 
 	if _, err := svc.Adjust(ctx, tenantID, credit.AdjustInput{
+		Currency:   "USD",
 		CustomerID: custID, AmountCents: -3000, Description: "correction",
 	}); err != nil {
 		t.Fatalf("adjust: %v", err)
@@ -193,6 +198,7 @@ func TestApplyToInvoice_CommitInvoiceIsCashInstrument(t *testing.T) {
 
 	// Pre-existing balance that must NOT drain into the commit invoice.
 	if _, err := svc.Grant(ctx, tenantID, credit.GrantInput{
+		Currency:   "USD",
 		CustomerID: custID, AmountCents: 50000, Description: "existing balance",
 	}); err != nil {
 		t.Fatalf("grant: %v", err)
@@ -224,7 +230,7 @@ func TestApplyToInvoice_CommitInvoiceIsCashInstrument(t *testing.T) {
 	if applied != 0 {
 		t.Fatalf("applied = %d, want 0 — credits must never pay a commit funding invoice", applied)
 	}
-	bal, err := svc.GetBalance(ctx, tenantID, custID)
+	bal, err := testutil.BalanceUSD(svc.GetBalance(ctx, tenantID, custID))
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}
@@ -247,6 +253,7 @@ func TestApplyToInvoice_SkipsSettledInvoice(t *testing.T) {
 	custID := seedCustomer(t, db, ctx, tenantID, "cus_apply_settled")
 
 	if _, err := svc.Grant(ctx, tenantID, credit.GrantInput{
+		Currency:   "USD",
 		CustomerID: custID, AmountCents: 30000, Description: "balance",
 	}); err != nil {
 		t.Fatalf("grant: %v", err)
@@ -265,7 +272,7 @@ func TestApplyToInvoice_SkipsSettledInvoice(t *testing.T) {
 	if applied != 0 {
 		t.Fatalf("applied = %d, want 0 — invoice already settled", applied)
 	}
-	bal, err := svc.GetBalance(ctx, tenantID, custID)
+	bal, err := testutil.BalanceUSD(svc.GetBalance(ctx, tenantID, custID))
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}
@@ -335,6 +342,7 @@ func TestBalanceCrossingEvents(t *testing.T) {
 
 	// 0 → 10000: recovered fires (0 → >0 crossing).
 	if _, err := svc.Grant(ctx, tenantID, credit.GrantInput{
+		Currency:   "USD",
 		CustomerID: custID, AmountCents: 10000, Description: "fund",
 	}); err != nil {
 		t.Fatalf("grant: %v", err)
@@ -353,16 +361,21 @@ func TestBalanceCrossingEvents(t *testing.T) {
 	if len(lows) != 1 {
 		t.Fatalf("low events = %d, want 1", len(lows))
 	}
-	if lows[0]["balance_cents"] != float64(3000) || lows[0]["threshold_cents"] != float64(5000) {
+	if err := domain.CheckWebhookData(domain.EventCreditBalanceLow, lows[0]); err != nil {
+		t.Fatal(err)
+	}
+	lowBalance := lows[0][domain.WebhookResourceCreditBalance].(map[string]any)
+	if lowBalance["balance_cents"] != float64(3000) || lows[0]["threshold_cents"] != float64(5000) {
 		t.Errorf("low payload = %v, want balance_cents=3000 threshold_cents=5000", lows[0])
 	}
-	if lows[0]["customer_id"] != custID {
-		t.Errorf("low payload customer_id = %v, want %s", lows[0]["customer_id"], custID)
+	if lowBalance["customer_id"] != custID || lowBalance["currency"] != "USD" {
+		t.Errorf("low payload balance = %v, want %s in USD", lowBalance, custID)
 	}
 
 	// 3000 → 0 via clawback: depleted fires; low does NOT re-fire (already
 	// below threshold — crossing semantics, not level semantics).
 	if _, err := svc.Adjust(ctx, tenantID, credit.AdjustInput{
+		Currency:   "USD",
 		CustomerID: custID, AmountCents: -3000, Description: "zero out",
 	}); err != nil {
 		t.Fatalf("adjust: %v", err)
@@ -377,6 +390,7 @@ func TestBalanceCrossingEvents(t *testing.T) {
 	// 0 → 2000: recovered fires again (complement of depleted — without it a
 	// consumer's depleted state could never clear).
 	if _, err := svc.Grant(ctx, tenantID, credit.GrantInput{
+		Currency:   "USD",
 		CustomerID: custID, AmountCents: 2000, Description: "top back up",
 	}); err != nil {
 		t.Fatalf("second grant: %v", err)
@@ -385,8 +399,8 @@ func TestBalanceCrossingEvents(t *testing.T) {
 	if len(recovered) != 2 {
 		t.Fatalf("recovered events = %d, want 2", len(recovered))
 	}
-	if recovered[1]["balance_cents"] != float64(2000) {
-		t.Errorf("recovered payload balance = %v, want 2000", recovered[1]["balance_cents"])
+	if b := recovered[1][domain.WebhookResourceCreditBalance].(map[string]any); b["balance_cents"] != float64(2000) {
+		t.Errorf("recovered payload balance = %v, want 2000", b["balance_cents"])
 	}
 }
 

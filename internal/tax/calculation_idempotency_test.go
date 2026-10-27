@@ -3,6 +3,8 @@ package tax
 import (
 	"context"
 	"testing"
+
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // A scoped calculation carries an idempotency key derived from the scope and
@@ -15,7 +17,7 @@ func TestCalculate_ScopedIdempotencyKey(t *testing.T) {
 		p, be := newCapturingProvider()
 		req := Request{Currency: "usd", CustomerAddress: Address{Country: "US", State: "WA", PostalCode: "98101"},
 			LineItems: []RequestLine{{Ref: "line_0", AmountCents: amount, Quantity: 1}}}
-		_, _ = p.Calculate(ctx, req) // the fake backend returns no lines; only the request matters here
+		_, _ = p.Calculate(postgres.WithLivemode(ctx, false), req) // the fake backend returns no lines; only the request matters here
 		if be.params == nil {
 			t.Fatal("no calculation request was sent")
 		}

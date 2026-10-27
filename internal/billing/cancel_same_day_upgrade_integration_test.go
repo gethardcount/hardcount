@@ -14,6 +14,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/invoice"
 	"github.com/sagarsuperuser/velox/internal/subscription"
+	"github.com/sagarsuperuser/velox/internal/testutil"
 )
 
 // prorationInvoices bridges the invoice store and the invoice numberer to the
@@ -86,10 +87,10 @@ func TestImmediateCancel_SameDayAsUnpaidUpgrade_VoidsUpgradeInvoice(t *testing.T
 	}
 
 	// Quantity 1 → 2 through the real handler, wired as internal/api/router.go
-	// wires it. No credit granter: an increase grants nothing.
+	// wires it. No credit-note issuer: an increase credits nothing.
 	h := subscription.NewHandler(r.f.subSvc)
 	h.SetDB(r.f.db)
-	h.SetProrationDeps(r.f.pricingSvc, prorationInvoices{PostgresStore: r.f.invStore, numberer: r.f.settings}, nil)
+	h.SetProrationDeps(r.f.pricingSvc, prorationInvoices{PostgresStore: r.f.invStore, numberer: r.f.settings})
 	h.SetProrationTaxApplier(prorationTax{engine: r.f.engine})
 	h.SetTenantLocator(r.f.engine)
 	h.SetNetTermsReader(r.f.engine)
@@ -141,7 +142,7 @@ func TestImmediateCancel_SameDayAsUnpaidUpgrade_VoidsUpgradeInvoice(t *testing.T
 	// One seat's unused share comes back on the paid day-1 invoice. The voided
 	// upgrade invoice was that same share for the second seat, so the two agree
 	// to the rounding cent; a double relief would credit twice as much.
-	bal, err := r.credit.GetBalance(r.base, r.f.tenantID, r.f.customerID)
+	bal, err := testutil.BalanceUSD(r.credit.GetBalance(r.base, r.f.tenantID, r.f.customerID))
 	if err != nil {
 		t.Fatalf("credit balance: %v", err)
 	}

@@ -10,10 +10,11 @@
 
 /**
  * When the recurring base fee is invoiced relative to the period it covers.
- * in_arrears (default): base + usage billed at period end.
+ * in_arrears: base + usage billed at period end.
  * in_advance: base billed at period start (day 1 on create; cycle-close invoice
  * carries upcoming period's base + elapsed period's usage). Usage lines are
- * always arrears regardless of this flag. See ADR-031.
+ * always arrears regardless of this field. A plan with no base fee is
+ * in_arrears. See ADR-031.
  */
 export type PlanBaseBillTiming = typeof PlanBaseBillTiming[keyof typeof PlanBaseBillTiming];
 

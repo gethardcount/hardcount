@@ -206,7 +206,7 @@ export const DEFAULT_RESOURCE_TYPES = [
   'credit', 'credit_note', 'api_key', 'billing', 'billing_profile',
   'payment_method', 'dunning_policy', 'dunning_run', 'test_clock',
   'webhook_endpoint', 'webhook_event', 'stripe_credentials',
-  'price_override', 'rating_rule', 'meter_pricing_rule',
+  'price_override', 'plan_price',
   // Emitted by the ADR-090 in-tx writers. (The dropdown normally comes from
   // /filters — these only matter as the empty-log fallback.) Historical rows
   // from the retired catch-all used the hyphenated 'provider-cost'; the
@@ -238,11 +238,12 @@ export const DEFAULT_ACTIONS = [
   'password_reset_requested', 'password_reset_completed',
 ]
 
-// auditAmount renders one *_cents metadata value. Invoice, payment and credit
-// note rows record their currency beside the amount, so the amount is shown in
-// it. Credit rows record none (the ledger has no currency, ADR-100); their
-// amount is shown without a symbol, never with the workspace's. A string value
-// is a decimal per-unit rate ("0.0003" cents), shown at full precision.
+// auditAmount renders one *_cents metadata value. Invoice, payment, credit
+// note and credit rows record their currency beside the amount, so the amount
+// is shown in it (credit rows since ADR-129). A row that records none, such
+// as a credit row written before, is shown without a symbol, never with the
+// workspace's. A string value is a decimal per-unit rate ("0.0003" cents),
+// shown at full precision.
 export function auditAmount(value: number | string, currency: unknown): string {
   const c = typeof currency === 'string' && currency !== '' ? currency : null
   if (typeof value === 'string') return c ? formatRate(value, c) : formatRateBare(value)

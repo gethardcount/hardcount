@@ -15,7 +15,6 @@ const (
 	SubscriptionTrialing SubscriptionStatus = "trialing"
 	SubscriptionActive   SubscriptionStatus = "active"
 	SubscriptionCanceled SubscriptionStatus = "canceled"
-	SubscriptionArchived SubscriptionStatus = "archived"
 )
 
 type SubscriptionBillingTime string
@@ -336,20 +335,37 @@ const (
 	PauseCollectionKeepAsDraft PauseCollectionBehavior = "keep_as_draft"
 )
 
+// PauseCollectionSetBy says who set a collection pause, and so what lifts
+// it. The store derives it from pause_collection_invoice_id: a dunning pause
+// records the invoice whose dunning set it, an operator's pause none.
+type PauseCollectionSetBy string
+
+const (
+	// PauseSetByOperator: the API or the dashboard. The pause lifts when the
+	// operator resumes collection, or at resumes_at.
+	PauseSetByOperator PauseCollectionSetBy = "operator"
+	// PauseSetByDunning: a dunning policy's pause final action. The pause
+	// lifts when the invoice whose dunning set it is paid: that payment
+	// stamps resumes_at, and the scheduled resumer clears it.
+	PauseSetByDunning PauseCollectionSetBy = "dunning"
+)
+
 // PauseCollection is the per-subscription collection-pause state. The
 // pointer-on-Subscription form mirrors Stripe's nullable subscription.
 // pause_collection — nil = running normally, non-nil = paused.
 type PauseCollection struct {
 	Behavior  PauseCollectionBehavior `json:"behavior"`
 	ResumesAt *time.Time              `json:"resumes_at,omitempty"`
+	SetBy     PauseCollectionSetBy    `json:"set_by"`
 }
 
 // InForceAt reports whether collection was paused at instant t. A pause
-// with no resumes_at holds until an operator resumes it; a timed pause
-// holds strictly before resumes_at, so a period ending exactly at
-// resumes_at bills as resumed. The scheduled resumers leave the pause
-// set until every period ending before resumes_at is closed, so this
-// stays answerable from the row.
+// with no resumes_at holds until something sets one or clears the pause:
+// the operator resuming, or, for a dunning pause, the payment of the
+// invoice whose dunning set it. A timed pause holds strictly before
+// resumes_at, so a period ending exactly at resumes_at bills as resumed.
+// The scheduled resumers leave the pause set until every period ending
+// before resumes_at is closed, so this stays answerable from the row.
 func (p *PauseCollection) InForceAt(t time.Time) bool {
 	return p != nil && (p.ResumesAt == nil || p.ResumesAt.After(t))
 }
@@ -377,15 +393,13 @@ type SubscriptionItemThreshold struct {
 //
 // Either alone or both. First to fire wins.
 //
-// ResetBillingCycle controls whether the cycle resets after fire. When
-// true, the new cycle starts at fire time and the next bill
-// is the natural cycle invoice for the new cycle. When false (the default), the
-// original cycle continues and a second invoice fires at the natural
-// cycle end with whatever residual usage accumulated.
+// A fire always keeps the billing period (Stripe's default): the threshold
+// invoice bills the period's usage so far, the period's next invoice bills
+// the rest of the usage, and the base fee is billed as with no threshold. Starting a new period at the fire
+// (reset_billing_cycle) was removed on 2026-10-23.
 type BillingThresholds struct {
-	AmountGTE         int64                       `json:"amount_gte,omitempty"`
-	ResetBillingCycle bool                        `json:"reset_billing_cycle"`
-	ItemThresholds    []SubscriptionItemThreshold `json:"item_thresholds"`
+	AmountGTE      int64                       `json:"amount_gte,omitempty"`
+	ItemThresholds []SubscriptionItemThreshold `json:"item_thresholds"`
 }
 
 // SubscriptionItem is a single priced line on a subscription. A subscription
@@ -422,6 +436,9 @@ type ItemInterval struct {
 	Quantity           int64      `json:"quantity"`
 	StartsAt           time.Time  `json:"starts_at"`
 	EndsAt             *time.Time `json:"ends_at,omitempty"`
+	// ItemCreatedAt is the item's created_at: the instant an item added
+	// to the subscription was added (Subscription.PlanJoinedAt).
+	ItemCreatedAt time.Time `json:"-"`
 }
 
 // MeterCoverageEnd is an instant at which a subscription stopped covering a
@@ -518,7 +535,7 @@ type Subscription struct {
 	// Mar 31, … instead of ratcheting off month-end (ADR-055). 0 for
 	// calendar-monthly subs (always the 1st) and legacy/unset rows (the
 	// advance then falls back to the historical path). Recomputed whenever the
-	// cycle re-anchors to "now" (cross-interval swap, threshold reset).
+	// cycle re-anchors to "now" (a cross-interval swap).
 	BillingAnchorDay int `json:"billing_anchor_day,omitempty"`
 	// Subscriptions have no per-sub billing timezone: every sub in a tenant
 	// bills in the one org timezone (default UTC), resolved live from tenant
@@ -551,6 +568,36 @@ var ErrTrialCancelDue = errors.New("trial has a cancel schedule due — route to
 // schedule was cleared, the trial extended, or another site already
 // canceled. The caller treats the sub as NOT handled this pass.
 var ErrTrialCancelConflict = errors.New("trial-end cancel conflicted — re-read and route")
+
+// BillingStartedAt is the instant the subscription began to bill: its trial
+// end when it had a trial (trial usage is free), else its start. Nil before
+// it started (a draft).
+func (s Subscription) BillingStartedAt() *time.Time {
+	if s.TrialEndAt != nil {
+		return s.TrialEndAt
+	}
+	return s.StartedAt
+}
+
+// PlanJoinedAt is the instant from which an item was on the plan of one
+// stretch of its life (ADR-130 §4 step 3, amended 2026-10-26): the latest of
+// from, where the stretch begins (a billing interval's start in the window
+// read, a swap onto the plan, or zero when unknown), the item's creation
+// when it was added after the subscription was created, and the
+// subscription's billing start. A billing interval opened by an add on a
+// period's first day starts at the period start (ADR-012), so the add's own
+// instant is the item's creation. Items created with the subscription share
+// its created_at.
+func (s Subscription) PlanJoinedAt(itemCreatedAt, from time.Time) time.Time {
+	at := from
+	if b := s.BillingStartedAt(); b != nil && b.After(at) {
+		at = *b
+	}
+	if itemCreatedAt.After(s.CreatedAt) && itemCreatedAt.After(at) {
+		at = itemCreatedAt
+	}
+	return at
+}
 
 // DeriveCancelEffectiveAt computes CancelEffectiveAt from the schedule
 // fields (ADR-069). Called from the subscription store's row scan — the one

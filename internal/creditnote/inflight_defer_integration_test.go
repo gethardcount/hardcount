@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sagarsuperuser/velox/internal/credit"
 	"github.com/sagarsuperuser/velox/internal/creditnote"
 	"github.com/sagarsuperuser/velox/internal/customer"
 	"github.com/sagarsuperuser/velox/internal/domain"
@@ -96,29 +97,27 @@ func TestListPendingClawbackDrafts_DefersInFlightSource(t *testing.T) {
 	mustCount(1, "settled source must make even an aged draft eligible — no 24h window")
 }
 
-// TestListPendingClawbackDrafts_ParkedSourceReleasedByWriteOff covers the one
-// source that NEVER settles, which the defer gate above was written before we
-// had.
+// TestListPendingClawbackDrafts_ParkedWrittenOffSourceWaitsThenIssues: a
+// relief draft on a parked invoice (payment_status 'unknown', no PaymentIntent
+// id: ADR-107) waits like a draft on any in-flight source, and a write-off does
+// not change that. A written-off invoice is billed but unpaid (ADR-050,
+// amendment 2026-10-23), so its relief is issued like an unpaid invoice's: it
+// lowers what the invoice asks for. Until 2026-10-23 a write-off released the
+// draft to the reconciler, and Issue voided it as an orphan, so a customer who
+// later paid the written-off invoice paid for the unused time too.
 //
-// ADR-107 parks an invoice at payment_status='unknown' with no PaymentIntent id
-// when a charge attempt cannot be identified with the provider. "The draft waits
-// until the source settles" then becomes a wait with no end: the draft is
-// excluded from this scan permanently — never issued, never voided, no error log
-// (deferred drafts log nothing by design), while the pending-drafts gauge counts
-// it forever. The customer is owed the relief and cannot be given it.
+// The wait ends when the park is answered: the stale-hold sweep asks Stripe
+// about the lost charge (ADR-127) and, when Stripe has nothing 24 hours after
+// the attempt, ends the park with UnparkAfterNoPayment (the payment status goes
+// back to pending or failed). The draft is then eligible, and Issue applies it
+// to the written-off invoice. The sweep keeps a written-off park's hold even
+// when Stripe refuses the check for good, so this exit stays reachable
+// (TestParked_WrittenOff_StripeRefusedForGood_KeptUntilStripeAnswers).
 //
-// The exit is the operator writing the invoice off, which is the only action a
-// parked invoice allows. That must release the draft — and the release has to
-// come from the invoice's STATUS, because a write-off deliberately does not
-// touch payment_status (we never learned whether the card was charged, so
-// recording an answer would be a lie). This test pins exactly that: still
-// 'unknown' after the write-off, and eligible anyway.
-//
-// Eligible, not issued: Issue()'s orphan guard then VOIDS the draft, since a
-// written-off invoice collected nothing and there is nothing to claw back. That
-// branch already existed and was already covered (inflight_gate_test.go); it was
-// simply unreachable, because this query never handed it the draft.
-func TestListPendingClawbackDrafts_ParkedSourceReleasedByWriteOff(t *testing.T) {
+// Mutation seams: put 'uncollectible' back in the scan's status term (step 2
+// lists the draft), or hold an uncollectible source in issueHeld (step 4 voids
+// the draft).
+func TestListPendingClawbackDrafts_ParkedWrittenOffSourceWaitsThenIssues(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	tenantID := testutil.CreateTestTenant(t, db, "CN Parked Source")
@@ -133,8 +132,6 @@ func TestListPendingClawbackDrafts_ParkedSourceReleasedByWriteOff(t *testing.T) 
 	invStore := invoice.NewPostgresStore(db)
 	now := time.Now().UTC()
 	issued := now
-	// Parked: unknown payment, no PaymentIntent id — nothing can ever name the
-	// attempt, so no webhook and no sweep will resolve this row.
 	inv, err := invStore.Create(ctx, tenantID, domain.Invoice{
 		CustomerID:            cust.ID,
 		InvoiceNumber:         "INV-PARKED-1",
@@ -154,7 +151,7 @@ func TestListPendingClawbackDrafts_ParkedSourceReleasedByWriteOff(t *testing.T) 
 	}
 
 	cnStore := creditnote.NewPostgresStore(db)
-	if _, err := cnStore.Create(ctx, tenantID, domain.CreditNote{
+	draft, err := cnStore.Create(ctx, tenantID, domain.CreditNote{
 		InvoiceID:        inv.ID,
 		CustomerID:       cust.ID,
 		CreditNoteNumber: "CN-PARKED-1",
@@ -165,7 +162,8 @@ func TestListPendingClawbackDrafts_ParkedSourceReleasedByWriteOff(t *testing.T) 
 		Currency:         "USD",
 		RefundStatus:     domain.RefundNone,
 		IssuePending:     true,
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("create clawback draft: %v", err)
 	}
 
@@ -180,32 +178,152 @@ func TestListPendingClawbackDrafts_ParkedSourceReleasedByWriteOff(t *testing.T) 
 		}
 	}
 
-	// 1. While the invoice is open, a parked source defers like any other
-	//    in-flight source. This is the control: it proves the release below
-	//    comes from the write-off and not from 'unknown' being ignored here.
-	mustCount(0, "a parked source on an OPEN invoice must still defer — its charge may yet be confirmed by a late webhook")
+	// 1. Open and parked: the draft waits.
+	mustCount(0, "a parked source on an open invoice must defer: its charge may yet be confirmed")
 
-	// 2. The operator writes it off — the only action ADR-107 leaves available.
+	// 2. Written off, still parked: the draft still waits. The write-off leaves
+	//    payment_status 'unknown' (it does not answer whether the card was
+	//    charged), and a written-off invoice can still be paid.
 	if _, err := invStore.UpdateStatus(ctx, tenantID, inv.ID, domain.InvoiceUncollectible); err != nil {
 		t.Fatalf("write off parked invoice: %v", err)
 	}
+	if after, err := invStore.Get(ctx, tenantID, inv.ID); err != nil || after.PaymentStatus != domain.PaymentUnknown {
+		t.Fatalf("payment_status after the write-off = %q (%v), want 'unknown': the write-off closes the invoice, it does not answer the charge", after.PaymentStatus, err)
+	}
+	mustCount(0, "a parked written-off source must defer like a parked open one")
 
-	// 3. The payment question is still open, and must stay that way. If a later
-	//    change starts settling payment_status on write-off, this fails loudly:
-	//    that would be recording "the card was not charged" on the strength of an
-	//    operator's click, which is precisely what we do not know.
+	// 3. The stale-hold sweep finds no charge at Stripe 24 hours after the
+	//    attempt and ends the park (ADR-127): UnparkAfterNoPayment, the
+	//    sweep's own write, which needs the park's charge hold. The draft is
+	//    now eligible.
+	hold := time.Now().Add(-25 * time.Hour).UTC().Truncate(time.Microsecond)
+	tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE invoices SET auto_charge_claimed_until = $2 WHERE id = $1`, inv.ID, hold); err != nil {
+		t.Fatalf("give the park its charge hold: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	mustCount(0, "a written-off park with its hold still waits")
+	if status, unparked, err := invStore.UnparkAfterNoPayment(ctx, tenantID, inv.ID, hold, inv.ChargeAttemptSeq); err != nil || !unparked || status != domain.PaymentPending {
+		t.Fatalf("end the park: status %q unparked %v err %v, want pending, ended", status, unparked, err)
+	}
+	mustCount(1, "an answered park must release the draft")
+
+	// 4. Issue applies it to the written-off invoice: 4000c less to pay, still
+	//    written off.
+	svc := creditnote.NewService(cnStore, invStore, nil)
+	got, err := svc.Issue(ctx, tenantID, draft.ID)
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	if got.Status != domain.CreditNoteIssued {
+		t.Fatalf("credit note status = %s, want issued: a written-off invoice's relief lowers what it asks for", got.Status)
+	}
 	after, err := invStore.Get(ctx, tenantID, inv.ID)
 	if err != nil {
-		t.Fatalf("get invoice after write-off: %v", err)
+		t.Fatalf("get invoice: %v", err)
 	}
-	if after.PaymentStatus != domain.PaymentUnknown {
-		t.Fatalf("write-off changed payment_status to %q — it must stay 'unknown'; the write-off closes the INVOICE, it does not answer whether the card was charged", after.PaymentStatus)
+	if after.Status != domain.InvoiceUncollectible || after.AmountDueCents != 6000 {
+		t.Errorf("invoice %s with %dc due, want uncollectible with 6000c due", after.Status, after.AmountDueCents)
+	}
+	mustCount(0, "an issued draft leaves the scan")
+}
+
+// The other answer to a written-off park: the card charge did succeed. The
+// card settlement records it (uncollectible -> paid, ADR-113: money that
+// already moved is recorded), the held relief draft is released, and Issue
+// takes the paid branch: the unused time goes to the customer's balance, the
+// same money as a cancel on an invoice paid before the write-off (ADR-050).
+// The draft must not have lowered the amount due first: that would have
+// asked the customer for 6000c while the card took 10000c.
+//
+// Mutation seam: release an uncollectible source in the held-draft scan again
+// (step 1 lists the draft while the charge is unknown).
+func TestListPendingClawbackDrafts_ParkedWrittenOffSource_CardSucceeded_CreditsTheBalance(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	ctx := postgres.WithLivemode(context.Background(), false)
+	tenantID := testutil.CreateTestTenant(t, db, "CN Parked Card Succeeded")
+
+	cust, err := customer.NewPostgresStore(db).Create(ctx, tenantID, domain.Customer{
+		ExternalID: "cus_parked_paid", DisplayName: "Parked Paid",
+	})
+	if err != nil {
+		t.Fatalf("create customer: %v", err)
+	}
+	invStore := invoice.NewPostgresStore(db)
+	now := time.Now().UTC()
+	inv, err := invStore.Create(ctx, tenantID, domain.Invoice{
+		CustomerID: cust.ID, InvoiceNumber: "INV-PARKED-PAID-1",
+		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentUnknown,
+		Currency: "USD", SubtotalCents: 10000, TotalAmountCents: 10000, AmountDueCents: 10000,
+		BillingPeriodStart: now.Add(-30 * 24 * time.Hour), BillingPeriodEnd: now, IssuedAt: &now,
+	})
+	if err != nil {
+		t.Fatalf("create parked invoice: %v", err)
+	}
+	if _, err := invStore.UpdateStatus(ctx, tenantID, inv.ID, domain.InvoiceUncollectible); err != nil {
+		t.Fatalf("write off parked invoice: %v", err)
+	}
+	cnStore := creditnote.NewPostgresStore(db)
+	draft, err := cnStore.Create(ctx, tenantID, domain.CreditNote{
+		InvoiceID: inv.ID, CustomerID: cust.ID, CreditNoteNumber: "CN-PARKED-PAID-1",
+		Status: domain.CreditNoteDraft, Reason: "subscription_cancellation",
+		SubtotalCents: 4000, TotalCents: 4000, Currency: "USD",
+		RefundStatus: domain.RefundNone, IssuePending: true,
+	})
+	if err != nil {
+		t.Fatalf("create clawback draft: %v", err)
+	}
+	pending := func() int {
+		t.Helper()
+		drafts, err := cnStore.ListPendingClawbackDrafts(ctx, 100, false)
+		if err != nil {
+			t.Fatalf("list pending clawback drafts: %v", err)
+		}
+		return len(drafts)
 	}
 
-	// 4. Released — despite payment_status being unchanged. Without the status
-	//    term in the scan predicate this returns 0 and the draft is stranded for
-	//    the life of the tenant.
-	mustCount(1, "a written-off source must release its clawback draft to the reconciler, which voids it as an orphan")
+	// 1. Written off and parked: the draft waits for the charge's answer.
+	if n := pending(); n != 0 {
+		t.Fatalf("%d pending drafts while the charge is unknown, want 0", n)
+	}
+
+	// 2. Stripe answers: the charge succeeded. The card settlement's write.
+	paid, transitioned, err := invStore.MarkPaidCardSettlementTransition(ctx, tenantID, inv.ID, "pi_found", time.Now().UTC(), nil)
+	if err != nil || !transitioned {
+		t.Fatalf("card settle: transitioned %v, err %v", transitioned, err)
+	}
+	if paid.Status != domain.InvoicePaid || paid.AmountPaidCents != 10000 {
+		t.Fatalf("after the card settle: invoice %s, %dc paid; want paid, 10000c", paid.Status, paid.AmountPaidCents)
+	}
+	if n := pending(); n != 1 {
+		t.Fatalf("%d pending drafts after the charge settled, want 1", n)
+	}
+
+	// 3. Issue takes the paid branch: 4000c to the balance.
+	credits := credit.NewService(credit.NewPostgresStore(db))
+	svc := creditnote.NewService(cnStore, invStore, nil, ledgerGranter{credits})
+	got, err := svc.Issue(ctx, tenantID, draft.ID)
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	if got.Status != domain.CreditNoteIssued || got.CreditAmountCents != 4000 {
+		t.Fatalf("note %s crediting %dc, want issued crediting 4000c to the balance", got.Status, got.CreditAmountCents)
+	}
+	bal, err := testutil.BalanceUSD(credits.GetBalance(ctx, tenantID, cust.ID))
+	if err != nil {
+		t.Fatalf("balance: %v", err)
+	}
+	if bal.BalanceCents != 4000 {
+		t.Errorf("customer balance = %dc, want 4000c: paid 10000c, 4000c of it unused", bal.BalanceCents)
+	}
+	if after, err := invStore.Get(ctx, tenantID, inv.ID); err != nil || after.Status != domain.InvoicePaid || after.AmountPaidCents != 10000 {
+		t.Errorf("invoice after the note = %+v (err %v), want paid with 10000c paid", after.Status, err)
+	}
 }
 
 // backdateCreditNote pushes a credit note's updated_at 10 days into the past to

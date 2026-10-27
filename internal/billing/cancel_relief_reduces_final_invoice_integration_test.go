@@ -135,21 +135,15 @@ func newReliefCancelRig(t *testing.T, db *postgres.DB, name string, o reliefRigO
 	if err != nil {
 		t.Fatalf("create customer: %v", err)
 	}
-	rule, err := pricingSvc.CreateRatingRule(ctx, tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "calls_flat", Name: "Calls", Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(1),
-	})
-	if err != nil {
-		t.Fatalf("create rating rule: %v", err)
-	}
 	meter, err := pricingSvc.CreateMeter(ctx, tenantID, pricing.CreateMeterInput{
-		Key: "calls", Name: "Calls", Unit: "calls", Aggregation: "sum", RatingRuleVersionID: rule.ID,
+		EventName: "calls", Name: "Calls", Unit: "calls", Aggregation: "sum",
 	})
 	if err != nil {
 		t.Fatalf("create meter: %v", err)
 	}
-	plan, err := pricingSvc.CreatePlan(ctx, tenantID, pricing.CreatePlanInput{
+	plan, _, err := pricingSvc.CreatePlan(ctx, tenantID, pricing.CreatePlanInput{
 		Code: "pro-adv-usage", Name: "Pro", Currency: "USD", BillingInterval: domain.BillingMonthly,
-		BaseAmountCents: reliefBaseCents, BaseBillTiming: domain.BillInAdvance, MeterIDs: []string{meter.ID},
+		BaseAmountCents: reliefBaseCents, BaseBillTiming: domain.BillInAdvance, Prices: []pricing.PriceInput{{MeterID: meter.ID, PriceShape: domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(1)}}},
 	})
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
@@ -171,7 +165,6 @@ func newReliefCancelRig(t *testing.T, db *postgres.DB, name string, o reliefRigO
 	e.SetNoPaymentMethodNotifier(noPM)
 	e.SetDunningStarter(testDunningStarter{})
 	e.SetDunningResolver(&testDunningResolver{})
-	e.SetCreditGranter(creditSvc)
 	e.SetInvoiceVoider(invoice.NewService(invStore, clock.Real(), settings))
 	e.SetCreditNoteAdjuster(cnSvc)
 	e.SetCreditHeadroomReader(cnSvc)
@@ -194,6 +187,7 @@ func newReliefCancelRig(t *testing.T, db *postgres.DB, name string, o reliefRigO
 	wantCredited := int64(reliefCents)
 	if o.day1Credit > 0 {
 		if _, err := creditSvc.Grant(ctx, tenantID, credit.GrantInput{
+			Currency:   "USD",
 			CustomerID: cust.ID, AmountCents: o.day1Credit, Description: "seed balance", At: periodStart,
 		}); err != nil {
 			t.Fatalf("grant credit: %v", err)
@@ -291,7 +285,7 @@ func (r *reliefCancelRig) invoice(t *testing.T, id string) domain.Invoice {
 
 func (r *reliefCancelRig) balance(t *testing.T) int64 {
 	t.Helper()
-	bal, err := r.credit.GetBalance(r.ctx, r.tenantID, r.customerID)
+	bal, err := testutil.BalanceUSD(r.credit.GetBalance(r.ctx, r.tenantID, r.customerID))
 	if err != nil {
 		t.Fatalf("credit balance: %v", err)
 	}

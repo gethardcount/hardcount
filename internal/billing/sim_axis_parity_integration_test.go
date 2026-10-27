@@ -78,24 +78,17 @@ func TestSimAxis_ClockDrivenLifecycle_EveryAuditRowIsStamped(t *testing.T) {
 		t.Fatalf("customer test_clock_id = %q, want %q", cust.TestClockID, clockID)
 	}
 
-	rrv, err := pricingSvc.CreateRatingRule(ctx, tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "sim_calls", Name: "Sim Calls",
-		Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(1),
-	})
-	if err != nil {
-		t.Fatalf("create rating rule: %v", err)
-	}
 	meter, err := pricingSvc.CreateMeter(ctx, tenantID, pricing.CreateMeterInput{
-		Key: "sim_calls", Name: "Sim Calls", Unit: "calls",
-		Aggregation: "sum", RatingRuleVersionID: rrv.ID,
+		EventName: "sim_calls", Name: "Sim Calls", Unit: "calls",
+		Aggregation: "sum",
 	})
 	if err != nil {
 		t.Fatalf("create meter: %v", err)
 	}
-	plan, err := pricingSvc.CreatePlan(ctx, tenantID, pricing.CreatePlanInput{
+	plan, _, err := pricingSvc.CreatePlan(ctx, tenantID, pricing.CreatePlanInput{
 		Code: "pln_sim", Name: "Sim Plan", Currency: "USD",
-		BillingInterval: domain.BillingMonthly, BaseAmountCents: 5000,
-		MeterIDs: []string{meter.ID},
+		BillingInterval: domain.BillingMonthly, BaseAmountCents: 5000, BaseBillTiming: domain.BillInArrears,
+		Prices: []pricing.PriceInput{{MeterID: meter.ID, PriceShape: domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(1)}}},
 	})
 	if err != nil {
 		t.Fatalf("create plan: %v", err)

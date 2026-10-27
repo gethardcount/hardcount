@@ -63,37 +63,21 @@ func TestE2E_FullBillingCycle(t *testing.T) {
 		}
 	})
 
-	// 2. Create rating rule (flat $10 per unit)
-	var ruleID string
-	t.Run("create rating rule", func(t *testing.T) {
-		resp := doPost(t, ts, "/v1/rating-rules", auth, map[string]any{
-			"rule_key":          "api_calls",
-			"name":              "API Call Pricing",
-			"mode":              "flat",
-			"currency":          "USD",
-			"flat_amount_cents": 1000,
-		})
-		assertStatus(t, resp, 201)
-		body := readJSON(t, resp)
-		ruleID = body["id"].(string)
-	})
-
-	// 3. Create meter linked to the rating rule
+	// 2. Create meter
 	var meterID string
 	t.Run("create meter", func(t *testing.T) {
 		resp := doPost(t, ts, "/v1/meters", auth, map[string]any{
-			"key":                    "api_calls",
-			"name":                   "API Calls",
-			"unit":                   "calls",
-			"aggregation":            "sum",
-			"rating_rule_version_id": ruleID,
+			"event_name":  "api_calls",
+			"name":        "API Calls",
+			"unit":        "calls",
+			"aggregation": "sum",
 		})
 		assertStatus(t, resp, 201)
 		body := readJSON(t, resp)
 		meterID = body["id"].(string)
 	})
 
-	// 4. Create plan with base fee + meter
+	// 3-4. Create plan with base fee + a $10 per call price on the meter
 	var planID string
 	t.Run("create plan", func(t *testing.T) {
 		resp := doPost(t, ts, "/v1/plans", auth, map[string]any{
@@ -102,7 +86,10 @@ func TestE2E_FullBillingCycle(t *testing.T) {
 			"currency":          "USD",
 			"billing_interval":  "monthly",
 			"base_amount_cents": 2900,
-			"meter_ids":         []string{meterID},
+			"base_bill_timing":  "in_arrears",
+			"prices": []map[string]any{{
+				"meter_id": meterID, "mode": "per_unit", "unit_amount_cents": "1000",
+			}},
 		})
 		assertStatus(t, resp, 201)
 		body := readJSON(t, resp)
@@ -131,7 +118,6 @@ func TestE2E_FullBillingCycle(t *testing.T) {
 			"items": []map[string]any{
 				{"plan_id": planID, "quantity": 1},
 			},
-			"start_now": true,
 		})
 		assertStatus(t, resp, 201)
 		body := readJSON(t, resp)
@@ -157,9 +143,9 @@ func TestE2E_FullBillingCycle(t *testing.T) {
 		}
 	})
 
-	// 8. Usage summary — query the billing period where events were ingested
-	t.Run("usage summary", func(t *testing.T) {
-		url := fmt.Sprintf("/v1/usage-summary/%s?from=%s&to=%s",
+	// 8. Usage totals — query the billing period where events were ingested
+	t.Run("usage totals", func(t *testing.T) {
+		url := fmt.Sprintf("/v1/usage-events/aggregate?customer_id=%s&from=%s&to=%s",
 			customerID,
 			periodStart.Format(time.RFC3339),
 			periodEnd.Format(time.RFC3339))
@@ -247,6 +233,7 @@ func TestE2E_FullBillingCycle(t *testing.T) {
 	t.Run("grant credits", func(t *testing.T) {
 		resp := doPost(t, ts, "/v1/credits/grant", auth, map[string]any{
 			"customer_id":  customerID,
+			"currency":     "USD",
 			"amount_cents": 5000,
 			"description":  "Welcome credit",
 		})
@@ -255,8 +242,10 @@ func TestE2E_FullBillingCycle(t *testing.T) {
 		resp = doGet(t, ts, "/v1/credits/balance/"+customerID, auth)
 		assertStatus(t, resp, 200)
 		body := readJSON(t, resp)
-		if body["balance_cents"].(float64) != 5000 {
-			t.Errorf("balance: got %v, want 5000", body["balance_cents"])
+		// One balance per currency (ADR-129).
+		rows, _ := body["data"].([]any)
+		if len(rows) != 1 || rows[0].(map[string]any)["balance_cents"].(float64) != 5000 || rows[0].(map[string]any)["currency"] != "USD" {
+			t.Errorf("balances: got %v, want one USD balance of 5000", body["data"])
 		}
 	})
 
@@ -327,6 +316,9 @@ func createTestAPIKey(t *testing.T, db *postgres.DB, tenantID string) string {
 	tx, err := db.BeginTx(context.Background(), postgres.TxBypass, "")
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
+	}
+	if _, err := tx.ExecContext(context.Background(), `SELECT set_config('app.livemode', 'on', true)`); err != nil {
+		t.Fatalf("set livemode: %v", err)
 	}
 	_, err = tx.ExecContext(context.Background(),
 		`INSERT INTO api_keys (id, key_prefix, key_hash, key_type, name, tenant_id)

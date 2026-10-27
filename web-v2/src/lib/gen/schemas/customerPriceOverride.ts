@@ -7,28 +7,39 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
-import type { CustomerPriceOverrideGraduatedTiersItem } from './customerPriceOverrideGraduatedTiersItem';
 import type { CustomerPriceOverrideMode } from './customerPriceOverrideMode';
+import type { PriceTier } from './priceTier';
 
+/**
+ * A customer's negotiated rate for one plan price. It keeps applying
+ * when the price's rate changes, and ends when the price is removed.
+ * It takes the plan's currency.
+ */
 export interface CustomerPriceOverride {
   id: string;
   tenant_id?: string;
-  /** The rating rule this override replaces the price of, across all its versions. */
-  rule_key: string;
   customer_id: string;
-  /** The rule version named when the override was created. For reference only. */
-  rating_rule_version_id: string;
+  /** The plan price this override replaces the rate of, for this customer. */
+  price_id: string;
+  /** As on PriceShape. */
   mode: CustomerPriceOverrideMode;
-  /** Per-unit rate in cents, as a decimal string. */
-  flat_amount_cents?: string;
+  /** Price per unit in cents, as a decimal string. */
+  unit_amount_cents?: string;
   /** Empty (`[]`) unless `mode` is `graduated`. */
-  graduated_tiers?: CustomerPriceOverrideGraduatedTiersItem[];
+  tiers?: PriceTier[];
   package_size?: number;
-  package_amount_cents?: number;
-  /** Per-unit overage rate in cents, as a decimal string. */
-  overage_unit_amount_cents?: string;
+  /** Price of one package in cents, as a decimal string. */
+  package_amount_cents?: string;
   reason?: string;
   active: boolean;
+  /**
+     * When the override starts, in the customer's time: wall time, or
+     * its test clock's time. A subscription already on the plan gets
+     * it from its next period; one that first joins the plan in a
+     * period after this instant gets it from the join.
+     */
   created_at: string;
+  /** When the override ended, in the customer's time. Absent while it is active. */
+  deactivated_at?: string;
   updated_at: string;
 }

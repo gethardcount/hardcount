@@ -102,9 +102,9 @@ func (r *countingPages) PaymentPagesLive(_ context.Context, _ string, ids []stri
 
 type countingStripe struct{ calls int }
 
-func (r *countingStripe) HasFor(context.Context, string, bool) bool {
+func (r *countingStripe) HasFor(context.Context, string, bool) (bool, error) {
 	r.calls++
-	return true
+	return true, nil
 }
 
 // TestList_AttentionReadsOncePerPage pins issue #1142: a list page reads each

@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/sagarsuperuser/velox/internal/subscription"
 	"maps"
 	"slices"
 	"strings"
@@ -13,9 +12,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sagarsuperuser/velox/internal/subscription"
+
 	"github.com/shopspring/decimal"
 
-	"github.com/sagarsuperuser/velox/internal/credit"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/payment"
@@ -107,7 +107,7 @@ func TestRunCycle_SkipsClockPinnedSubs(t *testing.T) {
 	invoices := &mockInvoices{}
 	engine := wireBaseTax(NewEngine(subs, &mockUsage{totals: map[string]int64{}}, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
 
-	if _, errs := engine.RunCycle(context.Background(), 50, nil); len(errs) > 0 {
+	if _, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil); len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
 
@@ -152,7 +152,7 @@ func TestRetryPendingCharges_DispatchesToCorrectQuery(t *testing.T) {
 		// We don't have a charger wired so the loop short-circuits at
 		// the paymentSetups nil check — that's fine, the assertion
 		// here is structural, not behavioural.
-		_, _ = engine.RetryPendingCharges(context.Background(), 50, nil)
+		_, _ = engine.RetryPendingCharges(postgres.WithLivemode(context.Background(), true), 50, nil)
 	})
 
 	t.Run("catchup path uses ListAutoChargePendingForClock", func(t *testing.T) {
@@ -189,7 +189,7 @@ func TestRetryPendingCharges_CardDeclineDoesNotEscalate(t *testing.T) {
 
 	engine := wireBaseTax(NewEngine(subs, &mockUsage{}, pricing, inv, nil, &mockSettings{}, pms, charger, billingTestClock()))
 
-	charged, errs := engine.RetryPendingCharges(context.Background(), 50, nil)
+	charged, errs := engine.RetryPendingCharges(postgres.WithLivemode(context.Background(), true), 50, nil)
 	if charged != 0 {
 		t.Errorf("charged: got %d, want 0 (card declined)", charged)
 	}
@@ -279,7 +279,7 @@ func TestBillSubscription_LoopsUntilCaughtUp(t *testing.T) {
 	clk := clock.NewFake(time.Date(2026, 9, 1, 0, 0, 1, 0, time.UTC))
 	engine := wireBaseTax(NewEngine(subs, &mockUsage{totals: map[string]int64{}}, pricing, invoices, nil, &mockSettings{}, nil, nil, clk))
 
-	if _, errs := engine.RunCycle(context.Background(), 50, nil); len(errs) > 0 {
+	if _, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil); len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
 
@@ -289,8 +289,8 @@ func TestBillSubscription_LoopsUntilCaughtUp(t *testing.T) {
 	}
 	// Sub's next_billing_at must be past clock now after all 5 cycles.
 	updated := subs.subs["sub_1"]
-	if updated.NextBillingAt == nil || !updated.NextBillingAt.After(clk.Now(context.Background())) {
-		t.Errorf("sub should be caught up: got next_billing_at=%v, clock=%v", updated.NextBillingAt, clk.Now(context.Background()))
+	if updated.NextBillingAt == nil || !updated.NextBillingAt.After(clk.Now(postgres.WithLivemode(context.Background(), true))) {
+		t.Errorf("sub should be caught up: got next_billing_at=%v, clock=%v", updated.NextBillingAt, clk.Now(postgres.WithLivemode(context.Background(), true)))
 	}
 }
 
@@ -752,14 +752,14 @@ type mockUsage struct {
 	// quantities per [from, to]. Key is "meterID|fromRFC3339|toRFC3339".
 	// Missing keys fall back to totals.
 	perInterval map[string]int64
-	// ruleAggs lets multi-dim tests stub per-pricing-rule buckets the way
-	// the real AggregateByPricingRules returns them (one RuleAggregation
-	// per claimed rule). Keyed by meterID; when unset, the legacy
-	// single-bucket fallback below applies.
-	ruleAggs map[string][]domain.RuleAggregation
-	// ruleAggsByWindow stubs a meter's pricing-rule buckets for one
-	// [from, to), keyed like perInterval. Missing keys fall back to ruleAggs.
-	ruleAggsByWindow map[string][]domain.RuleAggregation
+	// priceAggs lets multi-price tests stub per-price buckets the way the
+	// real AggregateClaims returns them (one ClaimedUsage per price that
+	// took events). Keyed by meterID; when unset, the fallback below
+	// applies.
+	priceAggs map[string][]domain.ClaimedUsage
+	// priceAggsByWindow stubs a meter's price buckets for one [from, to),
+	// keyed like perInterval. Missing keys fall back to priceAggs.
+	priceAggsByWindow map[string][]domain.ClaimedUsage
 }
 
 func mockIntervalKey(meterID string, from, to time.Time) string {
@@ -794,42 +794,54 @@ func (m *mockUsage) AggregateForBillingPeriodByAgg(_ context.Context, _, _ strin
 	return result, nil
 }
 
-// AggregateByPricingRules is a minimal stub — engine_test.go's existing
-// preview tests don't exercise the multi-dim path; the create_preview
-// integration tests cover that against real Postgres. We return one
-// aggregation per known meter so the new preview path produces the same
-// totals the legacy tests expect.
-func (m *mockUsage) AggregateByPricingRules(_ context.Context, _, _, meterID string, _ domain.AggregationMode, from, to time.Time) ([]domain.RuleAggregation, error) {
-	if aggs, ok := m.ruleAggsByWindow[mockIntervalKey(meterID, from, to)]; ok {
+// AggregateClaims answers the stubbed buckets, else the meter's total
+// (perInterval, then totals) as the real store answers events with no
+// labels: the catch-all price of the claims takes them, and with none they
+// are unclaimed.
+func (m *mockUsage) AggregateClaims(_ context.Context, _, _, meterID, _ string, claims []domain.UsageClaim, from, to time.Time) ([]domain.ClaimedUsage, error) {
+	if aggs, ok := m.priceAggsByWindow[mockIntervalKey(meterID, from, to)]; ok {
 		return aggs, nil
 	}
-	if aggs, ok := m.ruleAggs[meterID]; ok {
+	if aggs, ok := m.priceAggs[meterID]; ok {
 		return aggs, nil
 	}
-	qty, ok := m.totals[meterID]
+	qty, ok := m.perInterval[mockIntervalKey(meterID, from, to)]
 	if !ok {
-		return nil, nil
+		if qty, ok = m.totals[meterID]; !ok {
+			return nil, nil
+		}
 	}
-	return []domain.RuleAggregation{{
-		RuleID:              "",
-		RatingRuleVersionID: "",
-		Quantity:            decimal.NewFromInt(qty),
-	}}, nil
+	priceID := ""
+	for _, c := range claims {
+		if len(c.Match) == 0 {
+			priceID = c.PriceID
+			break
+		}
+	}
+	return []domain.ClaimedUsage{{PriceID: priceID, Quantity: decimal.NewFromInt(qty)}}, nil
 }
 
 type mockPricing struct {
-	plans     map[string]domain.Plan
-	meters    map[string]domain.Meter
-	rules     map[string]domain.RatingRuleVersion
-	overrides map[string]domain.CustomerPriceOverride // key: customerID+":"+ruleKey
-	// overrideErr, when set, is returned by GetOverrideByKeyAsOf —
-	// drives the fail-loud regression (a transient override-lookup
-	// failure must ABORT the close, never bill list price; ADR-070).
+	plans  map[string]domain.Plan
+	meters map[string]domain.Meter
+	// prices are each plan's prices, by plan id. The unit fixtures have no
+	// versions: a price is in force at every pin.
+	prices    map[string][]domain.PlanPrice
+	overrides map[string]domain.CustomerPriceOverride // key: customerID+":"+priceID
+	// overrideErr, when set, is returned by GetOverrideAt — drives the
+	// fail-loud regression (a transient override-lookup failure must ABORT
+	// the close, never bill list price).
 	overrideErr error
-	// meterPricingRules drives the multi-dim fork (ADR-044): meters with
-	// entries here take the AggregateByPricingRules path. Keyed by meterID;
-	// nil/missing keeps the meter on the legacy single-rule path.
-	meterPricingRules map[string][]domain.MeterPricingRule
+	// pricesErr, when set, is returned by PlanPricesAt.
+	pricesErr error
+}
+
+func clonePlans(p map[string]domain.Plan) map[string]domain.Plan {
+	out := make(map[string]domain.Plan, len(p))
+	for k, v := range p {
+		out[k] = v
+	}
+	return out
 }
 
 func (m *mockPricing) GetPlan(_ context.Context, _, id string) (domain.Plan, error) {
@@ -848,61 +860,43 @@ func (m *mockPricing) GetMeter(_ context.Context, _, id string) (domain.Meter, e
 	return meter, nil
 }
 
-func (m *mockPricing) GetRatingRule(_ context.Context, _, id string) (domain.RatingRuleVersion, error) {
-	r, ok := m.rules[id]
-	if !ok {
-		return domain.RatingRuleVersion{}, fmt.Errorf("rule not found")
+// PlanPricesAt is the plan's prices in claim order, as the store answers.
+func (m *mockPricing) PlanPricesAt(_ context.Context, _, planID string, _ time.Time, _ string) ([]domain.PlanPrice, error) {
+	if m.pricesErr != nil {
+		return nil, m.pricesErr
 	}
-	return r, nil
+	out := append([]domain.PlanPrice(nil), m.prices[planID]...)
+	for i := range out {
+		out[i].PlanID = planID
+	}
+	domain.ClaimOrder(out)
+	return out, nil
 }
 
-// GetRuleByKeyAsOf mirrors the store's ADR-070 resolution: highest
-// active version created at or before asOf; a key born after asOf
-// resolves to its earliest active version. Mock rules usually leave
-// CreatedAt zero, which sorts before any asOf — i.e. "always in force".
-func (m *mockPricing) GetRuleByKeyAsOf(_ context.Context, _, ruleKey string, asOf time.Time) (domain.RatingRuleVersion, error) {
-	var best, earliest domain.RatingRuleVersion
-	foundBest, foundAny := false, false
-	for _, r := range m.rules {
-		if r.RuleKey != ruleKey {
-			continue
-		}
-		if r.LifecycleState != "" && r.LifecycleState != domain.RatingRuleActive {
-			continue
-		}
-		if !foundAny || r.Version < earliest.Version {
-			earliest = r
-			foundAny = true
-		}
-		if !r.CreatedAt.After(asOf) && (!foundBest || r.Version > best.Version) {
-			best = r
-			foundBest = true
-		}
-	}
-	if foundBest {
-		return best, nil
-	}
-	if foundAny {
-		return earliest, nil
-	}
-	return domain.RatingRuleVersion{}, errs.ErrNotFound
-}
-
-func (m *mockPricing) GetOverrideByKeyAsOf(_ context.Context, _, customerID, ruleKey string, asOf time.Time) (domain.CustomerPriceOverride, error) {
+func (m *mockPricing) GetOverrideAt(_ context.Context, _, customerID, priceID string, at time.Time) (domain.CustomerPriceOverride, error) {
 	if m.overrideErr != nil {
 		return domain.CustomerPriceOverride{}, m.overrideErr
 	}
-	o, ok := m.overrides[customerID+":"+ruleKey]
-	if !ok || o.CreatedAt.After(asOf) {
+	o, ok := m.overrides[customerID+":"+priceID]
+	if !ok || o.CreatedAt.After(at) {
 		return domain.CustomerPriceOverride{}, errs.ErrNotFound
 	}
 	return o, nil
 }
 
-// ListMeterPricingRulesByMeter returns the configured multi-dim rules for a
-// meter (nil for legacy single-rule meters — the default for most tests).
-func (m *mockPricing) ListMeterPricingRulesByMeter(_ context.Context, _, meterID string) ([]domain.MeterPricingRule, error) {
-	return m.meterPricingRules[meterID], nil
+// perUnit is a per_unit catch-all price of meterID at cents.
+func perUnit(id, meterID string, cents int64) domain.PlanPrice {
+	return domain.PlanPrice{ID: id, MeterID: meterID, PriceShape: domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(cents)}}
+}
+
+// priceOf is a catch-all price of meterID with shape.
+func priceOf(id, meterID string, shape domain.PriceShape) domain.PlanPrice {
+	return domain.PlanPrice{ID: id, MeterID: meterID, PriceShape: shape}
+}
+
+// priceWith is a price of meterID that takes the events match names.
+func priceWith(id, meterID string, match map[string]string, shape domain.PriceShape) domain.PlanPrice {
+	return domain.PlanPrice{ID: id, MeterID: meterID, DimensionMatch: match, PriceShape: shape}
 }
 
 type mockInvoices struct {
@@ -1151,50 +1145,33 @@ func keysetPage(rows []domain.Invoice, after domain.InvoiceKeyset, limit int) []
 	return out
 }
 
-// LatestThresholdPeriodEnd mirrors the postgres semantics: MAX
-// billing_period_end across non-voided threshold invoices whose
-// billing_period_start is inside [periodStart, periodEnd). Tests seed a
-// threshold invoice in m.invoices and the cycle-close watermark finds
-// it organically.
-func (m *mockInvoices) LatestThresholdPeriodEnd(_ context.Context, _, subscriptionID string, periodStart, periodEnd time.Time) (time.Time, error) {
-	var latest time.Time
-	found := false
-	for _, inv := range m.invoices {
-		if inv.SubscriptionID != subscriptionID || inv.BillingReason != domain.BillingReasonThreshold {
-			continue
-		}
-		if inv.Status == domain.InvoiceVoided || inv.Status == domain.InvoiceUncollectible {
-			continue
-		}
-		if inv.BillingPeriodStart.Before(periodStart) || !inv.BillingPeriodStart.Before(periodEnd) {
-			continue
-		}
-		if !found || inv.BillingPeriodEnd.After(latest) {
-			latest = inv.BillingPeriodEnd
-			found = true
-		}
-	}
-	if !found {
-		return time.Time{}, errs.ErrNotFound
-	}
-	return latest, nil
-}
-
 // GetLatestThresholdInvoiceForCycle mirrors the postgres semantics: the
-// newest (by billing_period_end) non-voided threshold invoice whose
-// billing_period_start is inside [periodStart, periodEnd).
+// newest (by billing_period_end) threshold invoice that still bills its
+// window — any status but voided; a written-off one counts (ADR-066
+// amendment 2026-10-23) — whose billing_period_start is inside
+// [periodStart, periodEnd).
 func (m *mockInvoices) GetLatestThresholdInvoiceForCycleTx(ctx context.Context, _ *sql.Tx, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error) {
 	return m.GetLatestThresholdInvoiceForCycle(ctx, tenantID, subscriptionID, periodStart, periodEnd)
 }
 
 func (m *mockInvoices) GetLatestThresholdInvoiceForCycle(_ context.Context, _, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error) {
+	return m.latestThresholdInvoice(subscriptionID, periodStart, periodEnd, false)
+}
+
+// GetThresholdInvoiceForCycleAnyStatus mirrors the fire-once probe's read:
+// the same window, every status.
+func (m *mockInvoices) GetThresholdInvoiceForCycleAnyStatus(_ context.Context, _, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error) {
+	return m.latestThresholdInvoice(subscriptionID, periodStart, periodEnd, true)
+}
+
+func (m *mockInvoices) latestThresholdInvoice(subscriptionID string, periodStart, periodEnd time.Time, anyStatus bool) (domain.Invoice, error) {
 	var latest domain.Invoice
 	found := false
 	for _, inv := range m.invoices {
 		if inv.SubscriptionID != subscriptionID || inv.BillingReason != domain.BillingReasonThreshold {
 			continue
 		}
-		if inv.Status == domain.InvoiceVoided || inv.Status == domain.InvoiceUncollectible {
+		if !anyStatus && inv.Status == domain.InvoiceVoided {
 			continue
 		}
 		if inv.BillingPeriodStart.Before(periodStart) || !inv.BillingPeriodStart.Before(periodEnd) {
@@ -1337,18 +1314,6 @@ func (m *mockInvoices) UpdateTaxAtomic(_ context.Context, tenantID, invoiceID st
 	inv.AmountDueCents = due
 	m.invoices[idx] = inv
 	return inv, nil
-}
-
-// fakeCreditGranter records Grant calls. Backs the BillOnCancel
-// paid-check unit tests — they assert the grant fires (or doesn't)
-// based on the source invoice's payment_status.
-type fakeCreditGranter struct {
-	grants []credit.GrantInput
-}
-
-func (g *fakeCreditGranter) Grant(_ context.Context, _ string, in credit.GrantInput) (domain.CreditLedgerEntry, error) {
-	g.grants = append(g.grants, in)
-	return domain.CreditLedgerEntry{ID: fmt.Sprintf("vlx_cle_%d", len(g.grants))}, nil
 }
 
 // fakeInvoiceVoider / fakeCreditNoteAdjuster back the #22 unpaid-prebill-relief
@@ -1536,24 +1501,19 @@ func setupEngine() (*Engine, *mockSubs, *mockUsage, *mockPricing, *mockInvoices)
 				ID: "pln_1", Name: "Pro Plan", Currency: "USD",
 				BillingInterval: domain.BillingMonthly,
 				BaseAmountCents: 4900,
-				MeterIDs:        []string{"mtr_api", "mtr_storage"},
 			},
 		},
 		meters: map[string]domain.Meter{
-			"mtr_api":     {ID: "mtr_api", Name: "API Calls", Unit: "calls", RatingRuleVersionID: "rrv_api"},
-			"mtr_storage": {ID: "mtr_storage", Name: "Storage", Unit: "GB", RatingRuleVersionID: "rrv_storage"},
+			"mtr_api":     {ID: "mtr_api", Name: "API Calls", Unit: "calls"},
+			"mtr_storage": {ID: "mtr_storage", Name: "Storage", Unit: "GB"},
 		},
-		rules: map[string]domain.RatingRuleVersion{
-			"rrv_api": {
-				ID: "rrv_api", RuleKey: "api_calls", Version: 1, Mode: domain.PricingGraduated,
-				GraduatedTiers: []domain.RatingTier{
-					{UpTo: 1000, UnitAmountCents: decimal.NewFromInt(10)},
-					{UpTo: 0, UnitAmountCents: decimal.NewFromInt(5)},
-				},
-			},
-			"rrv_storage": {
-				ID: "rrv_storage", RuleKey: "storage_gb", Version: 1, Mode: domain.PricingFlat,
-				FlatAmountCents: decimal.NewFromInt(2500),
+		prices: map[string][]domain.PlanPrice{
+			"pln_1": {
+				priceOf("prc_api", "mtr_api", domain.PriceShape{Mode: domain.PricingGraduated, Tiers: []domain.RatingTier{
+					{UpTo: new(int64(1000)), UnitAmountCents: decimal.NewFromInt(10)},
+					{UpTo: nil, UnitAmountCents: decimal.NewFromInt(5)},
+				}}),
+				perUnit("prc_storage", "mtr_storage", 2500),
 			},
 		},
 	}
@@ -1636,7 +1596,7 @@ func TestBillOnCreateTx_PricesNewPlanOverNewPeriod(t *testing.T) {
 
 func TestRunCycle_GeneratesInvoice(t *testing.T) {
 	engine, subs, _, _, invoices := setupEngine()
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	count, errs := engine.RunCycle(ctx, 50, nil)
 	if len(errs) > 0 {
@@ -1733,7 +1693,7 @@ func TestRunCycle_CalendarMonthly_AutoRealignsOnCycleClose(t *testing.T) {
 	fakeClk := clock.NewFake(periodEnd.Add(time.Nanosecond))
 	engine := wireBaseTax(NewEngine(subs, &mockUsage{totals: map[string]int64{}}, pricing, invoices, nil, &mockSettings{}, nil, nil, fakeClk))
 
-	_, errs := engine.RunCycle(context.Background(), 50, nil)
+	_, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
@@ -1805,7 +1765,7 @@ func TestRunCycle_PlanIntervalChange_CalendarSnaps(t *testing.T) {
 	fakeClk := clock.NewFake(periodEnd.Add(time.Nanosecond))
 	engine := wireBaseTax(NewEngine(subs, &mockUsage{totals: map[string]int64{}}, pricing, &mockInvoices{}, nil, &mockSettings{}, nil, nil, fakeClk))
 
-	if _, errs := engine.RunCycle(context.Background(), 50, nil); len(errs) > 0 {
+	if _, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil); len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
 	updated := subs.subs["sub_1"]
@@ -1873,7 +1833,7 @@ func TestRunCycle_PlanIntervalChange_InAdvance_StubProrated(t *testing.T) {
 	fakeClk := clock.NewFake(periodEnd.Add(time.Nanosecond))
 	engine := wireBaseTax(NewEngine(subs, &mockUsage{totals: map[string]int64{}}, pricing, invoices, nil, &mockSettings{}, nil, nil, fakeClk))
 
-	if _, errs := engine.RunCycle(context.Background(), 50, nil); len(errs) > 0 {
+	if _, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil); len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
 	// New period: (Jun 24 2029, Jul 1 2029) — 7-day calendar-snap stub.
@@ -1919,7 +1879,7 @@ func TestRunCycle_AnniversaryMonthly_PreservesDayOfMonth(t *testing.T) {
 	fakeClk := clock.NewFake(periodEnd.Add(time.Nanosecond))
 	engine := wireBaseTax(NewEngine(subs, &mockUsage{totals: map[string]int64{}}, pricing, &mockInvoices{}, nil, &mockSettings{}, nil, nil, fakeClk))
 
-	_, errs := engine.RunCycle(context.Background(), 50, nil)
+	_, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
@@ -1961,7 +1921,7 @@ func TestRunCycle_SkipsTrialSubscription(t *testing.T) {
 	s.TrialEndAt = &trialEnd
 	subs.subs["sub_1"] = s
 
-	count, errs := engine.RunCycle(context.Background(), 50, nil)
+	count, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
@@ -1983,7 +1943,7 @@ func TestRunCycle_ZeroUsage(t *testing.T) {
 	// No usage at all
 	usage.totals = map[string]int64{}
 
-	count, errs := engine.RunCycle(context.Background(), 50, nil)
+	count, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
@@ -2028,16 +1988,16 @@ func TestRunCycle_LineItemDetails(t *testing.T) {
 				if item.PricingMode != "graduated" {
 					t.Errorf("API pricing_mode: got %q, want graduated", item.PricingMode)
 				}
-				if item.RatingRuleVersionID != "rrv_api" {
-					t.Errorf("API rule_id: got %q, want rrv_api", item.RatingRuleVersionID)
+				if item.PriceID != "prc_api" {
+					t.Errorf("API price_id: got %q, want prc_api", item.PriceID)
 				}
 			}
 			if item.MeterID == "mtr_storage" {
 				if item.AmountCents != 625000 { // 250 qty * 2500 flat rate
 					t.Errorf("storage amount: got %d, want 625000", item.AmountCents)
 				}
-				if item.PricingMode != "flat" {
-					t.Errorf("storage pricing_mode: got %q, want flat", item.PricingMode)
+				if item.PricingMode != "per_unit" {
+					t.Errorf("storage pricing_mode: got %q, want per_unit", item.PricingMode)
 				}
 			}
 		}
@@ -2051,12 +2011,12 @@ func TestRunCycle_LineItemDetails(t *testing.T) {
 // list price on a committed, finalized invoice.
 //
 // Mutation-verify: restore the `overrideErr == nil &&` swallow in
-// resolveRatedRule — this test fails (an invoice is generated).
+// rulePrices.Price (rate.go) — this test fails (an invoice is generated).
 func TestRunCycle_OverrideLookupTransientError_Aborts(t *testing.T) {
 	engine, _, _, pricing, invoices := setupEngine()
 	pricing.overrideErr = fmt.Errorf("connection reset by peer")
 
-	count, errs := engine.RunCycle(context.Background(), 50, nil)
+	count, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil)
 	if len(errs) == 0 {
 		t.Fatal("close succeeded despite override-lookup failure; want abort")
 	}
@@ -2066,7 +2026,7 @@ func TestRunCycle_OverrideLookupTransientError_Aborts(t *testing.T) {
 
 	// Recovery: the same sub bills normally once the lookup heals.
 	pricing.overrideErr = nil
-	count, errs = engine.RunCycle(context.Background(), 50, nil)
+	count, errs = engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil)
 	if len(errs) > 0 {
 		t.Fatalf("healed close errors: %v", errs)
 	}
@@ -2091,12 +2051,12 @@ func TestPreview_OverrideLookupTransientError_Aborts(t *testing.T) {
 	engine, subs, _, pricing, _ := setupEngine()
 	pricing.overrideErr = fmt.Errorf("connection reset by peer")
 
-	if _, err := engine.Preview(context.Background(), subs.subs["sub_1"]); err == nil {
+	if _, err := engine.previewCycle(context.Background(), subs.subs["sub_1"]); err == nil {
 		t.Fatal("preview succeeded despite override-lookup failure; want abort (a partial preview persisted by a threshold fire under-bills permanently)")
 	}
 
 	pricing.overrideErr = nil
-	preview, err := engine.Preview(context.Background(), subs.subs["sub_1"])
+	preview, err := engine.previewCycle(context.Background(), subs.subs["sub_1"])
 	if err != nil {
 		t.Fatalf("healed preview: %v", err)
 	}
@@ -2108,18 +2068,18 @@ func TestPreview_OverrideLookupTransientError_Aborts(t *testing.T) {
 func TestRunCycle_WithPriceOverride(t *testing.T) {
 	engine, _, _, pricing, invoices := setupEngine()
 
-	// Set a per-customer override: API calls flat $50 instead of graduated.
-	// Keyed by rule_key (ADR-070) — the override follows the rule across
-	// version publishes.
+	// Set a per-customer override: API calls per_unit $50 instead of
+	// graduated. Keyed by price (ADR-130 §6): the override follows the price
+	// across content edits.
 	pricing.overrides = map[string]domain.CustomerPriceOverride{
-		"cus_1:api_calls": {
-			ID: "cpo_1", CustomerID: "cus_1", RuleKey: "api_calls", RatingRuleVersionID: "rrv_api",
-			Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(5000),
-			Active: true,
+		"cus_1:prc_api": {
+			ID: "cpo_1", CustomerID: "cus_1", PriceID: "prc_api",
+			PriceShape: domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(5000)},
+			Active:     true,
 		},
 	}
 
-	count, errs := engine.RunCycle(context.Background(), 50, nil)
+	count, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil)
 	if len(errs) > 0 {
 		t.Fatalf("errors: %v", errs)
 	}
@@ -2182,26 +2142,23 @@ func TestRunCycle_UnitAmountRoundsBankers(t *testing.T) {
 			"pln_1": {
 				ID: "pln_1", Name: "Round Plan", Currency: "USD",
 				BillingInterval: domain.BillingMonthly,
-				BaseAmountCents: 0, MeterIDs: []string{"mtr_api"},
+				BaseAmountCents: 0,
 			},
 		},
 		meters: map[string]domain.Meter{
-			"mtr_api": {ID: "mtr_api", Name: "API Calls", Unit: "calls", RatingRuleVersionID: "rrv_api"},
+			"mtr_api": {ID: "mtr_api", Name: "API Calls", Unit: "calls"},
 		},
-		rules: map[string]domain.RatingRuleVersion{
-			"rrv_api": {
-				ID: "rrv_api", RuleKey: "api_calls", Version: 1, Mode: domain.PricingGraduated,
-				GraduatedTiers: []domain.RatingTier{
-					{UpTo: 1, UnitAmountCents: decimal.NewFromInt(100)},
-					{UpTo: 0, UnitAmountCents: decimal.NewFromInt(50)},
-				},
-			},
+		prices: map[string][]domain.PlanPrice{
+			"pln_1": {priceOf("prc_api", "mtr_api", domain.PriceShape{Mode: domain.PricingGraduated, Tiers: []domain.RatingTier{
+				{UpTo: new(int64(1)), UnitAmountCents: decimal.NewFromInt(100)},
+				{UpTo: nil, UnitAmountCents: decimal.NewFromInt(50)},
+			}})},
 		},
 	}
 	invoices := &mockInvoices{}
 	engine := wireBaseTax(NewEngine(subs, usage, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
 
-	if _, errs := engine.RunCycle(context.Background(), 50, nil); len(errs) > 0 {
+	if _, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil); len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
 	if len(invoices.invoices) != 1 {
@@ -2271,7 +2228,7 @@ func TestRunCycle_AppliesScheduledPlanChangeAtBoundary(t *testing.T) {
 	usage := &mockUsage{totals: map[string]int64{}}
 	engine := wireBaseTax(NewEngine(subs, usage, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
 
-	count, errs := engine.RunCycle(context.Background(), 50, nil)
+	count, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
@@ -2349,7 +2306,7 @@ func TestRunCycle_ScheduledPlanSwap_CrossInterval_BillsElapsedAtOutgoingPlan(t *
 	usage := &mockUsage{totals: map[string]int64{}}
 	engine := wireBaseTax(NewEngine(subs, usage, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
 
-	count, errs := engine.RunCycle(context.Background(), 50, nil)
+	count, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
@@ -2406,7 +2363,7 @@ func TestRunCycle_SkipsPendingChangeNotYetDue(t *testing.T) {
 	usage := &mockUsage{totals: map[string]int64{}}
 	engine := wireBaseTax(NewEngine(subs, usage, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
 
-	_, errs := engine.RunCycle(context.Background(), 50, nil)
+	_, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
@@ -2740,7 +2697,7 @@ func TestRunCycle_FiresPendingChangeAppliedEvent(t *testing.T) {
 	engine := wireBaseTax(NewEngine(subs, usage, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
 	engine.SetEventDispatcher(dispatcher)
 
-	if _, errs := engine.RunCycle(context.Background(), 50, nil); len(errs) > 0 {
+	if _, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil); len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
 
@@ -2767,8 +2724,14 @@ func TestRunCycle_FiresPendingChangeAppliedEvent(t *testing.T) {
 	if applied["old_plan_id"] != "pln_old" {
 		t.Errorf("old_plan_id: got %v, want pln_old", applied["old_plan_id"])
 	}
-	if applied["new_plan_id"] != "pln_new" {
-		t.Errorf("new_plan_id: got %v, want pln_new", applied["new_plan_id"])
+	if err := domain.CheckWebhookData(domain.EventSubscriptionPendingChangeApplied, applied); err != nil {
+		t.Error(err)
+	}
+	// The new plan is the item's plan in the subscription the event carries.
+	sub, _ := applied[domain.WebhookResourceSubscription].(map[string]any)
+	items, _ := sub["items"].([]any)
+	if len(items) != 1 || items[0].(map[string]any)["plan_id"] != "pln_new" {
+		t.Errorf("subscription items: got %v, want si_1 on pln_new", items)
 	}
 }
 
@@ -2804,18 +2767,17 @@ func TestRunCycle_OneSubFailsOthersContinue(t *testing.T) {
 	pricing := &mockPricing{
 		plans: map[string]domain.Plan{
 			"pln_ok":  {ID: "pln_ok", Name: "Flat", Currency: "USD", BillingInterval: domain.BillingMonthly, BaseAmountCents: 1000},
-			"pln_bad": {ID: "pln_bad", Name: "Broken", Currency: "USD", BillingInterval: domain.BillingMonthly, MeterIDs: []string{"mtr_missing"}},
+			"pln_bad": {ID: "pln_bad", Name: "Broken", Currency: "USD", BillingInterval: domain.BillingMonthly},
 		},
-		// mtr_missing references rrv_missing which isn't in rules — lookup fails
-		meters: map[string]domain.Meter{
-			"mtr_missing": {ID: "mtr_missing", Name: "Missing", RatingRuleVersionID: "rrv_missing"},
-		},
+		// pln_bad prices mtr_missing, which isn't in meters — the meter read
+		// fails.
+		prices: map[string][]domain.PlanPrice{"pln_bad": {perUnit("prc_missing", "mtr_missing", 1)}},
 	}
 	invoices := &mockInvoices{}
 	usage := &mockUsage{totals: map[string]int64{"mtr_missing": 100}}
 	engine := wireBaseTax(NewEngine(subs, usage, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
 
-	count, runErrs := engine.RunCycle(context.Background(), 50, nil)
+	count, runErrs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil)
 
 	if count != 1 {
 		t.Errorf("got %d invoices, want 1 (only sub_ok should succeed)", count)
@@ -2844,7 +2806,7 @@ func TestRunCycle_TaxProviderErrorDefersInvoice(t *testing.T) {
 	engine, _, _, _, invoices := setupEngine()
 	engine.SetTaxProviderResolver(stubResolver(&stubProvider{err: fmt.Errorf("stripe down")}))
 
-	count, runErrs := engine.RunCycle(context.Background(), 50, nil)
+	count, runErrs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil)
 	if len(runErrs) > 0 {
 		t.Fatalf("unexpected errors: %v", runErrs)
 	}
@@ -2898,7 +2860,7 @@ func TestRunCycle_NoPendingChangeNoAppliedEvent(t *testing.T) {
 	engine := wireBaseTax(NewEngine(subs, usage, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
 	engine.SetEventDispatcher(dispatcher)
 
-	if _, errs := engine.RunCycle(context.Background(), 50, nil); len(errs) > 0 {
+	if _, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil); len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
 
@@ -2947,7 +2909,7 @@ func TestRunCycle_CancelAtPeriodEnd_FiresAtBoundary(t *testing.T) {
 	engine := wireBaseTax(NewEngine(subs, &mockUsage{totals: map[string]int64{}}, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
 	engine.SetEventDispatcher(dispatcher)
 
-	if _, errs := engine.RunCycle(context.Background(), 50, nil); len(errs) > 0 {
+	if _, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil); len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
 
@@ -3016,7 +2978,7 @@ func TestRunCycle_CancelAt_FiresWhenTimestampReached(t *testing.T) {
 	invoices := &mockInvoices{}
 	engine := wireBaseTax(NewEngine(subs, &mockUsage{totals: map[string]int64{}}, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
 
-	if _, errs := engine.RunCycle(context.Background(), 50, nil); len(errs) > 0 {
+	if _, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil); len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
 
@@ -3133,7 +3095,7 @@ func TestRunCycle_PauseCollection_GeneratesDraft(t *testing.T) {
 	invoices := &mockInvoices{}
 	engine := wireBaseTax(NewEngine(subs, &mockUsage{totals: map[string]int64{}}, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
 
-	if _, errs := engine.RunCycle(context.Background(), 50, nil); len(errs) > 0 {
+	if _, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil); len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
 
@@ -3195,7 +3157,7 @@ func TestRunCycle_Trial_Active_SkipsBillingAndAdvancesCycle(t *testing.T) {
 	engine := wireBaseTax(NewEngine(subs, &mockUsage{totals: map[string]int64{}}, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
 	engine.SetEventDispatcher(dispatcher)
 
-	if _, errs := engine.RunCycle(context.Background(), 50, nil); len(errs) > 0 {
+	if _, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil); len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
 
@@ -3247,7 +3209,7 @@ func TestRunCycle_Trial_Ended_AutoActivatesAndBills(t *testing.T) {
 	engine := wireBaseTax(NewEngine(subs, &mockUsage{totals: map[string]int64{}}, pricing, invoices, nil, &mockSettings{}, nil, nil, clk))
 	engine.SetEventDispatcher(dispatcher)
 
-	if _, errs := engine.RunCycle(context.Background(), 50, nil); len(errs) > 0 {
+	if _, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil); len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
 
@@ -3324,7 +3286,7 @@ func TestRunCycle_Trial_Ended_InAdvance_CoversTrialEndPeriod(t *testing.T) {
 	clk := clock.NewFake(periodEnd.Add(time.Nanosecond))
 	engine := wireBaseTax(NewEngine(subs, &mockUsage{totals: map[string]int64{}}, pricing, invoices, nil, &mockSettings{}, nil, nil, clk))
 
-	if _, errs := engine.RunCycle(context.Background(), 50, nil); len(errs) > 0 {
+	if _, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil); len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
 
@@ -3404,7 +3366,7 @@ func TestRunCycle_InAdvance_ScheduledCancelAtPeriodEnd_NoOvercharge(t *testing.T
 	clk := clock.NewFake(periodEnd.Add(time.Nanosecond))
 	engine := wireBaseTax(NewEngine(subs, &mockUsage{totals: map[string]int64{}}, pricing, invoices, nil, &mockSettings{}, nil, nil, clk))
 
-	if _, errs := engine.RunCycle(context.Background(), 50, nil); len(errs) > 0 {
+	if _, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil); len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
 
@@ -3456,7 +3418,7 @@ func TestRunCycle_SkipEmptyCycleInvoice_NoChargeAttempt(t *testing.T) {
 	invoices := &mockInvoices{}
 	engine := wireBaseTax(NewEngine(subs, &mockUsage{totals: map[string]int64{}}, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
 
-	count, errs := engine.RunCycle(context.Background(), 50, nil)
+	count, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
@@ -3513,11 +3475,9 @@ func TestBillOnCancel_PaidCheck(t *testing.T) {
 			BillingPeriodStart: &paidStart,
 		}
 		inv := &mockInvoices{invoices: []domain.Invoice{paid}, lineItems: []domain.InvoiceLineItem{paidLine}}
-		granter := &fakeCreditGranter{}
 		adjuster := &fakeCreditNoteAdjuster{}
 
 		engine := wireBaseTax(NewEngine(&mockSubs{}, &mockUsage{}, makePricing(), inv, nil, &mockSettings{}, nil, nil, billingTestClock()))
-		engine.SetCreditGranter(granter)
 		engine.SetCreditNoteAdjuster(adjuster)
 		engine.SetCreditHeadroomReader(&fakeCreditHeadroom{})
 
@@ -3535,9 +3495,6 @@ func TestBillOnCancel_PaidCheck(t *testing.T) {
 		if cents != 3290 {
 			t.Errorf("return cents = %d, want 3290 — timeline detail depends on this match", cents)
 		}
-		if len(granter.grants) != 0 {
-			t.Errorf("engine must not double-credit via the ledger (grant happens inside CN Issue), got %d grants", len(granter.grants))
-		}
 	})
 
 	t.Run("source invoice UNPAID → credit suppressed", func(t *testing.T) {
@@ -3552,12 +3509,10 @@ func TestBillOnCancel_PaidCheck(t *testing.T) {
 			BillingPeriodStart: &unpaidStart,
 		}
 		inv := &mockInvoices{invoices: []domain.Invoice{unpaid}, lineItems: []domain.InvoiceLineItem{unpaidLine}}
-		granter := &fakeCreditGranter{}
 		voider := &fakeInvoiceVoider{}
 		adjuster := &fakeCreditNoteAdjuster{}
 
 		engine := wireBaseTax(NewEngine(&mockSubs{}, &mockUsage{}, makePricing(), inv, nil, &mockSettings{}, nil, nil, billingTestClock()))
-		engine.SetCreditGranter(granter)
 		engine.SetInvoiceVoider(voider)
 		engine.SetCreditNoteAdjuster(adjuster)
 		engine.SetCreditHeadroomReader(&fakeCreditHeadroom{})
@@ -3566,8 +3521,8 @@ func TestBillOnCancel_PaidCheck(t *testing.T) {
 		if err != nil {
 			t.Fatalf("BillOnCancel: %v", err)
 		}
-		if cents != 0 || len(granter.grants) != 0 {
-			t.Errorf("unpaid source: cents=%d grants=%d, want 0/0 (would have credited customer for unpaid period)", cents, len(granter.grants))
+		if cents != 0 {
+			t.Errorf("unpaid source: cents=%d, want 0 (would have credited customer for unpaid period)", cents)
 		}
 		// Suppressed ≠ silent: the unpaid receivable is settled in place —
 		// partially consumed (17/31 days) → amount_due reduced via adjustment
@@ -3584,16 +3539,11 @@ func TestBillOnCancel_PaidCheck(t *testing.T) {
 		// e.g. tenant manually deleted invoice, or cancel fires before any
 		// invoice was emitted for this period. Safest default: don't grant.
 		inv := &mockInvoices{}
-		granter := &fakeCreditGranter{}
 
 		engine := wireBaseTax(NewEngine(&mockSubs{}, &mockUsage{}, makePricing(), inv, nil, &mockSettings{}, nil, nil, billingTestClock()))
-		engine.SetCreditGranter(granter)
 
 		if _, err := billOnCancel(engine, context.Background(), makeSub()); err != nil {
 			t.Fatalf("BillOnCancel: %v", err)
-		}
-		if len(granter.grants) != 0 {
-			t.Errorf("expected no credit grant when source invoice missing, got %d", len(granter.grants))
 		}
 	})
 }
@@ -3645,21 +3595,19 @@ func TestBillOnCancel_UnpaidPrebillRelief(t *testing.T) {
 			}},
 		}
 	}
-	newEngine := func(inv *mockInvoices) (*Engine, *fakeCreditGranter, *fakeInvoiceVoider, *fakeCreditNoteAdjuster) {
+	newEngine := func(inv *mockInvoices) (*Engine, *fakeInvoiceVoider, *fakeCreditNoteAdjuster) {
 		e := wireBaseTax(NewEngine(&mockSubs{}, &mockUsage{}, makePricing(), inv, nil, &mockSettings{}, nil, nil, billingTestClock()))
-		g := &fakeCreditGranter{}
 		v := &fakeInvoiceVoider{}
 		a := &fakeCreditNoteAdjuster{}
-		e.SetCreditGranter(g)
 		e.SetInvoiceVoider(v)
 		e.SetCreditNoteAdjuster(a)
 		e.SetCreditHeadroomReader(&fakeCreditHeadroom{})
-		return e, g, v, a
+		return e, v, a
 	}
 
 	t.Run("partially consumed, no tax → adjustment CN reduces to consumed, no void, no grant", func(t *testing.T) {
 		inv := seedInvoices(6000, 0, 6000, 6000, 0)
-		e, g, v, a := newEngine(inv)
+		e, v, a := newEngine(inv)
 		cancelAt := time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC) // 17 unused / 31 days
 
 		cents, err := billOnCancel(e, context.Background(), makeSub(cancelAt))
@@ -3668,9 +3616,6 @@ func TestBillOnCancel_UnpaidPrebillRelief(t *testing.T) {
 		}
 		if cents != 0 {
 			t.Errorf("return cents = %d, want 0 (no balance credit on unpaid path)", cents)
-		}
-		if len(g.grants) != 0 {
-			t.Errorf("credit grants = %d, want 0 (unfunded — must not gift balance credit)", len(g.grants))
 		}
 		if len(v.voided) != 0 {
 			t.Errorf("voids = %d, want 0 (partial consumption must reduce, not void)", len(v.voided))
@@ -3687,7 +3632,7 @@ func TestBillOnCancel_UnpaidPrebillRelief(t *testing.T) {
 	t.Run("partially consumed WITH tax → CN amount grossed up so unused tax is reversed too", func(t *testing.T) {
 		// 10% tax: subtotal 6000, tax 600, total 6600, all unpaid.
 		inv := seedInvoices(6000, 600, 6600, 6600, 0)
-		e, _, v, a := newEngine(inv)
+		e, v, a := newEngine(inv)
 		cancelAt := time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC)
 
 		if _, err := billOnCancel(e, context.Background(), makeSub(cancelAt)); err != nil {
@@ -3707,7 +3652,7 @@ func TestBillOnCancel_UnpaidPrebillRelief(t *testing.T) {
 
 	t.Run("nothing consumed (cancel at period start) → void whole invoice, no CN, no grant", func(t *testing.T) {
 		inv := seedInvoices(6000, 0, 6000, 6000, 0)
-		e, g, v, a := newEngine(inv)
+		e, v, a := newEngine(inv)
 		cancelAt := periodStart.Add(time.Hour) // ~whole period unused → unusedDays rounds to full cycle
 
 		cents, err := billOnCancel(e, context.Background(), makeSub(cancelAt))
@@ -3716,9 +3661,6 @@ func TestBillOnCancel_UnpaidPrebillRelief(t *testing.T) {
 		}
 		if cents != 0 {
 			t.Errorf("return cents = %d, want 0", cents)
-		}
-		if len(g.grants) != 0 {
-			t.Errorf("credit grants = %d, want 0", len(g.grants))
 		}
 		if len(a.calls) != 0 {
 			t.Errorf("adjustment CN calls = %d, want 0 (fully unused → void)", len(a.calls))
@@ -3732,7 +3674,7 @@ func TestBillOnCancel_UnpaidPrebillRelief(t *testing.T) {
 		// Whole period unused but $20 already paid: must NOT void, must reduce
 		// amount_due (clamped) so the collected slice is preserved.
 		inv := seedInvoices(6000, 0, 6000, 4000, 2000) // 2000 paid, 4000 still due
-		e, _, v, a := newEngine(inv)
+		e, v, a := newEngine(inv)
 		cancelAt := periodStart.Add(time.Hour)
 
 		if _, err := billOnCancel(e, context.Background(), makeSub(cancelAt)); err != nil {
@@ -3809,10 +3751,8 @@ func TestBillOnPlanSwapImmediate(t *testing.T) {
 	}
 
 	t.Run("in_advance + paid source → refund credit issued via credit note", func(t *testing.T) {
-		granter := &fakeCreditGranter{}
 		adjuster := &fakeCreditNoteAdjuster{}
 		engine := wireBaseTax(NewEngine(&mockSubs{}, &mockUsage{}, makePricing(), paidInvoices(), nil, &mockSettings{}, nil, nil, billingTestClock()))
-		engine.SetCreditGranter(granter)
 		engine.SetCreditNoteAdjuster(adjuster)
 		engine.SetCreditHeadroomReader(&fakeCreditHeadroom{})
 
@@ -3830,15 +3770,10 @@ func TestBillOnPlanSwapImmediate(t *testing.T) {
 		if cents != 3097 {
 			t.Errorf("unused refund cents: got %d, want 3097 ($60 × 16/31, banker's)", cents)
 		}
-		if len(granter.grants) != 0 {
-			t.Errorf("engine must not double-credit via the ledger (grant happens inside CN Issue), got %d grants", len(granter.grants))
-		}
 	})
 
 	t.Run("in_arrears → no-op (nothing prebilled)", func(t *testing.T) {
-		granter := &fakeCreditGranter{}
 		engine := wireBaseTax(NewEngine(&mockSubs{}, &mockUsage{}, makePricing(), paidInvoices(), nil, &mockSettings{}, nil, nil, billingTestClock()))
-		engine.SetCreditGranter(granter)
 
 		cents, err := billOnPlanSwap(engine, context.Background(), makeArrearsSub(), swapAt)
 		if err != nil {
@@ -3846,9 +3781,6 @@ func TestBillOnPlanSwapImmediate(t *testing.T) {
 		}
 		if cents != 0 {
 			t.Errorf("in_arrears refund cents: got %d, want 0", cents)
-		}
-		if len(granter.grants) != 0 {
-			t.Errorf("in_arrears expected no credit grants, got %d", len(granter.grants))
 		}
 	})
 
@@ -3867,11 +3799,9 @@ func TestBillOnPlanSwapImmediate(t *testing.T) {
 			BillingPeriodStart: &periodStart,
 		}
 		inv := &mockInvoices{invoices: []domain.Invoice{unpaid}, lineItems: []domain.InvoiceLineItem{unpaidLine}}
-		granter := &fakeCreditGranter{}
 		voider := &fakeInvoiceVoider{}
 		adjuster := &fakeCreditNoteAdjuster{}
 		engine := wireBaseTax(NewEngine(&mockSubs{}, &mockUsage{}, makePricing(), inv, nil, &mockSettings{}, nil, nil, billingTestClock()))
-		engine.SetCreditGranter(granter)
 		engine.SetInvoiceVoider(voider)
 		engine.SetCreditNoteAdjuster(adjuster)
 		engine.SetCreditHeadroomReader(&fakeCreditHeadroom{})
@@ -3880,8 +3810,8 @@ func TestBillOnPlanSwapImmediate(t *testing.T) {
 		if err != nil {
 			t.Fatalf("BillOnPlanSwapImmediate: %v", err)
 		}
-		if cents != 0 || len(granter.grants) != 0 {
-			t.Errorf("unpaid swap: cents=%d grants=%d, want 0/0 (no refundable credit)", cents, len(granter.grants))
+		if cents != 0 {
+			t.Errorf("unpaid swap: cents=%d, want 0 (no refundable credit)", cents)
 		}
 		if len(voider.voided) != 0 {
 			t.Errorf("voids = %d, want 0 (partial consumption → reduce, not void)", len(voider.voided))
@@ -3921,10 +3851,8 @@ func TestBillOnPlanSwapImmediate(t *testing.T) {
 			BillingPeriodStart: &stubStart,
 		}
 		inv := &mockInvoices{invoices: []domain.Invoice{paid}, lineItems: []domain.InvoiceLineItem{paidLine}}
-		granter := &fakeCreditGranter{}
 		adjuster := &fakeCreditNoteAdjuster{}
 		engine := wireBaseTax(NewEngine(&mockSubs{}, &mockUsage{}, makePricing(), inv, nil, &mockSettings{}, nil, nil, billingTestClock()))
-		engine.SetCreditGranter(granter)
 		engine.SetCreditNoteAdjuster(adjuster)
 		engine.SetCreditHeadroomReader(&fakeCreditHeadroom{})
 
@@ -3945,9 +3873,7 @@ func TestBillOnPlanSwapImmediate(t *testing.T) {
 	})
 
 	t.Run("at >= periodEnd → no-op (clean swap at boundary)", func(t *testing.T) {
-		granter := &fakeCreditGranter{}
 		engine := wireBaseTax(NewEngine(&mockSubs{}, &mockUsage{}, makePricing(), paidInvoices(), nil, &mockSettings{}, nil, nil, billingTestClock()))
-		engine.SetCreditGranter(granter)
 
 		cents, err := billOnPlanSwap(engine, context.Background(), makeAdvanceSub(), periodEnd)
 		if err != nil {
@@ -3955,9 +3881,6 @@ func TestBillOnPlanSwapImmediate(t *testing.T) {
 		}
 		if cents != 0 {
 			t.Errorf("at=periodEnd refund: got %d cents, want 0", cents)
-		}
-		if len(granter.grants) != 0 {
-			t.Errorf("at=periodEnd expected no credit grants, got %d", len(granter.grants))
 		}
 	})
 }
@@ -4011,7 +3934,7 @@ func TestRunCycle_SegmentAware_SkipsInAdvanceSegment(t *testing.T) {
 	usage := &mockUsage{totals: map[string]int64{}}
 	engine := wireBaseTax(NewEngine(subs, usage, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
 
-	_, errs := engine.RunCycle(context.Background(), 50, nil)
+	_, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
@@ -4081,7 +4004,7 @@ func TestRunCycle_SegmentAware_InArrears_MidPeriodPlanChange(t *testing.T) {
 	usage := &mockUsage{totals: map[string]int64{}}
 	engine := wireBaseTax(NewEngine(subs, usage, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
 
-	count, errs := engine.RunCycle(context.Background(), 50, nil)
+	count, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
@@ -4160,16 +4083,16 @@ func TestRunCycle_SegmentAware_UsageMetersDifferPerSegment(t *testing.T) {
 	pricing := &mockPricing{
 		plans: map[string]domain.Plan{
 			// Zero base fees so the test isolates the usage assertion.
-			"pln_a": {ID: "pln_a", Name: "A", Currency: "USD", BillingInterval: domain.BillingMonthly, BaseAmountCents: 0, BaseBillTiming: domain.BillInArrears, MeterIDs: []string{"mtr_x"}},
-			"pln_b": {ID: "pln_b", Name: "B", Currency: "USD", BillingInterval: domain.BillingMonthly, BaseAmountCents: 0, BaseBillTiming: domain.BillInArrears, MeterIDs: []string{"mtr_y"}},
+			"pln_a": {ID: "pln_a", Name: "A", Currency: "USD", BillingInterval: domain.BillingMonthly, BaseAmountCents: 0, BaseBillTiming: domain.BillInArrears},
+			"pln_b": {ID: "pln_b", Name: "B", Currency: "USD", BillingInterval: domain.BillingMonthly, BaseAmountCents: 0, BaseBillTiming: domain.BillInArrears},
 		},
 		meters: map[string]domain.Meter{
-			"mtr_x": {ID: "mtr_x", Name: "Meter X", Unit: "unit", Aggregation: "sum", RatingRuleVersionID: "rrv_x"},
-			"mtr_y": {ID: "mtr_y", Name: "Meter Y", Unit: "unit", Aggregation: "sum", RatingRuleVersionID: "rrv_y"},
+			"mtr_x": {ID: "mtr_x", Name: "Meter X", Unit: "unit", Aggregation: "sum"},
+			"mtr_y": {ID: "mtr_y", Name: "Meter Y", Unit: "unit", Aggregation: "sum"},
 		},
-		rules: map[string]domain.RatingRuleVersion{
-			"rrv_x": {ID: "rrv_x", RuleKey: "x_key", Version: 1, Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(5)},
-			"rrv_y": {ID: "rrv_y", RuleKey: "y_key", Version: 1, Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(10)},
+		prices: map[string][]domain.PlanPrice{
+			"pln_a": {perUnit("prc_x", "mtr_x", 5)},
+			"pln_b": {perUnit("prc_y", "mtr_y", 10)},
 		},
 	}
 
@@ -4187,7 +4110,7 @@ func TestRunCycle_SegmentAware_UsageMetersDifferPerSegment(t *testing.T) {
 	invoices := &mockInvoices{}
 	engine := wireBaseTax(NewEngine(subs, usage, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
 
-	count, errs := engine.RunCycle(context.Background(), 50, nil)
+	count, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
@@ -4271,24 +4194,24 @@ func TestRunCycle_ItemRemovedAfterPeriodEnd_BillsItsUsage(t *testing.T) {
 	pricing := &mockPricing{
 		plans: map[string]domain.Plan{
 			"pln_cur": {ID: "pln_cur", Name: "Current", Currency: "USD", BillingInterval: domain.BillingMonthly,
-				BaseBillTiming: domain.BillInArrears, MeterIDs: []string{"mtr_x"}},
+				BaseBillTiming: domain.BillInArrears},
 			"pln_old": {ID: "pln_old", Name: "Removed", Currency: "USD", BillingInterval: domain.BillingMonthly,
-				BaseBillTiming: domain.BillInArrears, MeterIDs: []string{"mtr_y"}},
+				BaseBillTiming: domain.BillInArrears},
 		},
 		meters: map[string]domain.Meter{
-			"mtr_x": {ID: "mtr_x", Name: "Meter X", Unit: "unit", Aggregation: "sum", RatingRuleVersionID: "rrv_x"},
-			"mtr_y": {ID: "mtr_y", Name: "Meter Y", Unit: "unit", Aggregation: "sum", RatingRuleVersionID: "rrv_y"},
+			"mtr_x": {ID: "mtr_x", Name: "Meter X", Unit: "unit", Aggregation: "sum"},
+			"mtr_y": {ID: "mtr_y", Name: "Meter Y", Unit: "unit", Aggregation: "sum"},
 		},
-		rules: map[string]domain.RatingRuleVersion{
-			"rrv_x": {ID: "rrv_x", RuleKey: "x_key", Version: 1, Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(5)},
-			"rrv_y": {ID: "rrv_y", RuleKey: "y_key", Version: 1, Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(10)},
+		prices: map[string][]domain.PlanPrice{
+			"pln_cur": {perUnit("prc_x", "mtr_x", 5)},
+			"pln_old": {perUnit("prc_y", "mtr_y", 10)},
 		},
 	}
 	usage := &mockUsage{totals: map[string]int64{"mtr_x": 100, "mtr_y": 50}}
 	invoices := &mockInvoices{}
 	engine := wireBaseTax(NewEngine(subs, usage, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
 
-	if n, errs := engine.RunCycle(context.Background(), 50, nil); n != 1 || len(errs) != 0 {
+	if n, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil); n != 1 || len(errs) != 0 {
 		t.Fatalf("RunCycle = %d, %v; want 1 invoice", n, errs)
 	}
 	// X: 100 x 5c = 500c; Y: 50 x 10c = 500c.
@@ -4326,7 +4249,7 @@ func TestRunCycle_SegmentAware_NoChanges_FullPeriodLine(t *testing.T) {
 	usage := &mockUsage{totals: map[string]int64{}}
 	engine := wireBaseTax(NewEngine(subs, usage, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
 
-	count, errs := engine.RunCycle(context.Background(), 50, nil)
+	count, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
@@ -4394,7 +4317,7 @@ func TestBillSubscription_PeriodMoved_RetriesOnce(t *testing.T) {
 			s.NextBillingAt = &truncated
 			m.subs["sub_1"] = s
 		}
-		n, err := engine.billSubscription(context.Background(), subs.subs["sub_1"], 0, nil)
+		n, err := engine.billSubscription(postgres.WithLivemode(context.Background(), true), subs.subs["sub_1"], 0, nil)
 		if err != nil {
 			t.Fatalf("billSubscription: %v", err)
 		}
@@ -4418,7 +4341,7 @@ func TestBillSubscription_PeriodMoved_RetriesOnce(t *testing.T) {
 			s.CurrentBillingPeriodEnd = &moved
 			m.subs["sub_1"] = s
 		}
-		n, err := engine.billSubscription(context.Background(), subs.subs["sub_1"], 0, nil)
+		n, err := engine.billSubscription(postgres.WithLivemode(context.Background(), true), subs.subs["sub_1"], 0, nil)
 		if err != nil || n != 0 {
 			t.Fatalf("billSubscription = (%d, %v), want (0, nil): a lost race is not an error", n, err)
 		}

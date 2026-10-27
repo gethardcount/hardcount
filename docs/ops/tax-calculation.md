@@ -1,6 +1,6 @@
 # Tax calculation
 
-Velox adds tax to each invoice in one of three ways: no tax, one flat rate, or Stripe Tax. This page is for the person who sets up an account and the engineer who runs Velox. It says which choice fits, where to set it, and what to do when tax cannot be worked out.
+Velox adds tax to each invoice in one of three ways: no tax, one flat rate, or Stripe Tax.
 
 Velox does not decide which taxes you owe. You register for tax with the authorities (and, for Stripe Tax, in your Stripe account), and Velox applies what you set up. That works for registrations such as:
 
@@ -20,7 +20,7 @@ Set it in the dashboard under **Settings → Tax → Tax calculation → Tax pro
 
 One line is never taxed under any provider: a prepaid-commit purchase. It is not sent to Stripe Tax either, so a commit-only invoice has no Stripe Tax record. The usage the credit pays for is taxed when it is invoiced ([why](../ai-pricing.md#tax-on-prepaid-credit)).
 
-Velox never switches to another provider by itself. If Stripe Tax fails, the invoice waits; it is not issued at a guessed rate.
+If Stripe Tax fails, the invoice waits; Velox never falls back to a guessed rate ([what to do](#when-tax-cannot-be-worked-out)).
 
 ### Manual (flat rate)
 
@@ -72,17 +72,10 @@ Velox counts every invoice that waits for tax on the metric `velox_tax_outcome_t
 |---|---|
 | `no_country` | The customer has no country on file |
 | `no_client_for_mode` | Stripe is not connected for the invoice's mode, test or live |
+| `credentials_unreadable` | Velox could not read the stored Stripe keys for that mode, for example a database error or a key it cannot decrypt |
 | `api_error` | Stripe Tax returned an error |
 
-Each one also writes a warning to the log:
-
-```
-WARN stripe tax failed, deferring invoice for retry reason=api_error error=… livemode=true
-WARN stripe tax failed, deferring invoice for retry reason=no_country
-WARN stripe tax failed, deferring invoice for retry reason=no_client_for_mode livemode=true
-```
-
-They are warnings, not errors, because nothing is lost: the invoice waits and is retried. Alert on the metric rather than on the log lines.
+Each one also logs a WARN line, `stripe tax failed, deferring invoice for retry`, with the reason. Alert on the metric, not the log.
 
 | Pattern | Likely cause | What to do |
 |---|---|---|
@@ -90,7 +83,6 @@ They are warnings, not errors, because nothing is lost: the invoice waits and is
 | Many accounts at the same time | A Stripe outage. Check [status.stripe.com](https://status.stripe.com). | Make sure the waiting invoices clear once Stripe is back |
 | One account, starting suddenly | Its Stripe API key was changed or revoked | Ask the account owner to update the keys |
 
-## Related
+How the providers work inside Velox: [Architecture](../architecture.md#tax-providers).
 
-- [How the tax providers work inside Velox](../architecture.md#tax-providers): the provider methods, what is saved on each invoice, and why a failure waits instead of guessing.
-- [Operations runbook](runbook/monitoring.md): alerts on billing runs, including tax.
+**Next:** [alerts on billing runs](runbook/monitoring.md).

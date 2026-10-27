@@ -91,6 +91,7 @@ var markSkipCallers = map[string]markSkipCaller{
 	"internal/api/adapters.go":                   {2, "hosted-invoice payment-session reuse — a second Pay click returns the same Stripe session, no new claim row"},
 	"internal/api/middleware/idempotency.go":     {1, "idempotency replay — the cached response of a request whose original DID emit"},
 	"internal/creditnote/handler.go":             {1, "credit-note issue that defers"},
+	"internal/subscription/handler.go":           {2, "resume collection on a subscription that is not paused; clear a scheduled cancel when none is scheduled (both change nothing)"},
 }
 
 // TestMarkSkipCallers_MatchTheCode is the gate on the class that drifted in all

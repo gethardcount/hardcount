@@ -1,8 +1,7 @@
 # Manual fixes
 
-Operator actions for incidents, when the dashboard action is not available.
-Each one writes to the database directly, so record it in the audit log
-yourself. Back to the [runbook index](index.md).
+Operator actions for incidents. Where a fix below writes to the database
+directly, record it in the audit log yourself. Back to the [runbook index](index.md).
 
 ## Force-resolve a stuck dunning run
 
@@ -19,9 +18,20 @@ this only when the dashboard **Resolve** action is unavailable.
    | annulled or billed in error | `invoice_voided` |
    | written off as bad debt | `invoice_not_collectible` |
 
-2. **Resolve the run:**
+2. **Find the run's mode.** `true` is a live run, `false` a test run:
 
    ```sql
+   SELECT livemode FROM invoice_dunning_runs WHERE id = '<run_id>';
+   ```
+
+3. **Resolve the run.** Set `app.livemode` to `'on'` for a live run or
+   `'off'` for a test run. The event row takes its mode from this setting,
+   and the insert is refused without it.
+
+   ```sql
+   BEGIN;
+   SET LOCAL app.livemode = 'on';  -- 'off' for a test run
+
    UPDATE invoice_dunning_runs
    SET state = 'resolved', resolution = 'invoice_voided',  -- see table above
        resolved_at = now(), next_action_at = NULL
@@ -29,39 +39,58 @@ this only when the dashboard **Resolve** action is unavailable.
 
    INSERT INTO invoice_dunning_events (tenant_id, run_id, invoice_id, event_type, state, reason)
    VALUES ('<tenant_id>', '<run_id>', '<invoice_id>', 'resolved', 'resolved', 'invoice_voided');
+   COMMIT;
    ```
 
-   Do not write `manually_resolved`. It is the old value from before
-   migration 0170, and meant "voided or written off". The CHECK constraint
-   keeps it legal only so that older rows stay readable.
+   Do not write `manually_resolved`; it is kept only so old rows stay
+   readable.
 
-3. **Change the invoice too.** This SQL resolves the run only; it does not
+4. **Change the invoice too.** This SQL resolves the run only; it does not
    touch the invoice. The endpoint makes the matching invoice change (void,
    mark uncollectible, or record a payment), and this SQL does not. If you
    skip this step, the run and the invoice disagree.
 
-4. **Record the action in the audit log.**
+## Mark an invoice paid (offline payment received)
 
-## Force-mark an invoice paid (offline payment received)
+Use **Record offline payment** in the invoice's ⋯ menu (on a written-off
+invoice, the **Record payment** button), or
+`POST /v1/invoices/{id}/record-payment` (optional body
+`{"note": "Cheque #1234"}`). It also closes the dunning run, sends
+`invoice.paid` and writes the audit row, which an SQL update would skip.
+Do not mark an invoice paid with SQL. It is refused while a charge on the
+invoice is still being confirmed with Stripe: see
+[A charge's result is unclear](unclear-charge.md).
 
-Use the dashboard's **Mark as paid** action. The SQL alternative:
+## A subscription change is refused with `unpaid_invoice_blocks_change`
 
-```sql
--- payment_status has a CHECK (pending/processing/succeeded/failed/unknown);
--- 'paid' is an INVOICE status, not a payment_status. Mirror what MarkPaid does:
-UPDATE invoices
-SET status = 'paid', payment_status = 'succeeded',
-    amount_paid_cents = amount_due_cents, amount_due_cents = 0,
-    paid_at = now(), auto_charge_pending = false, updated_at = now()
-WHERE id = '<invoice_id>';
-```
+A plan change, added item or seat increase would charge for the rest of
+the current period, and the invoice that billed that period still has an
+amount due. A written-off invoice counts as unpaid. Do one of:
 
-Record the action in the audit log yourself if you run SQL directly.
+- record the payment, if the customer paid outside Stripe (above);
+- void the invoice, if it should not be owed. A void hands back the credits
+  applied to it and reverses its tax;
+- for a plan change, schedule it for the end of the period
+  (`immediate: false`). Nothing is charged for the rest of this one.
+
+After a payment or a void, make the change again. A cancel, downgrade or
+removed item is never refused for this: it lowers what that invoice asks
+for by the unused time. A cancel on the period's first day voids the invoice instead, if nothing
+is paid on it, no charge on it is being confirmed with Stripe and it bills
+nothing else.
+
+If the customer paid a new invoice you made to recover a written-off one,
+Velox does not link the two. The written-off invoice keeps its amount due,
+so the change is still refused, and a later cancel or downgrade lowers what
+it asks for instead of crediting the customer. Do not record a payment on
+it: the money would be counted twice. Schedule a plan change for the
+period's end. For a cancel or downgrade, grant the customer the unused time
+as credit (`POST /v1/credits/grant`). An added item or seat increase has no
+way round yet.
 
 ## A customer has no usable payment method on file
 
-There is no `setup_status` flag to change: the `customer_payment_setups`
-table was dropped (migration 0097). Saved cards live in the
+Saved cards live in the
 `payment_methods` table, written by the Stripe `setup_intent.succeeded` and
 `payment_method.attached` webhooks. If a webhook was missed, do not change
 the data with SQL. Instead:

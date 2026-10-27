@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/sagarsuperuser/velox/internal/credit"
+	"github.com/sagarsuperuser/velox/internal/testutil"
 )
 
 // TestGrantSummary_SplitsDeductedFromUsed: an operator deduction (a negative
@@ -20,11 +21,11 @@ func TestGrantSummary_SplitsDeductedFromUsed(t *testing.T) {
 	}
 	_, ctx, tenantID, cust, _, svc, invoiceStore := expirySetup(t, "GrantSummaryDeducted")
 
-	first, err := svc.Grant(ctx, tenantID, credit.GrantInput{CustomerID: cust.ID, AmountCents: 10000, Description: "first"})
+	first, err := svc.Grant(ctx, tenantID, credit.GrantInput{Currency: "USD", CustomerID: cust.ID, AmountCents: 10000, Description: "first"})
 	if err != nil {
 		t.Fatalf("grant first: %v", err)
 	}
-	second, err := svc.Grant(ctx, tenantID, credit.GrantInput{CustomerID: cust.ID, AmountCents: 5000, Description: "second"})
+	second, err := svc.Grant(ctx, tenantID, credit.GrantInput{Currency: "USD", CustomerID: cust.ID, AmountCents: 5000, Description: "second"})
 	if err != nil {
 		t.Fatalf("grant second: %v", err)
 	}
@@ -35,7 +36,7 @@ func TestGrantSummary_SplitsDeductedFromUsed(t *testing.T) {
 	if applied, err := svc.ApplyToInvoice(ctx, tenantID, cust.ID, inv.ID, 3000); err != nil || applied != 3000 {
 		t.Fatalf("apply: applied %d, err %v; want 3000", applied, err)
 	}
-	if _, err := svc.Adjust(ctx, tenantID, credit.AdjustInput{CustomerID: cust.ID, AmountCents: -2000, Description: "goodwill reversed"}); err != nil {
+	if _, err := svc.Adjust(ctx, tenantID, credit.AdjustInput{Currency: "USD", CustomerID: cust.ID, AmountCents: -2000, Description: "goodwill reversed"}); err != nil {
 		t.Fatalf("deduct 2000: %v", err)
 	}
 
@@ -61,7 +62,7 @@ func TestGrantSummary_SplitsDeductedFromUsed(t *testing.T) {
 	}
 
 	// A deduction spanning two grants: $50 left on the first, $30 from the second.
-	if _, err := svc.Adjust(ctx, tenantID, credit.AdjustInput{CustomerID: cust.ID, AmountCents: -8000, Description: "cleanup"}); err != nil {
+	if _, err := svc.Adjust(ctx, tenantID, credit.AdjustInput{Currency: "USD", CustomerID: cust.ID, AmountCents: -8000, Description: "cleanup"}); err != nil {
 		t.Fatalf("deduct 8000: %v", err)
 	}
 	m := byID()
@@ -73,7 +74,7 @@ func TestGrantSummary_SplitsDeductedFromUsed(t *testing.T) {
 		t.Errorf("second grant consumed=%d deducted=%d, want 3000 3000", b.ConsumedCents, b.DeductedCents)
 	}
 
-	bal, err := svc.GetBalance(ctx, tenantID, cust.ID)
+	bal, err := testutil.BalanceUSD(svc.GetBalance(ctx, tenantID, cust.ID))
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}

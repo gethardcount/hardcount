@@ -78,7 +78,7 @@ func TestActivityParity_SubscriptionOperatorScenarios(t *testing.T) {
 		sub := call("POST", "/v1/subscriptions", flowReq{body: map[string]any{
 			"code": "sub-parity-" + a.name, "display_name": "Sub Parity " + a.name, "customer_id": customerID,
 			"items": []map[string]any{{"plan_id": starter, "quantity": 1}}, "billing_time": "anniversary",
-			"start_now": true, "trial_days": 14,
+			"trial_days": 14,
 		}}).want(t, 201, a.name+": create subscription").body
 		subID := flowStr(sub, "id")
 		items, _ := sub["items"].([]any)
@@ -152,7 +152,7 @@ func TestActivityParity_SubscriptionOperatorScenarios(t *testing.T) {
 		"Scheduled cancellation cleared | by API key",
 		"Collection paused | Invoices are created but not charged until collection resumes · by API key",
 		"Collection resumed | by API key",
-		"Spend thresholds set | $500.00 total · by API key",
+		"Spend thresholds set | $500.00 usage total · by API key",
 		"Spend thresholds removed | by API key",
 		"Item added | Parity Extra · Quantity 2 · by API key",
 		"Quantity changed | Parity Extra · 2 → 3 · by API key",

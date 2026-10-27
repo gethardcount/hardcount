@@ -1,8 +1,8 @@
 // The one answer to "which currency is this customer billed in?".
 //
-// Every money figure on a customer that has no currency of its own (the
-// credit balance, an empty usage window, a margin with no revenue yet, the
-// default of the New invoice dialog) is shown in this currency. Before, each
+// Every money figure on a customer that has no currency of its own (an empty
+// usage window, a margin with no revenue yet, the default of the New invoice
+// and Grant credits dialogs) is shown in this currency. Before, each
 // card fell back on its own: the credit balance took the billing profile and
 // then the invoices, the usage and margin cards took the workspace default. A
 // customer on a EUR plan with no profile and no invoice yet read $0.00 in
@@ -12,15 +12,14 @@
 // invoice in (engine.invoiceCurrency, ADR-100), so the page shows the
 // currency the next invoice will use:
 //  1. the billing profile's currency;
-//  2. the plan of the customer's live subscription (the one whose period
-//     started last, the same "primary" pick GET /v1/customers/{id}/usage
-//     makes). A plan has exactly one currency;
+//  2. the plan of the customer's draft, trialing or active subscription (the
+//     one whose period started last, the same "primary" pick
+//     GET /v1/customers/{id}/usage makes). A plan has exactly one currency;
 //  3. the newest invoice's currency;
 //  4. the workspace default.
 //
-// Credits have no currency of their own: the ledger is drawn 1:1 against
-// whatever invoice they are applied to (ADR-100), which is why the credit
-// balance follows this answer too.
+// Credit is not such a figure: each ledger row stores its own currency and
+// pays only invoices in it (ADR-129), so credit amounts are shown in theirs.
 
 export type CustomerCurrencySource = 'subscription' | 'billing_profile' | 'invoice' | 'workspace'
 
@@ -29,8 +28,10 @@ export interface CustomerCurrency {
   source: CustomerCurrencySource
 }
 
-// A subscription still bills (and so still sets the currency) in these states.
-const LIVE_STATUSES = new Set(['active', 'trialing', 'past_due', 'paused'])
+// A subscription in these states fixes the customer's currency. They are the
+// states POST /v1/invoices pins a manual invoice to (ADR-100): a draft counts,
+// because it will bill in its plan's currency once it starts.
+const LIVE_STATUSES = new Set(['draft', 'trialing', 'active'])
 
 export interface CurrencySubscription {
   status: string
@@ -88,4 +89,21 @@ export function settledCustomerCurrency(
 ): CustomerCurrency | undefined {
   if (queries.some(q => q.isLoading || q.isError)) return undefined
   return resolveCustomerCurrency(input())
+}
+
+// invoiceCurrencyPin is why a manual invoice can only be in the customer's
+// currency, or null when it can be in any. POST /v1/invoices refuses another
+// currency (409 customer_currency_conflict) when the billing profile sets it
+// or a live subscription's plan does; the newest invoice and the workspace
+// default only suggest one. The New invoice dialog fixes the picker and
+// shows this line.
+export function invoiceCurrencyPin(c: CustomerCurrency): string | null {
+  switch (c.source) {
+    case 'billing_profile':
+      return `This customer is billed in ${c.currency} (billing profile), so the invoice is too.`
+    case 'subscription':
+      return `This customer is billed in ${c.currency} (subscription plan), so the invoice is too.`
+    default:
+      return null
+  }
 }

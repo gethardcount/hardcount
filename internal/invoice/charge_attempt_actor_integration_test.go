@@ -237,3 +237,30 @@ func TestChargeAttemptTriggers_MatchCheckConstraint(t *testing.T) {
 		t.Errorf("the CHECK allows %q, which no Go constant names", tr)
 	}
 }
+
+// TestChargeAttemptOutcomes_MatchCheckConstraint is the same rule for
+// domain.ChargeAttemptOutcomes and the outcome CHECK: a below-minimum
+// refusal's attempt row would otherwise fail its insert and the timeline
+// would lose it without a word.
+func TestChargeAttemptOutcomes_MatchCheckConstraint(t *testing.T) {
+	testutil.SetupTestDB(t)
+	var def string
+	if err := testutil.AdminPool(t).QueryRowContext(context.Background(),
+		`SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'invoice_charge_attempts_outcome_check'`,
+	).Scan(&def); err != nil {
+		t.Fatalf("read the CHECK: %v", err)
+	}
+	inCheck := map[string]bool{}
+	for _, m := range regexp.MustCompile(`'(\w+)'`).FindAllStringSubmatch(def, -1) {
+		inCheck[m[1]] = true
+	}
+	for _, o := range domain.ChargeAttemptOutcomes() {
+		if !inCheck[string(o)] {
+			t.Errorf("outcome %q is not in the CHECK (%s)", o, def)
+		}
+		delete(inCheck, string(o))
+	}
+	for o := range inCheck {
+		t.Errorf("the CHECK allows %q, which no Go constant names", o)
+	}
+}

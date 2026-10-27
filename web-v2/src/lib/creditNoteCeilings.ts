@@ -16,11 +16,20 @@
 // ceiling: a refund can never exceed the note it belongs to, so the honest
 // ceiling for that input is min(rule 2, rule 3), not rule 2 alone.
 
-/** Mirrors domain.Invoice.HasCardPayment. */
-export const OUT_OF_BAND_PI_PREFIX = 'out_of_band:'
+import { paymentIsUnresolved } from './status'
 
+// canIssueCreditNote is the server's rule for which invoices take a credit
+// note (creditnote.Service.Create): a finalized or paid invoice whose payment
+// is not in flight. The Credit Notes page lists only these invoices, and the
+// invoice page offers the action only on them.
+export function canIssueCreditNote(inv: { status: string; payment_status: string }): boolean {
+  return (inv.status === 'finalized' || inv.status === 'paid') && !paymentIsUnresolved(inv.payment_status)
+}
+
+/** Mirrors domain.Invoice.HasCardPayment: a card paid when a Stripe
+ *  PaymentIntent is recorded. An offline payment records none. */
 export function hasCardPayment(stripePaymentIntentId?: string | null): boolean {
-  return !!stripePaymentIntentId && !stripePaymentIntentId.startsWith(OUT_OF_BAND_PI_PREFIX)
+  return !!stripePaymentIntentId
 }
 
 export interface CeilingNote {

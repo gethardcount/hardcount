@@ -94,12 +94,17 @@ type CheckoutSessionCreator interface {
 // when it is true: without keys the checkout create fails, and the customer
 // used to see a Pay button that answered "failed to create checkout session".
 type StripeReadiness interface {
-	HasFor(ctx context.Context, tenantID string, livemode bool) bool
+	HasFor(ctx context.Context, tenantID string, livemode bool) (bool, error)
 }
 
 // PayUnavailableOnline is pay_unavailable_reason when the invoice is owed
 // but the seller has no payment provider connected for its mode.
-const PayUnavailableOnline = "online_payment_unavailable"
+const PayUnavailableOnline = errs.CodeOnlinePaymentUnavailable
+
+// PayUnavailableBelowMinimum is pay_unavailable_reason when Stripe refused to
+// charge the invoice because the amount is below its minimum charge
+// (domain.ErrBelowMinimumCharge): no card can pay it online.
+const PayUnavailableBelowMinimum = domain.BelowMinimumCode
 
 type Handler struct {
 	invoices    InvoiceResolver
@@ -206,18 +211,14 @@ type viewInvoice struct {
 
 type viewLineItem struct {
 	Description string `json:"description"`
-	Quantity    int64  `json:"quantity"`
-	// QuantityDecimal is the exact (possibly fractional) usage quantity as a
-	// decimal string; empty for whole-quantity lines. Without it the page
-	// showed the truncated integer against the full amount (1.5 GPU-hours →
-	// "Qty 1 × $6.67 = $10.00"), the qty × unit ≠ amount incoherence the
-	// invoice PDF already avoids via its QuantityDecimal-aware formatter.
-	QuantityDecimal string `json:"quantity_decimal,omitempty"`
-	UnitAmountCents int64  `json:"unit_amount_cents"`
+	// Quantity is the line's exact quantity as a decimal string
+	// (InvoiceLineItem.ExactQuantity): 1.5 GPU-hours is "1.5", never the
+	// truncated 1 against the full amount.
+	Quantity string `json:"quantity"`
 	// UnitAmountDecimal is the full-precision per-unit price (decimal cents),
-	// so the public page renders sub-cent rates (e.g. $0.003) instead of the
-	// whole-cent UnitAmountCents collapsing them to "$0.00" (ADR-054).
-	UnitAmountDecimal string `json:"unit_amount_decimal,omitempty"`
+	// so the public page renders sub-cent rates (e.g. $0.003) instead of a
+	// whole-cent price collapsing them to "$0.00" (ADR-054).
+	UnitAmountDecimal string `json:"unit_amount_decimal"`
 	// MeterUnit lets the public page render token rates per-1M
 	// ("$3.00 / 1M tokens"), matching the operator dashboard and the PDF.
 	MeterUnit        string `json:"meter_unit,omitempty"`
@@ -347,16 +348,31 @@ func (h *Handler) viewInvoice(w http.ResponseWriter, r *http.Request) {
 	}
 
 	owed := payEnabled(inv)
-	online := owed && h.onlinePaymentReady(r.Context(), inv)
+	live, err := postgres.Livemode(r.Context())
+	if err != nil {
+		slog.ErrorContext(r.Context(), "hostedinvoice: view", "error", err)
+		respond.InternalError(w, r)
+		return
+	}
+	online := false
+	if owed {
+		online, err = h.onlinePaymentReady(r.Context(), inv)
+		if err != nil {
+			slog.ErrorContext(r.Context(), "hostedinvoice: read Stripe connection", "error", err)
+			respond.InternalError(w, r)
+			return
+		}
+	}
+	belowMinimum := inv.BelowStripeMinimum()
 	respond.JSON(w, r, http.StatusOK, hostedInvoicePayload{
 		Invoice:              toViewInvoice(inv),
 		LineItems:            toViewLineItems(items),
 		BillTo:               billTo,
 		Branding:             branding,
-		PayEnabled:           owed && online,
-		PayUnavailableReason: payUnavailableReason(owed, online),
+		PayEnabled:           owed && online && !belowMinimum,
+		PayUnavailableReason: payUnavailableReason(owed, online, belowMinimum),
 		// resolveToken pinned the row's livemode onto the request ctx.
-		Livemode: postgres.Livemode(r.Context()),
+		Livemode: live,
 	})
 }
 
@@ -366,6 +382,9 @@ func (h *Handler) viewInvoice(w http.ResponseWriter, r *http.Request) {
 // Stripe), so the session uses a pre-totaled price_data line item and
 // does not enable Stripe's automatic_tax.
 func (h *Handler) createCheckoutSession(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	inv, ok := h.resolveInvoice(w, r)
 	if !ok {
 		return
@@ -378,6 +397,15 @@ func (h *Handler) createCheckoutSession(w http.ResponseWriter, r *http.Request) 
 			"invoice is not in a payable state")
 		return
 	}
+	if inv.BelowStripeMinimum() {
+		// Stripe's latest answer for this amount was that it is below its
+		// minimum charge, so a Checkout Session would most likely be refused
+		// too. The page hides Pay in this state; a direct POST gets the same
+		// answer the session create would. The operator's Collect payment
+		// asks Stripe again, and a different answer clears the stamp.
+		respond.FromError(w, r, domain.ErrBelowMinimumCharge, "invoice")
+		return
+	}
 	if h.stripe == nil {
 		// Deployed without Stripe (dev / staging without keys). Surface
 		// a 503 rather than 500: the state is a known operator misconfig,
@@ -386,7 +414,13 @@ func (h *Handler) createCheckoutSession(w http.ResponseWriter, r *http.Request) 
 			"payment processing is not configured")
 		return
 	}
-	if !h.onlinePaymentReady(r.Context(), inv) {
+	online, err := h.onlinePaymentReady(r.Context(), inv)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "hostedinvoice: read Stripe connection", "error", err)
+		respond.InternalError(w, r)
+		return
+	}
+	if !online {
 		// The tenant has no Stripe keys for this mode. The page hides Pay in
 		// this state; a direct POST gets the same answer as a 409 the page
 		// can explain, not a 502 "failed to create checkout session".
@@ -408,6 +442,13 @@ func (h *Handler) createCheckoutSession(w http.ResponseWriter, r *http.Request) 
 		// click, or a drifted session the customer just completed) —
 		// retrying won't help, and paying again is exactly the double
 		// charge this protocol prevents.
+		if errs.Code(err) == errs.CodeStripeNotConnected {
+			// Disconnected between the readiness check above and here: the
+			// same answer as the check, not the operator's sentence.
+			respond.Error(w, r, http.StatusConflict, "invalid_request_error", PayUnavailableOnline,
+				"online payment is not set up for this invoice")
+			return
+		}
 		if errors.Is(err, errs.ErrInvalidState) {
 			respond.FromError(w, r, err, "invoice")
 			return
@@ -497,20 +538,29 @@ func payEnabled(inv domain.Invoice) bool {
 // onlinePaymentReady: the seller can take this invoice's payment online —
 // a Stripe adapter is wired and the tenant has keys for the invoice's mode
 // (pinned on ctx by resolveInvoice).
-func (h *Handler) onlinePaymentReady(ctx context.Context, inv domain.Invoice) bool {
+func (h *Handler) onlinePaymentReady(ctx context.Context, inv domain.Invoice) (bool, error) {
 	if h.stripe == nil {
-		return false
+		return false, nil
 	}
 	if h.stripeReady == nil {
-		return true
+		return true, nil
 	}
-	return h.stripeReady.HasFor(ctx, inv.TenantID, postgres.Livemode(ctx))
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return false, err
+	}
+	return h.stripeReady.HasFor(ctx, inv.TenantID, live)
 }
 
 // payUnavailableReason is set only when money is owed but can't be paid
-// online, so the page can say "contact the seller" instead of nothing.
-func payUnavailableReason(owed, online bool) string {
-	if owed && !online {
+// online, so the page can say "contact the seller" instead of nothing: the
+// amount is below Stripe's minimum charge, or the seller has no payment
+// provider connected.
+func payUnavailableReason(owed, online, belowMinimum bool) string {
+	switch {
+	case owed && belowMinimum:
+		return PayUnavailableBelowMinimum
+	case owed && !online:
 		return PayUnavailableOnline
 	}
 	return ""
@@ -546,21 +596,16 @@ func toViewInvoice(inv domain.Invoice) viewInvoice {
 func toViewLineItems(items []domain.InvoiceLineItem) []viewLineItem {
 	out := make([]viewLineItem, 0, len(items))
 	for _, it := range items {
-		v := viewLineItem{
+		out = append(out, viewLineItem{
 			Description:       it.Description,
-			Quantity:          it.Quantity,
-			UnitAmountCents:   it.UnitAmountCents,
+			Quantity:          it.ExactQuantity().String(),
 			UnitAmountDecimal: it.DisplayUnitAmountDecimal().String(),
 			MeterUnit:         it.MeterUnit,
 			AmountCents:       it.AmountCents,
 			TaxAmountCents:    it.TaxAmountCents,
 			TotalAmountCents:  it.TotalAmountCents,
 			Currency:          it.Currency,
-		}
-		if !it.QuantityDecimal.IsZero() {
-			v.QuantityDecimal = it.QuantityDecimal.String()
-		}
-		out = append(out, v)
+		})
 	}
 	return out
 }

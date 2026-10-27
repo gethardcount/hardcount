@@ -63,6 +63,11 @@ func TestStampChargeOutcome_OutcomeRecordedDuringTheCallWins(t *testing.T) {
 			}
 		}
 	}
+	markPaidOffline := func(t *testing.T, id string) {
+		if _, err := store.MarkPaidOffline(ctx, tenantID, id, paidAt, nil); err != nil {
+			t.Fatalf("MarkPaidOffline: %v", err)
+		}
+	}
 	markFailed := func(pi string) step {
 		return func(t *testing.T, id string) {
 			if _, _, err := store.MarkPaymentFailedReportingTransition(ctx, tenantID, id, failureReport(pi, "card_declined"), nil); err != nil {
@@ -95,7 +100,7 @@ func TestStampChargeOutcome_OutcomeRecordedDuringTheCallWins(t *testing.T) {
 		// Refused — a paid invoice is never un-settled.
 		{"own webhook paid, then unknown with the PI", none, markPaid("pi_X"), domain.PaymentUnknown, "pi_X", false},
 		{"own webhook paid, then unknown with no PI", none, markPaid("pi_X"), domain.PaymentUnknown, "", false},
-		{"paid offline, then processing", none, markPaid("out_of_band:2026-10-10T09:00:00Z"), domain.PaymentProcessing, "pi_X", false},
+		{"paid offline, then processing", none, markPaidOffline, domain.PaymentProcessing, "pi_X", false},
 		{"paid by credits (no PI), then failed with no PI", none, markPaid(""), domain.PaymentFailed, "", false},
 		// Refused — a decline its own webhook already recorded stays recorded.
 		{"own decline webhook, then unknown with the PI", none, markFailed("pi_X"), domain.PaymentUnknown, "pi_X", false},

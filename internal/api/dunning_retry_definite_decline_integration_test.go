@@ -144,8 +144,8 @@ func newDunningRetryRig(t *testing.T, name string) *dunningRetryRig {
 	d.credits = credit.NewService(d.ledgerFaults)
 	d.faults = &faultInvoices{PostgresStore: r.invoices}
 	policy, err := d.runs.UpsertPolicy(r.ctx, r.tenantID, domain.DunningPolicy{
-		Name: "default", Enabled: true, RetrySchedule: []string{"72h", "72h"}, MaxRetryAttempts: 3,
-		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible, GracePeriodDays: 3,
+		Name: "default", Enabled: true, RetryDays: []int{3, 3, 3},
+		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible,
 	})
 	if err != nil {
 		t.Fatalf("upsert policy: %v", err)
@@ -275,7 +275,7 @@ func (d *dunningRetryRig) paidEvents(invID string) int {
 	}
 	defer postgres.Rollback(tx)
 	var n int
-	if err := tx.QueryRowContext(d.ctx, `SELECT count(*) FROM webhook_outbox WHERE tenant_id = $1 AND event_type = $2 AND payload->>'invoice_id' = $3`,
+	if err := tx.QueryRowContext(d.ctx, `SELECT count(*) FROM webhook_outbox WHERE tenant_id = $1 AND event_type = $2 AND payload->'invoice'->>'id' = $3`,
 		d.tenantID, domain.EventInvoicePaid, invID).Scan(&n); err != nil {
 		d.t.Fatalf("count invoice.paid: %v", err)
 	}
@@ -298,7 +298,7 @@ func (d *dunningRetryRig) isDue(runID string) bool {
 
 func (d *dunningRetryRig) grant(custID string, cents int64) {
 	d.t.Helper()
-	if _, err := d.credits.Grant(d.ctx, d.tenantID, credit.GrantInput{CustomerID: custID, AmountCents: cents, Description: "goodwill"}); err != nil {
+	if _, err := d.credits.Grant(d.ctx, d.tenantID, credit.GrantInput{Currency: "USD", CustomerID: custID, AmountCents: cents, Description: "goodwill"}); err != nil {
 		d.t.Fatalf("grant credit: %v", err)
 	}
 }
@@ -551,7 +551,7 @@ func TestDunningRetry_FinalAttemptDBError_NoFinalAction(t *testing.T) {
 	d := newDunningRetryRig(t, "Retry Final Attempt Error")
 	custID := d.customerWithCard("final", "pm_final")
 	inv := d.dunnedInvoice(custID, "INV-G2-FINAL")
-	before := d.dueRun(inv.ID, custID, d.policy.MaxRetryAttempts-1)
+	before := d.dueRun(inv.ID, custID, d.policy.Retries()-1)
 	d.charges.answers = []scriptedCharge{{pi: "pi_final_paid"}}
 	d.faults.method, d.faults.nth = "Get", 1
 
@@ -602,5 +602,47 @@ func TestDunningRetry_StripeSucceeded_InlineSettleError_Skipped(t *testing.T) {
 	}
 	if got := d.invoice(inv.ID); got.Status != domain.InvoiceFinalized {
 		t.Errorf("invoice %s, want finalized (the settle failed)", got.Status)
+	}
+}
+
+// R3 (ADR-129): a customer holds USD credit, has an unpaid USD invoice in
+// dunning from a canceled USD subscription, and a EUR invoice from the EUR
+// subscription that replaced it. The EUR close's credit apply draws nothing;
+// the dunning retry applies the USD credit to the USD invoice.
+func TestDunningRetry_AppliesOnlyTheInvoiceCurrency(t *testing.T) {
+	d := newDunningRetryRig(t, "Retry Credit Currency")
+	custID := d.customerWithCard("ccy", "pm_ccy")
+	if _, err := d.credits.Grant(d.ctx, d.tenantID, credit.GrantInput{
+		CustomerID: custID, Currency: "USD", AmountCents: 5000, Description: "USD goodwill",
+	}); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	now := time.Now().UTC()
+	eur, err := d.invoices.Create(d.ctx, d.tenantID, domain.Invoice{
+		CustomerID: custID, InvoiceNumber: "INV-CCY-EUR", Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
+		Currency: "EUR", SubtotalCents: 3000, TotalAmountCents: 3000, AmountDueCents: 3000,
+		BillingPeriodStart: now.Add(-30 * 24 * time.Hour), BillingPeriodEnd: now, IssuedAt: &now,
+	})
+	if err != nil {
+		t.Fatalf("create EUR invoice: %v", err)
+	}
+	if applied, err := d.credits.ApplyToInvoiceAt(d.ctx, d.tenantID, custID, eur.ID, 3000, now, eur.InvoiceNumber); err != nil || applied != 0 {
+		t.Errorf("EUR close credit apply = %d, %v; want 0", applied, err)
+	}
+
+	inv := d.dunnedInvoice(custID, "INV-CCY-USD")
+	d.dueRun(inv.ID, custID, 1)
+	d.tick()
+	if usage := d.creditUsage(custID, inv.ID); len(usage) != 1 || usage[0].AmountCents != -5000 {
+		t.Errorf("USD invoice credit usage %+v, want one entry of -5000", usage)
+	}
+	if got := d.invoice(inv.ID); got.Status != domain.InvoicePaid || got.CreditsAppliedCents != 5000 {
+		t.Errorf("USD invoice %s with %d credits applied, want paid with 5000", got.Status, got.CreditsAppliedCents)
+	}
+	if got := d.invoice(eur.ID); got.CreditsAppliedCents != 0 || got.AmountDueCents != 3000 {
+		t.Errorf("EUR invoice credits_applied %d, amount_due %d; want 0 and 3000", got.CreditsAppliedCents, got.AmountDueCents)
+	}
+	if n := len(d.charges.charged); n != 0 {
+		t.Errorf("Stripe received %d charges, want none (credit covered the USD invoice)", n)
 	}
 }

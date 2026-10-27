@@ -21,10 +21,11 @@ import (
 )
 
 type PostgresStore struct {
-	db           *postgres.DB
-	enc          *crypto.Encryptor
-	outbox       OutboxEnqueuer
-	commitFunder CommitFunder
+	db                  *postgres.DB
+	enc                 *crypto.Encryptor
+	outbox              OutboxEnqueuer
+	commitFunder        CommitFunder
+	dunningPauseRelease DunningPauseReleaser
 }
 
 func NewPostgresStore(db *postgres.DB) *PostgresStore {
@@ -45,7 +46,8 @@ type OutboxEnqueuer interface {
 // when unset, no event is enqueued.
 func (s *PostgresStore) SetOutboxEnqueuer(o OutboxEnqueuer) { s.outbox = o }
 
-// CommitFunder grants a prepaid-commit credit block on the caller's tx —
+// CommitFunder grants a prepaid-commit credit block, in the funding invoice's
+// currency (ADR-129), on the caller's tx —
 // FinalizeWithDates calls it inside the finalize coordinator tx so the status
 // flip and the grant are both-or-neither (ADR-078 D2). Satisfied by
 // *credit.Service; declared consumer-side so the invoice store needs no
@@ -53,11 +55,38 @@ func (s *PostgresStore) SetOutboxEnqueuer(o OutboxEnqueuer) { s.outbox = o }
 // commit line exists: FinalizeWithDates fails loud on a commit invoice with
 // no funder wired.
 type CommitFunder interface {
-	GrantCommitForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, invoiceID, invoiceNumber string, amountCents int64, expiresAt *time.Time) (domain.CreditLedgerEntry, error)
+	GrantCommitForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, invoiceID, invoiceNumber, currency string, amountCents int64, expiresAt *time.Time) (domain.CreditLedgerEntry, error)
 }
 
 // SetCommitFunder wires commit-grant funding at finalize (ADR-078).
 func (s *PostgresStore) SetCommitFunder(f CommitFunder) { s.commitFunder = f }
+
+// DunningPauseReleaser lifts a dunning collection pause in the transaction
+// that marks the invoice it was set for paid (ADR-036 amendment
+// 2026-10-22). Every paid flip goes through markPaidLockedTx, so every
+// payment path (card, offline, credit note, credits) releases the pause the
+// same way. LockDunningPauseTx runs first in each transaction that can reach
+// that flip, before the invoice row is locked, so the release takes the
+// subscription row before the invoice like every other writer of both.
+// Satisfied by *subscription.PostgresStore; declared consumer-side so the
+// invoice store needs no subscription import. The producer always wires it;
+// unwired, a dunning pause stays until the operator resumes it.
+type DunningPauseReleaser interface {
+	LockDunningPauseTx(ctx context.Context, tx *sql.Tx, invoiceID string) error
+	ReleaseDunningPauseTx(ctx context.Context, tx *sql.Tx, subID, paidInvoiceID string, at time.Time) error
+}
+
+// lockDunningPauseTx takes the subscription lock a release of invoiceID's
+// dunning pause needs, before the caller locks the invoice row.
+func (s *PostgresStore) lockDunningPauseTx(ctx context.Context, tx *sql.Tx, invoiceID string) error {
+	if s.dunningPauseRelease == nil {
+		return nil
+	}
+	return s.dunningPauseRelease.LockDunningPauseTx(ctx, tx, invoiceID)
+}
+
+// SetDunningPauseReleaser wires the dunning-pause release on payment.
+func (s *PostgresStore) SetDunningPauseReleaser(r DunningPauseReleaser) { s.dunningPauseRelease = r }
 
 // SetEncryptor wires AES-256-GCM encryption for the hosted-invoice public_token
 // at rest. When set (non-noop), the raw token is encrypted before storage and
@@ -211,7 +240,12 @@ const invCols = `id, tenant_id, customer_id, COALESCE(subscription_id,''), invoi
 	COALESCE(payment_anomaly_kind,''), COALESCE(payment_anomaly_payment_intent_id,''), COALESCE(payment_anomaly_captured_cents,0),
 	COALESCE(billing_timezone,''), no_pm_notified_at, charge_attempt_seq,
 	COALESCE(provider_payment_status,''), provider_synced_at,
-	bill_to_snapshot, supplier_snapshot`
+	bill_to_snapshot, supplier_snapshot, below_minimum_at, paid_out_of_band`
+
+// invClockCol reads the test clock an invoice's dates follow from its
+// customer (domain.Invoice.TestClockID). It follows invCols on the list and
+// get reads only; scan it into inv.TestClockID after scanInvDest.
+const invClockCol = `COALESCE((SELECT c.test_clock_id FROM customers c WHERE c.id = invoices.customer_id), '')`
 
 // qualifiedInvCols returns invCols with every column reference prefixed
 // by the given table alias. Used by ADR-029's per-clock queries that
@@ -432,8 +466,8 @@ func (s *PostgresStore) Get(ctx context.Context, tenantID, id string) (domain.In
 	defer postgres.Rollback(tx)
 
 	var inv domain.Invoice
-	err = tx.QueryRowContext(ctx, `SELECT `+invCols+` FROM invoices WHERE id = $1`, id).
-		Scan(s.scanInvDest(&inv)...)
+	err = tx.QueryRowContext(ctx, `SELECT `+invCols+`, `+invClockCol+` FROM invoices WHERE id = $1`, id).
+		Scan(append(s.scanInvDest(&inv), &inv.TestClockID)...)
 	if err == sql.ErrNoRows {
 		return domain.Invoice{}, errs.ErrNotFound
 	}
@@ -544,7 +578,7 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.I
 		queryLimit = limit + 1
 	}
 	args = append(args, queryLimit)
-	query := `SELECT ` + invCols + ` FROM invoices` + where +
+	query := `SELECT ` + invCols + `, ` + invClockCol + ` FROM invoices` + where +
 		` ORDER BY ` + orderBy +
 		` LIMIT $` + fmt.Sprintf("%d", len(args))
 	if !useCursor {
@@ -561,7 +595,7 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.I
 	var invoices []domain.Invoice
 	for rows.Next() {
 		var inv domain.Invoice
-		if err := rows.Scan(s.scanInvDest(&inv)...); err != nil {
+		if err := rows.Scan(append(s.scanInvDest(&inv), &inv.TestClockID)...); err != nil {
 			return nil, 0, err
 		}
 		invoices = append(invoices, inv)
@@ -714,7 +748,7 @@ func (s *PostgresStore) updateStatusInTx(ctx context.Context, tx *sql.Tx, id str
 		WHERE id = $5 AND status = ANY($6)
 		RETURNING `+invCols,
 		status, postgres.NullableTime(voidedAt), postgres.NullableTime(uncollectibleAt), now, id,
-		postgres.StringArray(allowedSources),
+		allowedSources,
 	).Scan(s.scanInvDest(&inv)...)
 
 	if err == sql.ErrNoRows {
@@ -830,7 +864,7 @@ func (s *PostgresStore) FinalizeWithDates(ctx context.Context, tenantID, id stri
 			expiresAt = &commitExpires.Time
 		}
 		if _, ferr := s.commitFunder.GrantCommitForInvoiceTx(ctx, tx, tenantID,
-			inv.CustomerID, inv.ID, inv.InvoiceNumber, commitCents.Int64, expiresAt); ferr != nil {
+			inv.CustomerID, inv.ID, inv.InvoiceNumber, inv.Currency, commitCents.Int64, expiresAt); ferr != nil {
 			return domain.Invoice{}, fmt.Errorf("fund commit grant at finalize: %w", ferr)
 		}
 	}
@@ -852,6 +886,9 @@ func (s *PostgresStore) FinalizeWithDates(ctx context.Context, tenantID, id stri
 // settled" instead of payment.duplicate_charge; a recorded decline turned
 // back into "unknown", and with no PaymentIntent id that parked the invoice
 // for good.
+//
+// It clears below_minimum_at: this answer from Stripe replaces an earlier
+// below-minimum one (StampBelowMinimum).
 //
 // attemptSeq is the charge_attempt_seq the attempt read — the value its
 // Stripe idempotency key was built from. Every writer that records an outcome
@@ -900,7 +937,7 @@ func (s *PostgresStore) StampChargeOutcome(ctx context.Context, tenantID, id str
 	applied := true
 	err = tx.QueryRowContext(ctx, `
 		UPDATE invoices SET payment_status = $1, stripe_payment_intent_id = $2,
-			last_payment_error = $3, updated_at = $4,
+			last_payment_error = $3, updated_at = $4, below_minimum_at = NULL,
 			charge_attempt_seq = charge_attempt_seq + 1
 		WHERE id = $5 AND charge_attempt_seq = $6
 		RETURNING `+invCols,
@@ -917,6 +954,61 @@ func (s *PostgresStore) StampChargeOutcome(ctx context.Context, tenantID, id str
 				return domain.Invoice{}, false, errs.ErrNotFound
 			}
 			return domain.Invoice{}, false, fmt.Errorf("re-read invoice after refused charge-outcome stamp: %w", err)
+		}
+	} else if err != nil {
+		return domain.Invoice{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.Invoice{}, false, err
+	}
+	return inv, applied, nil
+}
+
+// StampBelowMinimum records a charge Stripe refused because the invoice's
+// amount is below Stripe's minimum charge (domain.ErrBelowMinimumCharge). It
+// is not a failed payment, so payment_status goes to 'pending' (from
+// 'pending', or from 'failed' when an earlier decline left it there), and in
+// the same write:
+//   - auto_charge_pending is cleared, so the auto-charge sweep does not ask
+//     Stripe again every tick;
+//   - below_minimum_at is stamped, which the attention notice, the hosted
+//     page and dunning read (domain.Invoice.BelowStripeMinimum); the next
+//     charge outcome Stripe gives clears it (StampChargeOutcome, and
+//     MarkPaymentFailedReportingTransition when it moves the invoice);
+//   - last_payment_error keeps Stripe's sentence, which names the minimum;
+//   - stripe_payment_intent_id is cleared and charge_attempt_seq bumped, as
+//     for any attempt outcome with no PaymentIntent (StampChargeOutcome): the
+//     next charge gets a fresh idempotency key.
+//
+// attemptSeq is the seq CAS of StampChargeOutcome (P13): the write is refused,
+// applied=false with the row as it stands, when another outcome was recorded
+// during the call. Nothing moves an invoice that is no longer finalized.
+func (s *PostgresStore) StampBelowMinimum(ctx context.Context, tenantID, id string, attemptSeq int64, lastPaymentError string) (domain.Invoice, bool, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return domain.Invoice{}, false, err
+	}
+	defer postgres.Rollback(tx)
+
+	now := clock.Now(ctx)
+	var inv domain.Invoice
+	applied := true
+	err = tx.QueryRowContext(ctx, `
+		UPDATE invoices SET payment_status = 'pending', stripe_payment_intent_id = NULL,
+			last_payment_error = $1, auto_charge_pending = FALSE, below_minimum_at = $2, updated_at = $2,
+			charge_attempt_seq = charge_attempt_seq + 1
+		WHERE id = $3 AND charge_attempt_seq = $4 AND status = 'finalized'
+		RETURNING `+invCols,
+		postgres.NullableString(lastPaymentError), now, id, attemptSeq,
+	).Scan(s.scanInvDest(&inv)...)
+	if err == sql.ErrNoRows {
+		applied = false
+		if err := tx.QueryRowContext(ctx, `SELECT `+invCols+` FROM invoices WHERE id = $1`, id).
+			Scan(s.scanInvDest(&inv)...); err != nil {
+			if err == sql.ErrNoRows {
+				return domain.Invoice{}, false, errs.ErrNotFound
+			}
+			return domain.Invoice{}, false, fmt.Errorf("re-read invoice after refused below-minimum stamp: %w", err)
 		}
 	} else if err != nil {
 		return domain.Invoice{}, false, err
@@ -1036,6 +1128,7 @@ func (s *PostgresStore) MarkPaymentFailedReportingTransition(ctx context.Context
 				stripe_payment_intent_id = $1,
 				last_payment_error = $2,
 				failure_notified_pi = $1,
+				below_minimum_at = NULL,
 				charge_attempt_seq = charge_attempt_seq + 1,
 				updated_at = $3
 			WHERE id = $4
@@ -1056,14 +1149,9 @@ func (s *PostgresStore) MarkPaymentFailedReportingTransition(ctx context.Context
 	// PaymentIntent must not double-notify, while a NEW retry PaymentIntent is
 	// a genuinely distinct failure and fires again.
 	if firstNotice && s.outbox != nil {
-		if _, err := s.outbox.Enqueue(ctx, tx, tenantID, domain.EventPaymentFailed, map[string]any{
-			"invoice_id":        inv.ID,
-			"customer_id":       inv.CustomerID,
-			"payment_intent_id": pi,
-			"failure_message":   report.Message,
-			"amount_cents":      inv.TotalAmountCents,
-			"currency":          inv.Currency,
-		}); err != nil {
+		// The invoice row this transaction wrote holds the charge
+		// (stripe_payment_intent_id) and its failure (last_payment_error).
+		if _, err := s.outbox.Enqueue(ctx, tx, tenantID, domain.EventPaymentFailed, domain.InvoiceWebhookData(inv, nil)); err != nil {
 			return domain.Invoice{}, domain.PaymentFailureResult{}, fmt.Errorf("enqueue payment.failed: %w", err)
 		}
 	}
@@ -1144,7 +1232,7 @@ func (s *PostgresStore) MarkPaid(ctx context.Context, tenantID, id string, strip
 // MarkPaidReportingTransition is MarkPaid plus a `transitioned` flag:
 // true when THIS call moved the invoice finalized/uncollectible → paid,
 // false when it was already paid (the idempotent no-op branch). The
-// SELECT … FOR UPDATE serializes concurrent callers, so for two
+// row lock serializes concurrent callers, so for two
 // at-least-once webhook deliveries of the SAME charge exactly one gets
 // transitioned=true. SettleSucceeded gates its post-paid side-effects
 // (payment.succeeded event, receipt email, card stamp) on the flag so a
@@ -1152,19 +1240,21 @@ func (s *PostgresStore) MarkPaid(ctx context.Context, tenantID, id string, strip
 // catch — fires them once, not twice. invoice.paid itself is already
 // once-only (enqueued inside this tx, after the no-op branch returns).
 func (s *PostgresStore) MarkPaidReportingTransition(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time) (domain.Invoice, bool, error) {
-	return s.markPaidReportingTransition(ctx, tenantID, id, stripePaymentIntentID, paidAt, false, nil, nil)
+	return s.markPaidReportingTransition(ctx, tenantID, id, stripePaymentIntentID, paidAt, settleOther, nil, nil)
 }
 
 // MarkPaidOffline is MarkPaid for an operator-recorded payment (cheque,
-// wire): check runs on the invoice as it is under this transition's row lock,
-// before anything is written, and its error refuses the payment. It exists so
-// the offline path can refuse while a card charge is in progress (#975) —
-// the service's own read comes before the lock and can miss a charge that
-// started after it. Only the offline path gets a check: the card settlement
-// and the credit-covered settles run inside the charge's own hold and must
-// always be able to record it.
-func (s *PostgresStore) MarkPaidOffline(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time, check func(tx *sql.Tx, locked domain.Invoice) error) (domain.Invoice, error) {
-	inv, _, err := s.markPaidReportingTransition(ctx, tenantID, id, stripePaymentIntentID, paidAt, false, check, nil)
+// wire): the paid flip sets paid_out_of_band and leaves the invoice with no
+// PaymentIntent, since no charge was sent to Stripe (it takes none, so this
+// path cannot write one). check runs on the invoice as it is under this
+// transition's row lock, before anything is written, and its error refuses
+// the payment. It exists so the offline path can refuse while a card charge
+// is in progress (#975) — the service's own read comes before the lock and
+// can miss a charge that started after it. Only the offline path gets a
+// check: the card settlement and the credit-covered settles run inside the
+// charge's own hold and must always be able to record it.
+func (s *PostgresStore) MarkPaidOffline(ctx context.Context, tenantID, id string, paidAt time.Time, check func(tx *sql.Tx, locked domain.Invoice) error) (domain.Invoice, error) {
+	inv, _, err := s.markPaidReportingTransition(ctx, tenantID, id, "", paidAt, settleOffline, check, nil)
 	return inv, err
 }
 
@@ -1186,16 +1276,32 @@ func (s *PostgresStore) MarkPaidOffline(ctx context.Context, tenantID, id string
 // suppresses every later attempt). It receives the freshly-written row
 // because the receipt's amount is the amount actually booked here.
 func (s *PostgresStore) MarkPaidCardSettlementTransition(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time, then func(tx *sql.Tx, fresh domain.Invoice) error) (domain.Invoice, bool, error) {
-	return s.markPaidReportingTransition(ctx, tenantID, id, stripePaymentIntentID, paidAt, true, nil, then)
+	return s.markPaidReportingTransition(ctx, tenantID, id, stripePaymentIntentID, paidAt, settleCard, nil, then)
 }
 
-// markPaidReportingTransition is the shared core. cardSettlement=true also
-// enqueues payment.succeeded on the SAME tx as the paid-flip (gated on the
-// transition, so exactly-once). Both event enqueues live inside this one tx, so
+// settleKind says which paid flip markPaidLockedTx writes: the effects that
+// ride it differ by how the money arrived.
+type settleKind int
+
+const (
+	// settleOther: credits cover it, nothing is due, or a caller that names
+	// the PaymentIntent it settles without being the card settle path (the
+	// reconciler's fallback). invoice.paid only.
+	settleOther settleKind = iota
+	// settleCard: SettleSucceeded. Adds payment.succeeded in the same tx.
+	settleCard
+	// settleOffline: RecordOfflinePayment. Sets paid_out_of_band; no
+	// PaymentIntent, no charge attempt.
+	settleOffline
+)
+
+// markPaidReportingTransition is the shared core. settleCard also enqueues
+// payment.succeeded on the SAME tx as the paid-flip (gated on the
+// transition, so exactly-once); settleOffline marks the payment out of band. Both event enqueues live inside this one tx, so
 // they are atomic with finalized/uncollectible→paid: tx rolls back → no events;
 // commits → the dispatcher delivers.
 // check (nil = none) is MarkPaidOffline's refusal, run under the row lock.
-func (s *PostgresStore) markPaidReportingTransition(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time, cardSettlement bool, check func(tx *sql.Tx, locked domain.Invoice) error, then func(tx *sql.Tx, fresh domain.Invoice) error) (domain.Invoice, bool, error) {
+func (s *PostgresStore) markPaidReportingTransition(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time, kind settleKind, check func(tx *sql.Tx, locked domain.Invoice) error, then func(tx *sql.Tx, fresh domain.Invoice) error) (domain.Invoice, bool, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return domain.Invoice{}, false, err
@@ -1208,7 +1314,7 @@ func (s *PostgresStore) markPaidReportingTransition(ctx context.Context, tenantI
 	// editing line items; voided means the invoice was annulled and
 	// must not transition to paid.
 	//
-	// Also reject when tax_status is still pending/failed: even a
+	// Also reject when tax_status is still pending: even a
 	// finalized invoice with unresolved tax (rare — finalize itself
 	// gates on tax_status=ok, but a manual finalize bypassing that
 	// gate could create one) would lock the customer at the wrong
@@ -1223,9 +1329,17 @@ func (s *PostgresStore) markPaidReportingTransition(ctx context.Context, tenantI
 	//
 	// Re-paying an already-paid invoice is allowed (idempotent — the
 	// PaymentSucceeded webhook can fire twice on legitimate retries).
+	if err := s.lockDunningPauseTx(ctx, tx, id); err != nil {
+		return domain.Invoice{}, false, err
+	}
+	// FOR NO KEY UPDATE serializes with every other writer of the row and
+	// leaves a period closer's FOR KEY SHARE watermark read free
+	// (GetLatestThresholdInvoiceForCycleTx): this transaction can need the
+	// subscription lock that closer holds (the dunning-pause release), so
+	// the closer must not wait for it.
 	var status, taxStatus string
 	if err := tx.QueryRowContext(ctx,
-		`SELECT status, tax_status FROM invoices WHERE id = $1 FOR UPDATE`, id,
+		`SELECT status, tax_status FROM invoices WHERE id = $1 FOR NO KEY UPDATE`, id,
 	).Scan(&status, &taxStatus); err != nil {
 		if err == sql.ErrNoRows {
 			return domain.Invoice{}, false, errs.ErrNotFound
@@ -1291,7 +1405,7 @@ func (s *PostgresStore) markPaidReportingTransition(ctx context.Context, tenantI
 		))
 	}
 
-	inv, err := s.markPaidLockedTx(ctx, tx, tenantID, id, stripePaymentIntentID, paidAt, cardSettlement)
+	inv, err := s.markPaidLockedTx(ctx, tx, tenantID, id, stripePaymentIntentID, paidAt, kind)
 	if err != nil {
 		return domain.Invoice{}, false, err
 	}
@@ -1322,11 +1436,12 @@ func (s *PostgresStore) markPaidReportingTransition(ctx context.Context, tenantI
 
 // markPaidLockedTx writes the finalized/uncollectible → paid transition on tx
 // and the effects that ride it: the open checkout claims close, invoice.paid
-// is enqueued, and so is payment.succeeded for a card settlement. The caller
+// is enqueued, and so is payment.succeeded for a card settlement. An offline
+// settlement sets paid_out_of_band and names no PaymentIntent. The caller
 // holds the invoice row lock on tx and has decided the invoice may be paid.
 // Every paid flip goes through here (ADR-068 choke point), so the effects
 // cannot differ between settle paths.
-func (s *PostgresStore) markPaidLockedTx(ctx context.Context, tx *sql.Tx, tenantID, id string, stripePaymentIntentID string, paidAt time.Time, cardSettlement bool) (domain.Invoice, error) {
+func (s *PostgresStore) markPaidLockedTx(ctx context.Context, tx *sql.Tx, tenantID, id string, stripePaymentIntentID string, paidAt time.Time, kind settleKind) (domain.Invoice, error) {
 	now := clock.Now(ctx)
 	var inv domain.Invoice
 	// amount_paid_cents records the CURRENT amount_due (what the PaymentIntent was
@@ -1355,6 +1470,7 @@ func (s *PostgresStore) markPaidLockedTx(ctx context.Context, tx *sql.Tx, tenant
 			status = 'paid',
 			payment_status = 'succeeded',
 			stripe_payment_intent_id = $1,
+			paid_out_of_band = $5,
 			charge_attempt_seq = charge_attempt_seq + 1,
 			paid_at = $2,
 			amount_paid_cents = amount_due_cents,
@@ -1363,7 +1479,7 @@ func (s *PostgresStore) markPaidLockedTx(ctx context.Context, tx *sql.Tx, tenant
 			updated_at = $3
 		WHERE id = $4
 		RETURNING `+invCols,
-		postgres.NullableString(stripePaymentIntentID), paidAt, now, id,
+		postgres.NullableString(stripePaymentIntentID), paidAt, now, id, kind == settleOffline,
 	).Scan(s.scanInvDest(&inv)...)
 
 	if err == sql.ErrNoRows {
@@ -1394,15 +1510,7 @@ func (s *PostgresStore) markPaidLockedTx(ctx context.Context, tx *sql.Tx, tenant
 	// without each needing its own dispatch. ADR-040 transactional outbox: if the tx rolls
 	// back, no event; if it commits, the dispatcher delivers.
 	if s.outbox != nil {
-		if _, err := s.outbox.Enqueue(ctx, tx, tenantID, domain.EventInvoicePaid, map[string]any{
-			"invoice_id":        inv.ID,
-			"invoice_number":    inv.InvoiceNumber,
-			"customer_id":       inv.CustomerID,
-			"subscription_id":   inv.SubscriptionID,
-			"amount_paid_cents": inv.AmountPaidCents,
-			"currency":          inv.Currency,
-			"paid_at":           paidAt.UTC(),
-		}); err != nil {
+		if _, err := s.outbox.Enqueue(ctx, tx, tenantID, domain.EventInvoicePaid, domain.InvoiceWebhookData(inv, nil)); err != nil {
 			return domain.Invoice{}, fmt.Errorf("enqueue invoice.paid: %w", err)
 		}
 	}
@@ -1413,14 +1521,8 @@ func (s *PostgresStore) markPaidLockedTx(ctx context.Context, tx *sql.Tx, tenant
 	// tiering block in payment/settlement.go). Reaches here only on the
 	// finalized/uncollectible→paid transition, so it fires exactly once, same
 	// as invoice.paid.
-	if cardSettlement && s.outbox != nil {
-		if _, err := s.outbox.Enqueue(ctx, tx, tenantID, domain.EventPaymentSucceeded, map[string]any{
-			"invoice_id":        inv.ID,
-			"customer_id":       inv.CustomerID,
-			"payment_intent_id": stripePaymentIntentID,
-			"amount_cents":      inv.TotalAmountCents,
-			"currency":          inv.Currency,
-		}); err != nil {
+	if kind == settleCard && s.outbox != nil {
+		if _, err := s.outbox.Enqueue(ctx, tx, tenantID, domain.EventPaymentSucceeded, domain.InvoiceWebhookData(inv, nil)); err != nil {
 			return domain.Invoice{}, fmt.Errorf("enqueue payment.succeeded: %w", err)
 		}
 	}
@@ -1434,6 +1536,14 @@ func (s *PostgresStore) markPaidLockedTx(ctx context.Context, tx *sql.Tx, tenant
 	if err := upsertChargeAttemptTx(ctx, tx, tenantID, inv.ID, stripePaymentIntentID,
 		domain.ChargeAttemptSucceeded, "", inv.AmountPaidCents, "", "", attemptSimAt); err != nil {
 		return domain.Invoice{}, err
+	}
+	// A dunning pause set for this invoice lifts in this transaction, so
+	// the release cannot be lost to a crash after commit. The caller took
+	// the subscription lock it needs first (lockDunningPauseTx).
+	if inv.SubscriptionID != "" && s.dunningPauseRelease != nil {
+		if err := s.dunningPauseRelease.ReleaseDunningPauseTx(ctx, tx, inv.SubscriptionID, inv.ID, now); err != nil {
+			return domain.Invoice{}, err
+		}
 	}
 	return inv, nil
 }
@@ -1495,8 +1605,13 @@ func (s *PostgresStore) ApplyCreditNote(ctx context.Context, tenantID, id string
 // payment state can both move between its earlier read and its transaction (a
 // credit application, a settle, a void). FOR NO KEY UPDATE serializes with
 // those writers without blocking the foreign-key checks of rows that reference
-// the invoice.
+// the invoice. A note that leaves nothing due marks the invoice paid on this
+// tx (SettleZeroDueTx), so the subscription lock a dunning-pause release
+// needs is taken first.
 func (s *PostgresStore) LockForCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, id string) (domain.Invoice, error) {
+	if err := s.lockDunningPauseTx(ctx, tx, id); err != nil {
+		return domain.Invoice{}, err
+	}
 	var inv domain.Invoice
 	err := tx.QueryRowContext(ctx,
 		`SELECT `+invCols+` FROM invoices WHERE id = $1 AND tenant_id = $2 FOR NO KEY UPDATE`,
@@ -1516,6 +1631,12 @@ func (s *PostgresStore) LockForCreditNoteTx(ctx context.Context, tx *sql.Tx, ten
 // reduceCents, and creditsReturnedCents of customer credits are taken back off
 // the invoice (the caller grants them to the balance on the same tx). The two
 // add up to the note's total.
+//
+// An open receivable is a finalized or written-off (uncollectible) invoice
+// not yet paid: a write-off ends collection, not what is owed, so a relief
+// note lowers what a written-off invoice asks for as it does an unpaid one's
+// (ADR-050 amendment 2026-10-23). A written-off invoice left with nothing due
+// stays written off: SettleZeroDueTx settles only a finalized one.
 //
 // Both subtractions are exact. A note that asks for more than is due, or to
 // take back more credits than are applied, is refused with
@@ -1537,7 +1658,7 @@ func (s *PostgresStore) ApplyCreditNoteTx(ctx context.Context, tx *sql.Tx, tenan
 			amount_due_cents = amount_due_cents - $1,
 			credits_applied_cents = credits_applied_cents - $2,
 			updated_at = $3
-		WHERE id = $4 AND status = 'finalized' AND payment_status <> 'succeeded'
+		WHERE id = $4 AND status IN ('finalized', 'uncollectible') AND payment_status <> 'succeeded'
 		  AND amount_due_cents >= $1 AND credits_applied_cents >= $2
 		RETURNING `+invCols,
 		reduceCents, creditsReturnedCents, now, id,
@@ -1559,7 +1680,7 @@ func (s *PostgresStore) ApplyCreditNoteTx(ctx context.Context, tx *sql.Tx, tenan
 		if rerr != nil {
 			return domain.Invoice{}, rerr
 		}
-		if status == string(domain.InvoiceFinalized) && payment != string(domain.PaymentSucceeded) {
+		if (status == string(domain.InvoiceFinalized) || status == string(domain.InvoiceUncollectible)) && payment != string(domain.PaymentSucceeded) {
 			return domain.Invoice{}, errs.InvalidState(fmt.Sprintf(
 				"credit note asks to reduce invoice %s by %d with %d due and to return %d credits with %d applied",
 				id, reduceCents, due, creditsReturnedCents, applied)).
@@ -1625,7 +1746,7 @@ func (s *PostgresStore) SettleZeroDueTx(ctx context.Context, tx *sql.Tx, tenantI
 	if hold != domain.ChargeHoldNone {
 		return inv, false, nil
 	}
-	paid, err := s.markPaidLockedTx(ctx, tx, tenantID, id, "", paidAt, false)
+	paid, err := s.markPaidLockedTx(ctx, tx, tenantID, id, "", paidAt, settleOther)
 	if err != nil {
 		return domain.Invoice{}, false, err
 	}
@@ -1641,6 +1762,9 @@ func (s *PostgresStore) SettleZeroDue(ctx context.Context, tenantID, id string, 
 	}
 	defer postgres.Rollback(tx)
 
+	if err := s.lockDunningPauseTx(ctx, tx, id); err != nil {
+		return domain.Invoice{}, false, err
+	}
 	var one int
 	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM invoices WHERE id = $1 FOR NO KEY UPDATE`, id).Scan(&one); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -1668,6 +1792,19 @@ func (s *PostgresStore) SettleZeroDue(ctx context.Context, tenantID, id string, 
 // nominalRateArg returns the driver value for the nullable
 // nominal_unit_amount_decimal column: the decimal (via its Valuer) when set,
 // else nil → SQL NULL. See domain.InvoiceLineItem.NominalUnitAmountDecimal.
+// matchArg is a line's dimension_match as a column value: NULL for a line
+// that names no labels.
+func matchArg(m map[string]string) any {
+	if len(m) == 0 {
+		return nil
+	}
+	raw, err := json.Marshal(m)
+	if err != nil {
+		return nil
+	}
+	return raw
+}
+
 func nominalRateArg(p *decimal.Decimal) any {
 	if p == nil {
 		return nil
@@ -1702,26 +1839,26 @@ func (s *PostgresStore) CreateLineItem(ctx context.Context, tenantID string, ite
 	err = tx.QueryRowContext(ctx, `
 		INSERT INTO invoice_line_items (id, invoice_id, tenant_id, line_type, meter_id,
 			description, quantity, unit_amount_cents, amount_cents, tax_rate, tax_amount_cents,
-			total_amount_cents, currency, pricing_mode, rating_rule_version_id,
+			total_amount_cents, currency, pricing_mode, price_id,
 			billing_period_start, billing_period_end, metadata, created_at,
-			tax_jurisdiction, tax_code, tax_reason, quantity_decimal, nominal_unit_amount_decimal, meter_unit)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
+			tax_jurisdiction, tax_code, tax_reason, quantity_decimal, nominal_unit_amount_decimal, meter_unit, dimension_match)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)
 		RETURNING id, invoice_id, tenant_id, line_type, COALESCE(meter_id,''), description,
 			quantity, unit_amount_cents, amount_cents, tax_rate, tax_amount_cents,
 			total_amount_cents, currency, COALESCE(pricing_mode,''),
-			COALESCE(rating_rule_version_id,''), billing_period_start, billing_period_end,
+			COALESCE(price_id,''), billing_period_start, billing_period_end,
 			metadata, created_at, tax_jurisdiction, tax_code, tax_reason, quantity_decimal
 	`, id, item.InvoiceID, tenantID, item.LineType, postgres.NullableString(item.MeterID),
 		item.Description, item.Quantity, item.UnitAmountCents, item.AmountCents,
 		item.TaxRate, item.TaxAmountCents, item.TotalAmountCents, item.Currency,
-		postgres.NullableString(item.PricingMode), postgres.NullableString(item.RatingRuleVersionID),
+		postgres.NullableString(item.PricingMode), postgres.NullableString(item.PriceID),
 		postgres.NullableTime(item.BillingPeriodStart), postgres.NullableTime(item.BillingPeriodEnd),
 		metaJSON, now, item.TaxJurisdiction, item.TaxCode, item.TaxabilityReason, item.QuantityDecimal,
-		nominalRateArg(item.NominalUnitAmountDecimal), postgres.NullableString(item.MeterUnit),
+		nominalRateArg(item.NominalUnitAmountDecimal), postgres.NullableString(item.MeterUnit), matchArg(item.DimensionMatch),
 	).Scan(&item.ID, &item.InvoiceID, &item.TenantID, &item.LineType, &item.MeterID,
 		&item.Description, &item.Quantity, &item.UnitAmountCents, &item.AmountCents,
 		&item.TaxRate, &item.TaxAmountCents, &item.TotalAmountCents, &item.Currency,
-		&item.PricingMode, &item.RatingRuleVersionID,
+		&item.PricingMode, &item.PriceID,
 		&item.BillingPeriodStart, &item.BillingPeriodEnd, &metaJSON, &item.CreatedAt,
 		&item.TaxJurisdiction, &item.TaxCode, &item.TaxabilityReason, &item.QuantityDecimal)
 
@@ -1746,9 +1883,9 @@ func (s *PostgresStore) ListLineItems(ctx context.Context, tenantID, invoiceID s
 		SELECT id, invoice_id, tenant_id, line_type, COALESCE(meter_id,''), description,
 			quantity, unit_amount_cents, amount_cents, tax_rate, tax_amount_cents,
 			total_amount_cents, currency, COALESCE(pricing_mode,''),
-			COALESCE(rating_rule_version_id,''), billing_period_start, billing_period_end,
+			COALESCE(price_id,''), billing_period_start, billing_period_end,
 			metadata, created_at, tax_jurisdiction, tax_code, tax_reason, quantity_decimal,
-			commit_granted_cents, commit_expires_at, nominal_unit_amount_decimal, COALESCE(meter_unit,'')
+			commit_granted_cents, commit_expires_at, nominal_unit_amount_decimal, COALESCE(meter_unit,''), dimension_match
 		FROM invoice_line_items WHERE invoice_id = $1
 		ORDER BY created_at ASC
 	`, invoiceID)
@@ -1760,18 +1897,23 @@ func (s *PostgresStore) ListLineItems(ctx context.Context, tenantID, invoiceID s
 	var items []domain.InvoiceLineItem
 	for rows.Next() {
 		var item domain.InvoiceLineItem
-		var metaJSON []byte
+		var metaJSON, match []byte
 		var nominal decimal.NullDecimal
 		if err := rows.Scan(&item.ID, &item.InvoiceID, &item.TenantID, &item.LineType,
 			&item.MeterID, &item.Description, &item.Quantity, &item.UnitAmountCents,
 			&item.AmountCents, &item.TaxRate, &item.TaxAmountCents, &item.TotalAmountCents,
-			&item.Currency, &item.PricingMode, &item.RatingRuleVersionID,
+			&item.Currency, &item.PricingMode, &item.PriceID,
 			&item.BillingPeriodStart, &item.BillingPeriodEnd, &metaJSON, &item.CreatedAt,
 			&item.TaxJurisdiction, &item.TaxCode, &item.TaxabilityReason, &item.QuantityDecimal,
-			&item.CommitGrantedCents, &item.CommitExpiresAt, &nominal, &item.MeterUnit); err != nil {
+			&item.CommitGrantedCents, &item.CommitExpiresAt, &nominal, &item.MeterUnit, &match); err != nil {
 			return nil, err
 		}
 		item.NominalUnitAmountDecimal = scanNominalRate(nominal)
+		if len(match) > 0 {
+			if err := json.Unmarshal(match, &item.DimensionMatch); err != nil {
+				return nil, fmt.Errorf("decode dimension_match of line %s: %w", item.ID, err)
+			}
+		}
 		_ = json.Unmarshal(metaJSON, &item.Metadata)
 		items = append(items, item)
 	}
@@ -1812,7 +1954,10 @@ func (s *PostgresStore) GetOutstandingBalance(ctx context.Context, tenantID, cus
 		if err := rows.Scan(&a.Currency, &a.AmountCents, &n); err != nil {
 			return OutstandingBalance{}, err
 		}
-		out.TotalCents += a.AmountCents
+		var serr error
+		if out.TotalCents, serr = domain.SumCents(out.TotalCents, a.AmountCents); serr != nil {
+			return OutstandingBalance{}, fmt.Errorf("outstanding balance: %w", serr)
+		}
 		out.UnpaidCount += n
 		if a.AmountCents > 0 {
 			out.ByCurrency = append(out.ByCurrency, a)
@@ -1909,29 +2054,29 @@ func (s *PostgresStore) AddLineItemAtomicAudited(
 	err = tx.QueryRowContext(ctx, `
 		INSERT INTO invoice_line_items (id, invoice_id, tenant_id, line_type, meter_id,
 			description, quantity, unit_amount_cents, amount_cents, tax_rate, tax_amount_cents,
-			total_amount_cents, currency, pricing_mode, rating_rule_version_id,
+			total_amount_cents, currency, pricing_mode, price_id,
 			billing_period_start, billing_period_end, metadata, created_at,
 			tax_jurisdiction, tax_code, tax_reason, quantity_decimal,
-			commit_granted_cents, commit_expires_at, nominal_unit_amount_decimal, meter_unit)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)
+			commit_granted_cents, commit_expires_at, nominal_unit_amount_decimal, meter_unit, dimension_match)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)
 		RETURNING id, invoice_id, tenant_id, line_type, COALESCE(meter_id,''), description,
 			quantity, unit_amount_cents, amount_cents, tax_rate, tax_amount_cents,
 			total_amount_cents, currency, COALESCE(pricing_mode,''),
-			COALESCE(rating_rule_version_id,''), billing_period_start, billing_period_end,
+			COALESCE(price_id,''), billing_period_start, billing_period_end,
 			metadata, created_at, tax_jurisdiction, tax_code, tax_reason, quantity_decimal,
 			commit_granted_cents, commit_expires_at
 	`, itemID, invoiceID, tenantID, item.LineType, postgres.NullableString(item.MeterID),
 		item.Description, item.Quantity, item.UnitAmountCents, item.AmountCents,
 		item.TaxRate, item.TaxAmountCents, item.TotalAmountCents, currency,
-		postgres.NullableString(item.PricingMode), postgres.NullableString(item.RatingRuleVersionID),
+		postgres.NullableString(item.PricingMode), postgres.NullableString(item.PriceID),
 		postgres.NullableTime(item.BillingPeriodStart), postgres.NullableTime(item.BillingPeriodEnd),
 		metaJSON, now, item.TaxJurisdiction, item.TaxCode, item.TaxabilityReason, item.QuantityDecimal,
 		item.CommitGrantedCents, postgres.NullableTime(item.CommitExpiresAt),
-		nominalRateArg(item.NominalUnitAmountDecimal), postgres.NullableString(item.MeterUnit),
+		nominalRateArg(item.NominalUnitAmountDecimal), postgres.NullableString(item.MeterUnit), matchArg(item.DimensionMatch),
 	).Scan(&item.ID, &item.InvoiceID, &item.TenantID, &item.LineType, &item.MeterID,
 		&item.Description, &item.Quantity, &item.UnitAmountCents, &item.AmountCents,
 		&item.TaxRate, &item.TaxAmountCents, &item.TotalAmountCents, &item.Currency,
-		&item.PricingMode, &item.RatingRuleVersionID,
+		&item.PricingMode, &item.PriceID,
 		&item.BillingPeriodStart, &item.BillingPeriodEnd, &metaJSON, &item.CreatedAt,
 		&item.TaxJurisdiction, &item.TaxCode, &item.TaxabilityReason, &item.QuantityDecimal,
 		&item.CommitGrantedCents, &item.CommitExpiresAt)
@@ -2272,19 +2417,19 @@ func (s *PostgresStore) createWithLineItemsInTx(ctx context.Context, tx *sql.Tx,
 			INSERT INTO invoice_line_items (id, invoice_id, tenant_id, line_type, meter_id,
 				description, quantity, unit_amount_cents, amount_cents, tax_rate,
 				tax_amount_cents, total_amount_cents, currency, pricing_mode,
-				rating_rule_version_id, billing_period_start, billing_period_end, metadata, created_at,
+				price_id, billing_period_start, billing_period_end, metadata, created_at,
 				tax_jurisdiction, tax_code, tax_reason, quantity_decimal,
-				commit_granted_cents, commit_expires_at, nominal_unit_amount_decimal, meter_unit)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)
+				commit_granted_cents, commit_expires_at, nominal_unit_amount_decimal, meter_unit, dimension_match)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)
 		`, itemID, inv.ID, tenantID, items[i].LineType, postgres.NullableString(items[i].MeterID),
 			items[i].Description, items[i].Quantity, items[i].UnitAmountCents, items[i].AmountCents,
 			items[i].TaxRate, items[i].TaxAmountCents, items[i].TotalAmountCents,
 			items[i].Currency, postgres.NullableString(items[i].PricingMode),
-			postgres.NullableString(items[i].RatingRuleVersionID),
+			postgres.NullableString(items[i].PriceID),
 			postgres.NullableTime(items[i].BillingPeriodStart), postgres.NullableTime(items[i].BillingPeriodEnd),
 			itemMetaJSON, now, items[i].TaxJurisdiction, items[i].TaxCode, items[i].TaxabilityReason, items[i].QuantityDecimal,
 			items[i].CommitGrantedCents, postgres.NullableTime(items[i].CommitExpiresAt),
-			nominalRateArg(items[i].NominalUnitAmountDecimal), postgres.NullableString(items[i].MeterUnit),
+			nominalRateArg(items[i].NominalUnitAmountDecimal), postgres.NullableString(items[i].MeterUnit), matchArg(items[i].DimensionMatch),
 		)
 		if err != nil {
 			return domain.Invoice{}, fmt.Errorf("create line item %d: %w", i, err)
@@ -2631,6 +2776,10 @@ const staleHoldRecheckAfter = 30 * time.Minute
 // run: it reads page after page and checks each hold once, even one it could
 // not stamp.
 func (s *PostgresStore) ListStaleChargeHolds(ctx context.Context, limit int, skip []string) ([]domain.StaleChargeHold, error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return nil, err
+	}
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		return nil, err
@@ -2640,8 +2789,8 @@ func (s *PostgresStore) ListStaleChargeHolds(ctx context.Context, limit int, ski
 	if limit <= 0 {
 		limit = 50
 	}
-	// COALESCE: a nil skip list can reach Postgres as NULL, and
-	// NOT (id = ANY(NULL)) would filter out every row (see postgres.StringArray).
+	// COALESCE: pgx sends a nil skip list as NULL, and
+	// NOT (id = ANY(NULL)) would filter out every row.
 	rows, err := tx.QueryContext(ctx, `
 		SELECT `+qualifiedInvCols("i")+`, i.auto_charge_claimed_until, COALESCE(c.stripe_customer_id, ''),
 		       i.auto_charge_claimed_until < now() - make_interval(secs => $6)
@@ -2654,7 +2803,7 @@ func (s *PostgresStore) ListStaleChargeHolds(ctx context.Context, limit int, ski
 		ORDER BY (i.status = 'finalized' AND i.payment_status IN ('pending', 'failed')) DESC,
 		         i.provider_synced_at ASC NULLS FIRST, i.auto_charge_claimed_until ASC, i.id ASC
 		LIMIT $4
-	`, domain.StaleChargeHoldWait.Seconds(), postgres.Livemode(ctx), staleHoldRecheckAfter.Seconds(), limit, postgres.StringArray(skip),
+	`, domain.StaleChargeHoldWait.Seconds(), live, staleHoldRecheckAfter.Seconds(), limit, skip,
 		domain.ParkedNothingWait.Seconds())
 	if err != nil {
 		return nil, err
@@ -2915,6 +3064,10 @@ func notPausedForCollection(alias, at string) string {
 // must never charge a clock-pinned invoice. The catchup worker uses
 // ListAutoChargePendingForClock as the disjoint per-clock entry point.
 func (s *PostgresStore) ListAutoChargePending(ctx context.Context, after domain.InvoiceKeyset, limit int) ([]domain.Invoice, error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return nil, err
+	}
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		return nil, err
@@ -2947,7 +3100,7 @@ func (s *PostgresStore) ListAutoChargePending(ctx context.Context, after domain.
 		  AND (i.created_at, i.id) > ($3, $4)
 		ORDER BY i.created_at ASC, i.id ASC
 		LIMIT $2
-	`, postgres.Livemode(ctx), limit, after.CreatedAt, after.ID)
+	`, live, limit, after.CreatedAt, after.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -2983,6 +3136,10 @@ func (s *PostgresStore) ListAutoChargePending(ctx context.Context, after domain.
 // from ctx. olderThan is the cool-off so the inline SettleFailed path wins the
 // common case and this stays a pure backstop.
 func (s *PostgresStore) ListFailedWithoutDunningRun(ctx context.Context, olderThan time.Time, limit int) ([]domain.Invoice, error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return nil, err
+	}
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		return nil, err
@@ -3006,7 +3163,7 @@ func (s *PostgresStore) ListFailedWithoutDunningRun(ctx context.Context, olderTh
 		  AND i.is_simulated = false
 		ORDER BY i.updated_at ASC
 		LIMIT $3
-	`, postgres.Livemode(ctx), olderThan, limit)
+	`, live, olderThan, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -3153,6 +3310,10 @@ func (s *PostgresStore) ListProcessingPayments(ctx context.Context, olderThan ti
 // BindEffectiveNow + the velox_anchor_at PI anchor, so recovered outcomes
 // still stamp the simulated instant. See the ADR-030 wall-plane note.
 func (s *PostgresStore) listInflightPayments(ctx context.Context, status domain.InvoicePaymentStatus, olderThan time.Time, limit int) ([]domain.Invoice, error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return nil, err
+	}
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		return nil, err
@@ -3192,7 +3353,7 @@ func (s *PostgresStore) listInflightPayments(ctx context.Context, status domain.
 		-- hiding a row from the very code that would end its wait.
 		ORDER BY provider_synced_at ASC NULLS FIRST, updated_at ASC
 		LIMIT $4
-	`, string(status), olderThan, postgres.Livemode(ctx), limit)
+	`, string(status), olderThan, live, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -3215,7 +3376,7 @@ func (s *PostgresStore) listInflightPayments(ctx context.Context, status domain.
 // per-row under the correct RLS partition.
 //
 // Filter:
-//   - status='draft' AND tax_status IN (pending, failed)
+//   - status='draft' AND tax_status = pending
 //   - tax_error_code IN retryableCodes (e.g. provider_outage,
 //     unknown). Empty list short-circuits to "none".
 //   - tax_retry_count < maxAttempts (per-invoice cap)
@@ -3247,14 +3408,14 @@ func (s *PostgresStore) ListPendingTaxRetry(ctx context.Context, batch int, retr
 		SELECT `+invCols+` FROM invoices i
 		WHERE i.livemode = $1
 		  AND i.status = 'draft'
-		  AND i.tax_status IN ('pending', 'failed')
+		  AND i.tax_status = 'pending'
 		  AND COALESCE(i.tax_error_code, '') = ANY($2)
 		  AND i.tax_retry_count < $3
 		  AND (i.tax_next_retry_at IS NULL OR i.tax_next_retry_at <= now())
 		  AND i.is_simulated = false
 		ORDER BY i.tax_next_retry_at ASC NULLS FIRST
 		LIMIT $4
-	`, livemode, postgres.StringArray(retryableCodes), maxAttempts, batch)
+	`, livemode, retryableCodes, maxAttempts, batch)
 	if err != nil {
 		return nil, err
 	}
@@ -3507,12 +3668,12 @@ func (s *PostgresStore) ListPendingTaxRetryForClock(ctx context.Context, tenantI
 		WHERE i.tenant_id = $1
 		  AND c.test_clock_id = $2
 		  AND i.status = 'draft'
-		  AND i.tax_status IN ('pending', 'failed')
+		  AND i.tax_status = 'pending'
 		  AND COALESCE(i.tax_error_code, '') = ANY($3)
 		  AND i.tax_retry_count < $4
 		ORDER BY i.created_at ASC
 		LIMIT $5
-	`, tenantID, clockID, postgres.StringArray(retryableCodes), maxAttempts, limit)
+	`, tenantID, clockID, retryableCodes, maxAttempts, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -3548,7 +3709,7 @@ func (s *PostgresStore) ListProviderConfigErrors(ctx context.Context, tenantID s
 		SELECT `+invCols+` FROM invoices
 		WHERE livemode = $1
 		  AND status = 'draft'
-		  AND tax_status IN ('pending', 'failed')
+		  AND tax_status = 'pending'
 		  AND COALESCE(tax_error_code, '') IN ('provider_not_configured', 'provider_auth')
 		ORDER BY created_at ASC
 		LIMIT 1000
@@ -3574,7 +3735,7 @@ func (s *PostgresStore) ListCustomerDataInvalidErrors(ctx context.Context, tenan
 		SELECT `+invCols+` FROM invoices
 		WHERE customer_id = $1
 		  AND status = 'draft'
-		  AND tax_status IN ('pending', 'failed')
+		  AND tax_status = 'pending'
 		  AND COALESCE(tax_error_code, '') = 'customer_data_invalid'
 		ORDER BY created_at ASC
 		LIMIT 1000
@@ -3697,6 +3858,7 @@ func (s *PostgresStore) scanInvDest(inv *domain.Invoice) []any {
 		&inv.ProviderPaymentStatus, &inv.ProviderSyncedAt,
 		domain.SnapshotScanner[domain.DocumentBillTo]{Dst: &inv.BillToSnapshot, Open: s.openBillTo},
 		domain.SnapshotScanner[domain.DocumentSupplier]{Dst: &inv.SupplierSnapshot},
+		&inv.BelowMinimumAt, &inv.PaidOutOfBand,
 	}
 }
 
@@ -3825,6 +3987,16 @@ func (s *PostgresStore) GetByStripeInvoiceID(ctx context.Context, tenantID, stri
 	return inv, err
 }
 
+// baseFundsPeriod is the one status predicate for "this invoice charged the
+// period's in_advance base", shared by FindBaseInvoiceForPeriod and
+// FindFundingInvoicesForPeriod: every status but voided. A void annuls the
+// charge. A write-off does not: it ends collection, not the sale (ADR-111), so
+// a written-off invoice is billed but unpaid, and a mid-period change treats
+// it exactly as it treats an unpaid one (ADR-050 amendment 2026-10-23). The
+// threshold watermark keeps a written-off invoice for the same reason
+// (thresholdBillsWindow).
+const baseFundsPeriod = `i.status <> 'voided'`
+
 // FindBaseInvoiceForPeriod is the proration-credit gate: returns the
 // invoice carrying an in_advance base line for the given subscription
 // period. The line's `billing_period_start` matches the period the
@@ -3834,9 +4006,10 @@ func (s *PostgresStore) GetByStripeInvoiceID(ctx context.Context, tenantID, stri
 // adjust unpaid invoice" (Chargebee Adjustment / Stripe none) shape
 // applies.
 //
-// Voided / uncollectible invoices are filtered out — they don't
-// represent revenue the customer paid for, even if their line items
-// match the period. ORDER BY created_at DESC + LIMIT 1 surfaces the
+// A voided invoice is filtered out: it charged nothing. A written-off
+// (uncollectible) one is kept (baseFundsPeriod): it is billed but unpaid, so
+// an upgrade over it is refused as over an unpaid one (ADR-050 amendment
+// 2026-10-23). ORDER BY created_at DESC + LIMIT 1 surfaces the
 // most-recent matching invoice (relevant for plan-swap chains within
 // the same period that re-issued the base line).
 func (s *PostgresStore) FindBaseInvoiceForPeriod(ctx context.Context, tenantID, subscriptionID string, periodStart time.Time) (domain.Invoice, error) {
@@ -3853,7 +4026,7 @@ func (s *PostgresStore) FindBaseInvoiceForPeriod(ctx context.Context, tenantID, 
 	err = tx.QueryRowContext(ctx, `
 		SELECT `+invCols+` FROM invoices i
 		WHERE i.subscription_id = $1
-		  AND i.status NOT IN ('voided', 'uncollectible')
+		  AND `+baseFundsPeriod+`
 		  AND EXISTS (
 		    SELECT 1 FROM invoice_line_items li
 		    WHERE li.invoice_id = i.id
@@ -3869,8 +4042,8 @@ func (s *PostgresStore) FindBaseInvoiceForPeriod(ctx context.Context, tenantID, 
 	return inv, err
 }
 
-// FindFundingInvoicesForPeriod returns EVERY non-voided/non-uncollectible
-// invoice that prepaid the cycle [periodStart, periodEnd) for a subscription —
+// FindFundingInvoicesForPeriod returns EVERY non-voided invoice that
+// prepaid the cycle [periodStart, periodEnd) for a subscription —
 // the day-1 base invoice AND any mid-period proration invoice that a plan
 // upgrade / quantity increase issued against the same cycle. The single-result
 // FindBaseInvoiceForPeriod misses the latter, because a mid-period proration
@@ -3890,6 +4063,11 @@ func (s *PostgresStore) FindBaseInvoiceForPeriod(ctx context.Context, tenantID, 
 //     lines' billing_period_start is NULL, so the line predicate can't see
 //     it — the header is the reliable key.)
 //
+// A written-off (uncollectible) invoice is kept, as in FindBaseInvoiceForPeriod
+// (baseFundsPeriod): it is billed but unpaid, so a cancel, swap or decrease
+// credits it as it credits an unpaid one, lowering what it asks for, and a
+// later payment pays only the time used (ADR-050 amendment 2026-10-23).
+//
 // Ordered base-first (subscription_update sorts last) then created_at ASC, so a
 // caller allocating a fixed total across the set has a deterministic order for
 // residual-cent assignment. Returns ErrNotFound when nothing funded the period
@@ -3907,7 +4085,7 @@ func (s *PostgresStore) FindFundingInvoicesForPeriod(ctx context.Context, tenant
 	rows, err := tx.QueryContext(ctx, `
 		SELECT `+invCols+` FROM invoices i
 		WHERE i.subscription_id = $1
-		  AND i.status NOT IN ('voided', 'uncollectible')
+		  AND `+baseFundsPeriod+`
 		  AND (
 		    EXISTS (
 		      SELECT 1 FROM invoice_line_items li
@@ -3946,54 +4124,79 @@ func (s *PostgresStore) FindFundingInvoicesForPeriod(ctx context.Context, tenant
 	return out, nil
 }
 
-// LatestThresholdPeriodEnd returns the latest billing_period_end across
-// the subscription's threshold-fired invoices for the cycle starting at
-// periodStart. The billing engine's cycle close uses it as the
-// "already billed through" watermark: usage before that instant (and
-// the in_arrears base fee) landed on the threshold invoice, so the
-// cycle-close invoice must bill only the residual window — otherwise a
-// reset_billing_cycle=false threshold double-bills the customer.
+// thresholdBillsWindow is the one predicate for "this threshold invoice
+// billed its window": every status but voided (ADR-066 amendment
+// 2026-10-23). A write-off ends collection, not the sale (ADR-111, ADR-113),
+// and a written-off invoice can still be paid (an offline payment, a card
+// charge that settles late), so its window stays billed: no later invoice
+// bills it again. Only a void, which can never be paid, reopens it. Every
+// watermark read below uses this constant, so the closers (cycle close and
+// its in-tx re-read, immediate cancel, cross-interval swap), the swap's
+// re-anchor guard, the operator preview, the live balance and the
+// after_close classifier cannot disagree. Unqualified on purpose: every
+// query that uses it reads one table.
+const thresholdBillsWindow = `status <> 'voided'`
+
+// thresholdAnyStatus is the fire-once probe's status predicate: none.
+const thresholdAnyStatus = `TRUE`
+
+// ThresholdWatermarks returns two instants for the subscription's cycle
+// [periodStart, periodEnd), over the period's threshold invoices. Usage
+// ingest reads them before it writes an event (usage.ThresholdWatermark):
 //
-// Window-scoped by billing_period_start ∈ [periodStart, periodEnd) so
-// the watermark generalizes to multiple threshold fires per cycle
-// (each successive fire's period starts at the previous one's end).
-// Voided / uncollectible invoices don't count — their amounts were
-// returned or written off, so the usage they covered is billable again.
-// Returns errs.ErrNotFound when no threshold invoice fired this cycle.
-func (s *PostgresStore) LatestThresholdPeriodEnd(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (time.Time, error) {
-	if subscriptionID == "" {
-		return time.Time{}, errs.ErrNotFound
-	}
+//   - billedThrough is the closers' watermark: the latest
+//     billing_period_end of a threshold invoice that still bills its window
+//     (thresholdBillsWindow: not voided; a written-off one counts). Nil when
+//     none.
+//   - paidThrough is the latest billing_period_end of a paid one. Nil when
+//     none. It never passes billedThrough, and it never falls back: a paid
+//     invoice can be neither voided nor written off (updateStatusInTx's
+//     allowed sources), so the close's watermark stays at or past it.
+//
+// billedThrough falls back only on a void, and a void is final: the cycle
+// has one threshold invoice (idx_invoices_threshold_unique_per_cycle), so
+// nothing raises it again in that cycle.
+func (s *PostgresStore) ThresholdWatermarks(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (billedThrough, paidThrough *time.Time, err error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
-		return time.Time{}, err
+		return nil, nil, err
 	}
 	defer postgres.Rollback(tx)
 
-	var end sql.NullTime
+	var billed, paid sql.NullTime
 	err = tx.QueryRowContext(ctx, `
-		SELECT MAX(billing_period_end) FROM invoices
+		SELECT MAX(billing_period_end) FILTER (WHERE `+thresholdBillsWindow+`),
+		       MAX(billing_period_end) FILTER (WHERE status = 'paid')
+		FROM invoices
 		WHERE subscription_id = $1
 		  AND billing_reason = 'threshold'
-		  AND status NOT IN ('voided', 'uncollectible')
 		  AND billing_period_start >= $2
 		  AND billing_period_start < $3
-	`, subscriptionID, periodStart, periodEnd).Scan(&end)
+	`, subscriptionID, periodStart, periodEnd).Scan(&billed, &paid)
 	if err != nil {
-		return time.Time{}, err
+		return nil, nil, err
 	}
-	if !end.Valid {
-		return time.Time{}, errs.ErrNotFound
+	if billed.Valid {
+		billedThrough = &billed.Time
 	}
-	return end.Time, nil
+	if paid.Valid {
+		paidThrough = &paid.Time
+	}
+	return billedThrough, paidThrough, nil
 }
 
-// GetLatestThresholdInvoiceForCycle returns the newest non-voided
-// threshold-fired invoice for the cycle window — the same predicate as
-// LatestThresholdPeriodEnd but the full row. The billing engine's fire-once
-// probe uses it so a probe hit can also HEAL a crash between invoice-create
-// and the $0/credited MarkPaid (ADR-066): the probe needs the invoice's
-// status, payment_status and amount_due, not just the watermark instant.
+// GetLatestThresholdInvoiceForCycle returns the newest threshold-fired
+// invoice for the cycle window [periodStart, periodEnd) that still bills its
+// window (thresholdBillsWindow: not voided; a written-off one counts). It is
+// the "billed through" watermark of every closer: usage before its
+// billing_period_end landed on it, so the closer bills only the residual
+// window; without it a threshold fire's window would be billed twice. A fire
+// bills no base fee, so the invoice existing says nothing about the base:
+// only one made before that change carries a base line, and the closers skip
+// the base on that line alone (billing.thresholdWatermark.billedBase).
+// Window-scoped by
+// billing_period_start so the watermark generalizes to several fires per
+// cycle. errs.ErrNotFound when the cycle has no such invoice.
 func (s *PostgresStore) GetLatestThresholdInvoiceForCycle(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error) {
 	if subscriptionID == "" {
 		return domain.Invoice{}, errs.ErrNotFound
@@ -4003,35 +4206,93 @@ func (s *PostgresStore) GetLatestThresholdInvoiceForCycle(ctx context.Context, t
 		return domain.Invoice{}, err
 	}
 	defer postgres.Rollback(tx)
-	return s.latestThresholdInvoiceForCycleTx(ctx, tx, subscriptionID, periodStart, periodEnd)
+	return s.thresholdInvoiceForCycleTx(ctx, tx, subscriptionID, periodStart, periodEnd, thresholdBillsWindow, "")
 }
 
 // GetLatestThresholdInvoiceForCycleTx is GetLatestThresholdInvoiceForCycle
-// on the caller's tx — the period closer's in-tx watermark re-read
-// (ADR-115). Under READ COMMITTED a statement issued AFTER the closer's
-// row-lock wait sees every threshold fire that committed before it took the
-// lock, so the closer can prove the watermark it built its lines against is
-// still the watermark, and roll back if a fire landed in between.
+// on the caller's tx, holding the invoice row FOR KEY SHARE until that tx
+// ends. Its callers are the period's closers (the cycle close's in-tx
+// re-read, ADR-115; the immediate cancel; the cross-interval swap and its
+// re-anchor guard), and each calls it after its tx locked the subscription
+// row.
+//
+// Under READ COMMITTED a statement issued after the closer's row-lock wait
+// sees every threshold fire that committed before it took the lock, so the
+// closer can prove the watermark it built its lines against is still the
+// watermark, and roll back if a fire landed in between. The lock does the
+// same for a void (ADR-066 amendment 2026-10-23). A void locks the invoice
+// FOR UPDATE (UpdateStatusWithReversalPriorTx), which conflicts with this
+// lock. A void that holds the row when the read runs is waited for: the row
+// is re-checked after it commits, a voided row no longer matches, and the
+// closer bills the reopened window. A void that arrives after the read waits
+// for the closer's commit, so it lands after the period's invoice and the
+// window is forgiven. Without the lock that void could commit first and
+// still find its window billed nowhere.
+//
+// FOR KEY SHARE, not FOR SHARE: the paid flips (markPaidReportingTransition,
+// the credit note's LockForCreditNoteTx, SettleZeroDue) lock the invoice FOR
+// NO KEY UPDATE, which this lock does not wait for and does not block. Only
+// a void changes the watermark, and a paid flip can need the subscription
+// row while it holds the invoice: when dunning's SetDunningPause for this
+// invoice commits after the payment's LockDunningPauseTx read, the
+// payment's pause release waits for the subscription lock this closer
+// holds. Had this read waited for the payment, the two would deadlock.
+// Every writer that locks the invoice FOR UPDATE (void, write-off, charge
+// claims, payment failures, draft edits, disputes) takes no subscription
+// lock in that transaction, except the cancel's and swap's own prebill
+// void, which already holds it. Test-clock teardown (testclock clockTeardownStatements)
+// is the exception: it deletes the clock's invoices before its
+// subscriptions, so a teardown that overlaps a closer on one of that
+// clock's subscriptions fails one of the two with a deadlock error (40P01);
+// a retry succeeds. Before this lock the same overlap could fail the
+// teardown on a foreign key. Simulation data only.
+//
 // tenantID is accepted for symmetry with the store's other *Tx methods; RLS
 // scoping rides the tx's tenant binding.
 func (s *PostgresStore) GetLatestThresholdInvoiceForCycleTx(ctx context.Context, tx *sql.Tx, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error) {
 	if subscriptionID == "" {
 		return domain.Invoice{}, errs.ErrNotFound
 	}
-	return s.latestThresholdInvoiceForCycleTx(ctx, tx, subscriptionID, periodStart, periodEnd)
+	return s.thresholdInvoiceForCycleTx(ctx, tx, subscriptionID, periodStart, periodEnd, thresholdBillsWindow, "FOR KEY SHARE")
 }
 
-func (s *PostgresStore) latestThresholdInvoiceForCycleTx(ctx context.Context, tx *sql.Tx, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error) {
+// GetThresholdInvoiceForCycleAnyStatus is the fire-once probe's read: the
+// cycle window's newest threshold invoice in ANY status. The partial unique
+// index idx_invoices_threshold_unique_per_cycle keeps one threshold invoice
+// per (subscription, billing_period_start) whatever its status, so a voided
+// or written-off fire still holds the cycle's one slot and no later fire can
+// insert. Probing with the watermark predicate instead re-evaluated the
+// crossing every tick after a void (and, before 2026-10-23, after a
+// write-off), running a paid tax calculation before the index refused the
+// insert. Never a watermark: a voided row billed nothing.
+func (s *PostgresStore) GetThresholdInvoiceForCycleAnyStatus(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error) {
+	if subscriptionID == "" {
+		return domain.Invoice{}, errs.ErrNotFound
+	}
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return domain.Invoice{}, err
+	}
+	defer postgres.Rollback(tx)
+	return s.thresholdInvoiceForCycleTx(ctx, tx, subscriptionID, periodStart, periodEnd, thresholdAnyStatus, "")
+}
+
+// thresholdInvoiceForCycleTx reads the newest threshold invoice whose
+// billing_period_start falls in [periodStart, periodEnd) and that matches
+// statusPredicate, with lockClause ("" or "FOR KEY SHARE") on the row it
+// returns. Both are this file's constants, never caller input.
+func (s *PostgresStore) thresholdInvoiceForCycleTx(ctx context.Context, tx *sql.Tx, subscriptionID string, periodStart, periodEnd time.Time, statusPredicate, lockClause string) (domain.Invoice, error) {
 	var inv domain.Invoice
 	err := tx.QueryRowContext(ctx, `
 		SELECT `+invCols+` FROM invoices i
 		WHERE i.subscription_id = $1
 		  AND i.billing_reason = 'threshold'
-		  AND i.status NOT IN ('voided', 'uncollectible')
+		  AND `+statusPredicate+`
 		  AND i.billing_period_start >= $2
 		  AND i.billing_period_start < $3
 		ORDER BY i.billing_period_end DESC
 		LIMIT 1
+		`+lockClause+`
 	`, subscriptionID, periodStart, periodEnd).Scan(s.scanInvDest(&inv)...)
 	if err == sql.ErrNoRows {
 		return domain.Invoice{}, errs.ErrNotFound
@@ -4090,12 +4351,19 @@ func invoiceOrderBy(sort, dir string) string {
 // invoiceSortColumn maps the SPA's sort key to a SQL column name.
 // Closed allow-list to prevent injection. Unknown keys default to
 // created_at (the most common sort, matches Stripe Dashboard).
+//
+// amount_due sorts by the invoice's amount as the Invoices list's "Amount"
+// column shows it (invoiceAmountCents in web-v2/src/lib/invoiceTerminal.ts):
+// a paid invoice by what the payment and customer credit paid together, since
+// the settle zeroed its amount_due; every other invoice by amount_due, which a
+// void and a write-off keep. Sorting paid rows by the zeroed figure put a $29
+// paid invoice below a $20 open one (sign-off of #1328).
 func invoiceSortColumn(key string) string {
 	switch key {
 	case "invoice_number":
 		return "invoice_number"
 	case "amount_due_cents", "amount_due":
-		return "amount_due_cents"
+		return "(CASE WHEN status = 'paid' THEN amount_paid_cents + credits_applied_cents ELSE amount_due_cents END)"
 	case "billing_period_start", "period":
 		return "billing_period_start"
 	case "due_at":
@@ -4456,7 +4724,7 @@ func (s *PostgresStore) PaymentPagesLive(ctx context.Context, tenantID string, i
 	}
 	defer postgres.Rollback(tx)
 	rows, err := tx.QueryContext(ctx, `SELECT q.id FROM unnest($1::text[]) AS q(id) WHERE `+
-		domain.HostedCheckoutLiveSQL("q.id"), postgres.StringArray(invoiceIDs))
+		domain.HostedCheckoutLiveSQL("q.id"), invoiceIDs)
 	if err != nil {
 		return nil, fmt.Errorf("payment pages live: %w", err)
 	}
@@ -4471,16 +4739,24 @@ func (s *PostgresStore) PaymentPagesLive(ctx context.Context, tenantID string, i
 	return out, rows.Err()
 }
 
-// HardDeclineOnCard returns Stripe's decline code when the bank refused this
-// card for good on this invoice (domain.IsHardDecline, #966), or "" when no
-// attempt on the invoice records such a decline for the card. A dunning retry
-// asks it about the card it is about to charge, and charges nothing when the
-// answer is not empty. The question is per invoice and per card, as Stripe
-// Billing's is: another invoice, or another card, is charged as usual.
+// RetryBlockingDecline returns the Stripe decline code that stops a dunning
+// retry from charging this card for this invoice, or "" when the card may be
+// charged. Two codes do (domain.RetryBlock):
+//   - a hard decline (domain.IsHardDecline, #966) on any attempt with the
+//     card: the bank refused it for good, so it decides whatever came after;
+//   - otherwise authentication_required (domain.IsAuthenticationRequired) on
+//     the newest attempt with the card that names a decline code: the bank
+//     wants the customer to confirm the payment, which an off-session retry
+//     cannot do. A later ordinary decline (a Collect payment the bank
+//     answered differently) is the newer answer and ends it.
 //
-// Any one matching row answers it; LIMIT 1 picks the newest for the code it
-// names, not because the set is singular.
-func (s *PostgresStore) HardDeclineOnCard(ctx context.Context, tenantID, invoiceID, stripePaymentMethodID string) (string, error) {
+// A dunning retry asks it about the card it is about to charge. The question
+// is per invoice and per card, as Stripe Billing's is: another invoice, or
+// another card, is charged as usual.
+//
+// Hard declines sort first, then the newest row; LIMIT 1 takes the deciding
+// row, not because the set is singular.
+func (s *PostgresStore) RetryBlockingDecline(ctx context.Context, tenantID, invoiceID, stripePaymentMethodID string) (string, error) {
 	if stripePaymentMethodID == "" {
 		return "", nil
 	}
@@ -4494,27 +4770,30 @@ func (s *PostgresStore) HardDeclineOnCard(ctx context.Context, tenantID, invoice
 	err = tx.QueryRowContext(ctx, `
 		SELECT decline_code FROM invoice_charge_attempts
 		WHERE invoice_id = $1 AND stripe_payment_method_id = $2
-		  AND decline_code = ANY($3::text[])
-		ORDER BY created_at DESC, id DESC
+		  AND decline_code <> ''
+		ORDER BY decline_code = ANY($3::text[]) DESC, created_at DESC, id DESC
 		LIMIT 1`,
-		invoiceID, stripePaymentMethodID, postgres.StringArray(domain.HardDeclineCodes()),
+		invoiceID, stripePaymentMethodID, domain.HardDeclineCodes(),
 	).Scan(&code)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return "", fmt.Errorf("read hard decline on card: %w", err)
+		return "", fmt.Errorf("read retry-blocking decline on card: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return "", err
 	}
+	if domain.RetryBlock(code) == nil {
+		return "", nil
+	}
 	return code, nil
 }
 
-// HardDeclinesOnDefaultCards is HardDeclineOnCard for a page of invoices, each
-// asked about its customer's current default card: invoice id → Stripe's
-// decline code, for the invoices whose default card the bank refused for good
-// on that invoice. The attention notice reads it, so it says "needs a
-// different card" exactly while the next dunning retry would skip the card.
-// Invoices without such a decline are absent. One read for the page.
-func (s *PostgresStore) HardDeclinesOnDefaultCards(ctx context.Context, tenantID string, invoiceIDs []string) (map[string]string, error) {
+// RetryBlockingDeclinesOnDefaultCards is RetryBlockingDecline for a page of
+// invoices, each asked about its customer's current default card: invoice id
+// → Stripe's decline code, for the invoices whose next dunning retry would
+// skip that card. The attention notice reads it, so it says "needs a
+// different card" or "the customer must confirm" exactly while the retry
+// would skip the card. Other invoices are absent. One read for the page.
+func (s *PostgresStore) RetryBlockingDeclinesOnDefaultCards(ctx context.Context, tenantID string, invoiceIDs []string) (map[string]string, error) {
 	out := make(map[string]string, len(invoiceIDs))
 	if len(invoiceIDs) == 0 {
 		return out, nil
@@ -4534,11 +4813,11 @@ func (s *PostgresStore) HardDeclinesOnDefaultCards(ctx context.Context, tenantID
 			AND pm.stripe_payment_method_id = a.stripe_payment_method_id
 		WHERE a.invoice_id = ANY($1::text[])
 		  AND a.stripe_payment_method_id <> ''
-		  AND a.decline_code = ANY($2::text[])
-		ORDER BY a.invoice_id, a.created_at DESC, a.id DESC`,
-		postgres.StringArray(invoiceIDs), postgres.StringArray(domain.HardDeclineCodes()))
+		  AND a.decline_code <> ''
+		ORDER BY a.invoice_id, a.decline_code = ANY($2::text[]) DESC, a.created_at DESC, a.id DESC`,
+		invoiceIDs, domain.HardDeclineCodes())
 	if err != nil {
-		return nil, fmt.Errorf("read hard declines on default cards: %w", err)
+		return nil, fmt.Errorf("read retry-blocking declines on default cards: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
@@ -4546,7 +4825,9 @@ func (s *PostgresStore) HardDeclinesOnDefaultCards(ctx context.Context, tenantID
 		if err := rows.Scan(&id, &code); err != nil {
 			return nil, err
 		}
-		out[id] = code
+		if domain.RetryBlock(code) != nil {
+			out[id] = code
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

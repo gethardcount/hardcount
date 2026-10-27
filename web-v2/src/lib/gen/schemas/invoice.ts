@@ -14,6 +14,7 @@ import type { InvoiceBillingReason } from './invoiceBillingReason';
 import type { InvoiceMetadata } from './invoiceMetadata';
 import type { InvoicePaymentStatus } from './invoicePaymentStatus';
 import type { InvoiceStatus } from './invoiceStatus';
+import type { InvoiceTaxErrorCode } from './invoiceTaxErrorCode';
 import type { InvoiceTaxStatus } from './invoiceTaxStatus';
 import type { ItemChangeType } from './itemChangeType';
 import type { RecoveryWarning } from './recoveryWarning';
@@ -72,13 +73,11 @@ export interface Invoice {
   tax_retry_count?: number;
   tax_pending_reason?: string;
   /**
-     * Typed taxonomy of `tax_pending_reason`. One of
-     * `customer_data_invalid`, `jurisdiction_unsupported`,
-     * `provider_outage`, `provider_auth`, `unknown`. Empty for
-     * invoices deferred before this column existed (migration
-     * 0067).
+     * Why tax could not be calculated, as a code. Set while
+     * `tax_status` is `pending`; `tax_pending_reason` has the
+     * detail.
      */
-  tax_error_code?: string;
+  tax_error_code?: InvoiceTaxErrorCode;
   /**
      * The earliest time the background retry may calculate tax again,
      * after a failed attempt. Absent when a retry may run now.
@@ -93,7 +92,8 @@ export interface Invoice {
   /**
      * Set when a payment arrived that the invoice did not expect. The
      * webhook event name of the cause: `payment.duplicate_charge`,
-     * `payment.amount_mismatch` or `payment.received_on_voided_invoice`.
+     * `payment.amount_mismatch`, `payment.currency_mismatch` or
+     * `payment.received_on_voided_invoice`.
      * Only the latest one is kept.
      */
   payment_anomaly_kind?: string;
@@ -151,7 +151,23 @@ export interface Invoice {
   voided_at?: string | null;
   /** When the invoice was marked uncollectible. */
   uncollectible_at?: string;
+  /**
+     * The Stripe PaymentIntent of the card charge that paid the
+     * invoice, or of its last charge that is in progress or failed. It
+     * can be absent after a charge was sent: for example when the
+     * invoice was then paid without a card (by credits, with nothing
+     * due, or outside Velox: `paid_out_of_band`), or when Stripe
+     * refused the last charge as below its minimum.
+     */
   stripe_payment_intent_id?: string;
+  /**
+     * True when the payment was recorded as made outside Velox, such as
+     * a bank transfer or cheque (`POST /v1/invoices/{id}/record-payment`,
+     * or a payment recovery run resolved as `payment_recovered`). Such
+     * an invoice has no `stripe_payment_intent_id`, so there is no card
+     * to refund.
+     */
+  paid_out_of_band?: boolean;
   last_payment_error?: string;
   auto_charge_pending?: boolean;
   /**
@@ -198,11 +214,9 @@ export interface Invoice {
   source_change_type?: ItemChangeType;
   billing_reason?: InvoiceBillingReason;
   /**
-     * Source Stripe invoice id (`in_xxx`) for an invoice imported from
-     * a Stripe account. Currently always empty: the Stripe importer was
-     * removed (deferred until a design-partner cutover) and nothing
-     * writes this field today. The column and its unique index remain
-     * for a future importer. Empty for Velox-native invoices.
+     * Source Stripe invoice id (`in_xxx`). Set only on invoices the
+     * Stripe importer wrote before it was removed on 2026-04-29.
+     * Empty on every other invoice.
      */
   stripe_invoice_id?: string;
   /**
@@ -214,4 +228,12 @@ export interface Invoice {
      * instead of inferring it. Always false in live mode.
      */
   is_simulated?: boolean;
+  /**
+     * The test clock this invoice's dates follow: the clock its customer
+     * is pinned to, for cycle and one-off invoices alike. Read from the
+     * customer on `GET /v1/invoices` and `GET /v1/invoices/{id}`; other
+     * responses may leave it out. Left out for a customer on wall-clock
+     * time, and always in live mode.
+     */
+  test_clock_id?: string;
 }

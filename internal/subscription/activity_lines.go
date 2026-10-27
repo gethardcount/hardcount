@@ -177,8 +177,12 @@ func describeUpdate(meta map[string]any, lb lineLabels) activity.Line {
 		}
 	case domain.SubAuditCollectionResumed:
 		l.Kind, l.Title = kindCollectionResumed, "Collection resumed"
-		if metaString(meta, "triggered_by") == "schedule" {
+		switch metaString(meta, "triggered_by") {
+		case "schedule":
 			l.Detail = append(l.Detail, activity.Text("On its scheduled date"))
+		case "payment":
+			// Dunning paused it, and the invoice it paused for was paid.
+			l.Detail = append(l.Detail, activity.Text("The overdue invoice was paid"))
 		}
 	case domain.SubAuditTrialEnded:
 		// B2: the three schedule writers mark the row triggered_by=schedule;
@@ -207,7 +211,7 @@ func describeUpdate(meta map[string]any, lb lineLabels) activity.Line {
 		// B9: the amount as money in the subscription's currency, never cents.
 		l.Kind, l.Title = kindThresholdsSet, "Spend thresholds set"
 		if amt, ok := metaInt(meta, "amount_gte"); ok && amt > 0 {
-			l.Detail = append(l.Detail, activity.Segment{activity.M(amt, metaString(meta, "currency")), activity.T(" total")})
+			l.Detail = append(l.Detail, activity.Segment{activity.M(amt, metaString(meta, "currency")), activity.T(" usage total")})
 		}
 		if n, ok := metaInt(meta, "item_threshold_count"); ok && n > 0 {
 			l.Detail = append(l.Detail, activity.Text(fmt.Sprintf("%d item threshold%s", n, plural(int(n)))))
@@ -449,14 +453,19 @@ func quantityArrow(meta map[string]any, oldKey, newKey string) string {
 }
 
 // belowZeroMeters names each meter of a net-negative usage row with its
-// amount below zero: by the meter's name, which rows written before it was
-// recorded lack, so those show the key they have.
+// amount below zero: by the meter's name, or by its event_name when the row
+// has no name. Rows written before 2026-10-19 have no meter_name, and rows
+// written before 2026-10-27 carry the event name as meter_key, so an
+// install upgraded from a build of main keeps naming them.
 func belowZeroMeters(meta map[string]any) []string {
 	var out []string
 	ms, _ := meta["meters"].([]any)
 	for _, m := range ms {
 		mm, _ := m.(map[string]any)
 		name := metaString(mm, "meter_name")
+		if name == "" {
+			name = metaString(mm, "event_name")
+		}
 		if name == "" {
 			name = metaString(mm, "meter_key")
 		}

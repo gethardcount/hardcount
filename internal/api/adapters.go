@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -36,8 +38,8 @@ import (
 
 // compositePaymentSetupStore implements payment.PaymentSetupStore on
 // top of the canonical sources — customers.stripe_customer_id +
-// payment_methods. Lets payment/checkout.go and payment/stripe.go
-// keep their existing PaymentSetupStore-shaped wiring while the
+// payment_methods. Lets payment/stripe.go keep its existing
+// PaymentSetupStore-shaped wiring while the
 // deprecated customer_payment_setups table is read-only on its way
 // out. Compose the CustomerPaymentSetup wire shape from canonical
 // state on read; write only the parts the new architecture owns
@@ -231,34 +233,13 @@ type creditGrantAdapter struct {
 	svc *credit.Service
 }
 
-func (a *creditGrantAdapter) Grant(ctx context.Context, tenantID string, input creditnote.CreditGrantInput) error {
-	_, err := a.svc.Grant(ctx, tenantID, credit.GrantInput{
-		CustomerID:  input.CustomerID,
-		AmountCents: input.AmountCents,
-		Description: input.Description,
-		InvoiceID:   input.InvoiceID,
-	})
-	return err
-}
-
-// GrantForCreditNote bridges to credit.Service.GrantForCreditNote so
-// CN Issue() retries dedup via migration 0093's partial unique index.
-func (a *creditGrantAdapter) GrantForCreditNote(ctx context.Context, tenantID, creditNoteID string, input creditnote.CreditGrantInput) error {
-	_, err := a.svc.GrantForCreditNote(ctx, tenantID, creditNoteID, credit.GrantInput{
-		CustomerID:  input.CustomerID,
-		AmountCents: input.AmountCents,
-		Description: input.Description,
-		InvoiceID:   input.InvoiceID,
-	})
-	return err
-}
-
 // GrantForCreditNoteTx bridges to credit.Service.GrantForCreditNoteTx so the
 // grant rides CN Issue()'s coordinator tx (ADR-061): the credit ledger entry
 // commits atomically with the draft→issued CAS.
 func (a *creditGrantAdapter) GrantForCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, creditNoteID string, input creditnote.CreditGrantInput) error {
 	_, err := a.svc.GrantForCreditNoteTx(ctx, tx, tenantID, creditNoteID, credit.GrantInput{
 		CustomerID:  input.CustomerID,
+		Currency:    input.Currency,
 		AmountCents: input.AmountCents,
 		Description: input.Description,
 		InvoiceID:   input.InvoiceID,
@@ -322,7 +303,7 @@ type retryInvoiceStore interface {
 	ReleaseChargeHold(ctx context.Context, tenantID, id string, hold domain.ChargeHold) error
 	MarkPaid(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time) (domain.Invoice, error)
 	SettleZeroDue(ctx context.Context, tenantID, id string, paidAt time.Time) (domain.Invoice, bool, error)
-	HardDeclineOnCard(ctx context.Context, tenantID, invoiceID, stripePaymentMethodID string) (string, error)
+	RetryBlockingDecline(ctx context.Context, tenantID, invoiceID, stripePaymentMethodID string) (string, error)
 }
 
 // paymentRetrierAdapter bridges Stripe + invoice/customer stores → dunning.PaymentRetrier.
@@ -342,7 +323,10 @@ func (a *paymentRetrierAdapter) RetryPayment(ctx context.Context, tenantID, invo
 // classifyDunningRetryResult is the one rule for which retry results use up a
 // dunning attempt: a decline Stripe returned (*payment.PaymentError with
 // Unknown=false), no card to charge (counted so a card-less invoice reaches
-// its dunning terminal, ADR-060), or a card the bank refused for good.
+// its dunning terminal, ADR-060), a card the bank refused for good or whose
+// payment it wants the customer to confirm, or an
+// amount below Stripe's minimum charge (domain.ErrBelowMinimumCharge, which
+// ends the run instead of counting toward its final action).
 // Everything else becomes dunning.ErrTransientSkip, which dunning does not
 // count: a database error, Stripe unreachable or rate limiting, an outcome
 // Stripe did not confirm, a settle that failed after Stripe took the money.
@@ -353,7 +337,9 @@ func (a *paymentRetrierAdapter) RetryPayment(ctx context.Context, tenantID, invo
 // #978, #1302).
 func classifyDunningRetryResult(ctx context.Context, invoiceID string, err error) error {
 	if err == nil || errors.Is(err, dunning.ErrTransientSkip) ||
-		errors.Is(err, domain.ErrNoPaymentMethodOnRetry) || errors.Is(err, domain.ErrCardNeedsReplacing) {
+		errors.Is(err, domain.ErrNoPaymentMethodOnRetry) || errors.Is(err, domain.ErrCardNeedsReplacing) ||
+		errors.Is(err, domain.ErrCardNeedsConfirmation) ||
+		errors.Is(err, domain.ErrBelowMinimumCharge) {
 		return err
 	}
 	var pe *payment.PaymentError
@@ -470,27 +456,31 @@ func (a *paymentRetrierAdapter) retryPayment(ctx context.Context, tenantID, invo
 		return domain.ErrNoPaymentMethodOnRetry
 	}
 
-	// A card the bank refused for good on this invoice (lost, stolen and the
-	// rest of domain.IsHardDecline, #966) is not charged again: the retry
-	// cannot succeed, and the card networks charge merchants for trying.
-	// Stripe Billing does the same — its schedule and attempt count carry on,
-	// but a retry charges only once it sees a new payment method. So this
-	// attempt counts and charges nothing until a different card is the
-	// customer's default; then the next scheduled retry charges that card.
-	// Provably pre-Stripe, so the lease is released. A read error is not "no
+	// Two answers from the bank stop a retry from charging the card for this
+	// invoice. A card refused for good (lost, stolen and the rest of
+	// domain.IsHardDecline, #966): the retry cannot succeed, and the card
+	// networks charge merchants for trying. And authentication_required: the
+	// bank wants the customer to confirm the payment, which a charge made
+	// without them cannot do; the customer pays on the hosted invoice page,
+	// where Stripe runs the confirmation. Stripe Billing lists both among the
+	// codes it does not retry — its schedule and attempt count carry on, but
+	// a retry charges only once it sees a new payment method. So this attempt
+	// counts and charges nothing until a different card is the customer's
+	// default; then the next scheduled retry charges that card. Provably
+	// pre-Stripe, so the lease is released. A read error is not "no
 	// refusal": skip this tick uncounted, as for the payment-setup read.
-	refusedCode, err := a.invoiceStore.HardDeclineOnCard(ctx, tenantID, invoiceID, ps.StripePaymentMethodID)
+	blockCode, err := a.invoiceStore.RetryBlockingDecline(ctx, tenantID, invoiceID, ps.StripePaymentMethodID)
 	if err != nil {
 		release()
 		slog.WarnContext(ctx, "dunning retry: refused-card read failed; skipping this attempt",
 			"invoice_id", invoiceID, "customer_id", customerID, "error", err)
 		return dunning.ErrTransientSkip
 	}
-	if refusedCode != "" {
+	if block := domain.RetryBlock(blockCode); block != nil {
 		release()
-		slog.InfoContext(ctx, "dunning retry: not charging a card the bank refused for good; waiting for a different default card",
-			"invoice_id", invoiceID, "customer_id", customerID, "decline_code", refusedCode)
-		return domain.ErrCardNeedsReplacing
+		slog.InfoContext(ctx, "dunning retry: not charging this card; the bank refused it for good or wants the customer to confirm the payment; waiting for the customer or a different default card",
+			"invoice_id", invoiceID, "customer_id", customerID, "decline_code", blockCode)
+		return block
 	}
 
 	// 15s bound on the Stripe leg. Scheduler ticks run tens of retries
@@ -513,14 +503,15 @@ func (a *paymentRetrierAdapter) retryPayment(ctx context.Context, tenantID, invo
 	// wrapper, no payment import in dunning) so the failed retry's timeline
 	// row can be matched to its exact payment_intent.payment_failed webhook
 	// twin. A hard decline is flagged so the customer's warning asks for a
-	// different card (#966); the next retry's HardDeclineOnCard read is what
-	// stops the card being charged again. RetryPayment classifies the rest.
+	// different card (#966), and authentication_required so it asks for the
+	// confirmation; the next retry's RetryBlockingDecline read is what stops
+	// the card being charged again. RetryPayment classifies the rest.
 	var pe *payment.PaymentError
 	if errors.As(err, &pe) && !pe.Unknown && pe.PaymentIntentID != "" {
 		return &dunning.RetryError{
-			PaymentIntentID:    pe.PaymentIntentID,
-			Err:                err,
-			CardNeedsReplacing: domain.IsHardDecline(pe.DeclineCode),
+			PaymentIntentID: pe.PaymentIntentID,
+			Err:             err,
+			Ask:             domain.DeclineAskOf(pe.DeclineCode),
 		}
 	}
 	return err
@@ -562,20 +553,26 @@ func (a *dunningStarterAdapter) StartDunning(ctx context.Context, tenantID, invo
 }
 
 // subscriptionPauserAdapter bridges subscription.Service →
-// dunning.SubscriptionPauser. ADR-036 amendment: this now calls
-// PauseCollection(keep_as_draft), not the pre-amendment hard
-// PauseAtomic — matching Stripe's pause_collection.behavior=
-// keep_as_draft so the cycle keeps drafting (no silent skip of
-// invoice generation).
+// dunning.SubscriptionPauser: a keep_as_draft pause marked as dunning's,
+// which paying the invoice it was set for lifts (ADR-036 amendments).
 type subscriptionPauserAdapter struct {
 	svc *subscription.Service
 }
 
-func (a *subscriptionPauserAdapter) PauseCollection(ctx context.Context, tenantID, id string) error {
-	_, err := a.svc.PauseCollection(ctx, tenantID, id, subscription.PauseCollectionInput{
-		Behavior:    domain.PauseCollectionKeepAsDraft,
-		TriggeredBy: "dunning",
-	})
+func (a *subscriptionPauserAdapter) PauseCollection(ctx context.Context, tenantID, subID, invoiceID string) (bool, error) {
+	applied, err := a.svc.PauseCollectionForDunning(ctx, tenantID, subID, invoiceID)
+	return applied, dunningGraceWait(err)
+}
+
+// dunningGraceWait maps subscription's "the period is inside its invoice
+// grace" answer to dunning's SubscriptionActionNotYet, so the run waits for
+// the grace instead of counting a failed action (ADR-120 amendment
+// 2026-10-22). Every other error passes through.
+func dunningGraceWait(err error) error {
+	var inGrace *subscription.InsideInvoiceGraceError
+	if errors.As(err, &inGrace) {
+		return &dunning.SubscriptionActionNotYet{Until: inGrace.Until}
+	}
 	return err
 }
 
@@ -592,8 +589,10 @@ func (a *subscriptionCancelerAdapter) Cancel(ctx context.Context, tenantID, id s
 	// dunning as the driver, rather than each guessing from the absence of
 	// a request actor (ADR-090 PR4 review).
 	ctx = subscription.WithCancelOrigin(ctx, "dunning")
-	_, _, err := a.svc.Cancel(ctx, tenantID, id)
-	return err
+	// CancelForDunning, not the operator's Cancel: it waits for the invoice
+	// grace rather than closing the ended period now.
+	_, _, err := a.svc.CancelForDunning(ctx, tenantID, id)
+	return dunningGraceWait(err)
 }
 
 // subscriptionStateAdapter bridges subscription.Service →
@@ -609,12 +608,11 @@ func (a *subscriptionStateAdapter) GetTerminalState(ctx context.Context, tenantI
 	if err != nil {
 		return dunning.SubscriptionTerminalState{}, err
 	}
-	// The two states in which BOTH movers refuse: cancelSpec() allows only
-	// draft/trialing/active, and SetPauseCollection rejects canceled and
-	// archived outright.
+	// The state in which BOTH movers refuse: cancelSpec() allows only
+	// draft/trialing/active, and SetPauseCollection rejects canceled
+	// outright.
 	st := dunning.SubscriptionTerminalState{
-		Terminated: sub.Status == domain.SubscriptionCanceled ||
-			sub.Status == domain.SubscriptionArchived,
+		Terminated: sub.Status == domain.SubscriptionCanceled,
 	}
 	if sub.CurrentBillingPeriodStart != nil {
 		st.PeriodStart = *sub.CurrentBillingPeriodStart
@@ -954,46 +952,6 @@ func (a *noPaymentMethodNotifierAdapter) NotifyNoPaymentMethod(ctx context.Conte
 	return domain.NotifySent, nil
 }
 
-// prorationCreditGranterAdapter bridges credit.Service → subscription.ProrationCreditGranter.
-type prorationCreditGranterAdapter struct {
-	svc *credit.Service
-}
-
-func (a *prorationCreditGranterAdapter) GrantProration(ctx context.Context, tenantID string, input subscription.ProrationGrantInput) error {
-	planChangedAt := input.SourcePlanChangedAt
-	_, err := a.svc.Grant(ctx, tenantID, credit.GrantInput{
-		CustomerID:               input.CustomerID,
-		AmountCents:              input.AmountCents,
-		Description:              input.Description,
-		SourceSubscriptionID:     input.SourceSubscriptionID,
-		SourceSubscriptionItemID: input.SourceSubscriptionItemID,
-		SourcePlanChangedAt:      &planChangedAt,
-		SourceChangeType:         input.SourceChangeType,
-	})
-	return err
-}
-
-func (a *prorationCreditGranterAdapter) GetByProrationSource(ctx context.Context, tenantID, subscriptionID, subscriptionItemID string, changeType domain.ItemChangeType, changeAt time.Time) (domain.CreditLedgerEntry, error) {
-	return a.svc.GetByProrationSource(ctx, tenantID, subscriptionID, subscriptionItemID, changeType, changeAt)
-}
-
-// GrantProrationTx is the in-transaction variant. The caller owns the
-// tx; this adapter forwards to the credit service's tx-aware grant
-// path. ADR-030 atomic-proration follow-through (2026-05-29).
-func (a *prorationCreditGranterAdapter) GrantProrationTx(ctx context.Context, tx *sql.Tx, tenantID string, input subscription.ProrationGrantInput) error {
-	planChangedAt := input.SourcePlanChangedAt
-	_, err := a.svc.GrantTx(ctx, tx, tenantID, credit.GrantInput{
-		CustomerID:               input.CustomerID,
-		AmountCents:              input.AmountCents,
-		Description:              input.Description,
-		SourceSubscriptionID:     input.SourceSubscriptionID,
-		SourceSubscriptionItemID: input.SourceSubscriptionItemID,
-		SourcePlanChangedAt:      &planChangedAt,
-		SourceChangeType:         input.SourceChangeType,
-	})
-	return err
-}
-
 // prorationInvoiceCreatorAdapter bridges invoice.PostgresStore + tenant.SettingsStore → subscription.ProrationInvoiceCreator.
 // The embedded store supplies the methods whose names already match
 // (GetByProrationSource, FindBaseInvoiceForPeriod, FindFundingInvoicesForPeriod,
@@ -1238,6 +1196,16 @@ type hostedInvoiceStripeAdapter struct {
 	// construction — a public customer-token money path must not silently
 	// run unaudited.
 	audit *audit.Logger
+	// belowMinimum records Stripe refusing the session as below its minimum
+	// charge, as a charge's refusal is recorded (payment.Stripe). For a
+	// customer with no card the Pay click is the only place Velox learns it.
+	belowMinimum checkoutBelowMinimumRecorder
+}
+
+// checkoutBelowMinimumRecorder is the one method of payment.Stripe the hosted
+// Pay flow needs.
+type checkoutBelowMinimumRecorder interface {
+	RecordCheckoutBelowMinimum(ctx context.Context, tenantID string, inv domain.Invoice, bm *payment.BelowMinimumError)
 }
 
 func (a *hostedInvoiceStripeAdapter) CreateInvoicePaymentSession(
@@ -1256,10 +1224,16 @@ func (a *hostedInvoiceStripeAdapter) CreateInvoicePaymentSession(
 	// on `invoices` which has RLS — without app.tenant_id /
 	// app.bypass_rls set on the session, the policy returned zero
 	// rows ("resolve livemode: sql: no rows in result set").
-	livemode := postgres.Livemode(ctx)
-	sc := a.clients.For(ctx, tenantID, livemode)
+	livemode, err := postgres.Livemode(ctx)
+	if err != nil {
+		return "", err
+	}
+	sc, err := a.clients.Resolve(ctx, tenantID, livemode)
+	if err != nil {
+		return "", fmt.Errorf("read Stripe credentials for livemode=%v: %w", livemode, err)
+	}
 	if sc == nil {
-		return "", fmt.Errorf("stripe not configured for mode livemode=%v", livemode)
+		return "", errs.StripeNotConnected()
 	}
 	if a.ensurer == nil {
 		return "", fmt.Errorf("hosted invoice: Stripe customer ensurer not wired")
@@ -1455,6 +1429,33 @@ func (a *hostedInvoiceStripeAdapter) mintForClaim(
 ) (string, error) {
 	sess, err := sc.V1CheckoutSessions.Create(ctx, hostedInvoiceCheckoutParams(claim, stripeCustomerID, inv, successURL, cancelURL))
 	if err != nil {
+		// A definite refusal made no session, so nothing can be paid on this
+		// claim: release it. Left open, an unfilled claim reads as a link
+		// about to reach the customer and holds every charge and dunning
+		// retry on the invoice for 65 minutes (domain.HostedCheckoutLiveSQL;
+		// min-charge check 2026-10-22, finding 4.3). An unclear answer keeps
+		// the claim: its re-drive replays the same idempotency key.
+		if payment.IsDefiniteRefusal(err) {
+			if rerr := a.sessions.ReleaseRefused(ctx, claim.TenantID, claim.ID); rerr != nil {
+				slog.WarnContext(ctx, "checkout: releasing a claim Stripe refused failed; it stops holding charges 65 minutes after it was made",
+					"claim_id", claim.ID, "invoice_id", claim.InvoiceID, "error", rerr)
+			}
+		}
+		// Below the minimum: the customer can't pay this amount online at
+		// all, and the page says so (409 amount_below_minimum). Recorded as
+		// a charge's refusal is: the invoice is stamped, so the page drops
+		// its Pay button and the operator sees the notice, and a payment
+		// recovery on it ends. Left unrecorded, a card-less invoice kept its
+		// Pay button and its no-card recovery ran on to the final action.
+		if bm := payment.BelowMinimumOf(err); bm != nil {
+			if a.belowMinimum == nil {
+				slog.ErrorContext(ctx, "checkout: Stripe refused the session as below its minimum, and no recorder is wired to record it",
+					"invoice_id", inv.ID)
+			} else {
+				a.belowMinimum.RecordCheckoutBelowMinimum(ctx, claim.TenantID, inv, bm)
+			}
+			return "", bm
+		}
 		return "", fmt.Errorf("checkout session: %w", err)
 	}
 	// Persist Stripe's ACTUAL expiry (it clamps requests) via CAS; losing the
@@ -1655,21 +1656,196 @@ func (a *memberTenantNamerAdapter) GetTenantName(ctx context.Context, tenantID s
 // the usage package does not import the credit domain.
 type costDashboardCredits struct{ svc *credit.Service }
 
-// CreditSummary returns the customer's ledger balance and what is left of
-// their prepaid commit and promotional credit. Both reads run on a
-// tenant-scoped transaction in the mode already pinned on ctx.
-func (a costDashboardCredits) CreditSummary(ctx context.Context, tenantID, customerID string) (usage.CostDashboardCredits, error) {
-	bal, err := a.svc.GetBalance(ctx, tenantID, customerID)
+// CreditSummary returns, per currency (ADR-129), the customer's ledger
+// balance and what is left of their prepaid commit and promotional credit.
+// Both reads run on a tenant-scoped transaction in the mode already pinned on
+// ctx.
+func (a costDashboardCredits) CreditSummary(ctx context.Context, tenantID, customerID string) ([]usage.CostDashboardCredits, error) {
+	balances, err := a.svc.GetBalance(ctx, tenantID, customerID)
 	if err != nil {
-		return usage.CostDashboardCredits{}, fmt.Errorf("credit balance: %w", err)
+		return nil, fmt.Errorf("credit balance: %w", err)
 	}
 	grants, err := a.svc.ListGrants(ctx, tenantID, customerID, false)
 	if err != nil {
-		return usage.CostDashboardCredits{}, fmt.Errorf("credit grants: %w", err)
+		return nil, fmt.Errorf("credit grants: %w", err)
 	}
-	return usage.CostDashboardCredits{
-		BalanceCents:              bal.BalanceCents,
-		CommitRemainingCents:      grants.CommitRemainingCents,
-		PromotionalRemainingCents: grants.PromotionalRemainingCents,
-	}, nil
+	remaining := map[string]credit.CurrencyRemaining{}
+	for _, r := range grants.RemainingByCurrency {
+		remaining[r.Currency] = r
+	}
+	out := make([]usage.CostDashboardCredits, 0, len(balances))
+	for _, b := range balances {
+		out = append(out, usage.CostDashboardCredits{
+			Currency:                  b.Currency,
+			BalanceCents:              b.BalanceCents,
+			CommitRemainingCents:      remaining[b.Currency].CommitRemainingCents,
+			PromotionalRemainingCents: remaining[b.Currency].PromotionalRemainingCents,
+		})
+	}
+	return out, nil
+}
+
+// usageOpenPeriods implements usage.OpenPeriodReader: what usage ingest and
+// the held-usage release read to answer an event with its billing_status
+// (ADR-120, ADR-130): the open periods with their plans'
+// prices before the write, the meter's aggregation on the write's
+// transaction after it. The rule itself lives in usage (usage.OpenPeriodOf,
+// usage.BucketsOf); this only reads.
+type usageOpenPeriods struct {
+	subs       usageLiveSubscriptions
+	pricing    usageMeterReader
+	thresholds usageThresholdReader
+}
+
+type usageLiveSubscriptions interface {
+	ListLiveByCustomer(ctx context.Context, tenantID, customerID string) ([]domain.Subscription, error)
+	ListItemIntervals(ctx context.Context, tenantID, subscriptionID string) ([]domain.ItemInterval, error)
+	ListCustomerMeterCoverageEnds(ctx context.Context, tenantID, customerID, excludeSubID string, from, to time.Time) ([]domain.MeterCoverageEnd, error)
+}
+
+type usageMeterReader interface {
+	GetMeterTx(ctx context.Context, tx *sql.Tx, id string) (domain.Meter, error)
+	PriceMatchesAt(ctx context.Context, tenantID string, pins []pricing.PlanPin) ([]pricing.PinPrices, error)
+}
+
+type usageThresholdReader interface {
+	ThresholdWatermarks(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (billedThrough, paidThrough *time.Time, err error)
+}
+
+// OpenPeriods reads every active and trialing subscription of the customer
+// (one transaction); for each, the threshold watermarks of its current
+// period, how the close bills the period (billing.PeriodPlans: the plan
+// stretches, from its billing intervals when it is active, and each plan's
+// pin), and where the customer's other subscriptions stopped covering a
+// meter in the period; then, in one more transaction, the prices of each
+// plan of the period at its pin of the period, in the subscription's own
+// time domain (ADR-130 §4), each with whether its pin had passed. From the meters the plans price at their pins it builds the
+// period's usage windows, the close's own (billing.PeriodPlan.UsageWindows).
+// The watermarks are read whether or not the subscription still has
+// thresholds: the close keys them on the period's threshold invoices, not
+// on the setting.
+func (a usageOpenPeriods) OpenPeriods(ctx context.Context, tenantID, customerID string) ([]usage.OpenPeriod, error) {
+	subs, err := a.subs.ListLiveByCustomer(ctx, tenantID, customerID)
+	if err != nil {
+		return nil, fmt.Errorf("list live subscriptions: %w", err)
+	}
+	type subPins struct {
+		sub      domain.Subscription
+		wm       usage.ThresholdWatermark
+		period   billing.PeriodPlan
+		coverage []domain.MeterCoverageEnd
+		atPin    map[string]int // plan id → index in pins, at its pin of the period
+	}
+	var (
+		pins []pricing.PlanPin
+		read []subPins
+	)
+	for _, sub := range subs {
+		if sub.CurrentBillingPeriodStart == nil || sub.CurrentBillingPeriodEnd == nil {
+			continue
+		}
+		start, end := *sub.CurrentBillingPeriodStart, *sub.CurrentBillingPeriodEnd
+		sp := subPins{sub: sub, atPin: map[string]int{}}
+		sp.wm.BilledThrough, sp.wm.PaidThrough, err = a.thresholds.ThresholdWatermarks(ctx, tenantID, sub.ID, start, end)
+		if err != nil {
+			return nil, fmt.Errorf("threshold watermarks of %s: %w", sub.ID, err)
+		}
+		sp.period, err = billing.PeriodPlans(sub, start, end, func() ([]domain.ItemInterval, error) {
+			return a.subs.ListItemIntervals(ctx, tenantID, sub.ID)
+		})
+		if err != nil {
+			return nil, err
+		}
+		sp.coverage, err = a.subs.ListCustomerMeterCoverageEnds(ctx, tenantID, sub.CustomerID, sub.ID, start, end)
+		if err != nil {
+			return nil, fmt.Errorf("other subscriptions' meter coverage of %s: %w", sub.ID, err)
+		}
+		for _, planID := range slices.Sorted(maps.Keys(sp.period.Pins)) {
+			sp.atPin[planID] = len(pins)
+			pins = append(pins, pricing.PlanPin{PlanID: planID, At: sp.period.Pins[planID], ClockID: sub.TestClockID})
+		}
+		read = append(read, sp)
+	}
+	out := make([]usage.OpenPeriod, 0, len(read))
+	if len(read) == 0 {
+		return out, nil
+	}
+	prices, err := a.pricing.PriceMatchesAt(ctx, tenantID, pins)
+	if err != nil {
+		return nil, fmt.Errorf("prices of the plans: %w", err)
+	}
+	priceSet := func(i int) usage.PriceSet {
+		ps := usage.PriceSet{Ahead: !prices[i].Passed, ByMeter: map[string][]map[string]string{}}
+		for _, pm := range prices[i].Matches {
+			ps.ByMeter[pm.MeterID] = append(ps.ByMeter[pm.MeterID], pm.Match)
+		}
+		return ps
+	}
+	for _, sp := range read {
+		atPin := map[string]usage.PriceSet{}
+		planMeters := map[string][]string{}
+		for planID, i := range sp.atPin {
+			atPin[planID] = priceSet(i)
+			planMeters[planID] = slices.Sorted(maps.Keys(atPin[planID].ByMeter))
+		}
+		var stretches []usage.Stretch
+		for _, st := range sp.period.Stretches() {
+			stretches = append(stretches, usage.Stretch{PlanID: st.PlanID, From: st.From, To: st.To})
+		}
+		windows := map[string][]usage.Window{}
+		for meterID, ws := range sp.period.UsageWindows(planMeters, sp.coverage) {
+			for _, w := range ws {
+				windows[meterID] = append(windows[meterID], usage.Window{PlanID: w.PlanID, From: w.From, To: w.To})
+			}
+		}
+		if p, ok := usage.OpenPeriodOf(sp.sub, stretches, windows, atPin, sp.period.BilledFrom, sp.wm); ok {
+			out = append(out, p)
+		}
+	}
+	return out, nil
+}
+
+// MeterBucketsTx reads the meter on tx, the caller's open transaction: its
+// one aggregation decides its buckets (ADR-130 §2).
+func (a usageOpenPeriods) MeterBucketsTx(ctx context.Context, tx *sql.Tx, meterID string) (usage.MeterBuckets, error) {
+	m, err := a.pricing.GetMeterTx(ctx, tx, meterID)
+	if err != nil {
+		return usage.MeterBuckets{}, fmt.Errorf("get meter: %w", err)
+	}
+	return usage.BucketsOf(m), nil
+}
+
+// customerCurrencyFactsAdapter is invoice.CustomerCurrencyFacts: the stored
+// facts a manual invoice's currency must agree with (ADR-100, ADR-129), as
+// plain strings so the invoice package imports neither domain.
+type customerCurrencyFactsAdapter struct {
+	profiles interface {
+		GetBillingProfile(ctx context.Context, tenantID, customerID string) (domain.CustomerBillingProfile, error)
+	}
+	subs interface {
+		CustomerSubPlanCurrencies(ctx context.Context, tenantID, customerID, excludeSubID string) ([]subscription.SubPlanCurrency, error)
+	}
+}
+
+// CustomerCurrencyFacts returns the billing profile's currency ("" when there
+// is no profile) and the plan currencies of the customer's non-terminal
+// subscriptions, pending plan swaps included. A read error is returned.
+func (a customerCurrencyFactsAdapter) CustomerCurrencyFacts(ctx context.Context, tenantID, customerID string) (string, []string, error) {
+	profile := ""
+	bp, err := a.profiles.GetBillingProfile(ctx, tenantID, customerID)
+	switch {
+	case err == nil:
+		profile = bp.Currency
+	case !errors.Is(err, errs.ErrNotFound):
+		return "", nil, fmt.Errorf("read billing profile: %w", err)
+	}
+	subs, err := a.subs.CustomerSubPlanCurrencies(ctx, tenantID, customerID, "")
+	if err != nil {
+		return "", nil, fmt.Errorf("read subscription plan currencies: %w", err)
+	}
+	plans := make([]string, 0, len(subs))
+	for _, s := range subs {
+		plans = append(plans, s.Currency)
+	}
+	return profile, plans, nil
 }

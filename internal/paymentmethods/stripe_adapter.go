@@ -44,12 +44,14 @@ func NewStripeAdapter(clients *payment.StripeClients, customerLink CustomerStrip
 var _ StripeAPI = (*StripeAdapter)(nil)
 
 func (a *StripeAdapter) client(ctx context.Context) (*stripe.Client, error) {
-	c := a.clients.ForCtx(ctx)
+	c, err := a.clients.ResolveCtx(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("read Stripe credentials: %w", err)
+	}
 	if c == nil {
 		// Typed, so the API answers 409 with a sentence the operator can act
 		// on. As a bare error it reached the caller as a 500 "internal error".
-		return nil, errs.InvalidState("Stripe is not connected for this mode. Connect it under Settings, then try again.").
-			WithCode("stripe_not_connected")
+		return nil, errs.StripeNotConnected()
 	}
 	return c, nil
 }
@@ -77,10 +79,18 @@ func (a *StripeAdapter) EnsureStripeCustomer(ctx context.Context, tenantID, cust
 		return cust.StripeCustomerID, nil
 	}
 
-	livemode := postgres.Livemode(ctx)
-	sc := a.clients.For(ctx, tenantID, livemode)
+	livemode, err := postgres.Livemode(ctx)
+	if err != nil {
+		return "", err
+	}
+	sc, err := a.clients.Resolve(ctx, tenantID, livemode)
+	if err != nil {
+		return "", fmt.Errorf("read Stripe credentials for tenant=%s livemode=%v: %w", tenantID, livemode, err)
+	}
 	if sc == nil {
-		return "", fmt.Errorf("stripe not configured for tenant=%s livemode=%v", tenantID, livemode)
+		// Typed for the same reason as client(): a customer Velox has not yet
+		// sent to Stripe reached this first, and answered 500.
+		return "", errs.StripeNotConnected()
 	}
 
 	// Pre-populate the Stripe Customer with the Velox-side fields
@@ -169,23 +179,6 @@ func (a *StripeAdapter) EnsureStripeCustomer(ctx context.Context, tenantID, cust
 		return "", fmt.Errorf("record stripe customer %s for %s: %w", stripeCust.ID, customerID, err)
 	}
 	return stripeCust.ID, nil
-}
-
-func (a *StripeAdapter) CreateSetupIntent(ctx context.Context, stripeCustomerID string, metadata map[string]string) (string, string, error) {
-	sc, err := a.client(ctx)
-	if err != nil {
-		return "", "", err
-	}
-	si, err := sc.V1SetupIntents.Create(ctx, &stripe.SetupIntentCreateParams{
-		Customer:           stripe.String(stripeCustomerID),
-		PaymentMethodTypes: stripe.StringSlice([]string{"card"}),
-		Usage:              stripe.String("off_session"),
-		Params:             stripe.Params{Metadata: metadata},
-	})
-	if err != nil {
-		return "", "", fmt.Errorf("stripe create setup intent: %w", err)
-	}
-	return si.ClientSecret, si.ID, nil
 }
 
 // CreateSetupCheckoutSession creates a Checkout Session in setup mode so

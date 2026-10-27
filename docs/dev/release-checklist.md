@@ -40,6 +40,7 @@ clean.
 - [ ] Hosted invoice currency: first make sure the test can fail. Use a US test account with Adaptive Pricing **on** (Dashboard → Settings → Adaptive Pricing), and check that a plain session for a `+location_IN` email offers INR: `stripe checkout sessions create -d mode=payment -d success_url=https://example.com -d customer_email=test+location_IN@example.com -d "line_items[0][quantity]=1" -d "line_items[0][price_data][currency]=usd" -d "line_items[0][price_data][unit_amount]=1000" -d "line_items[0][price_data][product_data][name]=control"` → open its `url`. If INR is not offered, this step proves nothing on this account. Then, for a Velox customer whose email has `+location_IN`, open the hosted invoice page and Pay → the session has `adaptive_pricing.enabled=false` and Checkout shows only the invoice's currency. After paying with `4242`, the PaymentIntent shows the invoice's amount and currency and has no `presentment_details`.
 - [ ] Hosted invoice Pay on an Indian account: on a test account registered in India (Stripe doesn't offer Adaptive Pricing there), Pay on a hosted invoice → Checkout opens. Velox sends `adaptive_pricing[enabled]=false` on every hosted Pay session, so a Stripe error here breaks Pay for every invoice of such a tenant.
 - [ ] 3-D Secure: Pay with `4000 0027 6000 3184`, fail the challenge → the invoice stays unpaid; pass it → paid.
+- [ ] 3-D Secure off-session: save `4000 0027 6000 3184` through **Add payment method**, then finalize a one-off invoice → Stripe answers `authentication_required`; the notice reads "Customer must confirm payment" with only **Email payment link**; Mailpit has "Action required — confirm your payment for invoice …" with no word of a decline. Pay on the hosted page and pass the challenge → paid.
 - [ ] Refund: a credit note with "Refund to card" → `refund_status=succeeded`, and the refund shows in the Stripe dashboard.
 - [ ] Key in use: start two `stripe payment_intents create -d amount=2000 -d currency=usd -d payment_method=pm_card_visa -d "payment_method_types[]=card" -d confirm=true -i <key>` at once with one new key. Repeat with a fresh key until one answers HTTP 409 with code `idempotency_key_in_use` (identical replies are a replay) → write its error `type` in the comment on `stripe409KeyInUse` in `internal/payment/stripe_409_test.go`. Velox treats every 409 as unclear, whatever the type ([#976](https://github.com/getvelox/velox/issues/976)).
 - [ ] List after create: create a PaymentIntent for a test customer with metadata `velox_invoice_id=inv_x`, then at once `stripe payment_intents list --customer <cus> -d "expand[]=data.latest_charge"` → it is listed, with `latest_charge.refunded`. The stale-hold sweep reads "not listed" as "Stripe never got the charge" ([ADR-127](../adr/127-a-lost-charge-result-is-resolved-by-asking-stripe.md)).
@@ -52,11 +53,13 @@ clean.
 
 A dunning run is the automatic retries after a failed payment.
 
-- [ ] Dunning policies page: "Default retries" is the default and enabled. A bootstrap creates it in both modes (ADR-123). When its retries run out it changes nothing: final actions none and none. If you ran the demo first, its recipe's "AI default retry" is the default instead, and "Default retries" stays listed.
+- [ ] Dunning policies page: "Default retries" is the default and enabled. A bootstrap creates it in both modes (ADR-123). Its row reads "3 retries, on day 3, 7 and 14". When its retries run out it changes nothing: final actions none and none. Running the demo first does not change this: a recipe creates no dunning policy.
 - [ ] Mint a test clock, create a customer with an email, pinned to the clock, and subscribe it to a plan with a base fee (plans bill in arrears by default).
 - [ ] With `stripe listen` running, open the customer's setup link (Add payment method) and save card `0341` in Checkout → the card is listed on the customer. Do this before you advance the clock.
 - [ ] Advance the clock past the renewal → the renewal invoice is declined and a dunning run starts.
 - [ ] Open the invoice link in the payment-failed email and pay with `4242` → the invoice is paid, and the dunning run shows recovered.
+- [ ] Price change on a test clock: give the plan a usage price and send usage. Change the price on the plan's page → before you save, the page says the change applies from each subscriber's next billing period. Advance the clock past the renewal → that invoice bills the old price; send usage and advance again → the next invoice bills the new one. Its PDF usage line names the meter and the price's label values, with the new rate.
+- [ ] A new subscriber after a price change, on a test clock: change a usage price of a plan that has a subscriber, advance the clock an hour, then subscribe a new customer of the clock to the plan and send usage. Advance past its first renewal → its first invoice bills the new price.
 
 ## Email, PDF, LiteLLM
 
@@ -64,6 +67,23 @@ A dunning run is the automatic retries after a failed payment.
 - [ ] Invoice → Email: the message arrives in Mailpit; open it, read it, and check the amount and the links.
 - [ ] The emailed PDF opens, and its total, lines, tax and buyer address match the invoice page.
 - [ ] Run a real LiteLLM proxy with the callback from [the LiteLLM guide](../integrations/litellm.md) → one completion creates one `input` and one `output` usage event on the customer (plus `cache_read` if the prompt was cached).
+- [ ] With the same proxy, send one completion on a model the customer's plan has no price for → `velox_usage_unbilled_total{reason="no_price"}` on `/metrics` goes up by the call's events, and the customer page shows them in its "not billed" row.
+- [ ] Open [Anthropic's pricing page](https://platform.claude.com/docs/en/about-claude/pricing) and the models overview. Update `anthropicListPrices` and `anthropicPricesChecked` in `internal/recipe/anthropic_prices_test.go`. If a price moved, fix `anthropic_style.yaml`, bump its version, and add a CHANGELOG line telling existing installs to update that price. If a model was added, also:
+  - Add its id to `modelFamilies` in `internal/integrations/litellm/mapper.go`. If its price depends on the prompt's length, add it to `promptTiers` too.
+  - Add its prices to the plan in `anthropic_style.yaml`, bump the version, and add a CHANGELOG line telling existing installs to add its prices.
+  - In `internal/integrations/litellm/model_families_test.go`, add it to `pricingPageClaudeIDs`, and remove it from `mustStayRaw` if it is there.
+  - In `internal/integrations/litellm/testdata/list_claude_model_ids.py`, add it to `FAMILIES` and `PAGE`, and remove it from `PROBES` if it is there. Then regenerate the list (do not edit it by hand):
+
+    ```bash
+    pip download litellm==1.83.9 --no-deps -d /tmp/litellm-1.83.9
+    unzip -o /tmp/litellm-1.83.9/litellm-1.83.9-py3-none-any.whl \
+      litellm/model_prices_and_context_window_backup.json -d /tmp/litellm-1.83.9
+    python3 -I internal/integrations/litellm/testdata/list_claude_model_ids.py \
+      /tmp/litellm-1.83.9/litellm/model_prices_and_context_window_backup.json \
+      > internal/integrations/litellm/testdata/litellm-1.83.9-claude-model-ids.tsv
+    ```
+
+  Then run `go test ./internal/recipe/ ./internal/integrations/litellm/`.
 
 ## Fresh install and upgrade
 
@@ -77,14 +97,16 @@ These prove that the images the quick start pulls work, and that an existing ins
 
 ### Upgrade drill
 
+Skip it for v0.9.0: its previous release, v0.8.2, has no upgrade path. On a v0.8.2 install, step 2 says `no migration record`, and step 3 refuses to start.
+
 1. Run `./quickstart.sh destroy` to start from an empty install. Check out the previous release tag and run `./quickstart.sh`, then `./quickstart.sh demo`.
    **You see:** the demo's invoice link. Open it and note the invoice number, total and line amounts. Download its PDF.
 2. Check out the new release tag. In `deploy/compose/.env`, change the tag on the `VELOX_IMAGE` and `VELOX_DASHBOARD_IMAGE` lines to the new release. Run `docker compose pull`, then `docker compose run --rm velox-api migrate status`.
-   **You see:** the plan, with `running now:  no`. From v0.8.1 to v0.9.0: `ready to move`. For a later release: `behind`, listing the release's new migrations. Nothing is `refused`.
+   **You see:** the plan, with `running now:  no`. The state is `behind`, listing the release's new migrations.
 3. Run `docker compose up -d --no-build`.
    **You see:** `velox-api` is recreated, and `velox version` prints the new release.
 4. Check the migrations: `docker compose logs velox-api | grep migration`.
-   **You see:** one `migration applied` line per migration (`00180 v0.8.1 baseline` when moving from v0.8.1), then `migrations applied`, with `version` set to the new release's last migration number, and no error. `velox migrate status` now says `up to date`.
+   **You see:** one `migration applied` line per migration, then `migrations applied`, with `version` set to the new release's last migration number, and no error. `velox migrate status` now says `up to date`.
 5. Open the invoice from step 1.
    **You see:** the same number, total and line amounts. Its PDF has the same lines and amounts as the one you downloaded. The "Generated on" time at the bottom differs, because each PDF is made when you open it. A release that changes what the PDF prints says so in its notes.
 6. Open the Dunning policies page.
@@ -95,4 +117,4 @@ These prove that the images the quick start pulls work, and that an existing ins
 
 ## First invoice tutorial
 
-- [ ] Run [docs/first-invoice.md](../first-invoice.md) end to end against the quick-start stack from the fresh install. Every command works as written, and each output matches its "You see:" line. When a step differs, fix the page on `main` before you publish the release notes.
+- [ ] Run [docs/first-invoice.md](../first-invoice.md) end to end against the quick-start stack from the fresh install. Every command works as written, and each output matches the one under its "You see:". CI runs the same commands on every pull request, against a build from source, not the release images. When a step differs, fix the page on `main` before you publish the release notes. The page links its own version for the release that `quickstart.sh` starts. When you change `VELOX_VERSION` there, change the page's link and version too: `TestFirstInvoicePageNamesTheQuickStartRelease` fails until you do.

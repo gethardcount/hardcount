@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useEffectiveNow } from '@/hooks/useClockFrozenMap'
 import { useSingleFlight } from '@/hooks/useSingleFlight'
-import { useNavigate, useParams, useSearchParams, Link } from 'react-router-dom'
+import { useNavigate, useParams, Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -29,10 +29,11 @@ import { NO_CARD_SENTENCE, NO_CARD_TITLE } from '@/lib/subscriptionNotices'
 import { cardLabel, removeCardSentence } from '@/lib/paymentMethodCopy'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
 import { useCustomerCurrency, useCustomerSubscriptions } from '@/hooks/useCustomerCurrency'
+import { invoiceCurrencyPin, type CustomerCurrency } from '@/lib/customerCurrency'
 import { creditTotalsLine, invoiceCreditNote, outstandingIncludesCredit } from '@/lib/customerCredits'
 import { CustomerCreditsSection } from '@/components/customer/CustomerCreditsSection'
 import { statusBadgeVariant } from '@/lib/status'
-import { invoiceStatus } from '@/lib/statusLabels'
+import { collectionPausedFlag, invoiceStatus } from '@/lib/statusLabels'
 import { StatusBadge } from '@/components/StatusBadge'
 
 import { Button } from '@/components/ui/button'
@@ -70,6 +71,7 @@ import {
 } from '@/lib/geo'
 import { TAX_ID_HINTS, taxIdTypeOptions } from '@/lib/taxIdTypes'
 import { finalActionSummary } from '@/lib/dunningActions'
+import { retryPlanText } from '@/lib/dunningSchedule'
 import { ScrollPane } from '@/components/ui/scroll-pane'
 
 const statusVariant = statusBadgeVariant
@@ -222,7 +224,8 @@ export default function CustomerDetailPage() {
     return m
   }, [clocksData])
   // The customer's "now" (its test clock when pinned), for Past due on the
-  // recent-invoice badges. Subscriptions inherit the customer's pin (ADR-027).
+  // recent-invoice badges and for when a timed collection pause ends on the
+  // subscription rows. Subscriptions inherit the customer's pin (ADR-027).
   const invoiceNow = useEffectiveNow(customer?.test_clock_id)
 
   const { data: overview } = useQuery({
@@ -238,7 +241,9 @@ export default function CustomerDetailPage() {
     queryFn: () => api.getBalance(id!),
     enabled: !!id,
   })
-  const balance = balanceData?.balance_cents
+  // One balance per currency (ADR-129), ordered by currency.
+  const creditBalances = [...(balanceData?.data ?? [])].sort((a, b) => a.currency.localeCompare(b.currency))
+  const anyCredit = creditBalances.some(b => b.balance_cents > 0)
   const outstandingAmounts = amountsByCurrencyText(overview?.outstanding_balance?.by_currency ?? [])
 
   // Only a 404 means "no profile". Any other failure must not offer Set Up:
@@ -256,13 +261,12 @@ export default function CustomerDetailPage() {
   // One currency for every figure on this page that has none of its own, in
   // the order the engine picks an invoice's currency: the billing profile,
   // then the live subscription's plan, then the latest invoice, then the
-  // workspace default (lib/customerCurrency). Credits have no currency
-  // either; they are drawn 1:1 against the invoice (ADR-100). Undefined
-  // while it loads or if a read failed: figures read "—" and New invoice
-  // stays disabled rather than use a wrong currency.
+  // workspace default (lib/customerCurrency). Credit is not one of them: each
+  // ledger row carries its own currency (ADR-129). Undefined while it loads
+  // or if a read failed: figures read "—" and New invoice stays disabled
+  // rather than use a wrong currency.
   const customerCurrency = useCustomerCurrency(id)
   const creditCurrency = customerCurrency?.currency
-  const creditMoney = (cents: number) => (creditCurrency ? formatCents(cents, creditCurrency) : '—')
 
   const { data: metersData } = useQuery({
     queryKey: ['meters'],
@@ -270,7 +274,7 @@ export default function CustomerDetailPage() {
   })
 
   const meterMap: Record<string, { name: string; unit: string }> = {}
-  metersData?.data?.forEach(m => { meterMap[m.id] = { name: m.name, unit: m.unit }; meterMap[m.key] = { name: m.name, unit: m.unit } })
+  metersData?.data?.forEach(m => { meterMap[m.id] = { name: m.name, unit: m.unit }; meterMap[m.event_name] = { name: m.name, unit: m.unit } })
 
   const { data: plans } = useQuery({
     queryKey: ['plans-active'],
@@ -378,36 +382,6 @@ export default function CustomerDetailPage() {
   const effectiveDunningPolicy = assignedDunningPolicy ?? defaultDunningPolicy
 
   const isArchived = customer?.status === 'archived'
-
-  // After a Stripe Checkout return, the URL carries `?payment=success`
-  // or `?payment=cancel`. Toast appropriately, refetch the payment
-  // setup so the card details flip from pending → ready, and strip
-  // the query string so a refresh doesn't re-toast. The webhook is
-  // the authoritative path that flips the row; the toast is a UX
-  // hint that the customer's redirect landed.
-  //
-  // The ref-guard is required: React StrictMode (dev) double-invokes
-  // useEffect, and `setSearchParams` batches across both invocations
-  // — both pass `payment` is still 'success' and would fire the toast
-  // twice. Marking the param as handled on first run dedupes deterministic-
-  // ally without relying on render order.
-  const [searchParams, setSearchParams] = useSearchParams()
-  const handledPaymentParam = useRef<string | null>(null)
-  useEffect(() => {
-    const payment = searchParams.get('payment')
-    if (!payment) return
-    if (handledPaymentParam.current === payment) return
-    handledPaymentParam.current = payment
-    if (payment === 'success') {
-      toast.success('Payment method saved')
-      queryClient.invalidateQueries({ queryKey: ['customer-payment-methods', id] })
-    } else if (payment === 'cancel') {
-      toast.info('Setup canceled — no changes were made')
-    }
-    const next = new URLSearchParams(searchParams)
-    next.delete('payment')
-    setSearchParams(next, { replace: true })
-  }, [searchParams, setSearchParams, queryClient, id])
 
   const invalidateAll = () => {
     queryClient.invalidateQueries({ queryKey: ['customer', id] })
@@ -594,13 +568,19 @@ export default function CustomerDetailPage() {
             ) : (
               <Link to={`/credits?customer=${id}`} className="flex-1 min-w-0 px-6 py-4 hover:bg-accent/50 transition-colors">
                 <p className="text-sm text-muted-foreground">Credit balance</p>
-                <p className={cn('text-sm font-medium mt-1', (balance ?? 0) > 0 ? 'text-emerald-600' : 'text-foreground')}>
-                  {balance === undefined ? '—' : creditMoney(balance)}
+                {/* One figure per currency, never added together. A customer
+                    with no credit yet reads zero in its billing currency. */}
+                <p className={cn('text-sm font-medium mt-1', anyCredit ? 'text-emerald-600' : 'text-foreground')}>
+                  {!balanceData
+                    ? '—'
+                    : creditBalances.length === 0
+                      ? (creditCurrency ? formatCents(0, creditCurrency) : '—')
+                      : creditBalances.map(b => formatCents(b.balance_cents, b.currency)).join(' · ')}
                 </p>
-                {/* Kind split — money-backed commit liability must not read
-                    as one number with free promo credits. */}
-                {balanceData && creditCurrency && creditTotalsLine(balanceData, creditCurrency) && (
-                  <p className="text-xs text-muted-foreground mt-0.5">{creditTotalsLine(balanceData, creditCurrency)}</p>
+                {/* Where the credit went, when it is in one currency; the
+                    Credits section below has the line for each currency. */}
+                {creditBalances.length === 1 && creditTotalsLine(creditBalances[0], creditBalances[0].currency) && (
+                  <p className="text-xs text-muted-foreground mt-0.5">{creditTotalsLine(creditBalances[0], creditBalances[0].currency)}</p>
                 )}
               </Link>
             )}
@@ -842,17 +822,9 @@ export default function CustomerDetailPage() {
                   )}
                 </div>
               </div>
-              <div className="flex items-center justify-between px-6 py-3">
-                <span className="text-sm text-muted-foreground">Max retry attempts</span>
-                <span className="text-sm text-foreground">{effectiveDunningPolicy.max_retry_attempts}</span>
-              </div>
-              <div className="flex items-center justify-between px-6 py-3">
-                <span className="text-sm text-muted-foreground">Grace period</span>
-                <span className="text-sm text-foreground">{effectiveDunningPolicy.grace_period_days} days</span>
-              </div>
-              <div className="flex items-center justify-between px-6 py-3">
-                <span className="text-sm text-muted-foreground">Retry schedule</span>
-                <span className="text-sm text-foreground">{effectiveDunningPolicy.retry_schedule.join(' · ') || '—'}</span>
+              <div className="flex items-center justify-between gap-4 px-6 py-3">
+                <span className="text-sm text-muted-foreground">Schedule</span>
+                <span className="text-sm text-foreground text-right">{retryPlanText(effectiveDunningPolicy.retry_days)}</span>
               </div>
               <div className="flex items-center justify-between px-6 py-3">
                 <span className="text-sm text-muted-foreground">Final action</span>
@@ -879,10 +851,11 @@ export default function CustomerDetailPage() {
         <MarginCard customerId={id!} customerTestClockId={customer.test_clock_id} currency={customerCurrency?.currency} />
       </div>
 
-      {/* Credits: balance with granted/used/expired, every grant including
-          used-up ones, the latest ledger entries, and Grant credits. It waits
-          for the customer's currency, so no figure shows in the wrong one. */}
-      {creditCurrency && <div className="mt-6">
+      {/* Credits: balance per currency with granted/used/expired, every
+          grant including used-up ones, the latest ledger entries, and Grant
+          credits. Each amount carries its own currency; the customer's
+          currency is only the grant dialog's default. */}
+      <div className="mt-6">
         <CustomerCreditsSection
           customerId={id!}
           customerName={customer.display_name}
@@ -890,7 +863,7 @@ export default function CustomerDetailPage() {
           testClockId={customer.test_clock_id}
           readOnly={isArchived}
         />
-      </div>}
+      </div>
 
       {/* Public cost-dashboard token — ADR-031 / MANUAL_TEST CU8. Operator
           rotates to mint a shareable URL the customer can embed (iframe
@@ -1010,7 +983,7 @@ export default function CustomerDetailPage() {
           override exists purely as unexplained math on the usage card
           and the invoice. */}
       <div className="mt-6">
-        <PriceOverridesCard customerId={id!} customerTestClockId={customer?.test_clock_id} readOnly={isArchived} />
+        <PriceOverridesCard customerId={id!} readOnly={isArchived} />
       </div>
 
       <SendSetupLinkDialog
@@ -1037,9 +1010,15 @@ export default function CustomerDetailPage() {
           <CardContent className="p-0">
             <div className="divide-y divide-border">
               {activeSubsToShow.map(sub => (
-                <Link key={sub.id} to={`/subscriptions/${sub.id}`} className="flex items-center justify-between gap-3 px-6 py-2.5 hover:bg-accent/50 transition-colors">
-                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                // Wraps on a narrow screen, so the date drops below rather
+                // than the chips squeezing the name out.
+                <Link key={sub.id} to={`/subscriptions/${sub.id}`} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-6 py-2.5 hover:bg-accent/50 transition-colors">
+                  <div className="flex items-center gap-2 min-w-0 grow">
                     <Badge variant={statusVariant(sub.status)} className="shrink-0">{sub.status}</Badge>
+                    {(() => {
+                      const paused = collectionPausedFlag(sub, invoiceNow)
+                      return paused && <StatusBadge status={paused} className="shrink-0" />
+                    })()}
                     <span className="text-sm font-medium text-foreground truncate">{sub.display_name}</span>
                   </div>
                   <span className="text-xs text-muted-foreground whitespace-nowrap">{subMeta(sub)}</span>
@@ -1263,8 +1242,7 @@ export default function CustomerDetailPage() {
         <NewInvoiceDialog
           customerId={id}
           customer={customer}
-          billingProfile={billingProfile ?? null}
-          defaultCurrency={customerCurrency.currency}
+          customerCurrency={customerCurrency}
           onClose={() => setShowNewInvoice(false)}
           onCreated={({ invoice, result }) => {
             setShowNewInvoice(false)
@@ -1692,9 +1670,7 @@ function AssignDunningPolicyDialog({ customerId, currentPolicyID, policies, onCl
           </div>
           {selectedPolicy && (
             <div className="rounded-md border border-border bg-muted/30 p-3 text-xs space-y-1">
-              <div className="flex justify-between"><span className="text-muted-foreground">Max retries</span><span>{selectedPolicy.max_retry_attempts}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Grace period</span><span>{selectedPolicy.grace_period_days} days</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Retry schedule</span><span>{selectedPolicy.retry_schedule.join(' · ') || '—'}</span></div>
+              <div className="flex justify-between gap-4"><span className="text-muted-foreground">Schedule</span><span className="text-right">{retryPlanText(selectedPolicy.retry_days)}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">On exhaustion</span><span>{finalActionSummary(selectedPolicy)}</span></div>
             </div>
           )}
@@ -1754,17 +1730,18 @@ const blankLine = (): ComposerLine => ({
   commitExpiresAt: '',
 })
 
-function NewInvoiceDialog({ customerId, customer, billingProfile, defaultCurrency, onClose, onCreated }: {
+function NewInvoiceDialog({ customerId, customer, customerCurrency, onClose, onCreated }: {
   customerId: string
   customer: Customer
-  billingProfile: BillingProfile | null
-  defaultCurrency: string
+  customerCurrency: CustomerCurrency
   onClose: () => void
   onCreated: (result: { invoice: Invoice; result: NewInvoiceResult }) => void
 }) {
   // Default currency: the customer's currency (lib/customerCurrency), so a
-  // customer on a EUR plan opens in EUR. The operator can switch in one click.
-  const initialCurrency = defaultCurrency.toUpperCase()
+  // customer on a EUR plan opens in EUR. When the billing profile or a live
+  // plan sets it, the server refuses any other (409), so the picker is fixed.
+  const initialCurrency = customerCurrency.currency.toUpperCase()
+  const currencyPin = invoiceCurrencyPin(customerCurrency)
   const [currency, setCurrency] = useState(initialCurrency)
   const [memo, setMemo] = useState('')
   // Service period (optional) — the inclusive dates this invoice covers.
@@ -2001,6 +1978,7 @@ function NewInvoiceDialog({ customerId, customer, billingProfile, defaultCurrenc
                 items={GEO_CURRENCIES.map(c => ({ value: c.code, label: `${c.symbol} ${c.code} — ${c.label}` }))}
                 value={currency}
                 onValueChange={(v) => setCurrency((v ?? 'USD').toUpperCase())}
+                disabled={currencyPin !== null}
               >
                 <SelectTrigger id="composer-currency" className="w-full">
                   <SelectValue />
@@ -2013,8 +1991,8 @@ function NewInvoiceDialog({ customerId, customer, billingProfile, defaultCurrenc
                   ))}
                 </SelectContent>
               </Select>
-              {billingProfile?.currency && billingProfile.currency.toUpperCase() === currency && (
-                <p className="text-xs text-muted-foreground">From customer billing profile.</p>
+              {currencyPin && (
+                <p className="text-xs text-muted-foreground">{currencyPin}</p>
               )}
             </div>
 

@@ -13,7 +13,7 @@ export interface InvoiceCreateRequest {
   customer_id: string;
   /** Optional. Must belong to `customer_id`. Leave out for a one-off invoice. */
   subscription_id?: string;
-  /** ISO 4217 code. Defaults to the customer's billing currency, then the tenant default. */
+  /** ISO 4217 code. Must be the customer's currency (see 409). Defaults to the billing-profile currency, then the live subscriptions' plan currency, then the tenant default. */
   currency?: string;
   billing_period_start?: string;
   billing_period_end?: string;

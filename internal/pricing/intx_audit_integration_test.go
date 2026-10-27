@@ -87,22 +87,24 @@ func (f pricingFixture) rows(t *testing.T, resourceType, resourceID string) []do
 	return rows
 }
 
-func (f pricingFixture) seedRatingRule(t *testing.T, key string) domain.RatingRuleVersion {
+// seedPlan is a plan with one per_unit price on a fresh meter.
+func (f pricingFixture) seedPlan(t *testing.T, code string) (domain.Plan, domain.PlanPrice) {
 	t.Helper()
-	rule, err := pricing.NewService(f.store).CreateRatingRule(f.ctx, f.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: key, Name: key, Mode: domain.PricingFlat,
-		Currency: "USD", FlatAmountCents: decimal.NewFromInt(2),
+	m := f.seedMeter(t, code+"_meter")
+	plan, prices, err := pricing.NewService(f.store).CreatePlan(f.ctx, f.tenantID, pricing.CreatePlanInput{
+		Code: code, Name: code, Currency: "USD", BillingInterval: domain.BillingMonthly,
+		Prices: []pricing.PriceInput{{MeterID: m.ID, PriceShape: domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(2)}}},
 	})
 	if err != nil {
-		t.Fatalf("seed rating rule: %v", err)
+		t.Fatalf("seed plan: %v", err)
 	}
-	return rule
+	return plan, prices[0]
 }
 
 func (f pricingFixture) seedMeter(t *testing.T, key string) domain.Meter {
 	t.Helper()
 	m, err := pricing.NewService(f.store).CreateMeter(f.ctx, f.tenantID, pricing.CreateMeterInput{
-		Key: key, Name: "Before Rename", Unit: "unit", Aggregation: "sum",
+		EventName: key, Name: "Before Rename", Unit: "unit", Aggregation: "sum",
 	})
 	if err != nil {
 		t.Fatalf("seed meter: %v", err)
@@ -113,16 +115,14 @@ func (f pricingFixture) seedMeter(t *testing.T, key string) domain.Meter {
 // TestMeterUpdateAudit_SharedFate pins the ADR-090 emission on
 // PATCH /v1/meters/{id} (pricing.Service.UpdateMeter →
 // PostgresStore.UpdateMeterAudited). The route had NO emission of its own —
-// only the deleted HTTP catch-all — yet it is the operator action that binds or
-// UNBINDS a meter's default rating rule, i.e. the single change that decides
-// whether unmatched usage bills at all.
+// only the deleted HTTP catch-all — yet it changes how the meter counts its
+// usage.
 //
 // Directions pinned: (1) success commits patch + exactly one update row with
 // the changed fields; (2) a zero-row UPDATE (meter that doesn't exist) emits
 // NOTHING; (3) a failed emission rolls the patch back.
 func TestMeterUpdateAudit_SharedFate(t *testing.T) {
 	f := newPricingFixture(t, "Meter Update InTx Audit")
-	rule := f.seedRatingRule(t, "tokens")
 
 	t.Run("patch commits with exactly one update row carrying the changed fields", func(t *testing.T) {
 		m := f.seedMeter(t, "tokens_ok")
@@ -130,9 +130,8 @@ func TestMeterUpdateAudit_SharedFate(t *testing.T) {
 		agg := "max"
 
 		out, err := f.auditedSvc().UpdateMeter(f.ctx, f.tenantID, m.ID, pricing.UpdateMeterInput{
-			Name:                &newName,
-			Aggregation:         &agg,
-			RatingRuleVersionID: &rule.ID,
+			Name:        &newName,
+			Aggregation: &agg,
 		})
 		if err != nil {
 			t.Fatalf("update meter: %v", err)
@@ -155,11 +154,8 @@ func TestMeterUpdateAudit_SharedFate(t *testing.T) {
 		if row.Metadata["aggregation"] != "max" {
 			t.Errorf("metadata aggregation = %v, want max", row.Metadata["aggregation"])
 		}
-		if row.Metadata["rating_rule_version_id"] != rule.ID {
-			t.Errorf("metadata rating_rule_version_id = %v, want %s", row.Metadata["rating_rule_version_id"], rule.ID)
-		}
-		if row.Metadata["key"] != "tokens_ok" {
-			t.Errorf("metadata key = %v, want tokens_ok", row.Metadata["key"])
+		if row.Metadata["event_name"] != "tokens_ok" {
+			t.Errorf("metadata event_name = %v, want tokens_ok", row.Metadata["event_name"])
 		}
 		// Untouched field must NOT be claimed as changed.
 		if _, ok := row.Metadata["unit"]; ok {
@@ -171,34 +167,10 @@ func TestMeterUpdateAudit_SharedFate(t *testing.T) {
 		if err != nil {
 			t.Fatalf("get meter: %v", err)
 		}
-		if got.Name != newName || got.Aggregation != "max" || got.RatingRuleVersionID != rule.ID {
+		if got.Name != newName || got.Aggregation != "max" {
 			t.Errorf("meter did not commit with its audit row: %+v", got)
 		}
 		_ = out
-	})
-
-	t.Run("unbinding the default rate is recorded, not silently absent", func(t *testing.T) {
-		m := f.seedMeter(t, "tokens_unbind")
-		empty := ""
-		if _, err := f.auditedSvc().UpdateMeter(f.ctx, f.tenantID, m.ID, pricing.UpdateMeterInput{
-			RatingRuleVersionID: &rule.ID,
-		}); err != nil {
-			t.Fatalf("bind: %v", err)
-		}
-		if _, err := f.auditedSvc().UpdateMeter(f.ctx, f.tenantID, m.ID, pricing.UpdateMeterInput{
-			RatingRuleVersionID: &empty,
-		}); err != nil {
-			t.Fatalf("unbind: %v", err)
-		}
-		rows := f.rows(t, "meter", m.ID)
-		if len(rows) != 2 {
-			t.Fatalf("want two meter audit rows (bind + unbind); got %d", len(rows))
-		}
-		// Query returns newest-first: rows[0] is the unbind.
-		v, ok := rows[0].Metadata["rating_rule_version_id"]
-		if !ok || v != "" {
-			t.Errorf("unbind row must record rating_rule_version_id=\"\" (the change that stops usage being priced); got %v (present=%v)", v, ok)
-		}
 	})
 
 	t.Run("nonexistent meter emits nothing", func(t *testing.T) {
@@ -211,7 +183,7 @@ func TestMeterUpdateAudit_SharedFate(t *testing.T) {
 		// never touched (RLS/livemode-invisible rows reach exactly here).
 		_, err := f.store.UpdateMeterAudited(f.ctx, f.tenantID, domain.Meter{
 			ID: ghostID, Name: "Ghost", Unit: "unit", Aggregation: "sum",
-		}, func(tx *sql.Tx, out domain.Meter) error {
+		}, nil, func(tx *sql.Tx, out domain.Meter) error {
 			return emitter.LogInTx(f.ctx, tx, audit.Entry{})
 		})
 		if !errors.Is(err, errs.ErrNotFound) {
@@ -251,176 +223,113 @@ func TestMeterUpdateAudit_SharedFate(t *testing.T) {
 	})
 }
 
-// TestMeterPricingRuleDeleteAudit_SharedFate pins the ADR-090 emission on
-// DELETE /v1/meters/{meter_id}/pricing-rules/{id} — the ADR's poster child.
-// The catch-all recorded this as action=delete resource_type=meter
-// resource_id={meter_id}: a permanent, un-editable row claiming the operator
-// destroyed the whole meter when they removed ONE dimension rule. The truth
-// is now emitted from the DELETE's own tx, sourced from the deleted row.
+// TestPriceWriteAudit_SharedFate pins the ADR-090 emission of a price
+// write: the audit row is written on the write's own transaction, with the
+// content before and after and when it applies. A never-used plan's write
+// replaces the earlier content, so the row is the only record of it.
 //
-// Directions pinned: (1) success removes the rule AND writes exactly one
-// delete row on resource_type=meter_pricing_rule, resource_id={rule id},
-// metadata.meter_id = the rule's own meter — and writes NOTHING on the meter
-// (the old lie); (2) deleting a nonexistent rule emits NOTHING; (3) a failed
-// emission leaves the rule in place.
-func TestMeterPricingRuleDeleteAudit_SharedFate(t *testing.T) {
-	f := newPricingFixture(t, "Rule Delete InTx Audit")
-	rule := f.seedRatingRule(t, "tokens")
+// Directions pinned: (1) an edit and a removal each write exactly one row on
+// resource_type=plan_price, resource_id={price id}; (2) a write on a price
+// that does not exist emits nothing; (3) a failed emission leaves the price
+// as it was.
+func TestPriceWriteAudit_SharedFate(t *testing.T) {
+	f := newPricingFixture(t, "Price Write InTx Audit")
 
-	seedPricingRule := func(t *testing.T, meterKey string, priority int) (domain.Meter, domain.MeterPricingRule) {
-		t.Helper()
-		m := f.seedMeter(t, meterKey)
-		pr, err := pricing.NewService(f.store).UpsertMeterPricingRule(f.ctx, f.tenantID, pricing.UpsertMeterPricingRuleInput{
-			MeterID:             m.ID,
-			RatingRuleVersionID: rule.ID,
-			DimensionMatch:      map[string]any{"model": meterKey},
-			AggregationMode:     domain.AggSum,
-			Priority:            priority,
-		})
-		if err != nil {
-			t.Fatalf("seed pricing rule: %v", err)
+	t.Run("an edit and a removal are each recorded", func(t *testing.T) {
+		plan, price := f.seedPlan(t, "audited")
+		svc := f.auditedSvc()
+		if _, err := svc.EditPrice(f.ctx, f.tenantID, plan.ID, price.ID, domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(5)}); err != nil {
+			t.Fatalf("edit: %v", err)
 		}
-		return m, pr
-	}
-
-	t.Run("delete records the rule, not the meter", func(t *testing.T) {
-		m, pr := seedPricingRule(t, "rule_ok", 10)
-
-		if err := f.auditedSvc().DeleteMeterPricingRule(f.ctx, f.tenantID, pr.ID); err != nil {
-			t.Fatalf("delete rule: %v", err)
+		if _, err := svc.RemovePrice(f.ctx, f.tenantID, plan.ID, price.ID); err != nil {
+			t.Fatalf("remove: %v", err)
 		}
-
-		rows := f.rows(t, "meter_pricing_rule", pr.ID)
-		if len(rows) != 1 {
-			t.Fatalf("want exactly one meter_pricing_rule audit row; got %d: %+v", len(rows), rows)
+		rows := f.rows(t, "plan_price", price.ID)
+		if len(rows) != 2 {
+			t.Fatalf("want two plan_price audit rows; got %d: %+v", len(rows), rows)
 		}
-		row := rows[0]
-		if row.Action != domain.AuditActionDelete || row.ResourceType != "meter_pricing_rule" {
-			t.Errorf("vocabulary: got %s/%s, want delete/meter_pricing_rule", row.Action, row.ResourceType)
-		}
-		if row.ResourceID != pr.ID {
-			t.Errorf("resource_id = %q, want the RULE id %q (the catch-all used to record the meter id here)", row.ResourceID, pr.ID)
-		}
-		if row.Metadata["meter_id"] != m.ID {
-			t.Errorf("metadata meter_id = %v, want %s", row.Metadata["meter_id"], m.ID)
-		}
-		if row.Metadata["rating_rule_version_id"] != rule.ID {
-			t.Errorf("metadata rating_rule_version_id = %v, want %s", row.Metadata["rating_rule_version_id"], rule.ID)
-		}
-
-		// The lie is gone: nothing claims the METER was deleted.
-		for _, r := range f.rows(t, "meter", m.ID) {
-			if r.Action == domain.AuditActionDelete {
-				t.Errorf("a delete row still points at the meter — the fabricated record ADR-090 exists to kill: %+v", r)
+		var edit, removal domain.AuditEntry
+		for _, r := range rows {
+			switch r.Action {
+			case domain.AuditActionUpdate:
+				edit = r
+			case domain.AuditActionDelete:
+				removal = r
 			}
 		}
-
-		// And the rule really is gone (shared fate, success side).
-		if _, err := f.store.GetMeterPricingRule(f.ctx, f.tenantID, pr.ID); !errors.Is(err, errs.ErrNotFound) {
-			t.Errorf("rule survived its delete (err=%v)", err)
+		if edit.Metadata["effective"] != "now" || edit.Metadata["plan_id"] != plan.ID || edit.Metadata["before"] == nil || edit.Metadata["after"] == nil {
+			t.Errorf("edit row metadata = %v, want plan_id, effective now, before and after", edit.Metadata)
+		}
+		if removal.Metadata["effective"] != "now" || removal.Metadata["after"] != nil {
+			t.Errorf("removal row metadata = %v, want effective now and no after", removal.Metadata)
 		}
 	})
 
-	t.Run("nonexistent rule emits nothing", func(t *testing.T) {
-		ghostID := postgres.NewID("vlx_mpr") // never inserted
+	t.Run("a price that does not exist emits nothing", func(t *testing.T) {
+		plan, _ := f.seedPlan(t, "ghost")
 		emitter := &countingEmitter{}
 		svc := pricing.NewService(f.store)
 		svc.SetAuditLogger(emitter)
-
-		err := svc.DeleteMeterPricingRule(f.ctx, f.tenantID, ghostID)
-		if !errors.Is(err, errs.ErrNotFound) {
-			t.Fatalf("deleting a nonexistent rule must return ErrNotFound; got %v", err)
+		ghost := postgres.NewID("vlx_prc")
+		if _, err := svc.RemovePrice(f.ctx, f.tenantID, plan.ID, ghost); !errors.Is(err, errs.ErrNotFound) {
+			t.Fatalf("removing a price that does not exist must be a 404; got %v", err)
 		}
 		if emitter.calls != 0 {
-			t.Fatalf("emit fired %d time(s) for a rule that was never deleted — FABRICATED EVIDENCE", emitter.calls)
-		}
-		if rows := f.rows(t, "meter_pricing_rule", ghostID); len(rows) != 0 {
-			t.Errorf("audit rows recorded against a nonexistent rule: %+v", rows)
+			t.Fatalf("emit fired %d time(s) for a write that never happened", emitter.calls)
 		}
 	})
 
-	t.Run("audit failure rolls the delete back", func(t *testing.T) {
-		_, pr := seedPricingRule(t, "rule_rollback", 20)
-
+	t.Run("audit failure rolls the write back", func(t *testing.T) {
+		plan, price := f.seedPlan(t, "rollback")
 		emitter := &landThenFailEmitter{logger: f.logger}
 		svc := pricing.NewService(f.store)
 		svc.SetAuditLogger(emitter)
-
-		if err := svc.DeleteMeterPricingRule(f.ctx, f.tenantID, pr.ID); err == nil {
-			t.Fatal("delete must fail when its audit emission fails (shared fate)")
+		if _, err := svc.RemovePrice(f.ctx, f.tenantID, plan.ID, price.ID); err == nil {
+			t.Fatal("a removal must fail when its audit emission fails (shared fate)")
 		}
 		if emitter.calls != 1 {
 			t.Fatalf("emit calls = %d, want 1", emitter.calls)
 		}
-		// The rule is STILL BILLING — a rule that could not be recorded as
-		// deleted must not be deleted.
-		if _, err := f.store.GetMeterPricingRule(f.ctx, f.tenantID, pr.ID); err != nil {
-			t.Errorf("rule was deleted despite a failed audit emission: %v", err)
+		listed, err := svc.ListPlanPrices(f.ctx, f.tenantID, plan.ID)
+		if err != nil || len(listed) != 1 || !listed[0].UnitAmountCents.Equal(decimal.NewFromInt(2)) {
+			t.Errorf("the price must stand after a failed removal: %+v, %v", listed, err)
 		}
-		if rows := f.rows(t, "meter_pricing_rule", pr.ID); len(rows) != 0 {
-			t.Errorf("audit row survived the rolled-back delete: %+v", rows)
-		}
-
-		// The delete is still available to a retry.
-		if err := f.auditedSvc().DeleteMeterPricingRule(f.ctx, f.tenantID, pr.ID); err != nil {
-			t.Fatalf("retry delete: %v", err)
-		}
-		if rows := f.rows(t, "meter_pricing_rule", pr.ID); len(rows) != 1 {
-			t.Errorf("retry must land exactly one delete audit row; got %d", len(rows))
+		if rows := f.rows(t, "plan_price", price.ID); len(rows) != 0 {
+			t.Errorf("audit row survived the rolled-back write: %+v", rows)
 		}
 	})
 }
 
-// TestMeterRoutes_AreAccountedFor: both routes emit their own in-tx row, whose
-// self-mark accounts for the request. The pricing-rule DELETE is the headline
-// case of the whole redesign — the deleted catch-all recorded it as "deleted
-// meter {meter_id}" (its classifier read parts[1] of the path as the resource
-// id), a permanent row asserting the operator destroyed a meter that still
-// exists. If this route ever stops emitting, the coverage detector reports it
-// rather than a fabricated row papering over it.
+// TestMeterRoutes_AreAccountedFor: the meter PATCH and the price writes emit
+// their own in-tx row, whose self-mark accounts for the request. If a route
+// ever stops emitting, the coverage detector reports it rather than a
+// fabricated row papering over it.
 func TestMeterRoutes_AreAccountedFor(t *testing.T) {
 	f := newPricingFixture(t, "Meter Routes Accounted")
-	rule := f.seedRatingRule(t, "tokens")
 	m := f.seedMeter(t, "markhandled")
-
-	pr, err := f.auditedSvc().UpsertMeterPricingRule(f.ctx, f.tenantID, pricing.UpsertMeterPricingRuleInput{
-		MeterID: m.ID, RatingRuleVersionID: rule.ID,
-		DimensionMatch:  map[string]any{"model": "x"},
-		AggregationMode: domain.AggSum, Priority: 5,
-	})
-	if err != nil {
-		t.Fatalf("seed pricing rule: %v", err)
-	}
-
+	plan, price := f.seedPlan(t, "routes")
 	h := pricing.NewHandler(f.auditedSvc())
-	passthrough := func(next http.Handler) http.Handler { return next }
 
-	t.Run("PATCH /meters/{id} is accounted for", func(t *testing.T) {
-		reqCtx := audit.WithRequestState(auth.WithTenantID(f.ctx, f.tenantID))
-		req := httptest.NewRequest(http.MethodPatch, "/"+m.ID,
-			strings.NewReader(`{"name":"Renamed"}`)).WithContext(reqCtx)
-		rec := httptest.NewRecorder()
-		h.MeterRoutes().ServeHTTP(rec, req)
-
-		if rec.Code != http.StatusOK {
-			t.Fatalf("patch meter: got %d, want 200; body=%s", rec.Code, rec.Body.String())
-		}
-		if !audit.WasHandled(reqCtx) {
-			t.Error("meter PATCH emitted no audit row — the coverage detector will report it as an uncovered mutation")
-		}
-	})
-
-	t.Run("DELETE /meters/{meter_id}/pricing-rules/{id} is accounted for", func(t *testing.T) {
-		reqCtx := audit.WithRequestState(auth.WithTenantID(f.ctx, f.tenantID))
-		req := httptest.NewRequest(http.MethodDelete, "/"+pr.ID, nil).WithContext(reqCtx)
-		rec := httptest.NewRecorder()
-		h.MeterPricingRuleRoutes(passthrough, passthrough).ServeHTTP(rec, req)
-
-		if rec.Code != http.StatusNoContent {
-			t.Fatalf("delete rule: got %d, want 204; body=%s", rec.Code, rec.Body.String())
-		}
-		if !audit.WasHandled(reqCtx) {
-			t.Error("pricing-rule DELETE emitted no audit row — this is the route whose fabricated 'deleted meter {meter_id}' row ADR-090 exists to kill; it must carry its own truthful evidence")
-		}
-	})
+	for _, tc := range []struct {
+		name, method, path, body string
+		srv                      http.Handler
+		want                     int
+	}{
+		{"PATCH /meters/{id}", http.MethodPatch, "/" + m.ID, `{"name":"Renamed"}`, h.MeterRoutes(), http.StatusOK},
+		{"PATCH /plans/{id}/prices/{price_id}", http.MethodPatch, "/" + plan.ID + "/prices/" + price.ID, `{"mode":"per_unit","unit_amount_cents":"3"}`, h.PlanRoutes(), http.StatusOK},
+		{"DELETE /plans/{id}/prices/{price_id}", http.MethodDelete, "/" + plan.ID + "/prices/" + price.ID, "", h.PlanRoutes(), http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reqCtx := audit.WithRequestState(auth.WithTenantID(f.ctx, f.tenantID))
+			req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body)).WithContext(reqCtx)
+			rec := httptest.NewRecorder()
+			tc.srv.ServeHTTP(rec, req)
+			if rec.Code != tc.want {
+				t.Fatalf("got %d, want %d; body=%s", rec.Code, tc.want, rec.Body.String())
+			}
+			if !audit.WasHandled(reqCtx) {
+				t.Error("the write emitted no audit row — the coverage detector will report it as an uncovered mutation")
+			}
+		})
+	}
 }

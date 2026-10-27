@@ -1,5 +1,5 @@
 import { test, expect, type Locator, type Page } from '@playwright/test'
-import { api, usd, uniq } from './fixtures/api'
+import { api, usd, usdBalance, uniq } from './fixtures/api'
 import { billedCustomer, createCustomer, invoicesFor, type Invoice } from './fixtures/seed'
 
 // Invoices through the screen: issue one, settle it, correct it, close it.
@@ -17,7 +17,7 @@ interface InvoiceDetail extends Invoice {
   voided_at?: string
   billing_timezone?: string
 }
-interface LineItem { description: string; quantity: number; unit_amount_cents: number; amount_cents: number }
+interface LineItem { description: string; quantity: string; unit_amount_decimal: string; amount_cents: number }
 interface CreditNote {
   id: string
   credit_note_number: string
@@ -36,7 +36,7 @@ async function creditNotesFor(invoiceId: string): Promise<CreditNote[]> {
 }
 
 async function creditBalance(customerId: string): Promise<number> {
-  return (await api<{ balance_cents: number }>('GET', `/credits/balance/${customerId}`)).balance_cents
+  return usdBalance(await api<{ data: { currency: string; balance_cents: number }[] }>('GET', `/credits/balance/${customerId}`)).balance_cents
 }
 
 // Lets the next "Issue credit note" request reach the server, then drops the
@@ -92,11 +92,26 @@ function recentInvoice(page: Page, invoiceNumber: string) {
   return card.getByRole('link').filter({ hasText: invoiceNumber })
 }
 
+// The Credit Notes page's "Issue credit note": pick the customer, then the
+// invoice, and the invoice page's own dialog opens for that invoice.
+async function issueFromCreditNotesPage(page: Page, customerName: string, invoiceNumber: string) {
+  await page.getByRole('button', { name: 'Issue credit note' }).first().click()
+  const picker = page.getByRole('dialog', { name: 'Choose an invoice to credit' })
+  await picker.getByRole('button', { name: 'Select a customer...' }).click()
+  await page.getByPlaceholder('Search...').fill(customerName)
+  await page.getByRole('option', { name: new RegExp(customerName) }).click()
+  await picker.getByRole('button', { name: new RegExp(invoiceNumber) }).click()
+  await expect(picker).toBeHidden()
+  const dialog = page.getByRole('dialog', { name: 'Issue credit note' })
+  await expect(dialog.getByText(invoiceNumber, { exact: true })).toBeVisible()
+  return dialog
+}
+
 // A one-off invoice for $49.00 that used `creditCents` of the customer's
 // credit balance when it was finalized.
 async function invoicePaidPartlyByCredit(creditCents: number) {
   const customer = await createCustomer()
-  await api('POST', '/credits/grant', { customer_id: customer.id, amount_cents: creditCents, description: 'E2E credit used by an invoice' })
+  await api('POST', '/credits/grant', { customer_id: customer.id, currency: 'USD', amount_cents: creditCents, description: 'E2E credit used by an invoice' })
   const draft = await api<Invoice>('POST', '/invoices', {
     customer_id: customer.id,
     currency: 'USD',
@@ -129,7 +144,7 @@ test('a one-off invoice: save a draft from the customer page, add a line, finali
   const draft = await getInvoice(created[0].id)
   const number = draft.invoice.invoice_number
   expect(draft.invoice.status).toBe('draft')
-  expect(draft.line_items.map(l => [l.description, l.quantity, l.unit_amount_cents])).toEqual([[`E2E onboarding ${id}`, 2, 1250]])
+  expect(draft.line_items.map(l => [l.description, l.quantity, l.unit_amount_decimal])).toEqual([[`E2E onboarding ${id}`, '2', '1250']])
   expect(savedText).toBe(`Draft ${number} saved`)
   const recent = recentInvoice(page, number)
   await expect(recent).toContainText('Draft')
@@ -150,7 +165,7 @@ test('a one-off invoice: save a draft from the customer page, add a line, finali
   const twoLines = await getInvoice(draft.invoice.id)
   expect(twoLines.line_items).toHaveLength(2)
   const added = twoLines.line_items.find(l => l.description === `E2E support hours ${id}`)
-  expect(added && [added.quantity, added.unit_amount_cents]).toEqual([3, 4000])
+  expect(added && [added.quantity, added.unit_amount_decimal]).toEqual(['3', '4000'])
   await expect(page.getByRole('row').filter({ hasText: `E2E support hours ${id}` })).toContainText(usd(added!.amount_cents))
   await expect(figure(page, 'Subtotal')).toContainText(usd(twoLines.invoice.subtotal_cents))
 
@@ -346,17 +361,35 @@ test('closing an unpaid invoice: void gives back the credit it used, write-off c
   await expect(page.getByRole('button', { name: /^Pay/ })).toHaveCount(0)
 })
 
+test('a voided invoice in euros owes €0.00 on its page', async ({ page }) => {
+  // The page's void branch printed a literal "$0.00" whatever the currency,
+  // while the Invoices list read "€0.00" (review of #1328).
+  const customer = await createCustomer()
+  const draft = await api<Invoice>('POST', '/invoices', {
+    customer_id: customer.id,
+    currency: 'EUR',
+    line_items: [{ description: 'E2E setup fee', line_type: 'add_on', quantity: 1, unit_amount_cents: 4900 }],
+  })
+  await api('POST', `/invoices/${draft.id}/finalize`)
+  await api('POST', `/invoices/${draft.id}/void`)
+  expect((await getInvoice(draft.id)).invoice.status).toBe('voided')
+
+  await page.goto(`/invoices/${draft.id}`)
+  await expect(statusPill(page, 'Void')).toBeVisible()
+  await expect(figure(page, 'Amount due')).toContainText('€0.00')
+})
+
 test('the credit notes page issues a note against an invoice, and issues or voids a draft', async ({ page }) => {
-  const { invoice } = await billedCustomer()
+  const { customer, invoice } = await billedCustomer()
   await page.goto('/credit-notes')
 
-  // Issue a note from the page: the invoice's amount due drops by it.
-  await page.getByRole('button', { name: 'Issue credit note' }).first().click()
-  const dialog = page.getByRole('dialog', { name: 'Issue credit note' })
-  await dialog.getByLabel('Invoice', { exact: true }).selectOption(invoice.id)
-  await dialog.getByRole('button', { name: 'Billing error', exact: true }).click()
+  // Issue a note from the page: it opens the invoice page's dialog, whose
+  // ceiling is what is still creditable on that invoice, and the invoice's
+  // amount due drops by the note.
+  const dialog = await issueFromCreditNotesPage(page, customer.display_name, invoice.invoice_number)
+  await expect(dialog.getByText(`max ${usd(invoice.total_amount_cents)}`, { exact: true })).toBeVisible()
+  await dialog.getByLabel('Reason').fill('Billing error')
   await dialog.getByLabel(/^Amount/).fill('12.00')
-  await expect(dialog.getByText('Invoice amount due will be reduced by $12.00')).toBeVisible()
   await dialog.getByRole('button', { name: 'Issue credit note' }).click()
   await expect(dialog).toBeHidden()
 
@@ -379,6 +412,12 @@ test('the credit notes page issues a note against an invoice, and issues or void
   expect([toIssue.status, toVoid.status]).toEqual(['draft', 'draft'])
   await page.reload()
 
+  // The tab counts are the server's, so the Draft tab keeps its count while
+  // the Issued tab is open.
+  await page.getByRole('button', { name: /^Issued/ }).click()
+  await expect(page.getByRole('button', { name: /^Draft\s*\d+$/ })).toBeVisible()
+  await page.getByRole('button', { name: /^All/ }).click()
+
   await row(toIssue).getByRole('button', { name: 'Issue', exact: true }).click()
   await page.getByRole('alertdialog', { name: 'Issue credit note' }).getByRole('button', { name: 'Issue credit note' }).click()
   await expect(row(toIssue)).toContainText('issued')
@@ -399,7 +438,7 @@ test('the credit notes page issues a note against an invoice, and issues or void
 })
 
 test('issuing a credit note again after its answer was lost makes one note, from the invoice page and the credit notes page', async ({ page }) => {
-  const { invoice } = await billedCustomer()
+  const { customer, invoice } = await billedCustomer()
   const issueButton = (dialog: Locator) => dialog.getByRole('button', { name: 'Issue credit note' })
 
   // Invoice page: the first answer is lost, so the operator clicks again. The
@@ -416,12 +455,10 @@ test('issuing a credit note again after its answer was lost makes one note, from
   await expect(fromInvoice).toBeHidden()
   expect(await creditNotesFor(invoice.id)).toHaveLength(1)
 
-  // Credit notes page: the same, from its own dialog.
+  // Credit notes page: the same, through the invoice it opens.
   const openListDialog = async () => {
-    await page.getByRole('button', { name: 'Issue credit note' }).first().click()
-    const dialog = page.getByRole('dialog', { name: 'Issue credit note' })
-    await dialog.getByLabel('Invoice', { exact: true }).selectOption(invoice.id)
-    await dialog.getByRole('button', { name: 'Billing error', exact: true }).click()
+    const dialog = await issueFromCreditNotesPage(page, customer.display_name, invoice.invoice_number)
+    await dialog.getByLabel('Reason').fill('E2E lost answer')
     await dialog.getByLabel(/^Amount/).fill('5.00')
     return dialog
   }

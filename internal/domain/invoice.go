@@ -2,7 +2,6 @@ package domain
 
 import (
 	"encoding/json"
-	"strings"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -111,31 +110,20 @@ func (i Invoice) Parked() bool {
 	return i.PaymentStatus == PaymentUnknown && i.StripePaymentIntentID == ""
 }
 
-// OutOfBandPaymentIntentPrefix marks the synthetic PaymentIntent id that
-// RecordOfflinePayment stamps ("out_of_band:<RFC3339>") so an operator-recorded
-// bank transfer / cheque is distinguishable from an engine-collected card
-// charge. It is NOT a Stripe id: nothing at the provider will resolve it.
-const OutOfBandPaymentIntentPrefix = "out_of_band:"
-
 // HasCardPayment reports whether this invoice's settled money is refundable to
-// a card — i.e. a real Stripe PaymentIntent backs it. False for never-charged
-// invoices AND for offline-recorded ones, whose PI field holds only the
-// synthetic OutOfBandPaymentIntentPrefix marker.
+// a card: a Stripe PaymentIntent backs it. False for a never-charged invoice,
+// one paid by credits or with nothing due, and one paid out of band
+// (PaidOutOfBand).
 //
-// This is the single canonical answer to "can money go back the way it came?".
-// It exists because the rule was hand-copied at four sites while the three that
-// actually move refund money tested only `!= ""` — so an operator could promise
-// a card refund on a bank transfer, Velox would call Stripe with the synthetic
-// marker as a PaymentIntent id, and the credit note issued with a permanently
-// failed refund leg that no retry could ever clear (found walking FLOW C2,
-// 2026-08-02: VLX-000068 offered "Refund to card — max $53.62" on an invoice
-// paid entirely by bank transfer; Retry refund answered HTTP 500 forever).
-//
-// Callers that move refund money must gate on this, not on a bare emptiness
-// check: an out-of-band invoice has a NON-empty PI that is not a PI.
+// It is the one answer to "can money go back the way it came?", and a bare
+// emptiness check gives the same answer: the PaymentIntent column holds only
+// Stripe's ids, and an offline payment leaves it empty (migration 00203
+// refuses anything else). Before, an offline payment wrote a synthetic
+// "out_of_band:<time>" id there, every reader had to know the prefix, and
+// one that did not offered a card refund on a bank transfer (VLX-000068,
+// 2026-08-02).
 func (i Invoice) HasCardPayment() bool {
-	return i.StripePaymentIntentID != "" &&
-		!strings.HasPrefix(i.StripePaymentIntentID, OutOfBandPaymentIntentPrefix)
+	return i.StripePaymentIntentID != ""
 }
 
 // CardRefundableCents is the ceiling on what a credit note may push back to the
@@ -188,18 +176,17 @@ const (
 // InvoiceTaxStatus tracks whether tax has been successfully calculated for
 // an invoice. The happy path is ok: calculation succeeded (including
 // zero-tax outcomes from none/manual/exempt/reverse-charge). Pending means
-// calculation failed transiently and a retry worker will try again.
-// Failed means retries have been exhausted — operators resolve manually.
+// calculation failed and the invoice waits; tax_error_code says whether the
+// retry worker tries again or the operator must act.
 //
-// Invoices in pending or failed are blocked from finalize: sending a wrong
-// tax amount creates audit/compliance exposure, so we defer rather than
-// silently fall back to an incorrect rate.
+// A pending invoice is blocked from finalize: sending a wrong tax amount
+// creates audit/compliance exposure, so we defer rather than silently fall
+// back to an incorrect rate.
 type InvoiceTaxStatus string
 
 const (
 	InvoiceTaxOK      InvoiceTaxStatus = "ok"
 	InvoiceTaxPending InvoiceTaxStatus = "pending"
-	InvoiceTaxFailed  InvoiceTaxStatus = "failed"
 )
 
 // InvoiceFinalizationStatus returns the invoice Status that must be
@@ -338,20 +325,37 @@ type Invoice struct {
 	// surface that shows the period (PDF, dashboard, list) shows this one value
 	// verbatim so it can't drift across the Go and TS runtimes. The hosted
 	// invoice page shows no period; its linked PDF does.
-	BillingPeriodDisplay  string     `json:"billing_period_display,omitempty"`
-	IssuedAt              *time.Time `json:"issued_at,omitempty"`
-	DueAt                 *time.Time `json:"due_at,omitempty"`
-	PaidAt                *time.Time `json:"paid_at,omitempty"`
-	VoidedAt              *time.Time `json:"voided_at,omitempty"`
-	UncollectibleAt       *time.Time `json:"uncollectible_at,omitempty"`
-	StripePaymentIntentID string     `json:"stripe_payment_intent_id,omitempty"`
-	LastPaymentError      string     `json:"last_payment_error,omitempty"`
-	AutoChargePending     bool       `json:"auto_charge_pending,omitempty"`
+	BillingPeriodDisplay string     `json:"billing_period_display,omitempty"`
+	IssuedAt             *time.Time `json:"issued_at,omitempty"`
+	DueAt                *time.Time `json:"due_at,omitempty"`
+	PaidAt               *time.Time `json:"paid_at,omitempty"`
+	VoidedAt             *time.Time `json:"voided_at,omitempty"`
+	UncollectibleAt      *time.Time `json:"uncollectible_at,omitempty"`
+	// StripePaymentIntentID is the Stripe PaymentIntent behind the invoice's
+	// latest charge, and only that: empty when no charge was sent, and for an
+	// invoice paid out of band.
+	StripePaymentIntentID string `json:"stripe_payment_intent_id,omitempty"`
+	// PaidOutOfBand is set when the operator recorded the payment as made
+	// outside Velox (RecordOfflinePayment: a bank transfer, a cheque, cash).
+	// Stripe's paid_out_of_band. Such an invoice has no PaymentIntent (a
+	// CHECK holds both), so there is no card to refund.
+	PaidOutOfBand     bool   `json:"paid_out_of_band"`
+	LastPaymentError  string `json:"last_payment_error,omitempty"`
+	AutoChargePending bool   `json:"auto_charge_pending,omitempty"`
 	// NoPMNotifiedAt is the send-once marker for the "payment method needed"
 	// setup-link email: stamped by whichever sender delivered it (finalize-time
 	// collect or the auto-charge retry sweep), checked by the sweep so a no-PM
 	// invoice is emailed exactly once, not per tick (ADR-087 follow-up).
 	NoPMNotifiedAt *time.Time `json:"no_pm_notified_at,omitempty"`
+	// BelowMinimumAt is when Stripe last refused to charge this invoice
+	// because its amount is below Stripe's minimum charge (ErrBelowMinimumCharge).
+	// The charge path stamps it with payment_status 'pending' and the
+	// auto-charge queue cleared, in one write. It is Stripe's latest answer,
+	// not a permanent fact (the minimum of a converted charge follows the
+	// account's settlement currency): the next charge outcome clears it.
+	// Readers check Invoice.BelowStripeMinimum. Internal: the notice is the
+	// API's view.
+	BelowMinimumAt *time.Time `json:"-"`
 	// ChargeAttemptSeq seeds the Stripe charge idempotency key
 	// (payment.ChargeIdempotencyKey). It moves ONLY when a charge attempt
 	// outcome is recorded — every UPDATE that stamps stripe_payment_intent_id
@@ -437,6 +441,15 @@ type Invoice struct {
 	// or a read-time re-derivation from the (mutable) parent's test_clock_id.
 	// Always false in live mode (test clocks are test-mode only).
 	IsSimulated bool `json:"is_simulated"`
+
+	// TestClockID is the test clock this invoice's dates follow: the clock
+	// its customer is pinned to. The pin is set when the customer is created,
+	// never changes, and every subscription inherits it (ADR-027), so it
+	// covers cycle and one-off invoices alike. Read from the customer, never
+	// stored on the invoice. The list and get reads fill it; empty (left out)
+	// for a wall-clock customer. The dashboard reads "Due in N days" from
+	// this clock.
+	TestClockID string `json:"test_clock_id,omitempty"`
 }
 
 // ItemChangeType classifies per-item proration artifacts so the dedup index
@@ -461,12 +474,12 @@ const (
 )
 
 // InvoiceTaxRetryUpdate is the snapshot UpdateTaxAtomic writes to a
-// pending or failed invoice when an operator (or the retry worker)
+// pending invoice when an operator (or the retry worker)
 // triggers a tax recompute. Carries the new tax decision plus the
 // resulting headline totals; per-line tax stamps travel via the
 // lineItems argument.
 //
-// Empty TaxCalculationID + TaxStatus=pending|failed signals the
+// Empty TaxCalculationID + TaxStatus=pending signals the
 // retry itself failed — the row stays blocked from finalize and the
 // dashboard banner picks up the new error code.
 type InvoiceTaxRetryUpdate struct {
@@ -484,7 +497,7 @@ type InvoiceTaxRetryUpdate struct {
 	// means "ready now"; a future timestamp gates the row out of
 	// the worker's scan until the backoff window expires. Set
 	// per the exponential schedule in internal/billing/tax_retry.go
-	// when Status remains pending/failed; cleared (nil) when
+	// when Status remains pending; cleared (nil) when
 	// status flips to ok/exempt. Auto-finalize on a clean tax
 	// outcome happens at the service layer (so it shares the same
 	// public-token + tax-commit side-effects as manual Finalize),
@@ -517,20 +530,23 @@ type InvoiceLineItem struct {
 	// lines and on lines written before migration 0173's backfill ran.
 	MeterUnit   string `json:"meter_unit,omitempty"`
 	Description string `json:"description"`
-	Quantity    int64  `json:"quantity"`
-	// QuantityDecimal is the exact (possibly fractional) usage quantity. The
-	// integer Quantity above is it truncated, kept for back-compat (Stripe
-	// `quantity_decimal` / Chargebee `quantity_in_decimal` parity). Zero means
-	// "no decimal quantity — use Quantity" (base-fee/proration/manual lines).
-	// The line amount stays whole cents (AmountCents); this only restores the
-	// quantity × unit = amount reconciliation for fractional usage.
-	QuantityDecimal decimal.Decimal `json:"quantity_decimal"`
-	UnitAmountCents int64           `json:"unit_amount_cents"`
-	AmountCents     int64           `json:"amount_cents"`
-	TaxRate         float64         `json:"tax_rate"` // Percent rate (4-decimal precision). ADR-042/043.
-	TaxAmountCents  int64           `json:"tax_amount_cents"`
-	TaxJurisdiction string          `json:"tax_jurisdiction,omitempty"`
-	TaxCode         string          `json:"tax_code,omitempty"`
+	// Quantity and QuantityDecimal are the two stored quantity columns. The
+	// integer is the decimal truncated; QuantityDecimal is the exact
+	// (possibly fractional) usage quantity, zero on lines that store none
+	// (base-fee/proration/manual lines), which then use Quantity. Neither is
+	// on the wire: MarshalJSON sends the one exact value, ExactQuantity, as
+	// `quantity` (B5).
+	Quantity        int64           `json:"-"`
+	QuantityDecimal decimal.Decimal `json:"-"`
+	// UnitAmountCents is the stored whole-cent unit price. It is not on the
+	// wire: a sub-cent rate collapses to 0 in it, so the line sends
+	// DisplayUnitAmountDecimal as `unit_amount_decimal` instead (B5).
+	UnitAmountCents int64   `json:"-"`
+	AmountCents     int64   `json:"amount_cents"`
+	TaxRate         float64 `json:"tax_rate"` // Percent rate (4-decimal precision). ADR-042/043.
+	TaxAmountCents  int64   `json:"tax_amount_cents"`
+	TaxJurisdiction string  `json:"tax_jurisdiction,omitempty"`
+	TaxCode         string  `json:"tax_code,omitempty"`
 	// TaxabilityReason carries the Stripe-canonical structured reason
 	// (e.g. "standard_rated", "reverse_charge", "not_collecting",
 	// "customer_exempt", "product_exempt", "zero_rated"), or Velox's own
@@ -539,19 +555,22 @@ type InvoiceLineItem struct {
 	// non-trivial values, and the PDF appends a legend when a line is
 	// customer- or product-exempt or a prepaid credit purchase. Otherwise
 	// empty for non-Stripe providers.
-	TaxabilityReason    string `json:"tax_reason,omitempty"`
-	TotalAmountCents    int64  `json:"total_amount_cents"`
-	Currency            string `json:"currency"`
-	PricingMode         string `json:"pricing_mode,omitempty"`
-	RatingRuleVersionID string `json:"rating_rule_version_id,omitempty"`
+	TaxabilityReason string `json:"tax_reason,omitempty"`
+	TotalAmountCents int64  `json:"total_amount_cents"`
+	Currency         string `json:"currency"`
+	PricingMode      string `json:"pricing_mode,omitempty"`
+	// PriceID is the plan price that billed a usage line, and DimensionMatch
+	// the events that price takes (ADR-130 §16). Empty on other lines.
+	PriceID        string            `json:"price_id,omitempty"`
+	DimensionMatch map[string]string `json:"dimension_match,omitempty"`
 	// NominalUnitAmountDecimal is the actually-billed CONFIGURED per-unit rate
-	// (decimal cents) for FLAT-mode usage lines — the clean rate-card figure
+	// (decimal cents) for per_unit usage lines — the clean rate-card figure
 	// (0.0003 = $0.000003/token), unlike EffectiveUnitAmountDecimal
 	// (amount÷quantity) which drifts by the cent-rounding of the line total
 	// (e.g. 6,000 tokens billed 2¢ → effective 0.00033¢, nominal 0.0003¢).
-	// It is STAMPED at build from the override-applied rule.FlatAmountCents,
-	// NOT derived on read: a CustomerPriceOverride preserves the
-	// rating_rule_versions id while swapping the price, so re-reading that row
+	// It is STAMPED at build from the override-applied rule.UnitAmountCents,
+	// NOT derived on read: a CustomerPriceOverride keeps the price id while
+	// swapping the rate, so re-reading the price
 	// yields list price, not the negotiated price billed (ADR-054
 	// re-examination). Nil for every line with no single configured rate —
 	// base_fee/proration (effective per-seat is the honest figure),
@@ -559,7 +578,7 @@ type InvoiceLineItem struct {
 	// (whole-cent unit already equals nominal) — which fall back to the
 	// effective rate. Internal-only (json:"-"): the wire's unit_amount_decimal
 	// already carries the display value via DisplayUnitAmountDecimal, so
-	// exposing this separately would just duplicate it on flat lines.
+	// exposing this separately would just duplicate it on per_unit lines.
 	NominalUnitAmountDecimal *decimal.Decimal `json:"-"`
 	BillingPeriodStart       *time.Time       `json:"billing_period_start,omitempty"`
 	BillingPeriodEnd         *time.Time       `json:"billing_period_end,omitempty"`
@@ -603,11 +622,17 @@ const TaxReasonPrepaidCreditPurchase = "prepaid_credit_purchase"
 // Precision is capped at 12 decimal places (Stripe unit_amount_decimal
 // parity). Returns 0 when the quantity is 0 (no meaningful per-unit price).
 func (li InvoiceLineItem) EffectiveUnitAmountDecimal() decimal.Decimal {
-	qty := li.QuantityDecimal
-	if qty.IsZero() {
-		qty = decimal.NewFromInt(li.Quantity)
+	return EffectiveUnitAmountDecimalFor(li.AmountCents, li.ExactQuantity())
+}
+
+// ExactQuantity is the line's quantity: the stored decimal when the line has
+// one, else the stored integer. It is the line's `quantity` on the wire, and
+// the value the dashboard, the hosted page and the PDF show.
+func (li InvoiceLineItem) ExactQuantity() decimal.Decimal {
+	if !li.QuantityDecimal.IsZero() {
+		return li.QuantityDecimal
 	}
-	return EffectiveUnitAmountDecimalFor(li.AmountCents, qty)
+	return decimal.NewFromInt(li.Quantity)
 }
 
 // EffectiveUnitAmountDecimalFor is the per-unit price in DECIMAL CENTS derived
@@ -626,12 +651,12 @@ func EffectiveUnitAmountDecimalFor(amountCents int64, quantity decimal.Decimal) 
 }
 
 // DisplayUnitAmountDecimalFor is the per-unit price to SHOW for a LIVE-resolved
-// rule (decimal cents): the configured nominal rate for flat rules, else the
+// price (decimal cents): the configured nominal rate for per_unit, else the
 // effective amount÷quantity. It mirrors InvoiceLineItem.DisplayUnitAmountDecimal
 // — which reads the nominal stamped at invoice build — for surfaces that resolve
-// the rating rule live (the usage Activity panel and the public cost dashboard),
+// the price live (the usage Activity panel and the public cost dashboard),
 // so the unit price matches the invoice on every screen (ADR-054).
-func DisplayUnitAmountDecimalFor(rule RatingRuleVersion, amountCents int64, quantity decimal.Decimal) decimal.Decimal {
+func DisplayUnitAmountDecimalFor(rule PriceShape, amountCents int64, quantity decimal.Decimal) decimal.Decimal {
 	if nominal := NominalUnitAmountDecimal(rule); nominal != nil {
 		return *nominal
 	}
@@ -639,10 +664,10 @@ func DisplayUnitAmountDecimalFor(rule RatingRuleVersion, amountCents int64, quan
 }
 
 // DisplayUnitAmountDecimal is the per-unit price to SHOW on invoices (decimal
-// cents): the stamped nominal configured rate when present (flat usage lines),
+// cents): the stamped nominal configured rate when present (per_unit usage lines),
 // else the effective amount÷quantity rate. This is the single value the
 // dashboard wire form, the hosted DTO, and the PDF all render, so the
-// displayed rate is consistent across surfaces and clean for sub-cent flat
+// displayed rate is consistent across surfaces and clean for sub-cent per_unit
 // rates — $0.000003, not the effective $0.00000333333333 that the line's
 // cent-rounding produces (ADR-054 re-examination). See
 // NominalUnitAmountDecimal for why nominal is stamped, not derived on read.
@@ -653,18 +678,19 @@ func (li InvoiceLineItem) DisplayUnitAmountDecimal() decimal.Decimal {
 	return li.EffectiveUnitAmountDecimal()
 }
 
-// MarshalJSON augments the wire form with unit_amount_decimal — the
-// full-precision per-unit price (decimal cents) from DisplayUnitAmountDecimal
-// (the nominal configured rate on flat usage lines, else the effective
-// amount÷quantity rate) — so dashboards and API clients render sub-cent rates
-// cleanly without the whole-cent unit_amount_cents collapsing them to "$0.00"
-// (ADR-054). Computed on the fly.
+// MarshalJSON gives the line one quantity and one unit price on the wire
+// (B5): `quantity` is ExactQuantity as a decimal string, and
+// `unit_amount_decimal` is the full-precision per-unit price in decimal cents
+// from DisplayUnitAmountDecimal (the nominal configured rate on per_unit usage
+// lines, else the effective amount÷quantity rate), so a sub-cent rate never
+// collapses to "$0.00" (ADR-054). Both are computed on the fly.
 func (li InvoiceLineItem) MarshalJSON() ([]byte, error) {
 	type alias InvoiceLineItem
 	return json.Marshal(struct {
 		alias
+		Quantity          string `json:"quantity"`
 		UnitAmountDecimal string `json:"unit_amount_decimal"`
-	}{alias(li), li.DisplayUnitAmountDecimal().String()})
+	}{alias(li), li.ExactQuantity().String(), li.DisplayUnitAmountDecimal().String()})
 }
 
 // InvoiceKeyset is a position in a queue read oldest-first by (created_at, id).

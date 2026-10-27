@@ -29,16 +29,22 @@ func (s *PostgresStore) Ingest(ctx context.Context, tenantID string, event domai
 	return s.IngestAudited(ctx, tenantID, event, nil)
 }
 
-// IngestAudited is Ingest with an in-tx audit emission hook (ADR-090).
+// IngestAudited is Ingest with a hook, emit, run on the ingest's transaction
+// after the insert, only when the row was written. An emit error rolls the
+// write back.
 //
-// Live ingest (POST /v1/usage-events, /batch, the LiteLLM spend callback)
-// passes nil: it is machine metering at up to ~1000/s, usage_events IS the
-// record, and a row per event would double the write volume of the hottest
-// path for no forensic gain. BACKFILL is the exception and passes an emitter:
-// an operator inserting BACKDATED usage is changing what a customer will be
-// billed for a period that may already have closed — an operator action on the
-// money path, not machine telemetry. Sharing the ingest tx means a backfilled
-// event that cannot be recorded is not ingested at all.
+// The single and backfill doors read the meter's aggregation there
+// (open_period.go). Batch reads it in IngestBatch's hook, and the LiteLLM
+// door in IngestCallResolvingHeld's. Only
+// BACKFILL also writes an audit row there (ADR-090):
+// live ingest (POST /v1/usage-events, /batch, the LiteLLM spend callback) is
+// machine metering at up to ~1000/s, usage_events IS the record, and a row
+// per event would double the write volume of the hottest path for no
+// forensic gain. An operator inserting BACKDATED usage is changing what a
+// customer will be billed for a period that may already have closed — an
+// operator action on the money path, not machine telemetry. Sharing the
+// ingest tx means a backfilled event that cannot be recorded is not ingested
+// at all.
 func (s *PostgresStore) IngestAudited(ctx context.Context, tenantID string, event domain.UsageEvent, emit func(tx *sql.Tx, out domain.UsageEvent) error) (domain.UsageEvent, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -52,7 +58,7 @@ func (s *PostgresStore) IngestAudited(ctx context.Context, tenantID string, even
 	}
 	if emit != nil {
 		if err := emit(tx, event); err != nil {
-			return domain.UsageEvent{}, fmt.Errorf("audit emission: %w", err)
+			return domain.UsageEvent{}, fmt.Errorf("ingest emission: %w", err)
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -72,11 +78,14 @@ func (s *PostgresStore) IngestAudited(ctx context.Context, tenantID string, even
 //
 // Keyed duplicates (replay of a fully-committed batch, or the same key
 // twice within one batch) are counted in deduped, not errors — matching
-// the LiteLLM door's replay contract.
-func (s *PostgresStore) IngestBatch(ctx context.Context, tenantID string, events []domain.UsageEvent) (inserted, deduped int, err error) {
+// the LiteLLM door's replay contract. inserted lists the indices of the
+// events written, so the caller can tell which rows this batch wrote. after,
+// when not nil, runs on the transaction after every insert, with inserted;
+// an error from it rolls the batch back.
+func (s *PostgresStore) IngestBatch(ctx context.Context, tenantID string, events []domain.UsageEvent, after func(tx *sql.Tx, inserted []int) error) (inserted []int, deduped int, err error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
-		return 0, 0, err
+		return nil, 0, err
 	}
 	defer postgres.Rollback(tx)
 
@@ -86,13 +95,18 @@ func (s *PostgresStore) IngestBatch(ctx context.Context, tenantID string, events
 		case errors.Is(err, errs.ErrDuplicateKey):
 			deduped++
 		case err != nil:
-			return 0, 0, fmt.Errorf("event[%d]: %w", i, err)
+			return nil, 0, fmt.Errorf("event[%d]: %w", i, err)
 		default:
-			inserted++
+			inserted = append(inserted, i)
+		}
+	}
+	if after != nil {
+		if err := after(tx, inserted); err != nil {
+			return nil, 0, err
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return 0, 0, err
+		return nil, 0, err
 	}
 	return inserted, deduped, nil
 }
@@ -156,14 +170,19 @@ func ingestOneTx(ctx context.Context, tx *sql.Tx, tenantID string, event domain.
 	// write path; an empty rate table costs ~nothing via the unique
 	// index). Key order per ADR-079 D3: model_raw exact first (raw ids
 	// price per snapshot), then the canonical model family token. Micros
-	// = cost_per_token × quantity × 1e6, ROUND HALF UP. Source semantics:
+	// = unit_cost_cents × quantity × 1e4 (cents to micro-dollars), ROUND
+	// HALF UP. Source semantics:
 	// 'table' when a rate matched; 'not_applicable' when the event has no
 	// costable dims (non-token meters — keeps the honesty counter
-	// meaningful); NULL when costable dims exist but no rate matched
-	// ('unresolved' — the actionable signal).
+	// meaningful); NULL when costable dims exist but no rate matched, or
+	// when the cost does not fit BIGINT micros ('unresolved' — the
+	// actionable signal). A quantity and a rate inside their limits can
+	// price past BIGINT; the stamp is the operator's cost, not what the
+	// customer is billed, so the event is still stored and billed, and the
+	// margin report counts it as unresolved.
 	err = tx.QueryRowContext(ctx, `
 		WITH rate AS (
-			SELECT r.cost_per_token
+			SELECT r.unit_cost_cents
 			FROM provider_cost_rates r
 			WHERE r.tenant_id = $2
 			  AND r.provider = $6::jsonb->>'provider'
@@ -171,6 +190,11 @@ func ingestOneTx(ctx context.Context, tx *sql.Tx, tenantID string, event domain.
 			  AND r.model IN ($6::jsonb->>'model_raw', $6::jsonb->>'model')
 			ORDER BY (r.model IS NOT DISTINCT FROM $6::jsonb->>'model_raw') DESC
 			LIMIT 1
+		), stamp AS (
+			SELECT micros FROM (
+				SELECT ROUND(unit_cost_cents * $5 * 10000) AS micros FROM rate
+			) c
+			WHERE micros BETWEEN -9223372036854775808 AND 9223372036854775807
 		)
 		INSERT INTO usage_events (id, tenant_id, customer_id, meter_id,
 			quantity, properties, idempotency_key, timestamp, origin,
@@ -178,8 +202,8 @@ func ingestOneTx(ctx context.Context, tx *sql.Tx, tenantID string, event domain.
 		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9,
 			CASE
 				WHEN $10::BIGINT IS NOT NULL THEN $10::BIGINT
-				WHEN (SELECT COUNT(*) FROM rate) = 1
-					THEN ROUND((SELECT cost_per_token FROM rate) * $5 * 1000000)::BIGINT
+				WHEN (SELECT COUNT(*) FROM stamp) = 1
+					THEN (SELECT micros FROM stamp)::BIGINT
 			END,
 			CASE
 				WHEN $10::BIGINT IS NOT NULL THEN 'observed'
@@ -187,7 +211,7 @@ func ingestOneTx(ctx context.Context, tx *sql.Tx, tenantID string, event domain.
 				  OR $6::jsonb->>'token_type' IS NULL
 				  OR ($6::jsonb->>'model' IS NULL AND $6::jsonb->>'model_raw' IS NULL)
 					THEN 'not_applicable'
-				WHEN (SELECT COUNT(*) FROM rate) = 1 THEN 'table'
+				WHEN (SELECT COUNT(*) FROM stamp) = 1 THEN 'table'
 			END
 		ON CONFLICT (tenant_id, livemode, idempotency_key) DO NOTHING
 		RETURNING id, tenant_id, customer_id, meter_id,
@@ -630,232 +654,118 @@ func (s *PostgresStore) AggregateForBillingPeriod(ctx context.Context, tenantID,
 	return result, rows.Err()
 }
 
-// AggregateByPricingRules implements the priority+claim resolution path
-// described in docs/design/multi-dim-meters.md. Strategy:
+// AggregateClaims rolls a customer's events of one meter in [from, to) into
+// one quantity per claim, under the meter's aggregation (ADR-130 §2). Each
+// event belongs to the first claim in the list whose match its dimensions
+// contain (JSONB containment, `properties @> match`), so no event is counted
+// twice; an event no claim takes is the unclaimed bucket (PriceID ""). The
+// caller lists the claims in claim order (domain.ClaimOrder: the most labels
+// first), so the claim is the caller's and every caller claims the same way.
 //
-//  1. Rank meter_pricing_rules by (priority DESC, created_at ASC, id ASC)
-//     so the ROW_NUMBER is fully deterministic. The id tiebreaker covers
-//     the corner case where two rules share the same priority AND were
-//     inserted within the same created_at tick (bulk import, same-txn
-//     bootstrap, clock-resolution collisions) — without it, Postgres is
-//     free to order them differently across servers, which would make
-//     billing non-reproducible across replicas.
-//  2. LEFT JOIN LATERAL each in-period event against the ranked rules,
-//     keeping only the top-priority rule whose dimension_match is a
-//     subset of the event's properties. NULL rule means unclaimed.
-//  3. Aggregate per rule. The CASE inside the SELECT is safe because
-//     every event in a given (rule_id) group shares the rule's mode —
-//     we GROUP BY (rule_id, mode, rrv) so the CASE evaluates a constant
-//     within each group.
+// The aggregation is the meter's, one of sum, count, max and last. last is
+// the latest event by (timestamp DESC, id DESC), the order every read of a
+// last meter uses (AggregateForBillingPeriodByAgg, Aggregate): two events
+// at one instant are a tie the id breaks, so every path bills the same one.
 //
-// last_ever needs a separate query because it ignores the period bounds.
-// We run it only if any of the meter's rules is last_ever, then merge.
-func (s *PostgresStore) AggregateByPricingRules(
+// A bucket's quantity is the aggregation over that bucket's events alone, so
+// a max or last meter with several claims bills each claim's own peak or
+// latest value.
+func (s *PostgresStore) AggregateClaims(
 	ctx context.Context,
-	tenantID, customerID, meterID string,
-	defaultMode domain.AggregationMode,
+	tenantID, customerID, meterID, aggregation string,
+	claims []domain.UsageClaim,
 	from, to time.Time,
-) ([]domain.RuleAggregation, error) {
+) ([]domain.ClaimedUsage, error) {
 	// A request that carries a memo (the public cost dashboard) runs each
 	// distinct aggregation once; see AggregationMemo. Every other caller,
 	// including every billing writer, has no memo and always reads the table.
 	if memo, ok := ctx.Value(aggregationMemoKey{}).(*AggregationMemo); ok {
-		return memo.through(aggregationMemoKeyFor(tenantID, customerID, meterID, defaultMode, from, to), func() ([]domain.RuleAggregation, error) {
-			return s.aggregateByPricingRules(ctx, tenantID, customerID, meterID, defaultMode, from, to)
+		return memo.through(aggregationMemoKeyFor(tenantID, customerID, meterID, aggregation, claims, from, to), func() ([]domain.ClaimedUsage, error) {
+			return s.aggregateClaims(ctx, tenantID, customerID, meterID, aggregation, claims, from, to)
 		})
 	}
-	return s.aggregateByPricingRules(ctx, tenantID, customerID, meterID, defaultMode, from, to)
+	return s.aggregateClaims(ctx, tenantID, customerID, meterID, aggregation, claims, from, to)
 }
 
-func (s *PostgresStore) aggregateByPricingRules(
+// claimAggregate is the SQL aggregate of each meter aggregation over one
+// bucket's events.
+var claimAggregate = map[string]string{
+	domain.AggregationSum:   `COALESCE(SUM(quantity), 0)`,
+	domain.AggregationCount: `COUNT(*)::numeric`,
+	domain.AggregationMax:   `COALESCE(MAX(quantity), 0)`,
+	domain.AggregationLast:  `(array_agg(quantity ORDER BY timestamp DESC, id DESC))[1]`,
+}
+
+func (s *PostgresStore) aggregateClaims(
 	ctx context.Context,
-	tenantID, customerID, meterID string,
-	defaultMode domain.AggregationMode,
+	tenantID, customerID, meterID, aggregation string,
+	claims []domain.UsageClaim,
 	from, to time.Time,
-) ([]domain.RuleAggregation, error) {
+) ([]domain.ClaimedUsage, error) {
+	agg, ok := claimAggregate[aggregation]
+	if !ok {
+		return nil, fmt.Errorf("aggregate claims: meter %s has aggregation %q, not one of sum, count, max, last", meterID, aggregation)
+	}
+	if claims == nil {
+		claims = []domain.UsageClaim{}
+	}
+	claimsJSON, err := json.Marshal(claims)
+	if err != nil {
+		return nil, fmt.Errorf("aggregate claims: marshal claims: %w", err)
+	}
+
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return nil, err
 	}
 	defer postgres.Rollback(tx)
 
-	// Period-bounded modes: sum, count, last_during_period, max, plus
-	// the unclaimed bucket (defaultMode is one of these — last_ever on
-	// the meter default is rejected at the service layer).
-	//
-	// last_during_period uses (array_agg ORDER BY ts DESC)[1] to pick
-	// the latest event's quantity per group — a standard Postgres trick
-	// that compiles down to a single sort over the group.
+	// The claims arrive as one jsonb array; WITH ORDINALITY keeps the
+	// caller's order as the claim rank. The buckets come back in that order,
+	// the unclaimed one last, so a line order is the same on every read. tenant_id is in the WHERE clause
+	// for the index (see AggregateForBillingPeriodByAgg).
 	rows, err := tx.QueryContext(ctx, `
-		WITH ranked_rules AS (
-			SELECT id, dimension_match, aggregation_mode, rating_rule_version_id,
-			       ROW_NUMBER() OVER (ORDER BY priority DESC, created_at ASC, id ASC) AS rule_rank
-			FROM meter_pricing_rules
-			WHERE tenant_id = $1 AND meter_id = $2
+		WITH claims AS (
+			SELECT c->>'price_id' AS price_id,
+			       c->'match'     AS match,
+			       ord
+			FROM jsonb_array_elements($6::jsonb) WITH ORDINALITY AS t(c, ord)
 		),
-		claims AS (
-			SELECT
-				e.id,
-				e.quantity,
-				e.timestamp,
-				rr.id                     AS rule_id,
-				rr.aggregation_mode       AS aggregation_mode,
-				rr.rating_rule_version_id AS rating_rule_version_id
+		claimed AS (
+			SELECT e.id, e.quantity, e.timestamp, c.price_id, c.ord
 			FROM usage_events e
 			LEFT JOIN LATERAL (
-				-- ALL rules (last_ever included) compete to claim the event,
-				-- so rule_rank picks the true top-priority match. last_ever
-				-- must NOT be filtered out of the candidate set here: if it
-				-- were, an event whose real winner is a last_ever rule would
-				-- fall through to a lower-priority period rule (or the
-				-- unclaimed bucket) AND get claimed again by the last_ever
-				-- pass below — double-counting it. We exclude such events
-				-- from the period buckets after the claim instead.
-				SELECT id, aggregation_mode, rating_rule_version_id, rule_rank
-				FROM ranked_rules
-				WHERE e.properties @> ranked_rules.dimension_match
-				ORDER BY rule_rank ASC
+				SELECT price_id, ord
+				FROM claims
+				WHERE e.properties @> claims.match
+				ORDER BY ord
 				LIMIT 1
-			) rr ON TRUE
-			WHERE e.tenant_id  = $1
-			  AND e.meter_id   = $2
-			  AND e.customer_id = $3
-			  AND e.timestamp >= $4
-			  AND e.timestamp <  $5
-			  -- Events whose winning rule is last_ever belong solely to the
-			  -- last_ever pass; drop them from the period-bounded set so they
-			  -- neither double-count nor leak into the unclaimed default.
-			  AND COALESCE(rr.aggregation_mode, '') <> 'last_ever'
-		)
-		SELECT
-			COALESCE(rule_id, '')                AS rule_id,
-			COALESCE(rating_rule_version_id, '') AS rating_rule_version_id,
-			COALESCE(aggregation_mode, $6)       AS aggregation_mode,
-			CASE COALESCE(aggregation_mode, $6)
-				WHEN 'sum'                THEN COALESCE(SUM(quantity), 0)
-				WHEN 'count'              THEN COUNT(*)::numeric
-				WHEN 'max'                THEN COALESCE(MAX(quantity), 0)
-				WHEN 'last_during_period' THEN (array_agg(quantity ORDER BY timestamp DESC))[1]
-				ELSE 0
-			END AS quantity
-		FROM claims
-		GROUP BY rule_id, rating_rule_version_id, aggregation_mode
-	`, tenantID, meterID, customerID, from, to, string(defaultMode))
-	if err != nil {
-		return nil, fmt.Errorf("aggregate by pricing rules (period): %w", err)
-	}
-
-	var out []domain.RuleAggregation
-	for rows.Next() {
-		var r domain.RuleAggregation
-		var mode string
-		if err := rows.Scan(&r.RuleID, &r.RatingRuleVersionID, &mode, &r.Quantity); err != nil {
-			_ = rows.Close()
-			return nil, err
-		}
-		r.AggregationMode = domain.AggregationMode(mode)
-		out = append(out, r)
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return nil, err
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-
-	// last_ever pass — each last_ever rule's quantity is the most recent
-	// event (across all time) CLAIMED by it. Claim semantics must be truly
-	// identical to the period-bounded path: ALL of the meter's rules compete
-	// for each event and the single top-priority match wins; only events
-	// whose WINNER is a last_ever rule belong here.
-	//
-	// The pre-fix query filtered the candidate set to last_ever rules BEFORE
-	// the claim (JOIN … WHERE aggregation_mode='last_ever'), so an event
-	// already claimed by a higher-priority sum/max/count rule in the period
-	// pass was claimed AGAIN by a lower-priority last_ever rule — the same
-	// event billed twice (period bucket + last_ever bucket). Mirroring the
-	// period pass's LATERAL top-1 claim and filtering on the winner's mode
-	// AFTER the claim closes the double-count.
-	//
-	// The probe below is what makes the doc comment above true. This pass has
-	// no lower time bound — that is what last_ever MEANS (the latest value as
-	// of the window end, however old) — so running it unconditionally walked
-	// the customer's entire lifetime of
-	// events for the meter on every invoice, every preview, and every hourly
-	// threshold scan, including for the overwhelming majority of meters that
-	// have no last_ever rule at all. The probe is an index hit on
-	// (tenant_id, meter_id); the scan it skips is not.
-	var hasLastEver bool
-	if err := tx.QueryRowContext(ctx, `
-		SELECT EXISTS (
-			SELECT 1 FROM meter_pricing_rules
-			WHERE tenant_id = $1 AND meter_id = $2
-			  AND aggregation_mode = 'last_ever'
-		)
-	`, tenantID, meterID).Scan(&hasLastEver); err != nil {
-		return nil, fmt.Errorf("aggregate by pricing rules (last_ever probe): %w", err)
-	}
-	if !hasLastEver {
-		return out, nil
-	}
-
-	leverRows, err := tx.QueryContext(ctx, `
-		WITH ranked_rules AS (
-			SELECT id, dimension_match, aggregation_mode, rating_rule_version_id,
-			       ROW_NUMBER() OVER (ORDER BY priority DESC, created_at ASC, id ASC) AS rule_rank
-			FROM meter_pricing_rules
-			WHERE tenant_id = $1 AND meter_id = $2
-		),
-		claims AS (
-			SELECT
-				e.id,
-				e.quantity,
-				e.timestamp,
-				rr.id                     AS rule_id,
-				rr.rating_rule_version_id AS rating_rule_version_id
-			FROM usage_events e
-			LEFT JOIN LATERAL (
-				SELECT id, aggregation_mode, rating_rule_version_id, rule_rank
-				FROM ranked_rules
-				WHERE e.properties @> ranked_rules.dimension_match
-				ORDER BY rule_rank ASC
-				LIMIT 1
-			) rr ON TRUE
+			) c ON TRUE
 			WHERE e.tenant_id   = $1
 			  AND e.meter_id    = $2
 			  AND e.customer_id = $3
-			  -- The latest value AS OF the window end. No lower bound
-			  -- (that is what last_ever means), but an upper one: a close
-			  -- that runs after its period ended (the next tick, a catch-up
-			  -- over several periods, a test-clock advance) must not bill a
-			  -- value set after the period it is billing.
-			  AND e.timestamp   < $4
-			  AND rr.aggregation_mode = 'last_ever'
+			  AND e.timestamp  >= $4
+			  AND e.timestamp  <  $5
 		)
-		SELECT DISTINCT ON (rule_id)
-			rule_id, rating_rule_version_id, quantity
-		FROM claims
-		ORDER BY rule_id, timestamp DESC
-	`, tenantID, meterID, customerID, to)
+		SELECT COALESCE(price_id, ''), `+agg+`
+		FROM claimed
+		GROUP BY price_id
+		ORDER BY MIN(ord) NULLS LAST
+	`, tenantID, meterID, customerID, from, to, string(claimsJSON))
 	if err != nil {
-		return nil, fmt.Errorf("aggregate by pricing rules (last_ever): %w", err)
+		return nil, fmt.Errorf("aggregate claims: %w", err)
 	}
-	defer func() { _ = leverRows.Close() }()
+	defer func() { _ = rows.Close() }()
 
-	for leverRows.Next() {
-		var r domain.RuleAggregation
-		r.AggregationMode = domain.AggLastEver
-		if err := leverRows.Scan(&r.RuleID, &r.RatingRuleVersionID, &r.Quantity); err != nil {
+	var out []domain.ClaimedUsage
+	for rows.Next() {
+		var r domain.ClaimedUsage
+		if err := rows.Scan(&r.PriceID, &r.Quantity); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
 	}
-	if err := leverRows.Err(); err != nil {
-		return nil, err
-	}
-
-	return out, nil
+	return out, rows.Err()
 }
 
 func buildUsageWhere(f ListFilter) (string, []any) {
@@ -912,8 +822,8 @@ func buildUsageWhere(f ListFilter) (string, []any) {
 
 // propertiesJSON serializes the event's free-form properties for the JSONB
 // column. This map is also the carrier for multi-dim meter dimensions
-// (model, operation, region, etc.) that pricing_rule.dimension_match runs
-// subset-match against — losing it here would silently drop dimension
+// (model, operation, region, etc.) that a plan price's dimension_match is
+// matched against — losing it here would silently drop dimension
 // information at ingest, so a marshal failure is treated as a hard error.
 func propertiesJSON(props map[string]any) (string, error) {
 	if len(props) == 0 {

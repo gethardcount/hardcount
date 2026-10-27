@@ -12,6 +12,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 func dueSubFixture(id string) domain.Subscription {
@@ -50,7 +51,7 @@ func TestRunCycleForTenant_BillsDueSubs(t *testing.T) {
 	}
 	engine := tenantRunEngine(subs)
 
-	generated, failures := engine.RunCycleForTenant(context.Background(), "t1", 50)
+	generated, failures := engine.RunCycleForTenant(postgres.WithLivemode(context.Background(), true), "t1", 50)
 	if len(failures) != 0 {
 		t.Fatalf("unexpected failures: %v", failures)
 	}
@@ -98,7 +99,7 @@ func TestRunCycleForTenant_FailingSubDoesNotLoopForever(t *testing.T) {
 // scheduler-only.
 func TestTriggerCycle_ForbidsUnscopedKey(t *testing.T) {
 	subs := &mockSubs{subs: map[string]domain.Subscription{}, cycleUpdated: make(map[string]bool)}
-	h := NewHandler(tenantRunEngine(subs), subs)
+	h := NewHandler(tenantRunEngine(subs))
 
 	req := httptest.NewRequest(http.MethodPost, "/run", nil) // no tenant in ctx
 	rec := httptest.NewRecorder()
@@ -119,7 +120,7 @@ func TestTriggerCycle_SanitizesErrorDetail(t *testing.T) {
 		cycleUpdated:   make(map[string]bool),
 		closePeriodErr: errors.New(secret),
 	}
-	h := NewHandler(tenantRunEngine(subs), subs)
+	h := NewHandler(tenantRunEngine(subs))
 
 	ctx := auth.WithTenantID(context.Background(), "t1")
 	req := httptest.NewRequest(http.MethodPost, "/run", nil).WithContext(ctx)

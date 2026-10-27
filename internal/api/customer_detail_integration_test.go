@@ -20,10 +20,10 @@ import (
 
 // TestCustomerDetail_UnknownCustomer404s pins the fix for the walked
 // "200 empty shell" class (post-billing closeout, open item 2): the
-// per-customer composed views used to skip the customer lookup, so a
-// typo'd or cross-tenant id answered 200 with everything empty — "this
-// customer has nothing" — instead of 404 "no such customer". All three
-// routes now resolve the customer first. Cross-tenant behaves exactly
+// per-customer overview used to skip the customer lookup, so a typo'd or
+// cross-tenant id answered 200 with everything empty — "this customer has
+// nothing" — instead of 404 "no such customer". It now resolves the
+// customer first. Cross-tenant behaves exactly
 // like nonexistent (RLS hides the row), so there is still no existence
 // oracle — just an honest 404.
 func TestCustomerDetail_UnknownCustomer404s(t *testing.T) {
@@ -58,10 +58,8 @@ func TestCustomerDetail_UnknownCustomer404s(t *testing.T) {
 
 	r := chi.NewRouter()
 	r.Get("/customers/{customer_id}/overview", h.overview)
-	r.Get("/customers/{customer_id}/invoices", h.listInvoices)
-	r.Get("/customers/{customer_id}/subscriptions", h.listSubscriptions)
 
-	routes := []string{"overview", "invoices", "subscriptions"}
+	routes := []string{"overview"}
 	do := func(customerID, route string) int {
 		req := httptest.NewRequest("GET", "/customers/"+customerID+"/"+route, nil).
 			WithContext(auth.WithTenantID(ctx, tenantA))

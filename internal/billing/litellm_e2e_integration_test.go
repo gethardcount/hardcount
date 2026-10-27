@@ -14,7 +14,6 @@ import (
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/customer"
 	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/dunning"
 	"github.com/sagarsuperuser/velox/internal/integrations/litellm"
 	"github.com/sagarsuperuser/velox/internal/invoice"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
@@ -25,7 +24,6 @@ import (
 	"github.com/sagarsuperuser/velox/internal/subscription/subscriptiontest"
 	"github.com/sagarsuperuser/velox/internal/testutil"
 	"github.com/sagarsuperuser/velox/internal/usage"
-	"github.com/sagarsuperuser/velox/internal/webhook"
 )
 
 // TestLiteLLM_WedgeE2E is the AI-native wedge as a CI test: a REALISTIC LiteLLM
@@ -41,6 +39,10 @@ import (
 //   - CACHE_READ additive-disjoint split: prompt_tokens includes the cached
 //     tokens; the mapper emits input = prompt − cached and cache_read = cached,
 //     each priced at its own recipe rate.
+//   - CACHE_WRITE 5m/1h split: a second call, shaped like a LiteLLM 1.83.9
+//     record (top-level counts, end_user, the split under
+//     metadata.usage_object), is the flag-2 probe call scaled by 100 so every
+//     line is whole cents. Before the split it billed input 10.1M at 1.0x.
 //
 // This is the test that would have caught the S2/X15 wedge breakage at CI time.
 func TestLiteLLM_WedgeE2E(t *testing.T) {
@@ -68,9 +70,7 @@ func TestLiteLLM_WedgeE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load recipe registry: %v", err)
 	}
-	recipeSvc := recipe.NewService(db, recipe.NewPostgresStore(db), registry,
-		pricingSvc, dunning.NewService(dunning.NewPostgresStore(db), nil, nil),
-		webhook.NewService(webhook.NewPostgresStore(db), nil, "local"))
+	recipeSvc := recipe.NewService(db, recipe.NewPostgresStore(db), registry, pricingSvc)
 	if _, err := recipeSvc.Instantiate(ctx, tenantID, "anthropic_style", nil, recipe.InstantiateOptions{}); err != nil {
 		t.Fatalf("instantiate anthropic_style: %v", err)
 	}
@@ -127,25 +127,78 @@ func TestLiteLLM_WedgeE2E(t *testing.T) {
 	}`, eventTS)
 
 	handler := litellm.New(customerStore, pricingSvc, usageSvc, usageSvc)
-	req := httptest.NewRequest(http.MethodPost, "/spend", strings.NewReader(body)).WithContext(authCtx)
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	handler.Routes().ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("/spend: status %d, body %s", rec.Code, rec.Body.String())
+	post := func(body string) string {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/spend", strings.NewReader(body)).WithContext(authCtx)
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.Routes().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("/spend: status %d, body %s", rec.Code, rec.Body.String())
+		}
+		return rec.Body.String()
 	}
 	// input + cache_read + output = 3 accepted events.
-	if got := rec.Body.String(); !strings.Contains(got, `"accepted":3`) {
+	if got := post(body); !strings.Contains(got, `"accepted":3`) {
 		t.Fatalf("/spend body: got %s, want accepted=3 (input+cache_read+output)", got)
 	}
 
-	// 3b. Verify the events landed with the canonical family + token roles.
-	events, err := usageStore.AggregateByPricingRules(ctx, tenantID, cust.ID, plan.MeterIDs[0], domain.AggSum, periodStart, periodEnd)
-	if err != nil {
-		t.Fatalf("aggregate by rules: %v", err)
+	// The cache-write call, at claude-sonnet-4.5's recipe rates (input
+	// $3.00/M, 5m write $3.75/M, 1h write $6.00/M, output $15.00/M): 100,000
+	// fresh input → 30¢, 4M 5m writes → 1500¢, 6M 1h writes → 3600¢, 50,000
+	// output → 75¢: 5205¢, the probe's $0.5205 times 100.
+	writeBody := fmt.Sprintf(`{
+		"id":"wedge_call_writes","call_type":"acompletion","status":"success","cache_hit":null,
+		"model":"anthropic/claude-sonnet-4-5-20250929","custom_llm_provider":"anthropic",
+		"end_user":"cus_wedge","prompt_tokens":10100000,"completion_tokens":50000,"total_tokens":10150000,
+		"metadata":{"usage_object":{"prompt_tokens":10100000,"completion_tokens":50000,"total_tokens":10150000,
+			"cache_creation_input_tokens":10000000,"cache_read_input_tokens":0,
+			"prompt_tokens_details":{"cached_tokens":0,"cache_creation_tokens":10000000,"text_tokens":100000,
+				"cache_creation_token_details":{"ephemeral_5m_input_tokens":4000000,"ephemeral_1h_input_tokens":6000000}}}},
+		"endTime":%d
+	}`, eventTS)
+	if got := post(writeBody); !strings.Contains(got, `"accepted":4`) {
+		t.Fatalf("/spend body: got %s, want accepted=4 (input+cache_write_5m+cache_write_1h+output)", got)
 	}
-	if len(events) == 0 {
-		t.Fatal("no rule aggregations — events didn't match recipe rules (model normalization failed?)")
+
+	// A Claude Code /v1/messages call (call_type anthropic_messages), shaped
+	// like the LiteLLM 1.83.9 proxy record in
+	// internal/integrations/litellm/testdata/litellm-1.83.9-proxy-messages-split.json
+	// and scaled by 100. Before 2026-10-22 Velox skipped this call type and
+	// billed nothing. At claude-sonnet-4.5's rates: 100,000 input → 30¢,
+	// 500,000 cache reads at $0.30/M → 15¢, 4M 5m writes → 1500¢, 6M 1h
+	// writes → 3600¢, 50,000 output → 75¢: 5220¢.
+	messagesBody := fmt.Sprintf(`{
+		"id":"chatcmpl-wedge-messages","call_type":"anthropic_messages","status":"success","cache_hit":null,
+		"model":"anthropic/claude-sonnet-4-5-20250929","custom_llm_provider":"anthropic",
+		"end_user":"cus_wedge","prompt_tokens":10600000,"completion_tokens":50000,"total_tokens":10650000,
+		"metadata":{"usage_object":{"prompt_tokens":10600000,"completion_tokens":50000,"total_tokens":10650000,
+			"cache_creation_input_tokens":10000000,"cache_read_input_tokens":500000,
+			"prompt_tokens_details":{"cached_tokens":500000,"cache_creation_tokens":10000000,"text_tokens":100000,
+				"cache_creation_token_details":{"ephemeral_5m_input_tokens":4000000,"ephemeral_1h_input_tokens":6000000}}}},
+		"startTime":%d.25,"endTime":%d
+	}`, eventTS, eventTS)
+	if got := post(messagesBody); !strings.Contains(got, `"accepted":5`) {
+		t.Fatalf("/spend body: got %s, want accepted=5 (input+cache_read+cache_write_5m+cache_write_1h+output)", got)
+	}
+
+	// 3b. Verify the events landed with the canonical family + token roles.
+	prices, err := pricing.NewPostgresStore(db).PlanPricesAt(ctx, tenantID, plan.ID, periodStart, "")
+	if err != nil || len(prices) == 0 {
+		t.Fatalf("plan prices: %v (%d)", err, len(prices))
+	}
+	events, err := usageStore.AggregateClaims(ctx, tenantID, cust.ID, prices[0].MeterID, domain.AggregationSum, domain.ClaimsOf(prices), periodStart, periodEnd)
+	if err != nil {
+		t.Fatalf("aggregate by price: %v", err)
+	}
+	claimed := 0
+	for _, e := range events {
+		if e.PriceID != "" {
+			claimed++
+		}
+	}
+	if claimed == 0 {
+		t.Fatal("no price took an event — events didn't match the recipe prices (model normalization failed?)")
 	}
 
 	// 4. Run the cycle → invoice for the elapsed period.
@@ -170,11 +223,14 @@ func TestLiteLLM_WedgeE2E(t *testing.T) {
 	if inv.ID == "" {
 		t.Fatal("no cycle invoice for the wedge sub")
 	}
-	// input 300¢ + cache_read 30¢ + output 1500¢ = 1830¢ (base $0, no tax).
-	const wantCents = 1830
+	// Call 1: input 300¢ + cache_read 30¢ + output 1500¢ = 1830¢. Call 2:
+	// 30¢ + 1500¢ + 3600¢ + 75¢ = 5205¢ (it billed 3105¢ before the split).
+	// Call 3, the /v1/messages call: 5220¢ (0¢ before 2026-10-22). Base $0,
+	// no tax.
+	const wantCents = 1830 + 5205 + 5220
 	if inv.SubtotalCents != wantCents {
 		items, _ := invoiceStore.ListLineItems(ctx, tenantID, inv.ID)
-		t.Errorf("invoice subtotal: got %d¢, want %d¢ (input 300 + cache_read 30 + output 1500). Lines: %+v", inv.SubtotalCents, wantCents, items)
+		t.Errorf("invoice subtotal: got %d¢, want %d¢ (1830 for the cache-read call + 5205 for the cache-write call + 5220 for the /v1/messages call). Lines: %+v", inv.SubtotalCents, wantCents, items)
 	}
-	t.Logf("wedge e2e: claude-3-5-sonnet-20241022 → claude-3.5-sonnet, 3 token roles rated, invoice $%.2f", float64(inv.SubtotalCents)/100)
+	t.Logf("wedge e2e: dated model ids normalized, 5 token roles rated, invoice $%.2f", float64(inv.SubtotalCents)/100)
 }

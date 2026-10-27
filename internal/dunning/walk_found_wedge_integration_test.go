@@ -55,8 +55,8 @@ func TestListDueRuns_LivemodeIsolation(t *testing.T) {
 	}
 	dstore := dunning.NewPostgresStore(db)
 	policy, err := dstore.UpsertPolicy(ctx, tenantID, domain.DunningPolicy{
-		Name: "default", Enabled: true, RetrySchedule: []string{"72h"}, MaxRetryAttempts: 3,
-		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible, GracePeriodDays: 3,
+		Name: "default", Enabled: true, RetryDays: []int{3, 3, 3},
+		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible,
 	})
 	if err != nil {
 		t.Fatalf("upsert policy: %v", err)
@@ -158,8 +158,8 @@ func TestProcessDueRuns_TerminalInvoiceResolvesWithoutPolicy(t *testing.T) {
 	// a TEST run. GetPolicyByID under the test ctx cannot see it (mode-scoped
 	// read), which is precisely the not-found the walk hit.
 	livePolicy, err := dstore.UpsertPolicy(postgres.WithLivemode(context.Background(), true), tenantID, domain.DunningPolicy{
-		Name: "live-only", Enabled: true, RetrySchedule: []string{"72h"}, MaxRetryAttempts: 3,
-		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible, GracePeriodDays: 3,
+		Name: "live-only", Enabled: true, RetryDays: []int{3, 3, 3},
+		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible,
 	})
 	if err != nil {
 		t.Fatalf("upsert live policy: %v", err)

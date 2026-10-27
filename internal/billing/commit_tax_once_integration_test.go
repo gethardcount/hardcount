@@ -95,7 +95,7 @@ func TestCommitTax_PurchaseUntaxed_UsageTaxedOnce_E2E(t *testing.T) {
 	if bal := lf.balance(t); bal != 10000 {
 		t.Fatalf("credit after the purchase = %d, want 10000", bal)
 	}
-	if _, err := lf.invStore.MarkPaid(ctx, lf.tenantID, purchase.ID, "out_of_band:test", time.Now().UTC()); err != nil {
+	if _, err := lf.invStore.MarkPaidOffline(ctx, lf.tenantID, purchase.ID, time.Now().UTC(), nil); err != nil {
 		t.Fatalf("pay the commit invoice: %v", err)
 	}
 
@@ -185,7 +185,7 @@ func TestCommitRelief_TaxedPurchase_StillReversesItsTax(t *testing.T) {
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
-	if _, err := invStore.MarkPaid(ctx, tenantID, draft.ID, "out_of_band:test", time.Now().UTC()); err != nil {
+	if _, err := invStore.MarkPaidOffline(ctx, tenantID, draft.ID, time.Now().UTC(), nil); err != nil {
 		t.Fatalf("pay: %v", err)
 	}
 

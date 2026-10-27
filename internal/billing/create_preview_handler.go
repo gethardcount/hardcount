@@ -1,10 +1,7 @@
 package billing
 
 import (
-	"encoding/json"
 	"errors"
-	"io"
-	"log/slog"
 	"net/http"
 	"time"
 
@@ -18,7 +15,7 @@ import (
 
 // CreatePreviewHandler exposes POST /v1/invoices/create_preview. Kept
 // distinct from the existing billing.Handler (which owns the engine
-// trigger and the in-app debug preview) because this surface composes
+// trigger) because this surface composes
 // across customer / subscription / pricing — the dependency set is
 // materially different and the route lives under /invoices/* rather than
 // /billing/*.
@@ -82,19 +79,19 @@ func (h *CreatePreviewHandler) create(w http.ResponseWriter, r *http.Request) {
 	// already skips it. MarkSkip is kept as the LOCAL declaration the registry
 	// note cites — the two agree, and if the exemption is ever lifted this call is
 	// what keeps the route from reporting as an uncovered mutation.) Fired automatically by the dashboard's
-	// upcoming-invoice card on every customer page-open.
+	// upcoming-invoice cards on every customer and subscription page-open.
 	audit.MarkSkip(r.Context())
 
 	tenantID := auth.TenantID(r.Context())
 
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "create_preview: read body", "error", err)
-		respond.BadRequest(w, r, "could not read request body")
+	// An empty body is a degenerate {}: customer_id is then refused by the
+	// service (Required("customer_id")), the same as for {} or an empty
+	// customer_id.
+	var wire CreatePreviewWireRequest
+	if !respond.DecodeStrict(w, r, &wire, respond.EmptyBodyOK) {
 		return
 	}
-
-	req, err := decodeCreatePreviewRequest(body)
+	req, err := createPreviewRequestFromWire(wire)
 	if err != nil {
 		respond.FromError(w, r, err, "create_preview")
 		return
@@ -118,21 +115,10 @@ func (h *CreatePreviewHandler) create(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, r, http.StatusOK, result)
 }
 
-// decodeCreatePreviewRequest parses the JSON body and converts wire
-// timestamps to time.Time. Returns DomainError-wrapped failures so the
-// handler's FromError path can map them to 400/422 with the right field.
-//
-// Empty body is acceptable as a degenerate {}, but customer_id is required
-// by the service layer (Required("customer_id")) so the error surfaces
-// uniformly whether the body was {}, {"customer_id":""}, or absent.
-func decodeCreatePreviewRequest(body []byte) (CreatePreviewRequest, error) {
-	wire := CreatePreviewWireRequest{}
-	if len(body) > 0 {
-		if err := json.Unmarshal(body, &wire); err != nil {
-			return CreatePreviewRequest{}, errs.Invalid("body", "request body is not valid JSON")
-		}
-	}
-
+// createPreviewRequestFromWire converts the wire timestamps to time.Time.
+// Returns DomainError-wrapped failures so the handler's FromError path can
+// map them to 422 with the right field.
+func createPreviewRequestFromWire(wire CreatePreviewWireRequest) (CreatePreviewRequest, error) {
 	out := CreatePreviewRequest{
 		CustomerID:     wire.CustomerID,
 		SubscriptionID: wire.SubscriptionID,

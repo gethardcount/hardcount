@@ -2,7 +2,6 @@ package paymentmethods
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/api/respond"
 	"github.com/sagarsuperuser/velox/internal/auth"
+	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
 )
 
@@ -114,25 +114,9 @@ func (h *Handler) OperatorRoutes() chi.Router {
 	return r
 }
 
-type pmResponse struct {
-	ID        string    `json:"id"`
-	Type      string    `json:"type"`
-	CardBrand string    `json:"card_brand,omitempty"`
-	CardLast4 string    `json:"card_last4,omitempty"`
-	CardExpMo int       `json:"card_exp_month,omitempty"`
-	CardExpYr int       `json:"card_exp_year,omitempty"`
-	IsDefault bool      `json:"is_default"`
-	CreatedAt time.Time `json:"created_at"`
-}
-
-func toResp(pm PaymentMethod) pmResponse {
-	return pmResponse{
-		ID: pm.ID, Type: pm.Type,
-		CardBrand: pm.CardBrand, CardLast4: pm.CardLast4,
-		CardExpMo: pm.CardExpMonth, CardExpYr: pm.CardExpYear,
-		IsDefault: pm.IsDefault, CreatedAt: pm.CreatedAt,
-	}
-}
+// toResp is a payment method as the API returns it, the same shape the
+// payment_method.* webhooks carry (domain.PaymentMethodView).
+func toResp(pm PaymentMethod) domain.PaymentMethodView { return pm.View() }
 
 type SetupSessionRequest struct {
 	ReturnURL string `json:"return_url,omitempty"`
@@ -180,7 +164,7 @@ func (h *Handler) operatorList(w http.ResponseWriter, r *http.Request) {
 		respond.InternalError(w, r)
 		return
 	}
-	out := make([]pmResponse, 0, len(pms))
+	out := make([]domain.PaymentMethodView, 0, len(pms))
 	for _, pm := range pms {
 		out = append(out, toResp(pm))
 	}
@@ -188,6 +172,9 @@ func (h *Handler) operatorList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) operatorSetDefault(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID, customerID, ok := operatorIdentity(r)
 	if !ok {
 		respond.BadRequest(w, r, "missing tenant or customer id")
@@ -211,6 +198,9 @@ func (h *Handler) operatorSetDefault(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) operatorDetach(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID, customerID, ok := operatorIdentity(r)
 	if !ok {
 		respond.BadRequest(w, r, "missing tenant or customer id")
@@ -276,6 +266,11 @@ func (h *Handler) operatorSendSetupEmail(w http.ResponseWriter, r *http.Request)
 		respond.BadRequest(w, r, "missing tenant or customer id")
 		return
 	}
+	// The body first: a refused body must not start the cooldown.
+	var req SendSetupEmailRequest
+	if !respond.DecodeStrict(w, r, &req, respond.EmptyBodyOK) {
+		return
+	}
 	if h.customerLookup == nil || h.emailer == nil {
 		respond.Error(w, r, http.StatusServiceUnavailable, "api_error",
 			"email_unavailable",
@@ -302,10 +297,6 @@ func (h *Handler) operatorSendSetupEmail(w http.ResponseWriter, r *http.Request)
 				"a setup link was sent to this customer recently — wait before sending again")
 			return
 		}
-	}
-	var req SendSetupEmailRequest
-	if r.Body != nil {
-		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
 	note := strings.TrimSpace(req.Note)
 	if len(note) > 2000 {
@@ -390,8 +381,8 @@ func (h *Handler) operatorCreateSetupSession(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	var req SetupSessionRequest
-	if r.Body != nil {
-		_ = json.NewDecoder(r.Body).Decode(&req)
+	if !respond.DecodeStrict(w, r, &req, respond.EmptyBodyOK) {
+		return
 	}
 	url, sessionID, err := h.svc.CreateSetupSession(r.Context(), tenantID, customerID, req.ReturnURL)
 	if err != nil {

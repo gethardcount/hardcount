@@ -120,8 +120,62 @@ jobs:
         env:
           TEST_ADMIN_DATABASE_URL: postgres://velox:velox@localhost:5432/velox_test?sslmode=disable
           TEST_DATABASE_URL: postgres://velox_test_app:velox_test_app@localhost:5432/velox_test?sslmode=disable
-          # A database call that forgot to say live or test mode panics
-          # instead of logging a warning.
+
+  # The pricing-shapes suite (ADR-130): each common way to price with
+  # Velox, billed end to end and checked to the cent, plus the goldens of
+  # each price shape on every rating path. The test job runs these too;
+  # this job gives them a check of their own, so a branch rule can require
+  # it.
+  pricing-shapes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: velox
+          POSTGRES_USER: velox
+          POSTGRES_PASSWORD: velox
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U velox -d velox"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Create test database and app user
+        run: |
+          PGPASSWORD=velox psql -v ON_ERROR_STOP=1 -h localhost -U velox -d velox -f docker/init.sql
+          PGPASSWORD=velox psql -v ON_ERROR_STOP=1 -h localhost -U velox -d velox \
+            -c "ALTER SYSTEM SET fsync = off" \
+            -c "ALTER SYSTEM SET synchronous_commit = off" \
+            -c "ALTER SYSTEM SET full_page_writes = off" \
+            -c "SELECT pg_reload_conf()"
+
+      - name: Pricing shapes, through the API
+        run: >-
+          go test -p 1 -count=1 -short=false -v ./internal/api
+          -run '^(TestPricingShapes_|TestE2E_PlanPrices_TwoPlansPriceOneMeterDifferently$|TestE2E_PlanPrices_SwapPricesEachWindowByItsPlan$)'
+        env:
+          TEST_ADMIN_DATABASE_URL: postgres://velox:velox@localhost:5432/velox_test?sslmode=disable
+          TEST_DATABASE_URL: postgres://velox_test_app:velox_test_app@localhost:5432/velox_test?sslmode=disable
+          VELOX_LIVEMODE_STRICT: "true"
+
+      - name: Price shape goldens, on every rating path
+        run: >-
+          go test -p 1 -count=1 -short=false -v ./internal/billing
+          -run '^(TestPriceShapes_|TestRateShapes_)'
+        env:
+          TEST_ADMIN_DATABASE_URL: postgres://velox:velox@localhost:5432/velox_test?sslmode=disable
+          TEST_DATABASE_URL: postgres://velox_test_app:velox_test_app@localhost:5432/velox_test?sslmode=disable
           VELOX_LIVEMODE_STRICT: "true"
 
   # The same integration suite with the APP pool behind PgBouncer in
@@ -181,16 +235,14 @@ jobs:
 
       - name: Integration Tests through PgBouncer (transaction mode)
         run: PGB_MODE=ci scripts/pgbouncer-test.sh
-        env:
-          VELOX_LIVEMODE_STRICT: "true"
 
-  # The upgrade path (ADR-125): a new install of HEAD must equal an install
-  # upgraded from the published v0.8.1 image, schema with owners and access
-  # rights, data and applied versions, under three role setups (Compose,
-  # managed Postgres, the CI test database). Also a restore drill (a v0.8.1
-  # backup restored over a database HEAD took over must be refused) and an
-  # apply on Postgres 14. Each Postgres runs in its own container, so the
-  # job has no service.
+  # A fresh install of HEAD under three role setups (Compose, managed
+  # Postgres, the CI test database): every migration applies to an empty
+  # database, a second run has nothing to do, and the limited user has the
+  # idle-transaction timeout. Also a restore drill (a HEAD backup restored
+  # into an empty database with scripts/restore.sh) and an apply on
+  # Postgres 14. Each Postgres runs in its own container, so the job has no
+  # service.
   migrations:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -204,13 +256,13 @@ jobs:
       - name: Build HEAD
         run: go build -o "${{ runner.temp }}/velox" ./cmd/velox
 
-      - name: New install equals upgraded install
-        run: scripts/ci/migration-convergence.sh
+      - name: Fresh install under each role setup
+        run: scripts/ci/migrations-fresh-install.sh
         env:
           VELOX_BIN: ${{ runner.temp }}/velox
           KEEP_OUT: ${{ runner.temp }}/migrations-out
 
-      - name: Upload dumps on failure
+      - name: Upload outputs on failure
         if: failure()
         uses: actions/upload-artifact@v7
         with:
@@ -218,7 +270,8 @@ jobs:
           path: ${{ runner.temp }}/migrations-out
           retention-days: 7
 
-  # Golden path: the README quickstart + scripts/demo.sh, executed for real.
+  # Golden path: the first-invoice tutorial's own commands, then the README
+  # quickstart + scripts/demo.sh, executed for real.
   # This is the whole wedge chain in one run — recipe → test-clock customer →
   # LiteLLM-shaped token ingest → provider cost rates → simulated month →
   # finalized invoice with per-(model, token_type) lines + PDF → margin
@@ -286,6 +339,33 @@ jobs:
           # demo would pass without tenant isolation being on.
           grep -q 'using app database connection (RLS enforced)' server.log \
             || { echo "server is not on the app connection: row-level security is off"; tail -50 server.log; exit 1; }
+
+      # docs/first-invoice.md, run from its own code blocks by
+      # cmd/velox-docs-run, before the demo, as on a fresh install. The page
+      # reads the test key from the file the quick start writes, so this
+      # writes that file. The first pass sends the usage both ways (5a, then
+      # 5b, which deduplicates). The second takes only 5b, for a new
+      # customer, as the page's "already exists" row says to. Step 1 says
+      # applying the recipe again returns the same setup, so the plans and
+      # meters must be the same after the second pass as after the first.
+      - name: Run the first-invoice tutorial (docs/first-invoice.md)
+        run: |
+          set -o pipefail
+          shopt -s inherit_errexit
+          jq -n --arg k "$(cat secret.key)" '{secret_key_test: $k}' > deploy/compose/quickstart-credentials.json
+          go build -o "$RUNNER_TEMP/velox-docs-run" ./cmd/velox-docs-run
+          setup() {
+            for kind in plans meters; do
+              curl -sf "http://localhost:8080/v1/$kind" -H "Authorization: Bearer $(cat secret.key)" \
+                | jq -ec --arg kind "$kind" '{($kind): [.data[].id] | sort}'
+            done
+          }
+          "$RUNNER_TEMP/velox-docs-run" docs/first-invoice.md
+          after_first=$(setup)
+          "$RUNNER_TEMP/velox-docs-run" -skip 5a -replace acme-1=acme-2 docs/first-invoice.md
+          after_second=$(setup)
+          echo "$after_first"
+          [ "$after_first" = "$after_second" ] || { echo "Applying the recipe again changed the plans or meters:"; echo "$after_second"; exit 1; }
 
       - name: Run the golden path (scripts/demo.sh)
         run: ./scripts/demo.sh "$(cat secret.key)"
@@ -618,9 +698,10 @@ jobs:
 
   docker:
     timeout-minutes: 30
-    # Keep this list the same as the required status checks on main: an
-    # image must not be published past a check that would block a merge.
-    needs: [test, unit, test-pgbouncer, migrations, golden-path, codegen-drift, frontend, lint]
+    # Every check an image must pass before it is published. Not all of
+    # them are required checks on main (migrations and pricing-shapes are
+    # not today), so a merge can pass one this list still waits for.
+    needs: [test, unit, test-pgbouncer, pricing-shapes, migrations, golden-path, codegen-drift, frontend, lint]
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     permissions:

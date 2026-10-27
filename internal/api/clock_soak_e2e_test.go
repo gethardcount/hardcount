@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -16,7 +17,7 @@ import (
 )
 
 // TestE2E_ClockSoak_MonthEndAnchorThroughYearBoundary is the stability plan's
-// B2 soak (docs/records/product-stability-plan.md): one subscription anchored on
+// B2 soak (docs/dev/records/product-stability-plan.md): one subscription anchored on
 // the WORST day of the month (the 31st), driven through 13 real cycle closes
 // across a year boundary and two Februaries, through the REAL server — the
 // test-clock advance endpoint, the catchup orchestrator, the billing engine —
@@ -82,14 +83,14 @@ func TestE2E_ClockSoak_MonthEndAnchorThroughYearBoundary(t *testing.T) {
 
 	resp = doPost(t, ts, "/v1/plans", auth, map[string]any{
 		"code": "soak-mo", "name": "Soak Monthly", "currency": "USD",
-		"billing_interval": "monthly", "base_amount_cents": 5000, "status": "active",
+		"billing_interval": "monthly", "base_amount_cents": 5000, "base_bill_timing": "in_arrears", "status": "active",
 	})
 	assertStatus(t, resp, 201)
 	planID := readJSON(t, resp)["id"].(string)
 
 	resp = doPost(t, ts, "/v1/subscriptions", auth, map[string]any{
 		"code": "soak-sub", "display_name": "Soak Sub", "customer_id": custID,
-		"items": []map[string]any{{"plan_id": planID}}, "billing_time": "anniversary",
+		"items": []map[string]any{{"plan_id": planID}}, "billing_time": "anniversary", "status": "draft",
 	})
 	assertStatus(t, resp, 201)
 	subID := readJSON(t, resp)["id"].(string)
@@ -308,11 +309,11 @@ func TestE2E_ClockSoak_MonthEndAnchorThroughYearBoundary(t *testing.T) {
 		if lt, _ := li["line_type"].(string); lt != "base_fee" {
 			t.Errorf("step %d: line_type = %q, want base_fee", step, lt)
 		}
-		if got := num(li, "quantity"); got != 1 {
-			t.Errorf("step %d: line quantity = %d, want 1", step, got)
+		if got := li["quantity"]; got != "1" {
+			t.Errorf("step %d: line quantity = %v, want \"1\"", step, got)
 		}
-		if got := num(li, "unit_amount_cents"); got != wantBaseCents {
-			t.Errorf("step %d: line unit_amount_cents = %d, want %d", step, got, wantBaseCents)
+		if got, want := li["unit_amount_decimal"], strconv.FormatInt(wantBaseCents, 10); got != want {
+			t.Errorf("step %d: line unit_amount_decimal = %v, want %q", step, got, want)
 		}
 		if got := num(li, "amount_cents"); got != wantBaseCents {
 			t.Errorf("step %d: line amount_cents = %d, want %d", step, got, wantBaseCents)

@@ -47,11 +47,18 @@ test('no customer copy says token or billing provider', () => {
     }),
     checkoutErrorCopy('invalid_token', 'Acme'),
     checkoutErrorCopy('stripe_error', 'Acme'),
+    checkoutErrorCopy('online_payment_unavailable', 'Acme'),
     checkoutErrorCopy(undefined, 'Acme'),
   ]
   for (const line of all) {
     assert.doesNotMatch(line, /token|billing provider|billing administrator/i, line)
   }
+})
+
+test('a seller without online card payments is told, not asked to retry', () => {
+  const copy = checkoutErrorCopy('online_payment_unavailable', 'Acme')
+  assert.equal(copy, "Adding a card online isn't available yet. Contact Acme to update your payment method another way.")
+  assert.doesNotMatch(copy, /try again/i)
 })
 
 test('a failed card form names the company', () => {

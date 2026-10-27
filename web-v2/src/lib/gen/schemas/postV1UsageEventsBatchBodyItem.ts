@@ -8,18 +8,22 @@
  * OpenAPI spec version: 2026-04-07
  */
 import type { PostV1UsageEventsBatchBodyItemDimensions } from './postV1UsageEventsBatchBodyItemDimensions';
-import type { PostV1UsageEventsBatchBodyItemProperties } from './postV1UsageEventsBatchBodyItemProperties';
 
 export type PostV1UsageEventsBatchBodyItem = {
   /** The customer's external_id (your identifier), not the internal vlx_cus_ id. */
   external_customer_id: string;
-  /** The meter key (e.g. "tokens"). */
+  /** The meter's `event_name` (e.g. "tokens"). */
   event_name: string;
-  /** Decimal quantity — accepts a JSON number (5) or string ("5.5") for exact fractional values. */
+  /**
+     * A JSON number (`5`) or a string holding one (`"5.5"`,
+     * for exact decimals). At most 12 decimal places;
+     * trailing zeros do not count. Its size must be under
+     * 10^26, and it is at most 100 characters. A negative
+     * value is a correction. A missing quantity, or any
+     * other value, fails validation.
+     */
   quantity: number | string;
   dimensions?: PostV1UsageEventsBatchBodyItemDimensions;
-  /** Older name for `dimensions`. When both are sent, `dimensions` wins. */
-  properties?: PostV1UsageEventsBatchBodyItemProperties;
   /**
      * Your unique ID for this event. Pick it once, before the
      * first send, and send the same key on every retry of the
@@ -30,9 +34,8 @@ export type PostV1UsageEventsBatchBodyItem = {
      * event, such as a batch index or a timestamp that can
      * repeat, or that usage is lost. Empty or whitespace-only
      * keys are refused with 422, and so are keys longer than
-     * 255 characters. The `Idempotency-Key` header does not
-     * count as this key: it caches one HTTP response for 24
-     * hours.
+     * 255 characters. This is the only dedup key: the usage
+     * routes ignore the `Idempotency-Key` header.
      * @maxLength 255
      */
   idempotency_key: string;

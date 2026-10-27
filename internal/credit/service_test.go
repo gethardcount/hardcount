@@ -10,8 +10,13 @@ import (
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/sagarsuperuser/velox/internal/testutil"
 )
 
+// memStore is an in-memory Store for the service's business rules. It keeps
+// balances per currency like the real store, but it is NOT trusted for any
+// currency claim (ADR-129, T14): those are proven against Postgres in
+// currency_integration_test.go and the api route tests.
 type memStore struct {
 	entries []domain.CreditLedgerEntry
 }
@@ -94,9 +99,9 @@ func (m *memStore) AppendEntryAudited(ctx context.Context, tenantID string, entr
 	return out, nil
 }
 
-func (m *memStore) AdjustAtomicAudited(ctx context.Context, tenantID, customerID, description string, amountCents int64, emit func(tx *sql.Tx, out domain.CreditLedgerEntry) error) (domain.CreditLedgerEntry, error) {
+func (m *memStore) AdjustAtomicAudited(ctx context.Context, tenantID, customerID, currency, description string, amountCents int64, emit func(tx *sql.Tx, out domain.CreditLedgerEntry) error) (domain.CreditLedgerEntry, error) {
 	before := len(m.entries)
-	out, err := m.AdjustAtomic(ctx, tenantID, customerID, description, amountCents)
+	out, err := m.AdjustAtomic(ctx, tenantID, customerID, currency, description, amountCents)
 	if err != nil {
 		return out, err
 	}
@@ -132,10 +137,13 @@ func (m *memStore) AppendEntry(_ context.Context, tenantID string, entry domain.
 		}
 	}
 
-	// Compute balance
+	if entry.Currency == "" {
+		return domain.CreditLedgerEntry{}, fmt.Errorf("credit ledger entry for customer %s has no currency", entry.CustomerID)
+	}
+	// Compute balance in the entry's currency
 	var balance int64
 	for _, e := range m.entries {
-		if e.CustomerID == entry.CustomerID {
+		if e.CustomerID == entry.CustomerID && e.Currency == entry.Currency {
 			balance += e.AmountCents
 		}
 	}
@@ -152,47 +160,32 @@ func (m *memStore) AppendEntry(_ context.Context, tenantID string, entry domain.
 	return entry, nil
 }
 
-func (m *memStore) GetByCreditNoteSource(_ context.Context, tenantID, creditNoteID string) (domain.CreditLedgerEntry, error) {
-	for _, e := range m.entries {
-		if e.TenantID == tenantID && e.SourceCreditNoteID == creditNoteID {
-			return e, nil
-		}
-	}
-	return domain.CreditLedgerEntry{}, errs.ErrNotFound
-}
-
-func (m *memStore) GetByProrationSource(_ context.Context, tenantID, subscriptionID, subscriptionItemID string, changeType domain.ItemChangeType, changeAt time.Time) (domain.CreditLedgerEntry, error) {
-	for _, e := range m.entries {
-		if e.TenantID == tenantID && e.SourceSubscriptionID == subscriptionID &&
-			e.SourceSubscriptionItemID == subscriptionItemID &&
-			e.SourceChangeType == changeType &&
-			e.SourcePlanChangedAt != nil && e.SourcePlanChangedAt.Equal(changeAt) {
-			return e, nil
-		}
-	}
-	return domain.CreditLedgerEntry{}, errs.ErrNotFound
-}
-
-func (m *memStore) GetSpendableBalance(_ context.Context, _, customerID string, at time.Time) (int64, error) {
-	var spendable int64
+func (m *memStore) GetSpendableBalance(_ context.Context, _, customerID string, at time.Time) (map[string]int64, error) {
+	spendable := map[string]int64{}
 	for _, e := range m.entries {
 		if e.CustomerID != customerID {
 			continue
 		}
-		spendable += e.AmountCents
+		spendable[e.Currency] += e.AmountCents
 		if e.AmountCents > 0 && e.ConsumedCents < e.AmountCents && e.ExpiresAt != nil && !e.ExpiresAt.After(at) {
-			spendable -= e.AmountCents - e.ConsumedCents
+			spendable[e.Currency] -= e.AmountCents - e.ConsumedCents
 		}
 	}
 	return spendable, nil
 }
 
-func (m *memStore) GetBalance(_ context.Context, _, customerID string) (domain.CreditBalance, error) {
-	var b domain.CreditBalance
-	b.CustomerID = customerID
+func (m *memStore) GetBalance(_ context.Context, _, customerID string) ([]domain.CreditBalance, error) {
+	byCurrency := map[string]*domain.CreditBalance{}
+	var order []string
 	for _, e := range m.entries {
 		if e.CustomerID != customerID {
 			continue
+		}
+		b := byCurrency[e.Currency]
+		if b == nil {
+			b = &domain.CreditBalance{CustomerID: customerID, Currency: e.Currency}
+			byCurrency[e.Currency] = b
+			order = append(order, e.Currency)
 		}
 		b.BalanceCents += e.AmountCents
 		switch e.EntryType {
@@ -204,16 +197,21 @@ func (m *memStore) GetBalance(_ context.Context, _, customerID string) (domain.C
 			b.TotalExpired += -e.AmountCents
 		}
 	}
-	return b, nil
+	out := []domain.CreditBalance{}
+	for _, c := range order {
+		out = append(out, *byCurrency[c])
+	}
+	return out, nil
 }
 
 func (m *memStore) ListBalances(_ context.Context, _ string) ([]domain.CreditBalance, error) {
 	byCustomer := map[string]*domain.CreditBalance{}
 	for _, e := range m.entries {
-		b, ok := byCustomer[e.CustomerID]
+		key := e.CustomerID + "/" + e.Currency
+		b, ok := byCustomer[key]
 		if !ok {
-			b = &domain.CreditBalance{CustomerID: e.CustomerID}
-			byCustomer[e.CustomerID] = b
+			b = &domain.CreditBalance{CustomerID: e.CustomerID, Currency: e.Currency}
+			byCustomer[key] = b
 		}
 		b.BalanceCents += e.AmountCents
 		switch e.EntryType {
@@ -253,6 +251,7 @@ func (m *memStore) ExpireGrantAtomic(ctx context.Context, tenantID, customerID, 
 		if _, err := m.AppendEntry(ctx, tenantID, domain.CreditLedgerEntry{
 			CustomerID:  customerID,
 			EntryType:   domain.CreditExpiry,
+			Currency:    e.Currency,
 			AmountCents: -remaining,
 			Description: fmt.Sprintf("Expired grant %s", grantID),
 			CreatedAt:   expiredAt,
@@ -278,10 +277,16 @@ func (m *memStore) ListExpiredGrantsForClock(_ context.Context, _, _ string, _ t
 	return nil, nil
 }
 
-func (m *memStore) AdjustAtomic(ctx context.Context, tenantID, customerID, description string, amountCents int64) (domain.CreditLedgerEntry, error) {
-	bal, err := m.GetBalance(ctx, tenantID, customerID)
+func (m *memStore) AdjustAtomic(ctx context.Context, tenantID, customerID, currency, description string, amountCents int64) (domain.CreditLedgerEntry, error) {
+	all, err := m.GetBalance(ctx, tenantID, customerID)
 	if err != nil {
 		return domain.CreditLedgerEntry{}, err
+	}
+	var bal domain.CreditBalance
+	for _, b := range all {
+		if b.Currency == currency {
+			bal = b
+		}
 	}
 	if amountCents < 0 && bal.BalanceCents+amountCents < 0 {
 		return domain.CreditLedgerEntry{}, fmt.Errorf("Insufficient balance: only %.2f is available, so %.2f can't be deducted.",
@@ -294,6 +299,7 @@ func (m *memStore) AdjustAtomic(ctx context.Context, tenantID, customerID, descr
 	return m.AppendEntry(ctx, tenantID, domain.CreditLedgerEntry{
 		CustomerID:  customerID,
 		EntryType:   domain.CreditAdjustment,
+		Currency:    currency,
 		AmountCents: amountCents,
 		Description: description,
 		CreatedAt:   clock.Now(ctx),
@@ -304,7 +310,9 @@ func (m *memStore) ApplyToInvoiceAtomic(ctx context.Context, tenantID, customerI
 	if invoiceAmountCents <= 0 {
 		return 0, nil
 	}
-	bal, err := m.GetBalance(ctx, tenantID, customerID)
+	// The fake has no invoices; it draws USD, the currency every unit test
+	// invoice is in. Currency gating is proven on Postgres.
+	bal, err := testutil.BalanceUSD(m.GetBalance(ctx, tenantID, customerID))
 	if err != nil {
 		return 0, err
 	}
@@ -315,6 +323,7 @@ func (m *memStore) ApplyToInvoiceAtomic(ctx context.Context, tenantID, customerI
 	if _, err := m.AppendEntry(ctx, tenantID, domain.CreditLedgerEntry{
 		CustomerID:  customerID,
 		EntryType:   domain.CreditUsage,
+		Currency:    "USD",
 		AmountCents: -deduct,
 		Description: invoiceDesc,
 		InvoiceID:   invoiceID,
@@ -340,6 +349,7 @@ func (m *memStore) RetireCommitGrantForInvoiceTx(_ context.Context, _ *sql.Tx, t
 		m.entries = append(m.entries, domain.CreditLedgerEntry{
 			CustomerID:  e.CustomerID,
 			EntryType:   domain.CreditAdjustment,
+			Currency:    e.Currency,
 			AmountCents: -remaining,
 			Description: "Commit retired — funding invoice voided",
 		})
@@ -395,6 +405,7 @@ func TestGrant(t *testing.T) {
 
 	t.Run("valid grant", func(t *testing.T) {
 		entry, err := svc.Grant(ctx, "t1", GrantInput{
+			Currency:    "USD",
 			CustomerID:  "cus_1",
 			AmountCents: 50000,
 			Description: "$500 promotional credit",
@@ -414,14 +425,14 @@ func TestGrant(t *testing.T) {
 	})
 
 	t.Run("missing customer", func(t *testing.T) {
-		_, err := svc.Grant(ctx, "t1", GrantInput{AmountCents: 100})
+		_, err := svc.Grant(ctx, "t1", GrantInput{Currency: "USD", AmountCents: 100})
 		if err == nil {
 			t.Fatal("expected error")
 		}
 	})
 
 	t.Run("zero amount", func(t *testing.T) {
-		_, err := svc.Grant(ctx, "t1", GrantInput{CustomerID: "c", AmountCents: 0})
+		_, err := svc.Grant(ctx, "t1", GrantInput{Currency: "USD", CustomerID: "c", AmountCents: 0})
 		if err == nil {
 			t.Fatal("expected error")
 		}
@@ -434,6 +445,7 @@ func TestGrant(t *testing.T) {
 		// wall-clock; the past date should fail.
 		past := time.Now().AddDate(0, 0, -1) // yesterday
 		_, err := svc.Grant(ctx, "t1", GrantInput{
+			Currency:    "USD",
 			CustomerID:  "cus_1",
 			AmountCents: 10000,
 			Description: "DOA grant",
@@ -448,6 +460,7 @@ func TestGrant(t *testing.T) {
 		// Strict inequality: expires_at == now is also DOA.
 		nowT := time.Now()
 		_, err := svc.Grant(ctx, "t1", GrantInput{
+			Currency:    "USD",
 			CustomerID:  "cus_1",
 			AmountCents: 10000,
 			Description: "expires now",
@@ -461,6 +474,7 @@ func TestGrant(t *testing.T) {
 	t.Run("future expires_at accepted", func(t *testing.T) {
 		future := time.Now().AddDate(0, 1, 0) // 1 month from now
 		entry, err := svc.Grant(ctx, "t1", GrantInput{
+			Currency:    "USD",
 			CustomerID:  "cus_1",
 			AmountCents: 10000,
 			Description: "future-expiring grant",
@@ -476,6 +490,7 @@ func TestGrant(t *testing.T) {
 
 	t.Run("nil expires_at accepted (forever credit)", func(t *testing.T) {
 		entry, err := svc.Grant(ctx, "t1", GrantInput{
+			Currency:    "USD",
 			CustomerID:  "cus_1",
 			AmountCents: 10000,
 			Description: "forever credit",
@@ -495,7 +510,7 @@ func TestApplyToInvoice(t *testing.T) {
 	ctx := context.Background()
 
 	// Grant $500
-	_, _ = svc.Grant(ctx, "t1", GrantInput{CustomerID: "cus_1", AmountCents: 50000, Description: "Test grant"})
+	_, _ = svc.Grant(ctx, "t1", GrantInput{Currency: "USD", CustomerID: "cus_1", AmountCents: 50000, Description: "Test grant"})
 
 	t.Run("partial application", func(t *testing.T) {
 		deducted, err := svc.ApplyToInvoice(ctx, "t1", "cus_1", "inv_1", 19900)
@@ -506,7 +521,7 @@ func TestApplyToInvoice(t *testing.T) {
 			t.Errorf("deducted: got %d, want 19900", deducted)
 		}
 
-		bal, _ := svc.GetBalance(ctx, "t1", "cus_1")
+		bal, _ := testutil.BalanceUSD(svc.GetBalance(ctx, "t1", "cus_1"))
 		if bal.BalanceCents != 30100 {
 			t.Errorf("remaining balance: got %d, want 30100", bal.BalanceCents)
 		}
@@ -522,7 +537,7 @@ func TestApplyToInvoice(t *testing.T) {
 			t.Errorf("deducted: got %d, want 30100 (uses remaining balance)", deducted)
 		}
 
-		bal, _ := svc.GetBalance(ctx, "t1", "cus_1")
+		bal, _ := testutil.BalanceUSD(svc.GetBalance(ctx, "t1", "cus_1"))
 		if bal.BalanceCents != 0 {
 			t.Errorf("remaining balance: got %d, want 0", bal.BalanceCents)
 		}
@@ -563,6 +578,7 @@ func TestProcessExpiry_SkipsFullyConsumed(t *testing.T) {
 	seeded, err := store.AppendEntry(ctx, "t1", domain.CreditLedgerEntry{
 		CustomerID:  "cus_1",
 		EntryType:   domain.CreditGrant,
+		Currency:    "USD",
 		AmountCents: 5000,
 		Description: "seed",
 		ExpiresAt:   &expiresAt,
@@ -605,6 +621,7 @@ func TestProcessExpiry_DeductRemaining(t *testing.T) {
 	seeded, err := store.AppendEntry(ctx, "t1", domain.CreditLedgerEntry{
 		CustomerID:  "cus_1",
 		EntryType:   domain.CreditGrant,
+		Currency:    "USD",
 		AmountCents: 5000,
 		Description: "seed",
 		ExpiresAt:   &expiresAt,
@@ -648,10 +665,11 @@ func TestAdjust(t *testing.T) {
 	svc := NewService(newMemStore())
 	ctx := context.Background()
 
-	_, _ = svc.Grant(ctx, "t1", GrantInput{CustomerID: "cus_1", AmountCents: 10000, Description: "Test grant"})
+	_, _ = svc.Grant(ctx, "t1", GrantInput{Currency: "USD", CustomerID: "cus_1", AmountCents: 10000, Description: "Test grant"})
 
 	t.Run("positive adjustment", func(t *testing.T) {
 		entry, err := svc.Adjust(ctx, "t1", AdjustInput{
+			Currency:   "USD",
 			CustomerID: "cus_1", AmountCents: 5000, Description: "Goodwill credit",
 		})
 		if err != nil {
@@ -664,6 +682,7 @@ func TestAdjust(t *testing.T) {
 
 	t.Run("negative adjustment", func(t *testing.T) {
 		entry, err := svc.Adjust(ctx, "t1", AdjustInput{
+			Currency:   "USD",
 			CustomerID: "cus_1", AmountCents: -3000, Description: "Correction",
 		})
 		if err != nil {
@@ -675,7 +694,7 @@ func TestAdjust(t *testing.T) {
 	})
 
 	t.Run("missing description", func(t *testing.T) {
-		_, err := svc.Adjust(ctx, "t1", AdjustInput{CustomerID: "c", AmountCents: 100})
+		_, err := svc.Adjust(ctx, "t1", AdjustInput{Currency: "USD", CustomerID: "c", AmountCents: 100})
 		if err == nil {
 			t.Fatal("expected error for missing description")
 		}
@@ -696,12 +715,14 @@ func TestAdjust(t *testing.T) {
 		// Grant already binds — leverage it to verify the resolver
 		// wiring works end-to-end before exercising Adjust.
 		if _, err := svc.Grant(context.Background(), "t1", GrantInput{
+			Currency:   "USD",
 			CustomerID: "cus_sim", AmountCents: 10000, Description: "seed",
 		}); err != nil {
 			t.Fatalf("seed grant: %v", err)
 		}
 
 		entry, err := svc.Adjust(context.Background(), "t1", AdjustInput{
+			Currency:   "USD",
 			CustomerID: "cus_sim", AmountCents: -3000, Description: "Deduct",
 		})
 		if err != nil {
@@ -739,10 +760,10 @@ func TestGetBalance(t *testing.T) {
 	svc := NewService(newMemStore())
 	ctx := context.Background()
 
-	_, _ = svc.Grant(ctx, "t1", GrantInput{CustomerID: "cus_1", AmountCents: 50000, Description: "Test grant"})
+	_, _ = svc.Grant(ctx, "t1", GrantInput{Currency: "USD", CustomerID: "cus_1", AmountCents: 50000, Description: "Test grant"})
 	_, _ = svc.ApplyToInvoice(ctx, "t1", "cus_1", "inv_1", 20000)
 
-	bal, err := svc.GetBalance(ctx, "t1", "cus_1")
+	bal, err := testutil.BalanceUSD(svc.GetBalance(ctx, "t1", "cus_1"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

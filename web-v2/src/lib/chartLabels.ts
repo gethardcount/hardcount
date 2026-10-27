@@ -27,3 +27,14 @@ export function utcBucketLabel(key: string, pattern: string): string {
 export function revenueBucketLabel(key: string): string {
   return utcBucketLabel(key, /^\d{4}-\d{2}$/.test(key) ? 'MMM yyyy' : 'MMM d')
 }
+
+// compactAxisTick labels a quantity axis tick in short form: 180000 reads
+// "180K", so large numbers keep the axis narrow. The axis takes the width of
+// its longest label (width="auto"): a fixed 40px axis cut 180000 to "80000"
+// and 0.00008 to "00008". No digit of a tick is rounded away (quantities can
+// be fractions): 0.015 reads "0.015" and 1250 reads "1.25K". 15 significant
+// digits drop only floating-point noise, so 0.1 + 0.2 reads "0.3".
+const compact = new Intl.NumberFormat('en-US', { notation: 'compact', maximumSignificantDigits: 15 })
+export function compactAxisTick(value: number): string {
+  return compact.format(value)
+}

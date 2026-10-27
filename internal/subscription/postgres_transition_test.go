@@ -549,7 +549,7 @@ func TestPauseCollection_Roundtrip(t *testing.T) {
 	paused, err := store.SetPauseCollection(ctx, tenantID, subID, domain.PauseCollection{
 		Behavior:  domain.PauseCollectionKeepAsDraft,
 		ResumesAt: &resumesAt,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("set: %v", err)
 	}
@@ -575,7 +575,7 @@ func TestPauseCollection_Roundtrip(t *testing.T) {
 	// 2. Re-set with nil ResumesAt clears the timestamp column.
 	paused2, err := store.SetPauseCollection(ctx, tenantID, subID, domain.PauseCollection{
 		Behavior: domain.PauseCollectionKeepAsDraft,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("re-set: %v", err)
 	}
@@ -587,7 +587,7 @@ func TestPauseCollection_Roundtrip(t *testing.T) {
 	}
 
 	// 3. Clear wipes both columns.
-	cleared, err := store.ClearPauseCollection(ctx, tenantID, subID)
+	cleared, err := store.ClearPauseCollection(ctx, tenantID, subID, nil)
 	if err != nil {
 		t.Fatalf("clear: %v", err)
 	}
@@ -600,12 +600,12 @@ func TestPauseCollection_Roundtrip(t *testing.T) {
 	// cleared — the schedule callers use that to announce nothing; the
 	// operator path (Service.ResumeCollection) stays idempotent by returning
 	// the row unchanged.
-	if _, err := store.ClearPauseCollection(ctx, tenantID, subID); !errors.Is(err, subscription.ErrNotPaused) {
+	if _, err := store.ClearPauseCollection(ctx, tenantID, subID, nil); !errors.Is(err, subscription.ErrNotPaused) {
 		t.Fatalf("second clear: got %v, want ErrNotPaused", err)
 	}
 	svc := subscription.NewService(store, nil)
-	if again, err := svc.ResumeCollection(ctx, tenantID, subID); err != nil || again.ID != subID || again.PauseCollection != nil {
-		t.Fatalf("operator resume on an unpaused sub must be an idempotent no-op: %+v %v", again.PauseCollection, err)
+	if again, resumed, err := svc.ResumeCollection(ctx, tenantID, subID); err != nil || resumed || again.ID != subID || again.PauseCollection != nil {
+		t.Fatalf("operator resume on an unpaused sub must be an idempotent no-op that resumes nothing: resumed=%v %+v %v", resumed, again.PauseCollection, err)
 	}
 
 	// 5. Set on a canceled sub is rejected.
@@ -614,7 +614,7 @@ func TestPauseCollection_Roundtrip(t *testing.T) {
 	}
 	_, err = store.SetPauseCollection(ctx, tenantID, subID, domain.PauseCollection{
 		Behavior: domain.PauseCollectionKeepAsDraft,
-	})
+	}, nil)
 	if err == nil {
 		t.Fatal("expected error setting pause_collection on canceled sub, got nil")
 	}
@@ -622,12 +622,12 @@ func TestPauseCollection_Roundtrip(t *testing.T) {
 
 // --- HA-readiness hazard 5 root fix (2026-08-30, ADR-114 PR-B) ---
 
-// TestClearPauseCollection_CASOneWinner: two leaders clearing the same pause
-// (a failover window, a resumed frozen process) must produce exactly ONE
-// success — the winner announces `subscription.collection_resumed`, every
-// other clearer gets ErrNotPaused and announces nothing. Mutation-verify:
-// drop `AND pause_collection_behavior IS NOT NULL` from the UPDATE → every
-// goroutine succeeds.
+// TestClearPauseCollection_CASOneWinner: two leaders resuming the same
+// lifted pause (a failover window, a resumed frozen process) must produce
+// exactly ONE success — the winner announces `subscription.collection_resumed`,
+// every other resumer gets ErrNotPaused and announces nothing.
+// Mutation-verify: cut clearLiftedPauseTx's UPDATE down to `WHERE id = $2`
+// → every goroutine succeeds.
 func TestClearPauseCollection_CASOneWinner(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
@@ -636,7 +636,8 @@ func TestClearPauseCollection_CASOneWinner(t *testing.T) {
 	subID := seedActiveSubscription(t, db, tenantID, "cus_pause_race", "plan_pause_race", "sub-pause-race")
 
 	resumes := time.Now().Add(-time.Minute)
-	if _, err := store.SetPauseCollection(ctx, tenantID, subID, domain.PauseCollection{Behavior: domain.PauseCollectionBehavior("keep_as_draft"), ResumesAt: &resumes}); err != nil {
+	listed, err := store.SetPauseCollection(ctx, tenantID, subID, domain.PauseCollection{Behavior: domain.PauseCollectionBehavior("keep_as_draft"), ResumesAt: &resumes}, nil)
+	if err != nil {
 		t.Fatalf("set pause: %v", err)
 	}
 
@@ -650,7 +651,7 @@ func TestClearPauseCollection_CASOneWinner(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := store.ClearPauseCollection(ctx, tenantID, subID)
+			_, err := store.ResumeLiftedPause(ctx, tenantID, listed, nil)
 			switch {
 			case err == nil:
 				successes.Add(1)
@@ -666,10 +667,73 @@ func TestClearPauseCollection_CASOneWinner(t *testing.T) {
 		t.Fatalf("successes=%d notPaused=%d, want exactly 1 winner and %d ErrNotPaused", successes.Load(), notPaused.Load(), goroutines-1)
 	}
 	// And a clear on an unpaused row is ErrNotPaused, never a silent no-op.
-	if _, err := store.ClearPauseCollection(ctx, tenantID, subID); !errors.Is(err, subscription.ErrNotPaused) {
+	if _, err := store.ClearPauseCollection(ctx, tenantID, subID, nil); !errors.Is(err, subscription.ErrNotPaused) {
 		t.Fatalf("second clear: got %v, want ErrNotPaused", err)
 	}
-	if _, err := store.ClearPauseCollection(ctx, tenantID, "sub_does_not_exist"); !errors.Is(err, errs.ErrNotFound) {
+	if _, err := store.ClearPauseCollection(ctx, tenantID, "sub_does_not_exist", nil); !errors.Is(err, errs.ErrNotFound) {
+		t.Fatalf("missing row: got %v, want ErrNotFound", err)
+	}
+}
+
+// TestClearScheduledCancellation_CASOneWinner: of 20 clears racing on one
+// scheduled cancel, exactly one changes the row and so may announce
+// subscription.cancel_cleared; every other gets ErrNoScheduledCancel. A clear
+// with no schedule does not write the row. Mutation-verify: drop
+// `AND (cancel_at IS NOT NULL OR cancel_at_period_end)` → 20 winners.
+func TestClearScheduledCancellation_CASOneWinner(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	ctx := postgres.WithLivemode(context.Background(), false)
+	store := subscription.NewPostgresStore(db)
+	tenantID := testutil.CreateTestTenant(t, db, "Cancel Clear Race")
+	subID := seedActiveSubscription(t, db, tenantID, "cus_clear_race", "plan_clear_race", "sub-clear-race")
+
+	if _, err := store.ScheduleCancellation(ctx, tenantID, subID, nil, true, domain.SubscriptionActive); err != nil {
+		t.Fatalf("schedule cancel: %v", err)
+	}
+
+	const goroutines = 20
+	var (
+		wg          sync.WaitGroup
+		successes   atomic.Int64
+		noScheduled atomic.Int64
+	)
+	for g := 0; g < goroutines; g++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := store.ClearScheduledCancellation(ctx, tenantID, subID)
+			switch {
+			case err == nil:
+				successes.Add(1)
+			case errors.Is(err, subscription.ErrNoScheduledCancel):
+				noScheduled.Add(1)
+			default:
+				t.Errorf("unexpected error: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	if successes.Load() != 1 || noScheduled.Load() != goroutines-1 {
+		t.Fatalf("successes=%d noScheduled=%d, want exactly 1 winner and %d ErrNoScheduledCancel", successes.Load(), noScheduled.Load(), goroutines-1)
+	}
+	before, err := store.Get(ctx, tenantID, subID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if before.CancelAt != nil || before.CancelAtPeriodEnd {
+		t.Fatalf("schedule left after the clear: cancel_at=%v at_period_end=%v", before.CancelAt, before.CancelAtPeriodEnd)
+	}
+	if _, err := store.ClearScheduledCancellation(ctx, tenantID, subID); !errors.Is(err, subscription.ErrNoScheduledCancel) {
+		t.Fatalf("clear with none scheduled: got %v, want ErrNoScheduledCancel", err)
+	}
+	after, err := store.Get(ctx, tenantID, subID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if !after.UpdatedAt.Equal(before.UpdatedAt) {
+		t.Errorf("a clear with none scheduled wrote the row: updated_at %v → %v", before.UpdatedAt, after.UpdatedAt)
+	}
+	if _, err := store.ClearScheduledCancellation(ctx, tenantID, "sub_does_not_exist"); !errors.Is(err, errs.ErrNotFound) {
 		t.Fatalf("missing row: got %v, want ErrNotFound", err)
 	}
 }

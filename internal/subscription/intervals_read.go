@@ -2,6 +2,7 @@ package subscription
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"time"
 
@@ -22,9 +23,10 @@ func (s *PostgresStore) ListItemIntervals(ctx context.Context, tenantID, subscri
 	defer postgres.Rollback(tx)
 
 	rows, err := tx.QueryContext(ctx, `
-		SELECT subscription_item_id, plan_id, quantity, starts_at, ends_at
-		FROM billing_intervals
-		WHERE subscription_id = $1
+		SELECT bi.subscription_item_id, bi.plan_id, bi.quantity, bi.starts_at, bi.ends_at, si.created_at
+		FROM billing_intervals bi
+		LEFT JOIN subscription_items si ON si.id = bi.subscription_item_id
+		WHERE bi.subscription_id = $1
 	`, subscriptionID)
 	if err != nil {
 		return nil, err
@@ -34,9 +36,16 @@ func (s *PostgresStore) ListItemIntervals(ctx context.Context, tenantID, subscri
 	var intervals []domain.ItemInterval
 	for rows.Next() {
 		var iv domain.ItemInterval
-		if err := rows.Scan(&iv.SubscriptionItemID, &iv.PlanID, &iv.Quantity, &iv.StartsAt, &iv.EndsAt); err != nil {
+		var itemCreated *time.Time
+		if err := rows.Scan(&iv.SubscriptionItemID, &iv.PlanID, &iv.Quantity, &iv.StartsAt, &iv.EndsAt, &itemCreated); err != nil {
 			return nil, err
 		}
+		// The rater pins an added item's window at its creation (ADR-130
+		// §4 step 3). An interval whose item row is gone cannot be pinned.
+		if itemCreated == nil {
+			return nil, fmt.Errorf("billing interval of subscription %s names item %s, which does not exist", subscriptionID, iv.SubscriptionItemID)
+		}
+		iv.ItemCreatedAt = *itemCreated
 		intervals = append(intervals, iv)
 	}
 	if err := rows.Err(); err != nil {
@@ -70,7 +79,8 @@ func (s *PostgresStore) ListItemIntervals(ctx context.Context, tenantID, subscri
 // subscription whose period was backdated to midnight would otherwise bill
 // the usage another subscription already billed that day.
 //
-// Two sources, with plan meters unnested as in FindMeterConflicts:
+// Two sources, with a plan's meters every meter it has ever priced, as in
+// FindMeterConflicts:
 //   - billing_intervals of the other subscriptions that ended in the window,
 //     zero-width rows left out (they covered nothing). This covers an
 //     immediate or scheduled cancel, an item removal and a plan swap away.
@@ -89,11 +99,7 @@ func (s *PostgresStore) ListCustomerMeterCoverageEnds(ctx context.Context, tenan
 		SELECT m.meter_id, bi.ends_at
 		FROM billing_intervals bi
 		JOIN subscriptions sub ON sub.id = bi.subscription_id
-		JOIN plans p ON p.id = bi.plan_id
-		-- meter_ids is 'null' (not '[]') for meterless plans.
-		CROSS JOIN LATERAL jsonb_array_elements_text(
-			CASE WHEN jsonb_typeof(p.meter_ids) = 'array' THEN p.meter_ids ELSE '[]'::jsonb END
-		) AS m(meter_id)
+		JOIN (SELECT DISTINCT plan_id, meter_id FROM plan_prices) m ON m.plan_id = bi.plan_id
 		WHERE sub.customer_id = $1
 		  AND sub.id <> $2
 		  AND bi.ends_at > bi.starts_at
@@ -103,10 +109,7 @@ func (s *PostgresStore) ListCustomerMeterCoverageEnds(ctx context.Context, tenan
 		FROM subscriptions sub
 		JOIN subscription_items si
 		  ON si.subscription_id = sub.id AND si.deleted_at IS NULL
-		JOIN plans p ON p.id = si.plan_id
-		CROSS JOIN LATERAL jsonb_array_elements_text(
-			CASE WHEN jsonb_typeof(p.meter_ids) = 'array' THEN p.meter_ids ELSE '[]'::jsonb END
-		) AS m(meter_id)
+		JOIN (SELECT DISTINCT plan_id, meter_id FROM plan_prices) m ON m.plan_id = si.plan_id
 		WHERE sub.customer_id = $1
 		  AND sub.id <> $2
 		  AND sub.status = 'canceled'

@@ -23,6 +23,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/platform/activity"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/sagarsuperuser/velox/internal/platform/money"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/platform/timeline"
 	"github.com/sagarsuperuser/velox/internal/tax"
@@ -31,6 +32,13 @@ import (
 // PlanReader reads plan data for proration calculations.
 type PlanReader interface {
 	GetPlan(ctx context.Context, tenantID, id string) (domain.Plan, error)
+}
+
+// PlanMeterReader reads a plan's meters: every meter the plan has ever had a
+// price for, the conservative set the overlap guard compares (ADR-130).
+// Implemented by *pricing.PostgresStore, wired in router.go.
+type PlanMeterReader interface {
+	PlanMeterIDs(ctx context.Context, tenantID, planID string) ([]string, error)
 }
 
 // ProrationInvoiceCreator creates finalized proration invoices and supports
@@ -50,7 +58,8 @@ type ProrationInvoiceCreator interface {
 	GetByProrationSource(ctx context.Context, tenantID, subscriptionID, subscriptionItemID string, changeType domain.ItemChangeType, changeAt time.Time) (domain.Invoice, error)
 	NextInvoiceNumber(ctx context.Context, tenantID string) (string, error)
 	// FindBaseInvoiceForPeriod gates immediate in_advance proration on
-	// whether the source invoice was actually paid. Mirrors the engine's
+	// whether the source invoice was actually paid; a written-off one is
+	// unpaid (ADR-050 amendment 2026-10-23). Mirrors the engine's
 	// cancel-relief paid/unpaid split; same industry rationale (Chargebee
 	// Refundable vs Adjustment / Stripe proration_behavior=none).
 	FindBaseInvoiceForPeriod(ctx context.Context, tenantID, subscriptionID string, periodStart time.Time) (domain.Invoice, error)
@@ -91,17 +100,6 @@ type ProrationInvoiceCreator interface {
 type InvoiceFinalizeRecorder interface {
 	EmitFinalizeAuditTx(ctx context.Context, tx *sql.Tx, inv domain.Invoice) error
 	DispatchInvoiceFinalized(ctx context.Context, tenantID string, inv domain.Invoice)
-}
-
-// ProrationCreditGranter grants credits for downgrade proration. Dedup key is
-// (subscription, item, plan_changed_at) — see ProrationInvoiceCreator comment.
-type ProrationCreditGranter interface {
-	GrantProration(ctx context.Context, tenantID string, input ProrationGrantInput) error
-	GetByProrationSource(ctx context.Context, tenantID, subscriptionID, subscriptionItemID string, changeType domain.ItemChangeType, changeAt time.Time) (domain.CreditLedgerEntry, error)
-	// Tx variant — append the credit-ledger entry inside a caller-owned
-	// transaction. Same atomicity story as the invoice creator's Tx
-	// methods above.
-	GrantProrationTx(ctx context.Context, tx *sql.Tx, tenantID string, input ProrationGrantInput) error
 }
 
 // ProrationTaxResult is what ApplyTaxToLineItems returns: invoice-level tax
@@ -183,20 +181,6 @@ type NetTermsReader interface {
 	NetPaymentTermDays(ctx context.Context, tenantID string) (int, error)
 }
 
-// ProrationGrantInput carries the downgrade/removal/reduction credit payload
-// plus the provenance fields required for dedup. SourceChangeType
-// distinguishes plan-downgrade from qty-reduction from item-remove when the
-// same item is mutated multiple ways within the same billing period.
-type ProrationGrantInput struct {
-	CustomerID               string
-	AmountCents              int64
-	Description              string
-	SourceSubscriptionID     string
-	SourceSubscriptionItemID string
-	SourcePlanChangedAt      time.Time
-	SourceChangeType         domain.ItemChangeType
-}
-
 // auditRecorder is the narrow audit interface the subscription handler uses:
 // Log to write operator-action rows and Query to read them back for the
 // activity timeline. *audit.Logger satisfies it. Declared as an interface (vs
@@ -212,7 +196,6 @@ type Handler struct {
 	svc         *Service
 	plans       PlanReader
 	invoices    ProrationInvoiceCreator
-	credits     ProrationCreditGranter
 	creditNotes CreditNoteIssuer
 	tzLocator   TenantLocator
 	netTerms    NetTermsReader
@@ -295,15 +278,15 @@ func (h *Handler) bindForSub(ctx context.Context, tenantID, subID string) contex
 // One resolution of the pin yields both halves, consistent by construction
 // (clock.Sim).
 //
-// Cost is zero on the path that matters: live mode can hold no clock (DB
-// CHECK on test_clocks.livemode), so production never resolves. It is also a
-// no-op when ctx is already bound — the service-layer entry points
-// (bindForSub) bind before we get here on most routes.
+// A live subscription can hold no clock (DB CHECK on test_clocks.livemode),
+// so the bind finds none and leaves ctx as is. It is also a no-op when ctx is
+// already bound — the service-layer entry points (bindForSub) bind before we
+// get here on most routes.
 //
 // ADR-030 still holds: created_at stays WALL-clock ("when the operator
 // clicked"). This is the second axis, not a replacement for the first.
 func (h *Handler) auditCtx(ctx context.Context, tenantID, subID string) context.Context {
-	if h.resolver == nil || subID == "" || postgres.Livemode(ctx) {
+	if h.resolver == nil || subID == "" {
 		return ctx
 	}
 	if _, ok := clock.SimOf(ctx); ok {
@@ -329,11 +312,12 @@ func planIDsForAudit(sub domain.Subscription) []string {
 // right behavior in narrow unit tests.
 func (h *Handler) SetEventDispatcher(d domain.EventDispatcher) { h.events = d }
 
-// SetProrationDeps sets optional dependencies for proration invoice generation.
-func (h *Handler) SetProrationDeps(plans PlanReader, invoices ProrationInvoiceCreator, credits ProrationCreditGranter) {
+// SetProrationDeps sets optional dependencies for proration: the plan reader
+// and the invoice side. A proration credit is a credit note
+// (SetCreditNoteIssuer).
+func (h *Handler) SetProrationDeps(plans PlanReader, invoices ProrationInvoiceCreator) {
 	h.plans = plans
 	h.invoices = invoices
-	h.credits = credits
 }
 
 // SetProrationTaxApplier configures tax resolution on proration invoices.
@@ -401,26 +385,15 @@ func (h *Handler) SetCreditNoteIssuer(i CreditNoteIssuer) {
 // must persist-before-return so a crash between the handler's respond.JSON and
 // event emission can't silently lose the event. Logging an error beats
 // dropping.
+//
+// The event carries sub (ADR-131), which the caller read after the change,
+// with its items. sub must be that read: an event built from a guess would
+// tell receivers something the API does not show.
 func (h *Handler) fireEvent(ctx context.Context, tenantID, eventType string, sub domain.Subscription, extra map[string]any) {
 	if h.events == nil {
 		return
 	}
-	payload := map[string]any{
-		"subscription_id": sub.ID,
-		"customer_id":     sub.CustomerID,
-		"status":          string(sub.Status),
-		"item_count":      len(sub.Items),
-	}
-	if sub.CurrentBillingPeriodStart != nil {
-		payload["current_period_start"] = sub.CurrentBillingPeriodStart.UTC()
-	}
-	if sub.CurrentBillingPeriodEnd != nil {
-		payload["current_period_end"] = sub.CurrentBillingPeriodEnd.UTC()
-	}
-	for k, v := range extra {
-		payload[k] = v
-	}
-	if err := h.events.Dispatch(ctx, tenantID, eventType, payload); err != nil {
+	if err := h.events.Dispatch(ctx, tenantID, eventType, domain.SubscriptionWebhookData(sub, extra)); err != nil {
 		slog.ErrorContext(ctx, "dispatch subscription event",
 			"event_type", eventType,
 			"subscription_id", sub.ID,
@@ -430,21 +403,17 @@ func (h *Handler) fireEvent(ctx context.Context, tenantID, eventType string, sub
 	}
 }
 
-// itemPayload projects a SubscriptionItem into an event payload. Stable keys
-// — consumers depend on the shape, so we don't echo the full domain struct.
-func itemPayload(item domain.SubscriptionItem) map[string]any {
-	p := map[string]any{
-		"item_id":  item.ID,
-		"plan_id":  item.PlanID,
-		"quantity": item.Quantity,
+// fireItemEvent sends an item event: the subscription read after the change,
+// and item_id naming the item (gone from items on a removal). When the read
+// fails there is no true resource to send, so the event is left out, loudly.
+func (h *Handler) fireItemEvent(ctx context.Context, tenantID, eventType, subID, itemID string) {
+	sub, err := h.svc.Get(ctx, tenantID, subID)
+	if err != nil {
+		slog.ErrorContext(ctx, "subscription item event not sent: the subscription could not be read after the change",
+			"event_type", eventType, "subscription_id", subID, "item_id", itemID, "error", err)
+		return
 	}
-	if item.PendingPlanID != "" {
-		p["pending_plan_id"] = item.PendingPlanID
-	}
-	if item.PendingPlanEffectiveAt != nil {
-		p["pending_plan_effective_at"] = item.PendingPlanEffectiveAt.UTC()
-	}
-	return p
+	h.fireEvent(ctx, tenantID, eventType, sub, map[string]any{"item_id": itemID})
 }
 
 func (h *Handler) Routes() chi.Router {
@@ -478,13 +447,44 @@ func (h *Handler) Routes() chi.Router {
 	return r
 }
 
+// createBody is CreateInput as the API reads it. Its status hides the
+// embedded one so the handler can tell a field left out (start now) from one
+// sent empty or null (refused).
+type createBody struct {
+	CreateInput
+	Status sentStatus `json:"status"`
+}
+
+// sentStatus records whether "status" was in the body at all. encoding/json
+// calls UnmarshalJSON for a JSON null too, so null counts as sent.
+type sentStatus struct {
+	value domain.SubscriptionStatus
+	sent  bool
+}
+
+func (s *sentStatus) UnmarshalJSON(b []byte) error {
+	s.sent = true
+	if string(b) == "null" {
+		return nil
+	}
+	return json.Unmarshal(b, &s.value)
+}
+
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
-	var input CreateInput
-	if !respond.DecodeStrict(w, r, &input) {
+	var body createBody
+	if !respond.DecodeStrict(w, r, &body) {
 		return
 	}
+	// "status": "" and "status": null are not "left out": a template whose
+	// value was unset must not start and bill the subscription.
+	if body.Status.sent && body.Status.value == "" {
+		respond.FromError(w, r, errs.Invalid("status", createStatusMessage), "subscription")
+		return
+	}
+	input := body.CreateInput
+	input.Status = body.Status.value
 
 	sub, err := h.svc.Create(r.Context(), tenantID, input)
 	if err != nil {
@@ -524,13 +524,36 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		respond.BadRequest(w, r, `billing must be "failing" when set`)
 		return
 	}
+	// ?collection=paused lists live subscriptions whose collection is
+	// paused. Same closed-set rule as ?billing=.
+	collection := r.URL.Query().Get("collection")
+	if collection != "" && collection != ListCollectionPaused {
+		respond.BadRequest(w, r, `collection must be "paused" when set`)
+		return
+	}
+	// ?status= is a closed set too: an unknown value matched no row and
+	// read as "none of those". The Paused tab sent status=paused and was
+	// always empty (sweep E6).
+	status := r.URL.Query().Get("status")
+	switch domain.SubscriptionStatus(status) {
+	case "", domain.SubscriptionDraft, domain.SubscriptionTrialing, domain.SubscriptionActive,
+		domain.SubscriptionCanceled:
+	default:
+		msg := "status must be one of draft, trialing, active, canceled"
+		if status == "paused" {
+			msg += `; paused collection is not a status, use collection=paused`
+		}
+		respond.BadRequest(w, r, msg)
+		return
+	}
 
 	subs, total, err := h.svc.List(r.Context(), ListFilter{
 		TenantID:   tenantID,
 		CustomerID: r.URL.Query().Get("customer_id"),
 		PlanID:     r.URL.Query().Get("plan_id"),
-		Status:     r.URL.Query().Get("status"),
+		Status:     status,
 		Billing:    billing,
+		Collection: collection,
 		Search:     strings.TrimSpace(r.URL.Query().Get("search")),
 		Limit:      limit,
 		Offset:     offset,
@@ -571,6 +594,9 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) activate(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
@@ -595,6 +621,9 @@ func (h *Handler) activate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) cancel(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
@@ -658,16 +687,9 @@ func (h *Handler) scheduleCancel(w http.ResponseWriter, r *http.Request) {
 		_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, sub.ID), tenantID, domain.AuditActionUpdate, "subscription", sub.ID, sub.Code, meta)
 	}
 
-	extra := map[string]any{"cancel_at_period_end": sub.CancelAtPeriodEnd}
-	if sub.CancelAt != nil {
-		extra["cancel_at"] = sub.CancelAt.UTC()
-	}
-	// ADR-069: the authoritative "when does it actually cancel" — consumers
-	// must not re-derive it from the status-polymorphic flag.
-	if sub.CancelEffectiveAt != nil {
-		extra["cancel_effective_at"] = sub.CancelEffectiveAt.UTC()
-	}
-	h.fireEvent(r.Context(), tenantID, domain.EventSubscriptionCancelScheduled, sub, extra)
+	// The subscription carries cancel_at, cancel_at_period_end and
+	// cancel_effective_at (ADR-069: when it actually cancels).
+	h.fireEvent(r.Context(), tenantID, domain.EventSubscriptionCancelScheduled, sub, nil)
 
 	h.respondSub(w, r, http.StatusOK, sub)
 }
@@ -686,23 +708,18 @@ func (h *Handler) pauseCollection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// triggered_by tag distinguishes operator-driven pauses from
-	// dunning-driven pauses in the Activity timeline. The audit write
-	// itself now happens inside Service.PauseCollection so the dunning
-	// adapter path (which bypasses this handler) also produces an entry.
-	input.TriggeredBy = "operator"
-
 	sub, err := h.svc.PauseCollection(r.Context(), tenantID, id, input)
 	if err != nil {
 		respond.FromError(w, r, err, "subscription")
 		return
 	}
 
-	extra := map[string]any{"behavior": string(input.Behavior)}
-	if sub.PauseCollection != nil && sub.PauseCollection.ResumesAt != nil {
-		extra["resumes_at"] = sub.PauseCollection.ResumesAt.UTC()
-	}
-	h.fireEvent(r.Context(), tenantID, domain.EventSubscriptionCollectionPaused, sub, extra)
+	// The subscription's pause_collection holds behavior and resumes_at.
+	// Dunning's pause sends the same event from its own transaction
+	// (PostgresStore.SetDunningPause), with triggered_by dunning.
+	h.fireEvent(r.Context(), tenantID, domain.EventSubscriptionCollectionPaused, sub, map[string]any{
+		"triggered_by": "operator",
+	})
 
 	h.respondSub(w, r, http.StatusOK, sub)
 }
@@ -713,6 +730,9 @@ func (h *Handler) pauseCollection(w http.ResponseWriter, r *http.Request) {
 // triggered_by="operator" so analytics can distinguish from the
 // scheduled transition. Returns 422 if the row is not in 'trialing'.
 func (h *Handler) endTrial(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
@@ -747,6 +767,9 @@ func (h *Handler) endTrial(w http.ResponseWriter, r *http.Request) {
 // 409 invalid_state for a subscription on a test clock. The audit row is the
 // service's; the handler emits none.
 func (h *Handler) retryBilling(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
@@ -778,8 +801,7 @@ func (h *Handler) extendTrial(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
 	var body ExtendTrialInput
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &body) {
 		return
 	}
 	if body.TrialEnd.IsZero() {
@@ -801,9 +823,9 @@ func (h *Handler) extendTrial(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	// The new trial end is the subscription's trial_end_at.
 	h.fireEvent(r.Context(), tenantID, domain.EventSubscriptionTrialExtended, sub, map[string]any{
 		"triggered_by": "operator",
-		"trial_end":    body.TrialEnd.UTC(),
 	})
 
 	h.respondSub(w, r, http.StatusOK, sub)
@@ -811,15 +833,25 @@ func (h *Handler) extendTrial(w http.ResponseWriter, r *http.Request) {
 
 // resumeCollection clears the collection-pause state. Idempotent —
 // clearing a row that has no active pause returns 200 with the unchanged
-// subscription. Returns 404 only when the subscription itself doesn't
-// exist.
+// subscription. A pause that had already lifted is resumed by the store
+// with its own trigger, and this handler sends nothing. Returns 404 only
+// when the subscription itself doesn't exist.
 func (h *Handler) resumeCollection(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
-	sub, err := h.svc.ResumeCollection(r.Context(), tenantID, id)
+	sub, resumed, err := h.svc.ResumeCollection(r.Context(), tenantID, id)
 	if err != nil {
 		respond.FromError(w, r, err, "subscription")
+		return
+	}
+	if !resumed {
+		// Collection was not paused: nothing resumed, nothing announced.
+		audit.MarkSkip(r.Context())
+		h.respondSub(w, r, http.StatusOK, sub)
 		return
 	}
 
@@ -829,7 +861,9 @@ func (h *Handler) resumeCollection(w http.ResponseWriter, r *http.Request) {
 	// handler; engine's cycle-scan auto-resume writes its own audit row
 	// with triggered_by="schedule" directly via Engine.SetAuditLogger.
 
-	h.fireEvent(r.Context(), tenantID, domain.EventSubscriptionCollectionResumed, sub, nil)
+	h.fireEvent(r.Context(), tenantID, domain.EventSubscriptionCollectionResumed, sub, map[string]any{
+		"triggered_by": "operator",
+	})
 
 	h.respondSub(w, r, http.StatusOK, sub)
 }
@@ -839,7 +873,6 @@ func (h *Handler) resumeCollection(w http.ResponseWriter, r *http.Request) {
 //
 //	{
 //	  "amount_gte": 50000,                    // optional, integer cents
-//	  "reset_billing_cycle": true,            // optional, defaults FALSE (Stripe keep-anchor; see BillingThresholdsInput)
 //	  "item_thresholds": [                    // optional, always-array
 //	    {"subscription_item_id": "si_xxx", "usage_gte": "1000"}
 //	  ]
@@ -847,7 +880,8 @@ func (h *Handler) resumeCollection(w http.ResponseWriter, r *http.Request) {
 //
 // At least one of amount_gte or item_thresholds must be supplied. Returns
 // 422 on validation failure (terminal sub, unknown item id, negative
-// usage_gte, multi-currency item set, etc).
+// usage_gte, multi-currency item set, an unknown field such as the removed
+// reset_billing_cycle, etc). A fire always keeps the billing period.
 //
 // Replaces the full set on every call: the per-item rows for any item not
 // in the new slice are deleted by the store.
@@ -925,6 +959,9 @@ func (h *Handler) setBillingThresholds(w http.ResponseWriter, r *http.Request) {
 // 200 with the unchanged subscription. Returns 404 only when the
 // subscription itself doesn't exist.
 func (h *Handler) clearBillingThresholds(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
@@ -945,15 +982,24 @@ func (h *Handler) clearBillingThresholds(w http.ResponseWriter, r *http.Request)
 }
 
 // clearScheduledCancel removes any prior schedule. Idempotent — clearing a
-// row that has no pending cancel returns 200 with the unchanged subscription.
+// row that has no pending cancel returns 200 with the unchanged subscription,
+// and writes no audit entry and sends no event, since nothing changed.
 // Returns 404 only when the subscription itself doesn't exist.
 func (h *Handler) clearScheduledCancel(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
-	sub, err := h.svc.ClearScheduledCancel(r.Context(), tenantID, id)
+	sub, cleared, err := h.svc.ClearScheduledCancel(r.Context(), tenantID, id)
 	if err != nil {
 		respond.FromError(w, r, err, "subscription")
+		return
+	}
+	if !cleared {
+		audit.MarkSkip(r.Context())
+		h.respondSub(w, r, http.StatusOK, sub)
 		return
 	}
 
@@ -1061,10 +1107,10 @@ func (h *Handler) addItem(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Re-fetch the subscription so downstream payload/proration paths see the
-	// full post-add Items slice. Silent fallback: if the read fails we use a
-	// minimal struct for events — item.added is still useful without the
-	// enclosing snapshot.
+	// full post-add Items slice. If the read fails the proration path falls
+	// back to the snapshot from before the add; item.added is not sent.
 	var subAfter domain.Subscription
+	subAfterRead := false
 	if h.events != nil || (wantProration && !atomic) {
 		s, getErr := h.svc.Get(r.Context(), tenantID, id)
 		if getErr != nil {
@@ -1073,7 +1119,7 @@ func (h *Handler) addItem(w http.ResponseWriter, r *http.Request) {
 				subAfter = domain.Subscription{ID: id}
 			}
 		} else {
-			subAfter = s
+			subAfter, subAfterRead = s, true
 		}
 	}
 
@@ -1133,10 +1179,18 @@ func (h *Handler) addItem(w http.ResponseWriter, r *http.Request) {
 		_ = prorationResult
 	}
 
+	// The re-read above is the subscription with the new item. When it
+	// failed there is no true resource to send, so the event is left out,
+	// loudly.
 	if h.events != nil {
-		h.fireEvent(r.Context(), tenantID, domain.EventSubscriptionItemAdded, subAfter, map[string]any{
-			"item": itemPayload(item),
-		})
+		if subAfterRead {
+			h.fireEvent(r.Context(), tenantID, domain.EventSubscriptionItemAdded, subAfter, map[string]any{
+				"item_id": item.ID,
+			})
+		} else {
+			slog.ErrorContext(r.Context(), "subscription.item.added not sent: the subscription could not be read after the add",
+				"subscription_id", id, "item_id", item.ID)
+		}
 	}
 
 	respond.JSON(w, r, http.StatusCreated, item)
@@ -1432,27 +1486,23 @@ func (h *Handler) updateItem(w http.ResponseWriter, r *http.Request) {
 	// (Immediate=false, NewPlanID set) is an intent, not a mutation of the
 	// current cycle → subscription.pending_change.scheduled; the applied
 	// event fires at the cycle boundary from billing.Engine.
+	// The item in the subscription's items holds the new quantity or plan,
+	// or the scheduled one (pending_plan_id, pending_plan_effective_at).
 	if h.events != nil {
-		sub, getErr := h.svc.Get(r.Context(), tenantID, subID)
-		if getErr != nil {
-			sub = domain.Subscription{ID: subID}
-		}
-		extra := map[string]any{"item": itemPayload(result.Item)}
 		eventType := domain.EventSubscriptionItemUpdated
 		if input.NewPlanID != "" && !input.Immediate {
 			eventType = domain.EventSubscriptionPendingChangeScheduled
-			extra["new_plan_id"] = input.NewPlanID
-			if result.Item.PendingPlanEffectiveAt != nil {
-				extra["effective_at"] = result.Item.PendingPlanEffectiveAt.UTC()
-			}
 		}
-		h.fireEvent(r.Context(), tenantID, eventType, sub, extra)
+		h.fireItemEvent(r.Context(), tenantID, eventType, subID, result.Item.ID)
 	}
 
 	respond.JSON(w, r, http.StatusOK, result)
 }
 
 func (h *Handler) cancelPendingItemChange(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	subID := chi.URLParam(r, "id")
 	itemID := chi.URLParam(r, "itemID")
@@ -1471,19 +1521,16 @@ func (h *Handler) cancelPendingItemChange(w http.ResponseWriter, r *http.Request
 	}
 
 	if h.events != nil {
-		sub, getErr := h.svc.Get(r.Context(), tenantID, subID)
-		if getErr != nil {
-			sub = domain.Subscription{ID: subID}
-		}
-		h.fireEvent(r.Context(), tenantID, domain.EventSubscriptionPendingChangeCanceled, sub, map[string]any{
-			"item": itemPayload(item),
-		})
+		h.fireItemEvent(r.Context(), tenantID, domain.EventSubscriptionPendingChangeCanceled, subID, item.ID)
 	}
 
 	respond.JSON(w, r, http.StatusOK, item)
 }
 
 func (h *Handler) removeItem(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	subID := chi.URLParam(r, "id")
 	itemID := chi.URLParam(r, "itemID")
@@ -1508,7 +1555,7 @@ func (h *Handler) removeItem(w http.ResponseWriter, r *http.Request) {
 	var removedQuantity int64
 	var subBefore domain.Subscription
 	var prorationRemainingDays, prorationTotalDays int64
-	if h.plans != nil && h.credits != nil {
+	if h.plans != nil && h.invoices != nil {
 		// Read errors fail the remove: it is a hard delete, so carrying on
 		// would lose the unused-portion credit and the data to compute it.
 		item, gerr := h.svc.store.GetItem(ctx, tenantID, itemID)
@@ -1531,11 +1578,11 @@ func (h *Handler) removeItem(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Atomic RemoveItem-with-proration: delete + credit grant in one
-	// tx so a failed credit grant rolls back the delete. Falls back to
+	// Atomic RemoveItem-with-proration: delete + credit-note draft in one
+	// tx so a failed draft rolls back the delete. Falls back to
 	// the legacy non-atomic flow when db isn't wired or no proration
 	// emission is needed.
-	wantProration := prorationRemainingDays > 0 && removedPlanID != "" && h.credits != nil
+	wantProration := prorationRemainingDays > 0 && removedPlanID != "" && h.invoices != nil
 	atomic := h.db != nil && wantProration
 	var removeProration *ProrationDetail
 	if atomic {
@@ -1615,13 +1662,7 @@ func (h *Handler) removeItem(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.events != nil {
-		sub, getErr := h.svc.Get(r.Context(), tenantID, subID)
-		if getErr != nil {
-			sub = domain.Subscription{ID: subID}
-		}
-		h.fireEvent(r.Context(), tenantID, domain.EventSubscriptionItemRemoved, sub, map[string]any{
-			"item_id": itemID,
-		})
+		h.fireItemEvent(r.Context(), tenantID, domain.EventSubscriptionItemRemoved, subID, itemID)
 	}
 
 	w.WriteHeader(http.StatusNoContent)
@@ -2221,8 +2262,14 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 	// period, so the delta for the remaining portion is (new−old) ×
 	// remaining/fullCycle. This matches the engine's day-1 stub base fee and
 	// cross-interval swap refund (both divide by fullCycleDays).
-	oldAmount := oldPlan.BaseAmountCents * spec.oldQuantity
-	newAmount := newPlan.BaseAmountCents * spec.newQuantity
+	oldAmount, ok := money.Mul(oldPlan.BaseAmountCents, spec.oldQuantity)
+	if !ok {
+		return nil, fmt.Errorf("proration: base fee of plan %s × quantity %d: %w", oldPlan.ID, spec.oldQuantity, domain.ErrAmountOverflow)
+	}
+	newAmount, ok := money.Mul(newPlan.BaseAmountCents, spec.newQuantity)
+	if !ok {
+		return nil, fmt.Errorf("proration: base fee of plan %s × quantity %d: %w", newPlan.ID, spec.newQuantity, domain.ErrAmountOverflow)
+	}
 	billingLoc, err := h.tenantLoc(ctx, sub.TenantID)
 	if err != nil {
 		return nil, err
@@ -2234,7 +2281,10 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 		}
 	}
 	remainingDays := min(spec.remainingDays, denomDays)
-	proratedCents := prorationCents(oldAmount, newAmount, remainingDays, denomDays)
+	proratedCents, err := prorationCents(oldAmount, newAmount, remainingDays, denomDays)
+	if err != nil {
+		return nil, err
+	}
 
 	if proratedCents == 0 {
 		return nil, nil
@@ -2265,9 +2315,13 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 
 	// A net charge needs the period's base invoice: none yet (a fresh
 	// subscription whose first prebill has not been generated) defers to cycle
-	// close, and an UNPAID one blocks the change (ADR-050). An in-flight base
-	// is not unpaid: the charge goes ahead, and a later decrease's credit is
-	// drafted and held until that charge settles (ADR-059).
+	// close, and an UNPAID one blocks the change (ADR-050). A written-off base
+	// is unpaid: it blocks the same way (ADR-050 amendment 2026-10-23). An
+	// in-flight base is not unpaid: the charge goes ahead, and a later
+	// decrease's credit is drafted and held until that charge settles
+	// (ADR-059). A base with nothing left to pay (no amount due, tax done)
+	// blocks nothing: an unpaid one in that state is settled as paid, and a
+	// written-off one stays written off (ADR-113) but is owed nothing.
 	if h.invoices != nil && sub.CurrentBillingPeriodStart != nil {
 		// A single-row lookup is right here: it only routes paid vs unpaid.
 		resolved, lookupErr := h.invoices.FindBaseInvoiceForPeriod(ctx, tenantID, sub.ID, *sub.CurrentBillingPeriodStart) //nolint:forbidigo // single-invoice-ok: paid/unpaid routing gate only
@@ -2281,7 +2335,8 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 			)
 			return nil, nil
 		}
-		if !resolved.PaymentInFlight() && resolved.PaymentStatus != domain.PaymentSucceeded {
+		owesNothing := resolved.AmountDueCents == 0 && resolved.TaxStatus == domain.InvoiceTaxOK
+		if !resolved.PaymentInFlight() && resolved.PaymentStatus != domain.PaymentSucceeded && !owesNothing {
 			return nil, unpaidSourceBlocksCharge(ctx, sub, spec, resolved)
 		}
 	}
@@ -2338,6 +2393,11 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 		}
 		if h.tax != nil {
 			r, err := h.tax.ApplyTaxToLineItems(ctx, tenantID, sub.CustomerID, effectivePlan.Currency, proratedCents, discountCents, lineItems)
+			if errors.Is(err, domain.ErrAmountOverflow) {
+				// Not a tax-infra failure: an amount on this invoice does not
+				// fit int64 cents. Refuse the change; a draft would carry it.
+				return nil, fmt.Errorf("proration invoice: %w", err)
+			}
 			if err != nil {
 				// Transient tax-infra failure. Do NOT finalize with zero tax —
 				// that ships an invoice lying about authoritative amounts.
@@ -2363,6 +2423,8 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 				taxResult = r
 			}
 		}
+		// ApplyTaxToLineItems checks that this total fits; without a tax
+		// result (deferred) it is the subtotal less a zero discount.
 		netProrated := taxResult.SubtotalCents - taxResult.DiscountCents + taxResult.TaxAmountCents
 
 		// ADR-048 Phase C: present a PLAN upgrade as the industry-standard
@@ -2395,8 +2457,11 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 		splitEligible := spec.changeType == domain.ItemChangeTypePlan ||
 			spec.changeType == domain.ItemChangeTypeQuantity
 		if splitEligible && taxResult.SubtotalCents == proratedCents {
-			creditCents, chargeCents, creditTax, chargeTax := splitUpgradeProration(
+			creditCents, chargeCents, creditTax, chargeTax, err := splitUpgradeProration(
 				oldAmount, remainingDays, denomDays, proratedCents, taxResult.TaxAmountCents)
+			if err != nil {
+				return nil, err
+			}
 
 			// Use the tax-applied single line as the template so each split
 			// line inherits the per-line tax DISPLAY fields (rate, jurisdiction,
@@ -2424,7 +2489,11 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 			creditLine.AmountCents = creditCents
 			creditLine.UnitAmountCents = creditCents / oldQty
 			creditLine.TaxAmountCents = creditTax
-			creditLine.TotalAmountCents = creditCents + creditTax
+			creditTotal, ok := money.Add(creditCents, creditTax)
+			if !ok {
+				return nil, fmt.Errorf("proration credit line total: %w", domain.ErrAmountOverflow)
+			}
+			creditLine.TotalAmountCents = creditTotal
 
 			chargeLine := tmpl
 			chargeLine.Description = chargeDesc
@@ -2432,7 +2501,11 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 			chargeLine.AmountCents = chargeCents
 			chargeLine.UnitAmountCents = chargeCents / newQty
 			chargeLine.TaxAmountCents = chargeTax
-			chargeLine.TotalAmountCents = chargeCents + chargeTax
+			chargeTotal, ok := money.Add(chargeCents, chargeTax)
+			if !ok {
+				return nil, fmt.Errorf("proration charge line total: %w", domain.ErrAmountOverflow)
+			}
+			chargeLine.TotalAmountCents = chargeTotal
 
 			lineItems = []domain.InvoiceLineItem{creditLine, chargeLine}
 		}
@@ -2700,7 +2773,10 @@ func (h *Handler) creditUnusedTime(ctx context.Context, tenantID string, sub dom
 	detail.Type = "adjustment"
 	var gross int64
 	for _, sh := range shares {
-		gross += sh.GrossCents
+		var ok bool
+		if gross, ok = money.Add(gross, sh.GrossCents); !ok {
+			return nil, fmt.Errorf("credit for unused time: sum of credit shares: %w", domain.ErrAmountOverflow)
+		}
 		if sh.ToBalance {
 			detail.Type = "credit"
 		}

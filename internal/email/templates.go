@@ -186,7 +186,7 @@ func renderDunningWarningHTML(customerName, invoiceNumber string, attemptNumber,
 	var b strings.Builder
 	b.WriteString(`<h1 style="margin:0 0 12px;font-size:20px;color:#111827;">We weren't able to process your payment</h1>`)
 	b.WriteString(`<p style="margin:0 0 8px;color:#4b5563;">Hi ` + escape(customerName) + `,</p>`)
-	b.WriteString(`<p style="margin:0 0 12px;color:#4b5563;">Attempt <strong style="color:#111827;">` + escape(itoa(attemptNumber)) + ` of ` + escape(itoa(maxAttempts)) + `</strong> to charge invoice <strong style="color:#111827;">` + escape(invoiceNumber) + `</strong> was declined.</p>`)
+	b.WriteString(`<p style="margin:0 0 12px;color:#4b5563;">Attempt <strong style="color:#111827;">` + escape(itoa(attemptNumber)) + ` of ` + escape(itoa(maxAttempts)) + `</strong> to charge invoice <strong style="color:#111827;">` + escape(invoiceNumber) + `</strong> didn't go through.</p>`)
 	// Surface the decline reason inline so customers can act
 	// (insufficient_funds → top up; lost_card → swap card). Empty
 	// reason = no callout, no false noise.
@@ -205,9 +205,10 @@ func renderDunningWarningHTML(customerName, invoiceNumber string, attemptNumber,
 
 // renderCardRefusedWarningHTML is the dunning warning for a card the bank
 // refused for good (#966): lost, stolen, revoked and the rest of
-// domain.IsHardDecline. Dunning will not charge that card again for this
-// invoice, so unlike renderDunningWarningHTML it promises no retry date and
-// shows no attempt count. It does not say why the bank refused: Stripe asks
+// domain.IsHardDecline. Dunning retries skip that card, so unlike
+// renderDunningWarningHTML it promises no retry date and shows no attempt
+// count. It does not say the card won't be charged again: Collect payment
+// and the customer's next invoice still charge it. It does not say why the bank refused: Stripe asks
 // that lost, stolen and fraud declines reach the customer as a plain decline
 // (https://docs.stripe.com/declines/codes).
 func renderCardRefusedWarningHTML(customerName, invoiceNumber, hostedURL string) (subject, contentHTML, ctaURL, ctaLabel string) {
@@ -227,10 +228,46 @@ func renderCardRefusedWarningHTML(customerName, invoiceNumber, hostedURL string)
 // cardRefusedSentence and cardRefusedAsk are the card-refused warning's copy,
 // shared by its HTML and plain-text parts so the two cannot drift.
 func cardRefusedSentence(invoiceNumber string) string {
-	return "Your bank declined the card on file for invoice " + invoiceNumber + ", so we won't charge that card again."
+	return "Your bank declined the card on file for invoice " + invoiceNumber + "."
 }
 
 const cardRefusedAsk = "Please pay the invoice with a different card."
+
+// renderConfirmPaymentHTML is the email for a payment the customer's bank
+// wants them to confirm (domain.DeclineAskConfirm: Stripe's
+// authentication_required, usually 3-D Secure). It is both the first notice
+// and each dunning reminder, as Stripe Billing sends a confirmation link and
+// reminders until the customer confirms
+// (https://docs.stripe.com/billing/revenue-recovery/customer-emails#payment-confirmation-notifications).
+// Nothing was declined, so it says nothing about a decline, and no retry
+// date: a charge made without the customer cannot pass the bank's check.
+// The hosted invoice page runs the confirmation when the customer pays.
+func renderConfirmPaymentHTML(customerName, invoiceNumber, hostedURL string) (subject, contentHTML, ctaURL, ctaLabel string) {
+	subject = "Action required — confirm your payment for invoice " + invoiceNumber
+	var b strings.Builder
+	b.WriteString(`<h1 style="margin:0 0 12px;font-size:20px;color:#111827;">Please confirm your payment</h1>`)
+	b.WriteString(`<p style="margin:0 0 8px;color:#4b5563;">Hi ` + escape(customerName) + `,</p>`)
+	b.WriteString(`<p style="margin:0 0 12px;color:#4b5563;">` + escape(confirmPaymentSentence(invoiceNumber)) + `</p>`)
+	b.WriteString(`<p style="margin:0 0 16px;color:#4b5563;">` + escape(confirmPaymentAsk(hostedURL != "")) + `</p>`)
+	if hostedURL != "" {
+		ctaURL = hostedURL
+		ctaLabel = "Pay invoice"
+	}
+	return subject, b.String(), ctaURL, ctaLabel
+}
+
+// confirmPaymentSentence and confirmPaymentAsk are the confirm email's copy,
+// shared by its HTML and plain-text parts so the two cannot drift.
+func confirmPaymentSentence(invoiceNumber string) string {
+	return "Your bank asked you to confirm the payment for invoice " + invoiceNumber + " before it can go through."
+}
+
+func confirmPaymentAsk(hasLink bool) string {
+	if hasLink {
+		return "Please pay the invoice using the link below. Your bank may ask you to confirm the payment."
+	}
+	return "Please contact us to pay the invoice."
+}
 
 func renderDunningEscalationHTML(customerName, invoiceNumber string, outcome domain.DunningEscalationOutcome, hostedURL string) (subject, contentHTML, ctaURL, ctaLabel string) {
 	subject = "Action required for invoice " + invoiceNumber

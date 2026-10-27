@@ -171,7 +171,7 @@ func (s *Scheduler) SetLoginThrottleCleaner(cleaner LoginThrottleCleaner) {
 }
 
 // SetTaxRetrier wires the background tax-retry reconciler. Each
-// tick scans invoices stuck at tax_status pending|failed with a
+// tick scans invoices stuck at tax_status pending with a
 // retryable code (provider_outage, unknown) past their backoff
 // timestamp, recomputes tax, and (on success + non-manual
 // invoices) auto-finalizes. Without this hook, tax-pending
@@ -286,8 +286,7 @@ func (s *Scheduler) runBillingHalf(ctx context.Context) {
 	// mode's errors do not gate the other — they share nothing at the
 	// DB level once the RLS predicate splits them.
 	for _, live := range []bool{true, false} {
-		modeCtx := postgres.WithLivemode(ctx, live)
-		s.runBillingCycleForMode(modeCtx, live, &panics)
+		s.runBillingCycleForMode(ctx, live, &panics)
 	}
 
 	duration := time.Since(start)
@@ -311,15 +310,10 @@ func (s *Scheduler) runBillingHalf(ctx context.Context) {
 // been: payment reminders are dunning-driven (runDunningHalf) or operator-
 // triggered (AttentionActionSendReminder). The claim was stale prose from #13.
 //
-// Each step runs under panics' guard (see runBillingHalf). The livemode
-// assert below stays outside every guard: a missing mode is a wiring bug that
-// must crash, not be recovered and skipped.
+// Each step runs under panics' guard (see runBillingHalf). live is the only
+// source of the mode: every step reads it off ctx, set here.
 func (s *Scheduler) runBillingCycleForMode(ctx context.Context, live bool, panics *scheduler.Panics) {
-	// Sanity: the only legitimate caller (runBillingHalf) always wraps ctx
-	// with WithLivemode before calling us. Assert here so a future refactor
-	// that skips the wrap crashes the test that exercises this path, not
-	// silently routes test-mode work into the live partition.
-	ctx = postgres.WithRequiredLivemode(ctx)
+	ctx = postgres.WithLivemode(ctx, live)
 
 	mode := "live"
 	if !live {
@@ -356,9 +350,8 @@ func (s *Scheduler) runBillingCycleForMode(ctx context.Context, live bool, panic
 	}()
 
 	// 0.5 Billing thresholds — early-invoice scan. Runs before the
-	// natural cycle so a threshold-fired invoice and (when reset_billing_cycle
-	// is true) the cycle advance both land on this tick. The partial unique
-	// index on invoices(tenant, sub, billing_period_start) WHERE
+	// natural cycle so a threshold-fired invoice lands on this tick. The
+	// partial unique index on invoices(tenant, sub, billing_period_start) WHERE
 	// billing_reason='threshold' makes this idempotent under retry.
 	func() {
 		defer panics.Guard("step", "threshold_scan", "mode", mode)
@@ -541,8 +534,7 @@ func (s *Scheduler) runDunningHalf(ctx context.Context) {
 
 	var panics scheduler.Panics
 	for _, live := range []bool{true, false} {
-		modeCtx := postgres.WithLivemode(ctx, live)
-		s.runDunningForMode(modeCtx, live, tenantIDs, &panics)
+		s.runDunningForMode(ctx, live, tenantIDs, &panics)
 	}
 	panics.Repanic()
 }
@@ -550,9 +542,8 @@ func (s *Scheduler) runDunningHalf(ctx context.Context) {
 // runDunningForMode processes due dunning runs for every tenant under the
 // given livemode. Called twice per tick.
 func (s *Scheduler) runDunningForMode(ctx context.Context, live bool, tenantIDs []string, panics *scheduler.Panics) {
-	// Assert the fan-out site did its job; see note on runBillingCycleForMode.
-	// Outside the guards: a missing mode must crash, not be skipped.
-	ctx = postgres.WithRequiredLivemode(ctx)
+	// live is the only source of the mode; see runBillingCycleForMode.
+	ctx = postgres.WithLivemode(ctx, live)
 
 	mode := "live"
 	if !live {

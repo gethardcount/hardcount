@@ -1,6 +1,6 @@
 # ADR-112: Dunning exhaustion settles two questions, not one
 
-**Status:** Accepted (2026-08-05; amended 2026-10-08 and twice on 2026-10-19)
+**Status:** Accepted (2026-08-05; amended 2026-10-08, 2026-10-19 and 2026-10-22)
 **Amends:** [ADR-036](036-dunning-campaigns-model.md) (dunning campaigns —
 `final_action` and its 2026-05-16 four-value enum)
 **Relates to:** [ADR-110](110-written-off-invoices-close-self-service-payment.md)
@@ -274,9 +274,10 @@ no claim. A second processor could escalate a run twice or reopen it.
   terminal action did apply. Trigger: the first tenant on `mark_uncollectible`
   who reports a missing final notice.
 - A holder frozen longer than the 15-minute lease can repeat terminal actions
-  alongside the claim winner (pause has no skip-if-done; the escalation itself
-  stays exactly-once on `state`). Trigger: two or more dunning replicas in
-  production, or an observed duplicate `collection_paused` audit row.
+  alongside the claim winner (the escalation itself stays exactly-once on
+  `state`). Trigger: two or more dunning replicas in production. Since
+  2026-10-22 the pause is skip-if-done: a pause already in force writes
+  nothing ([ADR-036](036-dunning-campaigns-model.md) amendment 2026-10-22).
 - The escalated timeline row and `dunning.escalated` webhook are written after
   the escalation commits (a crash between loses them). Trigger: the
   one-attempt-path outbox work.
@@ -390,3 +391,18 @@ progress and for a crash on the final retry. Pinned by
 ## Amendment 2026-10-22 — money-path create routes refuse unknown fields
 
 Money-path create routes and the subscription change routes refuse unknown fields (422, `param` = key); policy routes keep the by-name refusal.
+
+## Amendment 2026-10-22 — a cancel that voids the run's invoice resolves the run
+
+When the final action's cancel voids the run's own invoice (a wholly unused
+prebill, ADR-118), the void now resolves the run as `invoice_voided`
+itself, in its post-commit legs. The run then neither escalates nor sends an
+escalation email, whatever the final invoice action is. Before, a policy
+with final invoice action `none` escalated over the voided invoice. See the
+[ADR-118 amendment of 2026-10-22](118-cancel-and-swap-relief-in-the-change-transaction.md#amendment-2026-10-22-a-relief-void-runs-every-voids-post-commit-legs).
+
+## Amendment 2026-10-22 — the subscription action can wait for the invoice grace
+
+A pause or cancel that would close a period still inside its invoice grace waits: both actions run when the grace ends ([ADR-120 amendment of 2026-10-22](120-invoice-grace-period-for-late-usage.md#decision)). The run stays active and the wait writes only `next_action_at`. A first exhaustion that waits is not marked `action_failed`. A re-attempt of an earlier failed action that waits keeps its `action_failed` resolution until the action runs: the last attempt of that action did fail, and the wait did not attempt it.
+
+The list reads of a run (`GET /v1/dunning/runs`, and the invoice notices) carry the bound policy's `max_retry_attempts`. A run whose `attempt_count` has reached it retries no charge, so its `next_action_at` is labelled the final step, not a retry, and the invoice notices no longer promise a retry for it. Before, they keyed on `action_failed` alone and promised a retry during the grace wait and the exhaustion lease.

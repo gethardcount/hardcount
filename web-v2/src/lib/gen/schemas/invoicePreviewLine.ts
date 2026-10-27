@@ -16,9 +16,9 @@ export interface InvoicePreviewLine {
   description: string;
   meter_id?: string;
   meter_unit?: string;
-  rating_rule_version_id?: string;
-  rule_key?: string;
-  /** For a meter with several pricing rules, the dimension values this line's rule matches. */
+  /** On a usage line, the plan price that priced it. */
+  price_id?: string;
+  /** On a usage line, the labels its price takes. Absent for a price that takes every event. */
   dimension_match?: InvoicePreviewLineDimensionMatch;
   currency: string;
   /** Exact quantity as a decimal string. */

@@ -11,12 +11,12 @@ import (
 // an int64 quantity input. The production signature takes decimal.Decimal
 // (fractional usage is supported); these table tests still express
 // quantity as int for readability so we wrap once at the call site.
-func computeInt(rule RatingRuleVersion, n int64) (int64, error) {
+func computeInt(rule PriceShape, n int64) (int64, error) {
 	return ComputeAmountCents(rule, decimal.NewFromInt(n))
 }
 
 func TestComputeAmountCents_Flat(t *testing.T) {
-	rule := RatingRuleVersion{Mode: PricingFlat, FlatAmountCents: decimal.NewFromInt(500)}
+	rule := PriceShape{Mode: PricingPerUnit, UnitAmountCents: decimal.NewFromInt(500)}
 
 	tests := []struct {
 		name    string
@@ -46,7 +46,7 @@ func TestComputeAmountCents_Flat(t *testing.T) {
 // a sub-cent-per-unit decimal rate ($3.00 / 1,000,000 tokens = 0.0003
 // cents/token) prices linearly and exactly — integer cents could not.
 func TestComputeAmountCents_SubCentFlatRate(t *testing.T) {
-	rule := RatingRuleVersion{Mode: PricingFlat, FlatAmountCents: decimal.RequireFromString("0.0003")}
+	rule := PriceShape{Mode: PricingPerUnit, UnitAmountCents: decimal.RequireFromString("0.0003")}
 	cases := []struct {
 		qty  int64
 		want int64
@@ -73,16 +73,16 @@ func TestComputeAmountCents_SubCentFlatRate(t *testing.T) {
 func TestComputeAmountCents_RejectsMisorderedCatchAllTiers(t *testing.T) {
 	for _, name := range []string{"two catch-alls", "catch-all not last"} {
 		tiers := []RatingTier{
-			{UpTo: 0, UnitAmountCents: decimal.NewFromInt(5)},
-			{UpTo: 0, UnitAmountCents: decimal.NewFromInt(1)},
+			{UpTo: nil, UnitAmountCents: decimal.NewFromInt(5)},
+			{UpTo: nil, UnitAmountCents: decimal.NewFromInt(1)},
 		}
 		if name == "catch-all not last" {
 			tiers = []RatingTier{
-				{UpTo: 0, UnitAmountCents: decimal.NewFromInt(5)},
-				{UpTo: 100, UnitAmountCents: decimal.NewFromInt(1)},
+				{UpTo: nil, UnitAmountCents: decimal.NewFromInt(5)},
+				{UpTo: new(int64(100)), UnitAmountCents: decimal.NewFromInt(1)},
 			}
 		}
-		rule := RatingRuleVersion{Mode: PricingGraduated, GraduatedTiers: tiers}
+		rule := PriceShape{Mode: PricingGraduated, Tiers: tiers}
 		if _, err := computeInt(rule, 150); err == nil {
 			t.Errorf("%s: expected ErrInvalidPricingConfig, got nil", name)
 		}
@@ -90,12 +90,12 @@ func TestComputeAmountCents_RejectsMisorderedCatchAllTiers(t *testing.T) {
 }
 
 func TestComputeAmountCents_Graduated(t *testing.T) {
-	rule := RatingRuleVersion{
+	rule := PriceShape{
 		Mode: PricingGraduated,
-		GraduatedTiers: []RatingTier{
-			{UpTo: 10, UnitAmountCents: decimal.NewFromInt(100)},
-			{UpTo: 50, UnitAmountCents: decimal.NewFromInt(50)},
-			{UpTo: 0, UnitAmountCents: decimal.NewFromInt(25)}, // unlimited
+		Tiers: []RatingTier{
+			{UpTo: new(int64(10)), UnitAmountCents: decimal.NewFromInt(100)},
+			{UpTo: new(int64(50)), UnitAmountCents: decimal.NewFromInt(50)},
+			{UpTo: nil, UnitAmountCents: decimal.NewFromInt(25)}, // unlimited
 		},
 	}
 
@@ -125,11 +125,10 @@ func TestComputeAmountCents_Graduated(t *testing.T) {
 }
 
 func TestComputeAmountCents_Package(t *testing.T) {
-	rule := RatingRuleVersion{
-		Mode:                   PricingPackage,
-		PackageSize:            100,
-		PackageAmountCents:     2000,
-		OverageUnitAmountCents: decimal.NewFromInt(30),
+	rule := PriceShape{
+		Mode:               PricingPackage,
+		PackageSize:        100,
+		PackageAmountCents: decimal.NewFromInt(2000),
 	}
 
 	tests := []struct {
@@ -138,9 +137,11 @@ func TestComputeAmountCents_Package(t *testing.T) {
 		wantAmt int64
 	}{
 		{"zero", 0, 0},
+		{"one unit is a whole package", 1, 2000},
 		{"one full package", 100, 2000},
-		{"with overage", 150, 2000 + 50*30}, // 3500
+		{"a part package bills as a whole one", 150, 4000},
 		{"two packages", 200, 4000},
+		{"one unit into the third package", 201, 6000},
 	}
 
 	for _, tt := range tests {
@@ -161,7 +162,7 @@ func TestComputeAmountCents_Package(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestComputeAmountCents_Flat_NegativeUnitPrice(t *testing.T) {
-	rule := RatingRuleVersion{Mode: PricingFlat, FlatAmountCents: decimal.NewFromInt(-1)}
+	rule := PriceShape{Mode: PricingPerUnit, UnitAmountCents: decimal.NewFromInt(-1)}
 	_, err := computeInt(rule, 10)
 	if err != ErrInvalidPricingConfig {
 		t.Fatalf("expected ErrInvalidPricingConfig for negative flat price, got %v", err)
@@ -170,9 +171,9 @@ func TestComputeAmountCents_Flat_NegativeUnitPrice(t *testing.T) {
 
 func TestComputeAmountCents_Flat_LargeQuantityOverflowCheck(t *testing.T) {
 	// Verify large quantity * unit price doesn't silently overflow.
-	// With FlatAmountCents=1000 ($10) and quantity near int64 max / 1000,
+	// With UnitAmountCents=1000 ($10) and quantity near int64 max / 1000,
 	// the multiplication should still produce a valid result.
-	rule := RatingRuleVersion{Mode: PricingFlat, FlatAmountCents: decimal.NewFromInt(1000)}
+	rule := PriceShape{Mode: PricingPerUnit, UnitAmountCents: decimal.NewFromInt(1000)}
 	qty := int64(math.MaxInt64 / 1000) // largest safe quantity
 	got, err := computeInt(rule, qty)
 	if err != nil {
@@ -187,7 +188,7 @@ func TestComputeAmountCents_Flat_LargeQuantityOverflowCheck(t *testing.T) {
 func TestComputeAmountCents_Flat_OverflowDetected(t *testing.T) {
 	// Pathological input: qty * unit would wrap int64. Must be rejected,
 	// not silently produce a negative invoice line.
-	rule := RatingRuleVersion{Mode: PricingFlat, FlatAmountCents: decimal.NewFromInt(2)}
+	rule := PriceShape{Mode: PricingPerUnit, UnitAmountCents: decimal.NewFromInt(2)}
 	_, err := computeInt(rule, math.MaxInt64)
 	if err != ErrAmountOverflow {
 		t.Fatalf("expected ErrAmountOverflow, got %v", err)
@@ -196,10 +197,10 @@ func TestComputeAmountCents_Flat_OverflowDetected(t *testing.T) {
 
 func TestComputeAmountCents_Graduated_OverflowDetected(t *testing.T) {
 	// Catch-all tier with huge unit price and huge quantity — multiply wraps.
-	rule := RatingRuleVersion{
+	rule := PriceShape{
 		Mode: PricingGraduated,
-		GraduatedTiers: []RatingTier{
-			{UpTo: 0, UnitAmountCents: decimal.NewFromInt(math.MaxInt64 / 2)},
+		Tiers: []RatingTier{
+			{UpTo: nil, UnitAmountCents: decimal.NewFromInt(math.MaxInt64 / 2)},
 		},
 	}
 	_, err := computeInt(rule, 10)
@@ -210,11 +211,11 @@ func TestComputeAmountCents_Graduated_OverflowDetected(t *testing.T) {
 
 func TestComputeAmountCents_Graduated_OverflowOnSum(t *testing.T) {
 	// First tier fills up; second tier addition would overflow the running sum.
-	rule := RatingRuleVersion{
+	rule := PriceShape{
 		Mode: PricingGraduated,
-		GraduatedTiers: []RatingTier{
-			{UpTo: 1, UnitAmountCents: decimal.NewFromInt(math.MaxInt64 - 5)},
-			{UpTo: 0, UnitAmountCents: decimal.NewFromInt(10)},
+		Tiers: []RatingTier{
+			{UpTo: new(int64(1)), UnitAmountCents: decimal.NewFromInt(math.MaxInt64 - 5)},
+			{UpTo: nil, UnitAmountCents: decimal.NewFromInt(10)},
 		},
 	}
 	_, err := computeInt(rule, 2)
@@ -224,12 +225,11 @@ func TestComputeAmountCents_Graduated_OverflowOnSum(t *testing.T) {
 }
 
 func TestComputeAmountCents_Package_OverflowDetected(t *testing.T) {
-	// Package multiply wraps: fullPackages * PackageAmountCents.
-	rule := RatingRuleVersion{
-		Mode:                   PricingPackage,
-		PackageSize:            1,
-		PackageAmountCents:     math.MaxInt64 / 2,
-		OverageUnitAmountCents: decimal.NewFromInt(0),
+	// Package multiply wraps: packages * PackageAmountCents.
+	rule := PriceShape{
+		Mode:               PricingPackage,
+		PackageSize:        1,
+		PackageAmountCents: decimal.NewFromInt(math.MaxInt64 / 2),
 	}
 	_, err := computeInt(rule, 10)
 	if err != ErrAmountOverflow {
@@ -237,23 +237,26 @@ func TestComputeAmountCents_Package_OverflowDetected(t *testing.T) {
 	}
 }
 
-func TestComputeAmountCents_Package_OverflowOnSum(t *testing.T) {
-	// Both multiplies fit; their sum overflows.
-	rule := RatingRuleVersion{
-		Mode:                   PricingPackage,
-		PackageSize:            2,
-		PackageAmountCents:     math.MaxInt64 - 5,
-		OverageUnitAmountCents: decimal.NewFromInt(10),
+func TestComputeAmountCents_Package_OverflowOnPartPackage(t *testing.T) {
+	// One package fits int64; the part package rounds up to a second one,
+	// which does not.
+	rule := PriceShape{
+		Mode:               PricingPackage,
+		PackageSize:        2,
+		PackageAmountCents: decimal.NewFromInt(math.MaxInt64/2 + 1),
 	}
-	_, err := computeInt(rule, 3) // 1 full package + 1 overage
+	if _, err := computeInt(rule, 2); err != nil {
+		t.Fatalf("one package: %v", err)
+	}
+	_, err := computeInt(rule, 3)
 	if err != ErrAmountOverflow {
-		t.Fatalf("expected ErrAmountOverflow on package sum, got %v", err)
+		t.Fatalf("expected ErrAmountOverflow on the part package, got %v", err)
 	}
 }
 
 func TestComputeAmountCents_Flat_ZeroUnitPrice(t *testing.T) {
 	// Free tier: 0 cents per unit
-	rule := RatingRuleVersion{Mode: PricingFlat, FlatAmountCents: decimal.NewFromInt(0)}
+	rule := PriceShape{Mode: PricingPerUnit, UnitAmountCents: decimal.NewFromInt(0)}
 	got, err := computeInt(rule, 999999)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -268,11 +271,11 @@ func TestComputeAmountCents_Flat_ZeroUnitPrice(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestComputeAmountCents_Graduated_ExactTierBoundary(t *testing.T) {
-	rule := RatingRuleVersion{
+	rule := PriceShape{
 		Mode: PricingGraduated,
-		GraduatedTiers: []RatingTier{
-			{UpTo: 100, UnitAmountCents: decimal.NewFromInt(50)},
-			{UpTo: 0, UnitAmountCents: decimal.NewFromInt(25)}, // catch-all
+		Tiers: []RatingTier{
+			{UpTo: new(int64(100)), UnitAmountCents: decimal.NewFromInt(50)},
+			{UpTo: nil, UnitAmountCents: decimal.NewFromInt(25)}, // catch-all
 		},
 	}
 	// Exactly at the first tier boundary
@@ -287,10 +290,10 @@ func TestComputeAmountCents_Graduated_ExactTierBoundary(t *testing.T) {
 
 func TestComputeAmountCents_Graduated_OnlyUnlimitedTier(t *testing.T) {
 	// Single tier with UpTo=0 (catch-all) handles any quantity
-	rule := RatingRuleVersion{
+	rule := PriceShape{
 		Mode: PricingGraduated,
-		GraduatedTiers: []RatingTier{
-			{UpTo: 0, UnitAmountCents: decimal.NewFromInt(10)},
+		Tiers: []RatingTier{
+			{UpTo: nil, UnitAmountCents: decimal.NewFromInt(10)},
 		},
 	}
 	got, err := computeInt(rule, 5000)
@@ -304,10 +307,10 @@ func TestComputeAmountCents_Graduated_OnlyUnlimitedTier(t *testing.T) {
 
 func TestComputeAmountCents_Graduated_InsufficientTiers(t *testing.T) {
 	// Tiers only cover up to 100, but quantity is 200 and no catch-all
-	rule := RatingRuleVersion{
+	rule := PriceShape{
 		Mode: PricingGraduated,
-		GraduatedTiers: []RatingTier{
-			{UpTo: 100, UnitAmountCents: decimal.NewFromInt(50)},
+		Tiers: []RatingTier{
+			{UpTo: new(int64(100)), UnitAmountCents: decimal.NewFromInt(50)},
 		},
 	}
 	_, err := computeInt(rule, 200)
@@ -317,9 +320,9 @@ func TestComputeAmountCents_Graduated_InsufficientTiers(t *testing.T) {
 }
 
 func TestComputeAmountCents_Graduated_EmptyTiers(t *testing.T) {
-	rule := RatingRuleVersion{
-		Mode:           PricingGraduated,
-		GraduatedTiers: nil,
+	rule := PriceShape{
+		Mode:  PricingGraduated,
+		Tiers: nil,
 	}
 	_, err := computeInt(rule, 10)
 	if err != ErrInvalidPricingConfig {
@@ -328,10 +331,10 @@ func TestComputeAmountCents_Graduated_EmptyTiers(t *testing.T) {
 }
 
 func TestComputeAmountCents_Graduated_NegativeUnitPrice(t *testing.T) {
-	rule := RatingRuleVersion{
+	rule := PriceShape{
 		Mode: PricingGraduated,
-		GraduatedTiers: []RatingTier{
-			{UpTo: 100, UnitAmountCents: decimal.NewFromInt(-5)},
+		Tiers: []RatingTier{
+			{UpTo: new(int64(100)), UnitAmountCents: decimal.NewFromInt(-5)},
 		},
 	}
 	_, err := computeInt(rule, 10)
@@ -341,10 +344,10 @@ func TestComputeAmountCents_Graduated_NegativeUnitPrice(t *testing.T) {
 }
 
 func TestComputeAmountCents_Graduated_NegativeUpTo(t *testing.T) {
-	rule := RatingRuleVersion{
+	rule := PriceShape{
 		Mode: PricingGraduated,
-		GraduatedTiers: []RatingTier{
-			{UpTo: -10, UnitAmountCents: decimal.NewFromInt(50)},
+		Tiers: []RatingTier{
+			{UpTo: new(int64(-10)), UnitAmountCents: decimal.NewFromInt(50)},
 		},
 	}
 	_, err := computeInt(rule, 5)
@@ -354,11 +357,11 @@ func TestComputeAmountCents_Graduated_NegativeUpTo(t *testing.T) {
 }
 
 func TestComputeAmountCents_Graduated_ZeroQuantity(t *testing.T) {
-	rule := RatingRuleVersion{
+	rule := PriceShape{
 		Mode: PricingGraduated,
-		GraduatedTiers: []RatingTier{
-			{UpTo: 100, UnitAmountCents: decimal.NewFromInt(50)},
-			{UpTo: 0, UnitAmountCents: decimal.NewFromInt(25)},
+		Tiers: []RatingTier{
+			{UpTo: new(int64(100)), UnitAmountCents: decimal.NewFromInt(50)},
+			{UpTo: nil, UnitAmountCents: decimal.NewFromInt(25)},
 		},
 	}
 	got, err := computeInt(rule, 0)
@@ -372,12 +375,12 @@ func TestComputeAmountCents_Graduated_ZeroQuantity(t *testing.T) {
 
 func TestComputeAmountCents_Graduated_ThreeTiersExactBoundaries(t *testing.T) {
 	// Tier 1: 0-10 @ 100, Tier 2: 11-50 @ 50, Tier 3: 51+ @ 25
-	rule := RatingRuleVersion{
+	rule := PriceShape{
 		Mode: PricingGraduated,
-		GraduatedTiers: []RatingTier{
-			{UpTo: 10, UnitAmountCents: decimal.NewFromInt(100)},
-			{UpTo: 50, UnitAmountCents: decimal.NewFromInt(50)},
-			{UpTo: 0, UnitAmountCents: decimal.NewFromInt(25)},
+		Tiers: []RatingTier{
+			{UpTo: new(int64(10)), UnitAmountCents: decimal.NewFromInt(100)},
+			{UpTo: new(int64(50)), UnitAmountCents: decimal.NewFromInt(50)},
+			{UpTo: nil, UnitAmountCents: decimal.NewFromInt(25)},
 		},
 	}
 	tests := []struct {
@@ -410,11 +413,10 @@ func TestComputeAmountCents_Graduated_ThreeTiersExactBoundaries(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestComputeAmountCents_Package_ExactMultiple(t *testing.T) {
-	rule := RatingRuleVersion{
-		Mode:                   PricingPackage,
-		PackageSize:            50,
-		PackageAmountCents:     1000,
-		OverageUnitAmountCents: decimal.NewFromInt(30),
+	rule := PriceShape{
+		Mode:               PricingPackage,
+		PackageSize:        50,
+		PackageAmountCents: decimal.NewFromInt(1000),
 	}
 	// 150 = 3 * 50, no overage
 	got, err := computeInt(rule, 150)
@@ -427,28 +429,26 @@ func TestComputeAmountCents_Package_ExactMultiple(t *testing.T) {
 }
 
 func TestComputeAmountCents_Package_SingleUnitLargePackage(t *testing.T) {
-	rule := RatingRuleVersion{
-		Mode:                   PricingPackage,
-		PackageSize:            1000,
-		PackageAmountCents:     5000,
-		OverageUnitAmountCents: decimal.NewFromInt(10),
+	rule := PriceShape{
+		Mode:               PricingPackage,
+		PackageSize:        1000,
+		PackageAmountCents: decimal.NewFromInt(5000),
 	}
-	// qty=1: 0 full packages, 1 overage unit
+	// qty=1: a part package bills as a whole one
 	got, err := computeInt(rule, 1)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got != 10 {
-		t.Errorf("got %d, want %d (1 overage unit)", got, 10)
+	if got != 5000 {
+		t.Errorf("got %d, want %d (one whole package)", got, 5000)
 	}
 }
 
 func TestComputeAmountCents_Package_ZeroPackageSize(t *testing.T) {
-	rule := RatingRuleVersion{
-		Mode:                   PricingPackage,
-		PackageSize:            0,
-		PackageAmountCents:     1000,
-		OverageUnitAmountCents: decimal.NewFromInt(10),
+	rule := PriceShape{
+		Mode:               PricingPackage,
+		PackageSize:        0,
+		PackageAmountCents: decimal.NewFromInt(1000),
 	}
 	_, err := computeInt(rule, 10)
 	if err != ErrInvalidPricingConfig {
@@ -457,11 +457,10 @@ func TestComputeAmountCents_Package_ZeroPackageSize(t *testing.T) {
 }
 
 func TestComputeAmountCents_Package_NegativePackageSize(t *testing.T) {
-	rule := RatingRuleVersion{
-		Mode:                   PricingPackage,
-		PackageSize:            -5,
-		PackageAmountCents:     1000,
-		OverageUnitAmountCents: decimal.NewFromInt(10),
+	rule := PriceShape{
+		Mode:               PricingPackage,
+		PackageSize:        -5,
+		PackageAmountCents: decimal.NewFromInt(1000),
 	}
 	_, err := computeInt(rule, 10)
 	if err != ErrInvalidPricingConfig {
@@ -470,46 +469,14 @@ func TestComputeAmountCents_Package_NegativePackageSize(t *testing.T) {
 }
 
 func TestComputeAmountCents_Package_NegativePackagePrice(t *testing.T) {
-	rule := RatingRuleVersion{
-		Mode:                   PricingPackage,
-		PackageSize:            100,
-		PackageAmountCents:     -500,
-		OverageUnitAmountCents: decimal.NewFromInt(10),
+	rule := PriceShape{
+		Mode:               PricingPackage,
+		PackageSize:        100,
+		PackageAmountCents: decimal.NewFromInt(-500),
 	}
 	_, err := computeInt(rule, 10)
 	if err != ErrInvalidPricingConfig {
 		t.Fatalf("expected ErrInvalidPricingConfig for negative package price, got %v", err)
-	}
-}
-
-func TestComputeAmountCents_Package_NegativeOveragePrice(t *testing.T) {
-	rule := RatingRuleVersion{
-		Mode:                   PricingPackage,
-		PackageSize:            100,
-		PackageAmountCents:     1000,
-		OverageUnitAmountCents: decimal.NewFromInt(-5),
-	}
-	_, err := computeInt(rule, 10)
-	if err != ErrInvalidPricingConfig {
-		t.Fatalf("expected ErrInvalidPricingConfig for negative overage price, got %v", err)
-	}
-}
-
-func TestComputeAmountCents_Package_ZeroOveragePrice(t *testing.T) {
-	// Free overage: anything beyond full packages costs nothing
-	rule := RatingRuleVersion{
-		Mode:                   PricingPackage,
-		PackageSize:            100,
-		PackageAmountCents:     2000,
-		OverageUnitAmountCents: decimal.NewFromInt(0),
-	}
-	got, err := computeInt(rule, 150)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	// 1 full package = 2000, 50 overage units at 0 = 0
-	if got != 2000 {
-		t.Errorf("got %d, want %d", got, 2000)
 	}
 }
 
@@ -518,7 +485,7 @@ func TestComputeAmountCents_Package_ZeroOveragePrice(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestComputeAmountCents_UnknownMode(t *testing.T) {
-	rule := RatingRuleVersion{Mode: "volume"}
+	rule := PriceShape{Mode: "volume"}
 	_, err := computeInt(rule, 10)
 	if err != ErrInvalidPricingConfig {
 		t.Fatalf("expected ErrInvalidPricingConfig for unknown mode, got %v", err)
@@ -532,15 +499,15 @@ func TestComputeAmountCents_UnknownMode(t *testing.T) {
 func TestComputeAmountCents_NegativeQuantity_AllModes(t *testing.T) {
 	modes := []struct {
 		name string
-		rule RatingRuleVersion
+		rule PriceShape
 	}{
-		{"flat", RatingRuleVersion{Mode: PricingFlat, FlatAmountCents: decimal.NewFromInt(100)}},
-		{"graduated", RatingRuleVersion{
-			Mode:           PricingGraduated,
-			GraduatedTiers: []RatingTier{{UpTo: 0, UnitAmountCents: decimal.NewFromInt(10)}},
+		{"per_unit", PriceShape{Mode: PricingPerUnit, UnitAmountCents: decimal.NewFromInt(100)}},
+		{"graduated", PriceShape{
+			Mode:  PricingGraduated,
+			Tiers: []RatingTier{{UpTo: nil, UnitAmountCents: decimal.NewFromInt(10)}},
 		}},
-		{"package", RatingRuleVersion{
-			Mode: PricingPackage, PackageSize: 10, PackageAmountCents: 100, OverageUnitAmountCents: decimal.NewFromInt(5),
+		{"package", PriceShape{
+			Mode: PricingPackage, PackageSize: 10, PackageAmountCents: decimal.NewFromInt(100),
 		}},
 	}
 	for _, m := range modes {
@@ -554,13 +521,13 @@ func TestComputeAmountCents_NegativeQuantity_AllModes(t *testing.T) {
 }
 
 // TestComputeAmountCents_Graduated_EmptyTiers_Validation verifies that
-// an unmarshal failure on graduated_tiers (empty list) is caught at billing time.
+// an unmarshal failure on tiers (empty list) is caught at billing time.
 func TestComputeAmountCents_Graduated_EmptyTiers_Validation(t *testing.T) {
 	// This simulates what happens if json.Unmarshal in scanRatingRule fails
-	// silently and leaves GraduatedTiers as an empty slice.
-	emptyRule := RatingRuleVersion{
-		Mode:           PricingGraduated,
-		GraduatedTiers: []RatingTier{}, // Empty because unmarshal failed
+	// silently and leaves Tiers as an empty slice.
+	emptyRule := PriceShape{
+		Mode:  PricingGraduated,
+		Tiers: []RatingTier{}, // Empty because unmarshal failed
 	}
 
 	qty := decimal.NewFromInt(100)

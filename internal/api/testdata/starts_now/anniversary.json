@@ -1,0 +1,135 @@
+{
+  "invoices": [
+    {
+      "invoice": {
+        "amount_due_cents": 5000,
+        "amount_paid_cents": 0,
+        "attention": {
+          "actions": [
+            {
+              "code": "add_payment_method",
+              "label": "Open customer page"
+            }
+          ],
+          "code": "payment.no_payment_method",
+          "detail": "To let Velox email setup links, set up email sending (SMTP) and the payment-update page address (PAYMENT_UPDATE_URL).",
+          "due_by": "2026-05-10T14:30:00Z",
+          "message": "This invoice is charged automatically once the customer adds a card.\nThis server can't email setup links, so none was sent; copy one from the customer page instead.",
+          "reason": "no_payment_method",
+          "severity": "warning",
+          "since": "2026-04-10T14:30:00Z"
+        },
+        "auto_charge_pending": true,
+        "bill_to_snapshot": {
+          "display_name": "Lag Customer",
+          "email": "lag@example.test"
+        },
+        "billing_period_display": "Apr 10, 2026 – May 9, 2026",
+        "billing_period_end": "2026-05-10T00:00:00Z",
+        "billing_period_start": "2026-04-10T00:00:00Z",
+        "billing_reason": "subscription_create",
+        "billing_timezone": "UTC",
+        "created_at": "2026-04-10T14:30:00Z",
+        "credits_applied_cents": 0,
+        "currency": "USD",
+        "customer_id": "<id 1>",
+        "discount_cents": 0,
+        "due_at": "2026-05-10T14:30:00Z",
+        "id": "<id 8>",
+        "invoice_number": "VLX-000001",
+        "is_simulated": false,
+        "issued_at": "2026-04-10T14:30:00Z",
+        "net_payment_term_days": 30,
+        "paid_out_of_band": false,
+        "payment_status": "pending",
+        "public_token": "<id 9>",
+        "status": "finalized",
+        "subscription_id": "<id 2>",
+        "subtotal_cents": 5000,
+        "supplier_snapshot": {},
+        "tax_amount_cents": 0,
+        "tax_provider": "manual",
+        "tax_rate": 0,
+        "tax_status": "ok",
+        "tenant_id": "<id 5>",
+        "total_amount_cents": 5000,
+        "updated_at": "2026-04-10T14:30:00Z"
+      },
+      "line_items": [
+        {
+          "amount_cents": 3000,
+          "billing_period_end": "2026-05-10T00:00:00Z",
+          "billing_period_start": "2026-04-10T00:00:00Z",
+          "created_at": "2026-04-10T14:30:00Z",
+          "currency": "USD",
+          "description": "plan_a - base fee (qty 1)",
+          "id": "<id 10>",
+          "invoice_id": "<id 8>",
+          "line_type": "base_fee",
+          "quantity": "1",
+          "tax_amount_cents": 0,
+          "tax_rate": 0,
+          "tenant_id": "<id 5>",
+          "total_amount_cents": 3000,
+          "unit_amount_decimal": "3000"
+        },
+        {
+          "amount_cents": 2000,
+          "billing_period_end": "2026-05-10T00:00:00Z",
+          "billing_period_start": "2026-04-10T00:00:00Z",
+          "created_at": "2026-04-10T14:30:00Z",
+          "currency": "USD",
+          "description": "plan_c - base fee (qty 2)",
+          "id": "<id 11>",
+          "invoice_id": "<id 8>",
+          "line_type": "base_fee",
+          "quantity": "2",
+          "tax_amount_cents": 0,
+          "tax_rate": 0,
+          "tenant_id": "<id 5>",
+          "total_amount_cents": 2000,
+          "unit_amount_decimal": "1000"
+        }
+      ]
+    }
+  ],
+  "subscription": {
+    "activated_at": "2026-04-10T14:30:00Z",
+    "billing_anchor_day": 10,
+    "billing_time": "anniversary",
+    "cancel_at_period_end": false,
+    "code": "starts-now",
+    "created_at": "2026-04-10T14:30:00Z",
+    "current_billing_period_display": "Apr 10, 2026 – May 9, 2026",
+    "current_billing_period_end": "2026-05-10T00:00:00Z",
+    "current_billing_period_start": "2026-04-10T00:00:00Z",
+    "customer_id": "<id 1>",
+    "display_name": "starts-now",
+    "id": "<id 2>",
+    "items": [
+      {
+        "created_at": "2026-04-10T14:30:00Z",
+        "id": "<id 3>",
+        "plan_id": "<id 4>",
+        "quantity": 1,
+        "subscription_id": "<id 2>",
+        "tenant_id": "<id 5>",
+        "updated_at": "2026-04-10T14:30:00Z"
+      },
+      {
+        "created_at": "2026-04-10T14:30:00Z",
+        "id": "<id 6>",
+        "plan_id": "<id 7>",
+        "quantity": 2,
+        "subscription_id": "<id 2>",
+        "tenant_id": "<id 5>",
+        "updated_at": "2026-04-10T14:30:00Z"
+      }
+    ],
+    "next_billing_at": "2026-05-10T00:00:00Z",
+    "started_at": "2026-04-10T14:30:00Z",
+    "status": "active",
+    "tenant_id": "<id 5>",
+    "updated_at": "2026-04-10T14:30:00Z"
+  }
+}

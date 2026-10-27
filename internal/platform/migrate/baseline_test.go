@@ -2,19 +2,23 @@ package migrate
 
 import (
 	"database/sql"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/pressly/goose/v3"
 )
 
-// The generated baseline keeps the properties migration 180 relies on.
-// scripts/gen-baseline.sh enforces them when it writes the file; this
-// catches a hand edit. Equality with the v0.8.1 history is the migrations
-// CI job's (scripts/ci/migration-convergence.sh).
+// The baseline keeps the properties migration 180 relies on, so an edit
+// cannot break them: no session settings, no transaction control (goose's
+// transaction holds the whole baseline and row 180), and grants only on
+// Velox's own objects, only to velox_app. That it applies under each role
+// setup is the migrations CI job's (scripts/ci/migrations-fresh-install.sh).
+// Mutation: a COMMIT, a GRANT ... ON SCHEMA or a grant to another role
+// added to the baseline; each fails here.
 func TestBaselineFile(t *testing.T) {
-	if !strings.HasPrefix(baselineSQL, "-- Velox's schema at migration 180") {
-		t.Fatal("the baseline lost its header: regenerate it with scripts/gen-baseline.sh")
+	if !strings.HasPrefix(baselineSQL, "-- The starting schema: migration 180.") {
+		t.Fatal("the baseline lost its header")
 	}
 	var sets int
 	for i, line := range strings.Split(baselineSQL, "\n") {
@@ -47,7 +51,29 @@ func TestBaselineFile(t *testing.T) {
 	if strings.Contains(baselineSQL, "set_config('search_path', '', false)") {
 		t.Error("search_path is set for the session")
 	}
+
+	stmts, err := splitSQLStatements([]byte(baselineSQL))
+	if err != nil {
+		t.Fatalf("split the baseline: %v", err)
+	}
+	for i, raw := range stmts {
+		s := strings.TrimSuffix(normalizeDDL(raw), ";")
+		switch {
+		// Migration 180 runs inside goose's transaction, which also writes
+		// row 180. A COMMIT would keep the tables before it when a later
+		// statement fails, with no row 180.
+		case txControl.MatchString(s):
+			t.Errorf("statement %d controls the transaction: %q", i+1, s)
+		case !grantStatement.MatchString(s):
+		case strings.Contains(s, " ON SCHEMA "):
+			t.Errorf("statement %d grants on a schema, which belongs to the install, not to Velox: %q", i+1, s)
+		case !strings.HasSuffix(s, " TO VELOX_APP") && !strings.HasSuffix(s, " FROM VELOX_APP"):
+			t.Errorf("statement %d grants to a role other than velox_app: %q", i+1, s)
+		}
+	}
 }
+
+var grantStatement = regexp.MustCompile(`^(GRANT|REVOKE)\b`)
 
 // The embedded set as goose sees it: migration 180, then the files in
 // sql/, with no other source. It builds the provider over a handle that

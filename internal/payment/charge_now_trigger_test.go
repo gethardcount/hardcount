@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // TestChargeInvoiceNow_RecordsChargeNowTrigger: the operator's Charge now
@@ -30,7 +31,7 @@ func TestChargeInvoiceNow_RecordsChargeNowTrigger(t *testing.T) {
 			invoices := newMockInvoiceUpdater()
 			invoices.invoices["inv_1"] = finalizedPendingInvoice()
 			s := NewStripe(tc.client, invoices, newMockWebhookStore(), nil, &recordingDunningStarter{})
-			_, err := s.ChargeInvoiceNow(context.Background(), "t1", invoices.invoices["inv_1"], testHold, "cus_stripe_abc", "pm_test")
+			_, err := s.ChargeInvoiceNow(postgres.WithLivemode(context.Background(), true), "t1", invoices.invoices["inv_1"], testHold, "cus_stripe_abc", "pm_test")
 			if (err != nil) != tc.fails {
 				t.Fatalf("ChargeInvoiceNow error = %v, want failure %v", err, tc.fails)
 			}

@@ -48,6 +48,7 @@ type lagRig struct {
 	clk      *clock.Fake
 	srv      *Server
 	auth     string
+	tenantID string
 	timing   string
 	meterID  string
 	planA    string
@@ -84,7 +85,7 @@ func newLagRigGranted(t *testing.T, timing string, withAddOn bool, grantCents in
 		items = append(items, map[string]any{"plan_id": r.planC, "quantity": 1})
 	}
 	sub := r.must(http.MethodPost, "/v1/subscriptions", lagP0, map[string]any{
-		"code": "lag-sub", "display_name": "Lag Sub", "customer_id": r.custID, "items": items, "start_now": true,
+		"code": "lag-sub", "display_name": "Lag Sub", "customer_id": r.custID, "items": items,
 	}, http.StatusCreated)
 	r.subID = sub["id"].(string)
 	s := r.sub()
@@ -99,6 +100,15 @@ func newLagRigGranted(t *testing.T, timing string, withAddOn bool, grantCents in
 	return r
 }
 
+// centPrices is a 1c-per-unit price for every event of each meter.
+func centPrices(meters []string) []map[string]any {
+	out := []map[string]any{}
+	for _, m := range meters {
+		out = append(out, map[string]any{"meter_id": m, "mode": "per_unit", "unit_amount_cents": "1"})
+	}
+	return out
+}
+
 // newLagRigBare is the rig's meter, plans and customer, with no subscription
 // yet: r.subID is empty until the test creates one.
 func newLagRigBare(t *testing.T, timing string, grantCents int64, opts ...ServerOption) *lagRig {
@@ -107,19 +117,17 @@ func newLagRigBare(t *testing.T, timing string, grantCents int64, opts ...Server
 	clk := clock.NewFake(lagP0)
 	r := &lagRig{t: t, db: db, clk: clk, srv: NewServer(db, clk, nil, opts...), timing: timing, custExt: "lag_cust"}
 	tenantID := testutil.CreateTestTenant(t, db, "close lag "+timing)
+	r.tenantID = tenantID
 	r.auth = "Bearer " + createTestAPIKey(t, db, tenantID)
 
-	rule := r.must(http.MethodPost, "/v1/rating-rules", lagP0, map[string]any{
-		"rule_key": "calls", "name": "Calls", "mode": "flat", "currency": "USD", "flat_amount_cents": 1,
-	}, http.StatusCreated)
 	meter := r.must(http.MethodPost, "/v1/meters", lagP0, map[string]any{
-		"key": "calls", "name": "Calls", "unit": "calls", "aggregation": "sum", "rating_rule_version_id": rule["id"],
+		"event_name": "calls", "name": "Calls", "unit": "calls", "aggregation": "sum",
 	}, http.StatusCreated)
 	r.meterID = meter["id"].(string)
 	plan := func(code, interval string, base int64, meters []string) string {
 		p := r.must(http.MethodPost, "/v1/plans", lagP0, map[string]any{
 			"code": code, "name": code, "currency": "USD", "billing_interval": interval,
-			"base_amount_cents": base, "base_bill_timing": timing, "meter_ids": meters,
+			"base_amount_cents": base, "base_bill_timing": timing, "prices": centPrices(meters),
 		}, http.StatusCreated)
 		return p["id"].(string)
 	}
@@ -133,7 +141,7 @@ func newLagRigBare(t *testing.T, timing string, grantCents int64, opts ...Server
 	r.custID = cust["id"].(string)
 	if grantCents > 0 {
 		r.must(http.MethodPost, "/v1/credits/grant", lagP0, map[string]any{
-			"customer_id": r.custID, "amount_cents": grantCents, "description": "lag rig fixture",
+			"customer_id": r.custID, "currency": "USD", "amount_cents": grantCents, "description": "lag rig fixture",
 		}, http.StatusCreated)
 	}
 	return r
@@ -286,8 +294,13 @@ func (r *lagRig) cycleInvoice(invs []lagInvoice, start time.Time) lagInvoice {
 func (r *lagRig) creditBalance() int64 {
 	r.t.Helper()
 	out := r.must(http.MethodGet, "/v1/credits/balance/"+r.custID, r.clk.Now(context.Background()), nil, http.StatusOK)
-	n, _ := out["balance_cents"].(float64)
-	return int64(n)
+	// One balance per currency (ADR-129); the rig bills in USD.
+	for _, b := range flowList(out, "data") {
+		if flowStr(b, "currency") == "USD" {
+			return flowInt(b, "balance_cents")
+		}
+	}
+	return 0
 }
 
 // wantAPIError checks an error answer: its status, its error code and a part
@@ -315,6 +328,11 @@ func (r *lagRig) exec(query string, args ...any) {
 		r.t.Fatalf("begin: %v", err)
 	}
 	defer postgres.Rollback(tx)
+	// Live, like the rig's API key: the livemode trigger stamps inserted rows
+	// from this setting and refuses an insert without it.
+	if _, err := tx.ExecContext(ctx, `SELECT set_config('app.livemode', 'on', true)`); err != nil {
+		r.t.Fatalf("set livemode: %v", err)
+	}
 	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
 		r.t.Fatalf("fixture %q: %v", query, err)
 	}
@@ -534,7 +552,7 @@ func TestCloseLag_ItemWrites_InGap(t *testing.T) {
 			// against an unpaid invoice for the running period is refused
 			// (ADR-050), which is not what these cases test.
 			r.must(http.MethodPost, "/v1/credits/grant", at.Add(-time.Hour), map[string]any{
-				"customer_id": r.custID, "amount_cents": 20000, "description": "close lag fixture",
+				"customer_id": r.custID, "currency": "USD", "amount_cents": 20000, "description": "close lag fixture",
 			}, http.StatusCreated)
 			method, path, body := c.write(r)
 			code, raw := r.do(method, path, at, body)
@@ -583,7 +601,7 @@ func TestCloseLag_ItemWritesWhileBillingFails_Refused(t *testing.T) {
 	// A second add-on with no meter, so the add is valid on its own merits.
 	planD := r.must(http.MethodPost, "/v1/plans", lagP0, map[string]any{
 		"code": "plan_d", "name": "plan_d", "currency": "USD", "billing_interval": "monthly",
-		"base_amount_cents": 500, "base_bill_timing": "in_advance", "meter_ids": []string{},
+		"base_amount_cents": 500, "base_bill_timing": "in_advance",
 	}, http.StatusCreated)["id"].(string)
 	r.exec(`UPDATE tenant_settings SET net_payment_terms = -1 WHERE tenant_id = (SELECT tenant_id FROM subscriptions WHERE id = $1)`, r.subID)
 	var addOn string

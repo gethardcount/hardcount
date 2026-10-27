@@ -57,21 +57,27 @@ func (m *memStore) IngestAudited(ctx context.Context, tenantID string, e domain.
 	return out, nil
 }
 
-func (m *memStore) IngestBatch(ctx context.Context, tenantID string, events []domain.UsageEvent) (int, int, error) {
+func (m *memStore) IngestBatch(ctx context.Context, tenantID string, events []domain.UsageEvent, after func(tx *sql.Tx, inserted []int) error) ([]int, int, error) {
 	staged := newMemStore()
 	for k, v := range m.events {
 		staged.events[k] = v
 	}
-	inserted, deduped := 0, 0
+	var inserted []int
+	deduped := 0
 	for i, e := range events {
 		_, err := staged.Ingest(ctx, tenantID, e)
 		switch {
 		case errors.Is(err, errs.ErrDuplicateKey):
 			deduped++
 		case err != nil:
-			return 0, 0, fmt.Errorf("event[%d]: %w", i, err)
+			return nil, 0, fmt.Errorf("event[%d]: %w", i, err)
 		default:
-			inserted++
+			inserted = append(inserted, i)
+		}
+	}
+	if after != nil {
+		if err := after(nil, inserted); err != nil {
+			return nil, 0, err
 		}
 	}
 	m.events = staged.events
@@ -88,10 +94,10 @@ func (m *memStore) GetByIdempotencyKey(_ context.Context, tenantID, key string) 
 }
 
 // listClamp mirrors the PostgresStore.List cap (it silently clamps the
-// requested limit to 1000). GetSummary must NOT read its totals from
+// requested limit to 1000). Aggregate must NOT read its totals from
 // List, or any customer with more events than this in the window is
 // under-counted. Keeping the fake honest about the clamp is what makes
-// the GetSummary regression test meaningful.
+// the aggregate regression test meaningful.
 const listClamp = 1000
 
 func (m *memStore) matching(filter ListFilter) []domain.UsageEvent {
@@ -144,7 +150,7 @@ func (m *memStore) AggregateForBillingPeriodByAgg(_ context.Context, _, _ string
 	return map[string]decimal.Decimal{}, nil
 }
 
-func (m *memStore) AggregateByPricingRules(_ context.Context, _, _, _ string, _ domain.AggregationMode, _, _ time.Time) ([]domain.RuleAggregation, error) {
+func (m *memStore) AggregateClaims(_ context.Context, _, _, _, _ string, _ []domain.UsageClaim, _, _ time.Time) ([]domain.ClaimedUsage, error) {
 	return nil, nil
 }
 
@@ -301,46 +307,36 @@ func TestIngest(t *testing.T) {
 	})
 }
 
-// TestAggregateByPricingRules_DefaultModeValidation guards the service-
-// level rule that the unclaimed-bucket fallback mode must be one of the
-// four period-bounded modes. last_ever as a default would silently break
-// "current state" semantics for events that match no rule, so the
-// service rejects it before the SQL ever runs.
-func TestAggregateByPricingRules_DefaultModeValidation(t *testing.T) {
+// TestAggregateClaims_RefusesAnUnknownAggregation: a meter's events bill
+// under the meter's own aggregation, never one it does not have, so the
+// service refuses anything but sum, count, max and last before the SQL
+// runs. last_ever and last_during_period, a pricing rule's modes before
+// ADR-130, are refused too.
+func TestAggregateClaims_RefusesAnUnknownAggregation(t *testing.T) {
 	svc := NewService(newMemStore())
 	ctx := context.Background()
 	from := time.Now().Add(-1 * time.Hour)
 	to := time.Now().Add(1 * time.Hour)
-
-	t.Run("rejects last_ever as default mode", func(t *testing.T) {
-		_, err := svc.AggregateByPricingRules(ctx, "t1", "c1", "m1", domain.AggLastEver, from, to)
-		if err == nil {
-			t.Fatal("expected default_mode=last_ever to be rejected")
+	for _, agg := range []string{"last_ever", "last_during_period", "bogus", ""} {
+		if _, err := svc.AggregateClaims(ctx, "t1", "c1", "m1", agg, nil, from, to); err == nil {
+			t.Errorf("aggregation %q: want a refusal", agg)
 		}
-	})
-
-	t.Run("rejects unknown mode", func(t *testing.T) {
-		_, err := svc.AggregateByPricingRules(ctx, "t1", "c1", "m1", domain.AggregationMode("bogus"), from, to)
-		if err == nil {
-			t.Fatal("expected unknown mode to be rejected")
+	}
+	for _, agg := range []string{"sum", "count", "max", "last"} {
+		if _, err := svc.AggregateClaims(ctx, "t1", "c1", "m1", agg, nil, from, to); err != nil {
+			t.Errorf("aggregation %q: %v", agg, err)
 		}
-	})
-
-	t.Run("empty mode defaults to sum", func(t *testing.T) {
-		_, err := svc.AggregateByPricingRules(ctx, "t1", "c1", "m1", "", from, to)
-		if err != nil {
-			t.Fatalf("empty mode should default to sum: %v", err)
-		}
-	})
+	}
 }
 
-// TestGetSummaryServerSideAggregate is the regression guard for the
-// under-count bug: GetSummary used List(Limit:10000), but List clamps to
-// 1000, so a customer with >1000 events in the window reported a truncated
-// total_events AND truncated per-meter quantities. The fix reads from
-// store.Aggregate (full COUNT(*) + GROUP BY SUM). This test ingests more
-// than the clamp and asserts the summary reflects the full set.
-func TestGetSummaryServerSideAggregate(t *testing.T) {
+// TestAggregateServerSide is the regression guard for an under-count bug
+// first found in the removed usage summary: it used List(Limit:10000), but
+// List clamps to 1000, so a customer with >1000 events in the window
+// reported a truncated total_events AND truncated per-meter quantities.
+// Aggregate reads from store.Aggregate (full COUNT(*) + GROUP BY SUM). This
+// test ingests more than the clamp and asserts the totals reflect the full
+// set.
+func TestAggregateServerSide(t *testing.T) {
 	store := newMemStore()
 	svc := NewService(store)
 	ctx := context.Background()
@@ -356,16 +352,18 @@ func TestGetSummaryServerSideAggregate(t *testing.T) {
 
 	from := time.Now().Add(-1 * time.Hour)
 	to := time.Now().Add(1 * time.Hour)
-	summary, err := svc.GetSummary(ctx, "t1", "cus_big", from, to)
+	agg, err := svc.Aggregate(ctx, ListFilter{TenantID: "t1", CustomerID: "cus_big", From: &from, To: &to}, nil)
 	if err != nil {
-		t.Fatalf("GetSummary: %v", err)
+		t.Fatalf("Aggregate: %v", err)
 	}
 
-	if summary.TotalEvents != n {
-		t.Errorf("total_events: got %d, want %d (List-clamped under-count regressed)", summary.TotalEvents, n)
+	if agg.TotalEvents != n {
+		t.Errorf("total_events: got %d, want %d (List-clamped under-count regressed)", agg.TotalEvents, n)
 	}
-	got := summary.Meters["mtr_tokens"]
-	if !got.Equal(dec(int64(n))) {
+	if len(agg.ByMeter) != 1 || agg.ByMeter[0].MeterID != "mtr_tokens" {
+		t.Fatalf("by_meter: got %+v, want one row for mtr_tokens", agg.ByMeter)
+	}
+	if got := agg.ByMeter[0].Total; !got.Equal(dec(int64(n))) {
 		t.Errorf("meter total: got %s, want %d (per-meter quantity truncated)", got.String(), n)
 	}
 }
@@ -459,13 +457,13 @@ func TestIngest_ZeroQuantityStaysZero(t *testing.T) {
 func TestBatchIngest_AllOrNothing_ErrorsIndexed(t *testing.T) {
 	store := newMemStore()
 	svc := NewService(store)
-	ingested, deduped, errs := svc.BatchIngest(context.Background(), "t1", []IngestInput{
+	res, errs := svc.BatchIngest(context.Background(), "t1", []IngestInput{
 		{CustomerID: "cus_1", MeterID: "mtr_1", Quantity: dec(1)},
 		{CustomerID: "cus_1", MeterID: "mtr_1", Quantity: dec(2)},
 		{CustomerID: "", MeterID: "mtr_1", Quantity: dec(3)}, // row 2 (0-based): invalid
 	})
-	if ingested != 0 || deduped != 0 {
-		t.Fatalf("got ingested=%d deduped=%d, want 0/0 — a failing batch must write nothing", ingested, deduped)
+	if res.Inserted != 0 || res.Deduplicated != 0 {
+		t.Fatalf("got ingested=%d deduped=%d, want 0/0 — a failing batch must write nothing", res.Inserted, res.Deduplicated)
 	}
 	if len(store.events) != 0 {
 		t.Fatalf("store has %d events, want 0 (committed prefix = double-billing on retry)", len(store.events))
@@ -490,15 +488,15 @@ func TestBatchIngest_ReplayCountsAsDeduped(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed ingest: %v", err)
 	}
-	ingested, deduped, errs := svc.BatchIngest(context.Background(), "t1", []IngestInput{
+	res, errs := svc.BatchIngest(context.Background(), "t1", []IngestInput{
 		{CustomerID: "cus_1", MeterID: "mtr_1", Quantity: dec(1), IdempotencyKey: "evt-a"}, // replay
 		{CustomerID: "cus_1", MeterID: "mtr_1", Quantity: dec(2), IdempotencyKey: "evt-b"}, // fresh
 	})
 	if len(errs) != 0 {
 		t.Fatalf("replay must not error: %v", errs)
 	}
-	if ingested != 1 || deduped != 1 {
-		t.Fatalf("got ingested=%d deduped=%d, want 1/1", ingested, deduped)
+	if res.Inserted != 1 || res.Deduplicated != 1 {
+		t.Fatalf("got ingested=%d deduped=%d, want 1/1", res.Inserted, res.Deduplicated)
 	}
 	if len(store.events) != 2 {
 		t.Fatalf("store has %d events, want 2 (no duplicate row)", len(store.events))

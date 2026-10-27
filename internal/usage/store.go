@@ -12,15 +12,20 @@ import (
 
 type Store interface {
 	Ingest(ctx context.Context, tenantID string, event domain.UsageEvent) (domain.UsageEvent, error)
-	// IngestAudited runs the caller-supplied audit emission on the ingest's
-	// own transaction (ADR-090). Only BACKFILL passes an emitter — live
-	// machine ingest passes nil (see PostgresStore.IngestAudited).
+	// IngestAudited runs emit on the ingest's own transaction after the
+	// insert, only when the row was written; an emit error rolls the write
+	// back. The service reads the meter's aggregation there, and for a
+	// BACKFILL writes the audit row (ADR-090; see
+	// PostgresStore.IngestAudited).
 	IngestAudited(ctx context.Context, tenantID string, event domain.UsageEvent, emit func(tx *sql.Tx, out domain.UsageEvent) error) (domain.UsageEvent, error)
 	// IngestBatch writes every event in ONE transaction — all-or-nothing,
 	// so a client retry after a mid-batch abort never re-ingests a
 	// committed prefix. Idempotency replays are counted in deduped, not
-	// errors. Returns (inserted, deduped, err).
-	IngestBatch(ctx context.Context, tenantID string, events []domain.UsageEvent) (int, int, error)
+	// errors. after, when not nil, runs on the transaction after the
+	// inserts with the indices inserted; an error from it rolls the batch
+	// back. Returns the indices of the events it inserted, the number
+	// deduplicated, and the error.
+	IngestBatch(ctx context.Context, tenantID string, events []domain.UsageEvent, after func(tx *sql.Tx, inserted []int) error) ([]int, int, error)
 	// GetByIdempotencyKey returns the event a replayed key originally
 	// wrote (errs.ErrNotFound when absent). Backs replay-as-success on
 	// the public ingest door.
@@ -30,16 +35,13 @@ type Store interface {
 	AggregateForBillingPeriod(ctx context.Context, tenantID, customerID string, meterIDs []string, from, to time.Time) (map[string]decimal.Decimal, error)
 	AggregateForBillingPeriodByAgg(ctx context.Context, tenantID, customerID string, meters map[string]string, from, to time.Time) (map[string]decimal.Decimal, error)
 
-	// AggregateByPricingRules walks meter_pricing_rules in priority-DESC
-	// order and claims each in-period event to its top-priority matching
-	// rule (JSONB superset on properties), then aggregates per rule using
-	// the rule's aggregation_mode. Events that match no rule are returned
-	// as an unclaimed entry (RuleID=="") aggregated with defaultMode.
-	//
-	// last_ever rules ignore the period start and pick the latest event
-	// stamped before `to` (for "current state" billing like seat counts):
-	// the value as of the window end, however late the window is read.
-	AggregateByPricingRules(ctx context.Context, tenantID, customerID, meterID string, defaultMode domain.AggregationMode, from, to time.Time) ([]domain.RuleAggregation, error)
+	// AggregateClaims rolls a customer's events of one meter in
+	// [from, to) into one quantity per claim, under the meter's
+	// aggregation: sum, count, max or last (the latest event by timestamp,
+	// then id). Each event belongs to the first claim, in the order given,
+	// whose match its dimensions contain; an event no claim takes is
+	// returned as the unclaimed entry (PriceID "").
+	AggregateClaims(ctx context.Context, tenantID, customerID, meterID, aggregation string, claims []domain.UsageClaim, from, to time.Time) ([]domain.ClaimedUsage, error)
 
 	// AggregateDailyBuckets returns events bucketed to UTC-day granularity
 	// over [from, to) for the given customer × meter set. One row per
@@ -156,91 +158,27 @@ type DailyValue struct {
 	sum, count, sumOfCustomerMax, sumOfCustomerLast decimal.Decimal
 }
 
-// AggregationMixed is the by_meter aggregation of a meter whose events
-// bill under more than one mode. Its value is the plain sum of reported
-// quantities, which billing may not use.
-const AggregationMixed = "mixed"
-
-// BillingModes works out, for each meter, the one aggregation billing uses
-// for its events: "sum", "count", "max", "last", or AggregationMixed.
-//
-// Billing reads the mode from each pricing rule (meters.aggregation became
-// advisory in migration 0054). Events no rule claims bill under the
-// meter's own aggregation, so that mode counts too unless a rule with an
-// empty dimension_match claims everything. last_during_period and
-// last_ever both read here as "last": the latest reading in the window.
-//
-// Billing aggregates each bucket on its own — one per rule, plus the
-// unclaimed events when no rule claims everything (AggregateByPricingRules)
-// — and adds the buckets up. A sum or a count adds up the same either way,
-// but a peak or a latest reading does not: two rules' peaks added together
-// are not the peak of all the events. So a max or last meter with more than
-// one bucket is AggregationMixed too.
-func BillingModes(meters []domain.Meter, rules []domain.MeterPricingRule) map[string]string {
-	ruleModes := map[string]map[string]bool{}
-	ruleCount := map[string]int{}
-	catchAll := map[string]bool{}
-	for _, r := range rules {
-		if ruleModes[r.MeterID] == nil {
-			ruleModes[r.MeterID] = map[string]bool{}
-		}
-		ruleModes[r.MeterID][ruleMode(r.AggregationMode)] = true
-		ruleCount[r.MeterID]++
-		if len(r.DimensionMatch) == 0 {
-			catchAll[r.MeterID] = true
-		}
-	}
+// BillingModes is, for each meter, the aggregation billing uses for its
+// events: the meter's own, which every price of the meter bills under
+// (ADR-130 §2). An empty or unknown aggregation reads as sum.
+func BillingModes(meters []domain.Meter) map[string]string {
 	out := make(map[string]string, len(meters))
 	for _, m := range meters {
-		set := map[string]bool{}
-		for mode := range ruleModes[m.ID] {
-			set[mode] = true
-		}
-		if !catchAll[m.ID] {
-			set[meterMode(m.Aggregation)] = true
-		}
-		buckets := ruleCount[m.ID]
-		if !catchAll[m.ID] {
-			buckets++
-		}
-		out[m.ID] = AggregationMixed
-		if len(set) == 1 {
-			for mode := range set {
-				if buckets == 1 || (mode != "max" && mode != "last") {
-					out[m.ID] = mode
-				}
-			}
-		}
+		out[m.ID] = meterMode(m.Aggregation)
 	}
 	return out
 }
 
-func ruleMode(m domain.AggregationMode) string {
-	switch m {
-	case domain.AggCount:
-		return "count"
-	case domain.AggMax:
-		return "max"
-	case domain.AggLastDuringPeriod, domain.AggLastEver:
-		return "last"
-	default:
-		return "sum"
-	}
-}
-
-// meterMode reads meters.aggregation the way billing does
-// (mapMeterAggregation): anything unrecognised bills as a sum.
+// meterMode reads a meter's aggregation: anything unrecognised is a sum.
 func meterMode(agg string) string {
-	switch agg {
-	case "count", "max", "last":
+	if domain.ValidAggregation(agg) {
 		return agg
-	default:
-		return "sum"
 	}
+	return domain.AggregationSum
 }
 
 // pick returns the candidate that matches an aggregation mode. An unknown
-// or empty mode, or AggregationMixed, falls back to the plain sum.
+// or empty mode falls back to the plain sum.
 func pick(mode string, sum, count, sumMax, sumLast decimal.Decimal) decimal.Decimal {
 	switch mode {
 	case "count":

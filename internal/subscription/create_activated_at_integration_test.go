@@ -14,7 +14,7 @@ import (
 // TestCreate_StartNow_PersistsActivatedAt is the real-Postgres lock on the
 // store-INSERT half of the activated_at fix. The CreateWithBill INSERT used to
 // omit activated_at from its column list entirely, so an immediately-active
-// (start_now) subscription landed with activated_at = NULL even when the
+// (started on create) subscription landed with activated_at = NULL even when the
 // service set it — the sub then counted in headline MRR (status='active') but
 // was INVISIBLE to MRR movement / point-in-time / churn (all key on
 // activated_at as the MRR-start event), so the dashboard never reconciled.
@@ -39,7 +39,7 @@ func TestCreate_StartNow_PersistsActivatedAt(t *testing.T) {
 	plan, err := pricing.NewPostgresStore(db).CreatePlan(ctx, tenantID, domain.Plan{
 		Code: "actat-monthly", Name: "ActAt Plan", Currency: "USD",
 		BillingInterval: domain.BillingMonthly, BaseAmountCents: 2900,
-		Status: domain.PlanActive, MeterIDs: []string{},
+		Status: domain.PlanActive,
 	})
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
@@ -48,16 +48,15 @@ func TestCreate_StartNow_PersistsActivatedAt(t *testing.T) {
 	svc := NewService(NewPostgresStore(db), nil)
 	sub, err := svc.Create(ctx, tenantID, CreateInput{
 		Code: "actat-sub", DisplayName: "ActAt Sub", CustomerID: cust.ID,
-		Items:    []CreateItemInput{{PlanID: plan.ID}},
-		StartNow: true,
+		Items: []CreateItemInput{{PlanID: plan.ID}},
 	})
 	if err != nil {
-		t.Fatalf("create start_now sub: %v", err)
+		t.Fatalf("create a sub that starts now: %v", err)
 	}
 
 	// Returned object carries it (RETURNING reads it back from the row).
 	if sub.ActivatedAt == nil {
-		t.Fatal("returned start_now sub has nil ActivatedAt — the INSERT dropped the column")
+		t.Fatal("returned started sub has nil ActivatedAt — the INSERT dropped the column")
 	}
 
 	// And it is actually persisted (read via a fresh bypass tx, not RLS-scoped).
@@ -77,7 +76,7 @@ func TestCreate_StartNow_PersistsActivatedAt(t *testing.T) {
 		t.Fatalf("status: got %q, want active", statusStr)
 	}
 	if !hasActivated {
-		t.Fatal("persisted activated_at is NULL for a start_now active sub — invisible to MRR movement")
+		t.Fatal("persisted activated_at is NULL for a sub started on create — invisible to MRR movement")
 	}
 
 	// A trialing sub, by contrast, must NOT be activated at create time.

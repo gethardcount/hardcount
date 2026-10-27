@@ -60,7 +60,6 @@ func TestSettleUnusedAcrossFunding_HeadroomSpill(t *testing.T) {
 	headroom := &fakeCreditHeadroom{credited: map[string]int64{"inv_up": 6000}}
 
 	e := wireBaseTax(NewEngine(&mockSubs{}, &mockUsage{}, pricing, inv, nil, &mockSettings{}, nil, nil, billingTestClock()))
-	e.SetCreditGranter(&fakeCreditGranter{})
 	e.SetCreditNoteAdjuster(adjuster)
 	e.SetCreditHeadroomReader(headroom)
 

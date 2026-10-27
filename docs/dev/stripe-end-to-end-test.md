@@ -257,8 +257,7 @@ shipped with Velox.
        \"display_name\": \"Stripe E2E Smoke\",
        \"customer_id\": \"<vlx_cus_...>\",
        \"items\": [{\"plan_id\": \"$PLAN_ID\", \"quantity\": 1}],
-       \"billing_time\": \"anniversary\",
-       \"start_now\": true
+       \"billing_time\": \"anniversary\"
      }"
    ```
 
@@ -324,8 +323,8 @@ Velox sends to your configured endpoints.
    policy that bootstrap creates in each mode (ADR-123). Its first retry is
    due three days after the failure.
 
-Retries follow the default policy's grace period and `retry_schedule`: day 3,
-7 and 14 for "Default retries". Each retry is a fresh PaymentIntent: on the
+Retries follow the default policy's `retry_days`, `[3, 4, 7]` for "Default
+retries": day 3, 7 and 14. Each retry is a fresh PaymentIntent: on the
 Stripe dashboard's Payments page, the PI (PaymentIntent) ID changes per
 attempt.
 

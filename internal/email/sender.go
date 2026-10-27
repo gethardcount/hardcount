@@ -489,17 +489,22 @@ func (s *Sender) SendPaymentReceipt(ctx context.Context, tenantID, to string, cc
 // willExhaustThisAttempt in internal/dunning/service.go).
 // CTA is a "Pay invoice" button on the hosted invoice page (Stripe
 // Checkout there handles both PM update and pay).
-func (s *Sender) SendDunningWarning(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string, cardNeedsReplacing bool) error {
+func (s *Sender) SendDunningWarning(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string, ask domain.DeclineAsk) error {
 	brand := s.brandingFor(ctx, tenantID)
 	hostedURL := s.hostedInvoiceURL(publicToken)
 
-	// A card the bank refused for good (#966) gets its own copy: no retry
-	// date is promised, because dunning will not charge that card again.
+	// A card the bank refused for good (#966), and a payment the bank wants
+	// the customer to confirm, get their own copy: no retry date is
+	// promised, because dunning retries skip that card.
 	subject, contentHTML, ctaURL, ctaLabel := renderDunningWarningHTML(customerName, invoiceNumber, attemptNumber, maxAttempts, nextRetryDate, failureReason, hostedURL)
 	textBody := dunningWarningTextBody(customerName, invoiceNumber, attemptNumber, maxAttempts, nextRetryDate, failureReason, hostedURL)
-	if cardNeedsReplacing {
+	switch ask {
+	case domain.DeclineAskNewCard:
 		subject, contentHTML, ctaURL, ctaLabel = renderCardRefusedWarningHTML(customerName, invoiceNumber, hostedURL)
 		textBody = cardRefusedWarningTextBody(customerName, invoiceNumber, hostedURL)
+	case domain.DeclineAskConfirm:
+		subject, contentHTML, ctaURL, ctaLabel = renderConfirmPaymentHTML(customerName, invoiceNumber, hostedURL)
+		textBody = confirmPaymentTextBody(customerName, invoiceNumber, hostedURL)
 	}
 	htmlBody, err := renderLayout(layoutInputs{
 		Subject: subject, CompanyName: brand.CompanyName, LogoURL: brand.LogoURL,
@@ -538,12 +543,19 @@ func (s *Sender) SendDunningEscalation(ctx context.Context, tenantID, to string,
 	})
 }
 
-// SendPaymentFailed notifies a customer about a failed charge.
-func (s *Sender) SendPaymentFailed(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber, reason, publicToken string) error {
+// SendPaymentFailed notifies a customer about a failed charge. ask
+// DeclineAskConfirm sends the "confirm your payment" copy instead: the bank
+// wants the customer to confirm it, and nothing was declined.
+func (s *Sender) SendPaymentFailed(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber, reason, publicToken string, ask domain.DeclineAsk) error {
 	brand := s.brandingFor(ctx, tenantID)
 	hostedURL := s.hostedInvoiceURL(publicToken)
 
 	subject, contentHTML, ctaURL, ctaLabel := renderPaymentFailedHTML(customerName, invoiceNumber, reason, hostedURL)
+	textBody := paymentFailedTextBody(customerName, invoiceNumber, reason, hostedURL)
+	if ask == domain.DeclineAskConfirm {
+		subject, contentHTML, ctaURL, ctaLabel = renderConfirmPaymentHTML(customerName, invoiceNumber, hostedURL)
+		textBody = confirmPaymentTextBody(customerName, invoiceNumber, hostedURL)
+	}
 	htmlBody, err := renderLayout(layoutInputs{
 		Subject: subject, CompanyName: brand.CompanyName, LogoURL: brand.LogoURL,
 		BrandColor: brand.BrandColor, SupportURL: brand.SupportURL,
@@ -552,7 +564,6 @@ func (s *Sender) SendPaymentFailed(ctx context.Context, tenantID, to string, cc 
 	if err != nil {
 		return fmt.Errorf("render payment failed html: %w", err)
 	}
-	textBody := paymentFailedTextBody(customerName, invoiceNumber, reason, hostedURL)
 
 	return s.sendRich(ctx, richMessage{
 		TenantID: tenantID, To: to, Cc: cc, Subject: subject,
@@ -743,7 +754,7 @@ func dunningWarningTextBody(customerName, invoiceNumber string, attemptNumber, m
 	// dunning service never sends a warning on the exhausting attempt.
 	var b strings.Builder
 	fmt.Fprintf(&b, "Hi %s,\n\n", customerName)
-	fmt.Fprintf(&b, "Attempt %d of %d to charge invoice %s was declined.\n", attemptNumber, maxAttempts, invoiceNumber)
+	fmt.Fprintf(&b, "Attempt %d of %d to charge invoice %s didn't go through.\n", attemptNumber, maxAttempts, invoiceNumber)
 	if strings.TrimSpace(failureReason) != "" {
 		fmt.Fprintf(&b, "Reason: %s\n", failureReason)
 	}
@@ -760,6 +771,18 @@ func cardRefusedWarningTextBody(customerName, invoiceNumber, hostedURL string) s
 	var b strings.Builder
 	fmt.Fprintf(&b, "Hi %s,\n\n", customerName)
 	fmt.Fprintf(&b, "%s\n%s\n\n", cardRefusedSentence(invoiceNumber), cardRefusedAsk)
+	if hostedURL != "" {
+		fmt.Fprintf(&b, "Pay invoice: %s\n", hostedURL)
+	}
+	return b.String()
+}
+
+// confirmPaymentTextBody is the plain-text part of the "confirm your
+// payment" email (renderConfirmPaymentHTML).
+func confirmPaymentTextBody(customerName, invoiceNumber, hostedURL string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Hi %s,\n\n", customerName)
+	fmt.Fprintf(&b, "%s\n%s\n\n", confirmPaymentSentence(invoiceNumber), confirmPaymentAsk(hostedURL != ""))
 	if hostedURL != "" {
 		fmt.Fprintf(&b, "Pay invoice: %s\n", hostedURL)
 	}

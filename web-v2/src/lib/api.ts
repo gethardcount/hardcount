@@ -12,6 +12,7 @@ import type { RecipeDetail } from './gen/schemas/recipeDetail'
 import type { RecipePreviewResult } from './gen/schemas/recipePreviewResult'
 import type { RecipeInstance } from './gen/schemas/recipeInstance'
 import type { ActivityLine } from './gen/schemas/activityLine'
+import type { CreditNoteStats } from './gen/schemas/creditNoteStats'
 
 const API_BASE = '/v1'
 
@@ -169,7 +170,7 @@ export const api = {
   // Subscriptions
   listSubscriptions: (params?: string) =>
     apiRequest<{ data: Subscription[]; total: number }>('GET', `/subscriptions${params ? '?' + params : ''}`),
-  createSubscription: (data: { code: string; display_name: string; customer_id: string; items: { plan_id: string; quantity?: number }[]; start_now?: boolean; billing_time?: string; trial_days?: number }) =>
+  createSubscription: (data: { code: string; display_name: string; customer_id: string; items: { plan_id: string; quantity?: number }[]; status?: 'draft'; billing_time?: string; trial_days?: number }) =>
     apiRequest<Subscription>('POST', '/subscriptions', data),
 
   // Pricing
@@ -177,27 +178,11 @@ export const api = {
     apiRequest<{ data: Meter[] }>('GET', '/meters'),
   getMeter: (id: string) =>
     apiRequest<Meter>('GET', `/meters/${id}`),
-  createMeter: (data: { key: string; name: string; unit?: string; aggregation?: string; rating_rule_version_id?: string }) =>
+  createMeter: (data: { event_name: string; name: string; unit?: string; aggregation?: string }) =>
     apiRequest<Meter>('POST', '/meters', data),
-  // "" clears the default binding; unmatched-dimension usage goes unbilled again.
-  updateMeter: (id: string, data: { rating_rule_version_id: string }) =>
+  // aggregation is refused (409 meter_has_usage) once the meter has usage events.
+  updateMeter: (id: string, data: { aggregation?: string; name?: string; unit?: string }) =>
     apiRequest<Meter>('PATCH', `/meters/${id}`, data),
-  listAllMeterPricingRules: () =>
-    apiRequest<{ data: MeterPricingRule[] }>('GET', '/meter-pricing-rules'),
-  listMeterPricingRules: (meterId: string) =>
-    apiRequest<{ data: MeterPricingRule[] }>('GET', `/meters/${meterId}/pricing-rules`),
-  createMeterPricingRule: (
-    meterId: string,
-    data: {
-      rating_rule_version_id: string
-      dimension_match: Record<string, string | number | boolean>
-      aggregation_mode: MeterAggregationMode
-      priority: number
-    },
-  ) =>
-    apiRequest<MeterPricingRule>('POST', `/meters/${meterId}/pricing-rules`, data),
-  deleteMeterPricingRule: (meterId: string, ruleId: string) =>
-    apiRequest<{ status: string }>('DELETE', `/meters/${meterId}/pricing-rules/${ruleId}`),
   customerUsage: (customerId: string, params?: { from?: string; to?: string }) => {
     const qs = new URLSearchParams()
     if (params?.from) qs.set('from', params.from)
@@ -207,29 +192,36 @@ export const api = {
   },
   listPlans: () =>
     apiRequest<{ data: Plan[] }>('GET', '/plans'),
-  // live_subscription_count: subscriptions that lock the plan's price,
-  // billing timing and meters (only on this endpoint, not the list).
+  // used and live_subscription_count are only on this endpoint, not the list.
   getPlan: (id: string) =>
-    apiRequest<Plan & { live_subscription_count: number }>('GET', `/plans/${id}`),
-  createPlan: (data: { code: string; name: string; currency: string; billing_interval: string; base_amount_cents: number; base_bill_timing?: BillTiming; meter_ids?: string[] }) =>
-    apiRequest<Plan>('POST', '/plans', data),
-  updatePlan: (id: string, data: Partial<{ name: string; status: string; base_amount_cents: number; base_bill_timing: BillTiming; meter_ids: string[] }>) =>
-    apiRequest<Plan>('PATCH', `/plans/${id}`, data),
-  listRatingRules: () =>
-    apiRequest<{ data: RatingRule[] }>('GET', '/rating-rules'),
-  getRatingRule: (id: string) =>
-    apiRequest<RatingRule>('GET', `/rating-rules/${id}`),
-  createRatingRule: (data: { rule_key: string; name: string; mode: string; currency: string; flat_amount_cents?: string; graduated_tiers?: { up_to: number; unit_amount_cents: string }[]; package_size?: number; package_amount_cents?: number }) =>
-    apiRequest<RatingRule>('POST', '/rating-rules', data),
+    apiRequest<PlanDetail>('GET', `/plans/${id}`),
+  createPlan: (data: { code: string; name: string; currency: string; billing_interval: string; base_amount_cents: number; base_bill_timing?: BillTiming; prices?: PriceInput[] }) =>
+    apiRequest<PlanDetail>('POST', '/plans', data),
+  updatePlan: (id: string, data: Partial<{ name: string; status: string; base_amount_cents: number; base_bill_timing: BillTiming }>) =>
+    apiRequest<PlanDetail>('PATCH', `/plans/${id}`, data),
 
-  // Price overrides (ADR-070): negotiated per-customer prices, keyed by
-  // rule_key so they survive version publishes. Create is an upsert — a
-  // second override on the same (customer, rule) replaces the first from
-  // the customer's next billing period. All rate changes (create, replace,
-  // delete) take effect at the next period open, never mid-period.
-  listPriceOverrides: (customerId?: string) =>
-    apiRequest<{ data: PriceOverride[] }>('GET', `/price-overrides${customerId ? `?customer_id=${customerId}` : ''}`),
-  createPriceOverride: (data: { customer_id: string; rating_rule_version_id: string; mode: string; flat_amount_cents?: string; graduated_tiers?: { up_to: number; unit_amount_cents: string }[]; package_size?: number; package_amount_cents?: number; reason?: string }) =>
+  // A plan's usage prices (ADR-130). On a plan no subscription has used, a
+  // write applies at once (effective "now"); on a used plan, from each
+  // subscriber's next billing period ("next_period").
+  addPlanPrice: (planId: string, data: PriceInput) =>
+    apiRequest<PriceWrite>('POST', `/plans/${planId}/prices`, data),
+  updatePlanPrice: (planId: string, priceId: string, data: PriceShape) =>
+    apiRequest<PriceWrite>('PATCH', `/plans/${planId}/prices/${priceId}`, data),
+  removePlanPrice: (planId: string, priceId: string) =>
+    apiRequest<PriceWrite>('DELETE', `/plans/${planId}/prices/${priceId}`),
+
+  // Price overrides: a customer's negotiated rate for one plan price. Create
+  // replaces an active override on the same (customer, price). A change
+  // applies from the customer's next billing period, or from the join when a
+  // subscription first joins the plan in a period after it (ADR-130 §4).
+  listPriceOverrides: (filter?: { customerId?: string; priceId?: string }) => {
+    const qs = new URLSearchParams()
+    if (filter?.customerId) qs.set('customer_id', filter.customerId)
+    if (filter?.priceId) qs.set('price_id', filter.priceId)
+    const q = qs.toString()
+    return apiRequest<{ data: PriceOverride[] }>('GET', `/price-overrides${q ? '?' + q : ''}`)
+  },
+  createPriceOverride: (data: { customer_id: string; price_id: string; reason?: string } & PriceShape) =>
     apiRequest<PriceOverride>('POST', '/price-overrides', data),
   deletePriceOverride: (id: string) =>
     apiRequest<void>('DELETE', `/price-overrides/${id}`),
@@ -274,7 +266,7 @@ export const api = {
   rotateInvoicePublicToken: (id: string) =>
     apiRequest<Invoice>('POST', `/invoices/${id}/rotate-public-token`),
   // retryInvoiceTax re-runs tax calculation against a draft invoice
-  // currently in tax_status pending or failed. Backs the "Retry tax"
+  // currently in tax_status pending. Backs the "Retry tax"
   // action surfaced by Attention. Returns the updated invoice with
   // its Attention re-derived — so the caller can render the new
   // banner state without a follow-up GET.
@@ -304,11 +296,6 @@ export const api = {
   getSubscriptionTimeline: (subscriptionId: string) =>
     apiRequest<{ events: TimelineEvent[]; truncated?: boolean }>('GET', `/subscriptions/${subscriptionId}/timeline`),
 
-  // Legacy `setupPayment` (/checkout/setup) and `getPaymentStatus`
-  // (/checkout/status) were removed in the unified-PM-paths cleanup.
-  // All "add a payment method" flows now go through
-  // `createCustomerSetupSession` / `sendCustomerSetupEmail` below.
-
   // Operator-side payment-method management (PCI SAQ-A; card capture
   // stays in Stripe-hosted iframe via setup-session, never on operator's
   // dashboard). Industry parity: Chargebee, Lago, Orb.
@@ -331,15 +318,16 @@ export const api = {
   // Credits
   listBalances: () =>
     apiRequest<{ data: CreditBalance[] }>('GET', '/credits/balances'),
+  // One balance per currency the customer holds credit in (ADR-129).
   getBalance: (customerId: string) =>
-    apiRequest<CreditBalance>('GET', `/credits/balance/${customerId}`),
+    apiRequest<{ data: CreditBalance[] }>('GET', `/credits/balance/${customerId}`),
   // Burndown: per-grant granted/drawn/remaining + kind subtotals — the
   // commit-drawdown answer without reconstructing it from the raw ledger.
   listCreditGrants: (customerId: string, includeExhausted = false) =>
     apiRequest<CreditGrantsResponse>('GET', `/credits/grants/${customerId}${includeExhausted ? '?include_exhausted=true' : ''}`),
-  grantCredits: (data: { customer_id: string; amount_cents: number; description: string; expires_at?: string; grant_kind?: 'promotional' }, idempotencyKey?: string) =>
+  grantCredits: (data: { customer_id: string; currency: string; amount_cents: number; description: string; expires_at?: string; grant_kind?: 'promotional' }, idempotencyKey?: string) =>
     apiRequest<CreditLedgerEntry>('POST', '/credits/grant', data, { idempotencyKey }),
-  adjustCredits: (data: { customer_id: string; amount_cents: number; description: string }, idempotencyKey?: string) =>
+  adjustCredits: (data: { customer_id: string; currency: string; amount_cents: number; description: string }, idempotencyKey?: string) =>
     apiRequest<CreditLedgerEntry>('POST', '/credits/adjust', data, { idempotencyKey }),
   listLedger: (customerId: string, params?: { entry_type?: string; limit?: number; offset?: number; sort?: string; dir?: string }) => {
     const qs = new URLSearchParams()
@@ -359,13 +347,6 @@ export const api = {
     apiRequest<CustomerOverview>('GET', `/customers/${customerId}/overview`),
 
   // Usage
-  usageSummary: (customerId: string, from?: string, to?: string) => {
-    const params = new URLSearchParams()
-    if (from) params.set('from', from)
-    if (to) params.set('to', to)
-    const qs = params.toString()
-    return apiRequest<UsageSummary>('GET', `/usage-summary/${customerId}${qs ? '?' + qs : ''}`)
-  },
   listUsageEvents: (params?: string) =>
     apiRequest<{ data: UsageEvent[]; total: number }>('GET', `/usage-events${params ? '?' + params : ''}`),
   // Server-side aggregate that powers the /usage page's stat cards +
@@ -410,7 +391,6 @@ export const api = {
   // decimal-string per ADR-005 to round-trip fractional meter quantities.
   setSubscriptionBillingThresholds: (id: string, body: {
     amount_gte?: number
-    reset_billing_cycle?: boolean
     item_thresholds?: { subscription_item_id: string; usage_gte: string }[]
   }) =>
     apiRequest<Subscription>('PUT', `/subscriptions/${id}/billing-thresholds`, body),
@@ -434,14 +414,12 @@ export const api = {
     apiRequest<{ status: string }>('DELETE', `/subscriptions/${id}/items/${itemID}`),
   cancelPendingItemChange: (id: string, itemID: string) =>
     apiRequest<SubscriptionItem>('DELETE', `/subscriptions/${id}/items/${itemID}/pending-change`),
-  invoicePreview: (subscriptionId: string) =>
-    apiRequest<InvoicePreview>('GET', `/billing/preview/${subscriptionId}`),
-  // Stripe Tier 1 parity for Invoice.upcoming. Same shape as the debug
-  // route above; composes against customer + subscription + period.
+  // Stripe Tier 1 parity for Invoice.upcoming. Composes against
+  // customer + subscription + period.
   // Pass {customer_id} and the server picks the primary active sub +
   // current cycle. Pass {customer_id, subscription_id} to preview a
   // specific sub. Pass {customer_id, period: {from, to}} to preview an
-  // explicit window. See docs/design/create-preview.md.
+  // explicit window. See docs/dev/design/create-preview.md.
   createInvoicePreview: (data: { customer_id: string; subscription_id?: string; period?: { from: string; to: string } }) =>
     apiRequest<InvoicePreview>('POST', '/invoices/create_preview', data),
 
@@ -485,6 +463,9 @@ export const api = {
 
   // Credit Notes
   listCreditNotes: (params?: string) => apiRequest<{ data: CreditNote[] }>('GET', `/credit-notes${params ? '?' + params : ''}`),
+  // Every note's count and the issued notes' money per currency, from the
+  // server: the list is a page of at most 100 rows and cannot be the source.
+  getCreditNoteStats: () => apiRequest<CreditNoteStats>('GET', '/credit-notes/stats'),
   // The key is required: an issued note can refund a card, and the server's
   // per-invoice cap stops over-crediting but not a repeat. A retry sent with
   // the same key gets the first request's answer instead of a second note.
@@ -502,7 +483,7 @@ export const api = {
   voidCreditNote: (id: string) => apiRequest<CreditNote>('POST', `/credit-notes/${id}/void`),
   retryCreditNoteRefund: (id: string) => apiRequest<CreditNote>('POST', `/credit-notes/${id}/retry-refund`),
 
-  // Recipes (pricing templates) — see docs/design/recipes.md
+  // Recipes (pricing templates) — see docs/dev/design/recipes.md
   listRecipes: () => apiRequest<ListRecipes200>('GET', '/recipes'),
   getRecipe: (key: string) => apiRequest<RecipeDetail>('GET', `/recipes/${key}`),
   previewRecipe: (key: string, overrides: Record<string, string | number>) =>
@@ -524,8 +505,7 @@ export const api = {
   createWebhookEndpoint: (data: { url: string; description?: string; events?: string[] }) => apiRequest<{ endpoint: WebhookEndpoint; secret: string }>('POST', '/webhook-endpoints/endpoints', data),
   // PATCH mutates url/description/events/active WITHOUT rotating the
   // signing secret (delete+recreate was the only mutation path before,
-  // forcing a receiver redeploy). Also how recipe-created endpoints
-  // (inactive + placeholder URL) get pointed at a real receiver.
+  // forcing a receiver redeploy).
   updateWebhookEndpoint: (id: string, data: { url?: string; description?: string; events?: string[]; active?: boolean }) =>
     apiRequest<WebhookEndpoint>('PATCH', `/webhook-endpoints/endpoints/${id}`, data),
   deleteWebhookEndpoint: (id: string) => apiRequest<{ status: string }>('DELETE', `/webhook-endpoints/endpoints/${id}`),
@@ -720,7 +700,6 @@ export interface SubscriptionItemThreshold {
 // multi-currency subs reject amount_gte at PUT time.
 export interface BillingThresholds {
   amount_gte?: number
-  reset_billing_cycle: boolean
   item_thresholds: SubscriptionItemThreshold[]
 }
 
@@ -924,7 +903,7 @@ export interface Invoice {
   // upstream failure and is awaiting retry (or has exhausted retries).
   // 'ok' is the happy path; 'pending' / 'failed' surface in the operator
   // context card so debugging context is one click away.
-  tax_status?: 'ok' | 'pending' | 'failed'
+  tax_status?: 'ok' | 'pending'
   tax_pending_reason?: string
   tax_retry_count?: number
   tax_deferred_at?: string
@@ -973,21 +952,25 @@ export interface Invoice {
   // "simulated" badge on header dates + the activity timeline. Live invoices
   // are always false.
   is_simulated?: boolean
+  // test_clock_id: the clock this invoice's dates follow (its customer's
+  // pin). Filled on the list and get reads; absent on wall-clock invoices.
+  test_clock_id?: string
 }
 
 export interface LineItem {
   id: string
   line_type: string
   description: string
-  quantity: number
-  unit_amount_cents: number
+  // The exact quantity as a decimal string ("3", "1.5"). Render with
+  // formatLineQuantity.
+  quantity: string
   // Full-precision per-unit price in decimal cents (e.g. "0.3" = $0.003).
   // Server-side display value (ADR-054): the stamped NOMINAL configured rate
   // on flat usage lines, falling back to amount_cents ÷ quantity only when no
   // nominal rate is stamped — so on flat lines it deliberately may differ from
   // amount ÷ quantity. Render with formatRate so sub-cent rates don't collapse
-  // to "$0.00" like unit_amount_cents would.
-  unit_amount_decimal?: string
+  // to "$0.00".
+  unit_amount_decimal: string
   // Meter the usage line was rated from. Stamped by the billing engine on
   // usage lines only; absent on base-fee, add-on, discount and tax lines.
   // Carries the drill-down from a disputed line back to the events behind it.
@@ -1092,8 +1075,8 @@ export interface CreditBalance {
   // an operator deducted. granted = used + expired + retired + deducted + balance.
   total_retired: number
   total_deducted: number
-  // The currency the customer is billed in. The ledger has none of its own
-  // (ADR-100), so the balance and every ledger row read in this one.
+  // The currency of this balance. Each ledger row stores its own currency,
+  // and a customer with credit in two currencies has two balances (ADR-129).
   currency: string
 }
 
@@ -1101,6 +1084,7 @@ export interface CreditBalance {
 export interface CreditGrantSummary {
   id: string
   entry_type: string
+  currency: string
   grant_kind?: 'commit' | 'promotional' | ''
   description: string
   amount_cents: number
@@ -1118,11 +1102,18 @@ export interface CreditGrantSummary {
   created_at: string
 }
 
-export interface CreditGrantsResponse {
-  grants: CreditGrantSummary[]
+// What is left of a customer's credit in one currency, by kind.
+export interface CreditRemaining {
+  currency: string
   commit_remaining_cents: number
   promotional_remaining_cents: number
   other_remaining_cents: number
+}
+
+export interface CreditGrantsResponse {
+  grants: CreditGrantSummary[]
+  // One entry per currency with credit left, ordered by currency.
+  remaining_by_currency: CreditRemaining[]
 }
 
 // CustomerPaymentMethod mirrors the operator-facing JSON shape from
@@ -1143,6 +1134,8 @@ export interface CreditLedgerEntry {
   id: string
   customer_id: string
   entry_type: string
+  // The entry's own currency; balance_after is the balance in it (ADR-129).
+  currency: string
   amount_cents: number
   balance_after: number
   description: string
@@ -1177,12 +1170,17 @@ export interface CustomerOverview {
 
 export interface Meter {
   id: string
-  key: string
+  // The event_name usage events send for this meter.
+  event_name: string
   name: string
   unit: string
+  // One aggregation for the meter; every price of it bills under it.
   aggregation: string
-  rating_rule_version_id: string
   created_at: string
+  // Set when one meter is created, fetched or updated (not on the list):
+  // whether the meter has usage events. Once it has, its aggregation is
+  // fixed. Held usage does not count.
+  has_usage?: boolean
 }
 
 export type BillTiming = 'in_advance' | 'in_arrears'
@@ -1195,52 +1193,81 @@ export interface Plan {
   billing_interval: string
   status: string
   base_amount_cents: number
-  // ADR-031: when the recurring base bills. Defaults to 'in_arrears'
-  // on existing plans. 'in_advance' opts the plan into first-invoice-
-  // on-create + cancel-proration. Usage lines are always arrears.
+  // ADR-031: when the recurring base bills. 'in_advance' opts the plan
+  // into first-invoice-on-create + cancel-proration. A plan with no base
+  // fee is 'in_arrears'. Usage lines are always arrears.
   base_bill_timing: BillTiming
-  meter_ids: string[]
+  // The plan's usage prices from now on. A plan's meters are the meters it
+  // has a price for.
+  prices: PlanPrice[]
   tax_code?: string
   created_at: string
 }
 
-// A negotiated per-customer price (ADR-070). rule_key is the identity —
-// the deal follows the rule across version publishes; rating_rule_version_id
-// only records which version the operator was looking at (provenance).
-export interface PriceOverride {
-  id: string
-  rule_key: string
-  customer_id: string
-  rating_rule_version_id: string
-  mode: string
-  flat_amount_cents: string
-  graduated_tiers?: { up_to: number; unit_amount_cents: string }[]
-  package_size: number
-  package_amount_cents: number
-  reason?: string
-  active: boolean
-  created_at: string
+// Get, create and update plan answer these too.
+export interface PlanDetail extends Plan {
+  // Whether a subscription ever used the plan: a price change then applies
+  // from each subscriber's next period instead of at once.
+  used: boolean
+  // Subscriptions that are not canceled. While above 0 the base fee is fixed.
+  live_subscription_count: number
 }
 
-export interface RatingRule {
-  id: string
-  rule_key: string
-  name: string
-  version: number
+// How a price bills a quantity. Rates are decimal cents as strings.
+export interface PriceShape {
   mode: string
-  currency: string
-  // Per-unit rates are decimal cents serialized as strings (Stripe
-  // unit_amount_decimal model) so sub-cent prices bill exactly. package_size /
-  // package_amount_cents stay whole — a package is a fixed fee for a block.
-  flat_amount_cents: string
-  graduated_tiers?: { up_to: number; unit_amount_cents: string }[]
+  unit_amount_cents?: string
+  tiers?: PriceTier[]
+  package_size?: number
+  package_amount_cents?: string
+}
+
+export interface PriceInput extends PriceShape {
+  meter_id: string
+  dimension_match?: Record<string, string>
+}
+
+// One usage price of a plan. Its meter and dimension_match are its identity;
+// it takes the plan's currency.
+export interface PlanPrice {
+  id: string
+  plan_id: string
+  meter_id: string
+  dimension_match: Record<string, string>
+  mode: string
+  unit_amount_cents: string
+  tiers: PriceTier[]
   package_size: number
-  package_amount_cents: number
-  // Per-unit rate charged for units beyond full packages (decimal-string
-  // cents) — the billing engine charges it; omitting it from display
-  // implies beyond-package usage is free.
-  overage_unit_amount_cents: string
-  lifecycle_state: string
+  package_amount_cents: string
+  created_at: string
+  updated_at: string
+}
+
+export interface PriceWrite extends PlanPrice {
+  effective: 'now' | 'next_period'
+  removed?: boolean
+  ended_overrides?: { id: string; customer_id: string }[]
+}
+
+// One graduated tier. up_to is null on the open last tier, and only there.
+export interface PriceTier {
+  up_to: number | null
+  unit_amount_cents: string
+}
+
+// A customer's negotiated rate for one plan price. It keeps applying when the
+// price's rate changes and ends when the price is removed.
+export interface PriceOverride {
+  id: string
+  customer_id: string
+  price_id: string
+  mode: string
+  unit_amount_cents: string
+  tiers?: PriceTier[]
+  package_size: number
+  package_amount_cents: string
+  reason?: string
+  active: boolean
   created_at: string
 }
 
@@ -1252,8 +1279,8 @@ export interface UsageEvent {
   // String-encoded NUMERIC(38, 12) — decimal precision for fractional GPU-hours
   // and partial tokens. Coerce via Number() / parseFloat() at display time.
   quantity: string
-  // Free-form dimensions per docs/design/multi-dim-meters.md, subset-matched
-  // by pricing rules.
+  // Free-form dimensions per docs/dev/design/multi-dim-meters.md. A price
+  // takes an event whose dimensions include the price's dimension_match.
   dimensions?: Record<string, string | number | boolean>
   idempotency_key: string
   timestamp: string
@@ -1287,23 +1314,6 @@ export interface UsageMeterTotal {
   customers: number
   peak: string
   daily: { date: string; value: string }[]
-}
-
-export type MeterAggregationMode =
-  | 'sum'
-  | 'count'
-  | 'last_during_period'
-  | 'last_ever'
-  | 'max'
-
-export interface MeterPricingRule {
-  id: string
-  meter_id: string
-  rating_rule_version_id: string
-  dimension_match: Record<string, string | number | boolean>
-  aggregation_mode: MeterAggregationMode
-  priority: number
-  created_at: string
 }
 
 // CustomerUsage — response of GET /v1/customers/{id}/usage. Live shape from
@@ -1344,19 +1354,21 @@ export interface CustomerUsageSubscription {
 
 export interface CustomerUsageMeter {
   meter_id: string
-  meter_key: string
+  event_name: string
   meter_name: string
   unit: string
   currency: string
   total_quantity: string
   total_amount_cents: number
-  rules: CustomerUsageRule[]
+  prices: CustomerUsagePrice[]
 }
 
-export interface CustomerUsageRule {
-  rating_rule_version_id: string
-  rule_key: string
-  dimension_match?: Record<string, string | number | boolean>
+// One (plan, price) that took usage, or a no_price row per plan for the usage
+// no price of that plan took.
+export interface CustomerUsagePrice {
+  price_id?: string
+  plan_id: string
+  dimension_match?: Record<string, string>
   quantity: string
   amount_cents: number
   // Per-unit price in DECIMAL CENTS (nominal rate for flat rules, effective
@@ -1364,16 +1376,9 @@ export interface CustomerUsageRule {
   // formatRate so sub-cent rates never collapse to $0.00. Absent on the
   // FE-synthesized "__other__" catch-all bucket.
   unit_amount_decimal?: string
-  // True on the bucket of events that matched NO pricing rule (meter has no
-  // default binding): billed nothing by the engine. Rendered as a warning row
-  // — usually a mislabeled dimension value on a matrix-priced meter.
-  unmatched?: boolean
-}
-
-export interface UsageSummary {
-  customer_id: string
-  meters: Record<string, number>
-  total_events: number
+  // True on the usage no price of the plan took: billed nothing. Rendered as
+  // a warning row — usually a label value no price names.
+  no_price?: boolean
 }
 
 export type CustomerTaxStatus = 'standard' | 'exempt' | 'reverse_charge'
@@ -1403,6 +1408,7 @@ export interface TenantSettings {
   default_currency: string
   timezone: string
   invoice_prefix: string
+  credit_note_prefix: string
   net_payment_terms: number
   tax_provider: 'none' | 'manual' | 'stripe_tax'
   tax_rate: number
@@ -1458,9 +1464,8 @@ export interface StripeProviderCredentials {
   retries_queued?: number
 }
 
-// InvoicePreview is the response shape for both /v1/billing/preview/{id}
-// (in-app debug route) and /v1/invoices/create_preview (Stripe Tier 1
-// surface). Per-(meter, rule) lines mean multi-dim meters render one row
+// InvoicePreview is the response shape of /v1/invoices/create_preview
+// (Stripe Tier 1 surface). Per-(meter, rule) lines mean multi-dim meters render one row
 // per rule with dimension_match echoed; totals[] is always-array (one
 // entry per distinct currency, even when there's only one) so a single
 // reader handles both shapes. quantity is a decimal STRING per ADR-005
@@ -1482,9 +1487,8 @@ export interface InvoicePreviewLine {
   line_type: string
   description: string
   meter_id?: string
-  rating_rule_version_id?: string
-  rule_key?: string
-  dimension_match?: Record<string, unknown>
+  price_id?: string
+  dimension_match?: Record<string, string>
   currency: string
   quantity: string
   unit_amount_cents: number
@@ -1509,14 +1513,16 @@ export interface DunningPolicy {
   // until it is edited or made the default (ADR-123). While true, the next
   // policy created takes over the default.
   seeded: boolean
-  retry_schedule: string[]
-  max_retry_attempts: number
+  // Days to wait before each retry: the first after the failed payment (or
+  // the collection that found no card), each later one after the retry
+  // before it. Its length is the number of
+  // retries (lib/dunningSchedule).
+  retry_days: number[]
   // The two terminal decisions (ADR-112): 'none' | 'pause' | 'cancel' and
   // 'none' | 'mark_uncollectible'. They replaced a single `final_action`,
   // which could not express "cancel and write off".
   final_subscription_action: string
   final_invoice_action: string
-  grace_period_days: number
   created_at?: string
   updated_at?: string
 }
@@ -1549,10 +1555,21 @@ export interface DunningRun {
   invoice_currency?: string
   // Owning sub's test-clock frozen_time when applicable. Used as the
   // "now" baseline for relative-time rendering on this row (Next
-  // Retry / Started). Missing for wall-clock runs — renderer falls
+  // step / Started). Missing for wall-clock runs — renderer falls
   // back to Date.now(). Authoritative; replaces prior heuristic.
   effective_now?: string
   test_clock_id?: string
+  // How many retries the run's policy makes, the length of its retry_days
+  // (list responses).
+  max_retry_attempts?: number
+}
+
+// dunningFinalStepNext: every retry is used, so next_action_at is when the
+// policy's final action (pause, cancel, write-off) runs, not a charge. The
+// run stays active there while that action waits for the invoice grace or is
+// tried again after it failed.
+export function dunningFinalStepNext(run: DunningRun): boolean {
+  return !!run.max_retry_attempts && run.attempt_count >= run.max_retry_attempts
 }
 
 export interface DunningEvent {
@@ -1574,7 +1591,10 @@ export interface DunningEvent {
 export interface DunningStats {
   active_count: number
   escalated_count: number
+  // Every resolved run, whatever closed it.
   resolved_count: number
+  // The resolved runs a payment closed.
+  recovered_count: number
   at_risk_cents: number
   // The currency at_risk_cents is in (the tenant default).
   currency: string
@@ -1760,7 +1780,8 @@ export interface AnalyticsOverview {
   // outstanding_ar alone is the default currency only.
   outstanding_by_currency: { currency: string; amount_cents: number }[]
   avg_invoice_value: number
-  credit_balance_total: number
+  // Credit customers hold, one row per currency (default first).
+  credit_balance_by_currency: { currency: string; amount_cents: number }[]
   // Customer records with status active (includes customers with no live
   // subscription). Home shows live_customers instead.
   active_customers: number
@@ -1826,7 +1847,7 @@ export interface UsagePoint {
 export interface TopMeterUsage {
   meter_id: string
   meter_name: string
-  key: string
+  event_name: string
   events: number
   quantity: number
 }
@@ -1899,6 +1920,13 @@ export function formatTaxRate(rate: number): string {
 // whole cents (formatCents).
 export function formatRate(cents: string | number, currency: string): string {
   return rateWithSymbol(cents, getCurrencySymbol(currency))
+}
+
+// formatLineQuantity renders an invoice line's quantity, which the API sends
+// as an exact decimal string ("3", "1.5"). The dashboard and the hosted page
+// both use it, so a line reads the same on each.
+export function formatLineQuantity(quantity: string): string {
+  return Number(quantity).toLocaleString(undefined, { maximumFractionDigits: 12 })
 }
 
 // formatRateBare is a rate with no currency symbol, for a figure whose

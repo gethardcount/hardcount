@@ -1,7 +1,7 @@
 # ADR-079: Provider cost tables + per-customer margin (COGS)
 
-**Status:** Accepted (2026-07-05; amended 2026-10-14, 2026-10-22)
-**Context:** `docs/design/cost-tables.md` (locked design — 4-platform
+**Status:** Accepted (2026-07-05; amended 2026-10-14, 2026-10-22; units amended by [ADR-130](130-usage-prices-belong-to-the-plan.md) §3, #1381: a rate is `unit_cost_cents`, US cents per token, and the API sends costs as `provider_cost_cents` and `cost_cents`, decimal strings of cents. The stored stamp `provider_cost_micros` is unchanged.)
+**Context:** `docs/dev/design/cost-tables.md` (locked design — 4-platform
 quote-verified sweep + 5-lens adversarial panel; this ADR records the
 decisions, the design doc holds the evidence).
 
@@ -52,7 +52,9 @@ ledger, and report per-customer margin in-app:
    Operator-auth only; COGS never renders on the customer-facing cost
    dashboard. `unresolved_events` counts costable-but-unmatched events
    only ('not_applicable' rows are excluded so non-token meters can't
-   drown the signal); cache-write exclusion disclosed.
+   drown the signal); cache-write exclusion disclosed. *[Amended
+   2026-10-24, #1378] An event whose cost does not fit BIGINT micros is
+   stored and billed with no cost, and counts as unresolved too.*
 6. **Sourcing: operator CRUD only** (`/v1/provider-costs` + dashboard
    page). No import in phase 1 (trigger: first >10-model operator; file
    upload only, never live-URL fetch). Deleting a rate never rewrites

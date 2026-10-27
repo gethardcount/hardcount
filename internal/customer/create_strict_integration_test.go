@@ -103,8 +103,10 @@ func TestCustomerCreateAndStatus_Validated(t *testing.T) {
 // TestBillingProfileUpsert_RefusesUnknownField: PUT
 // /v1/customers/{id}/billing-profile dropped Stripe's `tax_exempt:"exempt"`,
 // so tax_status kept its default and an exempt customer was taxed. The
-// unknown key is now a 422 naming it and the profile is unchanged. Control: a
-// body read back from GET (read-only fields included) is still accepted.
+// unknown key is now a 422 naming it and the profile is unchanged. A body read
+// back from GET carries the fields the server sets (customer_id,
+// profile_status, timestamps): those are refused by name too (B9), not
+// accepted and ignored. Control: the writable fields save.
 func TestBillingProfileUpsert_RefusesUnknownField(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
@@ -143,24 +145,32 @@ func TestBillingProfileUpsert_RefusesUnknownField(t *testing.T) {
 		t.Fatalf("refused upsert wrote a profile: GET status %d; body %s", rr.Code, rr.Body.String())
 	}
 
-	// Control: a known body saves, and the GET body sent back as-is saves too.
+	// Control: a known body saves.
 	rr = do(http.MethodPut, path, `{"legal_name":"Exempt Co","country":"US","tax_status":"exempt","tax_exempt_reason":"501(c)(3)"}`)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("known body: status %d, want 200; body %s", rr.Code, rr.Body.String())
-	}
-	rr = do(http.MethodGet, path, "")
-	if rr.Code != http.StatusOK {
-		t.Fatalf("GET profile: status %d; body %s", rr.Code, rr.Body.String())
-	}
-	rr = do(http.MethodPut, path, rr.Body.String())
-	if rr.Code != http.StatusOK {
-		t.Fatalf("GET body sent back: status %d, want 200; body %s", rr.Code, rr.Body.String())
 	}
 	var bp domain.CustomerBillingProfile
 	if err := json.Unmarshal(rr.Body.Bytes(), &bp); err != nil {
 		t.Fatalf("decode profile: %v", err)
 	}
 	if bp.TaxStatus != domain.TaxStatusExempt {
-		t.Fatalf("tax_status after round-trip: %q, want exempt", bp.TaxStatus)
+		t.Fatalf("tax_status: %q, want exempt", bp.TaxStatus)
+	}
+
+	// The GET body sent back names fields the server sets: refused, naming
+	// the field, and the profile is unchanged.
+	got := do(http.MethodGet, path, "")
+	if got.Code != http.StatusOK {
+		t.Fatalf("GET profile: status %d; body %s", got.Code, got.Body.String())
+	}
+	before := got.Body.String()
+	rr = do(http.MethodPut, path, strings.Replace(before, `"legal_name":"Exempt Co"`, `"legal_name":"Renamed Co"`, 1))
+	_ = json.Unmarshal(rr.Body.Bytes(), &env)
+	if rr.Code != http.StatusUnprocessableEntity || env.Error.Param != "customer_id" {
+		t.Fatalf("GET body sent back: status %d param %q, want 422 on customer_id; body %s", rr.Code, env.Error.Param, rr.Body.String())
+	}
+	if after := do(http.MethodGet, path, "").Body.String(); after != before {
+		t.Fatalf("refused upsert changed the profile:\nbefore %s\nafter  %s", before, after)
 	}
 }

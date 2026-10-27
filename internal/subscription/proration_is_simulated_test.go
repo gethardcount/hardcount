@@ -69,7 +69,7 @@ func TestUpdateItem_PlanChange_StampsIsSimulatedFromTestClock(t *testing.T) {
 			invoices := &invoicesMock{sourceInvoice: domain.Invoice{ID: "src_inv", PaymentStatus: domain.PaymentSucceeded}}
 
 			h := NewHandler(svc)
-			h.SetProrationDeps(plans, invoices, &creditsMock{})
+			h.SetProrationDeps(plans, invoices)
 
 			body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_pro", Immediate: true})
 			req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body)

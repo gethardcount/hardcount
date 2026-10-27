@@ -1,9 +1,7 @@
 # Emails not going out
 
 Velox queues every email in the `email_outbox` table, and a background job
-sends them through your SMTP relay. This page is for when emails stop going
-out: the relay keeps refusing them, the queue stalls, or emails are given
-up on. Back to the [runbook index](index.md).
+sends them through your SMTP relay. Back to the [runbook index](index.md).
 
 ## Symptom
 
@@ -84,8 +82,9 @@ different things by row status:
   code that writes this email type shipped without its dispatcher case.
 
 A `last_error` that begins `email: recipient is not a single valid email
-address` is not a provider problem. The row holds an address stored before
-Velox refused names, quotes and angle brackets, so it failed at once with
+address` is not a provider problem. The row holds an address saved by
+v0.8.2 or earlier, before Velox refused names, quotes and angle brackets,
+so it failed at once with
 no retry. Retrying the row sends the same address and fails again. Fix the
 customer's email or CC list (or the member's email) and send again.
 

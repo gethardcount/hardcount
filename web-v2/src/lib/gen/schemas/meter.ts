@@ -12,11 +12,25 @@ import type { MeterAggregation } from './meterAggregation';
 export interface Meter {
   id?: string;
   tenant_id?: string;
-  key?: string;
+  /** The `event_name` usage events send for this meter. */
+  event_name?: string;
   name?: string;
   unit?: string;
+  /**
+     * How the meter rolls its events into one quantity per billing
+     * period. Every price of the meter bills under it. `last`
+     * is the latest event by timestamp, then by id. Fixed once the
+     * meter has a usage event (see `has_usage`).
+     */
   aggregation?: MeterAggregation;
-  rating_rule_version_id?: string;
+  /**
+     * Whether the meter has usage events. Once it has, its
+     * `aggregation` cannot change. Held usage for its `event_name`
+     * does not count until it is released. Returned when you create,
+     * get or update one meter; the meter list leaves it out. A create
+     * or update that succeeded leaves it out if it could not be read.
+     */
+  has_usage?: boolean;
   created_at?: string;
   updated_at?: string;
 }

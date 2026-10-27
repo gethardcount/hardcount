@@ -13,53 +13,26 @@ import (
 	"github.com/sagarsuperuser/velox/internal/subscription"
 )
 
-// P4 (ADR-070): price-change lifecycle against real Postgres. The two
-// decisions under test: (a) overrides are keyed by rule_key and survive
-// version publishes; (b) the version (and override) in force at the
-// period OPEN prices the whole period — cycle close, threshold fire,
-// and preview agree across a mid-period publish.
+// Price edits against real Postgres (ADR-070, ADR-130 §5-§6). The decisions
+// under test: (a) an override is keyed by its price and follows it across
+// content edits; (b) the version (and override) in force at the period
+// start prices the whole period: the cycle close, the threshold invoice and
+// the preview agree across an edit saved mid-period. The fixture's plan is
+// made before its subscription, so its price is in force from the beginning
+// of time; the subscription makes the plan used, so an edit in the test
+// appends a version from now on.
 
-// seededRule resolves the fixture's seeded "calls_flat" rule version.
-func (f *thresholdFixture) seededRule(t *testing.T, ctx context.Context) domain.RatingRuleVersion {
-	t.Helper()
-	r, err := f.pricingSvc.GetRuleByKeyAsOf(ctx, f.tenantID, "calls_flat", time.Now().UTC())
-	if err != nil {
-		t.Fatalf("resolve seeded rule: %v", err)
-	}
-	return r
-}
-
-// backdateRuleVersion moves a rating-rule version's created_at before
-// the fixture's period open, modelling a catalog that existed when the
-// period started (the fixture creates everything "now", 72h into the
-// period).
-func backdateRuleVersion(t *testing.T, f *thresholdFixture, ctx context.Context, id string, to time.Time) {
-	t.Helper()
-	tx, err := f.db.BeginTx(ctx, postgres.TxBypass, "")
-	if err != nil {
-		t.Fatalf("begin bypass: %v", err)
-	}
-	defer postgres.Rollback(tx)
-	if _, err := tx.Exec(`UPDATE rating_rule_versions SET created_at = $1 WHERE id = $2`, to, id); err != nil {
-		t.Fatalf("backdate rule version: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit backdate: %v", err)
-	}
-}
-
-// createBackdatedOverride sets a negotiated flat price for the fixture
-// customer on the fixture rule, effective BEFORE the period opened (an
-// override created mid-period prices from the next period by design —
-// these tests model a deal already in place).
-func createBackdatedOverride(t *testing.T, f *thresholdFixture, ctx context.Context, ruleVersionID string, flatCents int64) domain.CustomerPriceOverride {
+// createBackdatedOverride sets a negotiated per_unit price for the fixture
+// customer on a price, effective BEFORE the period opened (an override
+// created mid-period prices from the next period by design — these tests
+// model a deal already in place).
+func createBackdatedOverride(t *testing.T, f *thresholdFixture, ctx context.Context, priceID string, cents int64) domain.CustomerPriceOverride {
 	t.Helper()
 	o, err := f.pricingSvc.CreateOverride(ctx, f.tenantID, pricing.CreateOverrideInput{
-		CustomerID:          f.customerID,
-		RatingRuleVersionID: ruleVersionID,
-		Mode:                domain.PricingFlat,
-		FlatAmountCents:     decimal.NewFromInt(flatCents),
-		Reason:              "negotiated",
+		CustomerID: f.customerID,
+		PriceID:    priceID,
+		PriceShape: domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(cents)},
+		Reason:     "negotiated",
 	})
 	if err != nil {
 		t.Fatalf("create override: %v", err)
@@ -106,6 +79,19 @@ func closeCycle(t *testing.T, f *thresholdFixture, ctx context.Context) {
 	}
 }
 
+// editFixturePrice saves a new per_unit rate for the fixture's price now,
+// mid-period on a used plan: it applies from the next period.
+func editFixturePrice(t *testing.T, f *thresholdFixture, ctx context.Context, cents int64) {
+	t.Helper()
+	pw, err := f.pricingSvc.EditPrice(ctx, f.tenantID, f.planID, f.priceID, domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(cents)})
+	if err != nil {
+		t.Fatalf("edit price: %v", err)
+	}
+	if pw.Effective != pricing.EffectiveNextPeriod {
+		t.Fatalf("edit effective %q, want next_period", pw.Effective)
+	}
+}
+
 func usageLineTotal(t *testing.T, f *thresholdFixture, ctx context.Context, invoiceID string) (int64, []domain.InvoiceLineItem) {
 	t.Helper()
 	lines, err := f.invStore.ListLineItems(ctx, f.tenantID, invoiceID)
@@ -134,35 +120,21 @@ func usageLineTotal(t *testing.T, f *thresholdFixture, ctx context.Context, invo
 	return total, usageLines
 }
 
-// TestPriceChange_OverrideSurvivesPublish_SingleRule is the audit-High
-// detach regression: a negotiated override must keep applying after the
-// rule gets a new version. Pre-ADR-070 the close resolved the LATEST
-// version and looked the override up by that version's id — publishing
-// v2 made the v1-keyed override unfindable and the customer silently
-// reverted to list price for the whole period.
+// TestPriceChange_OverrideFollowsAnEdit is the audit-High detach regression:
+// a negotiated override must keep applying after its price is edited. Before
+// ADR-070 the close resolved the latest version and looked the override up
+// by that version's id, so a publish made the override unfindable and the
+// customer silently reverted to list price for the whole period. An
+// override now keys on the price id, which an edit keeps.
 //
-// Mutation-verify: key the override lookup by version id (pass rule.ID
-// instead of rule.RuleKey in resolveRatedRule) — this test fails.
-func TestPriceChange_OverrideSurvivesPublish_SingleRule(t *testing.T) {
-	f := newThresholdFixture(t, "P4 Detach SingleRule")
+// Mutation-verify: look the override up by anything that changes on an edit
+// (rate.go planPrices.Price) — this test fails.
+func TestPriceChange_OverrideFollowsAnEdit(t *testing.T) {
+	f := newThresholdFixture(t, "P4 Detach")
 	ctx := postgres.WithLivemode(context.Background(), false)
 
-	// Catalog + deal in place before the period opened.
-	v1 := f.seededRule(t, ctx)
-	backdateRuleVersion(t, f, ctx, v1.ID, f.cycleStart.Add(-2*time.Hour))
-	createBackdatedOverride(t, f, ctx, v1.ID, 5) // negotiated 5c/call (list 1c)
-
-	// Mid-period publish: v2 at 2c/call.
-	v2, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "calls_flat", Name: "Calls Flat v2",
-		Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(2),
-	})
-	if err != nil {
-		t.Fatalf("publish v2: %v", err)
-	}
-	if v2.Version != 2 {
-		t.Fatalf("v2 version: got %d, want 2", v2.Version)
-	}
+	createBackdatedOverride(t, f, ctx, f.priceID, 5) // negotiated 5c/call (list 1c)
+	editFixturePrice(t, f, ctx, 2)                   // mid-period edit to 2c/call
 
 	f.ingestUsage(t, ctx, 100, 10) // 1000 calls
 	closeCycle(t, f, ctx)
@@ -172,59 +144,42 @@ func TestPriceChange_OverrideSurvivesPublish_SingleRule(t *testing.T) {
 		t.Fatalf("invoices: got %d, want 1", len(invoices))
 	}
 	total, usageLines := usageLineTotal(t, f, ctx, invoices[0].ID)
-	// 1000 calls × 5c override = 5000c. List v1 would be 1000c; v2 would
-	// be 2000c — either means the override detached or repriced.
+	// 1000 calls × 5c override = 5000c. List would be 1000c; the edit 2000c
+	// — either means the override detached or the edit repriced the period.
 	if total != 5000 {
-		t.Errorf("usage total: got %d cents, want 5000 (override survives the publish; 1000=v1 list, 2000=v2 list)", total)
+		t.Errorf("usage total: got %d cents, want 5000 (the override follows the edit; 1000=list, 2000=the edited list)", total)
 	}
-	// Provenance: the line records the version in force at period open.
-	if len(usageLines) == 1 && usageLines[0].RatingRuleVersionID != v1.ID {
-		t.Errorf("line rule version: got %s, want %s (v1 — the period opened on v1)", usageLines[0].RatingRuleVersionID, v1.ID)
+	if len(usageLines) == 1 && usageLines[0].PriceID != f.priceID {
+		t.Errorf("line price: got %s, want %s", usageLines[0].PriceID, f.priceID)
 	}
 	// ADR-054 re-examination — the override trap: the stamped nominal rate is
-	// the OVERRIDE-applied rate (5c/call), NOT the list price at the persisted
-	// version id (v1 = 1c). The override preserves the version id, so a naive
-	// derive-on-read from rating_rule_versions.flat_amount_cents would
-	// misdisplay list price on this negotiated line — which is exactly why the
-	// rate is stamped at build from the resolved (override-applied) rule.
-	// Mutation-verify: stamp rule.ID's list rate instead of rule.FlatAmountCents
+	// the OVERRIDE-applied rate (5c/call), NOT the list price of the price id
+	// (1c). The override keeps the price id, so a derive-on-read from the
+	// price would misdisplay list price on this negotiated line — which is
+	// exactly why the rate is stamped at build from the resolved
+	// (override-applied) price. Mutation-verify: stamp the list rate instead
 	// and this fails with got 1.
 	if len(usageLines) == 1 {
 		nom := usageLines[0].NominalUnitAmountDecimal
 		if nom == nil {
-			t.Errorf("nominal rate: got nil, want 5 (a flat line must stamp its configured rate)")
+			t.Errorf("nominal rate: got nil, want 5 (a per_unit line must stamp its configured rate)")
 		} else if !nom.Equal(decimal.NewFromInt(5)) {
-			t.Errorf("nominal rate: got %s, want 5 (the negotiated override, not v1 list 1c)", nom.String())
+			t.Errorf("nominal rate: got %s, want 5 (the negotiated override, not the 1c list)", nom.String())
 		}
 	}
 }
 
-// TestPriceChange_OverrideSurvivesPublish_MultiDim: same regression on
-// the multi-dim path (meter_pricing_rules bindings), which pre-ADR-070
-// never resolved by key at all — it priced the pinned binding version
-// and looked the override up by that id.
-func TestPriceChange_OverrideSurvivesPublish_MultiDim(t *testing.T) {
-	f := newThresholdFixture(t, "P4 Detach MultiDim")
+// TestPriceChange_OverrideFollowsAnEdit_ClaimedRead: the same on a meter read
+// per price (AggregateClaims), which a meter with more than one price is. A
+// second price for model=x is in place before the period opened.
+func TestPriceChange_OverrideFollowsAnEdit_ClaimedRead(t *testing.T) {
+	f := newThresholdFixture(t, "P4 Detach Claimed")
 	ctx := postgres.WithLivemode(context.Background(), false)
 
-	v1 := f.seededRule(t, ctx)
-	backdateRuleVersion(t, f, ctx, v1.ID, f.cycleStart.Add(-2*time.Hour))
-	// Catch-all pricing rule flips the meter onto the multi-dim path.
-	if _, err := f.pricingSvc.UpsertMeterPricingRule(ctx, f.tenantID, pricing.UpsertMeterPricingRuleInput{
-		MeterID:             f.meterID,
-		RatingRuleVersionID: v1.ID,
-		AggregationMode:     domain.AggSum,
-	}); err != nil {
-		t.Fatalf("upsert meter pricing rule: %v", err)
-	}
-	createBackdatedOverride(t, f, ctx, v1.ID, 5)
-
-	if _, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "calls_flat", Name: "Calls Flat v2",
-		Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(2),
-	}); err != nil {
-		t.Fatalf("publish v2: %v", err)
-	}
+	other := addPrice(t, f.db, ctx, f.tenantID, f.planID, priceOn{meterID: f.meterID, match: map[string]string{"model": "x"}, shape: perUnitShape("9")})
+	backdatePriceVersions(t, f.db, ctx, other.ID, f.cycleStart.Add(-2*time.Hour))
+	createBackdatedOverride(t, f, ctx, f.priceID, 5)
+	editFixturePrice(t, f, ctx, 2)
 
 	f.ingestUsage(t, ctx, 100, 10)
 	closeCycle(t, f, ctx)
@@ -235,32 +190,28 @@ func TestPriceChange_OverrideSurvivesPublish_MultiDim(t *testing.T) {
 	}
 	total, _ := usageLineTotal(t, f, ctx, invoices[0].ID)
 	if total != 5000 {
-		t.Errorf("usage total (multi-dim): got %d cents, want 5000 (override survives the publish)", total)
+		t.Errorf("usage total (claimed read): got %d cents, want 5000 (the override follows the edit)", total)
 	}
 }
 
-// TestPriceChange_FireThenPublishThenClose: one period, one price. The
-// threshold fire bills the pre-fire window at the period-open version;
-// a publish lands mid-period; the cycle close bills the residual at the
-// SAME version — never v2 (pre-ADR-070 the close resolved latest-by-key
-// while the fire priced the pinned version: two prices in one period,
-// and the graduated-tier restart math silently assumed one).
+// TestPriceChange_FireThenEditThenClose: one period, one price. The
+// threshold fire bills the pre-fire window at the version in force at the
+// period start; an edit lands mid-period; the cycle close bills the
+// residual at the SAME version, never the edit (before ADR-070 the close
+// resolved the latest version while the fire priced the pinned one: two
+// prices in one period).
 //
-// Mutation-verify: resolve with asOf=now instead of periodStart — the
-// close prices at v2 and this test fails.
-func TestPriceChange_FireThenPublishThenClose(t *testing.T) {
-	f := newThresholdFixture(t, "P4 FirePublishClose")
+// Mutation-verify: resolve the close's prices at now instead of the period
+// start — the close prices at the edit and this test fails.
+func TestPriceChange_FireThenEditThenClose(t *testing.T) {
+	f := newThresholdFixture(t, "P4 FireEditClose")
 	ctx := postgres.WithLivemode(context.Background(), false)
-
-	v1 := f.seededRule(t, ctx)
-	backdateRuleVersion(t, f, ctx, v1.ID, f.cycleStart.Add(-2*time.Hour))
 
 	// Threshold: fire once the running subtotal crosses $5, keep the
 	// cycle (reset=false) so the close bills the residual window of the
 	// SAME period.
-	noReset := false
 	if _, err := f.subSvc.SetBillingThresholds(ctx, f.tenantID, f.subID, subscription.BillingThresholdsInput{
-		AmountGTE: 500, ResetBillingCycle: &noReset,
+		AmountGTE: 500,
 	}); err != nil {
 		t.Fatalf("set thresholds: %v", err)
 	}
@@ -274,13 +225,8 @@ func TestPriceChange_FireThenPublishThenClose(t *testing.T) {
 		t.Fatalf("threshold fired = %d, want 1", fired)
 	}
 
-	// Mid-period publish at 5c/call.
-	if _, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "calls_flat", Name: "Calls Flat v2",
-		Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(5),
-	}); err != nil {
-		t.Fatalf("publish v2: %v", err)
-	}
+	// Mid-period edit to 5c/call.
+	editFixturePrice(t, f, ctx, 5)
 
 	// Residual usage AFTER the fire watermark (the fire invoice's line
 	// BillingPeriodEnd), inside a period end just past it — the close's
@@ -344,47 +290,29 @@ func TestPriceChange_FireThenPublishThenClose(t *testing.T) {
 		tot, _ := usageLineTotal(t, f, ctx, inv.ID)
 		totals = append(totals, tot)
 	}
-	// Fire billed 1000 calls at v1 (1000c); close bills the residual 500
-	// calls at the SAME v1 price (500c) — 2500c would mean v2 leaked in.
+	// Fire billed 1000 calls at 1c (1000c); close bills the residual 500
+	// calls at the SAME 1c (500c) — 2500c would mean the edit leaked in.
 	seen := map[int64]bool{totals[0]: true, totals[1]: true}
 	if !seen[1000] || !seen[500] {
-		t.Errorf("fire+close usage totals: got %v, want {1000, 500} — the whole period prices at the period-open version", totals)
+		t.Errorf("fire+close usage totals: got %v, want {1000, 500} — the whole period prices at the version in force at its start", totals)
 	}
 }
 
-// TestPriceChange_PreviewMatchesCloseAcrossPublish CI-locks the parity
-// claim in preview.go's doc comment ("the cycle scan calls the same
-// path, so a multi-dim tenant's preview matches what its actual invoice
-// will be") that was false pre-ADR-070: previewMeter
-// priced the meter-pinned version while the close priced latest-by-key,
-// so preview != invoice after any publish.
-func TestPriceChange_PreviewMatchesCloseAcrossPublish(t *testing.T) {
+// TestPriceChange_PreviewMatchesCloseAcrossAnEdit CI-locks that the preview
+// prices a period the way its close will after a mid-period edit: both read
+// the version and override in force at the period start, through one rater.
+func TestPriceChange_PreviewMatchesCloseAcrossAnEdit(t *testing.T) {
 	f := newThresholdFixture(t, "P4 PreviewParity")
 	ctx := postgres.WithLivemode(context.Background(), false)
 
-	v1 := f.seededRule(t, ctx)
-	backdateRuleVersion(t, f, ctx, v1.ID, f.cycleStart.Add(-2*time.Hour))
-	createBackdatedOverride(t, f, ctx, v1.ID, 3)
-
-	if _, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "calls_flat", Name: "Calls Flat v2",
-		Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(7),
-	}); err != nil {
-		t.Fatalf("publish v2: %v", err)
-	}
+	createBackdatedOverride(t, f, ctx, f.priceID, 3)
+	editFixturePrice(t, f, ctx, 7)
 
 	f.ingestUsage(t, ctx, 100, 10) // 1000 calls
 
-	sub, err := f.subStore.Get(ctx, f.tenantID, f.subID)
-	if err != nil {
-		t.Fatalf("get sub: %v", err)
-	}
-	preview, err := f.engine.Preview(ctx, sub)
-	if err != nil {
-		t.Fatalf("preview: %v", err)
-	}
+	preview := f.createPreview(t, ctx, f.customerID, f.subID)
 	if len(preview.Totals) != 1 {
-		t.Fatalf("preview totals: got %d entries (%v), want 1 — overridden lines must carry the rule's currency", len(preview.Totals), preview.Totals)
+		t.Fatalf("preview totals: got %d entries (%v), want 1 — overridden lines must carry the plan's currency", len(preview.Totals), preview.Totals)
 	}
 	previewTotal := preview.Totals[0].AmountCents
 
@@ -396,30 +324,24 @@ func TestPriceChange_PreviewMatchesCloseAcrossPublish(t *testing.T) {
 	closeTotal, _ := usageLineTotal(t, f, ctx, invoices[0].ID)
 
 	if previewTotal != closeTotal {
-		t.Errorf("preview total %d != close usage total %d (must agree across a publish)", previewTotal, closeTotal)
+		t.Errorf("preview total %d != close usage total %d (must agree across an edit)", previewTotal, closeTotal)
 	}
 	if closeTotal != 3000 {
 		t.Errorf("close total: got %d, want 3000 (1000 calls × 3c override)", closeTotal)
 	}
 }
 
-// TestThresholdFire_ZeroBaseAllOverride_ResolvesCurrency: the fixture
-// sub has NO base fee, and its only usage rule is overridden. The old
-// replace-wholesale ToRatingRule fabricated a rule with Currency == ""
-// — every preview line carried an empty currency, invoice-currency
-// resolution found no non-empty line, and the fire hard-failed "no
-// invoice currency resolved" for exactly the negotiated customers the
-// spend-cap wedge targets.
-//
-// Mutation-verify: revert ApplyTo to fabricate-from-scratch — this
-// test fails.
+// TestThresholdFire_ZeroBaseAllOverride_ResolvesCurrency: the fixture sub
+// has NO base fee, and its only usage price is overridden. A line takes the
+// plan's currency: an override carries none (ADR-130 §11), so a fire on an
+// all-override, zero-base subscription still resolves its invoice currency.
+// (An earlier override shape fabricated a rule with an empty currency and the
+// fire hard-failed "no invoice currency resolved".)
 func TestThresholdFire_ZeroBaseAllOverride_ResolvesCurrency(t *testing.T) {
 	f := newThresholdFixture(t, "P4 ZeroBaseOverrideFire")
 	ctx := postgres.WithLivemode(context.Background(), false)
 
-	v1 := f.seededRule(t, ctx)
-	backdateRuleVersion(t, f, ctx, v1.ID, f.cycleStart.Add(-2*time.Hour))
-	createBackdatedOverride(t, f, ctx, v1.ID, 5)
+	createBackdatedOverride(t, f, ctx, f.priceID, 5)
 
 	if _, err := f.subSvc.SetBillingThresholds(ctx, f.tenantID, f.subID, subscription.BillingThresholdsInput{
 		AmountGTE: 500,
@@ -441,7 +363,7 @@ func TestThresholdFire_ZeroBaseAllOverride_ResolvesCurrency(t *testing.T) {
 		t.Fatalf("invoices: got %d, want 1", len(invoices))
 	}
 	if invoices[0].Currency != "USD" {
-		t.Errorf("fire invoice currency: got %q, want USD (patched override keeps the rule's currency)", invoices[0].Currency)
+		t.Errorf("fire invoice currency: got %q, want USD (the plan's)", invoices[0].Currency)
 	}
 	total, _ := usageLineTotal(t, f, ctx, invoices[0].ID)
 	if total != 5000 {

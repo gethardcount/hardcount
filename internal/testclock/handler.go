@@ -2,7 +2,6 @@ package testclock
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"time"
@@ -13,6 +12,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // AuditWriter is the narrow audit surface testclock uses.
@@ -59,7 +59,12 @@ func (h *Handler) Routes() chi.Router {
 // eventually fail anyway — this makes the failure immediate and explains why.
 func (h *Handler) requireTestMode(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if auth.Livemode(r.Context()) {
+		live, err := postgres.Livemode(r.Context())
+		if err != nil {
+			respond.FromError(w, r, err, "test_clock")
+			return
+		}
+		if live {
 			respond.Forbidden(w, r, "test clocks are only available in test mode — use a test-mode API key (vlx_secret_test_...)")
 			return
 		}
@@ -71,8 +76,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
 	var input CreateInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &input) {
 		return
 	}
 
@@ -173,8 +177,7 @@ func (h *Handler) advance(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
 	var input AdvanceInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &input) {
 		return
 	}
 
@@ -220,6 +223,9 @@ func (h *Handler) advance(w http.ResponseWriter, r *http.Request) {
 // clock isn't in internal_failure (refuses to retry from ready
 // or advancing). ADR-018.
 func (h *Handler) retryAdvance(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
@@ -238,6 +244,9 @@ func (h *Handler) retryAdvance(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 

@@ -12,7 +12,6 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
-	"github.com/sagarsuperuser/velox/internal/platform/money"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/subscription"
 )
@@ -28,22 +27,22 @@ type thresholdEval struct {
 	CrossedItem   bool
 	CrossedItemID string
 	// RunningSubtotal is the amount_gte comparison figure — the customer's
-	// committed spend, including (iff reset=false) non-additive buckets that
-	// bill at cycle close instead of riding this invoice. Feeds the cap check
+	// committed spend, including non-additive buckets that bill at cycle
+	// close instead of riding this invoice. Feeds the cap check
 	// and the threshold_crossed event payload ONLY.
 	RunningSubtotal int64
 	// BilledSubtotal is the sum of LineItems' amounts — what the invoice
 	// actually charges. Feeds tax + the invoice header. Diverges from
-	// RunningSubtotal exactly when a non-additive bucket is dropped or
-	// cap-excluded (ADR-066 §4).
+	// RunningSubtotal exactly when a non-additive bucket is dropped
+	// (ADR-066 §4).
 	BilledSubtotal  int64
 	LineItems       []domain.InvoiceLineItem
 	InvoiceCurrency string
 	// Unpriced is the usage this threshold invoice is built without because
 	// no price matched it, and that no later invoice reports. It follows
-	// the line rules below: a non-additive bucket under reset=false belongs
-	// to the period close (its full-window pass reports it), so it is left
-	// out here; everything else is this invoice's to report (#981).
+	// the line rules below: a non-additive bucket belongs to the period
+	// close (its full-window pass reports it), so it is left out here;
+	// everything else is this invoice's to report (#981).
 	Unpriced []leftOutBucket
 	// BelowZero is the usage this threshold invoice counts as 0 because it
 	// was below zero after corrections (#1193), under the same rules as
@@ -51,16 +50,13 @@ type thresholdEval struct {
 	BelowZero []leftOutBucket
 }
 
-// nonAdditiveMode reports whether a rule bucket's aggregation cannot be split
-// across a threshold fire and a cycle close (max[0,t1) + max[t1,end) ≥
-// max[0,end); last is a point-in-time read). last_ever additionally ignores
-// window bounds entirely. ADR-066 §4.
-func nonAdditiveMode(m domain.AggregationMode) bool {
-	switch m {
-	case domain.AggMax, domain.AggLastDuringPeriod, domain.AggLastEver:
-		return true
-	}
-	return false
+// nonAdditive reports whether usage under a meter's aggregation cannot be
+// split across a threshold fire and a cycle close (max[0,t1) + max[t1,end) ≥
+// max[0,end); last is a point-in-time read). ADR-066 §4. A meter has one
+// aggregation (ADR-130 §2), so this is a property of the meter. An empty
+// aggregation reads as sum, as billing reads it.
+func nonAdditive(aggregation string) bool {
+	return aggregation != "" && !domain.AdditiveAggregation(aggregation)
 }
 
 // ScanThresholds finds every subscription with a billing threshold configured
@@ -85,6 +81,10 @@ func nonAdditiveMode(m domain.AggregationMode) bool {
 // errors do not abort the whole scan — they're collected and returned so
 // the operator dashboard can flag stuck rows without losing throughput.
 func (e *Engine) ScanThresholds(ctx context.Context, batchSize int) (int, []error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return 0, []error{err}
+	}
 	if batchSize <= 0 {
 		batchSize = 50
 	}
@@ -98,7 +98,7 @@ func (e *Engine) ScanThresholds(ctx context.Context, batchSize int) (int, []erro
 	// advances past failing subs so one bad row can't wedge the scan or cause a
 	// re-evaluation within the same tick. The fire-once probe in
 	// scanOneThreshold is what keeps a full drain affordable — already-fired
-	// subs cost one indexed lookup, not a previewWithWindow aggregation.
+	// subs cost one indexed lookup, not a window-preview aggregation.
 	fired := 0
 	var errsOut []error
 	afterID := ""
@@ -107,7 +107,7 @@ func (e *Engine) ScanThresholds(ctx context.Context, batchSize int) (int, []erro
 			errsOut = append(errsOut, fmt.Errorf("threshold scan ctx done: %w", err))
 			break
 		}
-		candidates, err := e.subs.ListWithThresholds(ctx, postgres.Livemode(ctx), afterID, batchSize)
+		candidates, err := e.subs.ListWithThresholds(ctx, live, afterID, batchSize)
 		if err != nil {
 			errsOut = append(errsOut, fmt.Errorf("list candidates: %w", err))
 			break
@@ -208,6 +208,10 @@ func (e *Engine) ScanThresholdsForClock(ctx context.Context, tenantID, clockID s
 // over the partial cycle [period_start, now), checks each configured cap,
 // and — when crossed — fires the early finalize via fireThreshold.
 func (e *Engine) scanOneThreshold(ctx context.Context, sub domain.Subscription) (bool, error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return false, err
+	}
 	if sub.BillingThresholds == nil {
 		return false, nil
 	}
@@ -260,19 +264,17 @@ func (e *Engine) scanOneThreshold(ctx context.Context, sub domain.Subscription) 
 	// billing run's cancel arm bills [period_start, cancel_at) at the
 	// contracted instant (ADR-097), but the scheduler runs this scan first in
 	// its tick: a fire here would bill [period_start, now), usage stamped after
-	// the subscription ended and the full in_arrears base included, and the
+	// the subscription ended included, and the
 	// cancel's final invoice would then find the window already billed.
 	if sub.CancelAt != nil && !now.Before(*sub.CancelAt) {
 		return false, nil
 	}
 
 	// Fire-once probe: if a threshold invoice already exists for this cycle,
-	// this sub is done until the period rolls (reset=false) or the cycle
-	// re-anchors (reset=true — which moves periodStart, emptying this window).
-	// Pre-fix the scan re-evaluated and re-fired every tick after a reset=false
-	// crossing: each re-fire burned an invoice number + a paid Stripe Tax
+	// this sub is done until the period rolls. Pre-fix the scan re-evaluated
+	// and re-fired every tick after a crossing: each re-fire burned an invoice number + a paid Stripe Tax
 	// calculation before the dedup index rejected it (~600/cycle). The probe
-	// also skips the expensive previewWithWindow aggregation for already-fired
+	// also skips the expensive window-preview aggregation for already-fired
 	// subs — what makes the drained scan affordable.
 	//
 	// This probe is a check-then-act OPTIMIZATION, not the exactly-once
@@ -281,12 +283,19 @@ func (e *Engine) scanOneThreshold(ctx context.Context, sub domain.Subscription) 
 	// invoice per sub+period_start) remains the correctness seam — the loser
 	// lands on errs.ErrAlreadyExists and short-circuits, exactly as before.
 	//
+	// The probe sees the cycle's threshold invoice in ANY status, not the
+	// watermark: the index holds the cycle's one slot whatever the status,
+	// so after a void (or a write-off) no later fire this cycle can insert.
+	// Probing with the watermark re-ran the evaluation and a paid tax
+	// calculation every tick after a void, only for the index to refuse the
+	// insert. A voided fire's window is billed by the cycle close instead.
+	//
 	// The probe fetches the full row (not just the watermark instant) so a
 	// hit can heal the $0/credited MarkPaid crash window: a crash between
 	// invoice-create and MarkPaid re-enters HERE on every later tick — the
 	// only re-entry this sub gets — so this is where the stranded
 	// payment_pending row is repaired (ADR-066).
-	if existing, err := e.invoices.GetLatestThresholdInvoiceForCycle(ctx, sub.TenantID, sub.ID, periodStart, *sub.CurrentBillingPeriodEnd); err == nil {
+	if existing, err := e.invoices.GetThresholdInvoiceForCycleAnyStatus(ctx, sub.TenantID, sub.ID, periodStart, *sub.CurrentBillingPeriodEnd); err == nil {
 		e.healStrandedZeroDue(ctx, sub.TenantID, existing, now)
 		return false, nil // already fired this cycle
 	} else if !errors.Is(err, errs.ErrNotFound) {
@@ -304,8 +313,8 @@ func (e *Engine) scanOneThreshold(ctx context.Context, sub domain.Subscription) 
 	}
 
 	// Empty billable set (ADR-066 §4b): the cap crossed but every billable
-	// line was a dropped non-additive bucket (pure-max/last sub under
-	// reset=false). There is nothing to invoice — the cycle close bills those
+	// line was a dropped non-additive bucket (a pure-max/last sub). There is
+	// nothing to invoice — the cycle close bills those
 	// buckets full-period. Skip BEFORE fireThreshold so no invoice number is
 	// minted and no paid tax calculation runs (the pre-fix currency bail sat
 	// after both, erroring every tick), with a once-per-(sub, period)
@@ -328,16 +337,16 @@ func (e *Engine) scanOneThreshold(ctx context.Context, sub domain.Subscription) 
 	// nothing).
 	unpriced := unpricedUsage{}
 	for _, u := range eval.Unpriced {
-		slog.Warn("threshold: usage matched no rating rule and meter has no default binding — not billed",
-			"meter", u.MeterKey, "quantity", u.Quantity.String(),
+		slog.Warn("threshold: usage matched no price of its plan — not billed",
+			"meter", u.EventName, "quantity", u.Quantity.String(),
 			"subscription_id", sub.ID)
 		unpriced.add(u.MeterID, u.Quantity)
 	}
-	unpriced.record(ctx, sub)
+	unpriced.record(live, sub)
 	// Usage below zero: its audit row committed with the fire (#1193).
 	for _, b := range eval.BelowZero {
 		slog.Warn("threshold: usage below zero after corrections — billed as 0",
-			"meter", b.MeterKey, "quantity", b.Quantity.String(),
+			"meter", b.EventName, "quantity", b.Quantity.String(),
 			"subscription_id", sub.ID)
 	}
 	return true, nil
@@ -347,16 +356,16 @@ func (e *Engine) scanOneThreshold(ctx context.Context, sub domain.Subscription) 
 // (ADR-066 §4) — shared by BOTH period-closers (billOnePeriod and
 // billFinalOnImmediateCancelImpl) so the protocol cannot drift between them:
 //
-//   - billedThrough: usage before this instant (and the in_arrears base)
-//     already billed on the mid-cycle threshold invoice; additive buckets
-//     bill only the residual window.
+//   - billedThrough: usage before this instant already billed on the
+//     mid-cycle threshold invoice; additive buckets bill only the residual
+//     window.
 //   - lines: the fire invoice's persisted line items — the per-bucket
 //     ground-truth for the non-additive clamp exemption. A max/last bucket
 //     with NO line was deliberately deferred by the fire and must bill
 //     full-window at close; one WITH a line already billed its window.
-//     Keyed on the invoice, never the mutable reset_billing_cycle config —
-//     an operator PATCH between fire and close would otherwise resurrect
-//     the billed-by-nobody gap or a double-bill.
+//     Keyed on the invoice, never the mutable threshold config — an
+//     operator removing thresholds between fire and close would otherwise
+//     resurrect the double-bill.
 //
 // A zero watermark (no fire this window) makes every method a no-op:
 // exists() false, deferredBucket() false — closers behave exactly as before.
@@ -375,7 +384,9 @@ func (e *Engine) loadThresholdWatermark(ctx context.Context, tenantID, subID str
 // loadThresholdWatermarkTx is loadThresholdWatermark with the fire invoice read
 // on tx (nil: its own connection). A closer that holds the subscription row
 // lock reads on its tx, after the lock: a fire commits under the same lock, so
-// every fire committed before it is seen (BillOnPlanSwapTx).
+// every fire committed before it is seen (BillOnPlanSwapTx, the immediate
+// cancel). The read holds the fire invoice FOR KEY SHARE until tx ends, so a
+// void of it waits for the closer's commit.
 func (e *Engine) loadThresholdWatermarkTx(ctx context.Context, tx *sql.Tx, tenantID, subID string, periodStart, periodEnd time.Time) (thresholdWatermark, error) {
 	var wmInv domain.Invoice
 	var err error
@@ -400,11 +411,28 @@ func (e *Engine) loadThresholdWatermarkTx(ctx context.Context, tx *sql.Tx, tenan
 
 func (w thresholdWatermark) exists() bool { return w.billedThrough != nil }
 
+// billedBase reports whether the fire invoice carries a base fee line. A
+// fire no longer bills a base (the period's own invoice does), but one made
+// before that change billed the full in_arrears base, and the period's
+// closer must not bill it again. Keyed on the invoice's lines, like the
+// non-additive exemption, so an open period that crosses the upgrade bills
+// its base exactly once.
+func (w thresholdWatermark) billedBase() bool {
+	for _, l := range w.lines {
+		if l.LineType == domain.LineTypeBaseFee {
+			return true
+		}
+	}
+	return false
+}
+
 // ThresholdBilledThroughTx implements subscription.Biller for the atomic
 // plan swap (ADR-115, fire-vs-swap): on the swap's tx, after its period CAS
 // took the subscription row lock, the instant a threshold fire already billed
-// the sub's CURRENT period through — nil when none fired. The swap refuses to
-// re-anchor the period below that instant; see applyCrossIntervalPlanSwapTx.
+// the sub's CURRENT period through — nil when none fired. A written-off fire
+// still billed it; a voided one did not (the watermark predicate). The swap
+// refuses to re-anchor the period below that instant; see
+// applyCrossIntervalPlanSwapTx.
 func (e *Engine) ThresholdBilledThroughTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription) (*time.Time, error) {
 	if sub.CurrentBillingPeriodStart == nil || sub.CurrentBillingPeriodEnd == nil {
 		return nil, nil
@@ -420,11 +448,10 @@ func (e *Engine) ThresholdBilledThroughTx(ctx context.Context, tx *sql.Tx, sub d
 	return &end, nil
 }
 
-// bucketOnFire reports whether the fire billed this (meter, rating rule
-// version) bucket.
-func (w thresholdWatermark) bucketOnFire(meterID, ratingRuleVersionID string) bool {
+// bucketOnFire reports whether the fire billed this (meter, price) bucket.
+func (w thresholdWatermark) bucketOnFire(meterID, priceID string) bool {
 	for _, li := range w.lines {
-		if li.LineType == domain.LineTypeUsage && li.MeterID == meterID && li.RatingRuleVersionID == ratingRuleVersionID {
+		if li.LineType == domain.LineTypeUsage && li.MeterID == meterID && li.PriceID == priceID {
 			return true
 		}
 	}
@@ -432,10 +459,10 @@ func (w thresholdWatermark) bucketOnFire(meterID, ratingRuleVersionID string) bo
 }
 
 // deferredBucket reports whether the fire deliberately DEFERRED this
-// non-additive bucket (dropped its line under reset=false) — the close must
-// bill it over the FULL window, exactly once.
-func (w thresholdWatermark) deferredBucket(mode domain.AggregationMode, meterID, ratingRuleVersionID string) bool {
-	return w.exists() && nonAdditiveMode(mode) && !w.bucketOnFire(meterID, ratingRuleVersionID)
+// non-additive bucket (dropped its line) — the close must bill it over the
+// FULL window, exactly once. Deferral keys on (meter, price) (ADR-130 §9).
+func (w thresholdWatermark) deferredBucket(aggregation, meterID, priceID string) bool {
+	return w.exists() && nonAdditive(aggregation) && !w.bucketOnFire(meterID, priceID)
 }
 
 // noteThresholdDeferred emits the loudness floor for a crossed-but-deferred
@@ -490,168 +517,141 @@ func (e *Engine) healStrandedZeroDue(ctx context.Context, tenantID string, inv d
 		"invoice_id", inv.ID, "tenant_id", tenantID)
 }
 
+// thresholdUsage is the usage a spend-threshold invoice bills over
+// [periodStart, now): the close's own windows (ADR-130 §9), one per stretch
+// of the period a plan was on the subscription and per meter it prices, each
+// from its meter's usage floor, priced by its own plan at the plan's pin of
+// the period (pinsOf).
+// Before PR-4 it priced one flat window with the current items' plans, which
+// priced pre-swap usage at the new plan's rates. No ladder: the evaluation
+// runs only while the period has no threshold invoice (the fire-once probe).
+type thresholdUsage struct {
+	lines    []PreviewLine
+	leftOut  []leftOutBucket
+	currency string
+	floors   usageFloors
+	// planMeters are the meters each plan prices at its pin (pins).
+	planMeters map[string][]string
+	pins       periodPins
+	plans      map[string]domain.Plan
+	src        PriceSource
+}
+
+func (e *Engine) readThresholdUsage(ctx context.Context, sub domain.Subscription, periodStart, now time.Time) (thresholdUsage, error) {
+	plans := make(map[string]domain.Plan, len(sub.Items))
+	for _, it := range sub.Items {
+		if _, ok := plans[it.PlanID]; ok {
+			continue
+		}
+		pl, err := e.pricing.GetPlan(ctx, sub.TenantID, it.PlanID)
+		if err != nil {
+			return thresholdUsage{}, fmt.Errorf("get plan %s: %w", it.PlanID, err)
+		}
+		plans[it.PlanID] = pl
+	}
+	segsByItem, err := e.windowSegments(ctx, sub, periodStart, now)
+	if err != nil {
+		return thresholdUsage{}, fmt.Errorf("resolve segments: %w", err)
+	}
+	if err := e.hydrateSegmentPlans(ctx, sub, segsByItem, plans); err != nil {
+		return thresholdUsage{}, err
+	}
+	src := e.prices()
+	stretches := planStretches(sub, segsByItem, periodStart, now)
+	pins := pinsOf(sub, stretches, periodStart)
+	planMeters, err := planMetersAt(ctx, src, sub.TenantID, plans, pins)
+	if err != nil {
+		return thresholdUsage{}, err
+	}
+	floors, err := e.loadUsageFloors(ctx, sub, periodStart, now)
+	if err != nil {
+		return thresholdUsage{}, err
+	}
+	clamped, _ := meterUsageIntervals(stretches, planMeters, nil, floors)
+	var windows []rateWindow
+	for _, k := range sortedPlanMeters(clamped) {
+		for _, iv := range mergeUsageIntervals(clamped[k]) {
+			windows = append(windows, rateWindow{planID: k.planID, meterID: k.meterID, iv: iv, pass: passEvery})
+		}
+	}
+	lines, _, leftOut, err := e.ratePreviewUsage(ctx, sub, src, windows, pins, nil, plans)
+	if err != nil {
+		return thresholdUsage{}, err
+	}
+	return thresholdUsage{
+		lines: lines, leftOut: leftOut, currency: plans[sub.Items[0].PlanID].Currency,
+		floors: floors, planMeters: planMeters, pins: pins, plans: plans, src: src,
+	}, nil
+}
+
 // evaluateThresholds computes the partial-cycle running totals for a sub and
-// reports whether any configured cap has been crossed. Reuses
-// previewWithWindow's per-item base-fee + per-(meter, rule) usage line
-// computation so the scan and the cycle scan agree on what "running total"
-// means — fed to the same priority+claim LATERAL JOIN as the natural cycle.
+// reports whether any configured cap has been crossed. It prices the usage
+// the way the close will (readThresholdUsage), so the threshold invoice and
+// the later close agree on what each window billed.
 func (e *Engine) evaluateThresholds(ctx context.Context, sub domain.Subscription, periodStart, now time.Time) (thresholdEval, error) {
-	preview, err := e.previewWithWindow(ctx, sub, periodStart, now)
+	tu, err := e.readThresholdUsage(ctx, sub, periodStart, now)
 	if err != nil {
 		return thresholdEval{}, err
 	}
 
-	// in_advance base fees are billed up front by BillOnCreate / cycle close,
-	// so they must NOT count toward the threshold running total or ride along
-	// on the early-finalize invoice — doing so double-bills the prepaid base.
-	// Each base_fee preview line carries its own PlanID + BaseBillTiming
-	// (stamped at emission, json:"-"), so the skip/proration below matches
-	// PER LINE — the previous parallel-array rebuild of the preview's
-	// emission order silently mis-attributed plans if that order ever
-	// changed (2026-07-10 design review: positional contract between a
-	// display surface and a money writer).
+	// A threshold counts and bills usage only. Base fees stay with the
+	// period's own invoice: an in_advance base is prepaid by BillOnCreate or
+	// the previous close, and an in_arrears base is billed by the period's
+	// close or immediate cancel, prorated as it would be with no fire.
 
-	// Roll up TWO totals across the previewed lines (ADR-066 §4 subtotal
-	// split). capRunning is the amount_gte comparison + event payload — the
-	// customer's committed spend. billedSubtotal is the sum of lines that
-	// actually ride the invoice — it feeds tax and the invoice header. They
-	// diverge exactly when a non-additive bucket is dropped (reset=false) or
-	// cap-excluded (reset=true); collapsing them charged the customer for
-	// invisible lines (header > sum of rendered lines). Multi-currency subs
-	// already filtered upstream at PATCH time, so summing across lines is
-	// safe — there's only one currency.
+	// Roll up TWO totals across the lines (ADR-066 §4 subtotal split).
+	// capRunning is the amount_gte comparison + event payload — the
+	// customer's committed usage spend. billedSubtotal is the sum of lines
+	// that actually ride the invoice — it feeds tax and the invoice header.
+	// They diverge exactly when a non-additive bucket is dropped; collapsing
+	// them charged the customer for invisible lines (header > sum of
+	// rendered lines). One currency per subscription (ADR-100), so summing
+	// across lines is safe.
 	var capRunning, billedSubtotal int64
-	reset := sub.BillingThresholds != nil && sub.BillingThresholds.ResetBillingCycle
-	currency := ""
-	lineItems := make([]domain.InvoiceLineItem, 0, len(preview.Lines))
-	for _, pl := range preview.Lines {
-		if pl.LineType == "base_fee" {
-			if pl.PlanID == "" {
-				// Every base_fee line is stamped at emission; an unstamped
-				// line means a new producer bypassed the contract — fail
-				// loud rather than guess whose base this is (money path).
-				return thresholdEval{}, fmt.Errorf("threshold fire: base_fee preview line %q has no plan stamp", pl.Description)
-			}
-			if pl.BaseBillTiming == domain.BillInAdvance {
-				// Already prepaid — skip from running total and line items.
-				continue
-			}
-			// reset_billing_cycle=true: the fire re-anchors the cycle, so the
-			// cycle close that would normally true-up the base never bills this
-			// window — the threshold invoice IS the window's base bill. Prorate
-			// it to the elapsed fraction; pre-fix the full month's base rode
-			// every fire, so a sub crossing 3x/month paid base 3x. The formula
-			// mirrors emitBaseSegmentLine EXACTLY: denominator = the plan's own
-			// FULL interval advanced from periodStart (domain/subscription.go
-			// invariant — never the current period length, which over-bills
-			// re-anchored stubs, mid-cycle-created periods, and cross-interval
-			// items, and can be zero for a sub-day stub). The whole line triple
-			// is rewritten (description/unit/amount) so qty × unit == amount on
-			// every render surface. reset=false is untouched: the cycle close
-			// bills only the post-fire residual and skips base when a threshold
-			// watermark exists, so the full base here stays correct.
-			if sub.BillingThresholds != nil && sub.BillingThresholds.ResetBillingCycle {
-				plan, err := e.pricing.GetPlan(ctx, sub.TenantID, pl.PlanID)
-				if err != nil {
-					return thresholdEval{}, fmt.Errorf("get plan %s for base proration: %w", pl.PlanID, err)
-				}
-				qty := pl.Quantity.IntPart()
-				loc, err := e.tenantLocation(ctx, sub.TenantID)
-				if err != nil {
-					return thresholdEval{}, err
-				}
-				// Anchor derived from THE PERIOD BEING BILLED, never the
-				// sub's live billing_anchor_day — a cross-interval swap
-				// rewrites the sub anchor before this window closes and
-				// the mutated anchor stretches the denominator (the #581
-				// "15/46 days" leak; that fix covered emitBaseSegmentLine's
-				// four billers but missed this fifth copy of the math).
-				anchorDay := domain.AnchorDayFor(periodStart, sub.BillingTime, plan.BillingInterval, loc)
-				fullCycleDays := roundDays(advanceBillingPeriod(periodStart, plan.BillingInterval, loc, anchorDay).Sub(periodStart))
-				segDays := roundDays(now.Sub(periodStart))
-				if fullCycleDays > 0 && segDays < fullCycleDays {
-					prorated := money.RoundHalfToEven(plan.BaseAmountCents*qty*int64(segDays), int64(fullCycleDays))
-					pl.AmountCents = prorated
-					pl.Description = fmt.Sprintf("%s - base fee (qty %d, prorated %d/%d days)", plan.Name, qty, segDays, fullCycleDays)
-					if qty > 0 {
-						pl.UnitAmountCents = money.RoundHalfToEven(prorated, qty)
-					}
-				}
-			}
+	lineItems := make([]domain.InvoiceLineItem, 0, len(tu.lines))
+	for _, pl := range tu.lines {
+		// Non-additive buckets (a max or last meter's) cannot be split
+		// across a threshold fire and a cycle close: max[0,t1) +
+		// max[t1,end) ≥ max[0,end). ADR-066 §4: DROP the line from the
+		// invoice — the cycle close bills the bucket full-period exactly
+		// once. The amount still counts toward the amount_gte cap
+		// (committed spend; the fire-once probe bounds this to one fire per
+		// cycle, so counting it cannot loop).
+		// Checked: a wrapped running total would read below the cap and
+		// miss the fire.
+		if capRunning, err = addCents(capRunning, pl.AmountCents); err != nil {
+			return thresholdEval{}, fmt.Errorf("threshold running total: %w", err)
 		}
-		// Non-additive buckets (max / last_during_period / last_ever) cannot be
-		// split across a threshold fire and a cycle close: max[0,t1) +
-		// max[t1,end) ≥ max[0,end). ADR-066 §4:
-		//
-		//   - reset=false: DROP the line from the invoice — the cycle close
-		//     bills the bucket full-period exactly once (the close-side clamp
-		//     exemption). The amount still counts toward the amount_gte cap
-		//     (committed spend — for max-metered GPU concurrency it can be
-		//     MOST of the spend; the fire-once probe bounds this to one fire
-		//     per cycle, so counting it cannot loop).
-		//   - reset=true: the line RIDES the invoice (the re-anchored stub
-		//     never gets a close for this window — dropping would bill it by
-		//     NOBODY), but the amount does NOT count toward the cap: a steady
-		//     peak re-materializes in every re-anchored window, so counting it
-		//     refires one invoice + card charge per scheduler tick.
-		//
-		// Classification is per RULE BUCKET (pl.AggregationMode rides from
-		// AggregateByPricingRules through rateMeterWindow), never per meter — one
-		// meter can carry sum and max rules simultaneously.
-		if pl.LineType == "usage" && nonAdditiveMode(pl.AggregationMode) {
-			if !reset {
-				capRunning += pl.AmountCents
-				continue
-			}
-			billedSubtotal += pl.AmountCents
-		} else {
-			capRunning += pl.AmountCents
-			billedSubtotal += pl.AmountCents
+		if nonAdditive(pl.Aggregation) {
+			continue
 		}
-		if currency == "" {
-			currency = pl.Currency
+		if billedSubtotal, err = addCents(billedSubtotal, pl.AmountCents); err != nil {
+			return thresholdEval{}, fmt.Errorf("threshold invoice subtotal: %w", err)
 		}
-		// A usage line's window is the one its meter was rated over: from
-		// the meter's usage floor (trial end, another subscription's
-		// coverage end), not always the period start (ADR-012 amendment
-		// 2026-10-22).
-		var ps, pe *time.Time
-		if pl.LineType == "usage" {
-			s := preview.floors.start(pl.MeterID, periodStart, now)
-			n := now
-			ps = &s
-			pe = &n
-		}
-		lineType := domain.InvoiceLineItemType(pl.LineType)
-		quantity := pl.Quantity.IntPart()
-		// Usage lines carry the exact fractional quantity (cycle-writer
-		// parity, engine.go billOnePeriod) so qty × unit reconciles with
-		// the amount on display surfaces. Base-fee lines keep the zero
-		// value per the QuantityDecimal contract ("use Quantity").
-		var qtyDecimal decimal.Decimal
-		if lineType == domain.LineTypeUsage {
-			qtyDecimal = pl.Quantity
-		}
+		// A usage line's window is the one it was rated over: its plan's
+		// stretch of the period, from its meter's usage floor.
+		ps, pe := pl.windowStart, pl.windowEnd
 		lineItems = append(lineItems, domain.InvoiceLineItem{
-			LineType:            lineType,
-			MeterID:             pl.MeterID,
-			MeterUnit:           pl.MeterUnit,
-			Description:         pl.Description,
-			Quantity:            quantity,
-			QuantityDecimal:     qtyDecimal,
-			UnitAmountCents:     pl.UnitAmountCents,
-			AmountCents:         pl.AmountCents,
-			TotalAmountCents:    pl.AmountCents,
-			Currency:            pl.Currency,
-			PricingMode:         pl.PricingMode,
-			RatingRuleVersionID: pl.RatingRuleVersionID,
-			// Copy the stamped nominal rate through from the preview line so
-			// overage usage lines show the clean configured rate like cycle
-			// usage lines (nil for non-flat / base_fee — falls back to
-			// effective). ADR-054 re-examination.
+			LineType:        domain.LineTypeUsage,
+			MeterID:         pl.MeterID,
+			MeterUnit:       pl.MeterUnit,
+			Description:     pl.Description,
+			Quantity:        pl.Quantity.IntPart(),
+			QuantityDecimal: pl.Quantity,
+			UnitAmountCents: pl.UnitAmountCents,
+			AmountCents:     pl.AmountCents,
+			// Usage lines carry the exact fractional quantity (cycle-writer
+			// parity) so qty × unit reconciles with the amount on display.
+			TotalAmountCents: pl.AmountCents,
+			Currency:         pl.Currency,
+			PricingMode:      pl.PricingMode,
+			PriceID:          pl.PriceID,
+			DimensionMatch:   pl.DimensionMatch,
+			// The stamped nominal rate, so overage lines show the clean
+			// configured rate like cycle usage lines (ADR-054).
 			NominalUnitAmountDecimal: pl.NominalUnitAmountDecimal,
-			BillingPeriodStart:       ps,
-			BillingPeriodEnd:         pe,
+			BillingPeriodStart:       &ps,
+			BillingPeriodEnd:         &pe,
 		})
 	}
 
@@ -659,10 +659,10 @@ func (e *Engine) evaluateThresholds(ctx context.Context, sub domain.Subscription
 		RunningSubtotal: capRunning,
 		BilledSubtotal:  billedSubtotal,
 		LineItems:       lineItems,
-		InvoiceCurrency: currency,
+		InvoiceCurrency: tu.currency,
 	}
-	for _, u := range preview.leftOut {
-		if nonAdditiveMode(u.Mode) && !reset {
+	for _, u := range tu.leftOut {
+		if nonAdditive(u.Aggregation) {
 			continue
 		}
 		if u.BelowZero {
@@ -679,38 +679,33 @@ func (e *Engine) evaluateThresholds(ctx context.Context, sub domain.Subscription
 		eval.CrossedAmount = true
 	}
 
-	// Per-item caps: sum the running quantity across each item's plan
-	// meters during [floor, now), the window the fire bills each meter over
-	// (the preview's usage floors). The meter quantity is the same
-	// figure the natural cycle would bill — pulled from the priority+claim
-	// resolver via AggregateByPricingRules. Item-to-meter is via the plan
-	// (item.plan_id -> plan.meter_ids). Cross-currency items already
-	// rejected upstream, so summing across plans is safe.
+	// Per-item caps: sum the running quantity across the meters each item's
+	// plan prices, during [floor, now), the window the fire bills each meter
+	// over. Every event of those meters counts, priced or not. Item to meter
+	// is via the plan's prices at its pin of the period. One currency per
+	// subscription, so summing across plans is safe.
 	if !eval.CrossedAny && len(bt.ItemThresholds) > 0 {
-		// Build a map from subscription_item_id -> running quantity sum.
-		// The sum aggregates every meter on the item's plan.
 		itemRunning := make(map[string]decimal.Decimal, len(sub.Items))
 		for _, it := range sub.Items {
 			// Read errors fail this subscription's evaluation (it retries
 			// next tick; other subscriptions are unaffected). Skipping the
 			// item, a meter, or a meter's usage under-counted the running
 			// total, so a crossed item threshold silently did not fire.
-			plan, err := e.pricing.GetPlan(ctx, sub.TenantID, it.PlanID)
+			prices, err := tu.src.PlanPrices(ctx, sub.TenantID, it.PlanID, tu.pins.of(it.PlanID))
 			if err != nil {
-				return thresholdEval{}, fmt.Errorf("item threshold: get plan %s for item %s: %w", it.PlanID, it.ID, err)
+				return thresholdEval{}, fmt.Errorf("item threshold: prices of plan %s for item %s: %w", it.PlanID, it.ID, err)
 			}
 			total := decimal.Zero
-			for _, meterID := range plan.MeterIDs {
+			for _, meterID := range tu.planMeters[it.PlanID] {
 				meter, mErr := e.pricing.GetMeter(ctx, sub.TenantID, meterID)
 				if mErr != nil {
 					return thresholdEval{}, fmt.Errorf("item threshold: get meter %s: %w", meterID, mErr)
 				}
-				from := preview.floors.start(meterID, periodStart, now)
+				from := tu.floors.start(meterID, periodStart, now)
 				if !from.Before(now) {
 					continue
 				}
-				defaultMode := mapMeterAggregation(meter.Aggregation)
-				aggs, aErr := e.usage.AggregateByPricingRules(ctx, sub.TenantID, sub.CustomerID, meterID, defaultMode, from, now)
+				aggs, aErr := e.usage.AggregateClaims(ctx, sub.TenantID, sub.CustomerID, meterID, meter.Aggregation, domain.ClaimsOf(pricesOn(prices, meterID)), from, now)
 				if aErr != nil {
 					return thresholdEval{}, fmt.Errorf("item threshold: aggregate meter %s: %w", meterID, aErr)
 				}
@@ -737,10 +732,10 @@ func (e *Engine) evaluateThresholds(ctx context.Context, sub domain.Subscription
 	return eval, nil
 }
 
-// fireThreshold emits the early-finalize invoice and (when reset_billing_cycle
-// is true) advances the subscription's cycle as if the period had ended
-// naturally. Returns (true, nil) on a successful fire, (false, nil) when a
-// concurrent retry already produced the same invoice (idempotent skip).
+// fireThreshold emits the early-finalize invoice. The subscription's period
+// does not move: its close bills the rest of the period. Returns (true, nil)
+// on a successful fire, (false, nil) when a concurrent retry already produced
+// the same invoice or the period moved under it (idempotent skip).
 //
 // The invoice is built from the same line items evaluateThresholds already
 // computed — re-aggregating would risk a different running total if usage
@@ -762,22 +757,9 @@ func (e *Engine) fireThreshold(ctx context.Context, sub domain.Subscription, eva
 		return false, err
 	}
 
-	// Resolve the items' plan map for cycle-advance interval.
-	plans := make(map[string]domain.Plan, len(sub.Items))
-	for _, it := range sub.Items {
-		if _, ok := plans[it.PlanID]; ok {
-			continue
-		}
-		pl, err := e.pricing.GetPlan(ctx, sub.TenantID, it.PlanID)
-		if err != nil {
-			return false, fmt.Errorf("get plan %s: %w", it.PlanID, err)
-		}
-		plans[it.PlanID] = pl
-	}
-
 	invoiceCurrency := eval.InvoiceCurrency
 	if invoiceCurrency == "" {
-		// Empty preview lines (zero base fees, zero usage) would land here.
+		// Empty preview lines (no usage) would land here.
 		// In that case the running subtotal is zero so we shouldn't have
 		// reached the fire path — defensive bail.
 		return false, fmt.Errorf("no invoice currency resolved for threshold fire")
@@ -867,40 +849,25 @@ func (e *Engine) fireThreshold(ctx context.Context, sub domain.Subscription, eva
 	// POST /v1/billing/run), a plan swap, a cancel or a sibling fire that
 	// committed since makes it 0 rows: the fire rolls back with nothing
 	// written and the next tick re-evaluates against the new period. Pre-fix
-	// the reset arm re-anchored WHERE id only and the reset=false arm never
-	// touched the row, so a fire in flight across an operator close billed
-	// [periodStart, now) on both invoices and could rewind the watermark.
+	// the fire never touched the row, so a fire in flight across an operator
+	// close billed [periodStart, now) on both invoices and could rewind the
+	// watermark.
 	//
-	//   - reset_billing_cycle=true re-anchors the cycle to `now` (recomputing
-	//     the anchor day for the new cadence and routing through
-	//     NextBillingPeriodEnd so a calendar sub re-snaps to the 1st, ADR-055).
-	//     ADR-066: the insert and the re-anchor share fate — a crash or
-	//     transient error between them once stranded the reset FOREVER
-	//     (the fire-once probe found the committed invoice and skipped every
-	//     later tick, silently degrading the sub to reset=false continuation
-	//     and, under base proration, permanently under-billing base).
-	//   - reset_billing_cycle=false writes the row VERIFY-ONLY: the same
-	//     values, so the period does not move, but the UPDATE takes the lock
-	//     and proves the snapshot through the one statement every closer
-	//     shares. (This bumps updated_at; nothing outside the package reads it.)
+	// The CAS writes the row VERIFY-ONLY: the same values, so the period does
+	// not move, but the UPDATE takes the lock and proves the snapshot through
+	// the one statement every closer shares. (This bumps updated_at; nothing
+	// outside the package reads it.)
 	//
 	// External calls (CommitTax, charge) stay post-commit — the tx never
 	// spans network I/O.
 	expected := subscription.SnapshotOf(sub)
 	belowZero := netNegativeUsage{}
 	for _, b := range eval.BelowZero {
-		belowZero.add(b.MeterID, b.MeterKey, b.MeterName, b.Quantity, periodStart, now) // the window the fire priced
+		belowZero.add(b.MeterID, b.EventName, b.MeterName, b.Quantity, periodStart, now) // the window the fire priced
 	}
 	var inv domain.Invoice
 	err = e.subs.WithTenantTx(ctx, sub.TenantID, func(tx *sql.Tx) error {
-		if sub.BillingThresholds.ResetBillingCycle {
-			interval := plans[sub.Items[0].PlanID].BillingInterval
-			resetAnchorDay := domain.AnchorDayFor(now, sub.BillingTime, interval, billingLoc)
-			nextPeriodEnd := domain.NextBillingPeriodEnd(now, sub.BillingTime, interval, billingLoc, resetAnchorDay)
-			if err := e.subs.ClosePeriodTx(ctx, tx, sub.TenantID, sub.ID, expected, now, nextPeriodEnd, nextPeriodEnd, resetAnchorDay); err != nil {
-				return err
-			}
-		} else if err := e.subs.ClosePeriodTx(ctx, tx, sub.TenantID, sub.ID, expected,
+		if err := e.subs.ClosePeriodTx(ctx, tx, sub.TenantID, sub.ID, expected,
 			*sub.CurrentBillingPeriodStart, *sub.CurrentBillingPeriodEnd, *sub.NextBillingAt, sub.BillingAnchorDay); err != nil {
 			return err
 		}
@@ -958,22 +925,24 @@ func (e *Engine) fireThreshold(ctx context.Context, sub domain.Subscription, eva
 	// collected when the tax-retry chain finalizes it.
 	e.CollectInvoice(ctx, sub.TenantID, inv.ID, &now)
 
-	// Emit subscription.threshold_crossed before the optional cycle reset
-	// so consumers see the crossing event ahead of any cycle-rollover side
-	// effects.
+	// The event carries the subscription as the fire left it (ADR-131): the
+	// scan's snapshot predates the fire's write, so it is read again.
 	if e.events != nil {
-		payload := map[string]any{
-			"subscription_id":  sub.ID,
-			"customer_id":      sub.CustomerID,
-			"invoice_id":       inv.ID,
-			"running_subtotal": eval.RunningSubtotal,
-			"crossed_amount":   eval.CrossedAmount,
-			"crossed_item_id":  eval.CrossedItemID,
-			"reset_cycle":      sub.BillingThresholds.ResetBillingCycle,
-		}
-		if err := e.events.Dispatch(ctx, sub.TenantID, domain.EventSubscriptionThresholdCrossed, payload); err != nil {
-			slog.Error("threshold scan: dispatch subscription.threshold_crossed failed",
+		fired, err := e.subs.Get(ctx, sub.TenantID, sub.ID)
+		if err != nil {
+			slog.Error("threshold scan: subscription.threshold_crossed not sent: the subscription could not be read after the fire",
 				"subscription_id", sub.ID, "tenant_id", sub.TenantID, "error", err)
+		} else {
+			payload := domain.SubscriptionWebhookData(fired, map[string]any{
+				"invoice_id":       inv.ID,
+				"running_subtotal": eval.RunningSubtotal,
+				"crossed_amount":   eval.CrossedAmount,
+				"crossed_item_id":  eval.CrossedItemID,
+			})
+			if err := e.events.Dispatch(ctx, sub.TenantID, domain.EventSubscriptionThresholdCrossed, payload); err != nil {
+				slog.Error("threshold scan: dispatch subscription.threshold_crossed failed",
+					"subscription_id", sub.ID, "tenant_id", sub.TenantID, "error", err)
+			}
 		}
 	}
 	// Audit row so the crossing shows on the subscription activity feed —
@@ -989,11 +958,6 @@ func (e *Engine) fireThreshold(ctx context.Context, sub domain.Subscription, eva
 		_ = e.auditLogger.Log(ctx, sub.TenantID, domain.AuditActionSubscriptionThresholdCrossed, "subscription", sub.ID, sub.Code, meta)
 	}
 
-	// NOTE: the reset=true cycle re-anchor already committed atomically with
-	// the invoice insert above — there is deliberately no post-hoc period
-	// write here (the old two-write shape with its "let the next tick
-	// reconcile" comment was a lie: the fire-once probe blocked every retry).
-
 	slog.Info("threshold-fired invoice generated",
 		"invoice_id", inv.ID,
 		"subscription_id", sub.ID,
@@ -1001,7 +965,6 @@ func (e *Engine) fireThreshold(ctx context.Context, sub domain.Subscription, eva
 		"crossed_amount", eval.CrossedAmount,
 		"crossed_item_id", eval.CrossedItemID,
 		"total_cents", totalWithTax,
-		"reset_cycle", sub.BillingThresholds.ResetBillingCycle,
 	)
 
 	return true, nil

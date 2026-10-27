@@ -111,12 +111,19 @@ type Collector interface {
 	CollectInvoice(ctx context.Context, tenantID, invoiceID string, at *time.Time)
 }
 
-// PaymentCanceler stops an invoice from being payable at Stripe when it is
-// voided: expire any live Checkout session, then cancel the PaymentIntent if
-// Stripe allows it (it refuses for Checkout-owned PIs — the session expiry is
-// what stops those). Satisfied by *payment.Stripe.
+// PaymentCanceler stops an invoice from being payable at Stripe. Satisfied by
+// *payment.Stripe.
+//
+// StopCollection is a void's: expire any live Checkout session, then cancel
+// the PaymentIntent if Stripe allows it (it refuses for Checkout-owned PIs —
+// the session expiry is what stops those). Every void runs it from
+// Service.AfterVoid.
+//
+// ExpireCheckoutSessions is a write-off's: the same session expiry, without
+// the PaymentIntent cancel. Service.MarkUncollectible runs it.
 type PaymentCanceler interface {
 	StopCollection(ctx context.Context, tenantID string, inv domain.Invoice)
+	ExpireCheckoutSessions(ctx context.Context, tenantID string, inv domain.Invoice)
 }
 
 // BillingProfileGetter reads customer billing profile for PDF.
@@ -124,7 +131,9 @@ type BillingProfileGetter interface {
 	GetBillingProfile(ctx context.Context, tenantID, customerID string) (domain.CustomerBillingProfile, error)
 }
 
-// DunningResolver resolves active dunning runs when an invoice is voided or paid.
+// DunningResolver resolves active dunning runs when an invoice is voided or
+// paid: Service.AfterVoid on every void, and this handler on a write-off or
+// an offline payment.
 type DunningResolver interface {
 	ResolveByInvoice(ctx context.Context, tenantID, invoiceID string, resolution domain.DunningResolution) error
 }
@@ -251,7 +260,6 @@ type Handler struct {
 	creditNotes     CreditNoteLister
 	charger         PaymentCharger
 	paymentSetups   PaymentSetupGetter
-	paymentCancel   PaymentCanceler
 	dunning         DunningResolver
 	emailEvents     EmailEventLister
 	dunningTimeline DunningTimelineFetcher
@@ -282,7 +290,6 @@ type HandlerDeps struct {
 	CreditNotes     CreditNoteLister
 	Charger         PaymentCharger
 	PaymentSetups   PaymentSetupGetter
-	PaymentCancel   PaymentCanceler
 	Dunning         DunningResolver
 	EmailEvents     EmailEventLister
 	DunningTimeline DunningTimelineFetcher
@@ -295,7 +302,6 @@ func NewHandler(svc *Service, customers CustomerGetter, settings SettingsGetter,
 		h.creditNotes = deps[0].CreditNotes
 		h.charger = deps[0].Charger
 		h.paymentSetups = deps[0].PaymentSetups
-		h.paymentCancel = deps[0].PaymentCancel
 		h.dunning = deps[0].Dunning
 		h.emailEvents = deps[0].EmailEvents
 		h.dunningTimeline = deps[0].DunningTimeline
@@ -390,46 +396,18 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Currency resolve for one-off invoices (FLOW I8, fixed 2026-07-26):
-	// explicit input → customer billing-profile currency → tenant default
-	// → the service's USD fallback. Pre-fix an empty currency hardcoded
-	// USD, so a bare API create for a GBP-profile customer silently
-	// minted a USD invoice — the composer masked it by always sending
-	// its picker value (which itself defaults to the profile currency).
-	// Only this endpoint can see an empty currency: every internal
-	// caller (cycle engine, prorations, threshold, BillOnCreate) stamps
-	// the plan currency explicitly.
-	//
-	// A read that ERRORS stops the request: treating it as "no currency set"
-	// minted, during a database blip, a USD invoice for a EUR customer — a
-	// wrong invoice nobody notices, where a failed request is retried. Only a
-	// profile that does not exist (or has no currency) falls through to the
-	// tenant default, which the settings read itself supplies when the tenant
-	// has no settings row.
-	if strings.TrimSpace(input.Currency) == "" && input.CustomerID != "" {
-		if h.customers != nil {
-			bp, err := h.customers.GetBillingProfile(r.Context(), tenantID, input.CustomerID)
-			switch {
-			case err == nil:
-				input.Currency = bp.Currency
-			case errors.Is(err, errs.ErrNotFound):
-				// No billing profile: the currency is not set.
-			default:
-				currencyUnavailable(w, r, tenantID, input.CustomerID, err)
-				return
-			}
-		}
-		if input.Currency == "" && h.settings != nil {
-			ts, err := h.settings.Get(r.Context(), tenantID)
-			if err != nil {
-				currencyUnavailable(w, r, tenantID, input.CustomerID, err)
-				return
-			}
-			input.Currency = ts.DefaultCurrency
-		}
-	}
-
+	// The currency is resolved in Service.Create (ADR-100, ADR-129): an
+	// explicit one must agree with the customer's billing profile and live
+	// subscriptions (409 customer_currency_conflict); an empty one takes the
+	// profile's, then the subscriptions' plan currency, then the workspace
+	// default. A read that errors stops the request: guessing minted, during
+	// a database blip, a USD invoice for a EUR customer — a wrong invoice
+	// nobody notices, where a failed request is retried.
 	inv, err := h.svc.Create(r.Context(), tenantID, input)
+	if errors.Is(err, ErrCurrencyUnavailable) {
+		currencyUnavailable(w, r, tenantID, input.CustomerID, err)
+		return
+	}
 	if err != nil {
 		respond.FromError(w, r, err, "invoice")
 		return
@@ -585,6 +563,9 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) finalize(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
@@ -630,41 +611,21 @@ func (h *Handler) finalize(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) void(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
+	// Service.Void is the whole void: the status flip, the credit reversal
+	// and the audit row in one transaction, then AfterVoid's legs (stop
+	// collection at Stripe, tax reversal, invoice.voided, close the dunning
+	// run), the same for every void path.
 	inv, err := h.svc.Void(r.Context(), tenantID, id)
 	if err != nil {
 		respond.FromError(w, r, err, "invoice")
 		return
 	}
-
-	// Stop collection at Stripe: expire live Checkout sessions, then cancel
-	// the PI where cancelable. Best-effort by design (see StopCollection).
-	if h.paymentCancel != nil {
-		h.paymentCancel.StopCollection(r.Context(), tenantID, inv)
-	}
-
-	// Consumed-credit reversal now happens atomically inside svc.Void (status
-	// flip + reversal in one tx) — single-writer, no separate best-effort step.
-
-	// Resolve any active dunning runs for this invoice. The resolution names
-	// the outcome — this path voids, so the run records invoice_voided (0170).
-	if h.dunning != nil {
-		if err := h.dunning.ResolveByInvoice(r.Context(), tenantID, id, domain.ResolutionInvoiceVoided); err != nil {
-			slog.WarnContext(r.Context(), "failed to resolve dunning on void", "invoice_id", id, "error", err)
-		} else {
-			slog.InfoContext(r.Context(), "dunning resolved on invoice void", "invoice_id", id)
-		}
-	}
-
-	// The void audit row rides the void transaction itself (ADR-090,
-	// Service.Void emission — one canonical row for this endpoint AND
-	// engine-triggered voids, which previously left no trail).
-
-	// invoice.voided is emitted by service.Void (single-writer — covers
-	// this endpoint AND engine-triggered voids via InvoiceVoider).
-
 	respond.JSON(w, r, http.StatusOK, inv)
 }
 
@@ -678,6 +639,9 @@ func (h *Handler) void(w http.ResponseWriter, r *http.Request) {
 // (Checkout in PAYMENT mode) — a different collection path for states where the
 // operator wants the customer to pay directly.
 func (h *Handler) resendSetupLink(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
@@ -778,6 +742,9 @@ func (h *Handler) resendSetupLink(w http.ResponseWriter, r *http.Request) {
 // (NOT invoice_not_collectible, which would loop back into the
 // "also mark invoice uncollectible" branch we just executed).
 func (h *Handler) markUncollectible(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
@@ -836,11 +803,8 @@ func (h *Handler) recordOfflinePayment(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
 	var input RecordPaymentInput
-	if r.ContentLength > 0 {
-		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-			respond.BadRequest(w, r, "invalid JSON body")
-			return
-		}
+	if !respond.DecodeStrict(w, r, &input, respond.EmptyBodyOK) {
+		return
 	}
 
 	inv, err := h.svc.RecordOfflinePayment(r.Context(), tenantID, id, input.Note)
@@ -869,6 +833,9 @@ func (h *Handler) recordOfflinePayment(w http.ResponseWriter, r *http.Request) {
 // archive leak). Only finalized/paid/voided invoices carry tokens — draft
 // invoices return 422, matching the store-level guard in SetPublicToken.
 func (h *Handler) rotatePublicToken(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
@@ -928,8 +895,11 @@ func (h *Handler) sendEmail(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
 	var body SendEmailInput
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Email == "" {
-		respond.BadRequest(w, r, "email is required")
+	if !respond.DecodeStrict(w, r, &body) {
+		return
+	}
+	if body.Email == "" {
+		respond.ValidationField(w, r, "email", "email is required")
 		return
 	}
 	// The To address gets the same check as a customer's stored email.
@@ -1047,6 +1017,9 @@ func resolveSendCC(ctx context.Context, customers CustomerGetter, tenantID, cust
 }
 
 func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
@@ -1161,12 +1134,22 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 		}
 		// A credit-paid invoice is recovered exactly as a card-paid one is, so
 		// its dunning run closes the same way. Without this the run stayed
-		// active at $0: a no-card run's next retry is a grace period away and
+		// active at $0: a no-card run's next retry is days away and
 		// the dunning tick only touches due runs. SettleZeroDue can return the
 		// invoice unsettled (not finalized, or no longer pending); a run on an
 		// unpaid invoice stays open.
 		if settled.Status == domain.InvoicePaid {
 			h.resolveDunningRecovered(r.Context(), tenantID, id)
+		}
+		// The same collect row the card path writes below: the credit paid
+		// the invoice, and that is the money movement an auditor looks for.
+		if settled.Status == domain.InvoicePaid && h.auditLogger != nil {
+			_ = h.auditLogger.Log(h.svc.AuditCtx(r.Context(), settled), tenantID, domain.AuditActionCollect, "invoice", settled.ID, settled.InvoiceNumber, map[string]any{
+				"invoice_number":        settled.InvoiceNumber,
+				"credits_applied_cents": settled.CreditsAppliedCents,
+				"currency":              settled.Currency,
+				"paid_with":             "credit",
+			})
 		}
 		respond.JSON(w, r, http.StatusOK, settled)
 		return
@@ -1334,7 +1317,7 @@ func (h *Handler) refund(w http.ResponseWriter, r *http.Request) {
 }
 
 // retryTax re-runs tax calculation against a draft invoice in
-// tax_status pending or failed. Backs the "Retry tax" action surfaced
+// tax_status pending. Backs the "Retry tax" action surfaced
 // by the unified Attention shape. Idempotent — each call increments
 // tax_retry_count and rewrites the per-line + invoice-level tax fields.
 //
@@ -1348,6 +1331,9 @@ func (h *Handler) refund(w http.ResponseWriter, r *http.Request) {
 // state conflict. The invoice stays a draft with its tax saved, for the
 // operator to finalize, and the retry_tax audit row is still written.
 func (h *Handler) retryTax(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
@@ -1579,7 +1565,7 @@ func piFromEventMetadata(meta map[string]any) string {
 // renderChargeAttempts renders the charge-attempt facts — the single
 // source of payment rows on the timeline (ADR-103).
 //
-// Exactly two suppressions, both exact-keyed, no heuristics:
+// Exactly three suppressions, all exact-keyed, no heuristics:
 //
 //   - a dunning row already carrying this attempt's PaymentIntent
 //     absorbs it: the campaign row ("Payment retry 2 failed" with
@@ -1588,13 +1574,25 @@ func piFromEventMetadata(meta map[string]any) string {
 //   - a SUCCEEDED attempt on a paid invoice defers to the "Invoice
 //     paid" lifecycle row. That row is the superset — an invoice can
 //     also become paid with no charge at all (credits, an offline
-//     payment, a $0 total) — so it owns the success story.
+//     payment, a $0 total) — so it owns the success story;
+//   - a dunning retry's below-minimum attempt defers to the retry's own
+//     row ("Payment retry N refused by Stripe"). Stripe made no
+//     PaymentIntent to key on, but a run ends at its one below-minimum
+//     retry, so each run has at most one such row and one such attempt:
+//     as many of these attempts are absorbed as there are rows, and one
+//     renders for each row that is missing.
 //
 // `pending` attempts never render (in flight; the attention banner owns
 // that), and a succeeded attempt on a NOT-paid invoice does render —
 // that shape is an anomaly worth seeing.
 func renderChargeAttempts(events []timelineEvent, attempts []domain.InvoiceChargeAttempt, inv domain.Invoice) []timelineEvent {
 	dunningIdxByPI := recoveryRowsByPI(events)
+	retryRefusedRows := 0
+	for _, e := range events {
+		if e.Line.Kind == kindRetryRefused {
+			retryRefusedRows++
+		}
+	}
 	sawSucceeded := false
 	for _, a := range attempts {
 		if a.Outcome == domain.ChargeAttemptSucceeded {
@@ -1602,6 +1600,11 @@ func renderChargeAttempts(events []timelineEvent, attempts []domain.InvoiceCharg
 		}
 		switch a.Outcome {
 		case domain.ChargeAttemptFailed, domain.ChargeAttemptUnknown:
+		case domain.ChargeAttemptBelowMinimum:
+			if a.Trigger == domain.ChargeTriggerDunningRetry && retryRefusedRows > 0 {
+				retryRefusedRows--
+				continue
+			}
 		case domain.ChargeAttemptSucceeded:
 			if inv.PaidAt != nil {
 				// The paid lifecycle row owns this success's story — and
@@ -1634,10 +1637,10 @@ func renderChargeAttempts(events []timelineEvent, attempts []domain.InvoiceCharg
 	}
 	// Tripwire (ADR-103): a card-paid invoice with no succeeded attempt
 	// means the one owner of payment rows is missing its fact — the
-	// timeline will simply show no charge. Out-of-band settlements
-	// (offline payment, credit-covered, $0) legitimately have none.
-	if inv.PaidAt != nil && !sawSucceeded &&
-		inv.StripePaymentIntentID != "" && !strings.HasPrefix(inv.StripePaymentIntentID, "out_of_band:") {
+	// timeline will simply show no charge. Settlements with no charge
+	// (offline payment, credit-covered, $0) have no PaymentIntent and
+	// legitimately no attempt.
+	if inv.PaidAt != nil && !sawSucceeded && inv.HasCardPayment() {
 		slog.Warn("invoice is paid by card but has no succeeded charge attempt — payment row will be missing (ADR-103 single-source invariant)",
 			"invoice_id", inv.ID, "payment_intent_id", inv.StripePaymentIntentID)
 	}

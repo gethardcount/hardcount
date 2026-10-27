@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/tax"
 )
 
@@ -330,7 +331,7 @@ func TestRetryPendingCreditNoteTaxReversal_ReDrivesAndClears(t *testing.T) {
 	// Stripe recovers; the sweep must re-drive and clear the marker.
 	rev.failWith = nil
 	rev.returnID = "tx_reversal_recovered"
-	n, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(context.Background(), 10)
+	n, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(postgres.WithLivemode(context.Background(), true), 10)
 	if len(sweepErrs) != 0 {
 		t.Fatalf("sweep errors: %v", sweepErrs)
 	}
@@ -382,7 +383,7 @@ func TestRetryPendingCreditNoteTaxReversal_RecoversMarkerlessOrphan(t *testing.T
 		t.Fatalf("seed orphan: %v", err)
 	}
 
-	n, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(context.Background(), 10)
+	n, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(postgres.WithLivemode(context.Background(), true), 10)
 	if len(sweepErrs) != 0 {
 		t.Fatalf("sweep errors: %v", sweepErrs)
 	}
@@ -399,11 +400,8 @@ func TestRetryPendingCreditNoteTaxReversal_RecoversMarkerlessOrphan(t *testing.T
 }
 
 // fakeCreditGranter satisfies the CreditGranter optional dep so
-// CreateRefund doesn't blow up when refund_type is credit. The refund
-// happy path doesn't call Grant, but wiring one keeps the service's
-// optional-dep surface exercised.
+// CreateRefund doesn't blow up when refund_type is credit.
 type fakeCreditGranter struct {
-	calls                                          []CreditGrantInput
 	cnCalls                                        []fakeCreditGranterCNCall
 	seenCNIDs                                      map[string]bool
 	commitGranted, commitConsumed, commitCNRetired int64
@@ -416,16 +414,10 @@ type fakeCreditGranterCNCall struct {
 	input        CreditGrantInput
 }
 
-func (f *fakeCreditGranter) Grant(_ context.Context, _ string, in CreditGrantInput) error {
-	f.calls = append(f.calls, in)
-	return nil
-}
-
-// GrantForCreditNote mirrors the production dedup contract: if the
-// same CN id is granted twice, the second call returns nil silently
-// (representing "ErrAlreadyExists handled by GrantForCreditNote's
-// fetch-and-return path"), but only ONE Grant call is recorded.
-func (f *fakeCreditGranter) GrantForCreditNote(_ context.Context, _, creditNoteID string, in CreditGrantInput) error {
+// GrantForCreditNoteTx ignores the (nil) coordinator tx and records one call
+// per credit-note id; a repeat id is ignored. Real in-tx atomicity is covered
+// by the PG test.
+func (f *fakeCreditGranter) GrantForCreditNoteTx(_ context.Context, _ *sql.Tx, _, creditNoteID string, in CreditGrantInput) error {
 	if f.seenCNIDs == nil {
 		f.seenCNIDs = make(map[string]bool)
 	}
@@ -437,8 +429,6 @@ func (f *fakeCreditGranter) GrantForCreditNote(_ context.Context, _, creditNoteI
 	return nil
 }
 
-// GrantForCreditNoteTx ignores the (nil) coordinator tx and delegates — the
-// fake records the same way; real in-tx atomicity is covered by the PG test.
 // Relief-pair stubs: unit doubles carry a configurable commit grant so the
 // relief coordinator's math is unit-testable; lock semantics are proven on
 // real Postgres.
@@ -452,10 +442,6 @@ func (f *fakeCreditGranter) RetireCommitSliceForReliefTx(_ context.Context, _ *s
 	f.commitConsumed += slice
 	f.commitCNRetired += slice
 	return f.commitGranted - f.commitConsumed, nil
-}
-
-func (f *fakeCreditGranter) GrantForCreditNoteTx(ctx context.Context, _ *sql.Tx, _, creditNoteID string, in CreditGrantInput) error {
-	return f.GrantForCreditNote(ctx, "", creditNoteID, in)
 }
 
 // TestRetryPendingCreditNoteTaxReversal_ZeroTaxOrphanDoesNotRewriteItself pins
@@ -503,7 +489,7 @@ func TestRetryPendingCreditNoteTaxReversal_ZeroTaxOrphanDoesNotRewriteItself(t *
 	}
 
 	before := store.setPendingCalls
-	if _, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(context.Background(), 10); len(sweepErrs) != 0 {
+	if _, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(postgres.WithLivemode(context.Background(), true), 10); len(sweepErrs) != 0 {
 		t.Fatalf("sweep errors: %v", sweepErrs)
 	}
 
@@ -554,7 +540,7 @@ func TestRetryPendingCreditNoteTaxReversal_ClearsMarkerWhenActuallySet(t *testin
 	}
 
 	before := store.setPendingCalls
-	if _, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(context.Background(), 10); len(sweepErrs) != 0 {
+	if _, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(postgres.WithLivemode(context.Background(), true), 10); len(sweepErrs) != 0 {
 		t.Fatalf("sweep errors: %v", sweepErrs)
 	}
 	if got := store.setPendingCalls - before; got != 1 {
@@ -608,7 +594,7 @@ func TestRetryPendingCreditNoteTaxReversal_PromotesMarkerlessOrphanOnFailure(t *
 	svc.SetTaxReverser(rev)
 	cn := seedTaxOrphan(t, store, false)
 
-	n, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(context.Background(), 10)
+	n, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(postgres.WithLivemode(context.Background(), true), 10)
 	if n != 0 || len(sweepErrs) != 1 {
 		t.Fatalf("reversed=%d errs=%v, want 0 reversed and exactly the re-drive error", n, sweepErrs)
 	}
@@ -631,7 +617,7 @@ func TestRetryPendingCreditNoteTaxReversal_RepeatedFailureDoesNotRewriteMarker(t
 	svc.SetTaxReverser(rev)
 	seedTaxOrphan(t, store, true)
 
-	if _, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(context.Background(), 10); len(sweepErrs) != 1 {
+	if _, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(postgres.WithLivemode(context.Background(), true), 10); len(sweepErrs) != 1 {
 		t.Fatalf("errs=%v, want exactly the re-drive error", sweepErrs)
 	}
 	if store.setPendingCalls != 0 {
@@ -650,7 +636,7 @@ func TestRetryPendingCreditNoteTaxReversal_PromoteWriteFailureIsReported(t *test
 	svc.SetTaxReverser(rev)
 	cn := seedTaxOrphan(t, store, false)
 
-	_, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(context.Background(), 10)
+	_, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(postgres.WithLivemode(context.Background(), true), 10)
 	if len(sweepErrs) != 2 {
 		t.Fatalf("errs=%v, want the re-drive error AND the promote error", sweepErrs)
 	}
@@ -672,7 +658,7 @@ func TestRetryPendingCreditNoteTaxReversal_EmptyResultOnTaxBearingInvoiceIsFailu
 	cnPending := seedTaxOrphan(t, store, true)
 	cnOrphan := seedTaxOrphan(t, store, false)
 
-	n, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(context.Background(), 10)
+	n, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(postgres.WithLivemode(context.Background(), true), 10)
 	if n != 0 {
 		t.Fatalf("reversed=%d, want 0 — an empty result reversed nothing", n)
 	}

@@ -15,12 +15,13 @@ func TestAggregationMemo_SameAggregationRunsOnce(t *testing.T) {
 	_, memo := WithAggregationMemo(context.Background())
 	from := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 	to := from.AddDate(0, 1, 0)
-	key := aggregationMemoKeyFor("ten", "cus", "mtr", domain.AggSum, from, to)
+	claims := []domain.UsageClaim{{PriceID: "p1", Match: map[string]string{"model": "a"}}}
+	key := aggregationMemoKeyFor("ten", "cus", "mtr", domain.AggregationSum, claims, from, to)
 
 	runs := 0
-	query := func() ([]domain.RuleAggregation, error) {
+	query := func() ([]domain.ClaimedUsage, error) {
 		runs++
-		return []domain.RuleAggregation{{RuleID: "r1", Quantity: decimal.NewFromInt(7)}}, nil
+		return []domain.ClaimedUsage{{PriceID: "p1", Quantity: decimal.NewFromInt(7)}}, nil
 	}
 	first, err := memo.through(key, query)
 	if err != nil {
@@ -41,12 +42,22 @@ func TestAggregationMemo_SameAggregationRunsOnce(t *testing.T) {
 	}
 
 	// A different window is a different aggregation.
-	other := aggregationMemoKeyFor("ten", "cus", "mtr", domain.AggSum, from.Add(time.Hour), to)
+	other := aggregationMemoKeyFor("ten", "cus", "mtr", domain.AggregationSum, claims, from.Add(time.Hour), to)
 	if _, err := memo.through(other, query); err != nil {
 		t.Fatalf("other window: %v", err)
 	}
 	if runs != 2 {
 		t.Errorf("a different window ran the query %d times in total, want 2", runs)
+	}
+
+	// Other claims, or another aggregation, are another aggregation too.
+	for _, k := range []string{
+		aggregationMemoKeyFor("ten", "cus", "mtr", domain.AggregationSum, nil, from, to),
+		aggregationMemoKeyFor("ten", "cus", "mtr", domain.AggregationMax, claims, from, to),
+	} {
+		if k == key {
+			t.Errorf("key %q equals the first reader's", k)
+		}
 	}
 }
 
@@ -54,11 +65,11 @@ func TestAggregationMemo_ErrorsAreNotRemembered(t *testing.T) {
 	_, memo := WithAggregationMemo(context.Background())
 	boom := errors.New("connection reset")
 	fail := true
-	query := func() ([]domain.RuleAggregation, error) {
+	query := func() ([]domain.ClaimedUsage, error) {
 		if fail {
 			return nil, boom
 		}
-		return []domain.RuleAggregation{}, nil
+		return []domain.ClaimedUsage{}, nil
 	}
 	if _, err := memo.through("k", query); !errors.Is(err, boom) {
 		t.Fatalf("err = %v, want the query error", err)

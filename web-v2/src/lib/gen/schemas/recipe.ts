@@ -7,16 +7,12 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
-import type { RecipeDunningPolicy } from './recipeDunningPolicy';
 import type { RecipeMeter } from './recipeMeter';
 import type { RecipeOverride } from './recipeOverride';
 import type { RecipePlan } from './recipePlan';
-import type { RecipePricingRule } from './recipePricingRule';
-import type { RecipeRatingRule } from './recipeRatingRule';
-import type { RecipeWebhook } from './recipeWebhook';
 
 /**
- * A recipe template as served by list/detail: the full parsed YAML (meters, rating rules, pricing rules, plans, optional dunning policy and webhook), not just display metadata.
+ * A recipe template as served by list/detail: the full parsed YAML, its meters and its plans with their prices, not just display metadata. A recipe creates nothing else.
  */
 export interface Recipe {
   key: string;
@@ -26,9 +22,5 @@ export interface Recipe {
   description?: string;
   overridable: RecipeOverride[];
   meters: RecipeMeter[];
-  rating_rules: RecipeRatingRule[];
-  pricing_rules: RecipePricingRule[];
   plans: RecipePlan[];
-  dunning_policy?: RecipeDunningPolicy;
-  webhook?: RecipeWebhook;
 }

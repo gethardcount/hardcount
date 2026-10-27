@@ -17,7 +17,7 @@ import (
 
 // seedRate inserts a provider_cost_rates row through a tenant-scoped tx so
 // RLS + the set_livemode trigger run exactly as production writes will.
-func seedRate(t *testing.T, db *postgres.DB, ctx context.Context, tenantID, provider, model, tokenType, costPerToken string) {
+func seedRate(t *testing.T, db *postgres.DB, ctx context.Context, tenantID, provider, model, tokenType, unitCostCents string) {
 	t.Helper()
 	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -25,9 +25,9 @@ func seedRate(t *testing.T, db *postgres.DB, ctx context.Context, tenantID, prov
 	}
 	defer postgres.Rollback(tx)
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO provider_cost_rates (tenant_id, provider, model, token_type, cost_per_token)
+		INSERT INTO provider_cost_rates (tenant_id, provider, model, token_type, unit_cost_cents)
 		VALUES ($1, $2, $3, $4, $5::numeric)
-	`, tenantID, provider, model, tokenType, costPerToken); err != nil {
+	`, tenantID, provider, model, tokenType, unitCostCents); err != nil {
 		t.Fatalf("seed rate: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -53,7 +53,7 @@ func TestProviderCostStamp(t *testing.T) {
 		t.Fatalf("customer: %v", err)
 	}
 	meter, err := pricing.NewPostgresStore(db).CreateMeter(ctx, tenantID, domain.Meter{
-		Key: "tokens", Name: "Tokens", Aggregation: "sum", Unit: "tokens",
+		EventName: "tokens", Name: "Tokens", Aggregation: "sum", Unit: "tokens",
 	})
 	if err != nil {
 		t.Fatalf("meter: %v", err)
@@ -62,8 +62,8 @@ func TestProviderCostStamp(t *testing.T) {
 
 	// Family-keyed rate + a raw-id-keyed rate at a DIFFERENT price: the
 	// raw key must win for events carrying that snapshot id.
-	seedRate(t, db, ctx, tenantID, "anthropic", "claude-3.5-sonnet", "input", "0.000003")
-	seedRate(t, db, ctx, tenantID, "anthropic", "claude-3-5-sonnet-20241022", "input", "0.000004")
+	seedRate(t, db, ctx, tenantID, "anthropic", "claude-3.5-sonnet", "input", "0.0003")
+	seedRate(t, db, ctx, tenantID, "anthropic", "claude-3-5-sonnet-20241022", "input", "0.0004")
 
 	ingest := func(dims map[string]any, qty int64) domain.UsageEvent {
 		t.Helper()
@@ -120,7 +120,7 @@ func TestProviderCostStamp(t *testing.T) {
 			t.Fatalf("begin: %v", err)
 		}
 		if _, err := tx.ExecContext(ctx, `
-			UPDATE provider_cost_rates SET cost_per_token = 0.000009
+			UPDATE provider_cost_rates SET unit_cost_cents = 0.0009
 			WHERE tenant_id = $1 AND model = 'claude-3-5-sonnet-20241022'
 		`, tenantID); err != nil {
 			t.Fatalf("edit rate: %v", err)
@@ -138,13 +138,13 @@ func TestProviderCostStamp(t *testing.T) {
 		t.Fatalf("post-edit stamp = %v, want 9000", fresh.ProviderCostMicros)
 	}
 
-	// 6. Fractional rounding: 333 tokens × 0.000004 = 1332 micros exactly;
+	// 6. Fractional rounding: 333 tokens × 0.0004¢ = 1332 micros exactly;
 	//    and a half-case rounds up (ROUND half away from zero):
-	//    125 tokens × 0.000004 = 500 micros — pick a case with a .5:
-	//    0.000003 $/tok family rate × 500 tokens = 1500 micros (exact).
-	//    Sub-micro: 1 token × 0.000003 = 3 micros. 1 token at a rate of
-	//    0.0000005 would be 0.5 → 1 micro (half-up).
-	seedRate(t, db, ctx, tenantID, "anthropic", "claude-tiny", "input", "0.0000005")
+	//    125 tokens × 0.0004¢ = 500 micros — pick a case with a .5:
+	//    0.0003¢/tok family rate × 500 tokens = 1500 micros (exact).
+	//    Sub-micro: 1 token × 0.0003¢ = 3 micros. 1 token at a rate of
+	//    0.00005¢ would be 0.5 → 1 micro (half-up).
+	seedRate(t, db, ctx, tenantID, "anthropic", "claude-tiny", "input", "0.00005")
 	ev = ingest(map[string]any{
 		"provider": "anthropic", "model": "claude-tiny", "token_type": "input",
 	}, 1)
@@ -169,14 +169,14 @@ func TestProviderCostStamp_LivemodeIsolation(t *testing.T) {
 		t.Fatalf("customer: %v", err)
 	}
 	meter, err := pricing.NewPostgresStore(db).CreateMeter(testCtx, tenantID, domain.Meter{
-		Key: "tokens", Name: "Tokens", Aggregation: "sum", Unit: "tokens",
+		EventName: "tokens", Name: "Tokens", Aggregation: "sum", Unit: "tokens",
 	})
 	if err != nil {
 		t.Fatalf("meter: %v", err)
 	}
 
 	// Rate created under TEST mode (trigger stamps livemode=false).
-	seedRate(t, db, testCtx, tenantID, "openai", "gpt-4o", "input", "0.000002")
+	seedRate(t, db, testCtx, tenantID, "openai", "gpt-4o", "input", "0.0002")
 
 	store := usage.NewPostgresStore(db)
 	dims := map[string]any{"provider": "openai", "model": "gpt-4o", "token_type": "input"}

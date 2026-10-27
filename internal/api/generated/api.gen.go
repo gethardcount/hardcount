@@ -211,6 +211,7 @@ func (e AttentionAction) Valid() bool {
 
 // Defines values for AttentionReason.
 const (
+	AttentionReasonAmountBelowMinimum   AttentionReason = "amount_below_minimum"
 	AttentionReasonAwaitingPayment      AttentionReason = "awaiting_payment"
 	AttentionReasonCollectionPaused     AttentionReason = "collection_paused"
 	AttentionReasonCommitExposure       AttentionReason = "commit_exposure"
@@ -229,6 +230,8 @@ const (
 // Valid indicates whether the value is a known member of the AttentionReason enum.
 func (e AttentionReason) Valid() bool {
 	switch e {
+	case AttentionReasonAmountBelowMinimum:
+		return true
 	case AttentionReasonAwaitingPayment:
 		return true
 	case AttentionReasonCollectionPaused:
@@ -512,42 +515,21 @@ func (e CustomerBillingProfileInputTaxStatus) Valid() bool {
 	}
 }
 
-// Defines values for CustomerPaymentSetupSetupStatus.
-const (
-	CustomerPaymentSetupSetupStatusMissing CustomerPaymentSetupSetupStatus = "missing"
-	CustomerPaymentSetupSetupStatusPending CustomerPaymentSetupSetupStatus = "pending"
-	CustomerPaymentSetupSetupStatusReady   CustomerPaymentSetupSetupStatus = "ready"
-)
-
-// Valid indicates whether the value is a known member of the CustomerPaymentSetupSetupStatus enum.
-func (e CustomerPaymentSetupSetupStatus) Valid() bool {
-	switch e {
-	case CustomerPaymentSetupSetupStatusMissing:
-		return true
-	case CustomerPaymentSetupSetupStatusPending:
-		return true
-	case CustomerPaymentSetupSetupStatusReady:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for CustomerPriceOverrideMode.
 const (
-	CustomerPriceOverrideModeFlat      CustomerPriceOverrideMode = "flat"
 	CustomerPriceOverrideModeGraduated CustomerPriceOverrideMode = "graduated"
 	CustomerPriceOverrideModePackage   CustomerPriceOverrideMode = "package"
+	CustomerPriceOverrideModePerUnit   CustomerPriceOverrideMode = "per_unit"
 )
 
 // Valid indicates whether the value is a known member of the CustomerPriceOverrideMode enum.
 func (e CustomerPriceOverrideMode) Valid() bool {
 	switch e {
-	case CustomerPriceOverrideModeFlat:
-		return true
 	case CustomerPriceOverrideModeGraduated:
 		return true
 	case CustomerPriceOverrideModePackage:
+		return true
+	case CustomerPriceOverrideModePerUnit:
 		return true
 	default:
 		return false
@@ -692,6 +674,7 @@ func (e DunningPolicyListItemFinalSubscriptionAction) Valid() bool {
 // Defines values for DunningRunResolution.
 const (
 	DunningRunResolutionActionFailed          DunningRunResolution = "action_failed"
+	DunningRunResolutionAmountBelowMinimum    DunningRunResolution = "amount_below_minimum"
 	DunningRunResolutionInvoiceNotCollectible DunningRunResolution = "invoice_not_collectible"
 	DunningRunResolutionInvoiceVoided         DunningRunResolution = "invoice_voided"
 	DunningRunResolutionManuallyResolved      DunningRunResolution = "manually_resolved"
@@ -703,6 +686,8 @@ const (
 func (e DunningRunResolution) Valid() bool {
 	switch e {
 	case DunningRunResolutionActionFailed:
+		return true
+	case DunningRunResolutionAmountBelowMinimum:
 		return true
 	case DunningRunResolutionInvoiceNotCollectible:
 		return true
@@ -723,7 +708,6 @@ func (e DunningRunResolution) Valid() bool {
 const (
 	DunningRunStateActive    DunningRunState = "active"
 	DunningRunStateEscalated DunningRunState = "escalated"
-	DunningRunStatePaused    DunningRunState = "paused"
 	DunningRunStateResolved  DunningRunState = "resolved"
 )
 
@@ -733,8 +717,6 @@ func (e DunningRunState) Valid() bool {
 	case DunningRunStateActive:
 		return true
 	case DunningRunStateEscalated:
-		return true
-	case DunningRunStatePaused:
 		return true
 	case DunningRunStateResolved:
 		return true
@@ -774,13 +756,8 @@ func (e DunningRunDetailDegraded) Valid() bool {
 const (
 	DunningRunEventEventTypeDunningStarted DunningRunEventEventType = "dunning_started"
 	DunningRunEventEventTypeEscalated      DunningRunEventEventType = "escalated"
-	DunningRunEventEventTypePaused         DunningRunEventEventType = "paused"
 	DunningRunEventEventTypeResolved       DunningRunEventEventType = "resolved"
-	DunningRunEventEventTypeResumed        DunningRunEventEventType = "resumed"
 	DunningRunEventEventTypeRetryAttempted DunningRunEventEventType = "retry_attempted"
-	DunningRunEventEventTypeRetryFailed    DunningRunEventEventType = "retry_failed"
-	DunningRunEventEventTypeRetryScheduled DunningRunEventEventType = "retry_scheduled"
-	DunningRunEventEventTypeRetrySucceeded DunningRunEventEventType = "retry_succeeded"
 )
 
 // Valid indicates whether the value is a known member of the DunningRunEventEventType enum.
@@ -790,19 +767,9 @@ func (e DunningRunEventEventType) Valid() bool {
 		return true
 	case DunningRunEventEventTypeEscalated:
 		return true
-	case DunningRunEventEventTypePaused:
-		return true
 	case DunningRunEventEventTypeResolved:
 		return true
-	case DunningRunEventEventTypeResumed:
-		return true
 	case DunningRunEventEventTypeRetryAttempted:
-		return true
-	case DunningRunEventEventTypeRetryFailed:
-		return true
-	case DunningRunEventEventTypeRetryScheduled:
-		return true
-	case DunningRunEventEventTypeRetrySucceeded:
 		return true
 	default:
 		return false
@@ -813,7 +780,6 @@ func (e DunningRunEventEventType) Valid() bool {
 const (
 	DunningRunEventStateActive    DunningRunEventState = "active"
 	DunningRunEventStateEscalated DunningRunEventState = "escalated"
-	DunningRunEventStatePaused    DunningRunEventState = "paused"
 	DunningRunEventStateResolved  DunningRunEventState = "resolved"
 )
 
@@ -823,8 +789,6 @@ func (e DunningRunEventState) Valid() bool {
 	case DunningRunEventStateActive:
 		return true
 	case DunningRunEventStateEscalated:
-		return true
-	case DunningRunEventStatePaused:
 		return true
 	case DunningRunEventStateResolved:
 		return true
@@ -853,13 +817,46 @@ func (e HeldUsageGroupReason) Valid() bool {
 
 // Defines values for HostedInvoicePayUnavailableReason.
 const (
+	AmountBelowMinimum       HostedInvoicePayUnavailableReason = "amount_below_minimum"
 	OnlinePaymentUnavailable HostedInvoicePayUnavailableReason = "online_payment_unavailable"
 )
 
 // Valid indicates whether the value is a known member of the HostedInvoicePayUnavailableReason enum.
 func (e HostedInvoicePayUnavailableReason) Valid() bool {
 	switch e {
+	case AmountBelowMinimum:
+		return true
 	case OnlinePaymentUnavailable:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for InvoiceTaxErrorCode.
+const (
+	InvoiceTaxErrorCodeCustomerDataInvalid     InvoiceTaxErrorCode = "customer_data_invalid"
+	InvoiceTaxErrorCodeJurisdictionUnsupported InvoiceTaxErrorCode = "jurisdiction_unsupported"
+	InvoiceTaxErrorCodeProviderAuth            InvoiceTaxErrorCode = "provider_auth"
+	InvoiceTaxErrorCodeProviderNotConfigured   InvoiceTaxErrorCode = "provider_not_configured"
+	InvoiceTaxErrorCodeProviderOutage          InvoiceTaxErrorCode = "provider_outage"
+	InvoiceTaxErrorCodeUnknown                 InvoiceTaxErrorCode = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the InvoiceTaxErrorCode enum.
+func (e InvoiceTaxErrorCode) Valid() bool {
+	switch e {
+	case InvoiceTaxErrorCodeCustomerDataInvalid:
+		return true
+	case InvoiceTaxErrorCodeJurisdictionUnsupported:
+		return true
+	case InvoiceTaxErrorCodeProviderAuth:
+		return true
+	case InvoiceTaxErrorCodeProviderNotConfigured:
+		return true
+	case InvoiceTaxErrorCodeProviderOutage:
+		return true
+	case InvoiceTaxErrorCodeUnknown:
 		return true
 	default:
 		return false
@@ -1057,19 +1054,19 @@ func (e InvoicePreviewLineLineType) Valid() bool {
 
 // Defines values for InvoicePreviewLinePricingMode.
 const (
-	InvoicePreviewLinePricingModeFlat      InvoicePreviewLinePricingMode = "flat"
 	InvoicePreviewLinePricingModeGraduated InvoicePreviewLinePricingMode = "graduated"
 	InvoicePreviewLinePricingModePackage   InvoicePreviewLinePricingMode = "package"
+	InvoicePreviewLinePricingModePerUnit   InvoicePreviewLinePricingMode = "per_unit"
 )
 
 // Valid indicates whether the value is a known member of the InvoicePreviewLinePricingMode enum.
 func (e InvoicePreviewLinePricingMode) Valid() bool {
 	switch e {
-	case InvoicePreviewLinePricingModeFlat:
-		return true
 	case InvoicePreviewLinePricingModeGraduated:
 		return true
 	case InvoicePreviewLinePricingModePackage:
+		return true
+	case InvoicePreviewLinePricingModePerUnit:
 		return true
 	default:
 		return false
@@ -1105,7 +1102,6 @@ func (e InvoiceStatus) Valid() bool {
 
 // Defines values for InvoiceTaxStatus.
 const (
-	InvoiceTaxStatusFailed  InvoiceTaxStatus = "failed"
 	InvoiceTaxStatusOk      InvoiceTaxStatus = "ok"
 	InvoiceTaxStatusPending InvoiceTaxStatus = "pending"
 )
@@ -1113,8 +1109,6 @@ const (
 // Valid indicates whether the value is a known member of the InvoiceTaxStatus enum.
 func (e InvoiceTaxStatus) Valid() bool {
 	switch e {
-	case InvoiceTaxStatusFailed:
-		return true
 	case InvoiceTaxStatusOk:
 		return true
 	case InvoiceTaxStatusPending:
@@ -1250,33 +1244,6 @@ func (e MeterAggregation) Valid() bool {
 	}
 }
 
-// Defines values for MeterPricingRuleAggregationMode.
-const (
-	MeterPricingRuleAggregationModeCount            MeterPricingRuleAggregationMode = "count"
-	MeterPricingRuleAggregationModeLastDuringPeriod MeterPricingRuleAggregationMode = "last_during_period"
-	MeterPricingRuleAggregationModeLastEver         MeterPricingRuleAggregationMode = "last_ever"
-	MeterPricingRuleAggregationModeMax              MeterPricingRuleAggregationMode = "max"
-	MeterPricingRuleAggregationModeSum              MeterPricingRuleAggregationMode = "sum"
-)
-
-// Valid indicates whether the value is a known member of the MeterPricingRuleAggregationMode enum.
-func (e MeterPricingRuleAggregationMode) Valid() bool {
-	switch e {
-	case MeterPricingRuleAggregationModeCount:
-		return true
-	case MeterPricingRuleAggregationModeLastDuringPeriod:
-		return true
-	case MeterPricingRuleAggregationModeLastEver:
-		return true
-	case MeterPricingRuleAggregationModeMax:
-		return true
-	case MeterPricingRuleAggregationModeSum:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for PlanBaseBillTiming.
 const (
 	PlanBaseBillTimingInAdvance PlanBaseBillTiming = "in_advance"
@@ -1317,7 +1284,6 @@ func (e PlanBillingInterval) Valid() bool {
 const (
 	PlanStatusActive   PlanStatus = "active"
 	PlanStatusArchived PlanStatus = "archived"
-	PlanStatusDraft    PlanStatus = "draft"
 )
 
 // Valid indicates whether the value is a known member of the PlanStatus enum.
@@ -1327,7 +1293,161 @@ func (e PlanStatus) Valid() bool {
 		return true
 	case PlanStatusArchived:
 		return true
-	case PlanStatusDraft:
+	default:
+		return false
+	}
+}
+
+// Defines values for PlanDetailBaseBillTiming.
+const (
+	PlanDetailBaseBillTimingInAdvance PlanDetailBaseBillTiming = "in_advance"
+	PlanDetailBaseBillTimingInArrears PlanDetailBaseBillTiming = "in_arrears"
+)
+
+// Valid indicates whether the value is a known member of the PlanDetailBaseBillTiming enum.
+func (e PlanDetailBaseBillTiming) Valid() bool {
+	switch e {
+	case PlanDetailBaseBillTimingInAdvance:
+		return true
+	case PlanDetailBaseBillTimingInArrears:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PlanDetailBillingInterval.
+const (
+	PlanDetailBillingIntervalMonthly PlanDetailBillingInterval = "monthly"
+	PlanDetailBillingIntervalYearly  PlanDetailBillingInterval = "yearly"
+)
+
+// Valid indicates whether the value is a known member of the PlanDetailBillingInterval enum.
+func (e PlanDetailBillingInterval) Valid() bool {
+	switch e {
+	case PlanDetailBillingIntervalMonthly:
+		return true
+	case PlanDetailBillingIntervalYearly:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PlanDetailStatus.
+const (
+	PlanDetailStatusActive   PlanDetailStatus = "active"
+	PlanDetailStatusArchived PlanDetailStatus = "archived"
+)
+
+// Valid indicates whether the value is a known member of the PlanDetailStatus enum.
+func (e PlanDetailStatus) Valid() bool {
+	switch e {
+	case PlanDetailStatusActive:
+		return true
+	case PlanDetailStatusArchived:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PlanPriceMode.
+const (
+	PlanPriceModeGraduated PlanPriceMode = "graduated"
+	PlanPriceModePackage   PlanPriceMode = "package"
+	PlanPriceModePerUnit   PlanPriceMode = "per_unit"
+)
+
+// Valid indicates whether the value is a known member of the PlanPriceMode enum.
+func (e PlanPriceMode) Valid() bool {
+	switch e {
+	case PlanPriceModeGraduated:
+		return true
+	case PlanPriceModePackage:
+		return true
+	case PlanPriceModePerUnit:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PriceInputMode.
+const (
+	PriceInputModeGraduated PriceInputMode = "graduated"
+	PriceInputModePackage   PriceInputMode = "package"
+	PriceInputModePerUnit   PriceInputMode = "per_unit"
+)
+
+// Valid indicates whether the value is a known member of the PriceInputMode enum.
+func (e PriceInputMode) Valid() bool {
+	switch e {
+	case PriceInputModeGraduated:
+		return true
+	case PriceInputModePackage:
+		return true
+	case PriceInputModePerUnit:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PriceShapeMode.
+const (
+	PriceShapeModeGraduated PriceShapeMode = "graduated"
+	PriceShapeModePackage   PriceShapeMode = "package"
+	PriceShapeModePerUnit   PriceShapeMode = "per_unit"
+)
+
+// Valid indicates whether the value is a known member of the PriceShapeMode enum.
+func (e PriceShapeMode) Valid() bool {
+	switch e {
+	case PriceShapeModeGraduated:
+		return true
+	case PriceShapeModePackage:
+		return true
+	case PriceShapeModePerUnit:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PriceWriteEffective.
+const (
+	NextPeriod PriceWriteEffective = "next_period"
+	Now        PriceWriteEffective = "now"
+)
+
+// Valid indicates whether the value is a known member of the PriceWriteEffective enum.
+func (e PriceWriteEffective) Valid() bool {
+	switch e {
+	case NextPeriod:
+		return true
+	case Now:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PriceWriteMode.
+const (
+	PriceWriteModeGraduated PriceWriteMode = "graduated"
+	PriceWriteModePackage   PriceWriteMode = "package"
+	PriceWriteModePerUnit   PriceWriteMode = "per_unit"
+)
+
+// Valid indicates whether the value is a known member of the PriceWriteMode enum.
+func (e PriceWriteMode) Valid() bool {
+	switch e {
+	case PriceWriteModeGraduated:
+		return true
+	case PriceWriteModePackage:
+		return true
+	case PriceWriteModePerUnit:
 		return true
 	default:
 		return false
@@ -1349,48 +1469,6 @@ func (e ProviderCostRateCurrency) Valid() bool {
 	}
 }
 
-// Defines values for RatingRuleLifecycleState.
-const (
-	RatingRuleLifecycleStateActive   RatingRuleLifecycleState = "active"
-	RatingRuleLifecycleStateArchived RatingRuleLifecycleState = "archived"
-	RatingRuleLifecycleStateDraft    RatingRuleLifecycleState = "draft"
-)
-
-// Valid indicates whether the value is a known member of the RatingRuleLifecycleState enum.
-func (e RatingRuleLifecycleState) Valid() bool {
-	switch e {
-	case RatingRuleLifecycleStateActive:
-		return true
-	case RatingRuleLifecycleStateArchived:
-		return true
-	case RatingRuleLifecycleStateDraft:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for RatingRuleMode.
-const (
-	RatingRuleModeFlat      RatingRuleMode = "flat"
-	RatingRuleModeGraduated RatingRuleMode = "graduated"
-	RatingRuleModePackage   RatingRuleMode = "package"
-)
-
-// Valid indicates whether the value is a known member of the RatingRuleMode enum.
-func (e RatingRuleMode) Valid() bool {
-	switch e {
-	case RatingRuleModeFlat:
-		return true
-	case RatingRuleModeGraduated:
-		return true
-	case RatingRuleModePackage:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for ReadinessReportStatus.
 const (
 	ReadinessReportStatusDegraded ReadinessReportStatus = "degraded"
@@ -1406,45 +1484,6 @@ func (e ReadinessReportStatus) Valid() bool {
 	case ReadinessReportStatusDraining:
 		return true
 	case ReadinessReportStatusOk:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for RecipeDunningPolicyFinalInvoiceAction.
-const (
-	RecipeDunningPolicyFinalInvoiceActionMarkUncollectible RecipeDunningPolicyFinalInvoiceAction = "mark_uncollectible"
-	RecipeDunningPolicyFinalInvoiceActionNone              RecipeDunningPolicyFinalInvoiceAction = "none"
-)
-
-// Valid indicates whether the value is a known member of the RecipeDunningPolicyFinalInvoiceAction enum.
-func (e RecipeDunningPolicyFinalInvoiceAction) Valid() bool {
-	switch e {
-	case RecipeDunningPolicyFinalInvoiceActionMarkUncollectible:
-		return true
-	case RecipeDunningPolicyFinalInvoiceActionNone:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for RecipeDunningPolicyFinalSubscriptionAction.
-const (
-	RecipeDunningPolicyFinalSubscriptionActionCancel RecipeDunningPolicyFinalSubscriptionAction = "cancel"
-	RecipeDunningPolicyFinalSubscriptionActionNone   RecipeDunningPolicyFinalSubscriptionAction = "none"
-	RecipeDunningPolicyFinalSubscriptionActionPause  RecipeDunningPolicyFinalSubscriptionAction = "pause"
-)
-
-// Valid indicates whether the value is a known member of the RecipeDunningPolicyFinalSubscriptionAction enum.
-func (e RecipeDunningPolicyFinalSubscriptionAction) Valid() bool {
-	switch e {
-	case RecipeDunningPolicyFinalSubscriptionActionCancel:
-		return true
-	case RecipeDunningPolicyFinalSubscriptionActionNone:
-		return true
-	case RecipeDunningPolicyFinalSubscriptionActionPause:
 		return true
 	default:
 		return false
@@ -1505,48 +1544,21 @@ func (e RecipePlanBillingInterval) Valid() bool {
 	}
 }
 
-// Defines values for RecipePricingRuleAggregationMode.
+// Defines values for RecipePriceMode.
 const (
-	RecipePricingRuleAggregationModeCount            RecipePricingRuleAggregationMode = "count"
-	RecipePricingRuleAggregationModeLastDuringPeriod RecipePricingRuleAggregationMode = "last_during_period"
-	RecipePricingRuleAggregationModeLastEver         RecipePricingRuleAggregationMode = "last_ever"
-	RecipePricingRuleAggregationModeMax              RecipePricingRuleAggregationMode = "max"
-	RecipePricingRuleAggregationModeSum              RecipePricingRuleAggregationMode = "sum"
+	RecipePriceModeGraduated RecipePriceMode = "graduated"
+	RecipePriceModePackage   RecipePriceMode = "package"
+	RecipePriceModePerUnit   RecipePriceMode = "per_unit"
 )
 
-// Valid indicates whether the value is a known member of the RecipePricingRuleAggregationMode enum.
-func (e RecipePricingRuleAggregationMode) Valid() bool {
+// Valid indicates whether the value is a known member of the RecipePriceMode enum.
+func (e RecipePriceMode) Valid() bool {
 	switch e {
-	case RecipePricingRuleAggregationModeCount:
+	case RecipePriceModeGraduated:
 		return true
-	case RecipePricingRuleAggregationModeLastDuringPeriod:
+	case RecipePriceModePackage:
 		return true
-	case RecipePricingRuleAggregationModeLastEver:
-		return true
-	case RecipePricingRuleAggregationModeMax:
-		return true
-	case RecipePricingRuleAggregationModeSum:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for RecipeRatingRuleMode.
-const (
-	RecipeRatingRuleModeFlat      RecipeRatingRuleMode = "flat"
-	RecipeRatingRuleModeGraduated RecipeRatingRuleMode = "graduated"
-	RecipeRatingRuleModePackage   RecipeRatingRuleMode = "package"
-)
-
-// Valid indicates whether the value is a known member of the RecipeRatingRuleMode enum.
-func (e RecipeRatingRuleMode) Valid() bool {
-	switch e {
-	case RecipeRatingRuleModeFlat:
-		return true
-	case RecipeRatingRuleModeGraduated:
-		return true
-	case RecipeRatingRuleModePackage:
+	case RecipePriceModePerUnit:
 		return true
 	default:
 		return false
@@ -1555,7 +1567,6 @@ func (e RecipeRatingRuleMode) Valid() bool {
 
 // Defines values for RecoveryWarningCode.
 const (
-	RecoverySuperseded       RecoveryWarningCode = "recovery_superseded"
 	ReliefNotReissued        RecoveryWarningCode = "relief_not_reissued"
 	TaxReversedUnrecoverable RecoveryWarningCode = "tax_reversed_unrecoverable"
 )
@@ -1563,8 +1574,6 @@ const (
 // Valid indicates whether the value is a known member of the RecoveryWarningCode enum.
 func (e RecoveryWarningCode) Valid() bool {
 	switch e {
-	case RecoverySuperseded:
-		return true
 	case ReliefNotReissued:
 		return true
 	case TaxReversedUnrecoverable:
@@ -1694,7 +1703,6 @@ func (e SubscriptionBillingTime) Valid() bool {
 // Defines values for SubscriptionStatus.
 const (
 	SubscriptionStatusActive   SubscriptionStatus = "active"
-	SubscriptionStatusArchived SubscriptionStatus = "archived"
 	SubscriptionStatusCanceled SubscriptionStatus = "canceled"
 	SubscriptionStatusDraft    SubscriptionStatus = "draft"
 	SubscriptionStatusTrialing SubscriptionStatus = "trialing"
@@ -1704,8 +1712,6 @@ const (
 func (e SubscriptionStatus) Valid() bool {
 	switch e {
 	case SubscriptionStatusActive:
-		return true
-	case SubscriptionStatusArchived:
 		return true
 	case SubscriptionStatusCanceled:
 		return true
@@ -1748,6 +1754,24 @@ const (
 func (e SubscriptionPauseCollectionBehavior) Valid() bool {
 	switch e {
 	case SubscriptionPauseCollectionBehaviorKeepAsDraft:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SubscriptionPauseCollectionSetBy.
+const (
+	Dunning  SubscriptionPauseCollectionSetBy = "dunning"
+	Operator SubscriptionPauseCollectionSetBy = "operator"
+)
+
+// Valid indicates whether the value is a known member of the SubscriptionPauseCollectionSetBy enum.
+func (e SubscriptionPauseCollectionSetBy) Valid() bool {
+	switch e {
+	case Dunning:
+		return true
+	case Operator:
 		return true
 	default:
 		return false
@@ -1894,19 +1918,43 @@ func (e TenantSettingsInputTaxProvider) Valid() bool {
 
 // Defines values for TestClockStatus.
 const (
-	Advancing       TestClockStatus = "advancing"
-	InternalFailure TestClockStatus = "internal_failure"
-	Ready           TestClockStatus = "ready"
+	TestClockStatusAdvancing       TestClockStatus = "advancing"
+	TestClockStatusInternalFailure TestClockStatus = "internal_failure"
+	TestClockStatusReady           TestClockStatus = "ready"
 )
 
 // Valid indicates whether the value is a known member of the TestClockStatus enum.
 func (e TestClockStatus) Valid() bool {
 	switch e {
-	case Advancing:
+	case TestClockStatusAdvancing:
 		return true
-	case InternalFailure:
+	case TestClockStatusInternalFailure:
 		return true
-	case Ready:
+	case TestClockStatusReady:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for UsageBillingStatus.
+const (
+	AfterClose          UsageBillingStatus = "after_close"
+	NoPrice             UsageBillingStatus = "no_price"
+	NotOnPlan           UsageBillingStatus = "not_on_plan"
+	OutsideSubscription UsageBillingStatus = "outside_subscription"
+)
+
+// Valid indicates whether the value is a known member of the UsageBillingStatus enum.
+func (e UsageBillingStatus) Valid() bool {
+	switch e {
+	case AfterClose:
+		return true
+	case NoPrice:
+		return true
+	case NotOnPlan:
+		return true
+	case OutsideSubscription:
 		return true
 	default:
 		return false
@@ -1952,21 +2000,18 @@ func (e UsageEventProviderCostSource) Valid() bool {
 	}
 }
 
-// Defines values for WebhookDeliveryStatus.
+// Defines values for UsageEventBatchEventResultStatus.
 const (
-	WebhookDeliveryStatusFailed    WebhookDeliveryStatus = "failed"
-	WebhookDeliveryStatusPending   WebhookDeliveryStatus = "pending"
-	WebhookDeliveryStatusSucceeded WebhookDeliveryStatus = "succeeded"
+	Deduplicated UsageEventBatchEventResultStatus = "deduplicated"
+	Ingested     UsageEventBatchEventResultStatus = "ingested"
 )
 
-// Valid indicates whether the value is a known member of the WebhookDeliveryStatus enum.
-func (e WebhookDeliveryStatus) Valid() bool {
+// Valid indicates whether the value is a known member of the UsageEventBatchEventResultStatus enum.
+func (e UsageEventBatchEventResultStatus) Valid() bool {
 	switch e {
-	case WebhookDeliveryStatusFailed:
+	case Deduplicated:
 		return true
-	case WebhookDeliveryStatusPending:
-		return true
-	case WebhookDeliveryStatusSucceeded:
+	case Ingested:
 		return true
 	default:
 		return false
@@ -2233,16 +2278,16 @@ func (e ListCreditNotesParamsDir) Valid() bool {
 
 // Defines values for PostV1CreditNotesJSONBodyRefundType.
 const (
-	PostV1CreditNotesJSONBodyRefundTypeCredit PostV1CreditNotesJSONBodyRefundType = "credit"
-	PostV1CreditNotesJSONBodyRefundTypeRefund PostV1CreditNotesJSONBodyRefundType = "refund"
+	Credit PostV1CreditNotesJSONBodyRefundType = "credit"
+	Refund PostV1CreditNotesJSONBodyRefundType = "refund"
 )
 
 // Valid indicates whether the value is a known member of the PostV1CreditNotesJSONBodyRefundType enum.
 func (e PostV1CreditNotesJSONBodyRefundType) Valid() bool {
 	switch e {
-	case PostV1CreditNotesJSONBodyRefundTypeCredit:
+	case Credit:
 		return true
-	case PostV1CreditNotesJSONBodyRefundTypeRefund:
+	case Refund:
 		return true
 	default:
 		return false
@@ -2391,7 +2436,6 @@ func (e SetDefaultDunningPolicy200JSONResponseBodyStatus) Valid() bool {
 const (
 	ListDunningRunsParamsStateActive    ListDunningRunsParamsState = "active"
 	ListDunningRunsParamsStateEscalated ListDunningRunsParamsState = "escalated"
-	ListDunningRunsParamsStatePaused    ListDunningRunsParamsState = "paused"
 	ListDunningRunsParamsStateResolved  ListDunningRunsParamsState = "resolved"
 )
 
@@ -2402,8 +2446,6 @@ func (e ListDunningRunsParamsState) Valid() bool {
 		return true
 	case ListDunningRunsParamsStateEscalated:
 		return true
-	case ListDunningRunsParamsStatePaused:
-		return true
 	case ListDunningRunsParamsStateResolved:
 		return true
 	default:
@@ -2413,19 +2455,19 @@ func (e ListDunningRunsParamsState) Valid() bool {
 
 // Defines values for ResolveDunningRunJSONBodyResolution.
 const (
-	ResolveDunningRunJSONBodyResolutionInvoiceNotCollectible ResolveDunningRunJSONBodyResolution = "invoice_not_collectible"
-	ResolveDunningRunJSONBodyResolutionInvoiceVoided         ResolveDunningRunJSONBodyResolution = "invoice_voided"
-	ResolveDunningRunJSONBodyResolutionPaymentRecovered      ResolveDunningRunJSONBodyResolution = "payment_recovered"
+	InvoiceNotCollectible ResolveDunningRunJSONBodyResolution = "invoice_not_collectible"
+	InvoiceVoided         ResolveDunningRunJSONBodyResolution = "invoice_voided"
+	PaymentRecovered      ResolveDunningRunJSONBodyResolution = "payment_recovered"
 )
 
 // Valid indicates whether the value is a known member of the ResolveDunningRunJSONBodyResolution enum.
 func (e ResolveDunningRunJSONBodyResolution) Valid() bool {
 	switch e {
-	case ResolveDunningRunJSONBodyResolutionInvoiceNotCollectible:
+	case InvoiceNotCollectible:
 		return true
-	case ResolveDunningRunJSONBodyResolutionInvoiceVoided:
+	case InvoiceVoided:
 		return true
-	case ResolveDunningRunJSONBodyResolutionPaymentRecovered:
+	case PaymentRecovered:
 		return true
 	default:
 		return false
@@ -2530,49 +2572,22 @@ func (e PostV1MetersJSONBodyAggregation) Valid() bool {
 
 // Defines values for PatchV1MetersIdJSONBodyAggregation.
 const (
-	PatchV1MetersIdJSONBodyAggregationCount PatchV1MetersIdJSONBodyAggregation = "count"
-	PatchV1MetersIdJSONBodyAggregationLast  PatchV1MetersIdJSONBodyAggregation = "last"
-	PatchV1MetersIdJSONBodyAggregationMax   PatchV1MetersIdJSONBodyAggregation = "max"
-	PatchV1MetersIdJSONBodyAggregationSum   PatchV1MetersIdJSONBodyAggregation = "sum"
+	Count PatchV1MetersIdJSONBodyAggregation = "count"
+	Last  PatchV1MetersIdJSONBodyAggregation = "last"
+	Max   PatchV1MetersIdJSONBodyAggregation = "max"
+	Sum   PatchV1MetersIdJSONBodyAggregation = "sum"
 )
 
 // Valid indicates whether the value is a known member of the PatchV1MetersIdJSONBodyAggregation enum.
 func (e PatchV1MetersIdJSONBodyAggregation) Valid() bool {
 	switch e {
-	case PatchV1MetersIdJSONBodyAggregationCount:
+	case Count:
 		return true
-	case PatchV1MetersIdJSONBodyAggregationLast:
+	case Last:
 		return true
-	case PatchV1MetersIdJSONBodyAggregationMax:
+	case Max:
 		return true
-	case PatchV1MetersIdJSONBodyAggregationSum:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for UpsertMeterPricingRuleJSONBodyAggregationMode.
-const (
-	UpsertMeterPricingRuleJSONBodyAggregationModeCount            UpsertMeterPricingRuleJSONBodyAggregationMode = "count"
-	UpsertMeterPricingRuleJSONBodyAggregationModeLastDuringPeriod UpsertMeterPricingRuleJSONBodyAggregationMode = "last_during_period"
-	UpsertMeterPricingRuleJSONBodyAggregationModeLastEver         UpsertMeterPricingRuleJSONBodyAggregationMode = "last_ever"
-	UpsertMeterPricingRuleJSONBodyAggregationModeMax              UpsertMeterPricingRuleJSONBodyAggregationMode = "max"
-	UpsertMeterPricingRuleJSONBodyAggregationModeSum              UpsertMeterPricingRuleJSONBodyAggregationMode = "sum"
-)
-
-// Valid indicates whether the value is a known member of the UpsertMeterPricingRuleJSONBodyAggregationMode enum.
-func (e UpsertMeterPricingRuleJSONBodyAggregationMode) Valid() bool {
-	switch e {
-	case UpsertMeterPricingRuleJSONBodyAggregationModeCount:
-		return true
-	case UpsertMeterPricingRuleJSONBodyAggregationModeLastDuringPeriod:
-		return true
-	case UpsertMeterPricingRuleJSONBodyAggregationModeLastEver:
-		return true
-	case UpsertMeterPricingRuleJSONBodyAggregationModeMax:
-		return true
-	case UpsertMeterPricingRuleJSONBodyAggregationModeSum:
+	case Sum:
 		return true
 	default:
 		return false
@@ -2630,63 +2645,6 @@ func (e PostV1PlansJSONBodyStatus) Valid() bool {
 	}
 }
 
-// Defines values for GetPlan200JSONResponseBodyBaseBillTiming.
-const (
-	GetPlan200JSONResponseBodyBaseBillTimingInAdvance GetPlan200JSONResponseBodyBaseBillTiming = "in_advance"
-	GetPlan200JSONResponseBodyBaseBillTimingInArrears GetPlan200JSONResponseBodyBaseBillTiming = "in_arrears"
-)
-
-// Valid indicates whether the value is a known member of the GetPlan200JSONResponseBodyBaseBillTiming enum.
-func (e GetPlan200JSONResponseBodyBaseBillTiming) Valid() bool {
-	switch e {
-	case GetPlan200JSONResponseBodyBaseBillTimingInAdvance:
-		return true
-	case GetPlan200JSONResponseBodyBaseBillTimingInArrears:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for GetPlan200JSONResponseBodyBillingInterval.
-const (
-	GetPlan200JSONResponseBodyBillingIntervalMonthly GetPlan200JSONResponseBodyBillingInterval = "monthly"
-	GetPlan200JSONResponseBodyBillingIntervalYearly  GetPlan200JSONResponseBodyBillingInterval = "yearly"
-)
-
-// Valid indicates whether the value is a known member of the GetPlan200JSONResponseBodyBillingInterval enum.
-func (e GetPlan200JSONResponseBodyBillingInterval) Valid() bool {
-	switch e {
-	case GetPlan200JSONResponseBodyBillingIntervalMonthly:
-		return true
-	case GetPlan200JSONResponseBodyBillingIntervalYearly:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for GetPlan200JSONResponseBodyStatus.
-const (
-	GetPlan200JSONResponseBodyStatusActive   GetPlan200JSONResponseBodyStatus = "active"
-	GetPlan200JSONResponseBodyStatusArchived GetPlan200JSONResponseBodyStatus = "archived"
-	GetPlan200JSONResponseBodyStatusDraft    GetPlan200JSONResponseBodyStatus = "draft"
-)
-
-// Valid indicates whether the value is a known member of the GetPlan200JSONResponseBodyStatus enum.
-func (e GetPlan200JSONResponseBodyStatus) Valid() bool {
-	switch e {
-	case GetPlan200JSONResponseBodyStatusActive:
-		return true
-	case GetPlan200JSONResponseBodyStatusArchived:
-		return true
-	case GetPlan200JSONResponseBodyStatusDraft:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for UpdatePlanJSONBodyBaseBillTiming.
 const (
 	InAdvance UpdatePlanJSONBodyBaseBillTiming = "in_advance"
@@ -2709,7 +2667,6 @@ func (e UpdatePlanJSONBodyBaseBillTiming) Valid() bool {
 const (
 	UpdatePlanJSONBodyStatusActive   UpdatePlanJSONBodyStatus = "active"
 	UpdatePlanJSONBodyStatusArchived UpdatePlanJSONBodyStatus = "archived"
-	UpdatePlanJSONBodyStatusDraft    UpdatePlanJSONBodyStatus = "draft"
 )
 
 // Valid indicates whether the value is a known member of the UpdatePlanJSONBodyStatus enum.
@@ -2719,8 +2676,6 @@ func (e UpdatePlanJSONBodyStatus) Valid() bool {
 		return true
 	case UpdatePlanJSONBodyStatusArchived:
 		return true
-	case UpdatePlanJSONBodyStatusDraft:
-		return true
 	default:
 		return false
 	}
@@ -2728,19 +2683,19 @@ func (e UpdatePlanJSONBodyStatus) Valid() bool {
 
 // Defines values for CreatePriceOverrideJSONBodyMode.
 const (
-	CreatePriceOverrideJSONBodyModeFlat      CreatePriceOverrideJSONBodyMode = "flat"
 	CreatePriceOverrideJSONBodyModeGraduated CreatePriceOverrideJSONBodyMode = "graduated"
 	CreatePriceOverrideJSONBodyModePackage   CreatePriceOverrideJSONBodyMode = "package"
+	CreatePriceOverrideJSONBodyModePerUnit   CreatePriceOverrideJSONBodyMode = "per_unit"
 )
 
 // Valid indicates whether the value is a known member of the CreatePriceOverrideJSONBodyMode enum.
 func (e CreatePriceOverrideJSONBodyMode) Valid() bool {
 	switch e {
-	case CreatePriceOverrideJSONBodyModeFlat:
-		return true
 	case CreatePriceOverrideJSONBodyModeGraduated:
 		return true
 	case CreatePriceOverrideJSONBodyModePackage:
+		return true
+	case CreatePriceOverrideJSONBodyModePerUnit:
 		return true
 	default:
 		return false
@@ -2789,48 +2744,6 @@ func (e GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSource) Val
 	case GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSourceNoSubscription:
 		return true
 	case GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSourceSubscription:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for GetV1RatingRulesParamsLifecycleState.
-const (
-	Active   GetV1RatingRulesParamsLifecycleState = "active"
-	Archived GetV1RatingRulesParamsLifecycleState = "archived"
-	Draft    GetV1RatingRulesParamsLifecycleState = "draft"
-)
-
-// Valid indicates whether the value is a known member of the GetV1RatingRulesParamsLifecycleState enum.
-func (e GetV1RatingRulesParamsLifecycleState) Valid() bool {
-	switch e {
-	case Active:
-		return true
-	case Archived:
-		return true
-	case Draft:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for PostV1RatingRulesJSONBodyMode.
-const (
-	PostV1RatingRulesJSONBodyModeFlat      PostV1RatingRulesJSONBodyMode = "flat"
-	PostV1RatingRulesJSONBodyModeGraduated PostV1RatingRulesJSONBodyMode = "graduated"
-	PostV1RatingRulesJSONBodyModePackage   PostV1RatingRulesJSONBodyMode = "package"
-)
-
-// Valid indicates whether the value is a known member of the PostV1RatingRulesJSONBodyMode enum.
-func (e PostV1RatingRulesJSONBodyMode) Valid() bool {
-	switch e {
-	case PostV1RatingRulesJSONBodyModeFlat:
-		return true
-	case PostV1RatingRulesJSONBodyModeGraduated:
-		return true
-	case PostV1RatingRulesJSONBodyModePackage:
 		return true
 	default:
 		return false
@@ -2915,6 +2828,30 @@ func (e SetStripeWebhookSecretParamsMode) Valid() bool {
 	}
 }
 
+// Defines values for GetV1SubscriptionsParamsStatus.
+const (
+	GetV1SubscriptionsParamsStatusActive   GetV1SubscriptionsParamsStatus = "active"
+	GetV1SubscriptionsParamsStatusCanceled GetV1SubscriptionsParamsStatus = "canceled"
+	GetV1SubscriptionsParamsStatusDraft    GetV1SubscriptionsParamsStatus = "draft"
+	GetV1SubscriptionsParamsStatusTrialing GetV1SubscriptionsParamsStatus = "trialing"
+)
+
+// Valid indicates whether the value is a known member of the GetV1SubscriptionsParamsStatus enum.
+func (e GetV1SubscriptionsParamsStatus) Valid() bool {
+	switch e {
+	case GetV1SubscriptionsParamsStatusActive:
+		return true
+	case GetV1SubscriptionsParamsStatusCanceled:
+		return true
+	case GetV1SubscriptionsParamsStatusDraft:
+		return true
+	case GetV1SubscriptionsParamsStatusTrialing:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetV1SubscriptionsParamsBilling.
 const (
 	Failing GetV1SubscriptionsParamsBilling = "failing"
@@ -2924,6 +2861,21 @@ const (
 func (e GetV1SubscriptionsParamsBilling) Valid() bool {
 	switch e {
 	case Failing:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetV1SubscriptionsParamsCollection.
+const (
+	Paused GetV1SubscriptionsParamsCollection = "paused"
+)
+
+// Valid indicates whether the value is a known member of the GetV1SubscriptionsParamsCollection enum.
+func (e GetV1SubscriptionsParamsCollection) Valid() bool {
+	switch e {
+	case Paused:
 		return true
 	default:
 		return false
@@ -2960,6 +2912,21 @@ func (e PostV1SubscriptionsJSONBodyBillingTime) Valid() bool {
 	case PostV1SubscriptionsJSONBodyBillingTimeAnniversary:
 		return true
 	case PostV1SubscriptionsJSONBodyBillingTimeCalendar:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PostV1SubscriptionsJSONBodyStatus.
+const (
+	Draft PostV1SubscriptionsJSONBodyStatus = "draft"
+)
+
+// Valid indicates whether the value is a known member of the PostV1SubscriptionsJSONBodyStatus enum.
+func (e PostV1SubscriptionsJSONBodyStatus) Valid() bool {
+	switch e {
+	case Draft:
 		return true
 	default:
 		return false
@@ -3017,21 +2984,6 @@ func (e DeleteV1TestClocksId200JSONResponseBodyStatus) Valid() bool {
 	}
 }
 
-// Defines values for GetUsageSummary500JSONResponseBodyError.
-const (
-	InternalError GetUsageSummary500JSONResponseBodyError = "internal_error"
-)
-
-// Valid indicates whether the value is a known member of the GetUsageSummary500JSONResponseBodyError enum.
-func (e GetUsageSummary500JSONResponseBodyError) Valid() bool {
-	switch e {
-	case InternalError:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for DeleteV1WebhookEndpointsEndpointsId200JSONResponseBodyStatus.
 const (
 	DeleteV1WebhookEndpointsEndpointsId200JSONResponseBodyStatusDeleted DeleteV1WebhookEndpointsEndpointsId200JSONResponseBodyStatus = "deleted"
@@ -3041,21 +2993,6 @@ const (
 func (e DeleteV1WebhookEndpointsEndpointsId200JSONResponseBodyStatus) Valid() bool {
 	switch e {
 	case DeleteV1WebhookEndpointsEndpointsId200JSONResponseBodyStatusDeleted:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for ReplayWebhookEventLegacy200JSONResponseBodyStatus.
-const (
-	Replayed ReplayWebhookEventLegacy200JSONResponseBodyStatus = "replayed"
-)
-
-// Valid indicates whether the value is a known member of the ReplayWebhookEventLegacy200JSONResponseBodyStatus enum.
-func (e ReplayWebhookEventLegacy200JSONResponseBodyStatus) Valid() bool {
-	switch e {
-	case Replayed:
 		return true
 	default:
 		return false
@@ -3290,19 +3227,22 @@ type AnalyticsOverview struct {
 	// AvgInvoiceValue Average total of invoices paid in the window.
 	AvgInvoiceValue int64 `json:"avg_invoice_value"`
 
-	// CreditBalanceTotal Sum of all customers' credit balances. Not limited to `currency`.
-	CreditBalanceTotal int64 `json:"credit_balance_total"`
+	// CreditBalanceByCurrency Customers' credit balances added up per currency, `currency` first, then largest. A currency whose balance is zero is left out. Customers on a test clock are not counted.
+	CreditBalanceByCurrency []struct {
+		AmountCents int64  `json:"amount_cents"`
+		Currency    string `json:"currency"`
+	} `json:"credit_balance_by_currency"`
 
-	// Currency The tenant's default currency. Every money field uses it, except `credit_balance_total` and `outstanding_by_currency`.
+	// Currency The tenant's default currency. Every money field uses it, except `credit_balance_by_currency` and `outstanding_by_currency`, which carry their own.
 	Currency string `json:"currency"`
 
 	// DunningActive Dunning runs (automatic payment retries) still in progress.
 	DunningActive int `json:"dunning_active"`
 
-	// DunningRecoveryRate Dunning runs opened in the window that are resolved, divided by all runs opened in the window. 0 when none were opened.
+	// DunningRecoveryRate Dunning runs opened in the window that a payment closed (`resolution` is `payment_recovered` and the invoice has `amount_paid_cents` above 0), divided by all runs opened in the window. A run closed by a void, a write-off, or a credit note or customer credit that left nothing due is not recovered. 0 when none were opened.
 	DunningRecoveryRate float64 `json:"dunning_recovery_rate"`
 
-	// FailedPayments Invoices created in the window whose payment failed. All currencies.
+	// FailedPayments Open invoices created in the window whose payment failed. A voided or written-off invoice is not counted. All currencies.
 	FailedPayments int `json:"failed_payments"`
 
 	// FailedPaymentsPrev `failed_payments` for the previous window.
@@ -3390,8 +3330,8 @@ type AnalyticsRevenuePoint struct {
 
 // AnalyticsTopMeter defines model for AnalyticsTopMeter.
 type AnalyticsTopMeter struct {
+	EventName string `json:"event_name"`
 	Events    int64  `json:"events"`
-	Key       string `json:"key"`
 	MeterId   string `json:"meter_id"`
 	MeterName string `json:"meter_name"`
 
@@ -3502,7 +3442,19 @@ type Attention struct {
 	// When the invoice also has `payment_anomaly`, that reason stays and
 	// its message asks the operator to check Stripe before any refund.
 	// The disputes themselves are at `GET /v1/invoices/{id}/disputes`
-	// (2026-10-19).
+	// (2026-10-19). `amount_below_minimum` reports an invoice Stripe
+	// refused to charge, or refused a payment page for, because the amount
+	// is below Stripe's minimum charge. The minimum depends on the
+	// currency the Stripe account settles in; Stripe's reply, in
+	// `provider_response`, names it. Nothing was charged, the invoice
+	// stays `finalized` with `payment_status` `pending`, it is not
+	// charged again automatically, dunning does not start (a run already
+	// open ends), and the customer is not emailed. The operator voids it
+	// or records a payment; Collect payment applies the customer's credit
+	// balance and pays it if that covers the amount, and otherwise asks
+	// Stripe again. Stripe's answer can change (for a converted charge the
+	// minimum is the settlement currency's), and a different answer ends
+	// this reason (2026-10-23).
 	Reason AttentionReason `json:"reason"`
 
 	// Severity Urgency of an Attention surface. Operators sort/filter on this
@@ -3525,12 +3477,14 @@ type Attention struct {
 // status unknown with no payment intent recorded), for a customer
 // who paid another way: Velox records a payment that Stripe shows,
 // and charges the invoice again if none appears within 24 hours.
-// Dashboards render it as a secondary action. `void_invoice` is offered only
-// on prepaid-commit exposure, and only while some of the granted
+// Dashboards render it as a secondary action. `void_invoice` is offered
+// on prepaid-commit exposure, only while some of the granted
 // credit is still unspent: voiding retires the unspent balance
 // (ADR-078) and is the sole recovery for an unpaid invoice whose
 // credit is already live. Credit the customer has already spent
-// is never clawed back (2026-08-04).
+// is never clawed back (2026-08-04). It is also offered on
+// `amount_below_minimum`, an amount Stripe will not charge
+// (2026-10-23).
 type AttentionAction string
 
 // AttentionActionItem defines model for AttentionActionItem.
@@ -3544,12 +3498,14 @@ type AttentionActionItem struct {
 	// status unknown with no payment intent recorded), for a customer
 	// who paid another way: Velox records a payment that Stripe shows,
 	// and charges the invoice again if none appears within 24 hours.
-	// Dashboards render it as a secondary action. `void_invoice` is offered only
-	// on prepaid-commit exposure, and only while some of the granted
+	// Dashboards render it as a secondary action. `void_invoice` is offered
+	// on prepaid-commit exposure, only while some of the granted
 	// credit is still unspent: voiding retires the unspent balance
 	// (ADR-078) and is the sole recovery for an unpaid invoice whose
 	// credit is already live. Credit the customer has already spent
-	// is never clawed back (2026-08-04).
+	// is never clawed back (2026-08-04). It is also offered on
+	// `amount_below_minimum`, an amount Stripe will not charge
+	// (2026-10-23).
 	Code AttentionAction `json:"code"`
 
 	// Label Default rendering label. UIs are free to substitute
@@ -3589,7 +3545,19 @@ type AttentionActionItem struct {
 // When the invoice also has `payment_anomaly`, that reason stays and
 // its message asks the operator to check Stripe before any refund.
 // The disputes themselves are at `GET /v1/invoices/{id}/disputes`
-// (2026-10-19).
+// (2026-10-19). `amount_below_minimum` reports an invoice Stripe
+// refused to charge, or refused a payment page for, because the amount
+// is below Stripe's minimum charge. The minimum depends on the
+// currency the Stripe account settles in; Stripe's reply, in
+// `provider_response`, names it. Nothing was charged, the invoice
+// stays `finalized` with `payment_status` `pending`, it is not
+// charged again automatically, dunning does not start (a run already
+// open ends), and the customer is not emailed. The operator voids it
+// or records a payment; Collect payment applies the customer's credit
+// balance and pays it if that covers the amount, and otherwise asks
+// Stripe again. Stripe's answer can change (for a converted charge the
+// minimum is the settlement currency's), and a different answer ends
+// this reason (2026-10-23).
 type AttentionReason string
 
 // AttentionSeverity Urgency of an Attention surface. Operators sort/filter on this
@@ -3706,11 +3674,11 @@ type BootstrapResult struct {
 	Tenant        Tenant `json:"tenant"`
 }
 
-// CreditBalance A customer's credit balance and where the credit went. Every cent granted is either still in the balance or in one of the totals: total_granted = total_used + total_expired + total_retired + total_deducted + balance_cents.
+// CreditBalance A customer's credit balance in one currency and where that credit went. Every cent granted is either still in the balance or in one of the totals: total_granted = total_used + total_expired + total_retired + total_deducted + balance_cents.
 type CreditBalance struct {
 	BalanceCents int64 `json:"balance_cents"`
 
-	// Currency The currency the customer is billed in, uppercase. Credit has no currency of its own: it pays the customer's invoices one cent for one cent, so its amounts read in this currency. The first of: the billing profile's currency, the plan of the customer's active or trialing subscription, the newest invoice's currency, the workspace default.
+	// Currency The currency of this balance, uppercase. Each credit ledger entry stores its own currency, and credit pays only invoices in that currency. A customer with credit in two currencies has two balances; they are never added together or converted.
 	Currency   string `json:"currency"`
 	CustomerId string `json:"customer_id"`
 
@@ -3740,6 +3708,9 @@ type CreditGrantBlock struct {
 	// retired and deducted.
 	ConsumedCents int64     `json:"consumed_cents"`
 	CreatedAt     time.Time `json:"created_at"`
+
+	// Currency The block's currency, uppercase.
+	Currency string `json:"currency"`
 
 	// DeductedCents The part an operator removed with a negative adjustment.
 	DeductedCents int64  `json:"deducted_cents"`
@@ -3775,17 +3746,22 @@ type CreditGrantBlock struct {
 type CreditGrantBlockGrantKind string
 
 // CreditGrants A customer's credit blocks, newest first, with the remaining credit
-// added up by kind.
+// added up by currency and kind.
 type CreditGrants struct {
-	// CommitRemainingCents Remaining credit the customer paid for (`commit`).
-	CommitRemainingCents int64              `json:"commit_remaining_cents"`
-	Grants               []CreditGrantBlock `json:"grants"`
+	Grants []CreditGrantBlock `json:"grants"`
 
-	// OtherRemainingCents Remaining credit with no kind, such as adjustments and proration credits.
-	OtherRemainingCents int64 `json:"other_remaining_cents"`
+	// RemainingByCurrency One entry per currency with credit left, ordered by currency.
+	RemainingByCurrency []struct {
+		// CommitRemainingCents Remaining credit the customer paid for (`commit`).
+		CommitRemainingCents int64  `json:"commit_remaining_cents"`
+		Currency             string `json:"currency"`
 
-	// PromotionalRemainingCents Remaining free credit (`promotional`).
-	PromotionalRemainingCents int64 `json:"promotional_remaining_cents"`
+		// OtherRemainingCents Remaining credit with no kind, such as adjustments and credit-note credit.
+		OtherRemainingCents int64 `json:"other_remaining_cents"`
+
+		// PromotionalRemainingCents Remaining free credit (`promotional`).
+		PromotionalRemainingCents int64 `json:"promotional_remaining_cents"`
+	} `json:"remaining_by_currency"`
 }
 
 // CreditLedgerEntry defines model for CreditLedgerEntry.
@@ -3793,15 +3769,18 @@ type CreditLedgerEntry struct {
 	// AmountCents Positive adds credit, negative removes it.
 	AmountCents int64 `json:"amount_cents"`
 
-	// BalanceAfter Customer's credit balance after this entry, in cents.
+	// BalanceAfter The customer's credit balance in this entry's currency after it, in cents.
 	BalanceAfter int64 `json:"balance_after"`
 
 	// ConsumedCents For entries that add credit, how much has been used or expired.
-	ConsumedCents int64                      `json:"consumed_cents,omitempty"`
-	CreatedAt     time.Time                  `json:"created_at"`
-	CustomerId    string                     `json:"customer_id"`
-	Description   string                     `json:"description"`
-	EntryType     CreditLedgerEntryEntryType `json:"entry_type"`
+	ConsumedCents int64     `json:"consumed_cents,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+
+	// Currency The entry's currency, uppercase. Credit pays only invoices in its own currency.
+	Currency    string                     `json:"currency"`
+	CustomerId  string                     `json:"customer_id"`
+	Description string                     `json:"description"`
+	EntryType   CreditLedgerEntryEntryType `json:"entry_type"`
 
 	// ExpiresAt On a grant, its expiry. The credit can be drawn up to and
 	// including this instant; a period invoice draws it when its
@@ -3842,19 +3821,26 @@ type CreditLedgerEntryEntryType string
 // CreditLedgerEntryGrantKind defines model for CreditLedgerEntry.GrantKind.
 type CreditLedgerEntryGrantKind string
 
-// CreditLiveBalance A customer's credit position right now. `balance_cents` is the credit the customer can spend: the settled ledger balance, which moves only when an invoice, grant, adjustment or expiry is written, less any grant that is past its expiry date and not yet written off. `unbilled_usage_cents` is the usage of the current period that no invoice has billed yet. `estimated_remaining_cents` is the first minus the second, never below zero.
+// CreditLiveBalance A customer's credit position right now, one entry per currency: every currency the customer holds credit in, and every currency a live subscription will invoice usage in. Amounts in two currencies are never added together.
 type CreditLiveBalance struct {
-	// BalanceCents Settled ledger balance, less what is left of any grant past its expiry date that the hourly expiry run has not written off yet (an invoice cannot draw on such a grant). Can be negative.
-	BalanceCents int64 `json:"balance_cents"`
+	// Balances Ordered by currency.
+	Balances []CreditLiveCurrency `json:"balances"`
 
 	// ComputedAt When the server computed these figures.
 	ComputedAt time.Time `json:"computed_at"`
 	CustomerId string    `json:"customer_id"`
+}
+
+// CreditLiveCurrency The live position in one currency. `balance_cents` is the credit the customer can spend in it: the settled ledger balance, which moves only when an invoice, grant, adjustment or expiry is written, less any grant that is past its expiry date and not yet written off. `unbilled_usage_cents` is the usage of the current period that no invoice has billed yet and that will be invoiced in this currency. `estimated_remaining_cents` is the first minus the second, never below zero.
+type CreditLiveCurrency struct {
+	// BalanceCents Settled ledger balance in this currency, less what is left of any grant past its expiry date that the hourly expiry run has not written off yet (an invoice cannot draw on such a grant). Can be negative.
+	BalanceCents int64  `json:"balance_cents"`
+	Currency     string `json:"currency"`
 
 	// EstimatedRemainingCents `balance_cents` minus `unbilled_usage_cents`, floored at zero. To see how far past zero a customer is, subtract the two parts yourself.
 	EstimatedRemainingCents int64 `json:"estimated_remaining_cents"`
 
-	// UnbilledUsageCents Metered usage that the next invoice of each subscription will bill, priced as the period close prices it. Usage that a mid-period threshold invoice already billed is not counted again. After a mid-period plan change each meter is counted for the time a plan carrying it was on the subscription. For a trialing subscription only usage inside its first paid period counts; that period starts at the beginning of the day the trial ends.
+	// UnbilledUsageCents Metered usage that the next invoice of each subscription invoiced in this currency will bill, priced as the period close prices it. Usage that a mid-period threshold invoice already billed is not counted again. After a mid-period plan change each meter is counted for the time a plan carrying it was on the subscription. For a trialing subscription only usage inside its first paid period counts; that period starts at the beginning of the day the trial ends.
 	UnbilledUsageCents int64 `json:"unbilled_usage_cents"`
 }
 
@@ -3932,6 +3918,35 @@ type CreditNoteRefundStatus string
 
 // CreditNoteStatus defines model for CreditNote.Status.
 type CreditNoteStatus string
+
+// CreditNoteStats defines model for CreditNoteStats.
+type CreditNoteStats struct {
+	// ByCurrency Money on issued notes, one entry per currency, the tenant's
+	// default currency first. Empty when no note is issued.
+	ByCurrency []struct {
+		// CreditedCents Added to customers' credit balances.
+		CreditedCents int64  `json:"credited_cents"`
+		Currency      string `json:"currency"`
+
+		// OutOfBandCents Recorded as paid back outside Stripe.
+		OutOfBandCents int64 `json:"out_of_band_cents"`
+
+		// RefundFailedCents Refunds that failed. No money went back to the card.
+		RefundFailedCents int64 `json:"refund_failed_cents"`
+
+		// RefundPendingCents Refunds not confirmed yet. Neither succeeded nor failed, the refund is waiting on Stripe, Stripe's answer was unclear, or its result was never recorded.
+		RefundPendingCents int64 `json:"refund_pending_cents"`
+
+		// RefundedCents Refunds that succeeded. A refund still pending or one that failed is not counted here.
+		RefundedCents int64 `json:"refunded_cents"`
+
+		// TotalCents Total of the issued notes.
+		TotalCents int64 `json:"total_cents"`
+	} `json:"by_currency"`
+	DraftCount  int `json:"draft_count"`
+	IssuedCount int `json:"issued_count"`
+	VoidedCount int `json:"voided_count"`
+}
 
 // Customer defines model for Customer.
 type Customer struct {
@@ -4082,68 +4097,44 @@ type CustomerOverview struct {
 	RecentInvoices []Invoice `json:"recent_invoices"`
 }
 
-// CustomerPaymentSetup defines model for CustomerPaymentSetup.
-type CustomerPaymentSetup struct {
-	CardBrand                   string    `json:"card_brand,omitempty"`
-	CardExpMonth                int       `json:"card_exp_month,omitempty"`
-	CardExpYear                 int       `json:"card_exp_year,omitempty"`
-	CardLast4                   string    `json:"card_last4,omitempty"`
-	CreatedAt                   time.Time `json:"created_at"`
-	CustomerId                  string    `json:"customer_id"`
-	DefaultPaymentMethodPresent bool      `json:"default_payment_method_present"`
-	PaymentMethodType           string    `json:"payment_method_type,omitempty"`
-
-	// SetupStatus `ready`: the customer has a default payment method. `pending`:
-	// a Stripe customer exists but there is no default payment method
-	// yet. `missing`: there is no Stripe customer.
-	SetupStatus           CustomerPaymentSetupSetupStatus `json:"setup_status"`
-	StripeCustomerId      string                          `json:"stripe_customer_id,omitempty"`
-	StripePaymentMethodId string                          `json:"stripe_payment_method_id,omitempty"`
-	TenantId              string                          `json:"tenant_id,omitempty"`
-	UpdatedAt             time.Time                       `json:"updated_at"`
-}
-
-// CustomerPaymentSetupSetupStatus `ready`: the customer has a default payment method. `pending`:
-// a Stripe customer exists but there is no default payment method
-// yet. `missing`: there is no Stripe customer.
-type CustomerPaymentSetupSetupStatus string
-
-// CustomerPriceOverride defines model for CustomerPriceOverride.
+// CustomerPriceOverride A customer's negotiated rate for one plan price. It keeps applying
+// when the price's rate changes, and ends when the price is removed.
+// It takes the plan's currency.
 type CustomerPriceOverride struct {
-	Active     bool      `json:"active"`
+	Active bool `json:"active"`
+
+	// CreatedAt When the override starts, in the customer's time: wall time, or
+	// its test clock's time. A subscription already on the plan gets
+	// it from its next period; one that first joins the plan in a
+	// period after this instant gets it from the join.
 	CreatedAt  time.Time `json:"created_at"`
 	CustomerId string    `json:"customer_id"`
 
-	// FlatAmountCents Per-unit rate in cents, as a decimal string.
-	FlatAmountCents string `json:"flat_amount_cents,omitempty"`
+	// DeactivatedAt When the override ended, in the customer's time. Absent while it is active.
+	DeactivatedAt time.Time `json:"deactivated_at,omitempty"`
+	Id            string    `json:"id"`
 
-	// GraduatedTiers Empty (`[]`) unless `mode` is `graduated`.
-	GraduatedTiers []struct {
-		// UnitAmountCents Per-unit rate in cents, as a decimal string.
-		UnitAmountCents string `json:"unit_amount_cents,omitempty"`
-
-		// UpTo 0 on the last tier means no upper bound.
-		UpTo int64 `json:"up_to,omitempty"`
-	} `json:"graduated_tiers,omitempty"`
-	Id   string                    `json:"id"`
+	// Mode As on PriceShape.
 	Mode CustomerPriceOverrideMode `json:"mode"`
 
-	// OverageUnitAmountCents Per-unit overage rate in cents, as a decimal string.
-	OverageUnitAmountCents string `json:"overage_unit_amount_cents,omitempty"`
-	PackageAmountCents     int64  `json:"package_amount_cents,omitempty"`
-	PackageSize            int64  `json:"package_size,omitempty"`
+	// PackageAmountCents Price of one package in cents, as a decimal string.
+	PackageAmountCents string `json:"package_amount_cents,omitempty"`
+	PackageSize        int64  `json:"package_size,omitempty"`
 
-	// RatingRuleVersionId The rule version named when the override was created. For reference only.
-	RatingRuleVersionId string `json:"rating_rule_version_id"`
-	Reason              string `json:"reason,omitempty"`
+	// PriceId The plan price this override replaces the rate of, for this customer.
+	PriceId  string `json:"price_id"`
+	Reason   string `json:"reason,omitempty"`
+	TenantId string `json:"tenant_id,omitempty"`
 
-	// RuleKey The rating rule this override replaces the price of, across all its versions.
-	RuleKey   string    `json:"rule_key"`
-	TenantId  string    `json:"tenant_id,omitempty"`
-	UpdatedAt time.Time `json:"updated_at"`
+	// Tiers Empty (`[]`) unless `mode` is `graduated`.
+	Tiers []PriceTier `json:"tiers,omitempty"`
+
+	// UnitAmountCents Price per unit in cents, as a decimal string.
+	UnitAmountCents string    `json:"unit_amount_cents,omitempty"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
-// CustomerPriceOverrideMode defines model for CustomerPriceOverride.Mode.
+// CustomerPriceOverrideMode As on PriceShape.
 type CustomerPriceOverrideMode string
 
 // CustomerUsage defines model for CustomerUsage.
@@ -4157,8 +4148,24 @@ type CustomerUsage struct {
 	} `json:"buckets"`
 	CustomerId string               `json:"customer_id"`
 	Meters     []CustomerUsageMeter `json:"meters"`
-	Period     struct {
-		From   time.Time                 `json:"from"`
+
+	// Period The window the response covers. With no `from` and `to`
+	// (`current_billing_cycle`), each subscription is rated over its
+	// own current billing period, and the period runs from the
+	// earliest start to the latest end of those periods. A meter's
+	// totals and daily `buckets` cover its own subscription's whole
+	// period, including usage a threshold invoice already billed.
+	Period struct {
+		From time.Time `json:"from"`
+
+		// Source `current_billing_cycle`: no `from` and `to` were sent, and
+		// the amounts are what the period's invoices bill.
+		// `explicit`: the window you sent. Its amounts are an
+		// estimate, so a past window can differ from its invoices.
+		// Only active and trialing subscriptions are counted: the
+		// usage of a canceled subscription is left out. Each
+		// subscription's usage in the window is priced at the
+		// prices of its current billing period.
 		Source CustomerUsagePeriodSource `json:"source"`
 		To     time.Time                 `json:"to"`
 	} `json:"period"`
@@ -4180,37 +4187,52 @@ type CustomerUsage struct {
 		AmountCents int64  `json:"amount_cents"`
 		Currency    string `json:"currency"`
 	} `json:"totals"`
+
+	// Warnings Problems found working out this usage, in words, such as usage
+	// that no price takes or a meter whose usage went below zero.
 	Warnings []string `json:"warnings"`
 }
 
-// CustomerUsagePeriodSource defines model for CustomerUsage.Period.Source.
+// CustomerUsagePeriodSource `current_billing_cycle`: no `from` and `to` were sent, and
+// the amounts are what the period's invoices bill.
+// `explicit`: the window you sent. Its amounts are an
+// estimate, so a past window can differ from its invoices.
+// Only active and trialing subscriptions are counted: the
+// usage of a canceled subscription is left out. Each
+// subscription's usage in the window is priced at the
+// prices of its current billing period.
 type CustomerUsagePeriodSource string
 
 // CustomerUsageMeter defines model for CustomerUsageMeter.
 type CustomerUsageMeter struct {
 	Currency  string `json:"currency"`
+	EventName string `json:"event_name"`
 	MeterId   string `json:"meter_id"`
-	MeterKey  string `json:"meter_key"`
 	MeterName string `json:"meter_name"`
 
-	// Rules One row per pricing rule that claimed events.
-	Rules []struct {
-		AmountCents    int64                  `json:"amount_cents"`
-		DimensionMatch map[string]interface{} `json:"dimension_match,omitempty"`
+	// Prices One row per (plan, price) that took usage, and a `no_price` row
+	// per plan for the usage no price of that plan took. Two plans can
+	// price one meter differently.
+	Prices []struct {
+		AmountCents int64 `json:"amount_cents"`
+
+		// DimensionMatch The labels the price takes. Absent for a price that takes every event.
+		DimensionMatch map[string]string `json:"dimension_match,omitempty"`
+
+		// NoPrice True for usage no price of the plan took. Velox bills
+		// nothing for it, and it is left out of the meter's totals.
+		NoPrice bool   `json:"no_price,omitempty"`
+		PlanId  string `json:"plan_id"`
+
+		// PriceId Absent on a `no_price` row.
+		PriceId string `json:"price_id,omitempty"`
 
 		// Quantity Decimal string.
-		Quantity            string `json:"quantity"`
-		RatingRuleVersionId string `json:"rating_rule_version_id"`
-		RuleKey             string `json:"rule_key"`
+		Quantity string `json:"quantity"`
 
 		// UnitAmountDecimal Price per unit in cents, as a decimal string; the same figure the invoice line shows.
 		UnitAmountDecimal string `json:"unit_amount_decimal,omitempty"`
-
-		// Unmatched True for events that matched no pricing rule. Velox
-		// bills nothing for them, and they are left out of the
-		// meter's totals.
-		Unmatched bool `json:"unmatched,omitempty"`
-	} `json:"rules"`
+	} `json:"prices"`
 	TotalAmountCents int64 `json:"total_amount_cents"`
 
 	// TotalQuantity Decimal string.
@@ -4219,41 +4241,29 @@ type CustomerUsageMeter struct {
 }
 
 // DisputeWebhookEventData The `data` of the outbound webhook events `payment.dispute_opened`
-// and `payment.dispute_closed` (docs/webhooks.md). Both are saved in the
-// same transaction that records the dispute, so a crash cannot drop
-// them. `payment.dispute_opened` is sent once per dispute, when Velox
-// first records it; if the first event Velox receives is already the
-// close, both are sent, and both carry the closed status and
-// `closed_at`. Their delivery order is not guaranteed.
-// `payment.dispute_closed` is sent when the dispute reaches a closed
-// status it did not have: `won`, `lost`, `warning_closed` or
-// `prevented`. A lost dispute that Stripe later marks won sends it
-// again.
+// and `payment.dispute_closed` (docs/webhooks.md): the invoice the
+// disputed payment paid and the dispute, each as the API returns it.
+// Both are saved in the same transaction that records the dispute, so
+// a crash cannot drop them. `payment.dispute_opened` is sent once per
+// dispute, when Velox first records it; if the first event Velox
+// receives is already the close, both are sent, and both carry the
+// closed status and `closed_at`. Their delivery order is not
+// guaranteed. `payment.dispute_closed` is sent when the dispute
+// reaches a closed status it did not have: `won`, `lost`,
+// `warning_closed` or `prevented`. A lost dispute that Stripe later
+// marks won sends it again.
 type DisputeWebhookEventData struct {
-	AmountCents int64 `json:"amount_cents"`
+	// Dispute A card dispute (chargeback) Stripe reported against one of the
+	// invoice's payments, recorded from Stripe's `charge.dispute.created`,
+	// `.updated` and `.closed` webhook events. It holds the dispute as the
+	// newest of those events showed it, whatever order they arrived in.
+	// Velox records and reports a dispute, and nothing else: the invoice
+	// stays paid and no money moves.
+	Dispute InvoiceDispute `json:"dispute"`
 
-	// ClosedAt Set when the dispute is closed: always on `payment.dispute_closed`,
-	// and on `payment.dispute_opened` when the first event Velox received
-	// was already the close.
-	ClosedAt   time.Time `json:"closed_at,omitempty"`
-	Currency   string    `json:"currency"`
-	CustomerId string    `json:"customer_id"`
-
-	// DisputeId The Velox dispute record (`InvoiceDispute.id`).
-	DisputeId     string    `json:"dispute_id"`
-	EvidenceDueBy time.Time `json:"evidence_due_by,omitempty"`
-	InvoiceId     string    `json:"invoice_id"`
-	InvoiceNumber string    `json:"invoice_number"`
-	OpenedAt      time.Time `json:"opened_at"`
-
-	// PaymentIntentId The disputed Stripe PaymentIntent.
-	PaymentIntentId string `json:"payment_intent_id"`
-	Reason          string `json:"reason,omitempty"`
-
-	// Status The dispute's status when the event was saved (see `InvoiceDispute.status`).
-	Status          string `json:"status"`
-	StripeChargeId  string `json:"stripe_charge_id,omitempty"`
-	StripeDisputeId string `json:"stripe_dispute_id"`
+	// Invoice A Velox invoice. Returned from create, finalize, void, list, get,
+	// rotate-public-token, and collect-payment endpoints.
+	Invoice Invoice `json:"invoice"`
 }
 
 // DocumentBillTo What an issued invoice or credit note prints about its buyer, copied
@@ -4297,19 +4307,20 @@ type DunningPolicy struct {
 	Enabled                 bool                                 `json:"enabled"`
 	FinalInvoiceAction      DunningPolicyFinalInvoiceAction      `json:"final_invoice_action"`
 	FinalSubscriptionAction DunningPolicyFinalSubscriptionAction `json:"final_subscription_action"`
-	GracePeriodDays         int                                  `json:"grace_period_days"`
 	Id                      string                               `json:"id"`
 
 	// IsDefault Customers without an assigned policy use the default.
-	IsDefault        bool     `json:"is_default"`
-	MaxRetryAttempts int      `json:"max_retry_attempts"`
-	Name             string   `json:"name"`
-	RetrySchedule    []string `json:"retry_schedule"`
+	IsDefault bool   `json:"is_default"`
+	Name      string `json:"name"`
+
+	// RetryDays Days to wait before each retry; the number of retries is its length.
+	RetryDays []int `json:"retry_days"`
 
 	// Seeded True for the "Default retries" policy the account was created
 	// with, until you edit it or make it the default. While it is
-	// true, the next enabled policy you create (by hand or from a
-	// recipe) becomes the default instead. Ignored in request bodies.
+	// true, the next enabled policy you create becomes the default
+	// instead. Set by the server: a request body that sends it is
+	// refused with 422.
 	Seeded    bool      `json:"seeded"`
 	TenantId  string    `json:"tenant_id,omitempty"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -4329,26 +4340,39 @@ type DunningPolicyInput struct {
 	// FinalInvoiceAction What happens to the invoice when retries run out.
 	FinalInvoiceAction DunningPolicyInputFinalInvoiceAction `json:"final_invoice_action,omitempty"`
 
-	// FinalSubscriptionAction What happens to the subscription when retries run out.
+	// FinalSubscriptionAction What happens to the subscription when retries run out. `pause`
+	// pauses collection and sends `subscription.collection_paused`
+	// with `triggered_by: dunning`. It does nothing if collection is
+	// already paused, the subscription is canceled, or the invoice
+	// was paid first. `cancel` cancels the subscription and sends
+	// `subscription.canceled` with `canceled_by: dunning`. It does
+	// nothing if the subscription is already canceled. If a scheduled
+	// cancel was already due, that cancel happens instead, and its
+	// event says `canceled_by: schedule`.
 	FinalSubscriptionAction DunningPolicyInputFinalSubscriptionAction `json:"final_subscription_action,omitempty"`
+	Name                    string                                    `json:"name,omitempty"`
 
-	// GracePeriodDays Days before the first retry. 0 or less means the default, 3.
-	GracePeriodDays int `json:"grace_period_days,omitempty"`
-
-	// MaxRetryAttempts 0 or less means the default, 3.
-	MaxRetryAttempts int    `json:"max_retry_attempts,omitempty"`
-	Name             string `json:"name,omitempty"`
-
-	// RetrySchedule Waits before retries 2 to N, as Go durations (h, m, s units; no
-	// days, so 3 days is "72h"). Needs at least
-	// `max_retry_attempts - 1` entries, each above zero.
-	RetrySchedule []string `json:"retry_schedule,omitempty"`
+	// RetryDays Days to wait before each retry. The first counts from the failed
+	// payment, or, with no card on file, from the collection that found
+	// none. Each later one counts from the retry before it: `[3, 4, 7]`
+	// retries on day 3, 7 and 14. The number of retries is the length
+	// of the list. A day is 24 hours. `retry_schedule`,
+	// `max_retry_attempts` and `grace_period_days` are refused.
+	RetryDays []int `json:"retry_days"`
 }
 
 // DunningPolicyInputFinalInvoiceAction What happens to the invoice when retries run out.
 type DunningPolicyInputFinalInvoiceAction string
 
-// DunningPolicyInputFinalSubscriptionAction What happens to the subscription when retries run out.
+// DunningPolicyInputFinalSubscriptionAction What happens to the subscription when retries run out. `pause`
+// pauses collection and sends `subscription.collection_paused`
+// with `triggered_by: dunning`. It does nothing if collection is
+// already paused, the subscription is canceled, or the invoice
+// was paid first. `cancel` cancels the subscription and sends
+// `subscription.canceled` with `canceled_by: dunning`. It does
+// nothing if the subscription is already canceled. If a scheduled
+// cancel was already due, that cancel happens instead, and its
+// event says `canceled_by: schedule`.
 type DunningPolicyInputFinalSubscriptionAction string
 
 // DunningPolicyListItem defines model for DunningPolicyListItem.
@@ -4359,19 +4383,20 @@ type DunningPolicyListItem struct {
 	Enabled                 bool                                         `json:"enabled"`
 	FinalInvoiceAction      DunningPolicyListItemFinalInvoiceAction      `json:"final_invoice_action"`
 	FinalSubscriptionAction DunningPolicyListItemFinalSubscriptionAction `json:"final_subscription_action"`
-	GracePeriodDays         int                                          `json:"grace_period_days"`
 	Id                      string                                       `json:"id"`
 
 	// IsDefault Customers without an assigned policy use the default.
-	IsDefault        bool     `json:"is_default"`
-	MaxRetryAttempts int      `json:"max_retry_attempts"`
-	Name             string   `json:"name"`
-	RetrySchedule    []string `json:"retry_schedule"`
+	IsDefault bool   `json:"is_default"`
+	Name      string `json:"name"`
+
+	// RetryDays Days to wait before each retry; the number of retries is its length.
+	RetryDays []int `json:"retry_days"`
 
 	// Seeded True for the "Default retries" policy the account was created
 	// with, until you edit it or make it the default. While it is
-	// true, the next enabled policy you create (by hand or from a
-	// recipe) becomes the default instead. Ignored in request bodies.
+	// true, the next enabled policy you create becomes the default
+	// instead. Set by the server: a request body that sends it is
+	// refused with 422.
 	Seeded    bool      `json:"seeded"`
 	TenantId  string    `json:"tenant_id,omitempty"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -4403,20 +4428,33 @@ type DunningRun struct {
 	// InvoiceNumber Filled in on list responses.
 	InvoiceNumber string    `json:"invoice_number,omitempty"`
 	LastAttemptAt time.Time `json:"last_attempt_at,omitempty"`
-	NextActionAt  time.Time `json:"next_action_at,omitempty"`
-	Paused        bool      `json:"paused"`
-	PolicyId      string    `json:"policy_id"`
-	Reason        string    `json:"reason,omitempty"`
+
+	// MaxRetryAttempts How many retries the run's policy makes: the length of its
+	// `retry_days`. Filled in on list responses.
+	// When `attempt_count` has reached it, no charge is retried:
+	// `next_action_at` is when the final action (pause, cancel or
+	// mark uncollectible) runs.
+	MaxRetryAttempts int       `json:"max_retry_attempts,omitempty"`
+	NextActionAt     time.Time `json:"next_action_at,omitempty"`
+	Paused           bool      `json:"paused"`
+	PolicyId         string    `json:"policy_id"`
+	Reason           string    `json:"reason,omitempty"`
 
 	// Resolution How the run ended, set when it is resolved. Exception:
 	// `action_failed` is set on a run that is still `active`. The
 	// final action (pause, cancel or mark uncollectible) failed and
 	// will be retried at `next_action_at`. `manually_resolved` appears
-	// only on older runs.
+	// only on older runs. `amount_below_minimum`: a charge on the
+	// invoice was refused by Stripe because the amount is below its
+	// minimum charge, so the run ended without its final action.
 	Resolution DunningRunResolution `json:"resolution,omitempty"`
 	ResolvedAt time.Time            `json:"resolved_at,omitempty"`
-	State      DunningRunState      `json:"state"`
-	TenantId   string               `json:"tenant_id,omitempty"`
+
+	// State `active`: retries are running. `escalated`: retries ran out
+	// (`resolution` is `retries_exhausted`). `resolved`: the run ended
+	// another way; see `resolution`.
+	State    DunningRunState `json:"state"`
+	TenantId string          `json:"tenant_id,omitempty"`
 
 	// TestClockId Filled in on list responses.
 	TestClockId string    `json:"test_clock_id,omitempty"`
@@ -4427,10 +4465,14 @@ type DunningRun struct {
 // `action_failed` is set on a run that is still `active`. The
 // final action (pause, cancel or mark uncollectible) failed and
 // will be retried at `next_action_at`. `manually_resolved` appears
-// only on older runs.
+// only on older runs. `amount_below_minimum`: a charge on the
+// invoice was refused by Stripe because the amount is below its
+// minimum charge, so the run ended without its final action.
 type DunningRunResolution string
 
-// DunningRunState defines model for DunningRun.State.
+// DunningRunState `active`: retries are running. `escalated`: retries ran out
+// (`resolution` is `retries_exhausted`). `resolved`: the run ended
+// another way; see `resolution`.
 type DunningRunState string
 
 // DunningRunDetail defines model for DunningRunDetail.
@@ -4480,21 +4522,26 @@ type DunningRunEventState string
 type DunningStats struct {
 	ActiveCount int `json:"active_count"`
 
-	// AtRiskByCurrency Amount due on active and escalated runs, one entry per currency.
-	// `currency` comes first, then the largest amount. Empty when no run
-	// is at risk.
+	// AtRiskByCurrency Amount due on active and escalated runs whose invoice is still
+	// open, one entry per currency. `currency` comes first, then the
+	// largest amount. Empty when no run is at risk.
 	AtRiskByCurrency []struct {
 		AmountCents int64  `json:"amount_cents"`
 		Currency    string `json:"currency"`
 	} `json:"at_risk_by_currency"`
 
-	// AtRiskCents Amount due on active and escalated runs, in `currency` only.
+	// AtRiskCents Amount due on active and escalated runs whose invoice is still open, in `currency` only. A voided or written-off invoice is not at risk.
 	AtRiskCents int64 `json:"at_risk_cents"`
 
 	// Currency The tenant's default currency.
 	Currency       string `json:"currency"`
 	EscalatedCount int    `json:"escalated_count"`
-	ResolvedCount  int    `json:"resolved_count"`
+
+	// RecoveredCount Resolved runs that a payment closed (`resolution` is `payment_recovered` and the invoice has `amount_paid_cents` above 0). A run closed by a credit note or customer credit that left nothing due is resolved, not recovered.
+	RecoveredCount int `json:"recovered_count"`
+
+	// ResolvedCount Resolved runs, whatever closed them (a payment, a void or a write-off).
+	ResolvedCount int `json:"resolved_count"`
 }
 
 // Error defines model for Error.
@@ -4503,7 +4550,13 @@ type Error struct {
 		Code    string `json:"code,omitempty"`
 		Message string `json:"message,omitempty"`
 
-		// Param The request field the error is about. Sent only when the error names one.
+		// Param The request field the error is about. Sent only when the error
+		// names one. A request body may hold only the fields its
+		// operation lists, spelled and cased as listed: any other
+		// field, or one the server sets (such as `id`), is refused
+		// with 422 and `param` naming it. An operation with no request body lists no fields: send
+		// no body, `{}` or `null`. The Stripe and Postmark webhooks and
+		// the LiteLLM callback take their sender's body as it comes.
 		Param     string `json:"param,omitempty"`
 		RequestId string `json:"request_id,omitempty"`
 
@@ -4517,10 +4570,13 @@ type Error struct {
 	} `json:"error,omitempty"`
 }
 
-// HeldUsageGroup The usage rows still held for one external customer ID, meter key and reason.
+// HeldUsageGroup The usage rows still held for one external customer ID, event name and reason.
 type HeldUsageGroup struct {
 	// CustomerId The customer whose external ID now matches, or empty when none does yet.
 	CustomerId string `json:"customer_id"`
+
+	// EventName The `event_name` the rows carried.
+	EventName string `json:"event_name"`
 
 	// ExternalCustomerId The LiteLLM `user` value the rows carried.
 	ExternalCustomerId string    `json:"external_customer_id"`
@@ -4530,9 +4586,8 @@ type HeldUsageGroup struct {
 	// LastReceivedAt When Velox last received a row for this group.
 	LastReceivedAt time.Time `json:"last_received_at"`
 
-	// MeterExists Whether a meter with this key exists now.
-	MeterExists bool   `json:"meter_exists"`
-	MeterKey    string `json:"meter_key"`
+	// MeterExists Whether a meter with this `event_name` exists now.
+	MeterExists bool `json:"meter_exists"`
 
 	// Reason What was missing when the rows arrived.
 	Reason HeldUsageGroupReason `json:"reason"`
@@ -4545,36 +4600,56 @@ type HeldUsageGroup struct {
 // HeldUsageGroupReason What was missing when the rows arrived.
 type HeldUsageGroupReason string
 
-// HeldUsageReleaseResult defines model for HeldUsageReleaseResult.
+// HeldUsageReleaseResult The counts are what Velox found when the release wrote the rows, as
+// for `billing_status` (see `UsageBillingStatus`). The invoice is the
+// final answer.
 type HeldUsageReleaseResult struct {
 	// CustomerId The customer the rows were ingested for.
 	CustomerId string `json:"customer_id"`
 
 	// Deduplicated Rows that were already usage events under the same idempotency
-	// key (LiteLLM resent the call after the customer existed). Marked
-	// released, not written again.
+	// key (LiteLLM resent the call after the customer existed), and
+	// LiteLLM cache-write rows whose call is already billed with the
+	// writes inside its input row. Marked released, not written again.
 	Deduplicated int `json:"deduplicated"`
 
-	// InOpenPeriod Released rows inside an active subscription's current billing
-	// period whose meter the subscription's plan prices. That period's
-	// invoice counts them.
+	// InOpenPeriod Released rows in a billing period not invoiced yet that a price
+	// of its plan takes. Rows Velox does not check count here too:
+	// rows after the current period's end, while the subscription
+	// continues, and rows after a trial's end while the subscription
+	// still trials. Rows of a sum or count meter stamped before the end
+	// of this period's spend-threshold invoice are not counted here:
+	// see `pending_threshold_invoice` and `outside_open_period`.
 	InOpenPeriod int `json:"in_open_period"`
 
 	// MoreToRelease Rows for this external ID still held only because one release
 	// takes at most 5,000 rows. Release again to take them.
 	MoreToRelease int `json:"more_to_release"`
 
-	// NotOnPlan Released rows inside an active subscription's current billing
-	// period whose meter no plan on that subscription prices. No
-	// invoice charges them.
+	// NoPrice Released rows in a billing period not invoiced yet whose plan
+	// prices the meter, but no price of that plan takes them (their
+	// dimensions do not include any price's `dimension_match`).
+	NoPrice int `json:"no_price"`
+
+	// NotOnPlan Released rows in a billing period not invoiced yet whose plan
+	// does not price the meter.
 	NotOnPlan int `json:"not_on_plan"`
 
-	// OutsideOpenPeriod Released rows outside every current billing period: before the
-	// subscription started, or in an earlier period. A subscription
-	// invoice does not count them unless that period's invoice has not
-	// been built yet. Bill them with a one-off invoice if they should
-	// be charged.
+	// OutsideOpenPeriod Released rows outside every subscription's time (before it
+	// started, in a free trial, after it ended or after its scheduled
+	// cancel, or in another, ended subscription's time), and rows in a
+	// period already invoiced. Also rows of a sum or count meter
+	// stamped before the end of this period's paid spend-threshold
+	// invoice. Bill them with a one-off invoice if they should be
+	// charged.
 	OutsideOpenPeriod int `json:"outside_open_period"`
+
+	// PendingThresholdInvoice Released rows of a sum or count meter stamped before the end of
+	// this period's spend-threshold invoice, while that invoice is not
+	// paid. The period's invoice counts them only if that invoice is
+	// voided before the period closes. A written-off invoice can still
+	// be voided.
+	PendingThresholdInvoice int `json:"pending_threshold_invoice"`
 
 	// Released Rows newly written as usage events.
 	Released int `json:"released"`
@@ -4663,33 +4738,39 @@ type HostedInvoice struct {
 		Currency    string `json:"currency"`
 		Description string `json:"description"`
 		MeterUnit   string `json:"meter_unit,omitempty"`
-		Quantity    int64  `json:"quantity"`
 
-		// QuantityDecimal The exact quantity when it has a fraction, for example `1.5`. Left out for whole quantities.
-		QuantityDecimal  string `json:"quantity_decimal,omitempty"`
+		// Quantity The exact quantity as a decimal string, for example `3` or `1.5`.
+		Quantity         string `json:"quantity"`
 		TaxAmountCents   int64  `json:"tax_amount_cents,omitempty"`
 		TotalAmountCents int64  `json:"total_amount_cents"`
-		UnitAmountCents  int64  `json:"unit_amount_cents"`
 
 		// UnitAmountDecimal The unit price in cents at full precision, for example `0.3` for $0.003.
-		UnitAmountDecimal string `json:"unit_amount_decimal,omitempty"`
+		UnitAmountDecimal string `json:"unit_amount_decimal"`
 	} `json:"line_items"`
 
 	// Livemode False for a test-mode invoice. The page shows a test-mode banner.
 	Livemode bool `json:"livemode"`
 
 	// PayEnabled True when the customer can pay online now: the invoice is
-	// finalized, something is owed, no payment is in progress, and the
-	// seller has Stripe connected for the invoice's mode.
+	// finalized, something is owed, no payment is in progress, the
+	// seller has Stripe connected for the invoice's mode, and Stripe's
+	// latest answer for the amount was not that it is below its
+	// minimum charge.
 	PayEnabled bool `json:"pay_enabled"`
 
-	// PayUnavailableReason Sent only when money is owed but the seller has no payment
-	// provider connected for this mode.
+	// PayUnavailableReason Sent only when money is owed but can't be paid online:
+	// `online_payment_unavailable` when the seller has no payment
+	// provider connected for this mode, `amount_below_minimum` when
+	// Stripe's latest answer refused the amount as below its minimum
+	// charge.
 	PayUnavailableReason HostedInvoicePayUnavailableReason `json:"pay_unavailable_reason,omitempty"`
 }
 
-// HostedInvoicePayUnavailableReason Sent only when money is owed but the seller has no payment
-// provider connected for this mode.
+// HostedInvoicePayUnavailableReason Sent only when money is owed but can't be paid online:
+// `online_payment_unavailable` when the seller has no payment
+// provider connected for this mode, `amount_below_minimum` when
+// Stripe's latest answer refused the amount as below its minimum
+// charge.
 type HostedInvoicePayUnavailableReason string
 
 // Invoice A Velox invoice. Returned from create, finalize, void, list, get,
@@ -4763,12 +4844,20 @@ type Invoice struct {
 	NoPmNotifiedAt time.Time `json:"no_pm_notified_at,omitempty"`
 	PaidAt         time.Time `json:"paid_at,omitempty"`
 
+	// PaidOutOfBand True when the payment was recorded as made outside Velox, such as
+	// a bank transfer or cheque (`POST /v1/invoices/{id}/record-payment`,
+	// or a payment recovery run resolved as `payment_recovered`). Such
+	// an invoice has no `stripe_payment_intent_id`, so there is no card
+	// to refund.
+	PaidOutOfBand bool `json:"paid_out_of_band,omitempty"`
+
 	// PaymentAnomalyCapturedCents The amount Stripe took in that unexpected payment.
 	PaymentAnomalyCapturedCents int64 `json:"payment_anomaly_captured_cents,omitempty"`
 
 	// PaymentAnomalyKind Set when a payment arrived that the invoice did not expect. The
 	// webhook event name of the cause: `payment.duplicate_charge`,
-	// `payment.amount_mismatch` or `payment.received_on_voided_invoice`.
+	// `payment.amount_mismatch`, `payment.currency_mismatch` or
+	// `payment.received_on_voided_invoice`.
 	// Only the latest one is kept.
 	PaymentAnomalyKind string `json:"payment_anomaly_kind,omitempty"`
 
@@ -4829,12 +4918,17 @@ type Invoice struct {
 	// nothing).
 	Status InvoiceStatus `json:"status"`
 
-	// StripeInvoiceId Source Stripe invoice id (`in_xxx`) for an invoice imported from
-	// a Stripe account. Currently always empty: the Stripe importer was
-	// removed (deferred until a design-partner cutover) and nothing
-	// writes this field today. The column and its unique index remain
-	// for a future importer. Empty for Velox-native invoices.
-	StripeInvoiceId       string `json:"stripe_invoice_id,omitempty"`
+	// StripeInvoiceId Source Stripe invoice id (`in_xxx`). Set only on invoices the
+	// Stripe importer wrote before it was removed on 2026-04-29.
+	// Empty on every other invoice.
+	StripeInvoiceId string `json:"stripe_invoice_id,omitempty"`
+
+	// StripePaymentIntentId The Stripe PaymentIntent of the card charge that paid the
+	// invoice, or of its last charge that is in progress or failed. It
+	// can be absent after a charge was sent: for example when the
+	// invoice was then paid without a card (by credits, with nothing
+	// due, or outside Velox: `paid_out_of_band`), or when Stripe
+	// refused the last charge as below its minimum.
 	StripePaymentIntentId string `json:"stripe_payment_intent_id,omitempty"`
 
 	// SubscriptionId Empty for one-off invoices not tied to a subscription.
@@ -4855,15 +4949,13 @@ type Invoice struct {
 	TaxCountry       string    `json:"tax_country,omitempty"`
 	TaxDeferredAt    time.Time `json:"tax_deferred_at,omitempty"`
 
-	// TaxErrorCode Typed taxonomy of `tax_pending_reason`. One of
-	// `customer_data_invalid`, `jurisdiction_unsupported`,
-	// `provider_outage`, `provider_auth`, `unknown`. Empty for
-	// invoices deferred before this column existed (migration
-	// 0067).
-	TaxErrorCode    string `json:"tax_error_code,omitempty"`
-	TaxExemptReason string `json:"tax_exempt_reason,omitempty"`
-	TaxId           string `json:"tax_id,omitempty"`
-	TaxName         string `json:"tax_name,omitempty"`
+	// TaxErrorCode Why tax could not be calculated, as a code. Set while
+	// `tax_status` is `pending`; `tax_pending_reason` has the
+	// detail.
+	TaxErrorCode    InvoiceTaxErrorCode `json:"tax_error_code,omitempty"`
+	TaxExemptReason string              `json:"tax_exempt_reason,omitempty"`
+	TaxId           string              `json:"tax_id,omitempty"`
+	TaxName         string              `json:"tax_name,omitempty"`
 
 	// TaxNextRetryAt The earliest time the background retry may calculate tax again,
 	// after a failed attempt. Absent when a retry may run now.
@@ -4884,11 +4976,10 @@ type Invoice struct {
 	// reversal is not confirmed.
 	TaxReversedAt time.Time `json:"tax_reversed_at,omitempty"`
 
-	// TaxStatus Whether tax has been successfully calculated. Happy path is `ok`.
-	// `pending` means a transient calculation failure is awaiting retry;
-	// `failed` means retries are exhausted (operator resolves manually).
-	// Pending/failed invoices are blocked from finalize so we never send
-	// a wrong tax amount.
+	// TaxStatus Whether tax has been calculated. `ok`: it has. `pending`: the
+	// calculation failed, and `tax_error_code` says why and whether
+	// Velox retries it. A pending invoice cannot be finalized, so a wrong
+	// tax amount is never sent.
 	TaxStatus InvoiceTaxStatus `json:"tax_status,omitempty"`
 
 	// TaxTransactionId Provider-side committed transaction reference, captured at
@@ -4900,7 +4991,14 @@ type Invoice struct {
 	// TenantId Owning tenant. Returned for diagnostic clarity but redundant
 	// with the API key (which already determines the tenant).
 	// Omitted when empty.
-	TenantId         string `json:"tenant_id,omitempty"`
+	TenantId string `json:"tenant_id,omitempty"`
+
+	// TestClockId The test clock this invoice's dates follow: the clock its customer
+	// is pinned to, for cycle and one-off invoices alike. Read from the
+	// customer on `GET /v1/invoices` and `GET /v1/invoices/{id}`; other
+	// responses may leave it out. Left out for a customer on wall-clock
+	// time, and always in live mode.
+	TestClockId      string `json:"test_clock_id,omitempty"`
 	TotalAmountCents int64  `json:"total_amount_cents"`
 
 	// UncollectibleAt When the invoice was marked uncollectible.
@@ -4908,6 +5006,11 @@ type Invoice struct {
 	UpdatedAt       time.Time `json:"updated_at"`
 	VoidedAt        time.Time `json:"voided_at,omitempty"`
 }
+
+// InvoiceTaxErrorCode Why tax could not be calculated, as a code. Set while
+// `tax_status` is `pending`; `tax_pending_reason` has the
+// detail.
+type InvoiceTaxErrorCode string
 
 // InvoiceBillingReason Mirrors Stripe's `invoice.billing_reason`. Classifies the trigger
 // that produced the invoice. Stamped at create time and never mutated.
@@ -4918,7 +5021,7 @@ type InvoiceCreateRequest struct {
 	BillingPeriodEnd   time.Time `json:"billing_period_end,omitempty"`
 	BillingPeriodStart time.Time `json:"billing_period_start,omitempty"`
 
-	// Currency ISO 4217 code. Defaults to the customer's billing currency, then the tenant default.
+	// Currency ISO 4217 code. Must be the customer's currency (see 409). Defaults to the billing-profile currency, then the live subscriptions' plan currency, then the tenant default.
 	Currency   string `json:"currency,omitempty"`
 	CustomerId string `json:"customer_id"`
 
@@ -5002,27 +5105,36 @@ type InvoiceLineItem struct {
 	// to the customer. May differ from the line price — discounted
 	// commits sell $10k of credits for $9k. add_on lines on manual
 	// invoices only, at most one per invoice. Absent on normal lines.
-	CommitGrantedCents int64                  `json:"commit_granted_cents,omitempty"`
-	CreatedAt          time.Time              `json:"created_at"`
-	Currency           string                 `json:"currency"`
-	Description        string                 `json:"description"`
-	Id                 string                 `json:"id"`
-	InvoiceId          string                 `json:"invoice_id"`
-	LineType           InvoiceLineType        `json:"line_type"`
-	Metadata           map[string]interface{} `json:"metadata,omitempty"`
-	MeterId            string                 `json:"meter_id,omitempty"`
+	CommitGrantedCents int64     `json:"commit_granted_cents,omitempty"`
+	CreatedAt          time.Time `json:"created_at"`
+	Currency           string    `json:"currency"`
+	Description        string    `json:"description"`
+
+	// DimensionMatch On a usage line, the labels its price takes. Absent for a price that takes every event, and on other lines.
+	DimensionMatch map[string]string `json:"dimension_match,omitempty"`
+	Id             string            `json:"id"`
+	InvoiceId      string            `json:"invoice_id"`
+
+	// LineType `discount` and `tax` appear only on lines added before 2026-10-22;
+	// a new line cannot use them.
+	LineType InvoiceLineType        `json:"line_type"`
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
+	MeterId  string                 `json:"meter_id,omitempty"`
 
 	// MeterUnit The meter's unit ("tokens", "seconds", …), stamped on usage lines at write time so invoice surfaces can apply the display-scale convention (token rates read "$3.00 / 1M tokens"). Empty on non-usage lines and on lines written before the 0173 backfill.
-	MeterUnit   string `json:"meter_unit,omitempty"`
-	PricingMode string `json:"pricing_mode,omitempty"`
-	Quantity    int64  `json:"quantity"`
+	MeterUnit string `json:"meter_unit,omitempty"`
 
-	// QuantityDecimal Exact (possibly fractional) usage quantity as a decimal string (e.g. "1.5"). The integer `quantity` is this truncated, kept for back-compat (Stripe quantity_decimal parity). "0" means none — use `quantity`. Line amounts stay whole cents.
-	QuantityDecimal     string `json:"quantity_decimal,omitempty"`
-	RatingRuleVersionId string `json:"rating_rule_version_id,omitempty"`
-	TaxAmountCents      int64  `json:"tax_amount_cents"`
-	TaxCode             string `json:"tax_code,omitempty"`
-	TaxJurisdiction     string `json:"tax_jurisdiction,omitempty"`
+	// PriceId On a usage line, the plan price that billed it. Absent on other lines.
+	PriceId string `json:"price_id,omitempty"`
+
+	// PricingMode On a usage line, the shape of its price: `per_unit`, `graduated` or `package`. Absent on other lines.
+	PricingMode string `json:"pricing_mode,omitempty"`
+
+	// Quantity The line's exact quantity as a decimal string, for example "3" or "1.5". Line amounts stay whole cents.
+	Quantity        string `json:"quantity"`
+	TaxAmountCents  int64  `json:"tax_amount_cents"`
+	TaxCode         string `json:"tax_code,omitempty"`
+	TaxJurisdiction string `json:"tax_jurisdiction,omitempty"`
 
 	// TaxRate Tax rate as a percent (18.50 = 18.50%), up to 4-decimal precision. ADR-042/043.
 	TaxRate float64 `json:"tax_rate"`
@@ -5039,10 +5151,9 @@ type InvoiceLineItem struct {
 	// TenantId Owning tenant. Omitted when empty.
 	TenantId         string `json:"tenant_id,omitempty"`
 	TotalAmountCents int64  `json:"total_amount_cents"`
-	UnitAmountCents  int64  `json:"unit_amount_cents"`
 
-	// UnitAmountDecimal Full-precision per-unit price in DECIMAL CENTS (e.g. "0.3" = $0.003 per unit), the Stripe unit_amount_decimal model. Derived on read as amount_cents ÷ quantity, so it reconciles with the rounded line amount and, unlike the whole-cent `unit_amount_cents`, never collapses a sub-cent rate to 0. Render with the decimal-aware rate formatter; line amounts/totals stay whole cents.
-	UnitAmountDecimal string `json:"unit_amount_decimal,omitempty"`
+	// UnitAmountDecimal The unit price in cents at full precision, for example "0.3" for $0.003. On a usage line priced `per_unit` it is that rate; on any other line it is amount_cents ÷ quantity. Line amounts and totals stay whole cents.
+	UnitAmountDecimal string `json:"unit_amount_decimal"`
 }
 
 // InvoiceLineItemInput A line to add to a draft invoice.
@@ -5069,7 +5180,8 @@ type InvoiceLineItemInput struct {
 // InvoiceLineItemInputLineType Defaults to `add_on`.
 type InvoiceLineItemInputLineType string
 
-// InvoiceLineType defines model for InvoiceLineType.
+// InvoiceLineType `discount` and `tax` appear only on lines added before 2026-10-22;
+// a new line cannot use them.
 type InvoiceLineType string
 
 // InvoicePaymentStatus Payment-attempt status. `unknown` marks a Stripe charge attempt that
@@ -5122,18 +5234,19 @@ type InvoicePreviewLine struct {
 	Currency    string `json:"currency"`
 	Description string `json:"description"`
 
-	// DimensionMatch For a meter with several pricing rules, the dimension values this line's rule matches.
-	DimensionMatch map[string]interface{}        `json:"dimension_match,omitempty"`
-	LineType       InvoicePreviewLineLineType    `json:"line_type"`
-	MeterId        string                        `json:"meter_id,omitempty"`
-	MeterUnit      string                        `json:"meter_unit,omitempty"`
-	PricingMode    InvoicePreviewLinePricingMode `json:"pricing_mode,omitempty"`
+	// DimensionMatch On a usage line, the labels its price takes. Absent for a price that takes every event.
+	DimensionMatch map[string]string          `json:"dimension_match,omitempty"`
+	LineType       InvoicePreviewLineLineType `json:"line_type"`
+	MeterId        string                     `json:"meter_id,omitempty"`
+	MeterUnit      string                     `json:"meter_unit,omitempty"`
+
+	// PriceId On a usage line, the plan price that priced it.
+	PriceId     string                        `json:"price_id,omitempty"`
+	PricingMode InvoicePreviewLinePricingMode `json:"pricing_mode,omitempty"`
 
 	// Quantity Exact quantity as a decimal string.
-	Quantity            string `json:"quantity"`
-	RatingRuleVersionId string `json:"rating_rule_version_id,omitempty"`
-	RuleKey             string `json:"rule_key,omitempty"`
-	UnitAmountCents     int64  `json:"unit_amount_cents"`
+	Quantity        string `json:"quantity"`
+	UnitAmountCents int64  `json:"unit_amount_cents"`
 }
 
 // InvoicePreviewLineLineType defines model for InvoicePreviewLine.LineType.
@@ -5154,11 +5267,10 @@ type InvoicePreviewTotal struct {
 // nothing).
 type InvoiceStatus string
 
-// InvoiceTaxStatus Whether tax has been successfully calculated. Happy path is `ok`.
-// `pending` means a transient calculation failure is awaiting retry;
-// `failed` means retries are exhausted (operator resolves manually).
-// Pending/failed invoices are blocked from finalize so we never send
-// a wrong tax amount.
+// InvoiceTaxStatus Whether tax has been calculated. `ok`: it has. `pending`: the
+// calculation failed, and `tax_error_code` says why and whether
+// Velox retries it. A pending invoice cannot be finalized, so a wrong
+// tax amount is never sent.
 type InvoiceTaxStatus string
 
 // InvoiceTimelineEvent defines model for InvoiceTimelineEvent.
@@ -5226,26 +5338,36 @@ type ItemChangeType string
 // LitellmSpendLog The fields of a LiteLLM `StandardLoggingPayload` that Velox reads.
 // Other fields are accepted and ignored.
 type LitellmSpendLog struct {
-	// CallType Only completion, acompletion, chat, chat.completion, embedding,
-	// aembedding, text_completion and atext_completion records produce
-	// usage. Others are skipped.
+	// CacheHit `true` when LiteLLM answered from its own response cache. The
+	// record is skipped and counted in `cache_hits`: the provider
+	// charged nothing.
+	CacheHit bool `json:"cache_hit,omitempty"`
+
+	// CallType A record bills on its token counts unless its call type is one
+	// Velox does not bill (images, audio, realtime, moderation,
+	// batches, files, A2A, response retrieval, ...); those are
+	// skipped, and a skipped record that carries tokens is logged.
 	CallType         string `json:"call_type,omitempty"`
 	CompletionTokens int64  `json:"completion_tokens,omitempty"`
 
 	// CostBreakdown The provider's own cost, in dollars. When present, each event's
-	// provider cost comes from its part (input, output or cache read)
-	// instead of the provider-costs table. A part that is missing or
-	// negative falls back to the table. `input_cost` includes cache
-	// reads, so the input event gets `input_cost` minus
-	// `cache_read_cost`. If there were cache reads but no
-	// `cache_read_cost`, the input and cache-read events use the
-	// provider-costs table.
+	// provider cost comes from its part (input, output, cache read or
+	// cache write) instead of the provider-costs table. A part that is
+	// missing or negative falls back to the table. `input_cost`
+	// includes cache reads and cache writes, so the input event gets
+	// `input_cost` minus `cache_read_cost` and `cache_creation_cost`.
+	// If there were cache reads but no `cache_read_cost`, or split-off
+	// cache writes but no `cache_creation_cost`, the input-side events
+	// use the provider-costs table. With 1-hour cache writes they
+	// always do: LiteLLM prices `cache_creation_cost` at the 5-minute
+	// rate.
 	CostBreakdown struct {
-		CacheReadCost float32 `json:"cache_read_cost,omitempty"`
-		InputCost     float32 `json:"input_cost,omitempty"`
-		OutputCost    float32 `json:"output_cost,omitempty"`
-		ToolUsageCost float32 `json:"tool_usage_cost,omitempty"`
-		TotalCost     float32 `json:"total_cost,omitempty"`
+		CacheCreationCost float32 `json:"cache_creation_cost,omitempty"`
+		CacheReadCost     float32 `json:"cache_read_cost,omitempty"`
+		InputCost         float32 `json:"input_cost,omitempty"`
+		OutputCost        float32 `json:"output_cost,omitempty"`
+		ToolUsageCost     float32 `json:"tool_usage_cost,omitempty"`
+		TotalCost         float32 `json:"total_cost,omitempty"`
 	} `json:"cost_breakdown,omitempty"`
 	CustomLlmProvider string `json:"custom_llm_provider,omitempty"`
 
@@ -5270,10 +5392,13 @@ type LitellmSpendLog struct {
 	ResponseCost float32 `json:"response_cost,omitempty"`
 
 	// StartTime Unix seconds. Event time when `endTime` is absent.
-	StartTime   float32 `json:"startTime,omitempty"`
-	TotalTokens int64   `json:"total_tokens,omitempty"`
+	StartTime float32 `json:"startTime,omitempty"`
+
+	// Status A `failure` record (a call the provider refused or that timed out) is skipped, whatever token counts it carries.
+	Status      string `json:"status,omitempty"`
+	TotalTokens int64  `json:"total_tokens,omitempty"`
 	Usage       struct {
-		// CacheCreationInputTokens Not billed on its own; billed as input only when included in prompt_tokens.
+		// CacheCreationInputTokens Cache-write tokens, included in prompt_tokens. Split into `cache_write_5m` and `cache_write_1h` by `prompt_tokens_details.cache_creation_token_details`.
 		CacheCreationInputTokens int64 `json:"cache_creation_input_tokens,omitempty"`
 		CacheReadInputTokens     int64 `json:"cache_read_input_tokens,omitempty"`
 		CompletionTokens         int64 `json:"completion_tokens,omitempty"`
@@ -5281,7 +5406,16 @@ type LitellmSpendLog struct {
 		// PromptTokens Includes cache-read tokens.
 		PromptTokens        int64 `json:"prompt_tokens,omitempty"`
 		PromptTokensDetails struct {
-			CachedTokens int64 `json:"cached_tokens,omitempty"`
+			// CacheCreationTokenDetails Anthropic's cache writes by cache lifetime. They become
+			// `cache_write_5m` and `cache_write_1h` events, taken out
+			// of `input`. Without this split, or when it does not add
+			// up to the cache-write count, the writes stay in `input`.
+			CacheCreationTokenDetails struct {
+				Ephemeral1hInputTokens int64 `json:"ephemeral_1h_input_tokens,omitempty"`
+				Ephemeral5mInputTokens int64 `json:"ephemeral_5m_input_tokens,omitempty"`
+			} `json:"cache_creation_token_details,omitempty"`
+			CacheCreationTokens int64 `json:"cache_creation_tokens,omitempty"`
+			CachedTokens        int64 `json:"cached_tokens,omitempty"`
 		} `json:"prompt_tokens_details,omitempty"`
 		TotalTokens int64 `json:"total_tokens,omitempty"`
 	} `json:"usage,omitempty"`
@@ -5295,10 +5429,18 @@ type LitellmSpendResult struct {
 	// Accepted Usage events newly recorded.
 	Accepted int `json:"accepted"`
 
+	// AfterClose Of `accepted`, the events answered `billing_status:
+	// after_close`: their time was already invoiced. A replay never
+	// counts here.
+	AfterClose int `json:"after_close"`
+
+	// CacheHits The LiteLLM response-cache hits among `skipped`. LiteLLM's own spend counts them as $0.
+	CacheHits int `json:"cache_hits"`
+
 	// Deduplicated Usage events already recorded, or already held, by an earlier delivery.
 	Deduplicated int `json:"deduplicated"`
 
-	// Errors One entry per event or record that was not recorded. A record can appear more than once.
+	// Errors One entry per record that was not recorded. A record's events are recorded together or not at all.
 	Errors []struct {
 		Error string `json:"error"`
 
@@ -5311,29 +5453,45 @@ type LitellmSpendResult struct {
 	// `POST /v1/usage-events/held/release`.
 	Held int `json:"held"`
 
-	// Skipped Records that carry no billable tokens.
+	// NoPrice Of `accepted`, the events no price of the subscription's plan
+	// takes (`billing_status: no_price`), such as a model no price
+	// names. A replay never counts here.
+	NoPrice int `json:"no_price"`
+
+	// NotOnPlan Of `accepted`, the events whose meter the subscription's plan
+	// does not price (`billing_status: not_on_plan`). A replay never
+	// counts here.
+	NotOnPlan int `json:"not_on_plan"`
+
+	// OutsideSubscription Of `accepted`, the events whose time no subscription of the
+	// customer bills (`billing_status: outside_subscription`). A replay
+	// never counts here.
+	OutsideSubscription int `json:"outside_subscription"`
+
+	// Skipped Records that bill nothing - a call type with no tokens, zero tokens, a failed call (`status` `failure`) or a LiteLLM response-cache hit.
 	Skipped int `json:"skipped"`
 }
 
 // MarginReport defines model for MarginReport.
 type MarginReport struct {
 	ByModel []struct {
-		// Attributed True only when a pricing rule pins this model — margin is never heuristically allocated.
-		Attributed bool  `json:"attributed"`
-		CostMicros int64 `json:"cost_micros"`
+		// Attributed True only when the price that billed the usage names this model — margin is never heuristically allocated.
+		Attributed bool `json:"attributed"`
+
+		// CostCents This model's stamped provider cost in US cents, as a decimal string.
+		CostCents string `json:"cost_cents"`
 
 		// MarginBps This model's (revenue − cost) / revenue in basis points, by the same formula as the report's margin_bps. Omitted whenever the report's margin_bps is omitted for currency or unresolved_events, and when the row is not attributed or has no provider cost of its own.
 		MarginBps    int64  `json:"margin_bps,omitempty"`
 		Model        string `json:"model"`
 		RevenueCents int64  `json:"revenue_cents,omitempty"`
 	} `json:"by_model"`
-	CacheWriteExcluded bool `json:"cache_write_excluded,omitempty"`
 
-	// CostCurrency Currency of cost_micros. Always USD.
+	// CostCents Total stamped provider cost in US cents, as a decimal string (e.g. "275.75").
+	CostCents string `json:"cost_cents"`
+
+	// CostCurrency Currency of cost_cents. Always USD.
 	CostCurrency string `json:"cost_currency"`
-
-	// CostMicros Total stamped provider cost, micro-dollars.
-	CostMicros int64 `json:"cost_micros"`
 
 	// CostRatesConfigured Whether the tenant has any provider cost rate. False with costed_events 0 means no rates are set up.
 	CostRatesConfigured bool `json:"cost_rates_configured"`
@@ -5346,7 +5504,7 @@ type MarginReport struct {
 	// MarginBps (revenue − cost) / revenue in basis points. Omitted when revenue is 0, when revenue_currency is not cost_currency, when costed_events is 0 (no provider cost known), or when unresolved_events is above 0 (part of the cost unknown, so the margin would read too high).
 	MarginBps int64 `json:"margin_bps,omitempty"`
 
-	// RevenueCents Total rated usage revenue in the window.
+	// RevenueCents Total rated usage revenue in the window, an estimate at each subscription's current prices. Only active and trialing subscriptions are counted.
 	RevenueCents int64 `json:"revenue_cents"`
 
 	// RevenueCurrency Currency of revenue_cents (the customer's price rules). Omitted when the window's revenue spans more than one currency or the customer has no priced meter.
@@ -5354,7 +5512,7 @@ type MarginReport struct {
 	To                       time.Time `json:"to"`
 	UnattributedRevenueCents int64     `json:"unattributed_revenue_cents"`
 
-	// UnresolvedEvents Token events with costable dims but no matching rate — add a rate to cost new events.
+	// UnresolvedEvents Token events with costable dims but no cost — no rate matched (add a rate to cost new events), or the cost, quantity × `unit_cost_cents`, was too large to record (about $9.2 trillion or more, either sign).
 	UnresolvedEvents int64 `json:"unresolved_events"`
 }
 
@@ -5380,39 +5538,34 @@ type MemberInvitationStatus string
 
 // Meter defines model for Meter.
 type Meter struct {
-	Aggregation         MeterAggregation `json:"aggregation,omitempty"`
-	CreatedAt           time.Time        `json:"created_at,omitempty"`
-	Id                  string           `json:"id,omitempty"`
-	Key                 string           `json:"key,omitempty"`
-	Name                string           `json:"name,omitempty"`
-	RatingRuleVersionId string           `json:"rating_rule_version_id,omitempty"`
-	TenantId            string           `json:"tenant_id,omitempty"`
-	Unit                string           `json:"unit,omitempty"`
-	UpdatedAt           time.Time        `json:"updated_at,omitempty"`
+	// Aggregation How the meter rolls its events into one quantity per billing
+	// period. Every price of the meter bills under it. `last`
+	// is the latest event by timestamp, then by id. Fixed once the
+	// meter has a usage event (see `has_usage`).
+	Aggregation MeterAggregation `json:"aggregation,omitempty"`
+	CreatedAt   time.Time        `json:"created_at,omitempty"`
+
+	// EventName The `event_name` usage events send for this meter.
+	EventName string `json:"event_name,omitempty"`
+
+	// HasUsage Whether the meter has usage events. Once it has, its
+	// `aggregation` cannot change. Held usage for its `event_name`
+	// does not count until it is released. Returned when you create,
+	// get or update one meter; the meter list leaves it out. A create
+	// or update that succeeded leaves it out if it could not be read.
+	HasUsage  bool      `json:"has_usage,omitempty"`
+	Id        string    `json:"id,omitempty"`
+	Name      string    `json:"name,omitempty"`
+	TenantId  string    `json:"tenant_id,omitempty"`
+	Unit      string    `json:"unit,omitempty"`
+	UpdatedAt time.Time `json:"updated_at,omitempty"`
 }
 
-// MeterAggregation defines model for Meter.Aggregation.
+// MeterAggregation How the meter rolls its events into one quantity per billing
+// period. Every price of the meter bills under it. `last`
+// is the latest event by timestamp, then by id. Fixed once the
+// meter has a usage event (see `has_usage`).
 type MeterAggregation string
-
-// MeterPricingRule defines model for MeterPricingRule.
-type MeterPricingRule struct {
-	AggregationMode MeterPricingRuleAggregationMode `json:"aggregation_mode"`
-	CreatedAt       time.Time                       `json:"created_at"`
-
-	// DimensionMatch Dimensions an event must have for this rule to bill it. `{}` matches every event.
-	DimensionMatch map[string]interface{} `json:"dimension_match"`
-	Id             string                 `json:"id"`
-	MeterId        string                 `json:"meter_id"`
-
-	// Priority Rules are tried highest first.
-	Priority            int       `json:"priority"`
-	RatingRuleVersionId string    `json:"rating_rule_version_id"`
-	TenantId            string    `json:"tenant_id,omitempty"`
-	UpdatedAt           time.Time `json:"updated_at"`
-}
-
-// MeterPricingRuleAggregationMode defines model for MeterPricingRule.AggregationMode.
-type MeterPricingRuleAggregationMode string
 
 // PaymentMethod defines model for PaymentMethod.
 type PaymentMethod struct {
@@ -5421,6 +5574,7 @@ type PaymentMethod struct {
 	CardExpYear  int       `json:"card_exp_year,omitempty"`
 	CardLast4    string    `json:"card_last4,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
+	CustomerId   string    `json:"customer_id"`
 	Id           string    `json:"id"`
 	IsDefault    bool      `json:"is_default"`
 	Type         string    `json:"type"`
@@ -5431,10 +5585,11 @@ type Plan struct {
 	BaseAmountCents int64 `json:"base_amount_cents,omitempty"`
 
 	// BaseBillTiming When the recurring base fee is invoiced relative to the period it covers.
-	// in_arrears (default): base + usage billed at period end.
+	// in_arrears: base + usage billed at period end.
 	// in_advance: base billed at period start (day 1 on create; cycle-close invoice
 	// carries upcoming period's base + elapsed period's usage). Usage lines are
-	// always arrears regardless of this flag. See ADR-031.
+	// always arrears regardless of this field. A plan with no base fee is
+	// in_arrears. See ADR-031.
 	BaseBillTiming  PlanBaseBillTiming  `json:"base_bill_timing,omitempty"`
 	BillingInterval PlanBillingInterval `json:"billing_interval,omitempty"`
 	Code            string              `json:"code,omitempty"`
@@ -5442,9 +5597,12 @@ type Plan struct {
 	Currency        string              `json:"currency,omitempty"`
 	Description     string              `json:"description,omitempty"`
 	Id              string              `json:"id,omitempty"`
-	MeterIds        []string            `json:"meter_ids,omitempty"`
 	Name            string              `json:"name,omitempty"`
-	Status          PlanStatus          `json:"status,omitempty"`
+
+	// Prices The plan's usage prices from now on. A plan's meters are the
+	// meters it has a price for.
+	Prices []PlanPrice `json:"prices,omitempty"`
+	Status PlanStatus  `json:"status,omitempty"`
 
 	// TaxCode Stripe tax code for this plan. Absent means the tenant's `default_product_tax_code`.
 	TaxCode   string    `json:"tax_code,omitempty"`
@@ -5453,10 +5611,11 @@ type Plan struct {
 }
 
 // PlanBaseBillTiming When the recurring base fee is invoiced relative to the period it covers.
-// in_arrears (default): base + usage billed at period end.
+// in_arrears: base + usage billed at period end.
 // in_advance: base billed at period start (day 1 on create; cycle-close invoice
 // carries upcoming period's base + elapsed period's usage). Usage lines are
-// always arrears regardless of this flag. See ADR-031.
+// always arrears regardless of this field. A plan with no base fee is
+// in_arrears. See ADR-031.
 type PlanBaseBillTiming string
 
 // PlanBillingInterval defines model for Plan.BillingInterval.
@@ -5465,23 +5624,225 @@ type PlanBillingInterval string
 // PlanStatus defines model for Plan.Status.
 type PlanStatus string
 
+// PlanDetail defines model for PlanDetail.
+type PlanDetail struct {
+	BaseAmountCents int64 `json:"base_amount_cents,omitempty"`
+
+	// BaseBillTiming When the recurring base fee is invoiced relative to the period it covers.
+	// in_arrears: base + usage billed at period end.
+	// in_advance: base billed at period start (day 1 on create; cycle-close invoice
+	// carries upcoming period's base + elapsed period's usage). Usage lines are
+	// always arrears regardless of this field. A plan with no base fee is
+	// in_arrears. See ADR-031.
+	BaseBillTiming  PlanDetailBaseBillTiming  `json:"base_bill_timing,omitempty"`
+	BillingInterval PlanDetailBillingInterval `json:"billing_interval,omitempty"`
+	Code            string                    `json:"code,omitempty"`
+	CreatedAt       time.Time                 `json:"created_at,omitempty"`
+	Currency        string                    `json:"currency,omitempty"`
+	Description     string                    `json:"description,omitempty"`
+	Id              string                    `json:"id,omitempty"`
+
+	// LiveSubscriptionCount Subscriptions on this plan that are not canceled. While it
+	// is above 0, `base_amount_cents` cannot change (see Update
+	// plan).
+	LiveSubscriptionCount int    `json:"live_subscription_count"`
+	Name                  string `json:"name,omitempty"`
+
+	// Prices The plan's usage prices from now on. A plan's meters are the
+	// meters it has a price for.
+	Prices []PlanPrice      `json:"prices"`
+	Status PlanDetailStatus `json:"status,omitempty"`
+
+	// TaxCode Stripe tax code for this plan. Absent means the tenant's `default_product_tax_code`.
+	TaxCode   string    `json:"tax_code,omitempty"`
+	TenantId  string    `json:"tenant_id,omitempty"`
+	UpdatedAt time.Time `json:"updated_at,omitempty"`
+
+	// Used Whether a subscription has ever used the plan (canceled ones
+	// and scheduled plan changes included). On a plan no one has
+	// used, a price change applies at once; on a used plan, from
+	// each subscriber's next billing period, and from the join for
+	// a subscriber who first joins the plan in a period after it.
+	Used bool `json:"used"`
+}
+
+// PlanDetailBaseBillTiming When the recurring base fee is invoiced relative to the period it covers.
+// in_arrears: base + usage billed at period end.
+// in_advance: base billed at period start (day 1 on create; cycle-close invoice
+// carries upcoming period's base + elapsed period's usage). Usage lines are
+// always arrears regardless of this field. A plan with no base fee is
+// in_arrears. See ADR-031.
+type PlanDetailBaseBillTiming string
+
+// PlanDetailBillingInterval defines model for PlanDetail.BillingInterval.
+type PlanDetailBillingInterval string
+
+// PlanDetailStatus defines model for PlanDetail.Status.
+type PlanDetailStatus string
+
+// PlanPrice One usage price of a plan: a meter, the events it takes
+// (`dimension_match`) and its rate. The price takes the plan's
+// currency. Its id stays the same when its rate changes; its meter
+// and `dimension_match` are its identity and never change.
+type PlanPrice struct {
+	CreatedAt time.Time `json:"created_at"`
+
+	// DimensionMatch The labels an event must carry for this price to take it, for
+	// example `{"model": "claude-opus-4.5", "token_type": "input"}`.
+	// `{}` takes every event of the meter. Of the prices whose labels
+	// an event carries, the one with the most labels takes it.
+	DimensionMatch map[string]string `json:"dimension_match"`
+	Id             string            `json:"id"`
+	MeterId        string            `json:"meter_id"`
+
+	// Mode As on PriceShape.
+	Mode PlanPriceMode `json:"mode"`
+
+	// PackageAmountCents Price of one package in cents, as a decimal string.
+	PackageAmountCents string `json:"package_amount_cents,omitempty"`
+	PackageSize        int64  `json:"package_size,omitempty"`
+	PlanId             string `json:"plan_id"`
+
+	// Tiers Empty (`[]`) unless `mode` is `graduated`.
+	Tiers []PriceTier `json:"tiers,omitempty"`
+
+	// UnitAmountCents Price per unit in cents, as a decimal string.
+	UnitAmountCents string `json:"unit_amount_cents,omitempty"`
+
+	// UpdatedAt When the content shown was saved.
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// PlanPriceMode As on PriceShape.
+type PlanPriceMode string
+
+// PriceInput defines model for PriceInput.
+type PriceInput struct {
+	// DimensionMatch The labels an event must carry for the price to take it.
+	// Values are strings of 1 to 100 characters, keys too; at
+	// most 16 labels. Omitted or `{}` takes every event of the
+	// meter. Two prices of one plan and meter that could both take
+	// one event with the same number of labels are refused (409
+	// `price_conflict`).
+	DimensionMatch map[string]string `json:"dimension_match,omitempty"`
+	MeterId        string            `json:"meter_id"`
+
+	// Mode `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one.
+	Mode PriceInputMode `json:"mode"`
+
+	// PackageAmountCents Price of one package in cents, as a decimal string (e.g. "0.2" with `package_size` 1000 = $0.002 per 1,000 units), with the limits of `unit_amount_cents`. Used when `mode` is `package`.
+	PackageAmountCents string `json:"package_amount_cents,omitempty"`
+
+	// PackageSize Used when `mode` is `package`. Must be above 0.
+	PackageSize int64 `json:"package_size,omitempty"`
+
+	// Tiers Used when `mode` is `graduated`. Each `up_to` is a whole number above the one before. The last tier has `up_to: null` (no upper bound), and only the last. Otherwise 422 with `param` `tiers`. A tier's rate takes the limits of `unit_amount_cents`; a refusal names `tiers[i].unit_amount_cents` (i counts from 0).
+	Tiers []PriceTier `json:"tiers,omitempty"`
+
+	// UnitAmountCents Price per unit in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units). Used when `mode` is `per_unit`. 0 or more, under 10^18, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. A value outside them is refused with 422 and `param` naming the field. Invoice line amounts round to whole cents.
+	UnitAmountCents string `json:"unit_amount_cents,omitempty"`
+}
+
+// PriceInputMode `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one.
+type PriceInputMode string
+
+// PriceShape How a price bills a quantity. Send only the mode's fields: a field the
+// mode does not use must be 0 or left out (`tiers`: `[]` or left out),
+// or the request is refused with 422 and `param` naming it.
+type PriceShape struct {
+	// Mode `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one.
+	Mode PriceShapeMode `json:"mode"`
+
+	// PackageAmountCents Price of one package in cents, as a decimal string (e.g. "0.2" with `package_size` 1000 = $0.002 per 1,000 units), with the limits of `unit_amount_cents`. Used when `mode` is `package`.
+	PackageAmountCents string `json:"package_amount_cents,omitempty"`
+
+	// PackageSize Used when `mode` is `package`. Must be above 0.
+	PackageSize int64 `json:"package_size,omitempty"`
+
+	// Tiers Used when `mode` is `graduated`. Each `up_to` is a whole number above the one before. The last tier has `up_to: null` (no upper bound), and only the last. Otherwise 422 with `param` `tiers`. A tier's rate takes the limits of `unit_amount_cents`; a refusal names `tiers[i].unit_amount_cents` (i counts from 0).
+	Tiers []PriceTier `json:"tiers,omitempty"`
+
+	// UnitAmountCents Price per unit in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units). Used when `mode` is `per_unit`. 0 or more, under 10^18, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. A value outside them is refused with 422 and `param` naming the field. Invoice line amounts round to whole cents.
+	UnitAmountCents string `json:"unit_amount_cents,omitempty"`
+}
+
+// PriceShapeMode `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one.
+type PriceShapeMode string
+
+// PriceTier defines model for PriceTier.
+type PriceTier struct {
+	// UnitAmountCents Price per unit in cents in this tier, as a decimal string.
+	UnitAmountCents string `json:"unit_amount_cents"`
+
+	// UpTo The tier's upper bound in whole units: the tier prices the quantity above the previous tier's bound, up to this one. `null` on the last tier, which has no upper bound. Only the last tier is `null`, and it must be.
+	UpTo int64 `json:"up_to"`
+}
+
+// PriceWrite defines model for PriceWrite.
+type PriceWrite struct {
+	CreatedAt time.Time `json:"created_at"`
+
+	// DimensionMatch The labels an event must carry for this price to take it, for
+	// example `{"model": "claude-opus-4.5", "token_type": "input"}`.
+	// `{}` takes every event of the meter. Of the prices whose labels
+	// an event carries, the one with the most labels takes it.
+	DimensionMatch map[string]string   `json:"dimension_match"`
+	Effective      PriceWriteEffective `json:"effective"`
+
+	// EndedOverrides On a removal, the customer overrides of the price it ended.
+	// Each ends when the removal takes effect for its customer.
+	EndedOverrides []struct {
+		CustomerId string `json:"customer_id"`
+		Id         string `json:"id"`
+	} `json:"ended_overrides,omitempty"`
+	Id      string `json:"id"`
+	MeterId string `json:"meter_id"`
+
+	// Mode As on PriceShape.
+	Mode PriceWriteMode `json:"mode"`
+
+	// PackageAmountCents Price of one package in cents, as a decimal string.
+	PackageAmountCents string `json:"package_amount_cents,omitempty"`
+	PackageSize        int64  `json:"package_size,omitempty"`
+	PlanId             string `json:"plan_id"`
+
+	// Removed True on the answer to a removal.
+	Removed bool `json:"removed,omitempty"`
+
+	// Tiers Empty (`[]`) unless `mode` is `graduated`.
+	Tiers []PriceTier `json:"tiers,omitempty"`
+
+	// UnitAmountCents Price per unit in cents, as a decimal string.
+	UnitAmountCents string `json:"unit_amount_cents,omitempty"`
+
+	// UpdatedAt When the content shown was saved.
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// PriceWriteEffective defines model for PriceWrite.Effective.
+type PriceWriteEffective string
+
+// PriceWriteMode As on PriceShape.
+type PriceWriteMode string
+
 // ProviderCostRate defines model for ProviderCostRate.
 type ProviderCostRate struct {
-	// CostPerToken Decimal dollars per token.
-	CostPerToken string    `json:"cost_per_token"`
-	CreatedAt    time.Time `json:"created_at,omitempty"`
+	CreatedAt time.Time `json:"created_at,omitempty"`
 
-	// Currency Always USD. Cost and margin count every rate in dollars.
+	// Currency Always USD. Cost and margin count every rate in US cents.
 	Currency  ProviderCostRateCurrency `json:"currency"`
 	Id        string                   `json:"id"`
 	Model     string                   `json:"model"`
 	Provider  string                   `json:"provider"`
 	TenantId  string                   `json:"tenant_id,omitempty"`
 	TokenType string                   `json:"token_type"`
-	UpdatedAt time.Time                `json:"updated_at,omitempty"`
+
+	// UnitCostCents US cents per token, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 tokens).
+	UnitCostCents string    `json:"unit_cost_cents"`
+	UpdatedAt     time.Time `json:"updated_at,omitempty"`
 }
 
-// ProviderCostRateCurrency Always USD. Cost and margin count every rate in dollars.
+// ProviderCostRateCurrency Always USD. Cost and margin count every rate in US cents.
 type ProviderCostRateCurrency string
 
 // PublicPaymentUpdate What the payment-update page shows before the customer adds a card.
@@ -5506,38 +5867,6 @@ type PublicPaymentUpdate struct {
 	InvoiceStatus InvoiceStatus `json:"invoice_status"`
 }
 
-// RatingRule defines model for RatingRule.
-type RatingRule struct {
-	CreatedAt time.Time `json:"created_at,omitempty"`
-	Currency  string    `json:"currency,omitempty"`
-
-	// FlatAmountCents Per-unit rate in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units). Arbitrary precision; invoice line amounts and totals still round to whole cents.
-	FlatAmountCents string `json:"flat_amount_cents,omitempty"`
-	GraduatedTiers  []struct {
-		// UnitAmountCents Per-unit rate in cents, as a decimal string (see flat_amount_cents).
-		UnitAmountCents string `json:"unit_amount_cents,omitempty"`
-		UpTo            int    `json:"up_to,omitempty"`
-	} `json:"graduated_tiers,omitempty"`
-	Id             string                   `json:"id,omitempty"`
-	LifecycleState RatingRuleLifecycleState `json:"lifecycle_state,omitempty"`
-	Mode           RatingRuleMode           `json:"mode,omitempty"`
-	Name           string                   `json:"name,omitempty"`
-
-	// OverageUnitAmountCents Per-unit overage rate in cents, as a decimal string.
-	OverageUnitAmountCents string `json:"overage_unit_amount_cents,omitempty"`
-	PackageAmountCents     int64  `json:"package_amount_cents,omitempty"`
-	PackageSize            int64  `json:"package_size,omitempty"`
-	RuleKey                string `json:"rule_key,omitempty"`
-	TenantId               string `json:"tenant_id,omitempty"`
-	Version                int    `json:"version,omitempty"`
-}
-
-// RatingRuleLifecycleState defines model for RatingRule.LifecycleState.
-type RatingRuleLifecycleState string
-
-// RatingRuleMode defines model for RatingRule.Mode.
-type RatingRuleMode string
-
 // ReadinessReport defines model for ReadinessReport.
 type ReadinessReport struct {
 	// Checks One entry per check. `api` is `ok` or `draining`. `database` is
@@ -5551,79 +5880,47 @@ type ReadinessReport struct {
 // ReadinessReportStatus defines model for ReadinessReport.Status.
 type ReadinessReportStatus string
 
-// Recipe A recipe template as served by list/detail: the full parsed YAML (meters, rating rules, pricing rules, plans, optional dunning policy and webhook), not just display metadata.
+// Recipe A recipe template as served by list/detail: the full parsed YAML, its meters and its plans with their prices, not just display metadata. A recipe creates nothing else.
 type Recipe struct {
-	Description   string              `json:"description,omitempty"`
-	DunningPolicy RecipeDunningPolicy `json:"dunning_policy,omitempty"`
-	Key           string              `json:"key"`
-	Meters        []RecipeMeter       `json:"meters"`
-	Name          string              `json:"name"`
-	Overridable   []RecipeOverride    `json:"overridable"`
-	Plans         []RecipePlan        `json:"plans"`
-	PricingRules  []RecipePricingRule `json:"pricing_rules"`
-	RatingRules   []RecipeRatingRule  `json:"rating_rules"`
-	Summary       string              `json:"summary"`
-	Version       string              `json:"version"`
-	Webhook       RecipeWebhook       `json:"webhook,omitempty"`
+	Description string           `json:"description,omitempty"`
+	Key         string           `json:"key"`
+	Meters      []RecipeMeter    `json:"meters"`
+	Name        string           `json:"name"`
+	Overridable []RecipeOverride `json:"overridable"`
+	Plans       []RecipePlan     `json:"plans"`
+	Summary     string           `json:"summary"`
+	Version     string           `json:"version"`
 }
 
-// RecipeCreatedObjects Per-role map of entity IDs a recipe apply produced (including ADOPTED catalog objects — apply reconnects to an existing meter/rule graph rather than duplicating it, ADR-085). Every field is omitted when empty; clients must guard reads.
+// RecipeCreatedObjects Per-role map of entity IDs a recipe apply produced (including ADOPTED meters — apply reconnects to an existing meter rather than duplicating it, ADR-085). Every field is omitted when empty; clients must guard reads.
 type RecipeCreatedObjects struct {
-	DunningPolicyId   string   `json:"dunning_policy_id,omitempty"`
-	MeterIds          []string `json:"meter_ids,omitempty"`
-	PlanIds           []string `json:"plan_ids,omitempty"`
-	PricingRuleIds    []string `json:"pricing_rule_ids,omitempty"`
-	RatingRuleIds     []string `json:"rating_rule_ids,omitempty"`
-	WebhookEndpointId string   `json:"webhook_endpoint_id,omitempty"`
+	MeterIds []string `json:"meter_ids,omitempty"`
+	PlanIds  []string `json:"plan_ids,omitempty"`
+	PriceIds []string `json:"price_ids,omitempty"`
 }
 
 // RecipeCreates Per-role count of objects a recipe will produce when instantiated. Recipes create no product entity — there is no `products` count.
 type RecipeCreates struct {
-	DunningPolicies  int `json:"dunning_policies"`
-	Meters           int `json:"meters"`
-	Plans            int `json:"plans"`
-	PricingRules     int `json:"pricing_rules"`
-	RatingRules      int `json:"rating_rules"`
-	WebhookEndpoints int `json:"webhook_endpoints"`
+	Meters int `json:"meters"`
+	Plans  int `json:"plans"`
+
+	// Prices The prices the install puts on its plans.
+	Prices int `json:"prices"`
 }
 
 // RecipeDetail defines model for RecipeDetail.
 type RecipeDetail struct {
 	// Creates Per-role count of objects a recipe will produce when instantiated. Recipes create no product entity — there is no `products` count.
-	Creates       RecipeCreates       `json:"creates"`
-	Description   string              `json:"description,omitempty"`
-	DunningPolicy RecipeDunningPolicy `json:"dunning_policy,omitempty"`
-	Key           string              `json:"key"`
-	Meters        []RecipeMeter       `json:"meters"`
-	Name          string              `json:"name"`
-	Overridable   []RecipeOverride    `json:"overridable"`
-	Plans         []RecipePlan        `json:"plans"`
-	PricingRules  []RecipePricingRule `json:"pricing_rules"`
-	RatingRules   []RecipeRatingRule  `json:"rating_rules"`
-	Summary       string              `json:"summary"`
-	Version       string              `json:"version"`
-	Webhook       RecipeWebhook       `json:"webhook,omitempty"`
+	Creates     RecipeCreates    `json:"creates"`
+	Description string           `json:"description,omitempty"`
+	Key         string           `json:"key"`
+	Meters      []RecipeMeter    `json:"meters"`
+	Name        string           `json:"name"`
+	Overridable []RecipeOverride `json:"overridable"`
+	Plans       []RecipePlan     `json:"plans"`
+	Summary     string           `json:"summary"`
+	Version     string           `json:"version"`
 }
-
-// RecipeDunningPolicy defines model for RecipeDunningPolicy.
-type RecipeDunningPolicy struct {
-	// FinalInvoiceAction What exhausting all retries does to the unpaid invoice. `mark_uncollectible` writes it off as bad debt — the receivable closes, the invoice stays on the books for audit, and it remains settleable out of band. `none` leaves it finalized and due, which means it stays open until a human closes or collects it.
-	// Independent of `final_subscription_action` (ADR-112): the two were one enum until 2026-08-05, which made "cancel and write off" inexpressible.
-	FinalInvoiceAction RecipeDunningPolicyFinalInvoiceAction `json:"final_invoice_action"`
-
-	// FinalSubscriptionAction What exhausting all retries does to the subscription behind the unpaid invoice. `pause` pauses collection only (the cycle keeps drafting invoices); `cancel` cancels the subscription. No-op on a one-off invoice, which has no subscription.
-	FinalSubscriptionAction RecipeDunningPolicyFinalSubscriptionAction `json:"final_subscription_action"`
-	IntervalsHours          []int                                      `json:"intervals_hours"`
-	MaxRetries              int                                        `json:"max_retries"`
-	Name                    string                                     `json:"name"`
-}
-
-// RecipeDunningPolicyFinalInvoiceAction What exhausting all retries does to the unpaid invoice. `mark_uncollectible` writes it off as bad debt — the receivable closes, the invoice stays on the books for audit, and it remains settleable out of band. `none` leaves it finalized and due, which means it stays open until a human closes or collects it.
-// Independent of `final_subscription_action` (ADR-112): the two were one enum until 2026-08-05, which made "cancel and write off" inexpressible.
-type RecipeDunningPolicyFinalInvoiceAction string
-
-// RecipeDunningPolicyFinalSubscriptionAction What exhausting all retries does to the subscription behind the unpaid invoice. `pause` pauses collection only (the cycle keeps drafting invoices); `cancel` cancels the subscription. No-op on a one-off invoice, which has no subscription.
-type RecipeDunningPolicyFinalSubscriptionAction string
 
 // RecipeInstance The install badge: the record of a recipe being applied for a tenant (scoped per livemode since m0157). Field names are `recipe_key` / `recipe_version` — NOT `key`/`version`, which the recipe template itself uses.
 type RecipeInstance struct {
@@ -5632,7 +5929,7 @@ type RecipeInstance struct {
 	// CreatedBy Operator email or API key ID. Omitted when empty.
 	CreatedBy string `json:"created_by,omitempty"`
 
-	// CreatedObjects Per-role map of entity IDs a recipe apply produced (including ADOPTED catalog objects — apply reconnects to an existing meter/rule graph rather than duplicating it, ADR-085). Every field is omitted when empty; clients must guard reads.
+	// CreatedObjects Per-role map of entity IDs a recipe apply produced (including ADOPTED meters — apply reconnects to an existing meter rather than duplicating it, ADR-085). Every field is omitted when empty; clients must guard reads.
 	CreatedObjects RecipeCreatedObjects   `json:"created_objects"`
 	Id             string                 `json:"id"`
 	Overrides      map[string]interface{} `json:"overrides"`
@@ -5646,28 +5943,24 @@ type RecipeInstance struct {
 // RecipeListItem defines model for RecipeListItem.
 type RecipeListItem struct {
 	// Creates Per-role count of objects a recipe will produce when instantiated. Recipes create no product entity — there is no `products` count.
-	Creates       RecipeCreates       `json:"creates"`
-	Description   string              `json:"description,omitempty"`
-	DunningPolicy RecipeDunningPolicy `json:"dunning_policy,omitempty"`
+	Creates     RecipeCreates `json:"creates"`
+	Description string        `json:"description,omitempty"`
 
 	// Instantiated The install badge: the record of a recipe being applied for a tenant (scoped per livemode since m0157). Field names are `recipe_key` / `recipe_version` — NOT `key`/`version`, which the recipe template itself uses.
-	Instantiated RecipeInstance      `json:"instantiated,omitempty"`
-	Key          string              `json:"key"`
-	Meters       []RecipeMeter       `json:"meters"`
-	Name         string              `json:"name"`
-	Overridable  []RecipeOverride    `json:"overridable"`
-	Plans        []RecipePlan        `json:"plans"`
-	PricingRules []RecipePricingRule `json:"pricing_rules"`
-	RatingRules  []RecipeRatingRule  `json:"rating_rules"`
-	Summary      string              `json:"summary"`
-	Version      string              `json:"version"`
-	Webhook      RecipeWebhook       `json:"webhook,omitempty"`
+	Instantiated RecipeInstance   `json:"instantiated,omitempty"`
+	Key          string           `json:"key"`
+	Meters       []RecipeMeter    `json:"meters"`
+	Name         string           `json:"name"`
+	Overridable  []RecipeOverride `json:"overridable"`
+	Plans        []RecipePlan     `json:"plans"`
+	Summary      string           `json:"summary"`
+	Version      string           `json:"version"`
 }
 
 // RecipeMeter defines model for RecipeMeter.
 type RecipeMeter struct {
 	Aggregation string `json:"aggregation"`
-	Key         string `json:"key"`
+	EventName   string `json:"event_name"`
 	Name        string `json:"name"`
 	Unit        string `json:"unit"`
 }
@@ -5690,82 +5983,64 @@ type RecipeOverrideType string
 type RecipePlan struct {
 	BaseAmountCents int64 `json:"base_amount_cents"`
 
-	// BaseBillTiming Optional; empty defaults to in_arrears at plan creation (ADR-031).
+	// BaseBillTiming Optional when the base fee is 0; the plan is then in_arrears (ADR-031).
 	BaseBillTiming  RecipePlanBaseBillTiming  `json:"base_bill_timing,omitempty"`
 	BillingInterval RecipePlanBillingInterval `json:"billing_interval"`
 	Code            string                    `json:"code"`
 	Currency        string                    `json:"currency"`
-	MeterKeys       []string                  `json:"meter_keys"`
 	Name            string                    `json:"name"`
+
+	// Prices The plan's usage prices. Each takes the plan's currency.
+	Prices []RecipePrice `json:"prices"`
 }
 
-// RecipePlanBaseBillTiming Optional; empty defaults to in_arrears at plan creation (ADR-031).
+// RecipePlanBaseBillTiming Optional when the base fee is 0; the plan is then in_arrears (ADR-031).
 type RecipePlanBaseBillTiming string
 
 // RecipePlanBillingInterval defines model for RecipePlan.BillingInterval.
 type RecipePlanBillingInterval string
 
-// RecipePreviewObjects Would-be-created object graph, grouped by role. All arrays are always present (possibly empty); optional singletons (dunning, webhook) are emitted as 0-or-1-length arrays so clients iterate without null guards.
+// RecipePreviewObjects What an install creates: the meters, and each plan with its prices. Both arrays are always present. An install reuses a meter that already exists with the same `event_name` and aggregation.
 type RecipePreviewObjects struct {
-	DunningPolicies  []RecipeDunningPolicy `json:"dunning_policies"`
-	Meters           []RecipeMeter         `json:"meters"`
-	Plans            []RecipePlan          `json:"plans"`
-	PricingRules     []RecipePricingRule   `json:"pricing_rules"`
-	RatingRules      []RecipeRatingRule    `json:"rating_rules"`
-	WebhookEndpoints []RecipeWebhook       `json:"webhook_endpoints"`
+	Meters []RecipeMeter `json:"meters"`
+	Plans  []RecipePlan  `json:"plans"`
 }
 
 // RecipePreviewResult defines model for RecipePreviewResult.
 type RecipePreviewResult struct {
 	Key string `json:"key"`
 
-	// Objects Would-be-created object graph, grouped by role. All arrays are always present (possibly empty); optional singletons (dunning, webhook) are emitted as 0-or-1-length arrays so clients iterate without null guards.
+	// Objects What an install creates: the meters, and each plan with its prices. Both arrays are always present. An install reuses a meter that already exists with the same `event_name` and aggregation.
 	Objects  RecipePreviewObjects `json:"objects"`
 	Version  string               `json:"version"`
 	Warnings []string             `json:"warnings"`
 }
 
-// RecipePricingRule defines model for RecipePricingRule.
-type RecipePricingRule struct {
-	AggregationMode RecipePricingRuleAggregationMode `json:"aggregation_mode"`
-	DimensionMatch  map[string]interface{}           `json:"dimension_match"`
-	MeterKey        string                           `json:"meter_key"`
-	Priority        int                              `json:"priority"`
-	RatingRuleKey   string                           `json:"rating_rule_key"`
+// RecipePrice defines model for RecipePrice.
+type RecipePrice struct {
+	DimensionMatch map[string]string `json:"dimension_match"`
+
+	// Meter The `event_name` of the recipe meter the price is on.
+	Meter string `json:"meter"`
+
+	// Mode `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one.
+	Mode RecipePriceMode `json:"mode"`
+
+	// PackageAmountCents Price of one package in cents, as a decimal string (e.g. "0.2" with `package_size` 1000 = $0.002 per 1,000 units), with the limits of `unit_amount_cents`. Used when `mode` is `package`.
+	PackageAmountCents string `json:"package_amount_cents,omitempty"`
+
+	// PackageSize Used when `mode` is `package`. Must be above 0.
+	PackageSize int64 `json:"package_size,omitempty"`
+
+	// Tiers Used when `mode` is `graduated`. Each `up_to` is a whole number above the one before. The last tier has `up_to: null` (no upper bound), and only the last. Otherwise 422 with `param` `tiers`. A tier's rate takes the limits of `unit_amount_cents`; a refusal names `tiers[i].unit_amount_cents` (i counts from 0).
+	Tiers []PriceTier `json:"tiers,omitempty"`
+
+	// UnitAmountCents Price per unit in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units). Used when `mode` is `per_unit`. 0 or more, under 10^18, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. A value outside them is refused with 422 and `param` naming the field. Invoice line amounts round to whole cents.
+	UnitAmountCents string `json:"unit_amount_cents,omitempty"`
 }
 
-// RecipePricingRuleAggregationMode defines model for RecipePricingRule.AggregationMode.
-type RecipePricingRuleAggregationMode string
-
-// RecipeRatingRule defines model for RecipeRatingRule.
-type RecipeRatingRule struct {
-	Currency string `json:"currency"`
-
-	// FlatAmountCents Per-unit rate in cents, as a decimal string (see RatingRule.flat_amount_cents).
-	FlatAmountCents string `json:"flat_amount_cents"`
-	GraduatedTiers  []struct {
-		// UnitAmountCents Per-unit rate in cents, as a decimal string.
-		UnitAmountCents string `json:"unit_amount_cents,omitempty"`
-		UpTo            int    `json:"up_to,omitempty"`
-	} `json:"graduated_tiers,omitempty"`
-	Key  string               `json:"key"`
-	Mode RecipeRatingRuleMode `json:"mode"`
-	Name string               `json:"name,omitempty"`
-
-	// OverageUnitAmountCents Per-unit overage rate in cents, as a decimal string.
-	OverageUnitAmountCents string `json:"overage_unit_amount_cents"`
-	PackageAmountCents     int64  `json:"package_amount_cents,omitempty"`
-	PackageSize            int64  `json:"package_size,omitempty"`
-}
-
-// RecipeRatingRuleMode defines model for RecipeRatingRule.Mode.
-type RecipeRatingRuleMode string
-
-// RecipeWebhook defines model for RecipeWebhook.
-type RecipeWebhook struct {
-	Events         []string `json:"events"`
-	UrlPlaceholder string   `json:"url_placeholder"`
-}
+// RecipePriceMode `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one.
+type RecipePriceMode string
 
 // RecoveryWarning What an operator must know BEFORE recording an OFFLINE payment on a
 // written-off invoice (`status = uncollectible`) — a consequence that
@@ -5782,8 +6057,6 @@ type RecipeWebhook struct {
 // `tax_reversed_unrecoverable` — the invoice's tax was reversed with the
 // tax provider and cannot be re-reported automatically; the recorded
 // payment collects tax already reported as not collected.
-// `recovery_superseded` — the invoice was billed on a usage threshold
-// and that usage has since been re-billed; the payment double-collects.
 // `relief_not_reissued` — a credit the invoice was owed was never
 // applied, so `amount_due_cents` is higher than what is owed and the
 // customer may have overpaid.
@@ -5901,7 +6174,10 @@ type Subscription struct {
 	// Never set on a subscription attached to a test clock.
 	BillingFailure BillingFailure `json:"billing_failure,omitempty"`
 
-	// BillingThresholds Limits that make Velox invoice before the period ends.
+	// BillingThresholds Limits that make Velox invoice before the period ends. A threshold
+	// invoice bills the period's usage so far, and no base fee. The period
+	// keeps its dates, the base fee is billed as it would be with no
+	// threshold, and the period's next invoice bills the rest of the usage.
 	BillingThresholds SubscriptionBillingThresholds `json:"billing_thresholds,omitempty"`
 	BillingTime       SubscriptionBillingTime       `json:"billing_time"`
 
@@ -5951,14 +6227,14 @@ type SubscriptionBillingTime string
 // SubscriptionStatus defines model for Subscription.Status.
 type SubscriptionStatus string
 
-// SubscriptionBillingThresholds Limits that make Velox invoice before the period ends.
+// SubscriptionBillingThresholds Limits that make Velox invoice before the period ends. A threshold
+// invoice bills the period's usage so far, and no base fee. The period
+// keeps its dates, the base fee is billed as it would be with no
+// threshold, and the period's next invoice bills the rest of the usage.
 type SubscriptionBillingThresholds struct {
-	// AmountGte Running-subtotal threshold in cents. Absent when not set.
+	// AmountGte Usage threshold in cents, compared with the period's usage so far (the base fee is not counted). Absent when not set.
 	AmountGte      int64                       `json:"amount_gte,omitempty"`
 	ItemThresholds []SubscriptionItemThreshold `json:"item_thresholds"`
-
-	// ResetBillingCycle Whether a threshold invoice starts a new billing period.
-	ResetBillingCycle bool `json:"reset_billing_cycle"`
 }
 
 // SubscriptionItem One priced line of a subscription. It pairs a plan with a quantity.
@@ -6027,12 +6303,30 @@ type SubscriptionItemThreshold struct {
 type SubscriptionPauseCollection struct {
 	Behavior SubscriptionPauseCollectionBehavior `json:"behavior"`
 
-	// ResumesAt When collection resumes. Absent when the pause lasts until it is cleared.
+	// ResumesAt When collection resumes. Absent when the pause lasts until it is
+	// cleared. On a pause set by dunning, it is when Velox recorded the
+	// payment of the invoice the pause was set for.
 	ResumesAt time.Time `json:"resumes_at,omitempty"`
+
+	// SetBy Who paused collection. `operator`: you, through the API or the
+	// dashboard; the pause lasts until you resume it or until
+	// `resumes_at`. `dunning`: a dunning policy's `pause` final action.
+	// A dunning pause lifts by itself once the invoice whose dunning
+	// set it is paid, even if another invoice is still owed. Periods
+	// that ended during the pause keep their draft invoices.
+	SetBy SubscriptionPauseCollectionSetBy `json:"set_by,omitempty"`
 }
 
 // SubscriptionPauseCollectionBehavior defines model for SubscriptionPauseCollection.Behavior.
 type SubscriptionPauseCollectionBehavior string
+
+// SubscriptionPauseCollectionSetBy Who paused collection. `operator`: you, through the API or the
+// dashboard; the pause lasts until you resume it or until
+// `resumes_at`. `dunning`: a dunning policy's `pause` final action.
+// A dunning pause lifts by itself once the invoice whose dunning
+// set it is paid, even if another invoice is still owed. Periods
+// that ended during the pause keep their draft invoices.
+type SubscriptionPauseCollectionSetBy string
 
 // SubscriptionTimelineEvent defines model for SubscriptionTimelineEvent.
 type SubscriptionTimelineEvent struct {
@@ -6123,9 +6417,17 @@ type TenantSettings struct {
 	// CreatedAt Zero time when the tenant has never saved settings.
 	CreatedAt time.Time `json:"created_at"`
 
-	// CreditBalanceLowThresholdCents When a customer's credit balance drops below this amount, the
-	// `credit.balance_low` webhook fires. null turns it off.
+	// CreditBalanceLowThresholdCents When a customer's credit in one currency drops below this
+	// amount, in that currency's minor units, the `credit.balance_low`
+	// webhook fires: 1000 means $10.00 of USD credit and €10.00 of EUR
+	// credit. null turns it off.
 	CreditBalanceLowThresholdCents int64 `json:"credit_balance_low_threshold_cents,omitempty"`
+
+	// CreditNotePrefix Starts every credit note number, such as `CN-000001`. A change
+	// applies to new credit notes only. Issued notes keep their
+	// numbers. It must differ from `invoice_prefix`, or an invoice and
+	// a credit note would get the same number.
+	CreditNotePrefix string `json:"credit_note_prefix"`
 
 	// DefaultCurrency ISO 4217 code. Zero-decimal currencies (such as JPY) are not supported yet.
 	DefaultCurrency string `json:"default_currency"`
@@ -6214,9 +6516,17 @@ type TenantSettingsInput struct {
 	CompanyPostalCode string `json:"company_postal_code,omitempty"`
 	CompanyState      string `json:"company_state,omitempty"`
 
-	// CreditBalanceLowThresholdCents When a customer's credit balance drops below this amount, the
-	// `credit.balance_low` webhook fires. null turns it off.
+	// CreditBalanceLowThresholdCents When a customer's credit in one currency drops below this
+	// amount, in that currency's minor units, the `credit.balance_low`
+	// webhook fires: 1000 means $10.00 of USD credit and €10.00 of EUR
+	// credit. null turns it off.
 	CreditBalanceLowThresholdCents int64 `json:"credit_balance_low_threshold_cents,omitempty"`
+
+	// CreditNotePrefix Starts every credit note number, such as `CN-000001`. A change
+	// applies to new credit notes only. Issued notes keep their
+	// numbers. It must differ from `invoice_prefix`, or an invoice and
+	// a credit note would get the same number.
+	CreditNotePrefix string `json:"credit_note_prefix,omitempty"`
 
 	// DefaultCurrency ISO 4217 code. Zero-decimal currencies (such as JPY) are not supported yet.
 	DefaultCurrency string `json:"default_currency,omitempty"`
@@ -6335,14 +6645,9 @@ type UsageAggregate struct {
 
 	// ByMeter One row per meter, largest total first.
 	ByMeter []struct {
-		// Aggregation The aggregation billing uses for this meter's events (`sum`,
-		// `count`, `max`, `last`), read from its pricing rules and, for
-		// events no rule claims, the meter's own aggregation. `mixed`
-		// when those differ, or when a `max` or `last` meter is billed
-		// in more than one part (several rules, or a rule plus the
-		// events no rule claims), since peaks of the parts added up
-		// are not one peak: `value` is then the plain sum, which
-		// billing may not use. Empty when unknown.
+		// Aggregation The meter's aggregation (`sum`, `count`, `max`, `last`),
+		// which every price of the meter bills under. Empty when
+		// unknown.
 		Aggregation string `json:"aggregation"`
 
 		// Customers Distinct customers with events on this meter.
@@ -6378,9 +6683,82 @@ type UsageAggregate struct {
 	TotalUnits string `json:"total_units"`
 }
 
+// UsageBillingStatus What Velox found when the event arrived. It checked the event
+// against the customer's subscriptions, the plans and prices in force,
+// and the invoices already built at that moment. Sent only on the
+// answer that wrote the event; the event is stored all the same.
+//
+// A status that is present was true at that moment:
+//
+//   - `after_close`: the event's time is already invoiced. A
+//     spend-threshold invoice counts only once it is paid. Bill the
+//     event with a one-off invoice if it should be charged.
+//   - `not_on_plan`: a billing period not invoiced yet holds the event's
+//     time, but its plan has no price for this meter.
+//   - `outside_subscription`: no active or trialing subscription of the
+//     customer bills the event's time. For example, it has none, or the
+//     time is before one starts, in a free trial, or after one ends or
+//     its scheduled cancel.
+//   - `no_price`: the plan that bills the event's time prices this
+//     meter, but no price of that plan takes the event's `dimensions`.
+//     A price takes an event whose dimensions include all of its
+//     `dimension_match`, compared as strings: the number `1` is not the
+//     string `"1"`.
+//
+// No `billing_status` means Velox found no reason then. It is not a
+// promise that the event will be billed. Velox checks only the
+// customer's current billing periods: time after a period end whose
+// invoice is not built yet is not checked, nor is time after a trial's
+// end before Velox ends the trial. A later change can change the
+// outcome either way: a subscription created, activated or changed, a
+// trial extended, a scheduled cancel undone, or a price added. The
+// invoice is the final answer.
+//
+// Two cases can make a present status wrong: a price change whose
+// save began before a billing period started and finished after the
+// request read the prices, and a subscription change saved while the
+// request is in flight. Absent on a replay and on a read.
+type UsageBillingStatus string
+
 // UsageEvent defines model for UsageEvent.
 type UsageEvent struct {
-	CustomerId string `json:"customer_id"`
+	// BillingStatus What Velox found when the event arrived. It checked the event
+	// against the customer's subscriptions, the plans and prices in force,
+	// and the invoices already built at that moment. Sent only on the
+	// answer that wrote the event; the event is stored all the same.
+	//
+	// A status that is present was true at that moment:
+	//
+	// - `after_close`: the event's time is already invoiced. A
+	//   spend-threshold invoice counts only once it is paid. Bill the
+	//   event with a one-off invoice if it should be charged.
+	// - `not_on_plan`: a billing period not invoiced yet holds the event's
+	//   time, but its plan has no price for this meter.
+	// - `outside_subscription`: no active or trialing subscription of the
+	//   customer bills the event's time. For example, it has none, or the
+	//   time is before one starts, in a free trial, or after one ends or
+	//   its scheduled cancel.
+	// - `no_price`: the plan that bills the event's time prices this
+	//   meter, but no price of that plan takes the event's `dimensions`.
+	//   A price takes an event whose dimensions include all of its
+	//   `dimension_match`, compared as strings: the number `1` is not the
+	//   string `"1"`.
+	//
+	// No `billing_status` means Velox found no reason then. It is not a
+	// promise that the event will be billed. Velox checks only the
+	// customer's current billing periods: time after a period end whose
+	// invoice is not built yet is not checked, nor is time after a trial's
+	// end before Velox ends the trial. A later change can change the
+	// outcome either way: a subscription created, activated or changed, a
+	// trial extended, a scheduled cancel undone, or a price added. The
+	// invoice is the final answer.
+	//
+	// Two cases can make a present status wrong: a price change whose
+	// save began before a billing period started and finished after the
+	// request read the prices, and a subscription change saved while the
+	// request is in flight. Absent on a replay and on a read.
+	BillingStatus UsageBillingStatus `json:"billing_status,omitempty"`
+	CustomerId    string             `json:"customer_id"`
 
 	// Dimensions The dimension values sent with the event. Absent when none were sent.
 	Dimensions     map[string]interface{} `json:"dimensions,omitempty"`
@@ -6391,13 +6769,14 @@ type UsageEvent struct {
 	// Origin How the event arrived. `backfill` means `POST /v1/usage-events/backfill`.
 	Origin UsageEventOrigin `json:"origin,omitempty"`
 
-	// ProviderCostMicros What serving this event cost you at your provider, in millionths
-	// of a dollar, priced from your provider cost rates when the event
-	// arrived. Absent when no rate matched or the event has no costed
-	// dimensions.
-	ProviderCostMicros int64 `json:"provider_cost_micros,omitempty"`
+	// ProviderCostCents What serving this event cost you at your provider, in US cents as
+	// a decimal string (e.g. "0.45"), set when the event arrived: from
+	// your provider cost rates, or the cost the sender reported (see
+	// `provider_cost_source`). Absent when the cost is unknown or the
+	// event has no costed dimensions.
+	ProviderCostCents string `json:"provider_cost_cents,omitempty"`
 
-	// ProviderCostSource Where `provider_cost_micros` came from: `table` (your provider
+	// ProviderCostSource Where `provider_cost_cents` came from: `table` (your provider
 	// cost rates), `observed` (the cost the sender reported), or
 	// `not_applicable` (the meter has no costed dimensions). Absent when
 	// the cost is unknown.
@@ -6412,50 +6791,89 @@ type UsageEvent struct {
 // UsageEventOrigin How the event arrived. `backfill` means `POST /v1/usage-events/backfill`.
 type UsageEventOrigin string
 
-// UsageEventProviderCostSource Where `provider_cost_micros` came from: `table` (your provider
+// UsageEventProviderCostSource Where `provider_cost_cents` came from: `table` (your provider
 // cost rates), `observed` (the cost the sender reported), or
 // `not_applicable` (the meter has no costed dimensions). Absent when
 // the cost is unknown.
 type UsageEventProviderCostSource string
 
-// UsageSummary defines model for UsageSummary.
-type UsageSummary struct {
-	CustomerId string `json:"customer_id"`
+// UsageEventBatchEventResult defines model for UsageEventBatchEventResult.
+type UsageEventBatchEventResult struct {
+	// BillingStatus What Velox found when the event arrived. It checked the event
+	// against the customer's subscriptions, the plans and prices in force,
+	// and the invoices already built at that moment. Sent only on the
+	// answer that wrote the event; the event is stored all the same.
+	//
+	// A status that is present was true at that moment:
+	//
+	// - `after_close`: the event's time is already invoiced. A
+	//   spend-threshold invoice counts only once it is paid. Bill the
+	//   event with a one-off invoice if it should be charged.
+	// - `not_on_plan`: a billing period not invoiced yet holds the event's
+	//   time, but its plan has no price for this meter.
+	// - `outside_subscription`: no active or trialing subscription of the
+	//   customer bills the event's time. For example, it has none, or the
+	//   time is before one starts, in a free trial, or after one ends or
+	//   its scheduled cancel.
+	// - `no_price`: the plan that bills the event's time prices this
+	//   meter, but no price of that plan takes the event's `dimensions`.
+	//   A price takes an event whose dimensions include all of its
+	//   `dimension_match`, compared as strings: the number `1` is not the
+	//   string `"1"`.
+	//
+	// No `billing_status` means Velox found no reason then. It is not a
+	// promise that the event will be billed. Velox checks only the
+	// customer's current billing periods: time after a period end whose
+	// invoice is not built yet is not checked, nor is time after a trial's
+	// end before Velox ends the trial. A later change can change the
+	// outcome either way: a subscription created, activated or changed, a
+	// trial extended, a scheduled cancel undone, or a price added. The
+	// invoice is the final answer.
+	//
+	// Two cases can make a present status wrong: a price change whose
+	// save began before a billing period started and finished after the
+	// request read the prices, and a subscription change saved while the
+	// request is in flight. Absent on a replay and on a read.
+	BillingStatus UsageBillingStatus `json:"billing_status,omitempty"`
 
-	// Meters Meter id to the sum of its quantities, as a decimal string.
-	Meters      map[string]string `json:"meters"`
-	PeriodFrom  time.Time         `json:"period_from"`
-	PeriodTo    time.Time         `json:"period_to"`
-	TotalEvents int               `json:"total_events"`
+	// Status `ingested`: the batch wrote the event. `deduplicated`: an event
+	// with its `idempotency_key` was already stored, earlier or in
+	// this batch, so it was not stored again.
+	Status UsageEventBatchEventResultStatus `json:"status"`
 }
 
-// WebhookDelivery One delivery of an event to one endpoint, as the older events routes return it.
-type WebhookDelivery struct {
-	AttemptCount        int       `json:"attempt_count"`
-	CompletedAt         time.Time `json:"completed_at,omitempty"`
-	CreatedAt           time.Time `json:"created_at"`
-	EndpointDescription string    `json:"endpoint_description,omitempty"`
+// UsageEventBatchEventResultStatus `ingested`: the batch wrote the event. `deduplicated`: an event
+// with its `idempotency_key` was already stored, earlier or in
+// this batch, so it was not stored again.
+type UsageEventBatchEventResultStatus string
 
-	// EndpointUrl The endpoint's URL, kept after the endpoint is deleted.
-	EndpointUrl  string `json:"endpoint_url,omitempty"`
-	ErrorMessage string `json:"error_message,omitempty"`
+// UsageEventBatchResult defines model for UsageEventBatchResult.
+type UsageEventBatchResult struct {
+	// AfterClose Of `ingested`, the events answered `billing_status` `after_close`.
+	AfterClose int `json:"after_close"`
 
-	// HttpStatusCode HTTP status from the receiver. Left out when there was no response.
-	HttpStatusCode    int                   `json:"http_status_code,omitempty"`
-	Id                string                `json:"id"`
-	Livemode          bool                  `json:"livemode"`
-	NextRetryAt       time.Time             `json:"next_retry_at,omitempty"`
-	ResponseBody      string                `json:"response_body,omitempty"`
-	Status            WebhookDeliveryStatus `json:"status"`
-	TenantId          string                `json:"tenant_id,omitempty"`
-	WebhookEndpointId string                `json:"webhook_endpoint_id"`
+	// Deduplicated Idempotency replays — already ingested, counted as success.
+	Deduplicated int `json:"deduplicated"`
 
-	// WebhookEventId The event this delivery belongs to. For a replay's delivery, the replay's own id; the message it sent carries the original event's `id`.
-	WebhookEventId string `json:"webhook_event_id"`
+	// Ingested Newly written events.
+	Ingested int `json:"ingested"`
+
+	// NoPrice Of `ingested`, the events answered `billing_status` `no_price`.
+	NoPrice int `json:"no_price"`
+
+	// NotOnPlan Of `ingested`, the events answered `billing_status` `not_on_plan`.
+	NotOnPlan int `json:"not_on_plan"`
+
+	// OutsideSubscription Of `ingested`, the events answered `billing_status` `outside_subscription`.
+	OutsideSubscription int `json:"outside_subscription"`
+
+	// Results One entry per event, in the order sent: `results[i]` is the
+	// request's event `i`.
+	Results []UsageEventBatchEventResult `json:"results"`
+
+	// Total Events in the request.
+	Total int `json:"total"`
 }
-
-// WebhookDeliveryStatus defines model for WebhookDelivery.Status.
-type WebhookDeliveryStatus string
 
 // WebhookDeliveryReplayResult defines model for WebhookDeliveryReplayResult.
 type WebhookDeliveryReplayResult struct {
@@ -6548,7 +6966,11 @@ type WebhookEvent struct {
 	Id        string    `json:"id"`
 	Livemode  bool      `json:"livemode"`
 
-	// Payload The event's data. docs/webhooks.md lists what each event carries;
+	// Payload The event's data: the resource the event is about, under the
+	// resource's name (`invoice`, `subscription`, `customer`,
+	// `payment_method`, `dunning_run` or `credit_balance`), as the
+	// API returns it, and the few keys the event adds beside it.
+	// docs/webhooks.md lists what each event carries;
 	// `payment.dispute_opened` and `payment.dispute_closed` carry a
 	// `DisputeWebhookEventData`.
 	Payload map[string]interface{} `json:"payload"`
@@ -6614,7 +7036,10 @@ type WebhookSecretRotation struct {
 type WebhookStreamFrame struct {
 	CreatedAt time.Time `json:"created_at"`
 
-	// CustomerId The payload's `customer_id`, or empty.
+	// CustomerId The customer the event is about: the `customer_id` of the
+	// resource in `data` (its `id` for a `customer.*` event), or empty.
+	// For an event queued before `data` held the resource, its
+	// `data.customer_id`.
 	CustomerId      string    `json:"customer_id"`
 	EventId         string    `json:"event_id"`
 	EventType       string    `json:"event_type"`
@@ -6686,7 +7111,8 @@ type CreateApiKeyParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -6705,7 +7131,8 @@ type RotateApiKeyParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -6803,7 +7230,8 @@ type PostV1BillingRunParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -6818,31 +7246,6 @@ type BootstrapJSONBody struct {
 
 	// Token The value of `VELOX_BOOTSTRAP_TOKEN`. Or send it as a Bearer token.
 	Token string `json:"token,omitempty"`
-}
-
-// CreateCheckoutSetupSessionJSONBody defines parameters for CreateCheckoutSetupSession.
-type CreateCheckoutSetupSessionJSONBody struct {
-	AddressCity       string `json:"address_city,omitempty"`
-	AddressCountry    string `json:"address_country,omitempty"`
-	AddressLine1      string `json:"address_line1,omitempty"`
-	AddressPostalCode string `json:"address_postal_code,omitempty"`
-	AddressState      string `json:"address_state,omitempty"`
-	CustomerId        string `json:"customer_id"`
-	CustomerName      string `json:"customer_name,omitempty"`
-	Email             string `json:"email,omitempty"`
-
-	// ReturnUrl The page Stripe sends the customer back to. Always send it, because the default works only in local development.
-	ReturnUrl string `json:"return_url,omitempty"`
-}
-
-// CreateCheckoutSetupSessionParams defines parameters for CreateCheckoutSetupSession.
-type CreateCheckoutSetupSessionParams struct {
-	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
-	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // ListCreditNotesParams defines parameters for ListCreditNotes.
@@ -6933,7 +7336,8 @@ type PostV1CreditNotesParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -6946,7 +7350,8 @@ type IssueCreditNoteParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -6956,7 +7361,8 @@ type RetryCreditNoteRefundParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -6972,7 +7378,8 @@ type PostV1CreditNotesIdSendParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -6985,14 +7392,18 @@ type VoidCreditNoteParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // AdjustCreditsJSONBody defines parameters for AdjustCredits.
 type AdjustCreditsJSONBody struct {
 	// AmountCents Positive adds credit, negative removes it. Not zero.
-	AmountCents int64  `json:"amount_cents"`
+	AmountCents int64 `json:"amount_cents"`
+
+	// Currency ISO 4217 code of the balance to change. Case-insensitive; stored uppercase.
+	Currency    string `json:"currency"`
 	CustomerId  string `json:"customer_id"`
 	Description string `json:"description"`
 }
@@ -7003,13 +7414,19 @@ type AdjustCreditsParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // PostV1CreditsGrantJSONBody defines parameters for PostV1CreditsGrant.
 type PostV1CreditsGrantJSONBody struct {
-	AmountCents int64  `json:"amount_cents"`
+	AmountCents int64 `json:"amount_cents"`
+
+	// Currency ISO 4217 code of the credit. Required. Case-insensitive;
+	// stored uppercase. Zero-decimal currencies (such as JPY)
+	// are not supported yet.
+	Currency    string `json:"currency"`
 	CustomerId  string `json:"customer_id"`
 	Description string `json:"description,omitempty"`
 
@@ -7034,7 +7451,8 @@ type PostV1CreditsGrantParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7110,14 +7528,9 @@ type PostV1CustomersParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
-}
-
-// ListCustomerInvoicesParams defines parameters for ListCustomerInvoices.
-type ListCustomerInvoicesParams struct {
-	// Limit Default 25, at most 100.
-	Limit int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // SendCustomerPaymentSetupEmailJSONBody defines parameters for SendCustomerPaymentSetupEmail.
@@ -7133,7 +7546,8 @@ type SendCustomerPaymentSetupEmailParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7150,7 +7564,8 @@ type CreateCustomerPaymentSetupSessionParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7160,7 +7575,8 @@ type SetCustomerDefaultPaymentMethodParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7181,7 +7597,8 @@ type UpdateCustomerParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7194,7 +7611,8 @@ type UpsertCustomerBillingProfileParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7213,7 +7631,8 @@ type PostV1CustomersIdRotateCostDashboardTokenParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7232,7 +7651,8 @@ type CreateDunningPolicyParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7245,7 +7665,8 @@ type UpdateDunningPolicyParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7255,7 +7676,8 @@ type SetDefaultDunningPolicyParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7286,7 +7708,8 @@ type ResolveDunningRunParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7365,16 +7788,6 @@ type IngestLitellmSpendJSONBody struct {
 	union json.RawMessage
 }
 
-// IngestLitellmSpendParams defines parameters for IngestLitellmSpend.
-type IngestLitellmSpendParams struct {
-	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
-	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
-}
-
 // IngestLitellmSpendJSONBody1 defines parameters for IngestLitellmSpend.
 type IngestLitellmSpendJSONBody1 = []LitellmSpendLog
 
@@ -7410,7 +7823,7 @@ type GetV1InvoicesParams struct {
 	// Ids Comma-separated invoice IDs to fetch exactly.
 	Ids string `form:"ids,omitempty" json:"ids,omitempty"`
 
-	// Sort One of invoice_number, amount_due_cents, billing_period_start, due_at, issued_at, status, payment_status, created_at (default).
+	// Sort One of invoice_number, amount_due_cents, billing_period_start, due_at, issued_at, status, payment_status, created_at (default). amount_due_cents sorts a paid invoice by what paid it (`amount_paid_cents` plus `credits_applied_cents`, since paying zeroes `amount_due_cents`) and every other invoice by `amount_due_cents`, which a voided or written-off invoice keeps.
 	Sort   string                 `form:"sort,omitempty" json:"sort,omitempty"`
 	Dir    GetV1InvoicesParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
 	Limit  int                    `form:"limit,omitempty" json:"limit,omitempty"`
@@ -7429,7 +7842,8 @@ type CreateInvoiceParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7458,7 +7872,8 @@ type PostV1InvoicesCreatePreviewParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7468,7 +7883,8 @@ type CollectInvoicePaymentParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7478,7 +7894,8 @@ type PostV1InvoicesIdFinalizeParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7488,7 +7905,8 @@ type AddInvoiceLineItemParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7498,7 +7916,8 @@ type MarkInvoiceUncollectibleParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7514,7 +7933,8 @@ type RecordInvoicePaymentParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7534,7 +7954,8 @@ type RefundInvoiceParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7547,7 +7968,8 @@ type ResendInvoiceSetupLinkParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7560,7 +7982,8 @@ type PostV1InvoicesIdRetryTaxParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7570,7 +7993,8 @@ type RotateInvoicePublicTokenParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7586,7 +8010,8 @@ type PostV1InvoicesIdSendParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7599,7 +8024,8 @@ type VoidInvoiceParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7614,17 +8040,20 @@ type InviteMemberParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // PostV1MetersJSONBody defines parameters for PostV1Meters.
 type PostV1MetersJSONBody struct {
-	Aggregation         PostV1MetersJSONBodyAggregation `json:"aggregation,omitempty"`
-	Key                 string                          `json:"key"`
-	Name                string                          `json:"name"`
-	RatingRuleVersionId string                          `json:"rating_rule_version_id,omitempty"`
-	Unit                string                          `json:"unit,omitempty"`
+	// Aggregation How the meter rolls its events into one quantity per billing period. Fixed once the meter has a usage event.
+	Aggregation PostV1MetersJSONBodyAggregation `json:"aggregation,omitempty"`
+
+	// EventName The `event_name` usage events will send for this meter. Letters, digits, `-` and `_`; at most 100 characters.
+	EventName string `json:"event_name"`
+	Name      string `json:"name"`
+	Unit      string `json:"unit,omitempty"`
 }
 
 // PostV1MetersParams defines parameters for PostV1Meters.
@@ -7633,7 +8062,8 @@ type PostV1MetersParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7644,10 +8074,7 @@ type PostV1MetersJSONBodyAggregation string
 type PatchV1MetersIdJSONBody struct {
 	Aggregation PatchV1MetersIdJSONBodyAggregation `json:"aggregation,omitempty"`
 	Name        string                             `json:"name,omitempty"`
-
-	// RatingRuleVersionId Default rating rule; empty string clears.
-	RatingRuleVersionId string `json:"rating_rule_version_id,omitempty"`
-	Unit                string `json:"unit,omitempty"`
+	Unit        string                             `json:"unit,omitempty"`
 }
 
 // PatchV1MetersIdParams defines parameters for PatchV1MetersId.
@@ -7656,56 +8083,32 @@ type PatchV1MetersIdParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // PatchV1MetersIdJSONBodyAggregation defines parameters for PatchV1MetersId.
 type PatchV1MetersIdJSONBodyAggregation string
 
-// UpsertMeterPricingRuleJSONBody defines parameters for UpsertMeterPricingRule.
-type UpsertMeterPricingRuleJSONBody struct {
-	// AggregationMode How the matched events become one quantity for the period.
-	AggregationMode UpsertMeterPricingRuleJSONBodyAggregationMode `json:"aggregation_mode,omitempty"`
-
-	// DimensionMatch Event dimensions this rule claims, for example
-	// `{"model": "gpt-4o", "token_type": "input"}`. Values must be
-	// strings, numbers or booleans. Omitted or `{}` matches every event.
-	DimensionMatch map[string]interface{} `json:"dimension_match,omitempty"`
-
-	// Priority Higher wins when an event matches more than one rule.
-	Priority int `json:"priority,omitempty"`
-
-	// RatingRuleVersionId The rating rule that prices the matched usage. Must exist in this tenant and mode.
-	RatingRuleVersionId string `json:"rating_rule_version_id"`
-}
-
-// UpsertMeterPricingRuleParams defines parameters for UpsertMeterPricingRule.
-type UpsertMeterPricingRuleParams struct {
-	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
-	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
-}
-
-// UpsertMeterPricingRuleJSONBodyAggregationMode defines parameters for UpsertMeterPricingRule.
-type UpsertMeterPricingRuleJSONBodyAggregationMode string
-
 // PostV1PlansJSONBody defines parameters for PostV1Plans.
 type PostV1PlansJSONBody struct {
 	BaseAmountCents int64 `json:"base_amount_cents,omitempty"`
 
-	// BaseBillTiming Optional. Defaults to in_arrears. See Plan.base_bill_timing
-	// for semantics (ADR-031).
+	// BaseBillTiming Required when `base_amount_cents` is above 0. With a base
+	// of 0 it may be left out, and the plan is in_arrears;
+	// `in_advance` with a base of 0 is refused. See
+	// Plan.base_bill_timing (ADR-031).
 	BaseBillTiming  PostV1PlansJSONBodyBaseBillTiming  `json:"base_bill_timing,omitempty"`
 	BillingInterval PostV1PlansJSONBodyBillingInterval `json:"billing_interval"`
 	Code            string                             `json:"code"`
 	Currency        string                             `json:"currency"`
 	Description     string                             `json:"description,omitempty"`
-	MeterIds        []string                           `json:"meter_ids,omitempty"`
 	Name            string                             `json:"name"`
+
+	// Prices The plan's usage prices, created with it in one request.
+	// Each takes the plan's currency.
+	Prices []PriceInput `json:"prices,omitempty"`
 
 	// Status Optional. A plan is created active; archive it with PATCH.
 	Status PostV1PlansJSONBodyStatus `json:"status,omitempty"`
@@ -7722,7 +8125,8 @@ type PostV1PlansParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7735,26 +8139,14 @@ type PostV1PlansJSONBodyBillingInterval string
 // PostV1PlansJSONBodyStatus defines parameters for PostV1Plans.
 type PostV1PlansJSONBodyStatus string
 
-// GetPlan200JSONResponseBodyBaseBillTiming defines parameters for GetPlan.
-type GetPlan200JSONResponseBodyBaseBillTiming string
-
-// GetPlan200JSONResponseBodyBillingInterval defines parameters for GetPlan.
-type GetPlan200JSONResponseBodyBillingInterval string
-
-// GetPlan200JSONResponseBodyStatus defines parameters for GetPlan.
-type GetPlan200JSONResponseBodyStatus string
-
 // UpdatePlanJSONBody defines parameters for UpdatePlan.
 type UpdatePlanJSONBody struct {
-	// BaseAmountCents Ignored when 0 or less.
+	// BaseAmountCents 0 or more. Omit to keep the current base fee.
 	BaseAmountCents int64                            `json:"base_amount_cents,omitempty"`
 	BaseBillTiming  UpdatePlanJSONBodyBaseBillTiming `json:"base_bill_timing,omitempty"`
 
 	// Description Whitespace is trimmed. Omit to keep the current description; an empty string clears it.
 	Description string `json:"description,omitempty"`
-
-	// MeterIds Replaces the plan's meters. Omit to keep them.
-	MeterIds []string `json:"meter_ids,omitempty"`
 
 	// Name Whitespace is trimmed. Empty or omitted keeps the current name.
 	Name   string                   `json:"name,omitempty"`
@@ -7770,7 +8162,8 @@ type UpdatePlanParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7780,41 +8173,63 @@ type UpdatePlanJSONBodyBaseBillTiming string
 // UpdatePlanJSONBodyStatus defines parameters for UpdatePlan.
 type UpdatePlanJSONBodyStatus string
 
+// AddPlanPriceParams defines parameters for AddPlanPrice.
+type AddPlanPriceParams struct {
+	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
+	// the same value on every retry. For 24 hours, a repeat with the same
+	// key, method, path and body gets the first response again, with an
+	// `Idempotent-Replayed: true` header, instead of running again. The
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
+// UpdatePlanPriceParams defines parameters for UpdatePlanPrice.
+type UpdatePlanPriceParams struct {
+	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
+	// the same value on every retry. For 24 hours, a repeat with the same
+	// key, method, path and body gets the first response again, with an
+	// `Idempotent-Replayed: true` header, instead of running again. The
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
 // ListPriceOverridesParams defines parameters for ListPriceOverrides.
 type ListPriceOverridesParams struct {
 	// CustomerId Only this customer's overrides.
 	CustomerId string `form:"customer_id,omitempty" json:"customer_id,omitempty"`
+
+	// PriceId Only this price's overrides.
+	PriceId string `form:"price_id,omitempty" json:"price_id,omitempty"`
 }
 
 // CreatePriceOverrideJSONBody defines parameters for CreatePriceOverride.
 type CreatePriceOverrideJSONBody struct {
 	CustomerId string `json:"customer_id"`
 
-	// FlatAmountCents Per-unit rate in cents, as a decimal string. Used when `mode` is `flat`. 0 or more.
-	FlatAmountCents string `json:"flat_amount_cents,omitempty"`
-
-	// GraduatedTiers Used when `mode` is `graduated`. Each `up_to` must be larger
-	// than the one before, and the last tier must have
-	// `up_to: 0` (no upper bound).
-	GraduatedTiers []struct {
-		// UnitAmountCents Per-unit rate in cents, as a decimal string.
-		UnitAmountCents string `json:"unit_amount_cents,omitempty"`
-		UpTo            int64  `json:"up_to,omitempty"`
-	} `json:"graduated_tiers,omitempty"`
+	// Mode As on PriceShape, also for the fields a mode does not use.
 	Mode CreatePriceOverrideJSONBodyMode `json:"mode"`
 
-	// OverageUnitAmountCents Package-mode per-unit overage rate in cents, as a decimal string.
-	OverageUnitAmountCents string `json:"overage_unit_amount_cents,omitempty"`
-
-	// PackageAmountCents Price of one package in cents. Used when `mode` is `package`.
-	PackageAmountCents int64 `json:"package_amount_cents,omitempty"`
+	// PackageAmountCents Price of one package in cents, as a decimal string, with the limits of `unit_amount_cents`. Used when `mode` is `package`.
+	PackageAmountCents string `json:"package_amount_cents,omitempty"`
 
 	// PackageSize Used when `mode` is `package`. Must be above 0.
 	PackageSize int64 `json:"package_size,omitempty"`
 
-	// RatingRuleVersionId Any version of the rule to override.
-	RatingRuleVersionId string `json:"rating_rule_version_id"`
-	Reason              string `json:"reason,omitempty"`
+	// PriceId The plan price to override.
+	PriceId string `json:"price_id"`
+	Reason  string `json:"reason,omitempty"`
+
+	// Tiers Used when `mode` is `graduated`. Each `up_to` is a whole number above the one before. The last tier has `up_to: null` (no upper bound), and only the last. Otherwise 422 with `param` `tiers`.
+	Tiers []struct {
+		// UnitAmountCents Price per unit in cents in this tier, as a decimal string, with the limits of `unit_amount_cents`. A refusal names `tiers[i].unit_amount_cents` (i counts from 0).
+		UnitAmountCents string `json:"unit_amount_cents,omitempty"`
+		UpTo            int64  `json:"up_to,omitempty"`
+	} `json:"tiers,omitempty"`
+
+	// UnitAmountCents Price per unit in cents, as a decimal string. Used when `mode` is `per_unit`. 0 or more, under 10^18, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. A value outside them is refused with 422 and `param` naming the field.
+	UnitAmountCents string `json:"unit_amount_cents,omitempty"`
 }
 
 // CreatePriceOverrideParams defines parameters for CreatePriceOverride.
@@ -7823,7 +8238,8 @@ type CreatePriceOverrideParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7835,9 +8251,6 @@ type DeletePriceOverride200JSONResponseBodyActive bool
 
 // PutV1ProviderCostsJSONBody defines parameters for PutV1ProviderCosts.
 type PutV1ProviderCostsJSONBody struct {
-	// CostPerToken Decimal dollars per token (e.g. "0.000003").
-	CostPerToken string `json:"cost_per_token"`
-
 	// Currency Rates are in USD only, the currency LiteLLM reports cost
 	// in. Any other value is 422.
 	Currency PutV1ProviderCostsJSONBodyCurrency `json:"currency,omitempty"`
@@ -7848,6 +8261,9 @@ type PutV1ProviderCostsJSONBody struct {
 
 	// TokenType ADR-044 role — input / output / cache_read.
 	TokenType string `json:"token_type"`
+
+	// UnitCostCents US cents per token, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 tokens). 0 or more, under 10^10, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read.
+	UnitCostCents string `json:"unit_cost_cents"`
 }
 
 // PutV1ProviderCostsParams defines parameters for PutV1ProviderCosts.
@@ -7856,7 +8272,8 @@ type PutV1ProviderCostsParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7865,53 +8282,6 @@ type PutV1ProviderCostsJSONBodyCurrency string
 
 // GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSource defines parameters for GetV1PublicCostDashboardToken.
 type GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSource string
-
-// GetV1RatingRulesParams defines parameters for GetV1RatingRules.
-type GetV1RatingRulesParams struct {
-	// RuleKey Only versions of this rule.
-	RuleKey        string                               `form:"rule_key,omitempty" json:"rule_key,omitempty"`
-	LifecycleState GetV1RatingRulesParamsLifecycleState `form:"lifecycle_state,omitempty" json:"lifecycle_state,omitempty"`
-
-	// Latest When true, only the newest version of each rule.
-	Latest bool `form:"latest,omitempty" json:"latest,omitempty"`
-}
-
-// GetV1RatingRulesParamsLifecycleState defines parameters for GetV1RatingRules.
-type GetV1RatingRulesParamsLifecycleState string
-
-// PostV1RatingRulesJSONBody defines parameters for PostV1RatingRules.
-type PostV1RatingRulesJSONBody struct {
-	Currency string `json:"currency"`
-
-	// FlatAmountCents Per-unit rate in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units).
-	FlatAmountCents string `json:"flat_amount_cents,omitempty"`
-	GraduatedTiers  []struct {
-		// UnitAmountCents Per-unit rate in cents, as a decimal string.
-		UnitAmountCents string `json:"unit_amount_cents,omitempty"`
-		UpTo            int    `json:"up_to,omitempty"`
-	} `json:"graduated_tiers,omitempty"`
-	Mode PostV1RatingRulesJSONBodyMode `json:"mode"`
-	Name string                        `json:"name"`
-
-	// OverageUnitAmountCents Package-mode per-unit overage rate in cents, as a decimal string. Fixed fees (package_amount_cents) stay integer cents.
-	OverageUnitAmountCents string `json:"overage_unit_amount_cents,omitempty"`
-	PackageAmountCents     int    `json:"package_amount_cents,omitempty"`
-	PackageSize            int    `json:"package_size,omitempty"`
-	RuleKey                string `json:"rule_key"`
-}
-
-// PostV1RatingRulesParams defines parameters for PostV1RatingRules.
-type PostV1RatingRulesParams struct {
-	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
-	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
-}
-
-// PostV1RatingRulesJSONBodyMode defines parameters for PostV1RatingRules.
-type PostV1RatingRulesJSONBodyMode string
 
 // InstantiateRecipeJSONBody defines parameters for InstantiateRecipe.
 type InstantiateRecipeJSONBody struct {
@@ -7924,7 +8294,8 @@ type InstantiateRecipeParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7939,7 +8310,8 @@ type PreviewRecipeParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7949,7 +8321,8 @@ type UpdateTenantSettingsParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7965,7 +8338,8 @@ type SendTestEmailParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7990,7 +8364,8 @@ type ConnectStripeParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8009,7 +8384,8 @@ type SetStripeWebhookSecretParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8022,12 +8398,22 @@ type GetV1SubscriptionsParams struct {
 
 	// PlanId Filter to subscriptions with a live item on this plan.
 	PlanId string `form:"plan_id,omitempty" json:"plan_id,omitempty"`
-	Status string `form:"status,omitempty" json:"status,omitempty"`
+
+	// Status Exact status. Any other value is a 400. Paused collection is not
+	// a status: use `collection=paused`.
+	Status GetV1SubscriptionsParamsStatus `form:"status,omitempty" json:"status,omitempty"`
 
 	// Billing `failing` returns only subscriptions that carry a
 	// `billing_failure`: those waiting for their next billing attempt
 	// and those that are parked. Any other value is a 400.
 	Billing GetV1SubscriptionsParamsBilling `form:"billing,omitempty" json:"billing,omitempty"`
+
+	// Collection `paused` returns only active and trialing subscriptions whose
+	// `pause_collection` is in force, whether an operator or dunning set
+	// it. A timed pause ends at `resumes_at` (on the subscription's test
+	// clock, if it has one), even while the response still carries it.
+	// Any other value is a 400.
+	Collection GetV1SubscriptionsParamsCollection `form:"collection,omitempty" json:"collection,omitempty"`
 
 	// Search Case-insensitive substring match on display name or code.
 	Search string `form:"search,omitempty" json:"search,omitempty"`
@@ -8039,8 +8425,14 @@ type GetV1SubscriptionsParams struct {
 	Offset int                         `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
+// GetV1SubscriptionsParamsStatus defines parameters for GetV1Subscriptions.
+type GetV1SubscriptionsParamsStatus string
+
 // GetV1SubscriptionsParamsBilling defines parameters for GetV1Subscriptions.
 type GetV1SubscriptionsParamsBilling string
+
+// GetV1SubscriptionsParamsCollection defines parameters for GetV1Subscriptions.
+type GetV1SubscriptionsParamsCollection string
 
 // GetV1SubscriptionsParamsDir defines parameters for GetV1Subscriptions.
 type GetV1SubscriptionsParamsDir string
@@ -8057,8 +8449,23 @@ type PostV1SubscriptionsJSONBody struct {
 		PlanId   string `json:"plan_id"`
 		Quantity int    `json:"quantity,omitempty"`
 	} `json:"items"`
-	StartNow  bool `json:"start_now,omitempty"`
-	TrialDays int  `json:"trial_days,omitempty"`
+
+	// Status Leave it out and the subscription starts now. Without
+	// `trial_days` it is `active`, its first period starts
+	// today in the account's billing time zone (the clock's
+	// day for a customer on a test clock), and a non-zero base
+	// fee billed in advance is invoiced now. With `trial_days`
+	// above 0 it is `trialing` from now. Send `draft` to create it
+	// without starting it: it bills nothing until you activate
+	// it with `POST /v1/subscriptions/{id}/activate`. A draft
+	// cannot have a trial (`trial_days` above 0). An empty or
+	// null `status` is refused.
+	Status PostV1SubscriptionsJSONBodyStatus `json:"status,omitempty"`
+
+	// TrialDays Days of free trial; 0 means no trial. Above 0, the
+	// subscription is `trialing` from now and its first paid
+	// period starts on the day the trial ends.
+	TrialDays int `json:"trial_days,omitempty"`
 }
 
 // PostV1SubscriptionsParams defines parameters for PostV1Subscriptions.
@@ -8067,12 +8474,16 @@ type PostV1SubscriptionsParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // PostV1SubscriptionsJSONBodyBillingTime defines parameters for PostV1Subscriptions.
 type PostV1SubscriptionsJSONBodyBillingTime string
+
+// PostV1SubscriptionsJSONBodyStatus defines parameters for PostV1Subscriptions.
+type PostV1SubscriptionsJSONBodyStatus string
 
 // PostV1SubscriptionsIdActivateParams defines parameters for PostV1SubscriptionsIdActivate.
 type PostV1SubscriptionsIdActivateParams struct {
@@ -8080,26 +8491,22 @@ type PostV1SubscriptionsIdActivateParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // SetSubscriptionBillingThresholdsJSONBody defines parameters for SetSubscriptionBillingThresholds.
 type SetSubscriptionBillingThresholdsJSONBody struct {
-	// AmountGte Invoice early when the period's running subtotal reaches this amount, in cents of the subscription's currency.
+	// AmountGte Invoice early when the period's usage so far reaches this amount, in cents of the subscription's currency. The base fee is not counted.
 	AmountGte      int64 `json:"amount_gte,omitempty"`
 	ItemThresholds []struct {
 		// SubscriptionItemId An item of this subscription. Each item can appear once.
 		SubscriptionItemId string `json:"subscription_item_id"`
 
-		// UsageGte Invoice early when the item's usage in the period reaches this quantity. A decimal string, 0 or more (e.g. "1000" or "3.14").
+		// UsageGte Invoice early when the item's usage in the period reaches this quantity. A decimal string (e.g. "1000" or "3.14"): more than 0, under 10^26, at most 12 decimal places (trailing zeros do not count), and at most 100 characters.
 		UsageGte string `json:"usage_gte"`
 	} `json:"item_thresholds,omitempty"`
-
-	// ResetBillingCycle `true` starts a new billing period when a threshold
-	// invoice is issued. `false` keeps the period; the rest of
-	// the period's usage is billed at its normal end.
-	ResetBillingCycle bool `json:"reset_billing_cycle,omitempty"`
 }
 
 // SetSubscriptionBillingThresholdsParams defines parameters for SetSubscriptionBillingThresholds.
@@ -8108,7 +8515,8 @@ type SetSubscriptionBillingThresholdsParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8118,7 +8526,8 @@ type CancelSubscriptionParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8128,7 +8537,8 @@ type EndSubscriptionTrialParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8144,7 +8554,8 @@ type ExtendSubscriptionTrialParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8160,7 +8571,8 @@ type AddSubscriptionItemParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8182,7 +8594,8 @@ type UpdateSubscriptionItemParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8200,7 +8613,8 @@ type PauseSubscriptionCollectionParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8213,7 +8627,8 @@ type PostV1SubscriptionsIdRetryBillingParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8232,7 +8647,8 @@ type ScheduleSubscriptionCancelParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8262,7 +8678,8 @@ type PostV1TestClocksParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8280,7 +8697,8 @@ type PostV1TestClocksIdAdvanceParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8290,7 +8708,8 @@ type PostV1TestClocksIdRetryAdvanceParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8321,10 +8740,10 @@ type GetV1UsageEventsParams struct {
 
 // PostV1UsageEventsJSONBody defines parameters for PostV1UsageEvents.
 type PostV1UsageEventsJSONBody struct {
-	// Dimensions Scalar dimension values used for pricing-rule dispatch (e.g. {"model", "token_type"}).
+	// Dimensions Scalar labels of the event (e.g. {"model", "token_type"}). A price takes an event whose labels include the price's `dimension_match`.
 	Dimensions map[string]interface{} `json:"dimensions,omitempty"`
 
-	// EventName The meter key (e.g. "tokens").
+	// EventName The meter's `event_name` (e.g. "tokens").
 	EventName string `json:"event_name"`
 
 	// ExternalCustomerId The customer's external_id (your identifier), not the internal vlx_cus_ id.
@@ -8339,27 +8758,18 @@ type PostV1UsageEventsJSONBody struct {
 	// event, such as a batch index or a timestamp that can
 	// repeat, or that usage is lost. Empty or whitespace-only
 	// keys are refused with 422, and so are keys longer than
-	// 255 characters. The `Idempotency-Key` header does not
-	// count as this key: it caches one HTTP response for 24
-	// hours.
+	// 255 characters. This is the only dedup key: the usage
+	// routes ignore the `Idempotency-Key` header.
 	IdempotencyKey string `json:"idempotency_key"`
 
-	// Properties Older name for `dimensions`. When both are sent, `dimensions` wins.
-	Properties map[string]interface{} `json:"properties,omitempty"`
-
-	// Quantity Decimal quantity — accepts a JSON number (5) or string ("5.5") for exact fractional values.
+	// Quantity A JSON number (`5`) or a string holding one (`"5.5"`,
+	// for exact decimals). At most 12 decimal places; trailing
+	// zeros do not count. Its size must be under 10^26, and it
+	// is at most 100 characters. A negative value is a
+	// correction. A missing quantity, or any other value, is
+	// refused with 422 and `param: quantity`.
 	Quantity  PostV1UsageEventsJSONBody_Quantity `json:"quantity"`
 	Timestamp time.Time                          `json:"timestamp,omitempty"`
-}
-
-// PostV1UsageEventsParams defines parameters for PostV1UsageEvents.
-type PostV1UsageEventsParams struct {
-	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
-	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // PostV1UsageEventsJSONBodyQuantity0 defines parameters for PostV1UsageEvents.
@@ -8396,10 +8806,10 @@ type AggregateUsageEventsParams struct {
 
 // BackfillUsageEventJSONBody defines parameters for BackfillUsageEvent.
 type BackfillUsageEventJSONBody struct {
-	// Dimensions Scalar dimension values used to pick the pricing rule.
+	// Dimensions Scalar labels of the event. A price takes an event whose labels include the price's `dimension_match`.
 	Dimensions map[string]interface{} `json:"dimensions,omitempty"`
 
-	// EventName The meter key (e.g. "tokens").
+	// EventName The meter's `event_name` (e.g. "tokens").
 	EventName string `json:"event_name"`
 
 	// ExternalCustomerId The customer's external_id (your identifier), not the internal vlx_cus_ id.
@@ -8414,29 +8824,20 @@ type BackfillUsageEventJSONBody struct {
 	// event, such as a batch index or a timestamp that can
 	// repeat, or that usage is lost. Empty or whitespace-only
 	// keys are refused with 422, and so are keys longer than
-	// 255 characters. The `Idempotency-Key` header does not
-	// count as this key: it caches one HTTP response for 24
-	// hours.
+	// 255 characters. This is the only dedup key: the usage
+	// routes ignore the `Idempotency-Key` header.
 	IdempotencyKey string `json:"idempotency_key"`
 
-	// Properties Older name for `dimensions`. Used only when `dimensions` is absent.
-	Properties map[string]interface{} `json:"properties,omitempty"`
-
-	// Quantity Decimal quantity, as a JSON number or a string. Omitted means 0. Negative values are allowed as corrections.
-	Quantity BackfillUsageEventJSONBody_Quantity `json:"quantity,omitempty"`
+	// Quantity A JSON number (`5`) or a string holding one (`"5.5"`,
+	// for exact decimals). At most 12 decimal places; trailing
+	// zeros do not count. Its size must be under 10^26, and it
+	// is at most 100 characters. A negative value is a
+	// correction. A missing quantity, or any other value, is
+	// refused with 422 and `param: quantity`.
+	Quantity BackfillUsageEventJSONBody_Quantity `json:"quantity"`
 
 	// Timestamp RFC 3339. Must not be in the future.
 	Timestamp time.Time `json:"timestamp"`
-}
-
-// BackfillUsageEventParams defines parameters for BackfillUsageEvent.
-type BackfillUsageEventParams struct {
-	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
-	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // BackfillUsageEventJSONBodyQuantity0 defines parameters for BackfillUsageEvent.
@@ -8454,7 +8855,7 @@ type BackfillUsageEventJSONBody_Quantity struct {
 type PostV1UsageEventsBatchJSONBody = []struct {
 	Dimensions map[string]interface{} `json:"dimensions,omitempty"`
 
-	// EventName The meter key (e.g. "tokens").
+	// EventName The meter's `event_name` (e.g. "tokens").
 	EventName string `json:"event_name"`
 
 	// ExternalCustomerId The customer's external_id (your identifier), not the internal vlx_cus_ id.
@@ -8469,27 +8870,18 @@ type PostV1UsageEventsBatchJSONBody = []struct {
 	// event, such as a batch index or a timestamp that can
 	// repeat, or that usage is lost. Empty or whitespace-only
 	// keys are refused with 422, and so are keys longer than
-	// 255 characters. The `Idempotency-Key` header does not
-	// count as this key: it caches one HTTP response for 24
-	// hours.
+	// 255 characters. This is the only dedup key: the usage
+	// routes ignore the `Idempotency-Key` header.
 	IdempotencyKey string `json:"idempotency_key"`
 
-	// Properties Older name for `dimensions`. When both are sent, `dimensions` wins.
-	Properties map[string]interface{} `json:"properties,omitempty"`
-
-	// Quantity Decimal quantity — accepts a JSON number (5) or string ("5.5") for exact fractional values.
+	// Quantity A JSON number (`5`) or a string holding one (`"5.5"`,
+	// for exact decimals). At most 12 decimal places;
+	// trailing zeros do not count. Its size must be under
+	// 10^26, and it is at most 100 characters. A negative
+	// value is a correction. A missing quantity, or any
+	// other value, fails validation.
 	Quantity  PostV1UsageEventsBatchJSONBody_Quantity `json:"quantity"`
 	Timestamp time.Time                               `json:"timestamp,omitempty"`
-}
-
-// PostV1UsageEventsBatchParams defines parameters for PostV1UsageEventsBatch.
-type PostV1UsageEventsBatchParams struct {
-	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
-	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // PostV1UsageEventsBatchJSONBodyQuantity0 defines parameters for PostV1UsageEventsBatch.
@@ -8505,20 +8897,9 @@ type PostV1UsageEventsBatchJSONBody_Quantity struct {
 
 // DiscardHeldUsageJSONBody defines parameters for DiscardHeldUsage.
 type DiscardHeldUsageJSONBody struct {
+	// EventName Discard only the rows with this `event_name`. Omit for all.
+	EventName          string `json:"event_name,omitempty"`
 	ExternalCustomerId string `json:"external_customer_id"`
-
-	// MeterKey Discard only this meter's rows. Omit for all.
-	MeterKey string `json:"meter_key,omitempty"`
-}
-
-// DiscardHeldUsageParams defines parameters for DiscardHeldUsage.
-type DiscardHeldUsageParams struct {
-	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
-	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // ReleaseHeldUsageJSONBody defines parameters for ReleaseHeldUsage.
@@ -8531,28 +8912,6 @@ type ReleaseHeldUsageJSONBody struct {
 	// ExternalCustomerId The external ID the rows were held under.
 	ExternalCustomerId string `json:"external_customer_id"`
 }
-
-// ReleaseHeldUsageParams defines parameters for ReleaseHeldUsage.
-type ReleaseHeldUsageParams struct {
-	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
-	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
-}
-
-// GetUsageSummaryParams defines parameters for GetUsageSummary.
-type GetUsageSummaryParams struct {
-	// From Window start. RFC 3339, or a date (YYYY-MM-DD) meaning 00:00:00 UTC.
-	From string `form:"from,omitempty" json:"from,omitempty"`
-
-	// To Window end, exclusive. RFC 3339, or a date (YYYY-MM-DD) meaning 23:59:59.999999 UTC that day, so the day is included.
-	To string `form:"to,omitempty" json:"to,omitempty"`
-}
-
-// GetUsageSummary500JSONResponseBodyError defines parameters for GetUsageSummary.
-type GetUsageSummary500JSONResponseBodyError string
 
 // PostV1WebhookEndpointsEndpointsJSONBody defines parameters for PostV1WebhookEndpointsEndpoints.
 type PostV1WebhookEndpointsEndpointsJSONBody struct {
@@ -8567,7 +8926,8 @@ type PostV1WebhookEndpointsEndpointsParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8588,7 +8948,8 @@ type PatchV1WebhookEndpointsEndpointsIdParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8598,7 +8959,8 @@ type ReplayWebhookDeliveryParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8608,22 +8970,10 @@ type PostV1WebhookEndpointsEndpointsIdRotateSecretParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
-
-// ReplayWebhookEventLegacyParams defines parameters for ReplayWebhookEventLegacy.
-type ReplayWebhookEventLegacyParams struct {
-	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
-	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
-}
-
-// ReplayWebhookEventLegacy200JSONResponseBodyStatus defines parameters for ReplayWebhookEventLegacy.
-type ReplayWebhookEventLegacy200JSONResponseBodyStatus string
 
 // ReplayWebhookEventParams defines parameters for ReplayWebhookEvent.
 type ReplayWebhookEventParams struct {
@@ -8631,7 +8981,8 @@ type ReplayWebhookEventParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8678,9 +9029,6 @@ type PostV1AuthPasswordResetRequestJSONRequestBody PostV1AuthPasswordResetReques
 
 // BootstrapJSONRequestBody defines body for Bootstrap for application/json ContentType.
 type BootstrapJSONRequestBody BootstrapJSONBody
-
-// CreateCheckoutSetupSessionJSONRequestBody defines body for CreateCheckoutSetupSession for application/json ContentType.
-type CreateCheckoutSetupSessionJSONRequestBody CreateCheckoutSetupSessionJSONBody
 
 // PostV1CreditNotesJSONRequestBody defines body for PostV1CreditNotes for application/json ContentType.
 type PostV1CreditNotesJSONRequestBody PostV1CreditNotesJSONBody
@@ -8748,23 +9096,23 @@ type PostV1MetersJSONRequestBody PostV1MetersJSONBody
 // PatchV1MetersIdJSONRequestBody defines body for PatchV1MetersId for application/json ContentType.
 type PatchV1MetersIdJSONRequestBody PatchV1MetersIdJSONBody
 
-// UpsertMeterPricingRuleJSONRequestBody defines body for UpsertMeterPricingRule for application/json ContentType.
-type UpsertMeterPricingRuleJSONRequestBody UpsertMeterPricingRuleJSONBody
-
 // PostV1PlansJSONRequestBody defines body for PostV1Plans for application/json ContentType.
 type PostV1PlansJSONRequestBody PostV1PlansJSONBody
 
 // UpdatePlanJSONRequestBody defines body for UpdatePlan for application/json ContentType.
 type UpdatePlanJSONRequestBody UpdatePlanJSONBody
 
+// AddPlanPriceJSONRequestBody defines body for AddPlanPrice for application/json ContentType.
+type AddPlanPriceJSONRequestBody = PriceInput
+
+// UpdatePlanPriceJSONRequestBody defines body for UpdatePlanPrice for application/json ContentType.
+type UpdatePlanPriceJSONRequestBody = PriceShape
+
 // CreatePriceOverrideJSONRequestBody defines body for CreatePriceOverride for application/json ContentType.
 type CreatePriceOverrideJSONRequestBody CreatePriceOverrideJSONBody
 
 // PutV1ProviderCostsJSONRequestBody defines body for PutV1ProviderCosts for application/json ContentType.
 type PutV1ProviderCostsJSONRequestBody PutV1ProviderCostsJSONBody
-
-// PostV1RatingRulesJSONRequestBody defines body for PostV1RatingRules for application/json ContentType.
-type PostV1RatingRulesJSONRequestBody PostV1RatingRulesJSONBody
 
 // InstantiateRecipeJSONRequestBody defines body for InstantiateRecipe for application/json ContentType.
 type InstantiateRecipeJSONRequestBody InstantiateRecipeJSONBody
@@ -9177,27 +9525,21 @@ type ServerInterface interface {
 	// Request a password reset link
 	// (POST /v1/auth/password-reset/request)
 	PostV1AuthPasswordResetRequest(w http.ResponseWriter, r *http.Request)
-	// Invoice preview (dry run)
-	// (GET /v1/billing/preview/{subscription_id})
-	GetV1BillingPreviewSubscriptionId(w http.ResponseWriter, r *http.Request, subscriptionId string)
 	// Trigger billing cycle
 	// (POST /v1/billing/run)
 	PostV1BillingRun(w http.ResponseWriter, r *http.Request, params PostV1BillingRunParams)
 	// Set up a new installation
 	// (POST /v1/bootstrap)
 	Bootstrap(w http.ResponseWriter, r *http.Request)
-	// Start a card setup in Stripe Checkout (older route)
-	// (POST /v1/checkout/setup)
-	CreateCheckoutSetupSession(w http.ResponseWriter, r *http.Request, params CreateCheckoutSetupSessionParams)
-	// Get a customer's card setup status (older route)
-	// (GET /v1/checkout/status/{customerID})
-	GetCheckoutSetupStatus(w http.ResponseWriter, r *http.Request, customerID string)
 	// List credit notes
 	// (GET /v1/credit-notes)
 	ListCreditNotes(w http.ResponseWriter, r *http.Request, params ListCreditNotesParams)
 	// Create a credit note (line-based, or commit relief)
 	// (POST /v1/credit-notes)
 	PostV1CreditNotes(w http.ResponseWriter, r *http.Request, params PostV1CreditNotesParams)
+	// Get credit note totals
+	// (GET /v1/credit-notes/stats)
+	GetCreditNoteStats(w http.ResponseWriter, r *http.Request)
 	// Get a credit note
 	// (GET /v1/credit-notes/{id})
 	GetCreditNote(w http.ResponseWriter, r *http.Request, id string)
@@ -9243,9 +9585,6 @@ type ServerInterface interface {
 	// Create customer
 	// (POST /v1/customers)
 	PostV1Customers(w http.ResponseWriter, r *http.Request, params PostV1CustomersParams)
-	// List the customer's invoices
-	// (GET /v1/customers/{customer_id}/invoices)
-	ListCustomerInvoices(w http.ResponseWriter, r *http.Request, customerId string, params ListCustomerInvoicesParams)
 	// Get a customer overview
 	// (GET /v1/customers/{customer_id}/overview)
 	GetCustomerOverview(w http.ResponseWriter, r *http.Request, customerId string)
@@ -9264,9 +9603,6 @@ type ServerInterface interface {
 	// Make a payment method the default
 	// (POST /v1/customers/{customer_id}/payment-methods/{pmID}/default)
 	SetCustomerDefaultPaymentMethod(w http.ResponseWriter, r *http.Request, customerId string, pmid string, params SetCustomerDefaultPaymentMethodParams)
-	// List the customer's subscriptions
-	// (GET /v1/customers/{customer_id}/subscriptions)
-	ListCustomerSubscriptions(w http.ResponseWriter, r *http.Request, customerId string)
 	// Get customer
 	// (GET /v1/customers/{id})
 	GetCustomer(w http.ResponseWriter, r *http.Request, id string)
@@ -9338,7 +9674,7 @@ type ServerInterface interface {
 	ExportUsageEventsCsv(w http.ResponseWriter, r *http.Request, params ExportUsageEventsCsvParams)
 	// Ingest LiteLLM spend logs
 	// (POST /v1/integrations/litellm/spend)
-	IngestLitellmSpend(w http.ResponseWriter, r *http.Request, params IngestLitellmSpendParams)
+	IngestLitellmSpend(w http.ResponseWriter, r *http.Request)
 	// List invoices
 	// (GET /v1/invoices)
 	GetV1Invoices(w http.ResponseWriter, r *http.Request, params GetV1InvoicesParams)
@@ -9405,9 +9741,6 @@ type ServerInterface interface {
 	// Remove a member from the workspace
 	// (DELETE /v1/members/{userID})
 	RemoveMember(w http.ResponseWriter, r *http.Request, userID string)
-	// List all meter pricing rules
-	// (GET /v1/meter-pricing-rules)
-	ListAllMeterPricingRules(w http.ResponseWriter, r *http.Request)
 	// List meters
 	// (GET /v1/meters)
 	GetV1Meters(w http.ResponseWriter, r *http.Request)
@@ -9417,21 +9750,9 @@ type ServerInterface interface {
 	// Get meter
 	// (GET /v1/meters/{id})
 	GetMeter(w http.ResponseWriter, r *http.Request, id string)
-	// Update meter (incl. the default rating-rule binding)
+	// Update meter
 	// (PATCH /v1/meters/{id})
 	PatchV1MetersId(w http.ResponseWriter, r *http.Request, id string, params PatchV1MetersIdParams)
-	// List a meter's pricing rules
-	// (GET /v1/meters/{meter_id}/pricing-rules)
-	ListMeterPricingRules(w http.ResponseWriter, r *http.Request, meterId string)
-	// Create or update a meter pricing rule
-	// (POST /v1/meters/{meter_id}/pricing-rules)
-	UpsertMeterPricingRule(w http.ResponseWriter, r *http.Request, meterId string, params UpsertMeterPricingRuleParams)
-	// Delete a meter pricing rule
-	// (DELETE /v1/meters/{meter_id}/pricing-rules/{id})
-	DeleteMeterPricingRule(w http.ResponseWriter, r *http.Request, meterId string, id string)
-	// Get a meter pricing rule
-	// (GET /v1/meters/{meter_id}/pricing-rules/{id})
-	GetMeterPricingRule(w http.ResponseWriter, r *http.Request, meterId string, id string)
 	// List plans
 	// (GET /v1/plans)
 	GetV1Plans(w http.ResponseWriter, r *http.Request)
@@ -9444,6 +9765,18 @@ type ServerInterface interface {
 	// Update plan
 	// (PATCH /v1/plans/{id})
 	UpdatePlan(w http.ResponseWriter, r *http.Request, id string, params UpdatePlanParams)
+	// List a plan's prices
+	// (GET /v1/plans/{id}/prices)
+	ListPlanPrices(w http.ResponseWriter, r *http.Request, id string)
+	// Add a price to a plan
+	// (POST /v1/plans/{id}/prices)
+	AddPlanPrice(w http.ResponseWriter, r *http.Request, id string, params AddPlanPriceParams)
+	// Remove a price from a plan
+	// (DELETE /v1/plans/{id}/prices/{price_id})
+	RemovePlanPrice(w http.ResponseWriter, r *http.Request, id string, priceId string)
+	// Change a price's rate
+	// (PATCH /v1/plans/{id}/prices/{price_id})
+	UpdatePlanPrice(w http.ResponseWriter, r *http.Request, id string, priceId string, params UpdatePlanPriceParams)
 	// List active price overrides
 	// (GET /v1/price-overrides)
 	ListPriceOverrides(w http.ResponseWriter, r *http.Request, params ListPriceOverridesParams)
@@ -9480,15 +9813,6 @@ type ServerInterface interface {
 	// Start adding a card in Stripe Checkout
 	// (POST /v1/public/payment-updates/{token}/checkout)
 	CreatePublicPaymentUpdateCheckout(w http.ResponseWriter, r *http.Request, token string)
-	// List rating rules
-	// (GET /v1/rating-rules)
-	GetV1RatingRules(w http.ResponseWriter, r *http.Request, params GetV1RatingRulesParams)
-	// Create rating rule
-	// (POST /v1/rating-rules)
-	PostV1RatingRules(w http.ResponseWriter, r *http.Request, params PostV1RatingRulesParams)
-	// Get rating rule
-	// (GET /v1/rating-rules/{id})
-	GetRatingRule(w http.ResponseWriter, r *http.Request, id string)
 	// List recipes
 	// (GET /v1/recipes)
 	ListRecipes(w http.ResponseWriter, r *http.Request)
@@ -9623,28 +9947,25 @@ type ServerInterface interface {
 	GetV1UsageEvents(w http.ResponseWriter, r *http.Request, params GetV1UsageEventsParams)
 	// Ingest usage event
 	// (POST /v1/usage-events)
-	PostV1UsageEvents(w http.ResponseWriter, r *http.Request, params PostV1UsageEventsParams)
+	PostV1UsageEvents(w http.ResponseWriter, r *http.Request)
 	// Usage totals
 	// (GET /v1/usage-events/aggregate)
 	AggregateUsageEvents(w http.ResponseWriter, r *http.Request, params AggregateUsageEventsParams)
 	// Backfill a past usage event
 	// (POST /v1/usage-events/backfill)
-	BackfillUsageEvent(w http.ResponseWriter, r *http.Request, params BackfillUsageEventParams)
+	BackfillUsageEvent(w http.ResponseWriter, r *http.Request)
 	// Batch ingest usage events (max 1000, all-or-nothing)
 	// (POST /v1/usage-events/batch)
-	PostV1UsageEventsBatch(w http.ResponseWriter, r *http.Request, params PostV1UsageEventsBatchParams)
+	PostV1UsageEventsBatch(w http.ResponseWriter, r *http.Request)
 	// List held usage
 	// (GET /v1/usage-events/held)
 	ListHeldUsage(w http.ResponseWriter, r *http.Request)
 	// Discard held usage
 	// (POST /v1/usage-events/held/discard)
-	DiscardHeldUsage(w http.ResponseWriter, r *http.Request, params DiscardHeldUsageParams)
+	DiscardHeldUsage(w http.ResponseWriter, r *http.Request)
 	// Release held usage
 	// (POST /v1/usage-events/held/release)
-	ReleaseHeldUsage(w http.ResponseWriter, r *http.Request, params ReleaseHeldUsageParams)
-	// Customer usage summary
-	// (GET /v1/usage-summary/{customer_id})
-	GetUsageSummary(w http.ResponseWriter, r *http.Request, customerId string, params GetUsageSummaryParams)
+	ReleaseHeldUsage(w http.ResponseWriter, r *http.Request)
 	// List webhook endpoints
 	// (GET /v1/webhook-endpoints/endpoints)
 	GetV1WebhookEndpointsEndpoints(w http.ResponseWriter, r *http.Request)
@@ -9672,12 +9993,6 @@ type ServerInterface interface {
 	// List recent outbound events (newest 50)
 	// (GET /v1/webhook-endpoints/events)
 	GetV1WebhookEndpointsEvents(w http.ResponseWriter, r *http.Request)
-	// List an event's deliveries (older route)
-	// (GET /v1/webhook-endpoints/events/{id}/deliveries)
-	ListWebhookEventDeliveriesLegacy(w http.ResponseWriter, r *http.Request, id string)
-	// Replay an event to all matching endpoints (older route)
-	// (POST /v1/webhook-endpoints/events/{id}/replay)
-	ReplayWebhookEventLegacy(w http.ResponseWriter, r *http.Request, id string, params ReplayWebhookEventLegacyParams)
 	// Stream webhook events live (Server-Sent Events)
 	// (GET /v1/webhook_events/stream)
 	StreamWebhookEvents(w http.ResponseWriter, r *http.Request)
@@ -9828,12 +10143,6 @@ func (_ Unimplemented) PostV1AuthPasswordResetRequest(w http.ResponseWriter, r *
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Invoice preview (dry run)
-// (GET /v1/billing/preview/{subscription_id})
-func (_ Unimplemented) GetV1BillingPreviewSubscriptionId(w http.ResponseWriter, r *http.Request, subscriptionId string) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
 // Trigger billing cycle
 // (POST /v1/billing/run)
 func (_ Unimplemented) PostV1BillingRun(w http.ResponseWriter, r *http.Request, params PostV1BillingRunParams) {
@@ -9846,18 +10155,6 @@ func (_ Unimplemented) Bootstrap(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Start a card setup in Stripe Checkout (older route)
-// (POST /v1/checkout/setup)
-func (_ Unimplemented) CreateCheckoutSetupSession(w http.ResponseWriter, r *http.Request, params CreateCheckoutSetupSessionParams) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-// Get a customer's card setup status (older route)
-// (GET /v1/checkout/status/{customerID})
-func (_ Unimplemented) GetCheckoutSetupStatus(w http.ResponseWriter, r *http.Request, customerID string) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
 // List credit notes
 // (GET /v1/credit-notes)
 func (_ Unimplemented) ListCreditNotes(w http.ResponseWriter, r *http.Request, params ListCreditNotesParams) {
@@ -9867,6 +10164,12 @@ func (_ Unimplemented) ListCreditNotes(w http.ResponseWriter, r *http.Request, p
 // Create a credit note (line-based, or commit relief)
 // (POST /v1/credit-notes)
 func (_ Unimplemented) PostV1CreditNotes(w http.ResponseWriter, r *http.Request, params PostV1CreditNotesParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Get credit note totals
+// (GET /v1/credit-notes/stats)
+func (_ Unimplemented) GetCreditNoteStats(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -9960,12 +10263,6 @@ func (_ Unimplemented) PostV1Customers(w http.ResponseWriter, r *http.Request, p
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// List the customer's invoices
-// (GET /v1/customers/{customer_id}/invoices)
-func (_ Unimplemented) ListCustomerInvoices(w http.ResponseWriter, r *http.Request, customerId string, params ListCustomerInvoicesParams) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
 // Get a customer overview
 // (GET /v1/customers/{customer_id}/overview)
 func (_ Unimplemented) GetCustomerOverview(w http.ResponseWriter, r *http.Request, customerId string) {
@@ -9999,12 +10296,6 @@ func (_ Unimplemented) DetachCustomerPaymentMethod(w http.ResponseWriter, r *htt
 // Make a payment method the default
 // (POST /v1/customers/{customer_id}/payment-methods/{pmID}/default)
 func (_ Unimplemented) SetCustomerDefaultPaymentMethod(w http.ResponseWriter, r *http.Request, customerId string, pmid string, params SetCustomerDefaultPaymentMethodParams) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-// List the customer's subscriptions
-// (GET /v1/customers/{customer_id}/subscriptions)
-func (_ Unimplemented) ListCustomerSubscriptions(w http.ResponseWriter, r *http.Request, customerId string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10148,7 +10439,7 @@ func (_ Unimplemented) ExportUsageEventsCsv(w http.ResponseWriter, r *http.Reque
 
 // Ingest LiteLLM spend logs
 // (POST /v1/integrations/litellm/spend)
-func (_ Unimplemented) IngestLitellmSpend(w http.ResponseWriter, r *http.Request, params IngestLitellmSpendParams) {
+func (_ Unimplemented) IngestLitellmSpend(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10284,12 +10575,6 @@ func (_ Unimplemented) RemoveMember(w http.ResponseWriter, r *http.Request, user
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// List all meter pricing rules
-// (GET /v1/meter-pricing-rules)
-func (_ Unimplemented) ListAllMeterPricingRules(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
 // List meters
 // (GET /v1/meters)
 func (_ Unimplemented) GetV1Meters(w http.ResponseWriter, r *http.Request) {
@@ -10308,33 +10593,9 @@ func (_ Unimplemented) GetMeter(w http.ResponseWriter, r *http.Request, id strin
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Update meter (incl. the default rating-rule binding)
+// Update meter
 // (PATCH /v1/meters/{id})
 func (_ Unimplemented) PatchV1MetersId(w http.ResponseWriter, r *http.Request, id string, params PatchV1MetersIdParams) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-// List a meter's pricing rules
-// (GET /v1/meters/{meter_id}/pricing-rules)
-func (_ Unimplemented) ListMeterPricingRules(w http.ResponseWriter, r *http.Request, meterId string) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-// Create or update a meter pricing rule
-// (POST /v1/meters/{meter_id}/pricing-rules)
-func (_ Unimplemented) UpsertMeterPricingRule(w http.ResponseWriter, r *http.Request, meterId string, params UpsertMeterPricingRuleParams) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-// Delete a meter pricing rule
-// (DELETE /v1/meters/{meter_id}/pricing-rules/{id})
-func (_ Unimplemented) DeleteMeterPricingRule(w http.ResponseWriter, r *http.Request, meterId string, id string) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-// Get a meter pricing rule
-// (GET /v1/meters/{meter_id}/pricing-rules/{id})
-func (_ Unimplemented) GetMeterPricingRule(w http.ResponseWriter, r *http.Request, meterId string, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10359,6 +10620,30 @@ func (_ Unimplemented) GetPlan(w http.ResponseWriter, r *http.Request, id string
 // Update plan
 // (PATCH /v1/plans/{id})
 func (_ Unimplemented) UpdatePlan(w http.ResponseWriter, r *http.Request, id string, params UpdatePlanParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// List a plan's prices
+// (GET /v1/plans/{id}/prices)
+func (_ Unimplemented) ListPlanPrices(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Add a price to a plan
+// (POST /v1/plans/{id}/prices)
+func (_ Unimplemented) AddPlanPrice(w http.ResponseWriter, r *http.Request, id string, params AddPlanPriceParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Remove a price from a plan
+// (DELETE /v1/plans/{id}/prices/{price_id})
+func (_ Unimplemented) RemovePlanPrice(w http.ResponseWriter, r *http.Request, id string, priceId string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Change a price's rate
+// (PATCH /v1/plans/{id}/prices/{price_id})
+func (_ Unimplemented) UpdatePlanPrice(w http.ResponseWriter, r *http.Request, id string, priceId string, params UpdatePlanPriceParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10431,24 +10716,6 @@ func (_ Unimplemented) GetPublicPaymentUpdate(w http.ResponseWriter, r *http.Req
 // Start adding a card in Stripe Checkout
 // (POST /v1/public/payment-updates/{token}/checkout)
 func (_ Unimplemented) CreatePublicPaymentUpdateCheckout(w http.ResponseWriter, r *http.Request, token string) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-// List rating rules
-// (GET /v1/rating-rules)
-func (_ Unimplemented) GetV1RatingRules(w http.ResponseWriter, r *http.Request, params GetV1RatingRulesParams) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-// Create rating rule
-// (POST /v1/rating-rules)
-func (_ Unimplemented) PostV1RatingRules(w http.ResponseWriter, r *http.Request, params PostV1RatingRulesParams) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-// Get rating rule
-// (GET /v1/rating-rules/{id})
-func (_ Unimplemented) GetRatingRule(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10718,7 +10985,7 @@ func (_ Unimplemented) GetV1UsageEvents(w http.ResponseWriter, r *http.Request, 
 
 // Ingest usage event
 // (POST /v1/usage-events)
-func (_ Unimplemented) PostV1UsageEvents(w http.ResponseWriter, r *http.Request, params PostV1UsageEventsParams) {
+func (_ Unimplemented) PostV1UsageEvents(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10730,13 +10997,13 @@ func (_ Unimplemented) AggregateUsageEvents(w http.ResponseWriter, r *http.Reque
 
 // Backfill a past usage event
 // (POST /v1/usage-events/backfill)
-func (_ Unimplemented) BackfillUsageEvent(w http.ResponseWriter, r *http.Request, params BackfillUsageEventParams) {
+func (_ Unimplemented) BackfillUsageEvent(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // Batch ingest usage events (max 1000, all-or-nothing)
 // (POST /v1/usage-events/batch)
-func (_ Unimplemented) PostV1UsageEventsBatch(w http.ResponseWriter, r *http.Request, params PostV1UsageEventsBatchParams) {
+func (_ Unimplemented) PostV1UsageEventsBatch(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10748,19 +11015,13 @@ func (_ Unimplemented) ListHeldUsage(w http.ResponseWriter, r *http.Request) {
 
 // Discard held usage
 // (POST /v1/usage-events/held/discard)
-func (_ Unimplemented) DiscardHeldUsage(w http.ResponseWriter, r *http.Request, params DiscardHeldUsageParams) {
+func (_ Unimplemented) DiscardHeldUsage(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // Release held usage
 // (POST /v1/usage-events/held/release)
-func (_ Unimplemented) ReleaseHeldUsage(w http.ResponseWriter, r *http.Request, params ReleaseHeldUsageParams) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-// Customer usage summary
-// (GET /v1/usage-summary/{customer_id})
-func (_ Unimplemented) GetUsageSummary(w http.ResponseWriter, r *http.Request, customerId string, params GetUsageSummaryParams) {
+func (_ Unimplemented) ReleaseHeldUsage(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10815,18 +11076,6 @@ func (_ Unimplemented) PostV1WebhookEndpointsEndpointsIdRotateSecret(w http.Resp
 // List recent outbound events (newest 50)
 // (GET /v1/webhook-endpoints/events)
 func (_ Unimplemented) GetV1WebhookEndpointsEvents(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-// List an event's deliveries (older route)
-// (GET /v1/webhook-endpoints/events/{id}/deliveries)
-func (_ Unimplemented) ListWebhookEventDeliveriesLegacy(w http.ResponseWriter, r *http.Request, id string) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-// Replay an event to all matching endpoints (older route)
-// (POST /v1/webhook-endpoints/events/{id}/replay)
-func (_ Unimplemented) ReplayWebhookEventLegacy(w http.ResponseWriter, r *http.Request, id string, params ReplayWebhookEventLegacyParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11604,38 +11853,6 @@ func (siw *ServerInterfaceWrapper) PostV1AuthPasswordResetRequest(w http.Respons
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1BillingPreviewSubscriptionId operation middleware
-func (siw *ServerInterfaceWrapper) GetV1BillingPreviewSubscriptionId(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "subscription_id" -------------
-	var subscriptionId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "subscription_id", chi.URLParam(r, "subscription_id"), &subscriptionId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "subscription_id", Err: err})
-		return
-	}
-
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1BillingPreviewSubscriptionId(w, r, subscriptionId)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
 // PostV1BillingRun operation middleware
 func (siw *ServerInterfaceWrapper) PostV1BillingRun(w http.ResponseWriter, r *http.Request) {
 
@@ -11688,85 +11905,6 @@ func (siw *ServerInterfaceWrapper) Bootstrap(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.Bootstrap(w, r)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// CreateCheckoutSetupSession operation middleware
-func (siw *ServerInterfaceWrapper) CreateCheckoutSetupSession(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params CreateCheckoutSetupSessionParams
-
-	headers := r.Header
-
-	// ------------- Optional header parameter "Idempotency-Key" -------------
-	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
-		var IdempotencyKey IdempotencyKey
-		n := len(valueList)
-		if n != 1 {
-			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
-			return
-		}
-
-		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
-		if err != nil {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
-			return
-		}
-
-		params.IdempotencyKey = IdempotencyKey
-
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.CreateCheckoutSetupSession(w, r, params)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// GetCheckoutSetupStatus operation middleware
-func (siw *ServerInterfaceWrapper) GetCheckoutSetupStatus(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "customerID" -------------
-	var customerID string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "customerID", chi.URLParam(r, "customerID"), &customerID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "customerID", Err: err})
-		return
-	}
-
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetCheckoutSetupStatus(w, r, customerID)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -11944,6 +12082,26 @@ func (siw *ServerInterfaceWrapper) PostV1CreditNotes(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PostV1CreditNotes(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetCreditNoteStats operation middleware
+func (siw *ServerInterfaceWrapper) GetCreditNoteStats(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetCreditNoteStats(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -12744,54 +12902,6 @@ func (siw *ServerInterfaceWrapper) PostV1Customers(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
-// ListCustomerInvoices operation middleware
-func (siw *ServerInterfaceWrapper) ListCustomerInvoices(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "customer_id" -------------
-	var customerId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "customer_id", chi.URLParam(r, "customer_id"), &customerId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "customer_id", Err: err})
-		return
-	}
-
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params ListCustomerInvoicesParams
-
-	// ------------- Optional query parameter "limit" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
-		}
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListCustomerInvoices(w, r, customerId, params)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
 // GetCustomerOverview operation middleware
 func (siw *ServerInterfaceWrapper) GetCustomerOverview(w http.ResponseWriter, r *http.Request) {
 
@@ -13065,38 +13175,6 @@ func (siw *ServerInterfaceWrapper) SetCustomerDefaultPaymentMethod(w http.Respon
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetCustomerDefaultPaymentMethod(w, r, customerId, pmid, params)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// ListCustomerSubscriptions operation middleware
-func (siw *ServerInterfaceWrapper) ListCustomerSubscriptions(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "customer_id" -------------
-	var customerId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "customer_id", chi.URLParam(r, "customer_id"), &customerId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "customer_id", Err: err})
-		return
-	}
-
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListCustomerSubscriptions(w, r, customerId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -14314,41 +14392,14 @@ func (siw *ServerInterfaceWrapper) ExportUsageEventsCsv(w http.ResponseWriter, r
 // IngestLitellmSpend operation middleware
 func (siw *ServerInterfaceWrapper) IngestLitellmSpend(w http.ResponseWriter, r *http.Request) {
 
-	var err error
-	_ = err
-
 	ctx := r.Context()
 
 	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
 
 	r = r.WithContext(ctx)
 
-	// Parameter object where we will unmarshal all parameters from the context
-	var params IngestLitellmSpendParams
-
-	headers := r.Header
-
-	// ------------- Optional header parameter "Idempotency-Key" -------------
-	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
-		var IdempotencyKey IdempotencyKey
-		n := len(valueList)
-		if n != 1 {
-			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
-			return
-		}
-
-		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
-		if err != nil {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
-			return
-		}
-
-		params.IdempotencyKey = IdempotencyKey
-
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.IngestLitellmSpend(w, r, params)
+		siw.Handler.IngestLitellmSpend(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -15535,26 +15586,6 @@ func (siw *ServerInterfaceWrapper) RemoveMember(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
-// ListAllMeterPricingRules operation middleware
-func (siw *ServerInterfaceWrapper) ListAllMeterPricingRules(w http.ResponseWriter, r *http.Request) {
-
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListAllMeterPricingRules(w, r)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
 // GetV1Meters operation middleware
 func (siw *ServerInterfaceWrapper) GetV1Meters(w http.ResponseWriter, r *http.Request) {
 
@@ -15701,176 +15732,6 @@ func (siw *ServerInterfaceWrapper) PatchV1MetersId(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PatchV1MetersId(w, r, id, params)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// ListMeterPricingRules operation middleware
-func (siw *ServerInterfaceWrapper) ListMeterPricingRules(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "meter_id" -------------
-	var meterId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "meter_id", chi.URLParam(r, "meter_id"), &meterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "meter_id", Err: err})
-		return
-	}
-
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListMeterPricingRules(w, r, meterId)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// UpsertMeterPricingRule operation middleware
-func (siw *ServerInterfaceWrapper) UpsertMeterPricingRule(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "meter_id" -------------
-	var meterId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "meter_id", chi.URLParam(r, "meter_id"), &meterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "meter_id", Err: err})
-		return
-	}
-
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params UpsertMeterPricingRuleParams
-
-	headers := r.Header
-
-	// ------------- Optional header parameter "Idempotency-Key" -------------
-	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
-		var IdempotencyKey IdempotencyKey
-		n := len(valueList)
-		if n != 1 {
-			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
-			return
-		}
-
-		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
-		if err != nil {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
-			return
-		}
-
-		params.IdempotencyKey = IdempotencyKey
-
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.UpsertMeterPricingRule(w, r, meterId, params)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// DeleteMeterPricingRule operation middleware
-func (siw *ServerInterfaceWrapper) DeleteMeterPricingRule(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "meter_id" -------------
-	var meterId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "meter_id", chi.URLParam(r, "meter_id"), &meterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "meter_id", Err: err})
-		return
-	}
-
-	// ------------- Path parameter "id" -------------
-	var id string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
-		return
-	}
-
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.DeleteMeterPricingRule(w, r, meterId, id)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// GetMeterPricingRule operation middleware
-func (siw *ServerInterfaceWrapper) GetMeterPricingRule(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "meter_id" -------------
-	var meterId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "meter_id", chi.URLParam(r, "meter_id"), &meterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "meter_id", Err: err})
-		return
-	}
-
-	// ------------- Path parameter "id" -------------
-	var id string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
-		return
-	}
-
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetMeterPricingRule(w, r, meterId, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -16035,6 +15896,200 @@ func (siw *ServerInterfaceWrapper) UpdatePlan(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
+// ListPlanPrices operation middleware
+func (siw *ServerInterfaceWrapper) ListPlanPrices(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListPlanPrices(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AddPlanPrice operation middleware
+func (siw *ServerInterfaceWrapper) AddPlanPrice(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params AddPlanPriceParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AddPlanPrice(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RemovePlanPrice operation middleware
+func (siw *ServerInterfaceWrapper) RemovePlanPrice(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "price_id" -------------
+	var priceId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "price_id", chi.URLParam(r, "price_id"), &priceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "price_id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RemovePlanPrice(w, r, id, priceId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdatePlanPrice operation middleware
+func (siw *ServerInterfaceWrapper) UpdatePlanPrice(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "price_id" -------------
+	var priceId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "price_id", chi.URLParam(r, "price_id"), &priceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "price_id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params UpdatePlanPriceParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdatePlanPrice(w, r, id, priceId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListPriceOverrides operation middleware
 func (siw *ServerInterfaceWrapper) ListPriceOverrides(w http.ResponseWriter, r *http.Request) {
 
@@ -16059,6 +16114,19 @@ func (siw *ServerInterfaceWrapper) ListPriceOverrides(w http.ResponseWriter, r *
 			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "customer_id"})
 		} else {
 			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "customer_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "price_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "price_id", r.URL.Query(), &params.PriceId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "price_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "price_id", Err: err})
 		}
 		return
 	}
@@ -16399,150 +16467,6 @@ func (siw *ServerInterfaceWrapper) CreatePublicPaymentUpdateCheckout(w http.Resp
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreatePublicPaymentUpdateCheckout(w, r, token)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// GetV1RatingRules operation middleware
-func (siw *ServerInterfaceWrapper) GetV1RatingRules(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params GetV1RatingRulesParams
-
-	// ------------- Optional query parameter "rule_key" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "rule_key", r.URL.Query(), &params.RuleKey, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "rule_key"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "rule_key", Err: err})
-		}
-		return
-	}
-
-	// ------------- Optional query parameter "lifecycle_state" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "lifecycle_state", r.URL.Query(), &params.LifecycleState, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "lifecycle_state"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "lifecycle_state", Err: err})
-		}
-		return
-	}
-
-	// ------------- Optional query parameter "latest" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "latest", r.URL.Query(), &params.Latest, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "latest"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "latest", Err: err})
-		}
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1RatingRules(w, r, params)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// PostV1RatingRules operation middleware
-func (siw *ServerInterfaceWrapper) PostV1RatingRules(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1RatingRulesParams
-
-	headers := r.Header
-
-	// ------------- Optional header parameter "Idempotency-Key" -------------
-	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
-		var IdempotencyKey IdempotencyKey
-		n := len(valueList)
-		if n != 1 {
-			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
-			return
-		}
-
-		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
-		if err != nil {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
-			return
-		}
-
-		params.IdempotencyKey = IdempotencyKey
-
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1RatingRules(w, r, params)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// GetRatingRule operation middleware
-func (siw *ServerInterfaceWrapper) GetRatingRule(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "id" -------------
-	var id string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
-		return
-	}
-
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetRatingRule(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -17088,6 +17012,19 @@ func (siw *ServerInterfaceWrapper) GetV1Subscriptions(w http.ResponseWriter, r *
 			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "billing"})
 		} else {
 			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "billing", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "collection" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "collection", r.URL.Query(), &params.Collection, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "collection"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "collection", Err: err})
 		}
 		return
 	}
@@ -18557,41 +18494,14 @@ func (siw *ServerInterfaceWrapper) GetV1UsageEvents(w http.ResponseWriter, r *ht
 // PostV1UsageEvents operation middleware
 func (siw *ServerInterfaceWrapper) PostV1UsageEvents(w http.ResponseWriter, r *http.Request) {
 
-	var err error
-	_ = err
-
 	ctx := r.Context()
 
 	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
 
 	r = r.WithContext(ctx)
 
-	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1UsageEventsParams
-
-	headers := r.Header
-
-	// ------------- Optional header parameter "Idempotency-Key" -------------
-	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
-		var IdempotencyKey IdempotencyKey
-		n := len(valueList)
-		if n != 1 {
-			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
-			return
-		}
-
-		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
-		if err != nil {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
-			return
-		}
-
-		params.IdempotencyKey = IdempotencyKey
-
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1UsageEvents(w, r, params)
+		siw.Handler.PostV1UsageEvents(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -18708,41 +18618,14 @@ func (siw *ServerInterfaceWrapper) AggregateUsageEvents(w http.ResponseWriter, r
 // BackfillUsageEvent operation middleware
 func (siw *ServerInterfaceWrapper) BackfillUsageEvent(w http.ResponseWriter, r *http.Request) {
 
-	var err error
-	_ = err
-
 	ctx := r.Context()
 
 	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
 
 	r = r.WithContext(ctx)
 
-	// Parameter object where we will unmarshal all parameters from the context
-	var params BackfillUsageEventParams
-
-	headers := r.Header
-
-	// ------------- Optional header parameter "Idempotency-Key" -------------
-	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
-		var IdempotencyKey IdempotencyKey
-		n := len(valueList)
-		if n != 1 {
-			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
-			return
-		}
-
-		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
-		if err != nil {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
-			return
-		}
-
-		params.IdempotencyKey = IdempotencyKey
-
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.BackfillUsageEvent(w, r, params)
+		siw.Handler.BackfillUsageEvent(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -18755,41 +18638,14 @@ func (siw *ServerInterfaceWrapper) BackfillUsageEvent(w http.ResponseWriter, r *
 // PostV1UsageEventsBatch operation middleware
 func (siw *ServerInterfaceWrapper) PostV1UsageEventsBatch(w http.ResponseWriter, r *http.Request) {
 
-	var err error
-	_ = err
-
 	ctx := r.Context()
 
 	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
 
 	r = r.WithContext(ctx)
 
-	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1UsageEventsBatchParams
-
-	headers := r.Header
-
-	// ------------- Optional header parameter "Idempotency-Key" -------------
-	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
-		var IdempotencyKey IdempotencyKey
-		n := len(valueList)
-		if n != 1 {
-			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
-			return
-		}
-
-		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
-		if err != nil {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
-			return
-		}
-
-		params.IdempotencyKey = IdempotencyKey
-
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1UsageEventsBatch(w, r, params)
+		siw.Handler.PostV1UsageEventsBatch(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -18822,41 +18678,14 @@ func (siw *ServerInterfaceWrapper) ListHeldUsage(w http.ResponseWriter, r *http.
 // DiscardHeldUsage operation middleware
 func (siw *ServerInterfaceWrapper) DiscardHeldUsage(w http.ResponseWriter, r *http.Request) {
 
-	var err error
-	_ = err
-
 	ctx := r.Context()
 
 	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
 
 	r = r.WithContext(ctx)
 
-	// Parameter object where we will unmarshal all parameters from the context
-	var params DiscardHeldUsageParams
-
-	headers := r.Header
-
-	// ------------- Optional header parameter "Idempotency-Key" -------------
-	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
-		var IdempotencyKey IdempotencyKey
-		n := len(valueList)
-		if n != 1 {
-			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
-			return
-		}
-
-		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
-		if err != nil {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
-			return
-		}
-
-		params.IdempotencyKey = IdempotencyKey
-
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.DiscardHeldUsage(w, r, params)
+		siw.Handler.DiscardHeldUsage(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -18869,102 +18698,14 @@ func (siw *ServerInterfaceWrapper) DiscardHeldUsage(w http.ResponseWriter, r *ht
 // ReleaseHeldUsage operation middleware
 func (siw *ServerInterfaceWrapper) ReleaseHeldUsage(w http.ResponseWriter, r *http.Request) {
 
-	var err error
-	_ = err
-
 	ctx := r.Context()
 
 	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
 
 	r = r.WithContext(ctx)
 
-	// Parameter object where we will unmarshal all parameters from the context
-	var params ReleaseHeldUsageParams
-
-	headers := r.Header
-
-	// ------------- Optional header parameter "Idempotency-Key" -------------
-	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
-		var IdempotencyKey IdempotencyKey
-		n := len(valueList)
-		if n != 1 {
-			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
-			return
-		}
-
-		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
-		if err != nil {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
-			return
-		}
-
-		params.IdempotencyKey = IdempotencyKey
-
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ReleaseHeldUsage(w, r, params)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// GetUsageSummary operation middleware
-func (siw *ServerInterfaceWrapper) GetUsageSummary(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "customer_id" -------------
-	var customerId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "customer_id", chi.URLParam(r, "customer_id"), &customerId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "customer_id", Err: err})
-		return
-	}
-
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params GetUsageSummaryParams
-
-	// ------------- Optional query parameter "from" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
-		}
-		return
-	}
-
-	// ------------- Optional query parameter "to" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
-		}
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetUsageSummary(w, r, customerId, params)
+		siw.Handler.ReleaseHeldUsage(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -19313,94 +19054,6 @@ func (siw *ServerInterfaceWrapper) GetV1WebhookEndpointsEvents(w http.ResponseWr
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetV1WebhookEndpointsEvents(w, r)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// ListWebhookEventDeliveriesLegacy operation middleware
-func (siw *ServerInterfaceWrapper) ListWebhookEventDeliveriesLegacy(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "id" -------------
-	var id string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
-		return
-	}
-
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListWebhookEventDeliveriesLegacy(w, r, id)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// ReplayWebhookEventLegacy operation middleware
-func (siw *ServerInterfaceWrapper) ReplayWebhookEventLegacy(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "id" -------------
-	var id string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
-		return
-	}
-
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params ReplayWebhookEventLegacyParams
-
-	headers := r.Header
-
-	// ------------- Optional header parameter "Idempotency-Key" -------------
-	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
-		var IdempotencyKey IdempotencyKey
-		n := len(valueList)
-		if n != 1 {
-			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
-			return
-		}
-
-		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
-		if err != nil {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
-			return
-		}
-
-		params.IdempotencyKey = IdempotencyKey
-
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ReplayWebhookEventLegacy(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -19789,25 +19442,19 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/v1/auth/password-reset/request", wrapper.PostV1AuthPasswordResetRequest)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/billing/preview/{subscription_id}", wrapper.GetV1BillingPreviewSubscriptionId)
-	})
-	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/billing/run", wrapper.PostV1BillingRun)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/bootstrap", wrapper.Bootstrap)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/checkout/setup", wrapper.CreateCheckoutSetupSession)
-	})
-	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/checkout/status/{customerID}", wrapper.GetCheckoutSetupStatus)
-	})
-	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/credit-notes", wrapper.ListCreditNotes)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/credit-notes", wrapper.PostV1CreditNotes)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/credit-notes/stats", wrapper.GetCreditNoteStats)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/credit-notes/{id}", wrapper.GetCreditNote)
@@ -19855,9 +19502,6 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/v1/customers", wrapper.PostV1Customers)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/customers/{customer_id}/invoices", wrapper.ListCustomerInvoices)
-	})
-	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/customers/{customer_id}/overview", wrapper.GetCustomerOverview)
 	})
 	r.Group(func(r chi.Router) {
@@ -19874,9 +19518,6 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/customers/{customer_id}/payment-methods/{pmID}/default", wrapper.SetCustomerDefaultPaymentMethod)
-	})
-	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/customers/{customer_id}/subscriptions", wrapper.ListCustomerSubscriptions)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/customers/{id}", wrapper.GetCustomer)
@@ -20017,9 +19658,6 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Delete(options.BaseURL+"/v1/members/{userID}", wrapper.RemoveMember)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/meter-pricing-rules", wrapper.ListAllMeterPricingRules)
-	})
-	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/meters", wrapper.GetV1Meters)
 	})
 	r.Group(func(r chi.Router) {
@@ -20032,18 +19670,6 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Patch(options.BaseURL+"/v1/meters/{id}", wrapper.PatchV1MetersId)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/meters/{meter_id}/pricing-rules", wrapper.ListMeterPricingRules)
-	})
-	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/meters/{meter_id}/pricing-rules", wrapper.UpsertMeterPricingRule)
-	})
-	r.Group(func(r chi.Router) {
-		r.Delete(options.BaseURL+"/v1/meters/{meter_id}/pricing-rules/{id}", wrapper.DeleteMeterPricingRule)
-	})
-	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/meters/{meter_id}/pricing-rules/{id}", wrapper.GetMeterPricingRule)
-	})
-	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/plans", wrapper.GetV1Plans)
 	})
 	r.Group(func(r chi.Router) {
@@ -20054,6 +19680,18 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Patch(options.BaseURL+"/v1/plans/{id}", wrapper.UpdatePlan)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/plans/{id}/prices", wrapper.ListPlanPrices)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/plans/{id}/prices", wrapper.AddPlanPrice)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/v1/plans/{id}/prices/{price_id}", wrapper.RemovePlanPrice)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/v1/plans/{id}/prices/{price_id}", wrapper.UpdatePlanPrice)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/price-overrides", wrapper.ListPriceOverrides)
@@ -20090,15 +19728,6 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/public/payment-updates/{token}/checkout", wrapper.CreatePublicPaymentUpdateCheckout)
-	})
-	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/rating-rules", wrapper.GetV1RatingRules)
-	})
-	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/rating-rules", wrapper.PostV1RatingRules)
-	})
-	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/rating-rules/{id}", wrapper.GetRatingRule)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/recipes", wrapper.ListRecipes)
@@ -20254,9 +19883,6 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/v1/usage-events/held/release", wrapper.ReleaseHeldUsage)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/usage-summary/{customer_id}", wrapper.GetUsageSummary)
-	})
-	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/webhook-endpoints/endpoints", wrapper.GetV1WebhookEndpointsEndpoints)
 	})
 	r.Group(func(r chi.Router) {
@@ -20282,12 +19908,6 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/webhook-endpoints/events", wrapper.GetV1WebhookEndpointsEvents)
-	})
-	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/webhook-endpoints/events/{id}/deliveries", wrapper.ListWebhookEventDeliveriesLegacy)
-	})
-	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/webhook-endpoints/events/{id}/replay", wrapper.ReplayWebhookEventLegacy)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/webhook_events/stream", wrapper.StreamWebhookEvents)

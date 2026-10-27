@@ -9,6 +9,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // fakeNoPMNotifier records NotifyNoPaymentMethod calls so tests can assert
@@ -38,7 +39,7 @@ func thresholdNoPMFixture() (*Engine, *mockInvoices, *recordingCharger, *fakeNoP
 		CurrentBillingPeriodStart: &periodStart,
 		CurrentBillingPeriodEnd:   &periodEnd,
 		NextBillingAt:             &nextBilling,
-		BillingThresholds:         &domain.BillingThresholds{AmountGTE: 100000, ResetBillingCycle: true},
+		BillingThresholds:         &domain.BillingThresholds{AmountGTE: 100000},
 	}
 	base := &mockSubs{subs: map[string]domain.Subscription{"sub_1": sub}, cycleUpdated: make(map[string]bool)}
 	subs := &thresholdMockSubs{mockSubs: base, candidates: []domain.Subscription{sub}}
@@ -47,13 +48,11 @@ func thresholdNoPMFixture() (*Engine, *mockInvoices, *recordingCharger, *fakeNoP
 		plans: map[string]domain.Plan{"pln_1": {
 			ID: "pln_1", Name: "Pro Plan", Currency: "USD",
 			BillingInterval: domain.BillingMonthly, BaseAmountCents: 4900,
-			MeterIDs: []string{"mtr_api"},
 		}},
-		meters: map[string]domain.Meter{"mtr_api": {ID: "mtr_api", Name: "API Calls", Unit: "calls", RatingRuleVersionID: "rrv_api"}},
-		rules: map[string]domain.RatingRuleVersion{"rrv_api": {
-			ID: "rrv_api", RuleKey: "api_calls", Version: 1, Mode: domain.PricingFlat,
-			FlatAmountCents: decimal.NewFromInt(100),
-		}},
+		meters: map[string]domain.Meter{"mtr_api": {ID: "mtr_api", Name: "API Calls", Unit: "calls"}},
+		prices: map[string][]domain.PlanPrice{
+			"pln_1": {priceOf("prc_api", "mtr_api", domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(100)})},
+		},
 	}
 	invoices := &mockInvoices{}
 	applier := &fakeCreditApplier{inv: invoices, applyCents: 0}
@@ -75,7 +74,7 @@ func thresholdNoPMFixture() (*Engine, *mockInvoices, *recordingCharger, *fakeNoP
 func TestThresholdScan_NoPM_QueuesAndNotifies(t *testing.T) {
 	engine, invoices, charger, notifier := thresholdNoPMFixture()
 
-	fired, errs := engine.ScanThresholds(context.Background(), 50)
+	fired, errs := engine.ScanThresholds(postgres.WithLivemode(context.Background(), true), 50)
 	if len(errs) != 0 || fired != 1 {
 		t.Fatalf("fired/errs: %d/%v", fired, errs)
 	}
@@ -118,7 +117,7 @@ func TestThresholdScan_NoPM_DraftInvoiceStaysQuiet(t *testing.T) {
 	// Force a tax defer -> the threshold invoice lands tax_status=pending, draft.
 	engine.SetTaxProviderResolver(stubResolver(&stubProvider{err: fmt.Errorf("stripe tax down")}))
 
-	fired, errs := engine.ScanThresholds(context.Background(), 50)
+	fired, errs := engine.ScanThresholds(postgres.WithLivemode(context.Background(), true), 50)
 	if len(errs) != 0 || fired != 1 {
 		t.Fatalf("fired/errs: %d/%v", fired, errs)
 	}

@@ -7,9 +7,6 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"time"
-
-	"github.com/shopspring/decimal"
 
 	"github.com/sagarsuperuser/velox/internal/audit"
 	"github.com/sagarsuperuser/velox/internal/domain"
@@ -26,15 +23,11 @@ type AuditEmitter interface {
 }
 
 // SubscriptionPlanUsageReader counts subscriptions referencing a plan.
-// Used by UpdatePlan to enforce immutability of billing-affecting
-// fields when the plan has live subs — Stripe-parity (Prices are
-// immutable for billing-relevant fields). Narrow shape; concrete
-// query lives in *subscription.PostgresStore.
+// UpdatePlan uses it to keep the base fee fixed while live subscriptions use
+// the plan (ADR-034). Narrow shape; the concrete query lives in
+// *subscription.PostgresStore.
 //
-// "Live" = any sub that may still bill: status NOT IN ('canceled',
-// 'archived'). Draft / active / trialing / paused all qualify
-// because they could still produce future invoices and need
-// deterministic terms.
+// "Live" = any sub that may still bill: every status but canceled.
 type SubscriptionPlanUsageReader interface {
 	CountLiveSubsByPlan(ctx context.Context, tenantID, planID string) (int, error)
 }
@@ -57,221 +50,22 @@ func NewService(store Store) *Service {
 }
 
 // SetAuditLogger wires in-tx audit emission for the pricing mutations that
-// own their transaction in the store: meter PATCH and pricing-rule DELETE
+// own their transaction in the store: meter PATCH and every price write
 // (ADR-090). Nil-safe — an unwired service skips emission, which keeps the
-// narrow unit tests fake-friendly. The handler's remaining post-hoc
-// AuditWriter (plan/meter create, rule upsert, override) is a separate seam.
+// narrow unit tests fake-friendly. The handler's post-hoc AuditWriter (plan
+// and meter create, plan PATCH, override) is a separate seam.
 func (s *Service) SetAuditLogger(a AuditEmitter) { s.auditLogger = a }
 
 // SetCustomerReader wires the customer read CreateOverride runs before
 // writing. When unwired (narrow unit tests) the read is skipped.
 func (s *Service) SetCustomerReader(r CustomerReader) { s.customers = r }
 
-// SetSubscriptionPlanUsageReader wires the live-sub counter used by
-// UpdatePlan to gate billing-affecting field mutations. Optional —
-// when unwired (narrow unit tests), the immutability guard is
-// silent and all fields are mutable. Production wires
+// SetSubscriptionPlanUsageReader wires the live-sub counter UpdatePlan uses
+// to keep the base fee fixed (ADR-034). Optional — when unwired (narrow unit
+// tests) the base fee is editable. Production wires
 // *subscription.PostgresStore via router.go.
 func (s *Service) SetSubscriptionPlanUsageReader(r SubscriptionPlanUsageReader) {
 	s.subPlanUsage = r
-}
-
-// ---------------------------------------------------------------------------
-// Rating Rules
-// ---------------------------------------------------------------------------
-
-type CreateRatingRuleInput struct {
-	RuleKey                string              `json:"rule_key"`
-	Name                   string              `json:"name"`
-	Mode                   domain.PricingMode  `json:"mode"`
-	Currency               string              `json:"currency"`
-	FlatAmountCents        decimal.Decimal     `json:"flat_amount_cents"`
-	GraduatedTiers         []domain.RatingTier `json:"graduated_tiers"`
-	PackageSize            int64               `json:"package_size"`
-	PackageAmountCents     int64               `json:"package_amount_cents"`
-	OverageUnitAmountCents decimal.Decimal     `json:"overage_unit_amount_cents"`
-}
-
-func (s *Service) CreateRatingRule(ctx context.Context, tenantID string, input CreateRatingRuleInput) (domain.RatingRuleVersion, error) {
-	if err := validateRatingRuleInput(input); err != nil {
-		return domain.RatingRuleVersion{}, err
-	}
-
-	currency := strings.ToUpper(input.Currency)
-
-	// Currency guard (ADR-070): overrides follow the rule_key across
-	// version publishes and carry bare integer cents with no currency
-	// of their own — a publish that changes the key's currency would
-	// silently reinterpret every referencing override's amounts in the
-	// new currency ($8.00 becomes €8.00). Reject while any active
-	// override references the key; without overrides the change is
-	// safe (each period resolves its pinned version, and invoice lines
-	// carry their own currency).
-	existing, err := s.store.ListRatingRules(ctx, RatingRuleFilter{
-		TenantID:   tenantID,
-		RuleKey:    input.RuleKey,
-		LatestOnly: true,
-	})
-	if err != nil {
-		return domain.RatingRuleVersion{}, err
-	}
-	if len(existing) > 0 && existing[0].Currency != currency {
-		n, err := s.store.CountActiveOverridesByRuleKey(ctx, tenantID, input.RuleKey)
-		if err != nil {
-			return domain.RatingRuleVersion{}, fmt.Errorf("check overrides for currency guard: %w", err)
-		}
-		if n > 0 {
-			return domain.RatingRuleVersion{}, errs.InvalidState(fmt.Sprintf(
-				"cannot change currency from %s to %s: %d active customer price override(s) reference rule %q and would be silently repriced in the new currency — remove the overrides first",
-				existing[0].Currency, currency, n, input.RuleKey))
-		}
-		// ADR-100: overrides are not the only downstream — plans bound to
-		// this key (via meter pricing rules or a meter's default binding)
-		// bill it at cycle close, and their invoices would silently carry
-		// amounts computed in the new currency under the old label.
-		if err := s.guardRuleCurrencyChange(ctx, tenantID, input.RuleKey, currency); err != nil {
-			return domain.RatingRuleVersion{}, err
-		}
-	}
-
-	rule := domain.RatingRuleVersion{
-		RuleKey:                input.RuleKey,
-		Name:                   input.Name,
-		LifecycleState:         domain.RatingRuleActive,
-		Mode:                   input.Mode,
-		Currency:               currency,
-		FlatAmountCents:        input.FlatAmountCents,
-		GraduatedTiers:         input.GraduatedTiers,
-		PackageSize:            input.PackageSize,
-		PackageAmountCents:     input.PackageAmountCents,
-		OverageUnitAmountCents: input.OverageUnitAmountCents,
-	}
-
-	// Validate the pricing config by computing a test amount (shape
-	// errors beyond qty=1's reach are caught by validateRatingRuleInput).
-	if _, err := domain.ComputeAmountCents(rule, decimal.NewFromInt(1)); err != nil {
-		return domain.RatingRuleVersion{}, errs.Invalid("pricing", fmt.Sprintf("invalid pricing configuration: %v", err))
-	}
-
-	// The store allocates the version in SQL (MAX+1). Two publishes
-	// racing the same key can still collide on the unique index — the
-	// loser retries with a freshly-allocated number instead of
-	// surfacing a spurious 409.
-	var created domain.RatingRuleVersion
-	var createErr error
-	for attempt := 0; attempt < 3; attempt++ {
-		created, createErr = s.store.CreateRatingRule(ctx, tenantID, rule)
-		if createErr == nil || !errors.Is(createErr, errs.ErrAlreadyExists) {
-			return created, createErr
-		}
-	}
-	return domain.RatingRuleVersion{}, createErr
-}
-
-func (s *Service) GetRatingRule(ctx context.Context, tenantID, id string) (domain.RatingRuleVersion, error) {
-	return s.store.GetRatingRule(ctx, tenantID, id)
-}
-
-// GetRuleByKeyAsOf resolves the version in force at asOf — the single
-// version-resolution rule every rating path shares (cycle close, cancel
-// finalize, threshold fire, preview; ADR-070 pin-at-period-start).
-func (s *Service) GetRuleByKeyAsOf(ctx context.Context, tenantID, ruleKey string, asOf time.Time) (domain.RatingRuleVersion, error) {
-	return s.store.GetRuleByKeyAsOf(ctx, tenantID, ruleKey, asOf)
-}
-
-func (s *Service) ListRatingRules(ctx context.Context, filter RatingRuleFilter) ([]domain.RatingRuleVersion, error) {
-	return s.store.ListRatingRules(ctx, filter)
-}
-
-func validateRatingRuleInput(input CreateRatingRuleInput) error {
-	if strings.TrimSpace(input.RuleKey) == "" {
-		return errs.Required("rule_key")
-	}
-	if err := domain.MaxLen("rule_key", input.RuleKey, 100); err != nil {
-		return err
-	}
-	if !slugPattern.MatchString(input.RuleKey) {
-		return errs.Invalid("rule_key", "must contain only alphanumeric characters, hyphens, and underscores")
-	}
-	if strings.TrimSpace(input.Name) == "" {
-		return errs.Required("name")
-	}
-	if err := domain.MaxLen("name", input.Name, 255); err != nil {
-		return err
-	}
-	if err := domain.ValidateCurrency(input.Currency); err != nil {
-		return err
-	}
-
-	return validatePricingShape(input.Mode, input.FlatAmountCents, input.GraduatedTiers, input.PackageSize, input.PackageAmountCents)
-}
-
-// validatePricingShape enforces the FULL pricing contract at authoring
-// time — shared by rating-rule creation and customer overrides. The
-// tier rules mirror ComputeAmountCents' rating-time checks exactly
-// (domain/pricing.go): the old validation probed ComputeAmountCents at
-// qty=1, which breaks out of the tier loop before reaching tier 2, so
-// a non-monotonic table ([{up_to:100},{up_to:50}]) or one without a
-// catch-all passed authoring and then hard-failed billOnePeriod at the
-// first cycle close whose quantity crossed tier 1 — blocking the sub's
-// invoice every tick.
-func validatePricingShape(mode domain.PricingMode, flat decimal.Decimal, tiers []domain.RatingTier, pkgSize, pkgAmount int64) error {
-	switch mode {
-	case domain.PricingFlat:
-		// Zero is a legal rate: "this dimension is free" (a $0 embedding
-		// model, an internal meter tracked but not billed). Almost every
-		// AI-infra pricing page has an included-free shape, and rejecting
-		// $0 at authoring forced per-customer credit-grant workarounds.
-		// ComputeAmountCents has always accepted zero (it rejects only
-		// negatives) — this gate was authoring-only. Negative stays
-		// rejected: a negative RATE is a discount misspelled (credits are
-		// the discount primitive, ADR-039).
-		if flat.IsNegative() {
-			return errs.Invalid("flat_amount_cents", "unit price must not be negative (use 0 for a free rate)")
-		}
-	case domain.PricingGraduated:
-		if len(tiers) == 0 {
-			return errs.Invalid("graduated_tiers", "at least one pricing tier is required")
-		}
-		lastUpper := int64(0)
-		for i, tier := range tiers {
-			// Zero-price tiers express included allowances — "first 1M
-			// tokens free, then $2/M" (Stripe documents a $0 first tier
-			// as the canonical graduated free-tier shape).
-			if tier.UnitAmountCents.IsNegative() {
-				return errs.Invalid("graduated_tiers", fmt.Sprintf("tier %d: unit price must not be negative (use 0 for a free tier)", i+1))
-			}
-			if tier.UpTo < 0 {
-				return errs.Invalid("graduated_tiers", fmt.Sprintf("tier %d: up_to must be positive, or 0 for the final catch-all tier", i+1))
-			}
-			if tier.UpTo == 0 {
-				if i != len(tiers)-1 {
-					return errs.Invalid("graduated_tiers", fmt.Sprintf("tier %d: a catch-all tier (up_to=0) must be the last tier — tiers after it would never price anything", i+1))
-				}
-				continue
-			}
-			if tier.UpTo <= lastUpper {
-				return errs.Invalid("graduated_tiers", fmt.Sprintf("tier %d: up_to (%d) must be strictly greater than the previous tier's up_to (%d)", i+1, tier.UpTo, lastUpper))
-			}
-			lastUpper = tier.UpTo
-		}
-		if tiers[len(tiers)-1].UpTo != 0 {
-			return errs.Invalid("graduated_tiers", "the final tier must be a catch-all (up_to=0): a bounded last tier makes any usage beyond it unpriceable and blocks invoice generation at cycle close — to invoice early when usage runs high, set a spend threshold on the subscription")
-		}
-	case domain.PricingPackage:
-		if pkgSize <= 0 {
-			return errs.Invalid("package_size", "package size must be greater than 0")
-		}
-		// Zero-priced packages are legal for the same included-allowance
-		// reason as zero tiers (ComputeAmountCents already accepts them).
-		if pkgAmount < 0 {
-			return errs.Invalid("package_amount_cents", "package price must not be negative (use 0 for a free package)")
-		}
-	default:
-		return errs.Invalid("mode", "must be one of: flat, graduated, package")
-	}
-
-	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -279,24 +73,42 @@ func validatePricingShape(mode domain.PricingMode, flat decimal.Decimal, tiers [
 // ---------------------------------------------------------------------------
 
 type CreateMeterInput struct {
-	Key                 string `json:"key"`
-	Name                string `json:"name"`
-	Unit                string `json:"unit"`
-	Aggregation         string `json:"aggregation"`
-	RatingRuleVersionID string `json:"rating_rule_version_id,omitempty"`
+	// EventName is the event_name usage events send for this meter.
+	EventName   string `json:"event_name"`
+	Name        string `json:"name"`
+	Unit        string `json:"unit"`
+	Aggregation string `json:"aggregation"`
 }
 
 func (s *Service) CreateMeter(ctx context.Context, tenantID string, input CreateMeterInput) (domain.Meter, error) {
-	key := strings.TrimSpace(input.Key)
-	name := strings.TrimSpace(input.Name)
-	if key == "" {
-		return domain.Meter{}, errs.Required("key")
-	}
-	if err := domain.MaxLen("key", key, 100); err != nil {
+	m, err := meterFromInput(input)
+	if err != nil {
 		return domain.Meter{}, err
 	}
-	if !slugPattern.MatchString(key) {
-		return domain.Meter{}, errs.Invalid("key", "must contain only alphanumeric characters, hyphens, and underscores")
+	return s.store.CreateMeter(ctx, tenantID, m)
+}
+
+// CreateMeterTx is CreateMeter on the caller's transaction (the recipe
+// install), with the same checks.
+func (s *Service) CreateMeterTx(ctx context.Context, tx *sql.Tx, tenantID string, m domain.Meter) (domain.Meter, error) {
+	checked, err := meterFromInput(CreateMeterInput{EventName: m.EventName, Name: m.Name, Unit: m.Unit, Aggregation: m.Aggregation})
+	if err != nil {
+		return domain.Meter{}, err
+	}
+	return s.store.CreateMeterTx(ctx, tx, tenantID, checked)
+}
+
+func meterFromInput(input CreateMeterInput) (domain.Meter, error) {
+	eventName := strings.TrimSpace(input.EventName)
+	name := strings.TrimSpace(input.Name)
+	if eventName == "" {
+		return domain.Meter{}, errs.Required("event_name")
+	}
+	if err := domain.MaxLen("event_name", eventName, 100); err != nil {
+		return domain.Meter{}, err
+	}
+	if !slugPattern.MatchString(eventName) {
+		return domain.Meter{}, errs.Invalid("event_name", "must contain only alphanumeric characters, hyphens, and underscores")
 	}
 	if name == "" {
 		return domain.Meter{}, errs.Required("name")
@@ -304,65 +116,41 @@ func (s *Service) CreateMeter(ctx context.Context, tenantID string, input Create
 	if err := domain.MaxLen("name", name, 255); err != nil {
 		return domain.Meter{}, err
 	}
-
-	unit := input.Unit
+	unit := strings.TrimSpace(input.Unit)
 	if unit == "" {
 		unit = "unit"
 	}
 	agg := input.Aggregation
 	if agg == "" {
-		agg = "sum"
+		agg = domain.AggregationSum
 	}
-	if agg != "sum" && agg != "count" && agg != "max" && agg != "last" {
+	if !domain.ValidAggregation(agg) {
 		return domain.Meter{}, errs.Invalid("aggregation", "must be one of: sum, count, max, last")
 	}
-
-	// The default binding must be a rating rule in the caller's tenant and
-	// mode, as UpdateMeter already requires. The foreign key is on the id
-	// alone and foreign-key checks do not apply row-level security, so the
-	// insert would accept another tenant's or the other mode's rule.
-	if rid := strings.TrimSpace(input.RatingRuleVersionID); rid != "" {
-		if _, err := s.store.GetRatingRule(ctx, tenantID, rid); err != nil {
-			if errors.Is(err, errs.ErrNotFound) {
-				return domain.Meter{}, errs.Invalid("rating_rule_version_id", "rating rule not found")
-			}
-			return domain.Meter{}, fmt.Errorf("get rating rule: %w", err)
-		}
-	}
-
-	return s.store.CreateMeter(ctx, tenantID, domain.Meter{
-		Key:                 key,
-		Name:                name,
-		Unit:                unit,
-		Aggregation:         agg,
-		RatingRuleVersionID: input.RatingRuleVersionID,
-	})
+	return domain.Meter{EventName: eventName, Name: name, Unit: unit, Aggregation: agg}, nil
 }
 
-// UpdateMeterInput is the PATCH shape: nil = leave unchanged. A non-nil
-// empty RatingRuleVersionID CLEARS the default binding.
+// UpdateMeterInput is the PATCH shape: nil = leave unchanged.
 type UpdateMeterInput struct {
-	Name                *string `json:"name,omitempty"`
-	Unit                *string `json:"unit,omitempty"`
-	Aggregation         *string `json:"aggregation,omitempty"`
-	RatingRuleVersionID *string `json:"rating_rule_version_id,omitempty"`
+	Name        *string `json:"name,omitempty"`
+	Unit        *string `json:"unit,omitempty"`
+	Aggregation *string `json:"aggregation,omitempty"`
 }
 
-// UpdateMeter patches a meter — most importantly the DEFAULT rating-rule
-// binding (meters.rating_rule_version_id), which pre-2026-07-05 could only
-// be set at meter CREATE: a meter created without one (every recipe meter)
-// had no way to gain a catch-all rate later, so usage matching no pricing
-// rule was silently unbilled at cycle close with no operator remedy short
-// of recreating the meter. The default binding is the escape hatch: it
-// prices every event no dimension rule claims (Orb's required
-// default_unit_amount is the peer shape). Aggregation switches are
-// supported per FLOW B13 (re-bills next cycle; finalized invoices are
-// immutable).
+// UpdateMeter patches a meter's name, unit or aggregation. A meter only
+// counts (ADR-130 §1): its prices are on the plans. Name and unit change at
+// once. The aggregation is fixed once the meter has events (ADR-130 §2):
+// every event so far was counted under it.
+//
+// The UPDATE writes every column from the read below, so the write locks the
+// meter and refuses if another write changed it since that read; otherwise a
+// rename could put back an aggregation another PATCH just changed.
 func (s *Service) UpdateMeter(ctx context.Context, tenantID, id string, input UpdateMeterInput) (domain.Meter, error) {
 	m, err := s.store.GetMeter(ctx, tenantID, id)
 	if err != nil {
 		return domain.Meter{}, err
 	}
+	before := m
 	if input.Name != nil {
 		name := strings.TrimSpace(*input.Name)
 		if name == "" {
@@ -382,43 +170,43 @@ func (s *Service) UpdateMeter(ctx context.Context, tenantID, id string, input Up
 	}
 	if input.Aggregation != nil {
 		agg := *input.Aggregation
-		if agg != "sum" && agg != "count" && agg != "max" && agg != "last" {
+		if !domain.ValidAggregation(agg) {
 			return domain.Meter{}, errs.Invalid("aggregation", "must be one of: sum, count, max, last")
 		}
 		m.Aggregation = agg
 	}
-	if input.RatingRuleVersionID != nil {
-		rid := strings.TrimSpace(*input.RatingRuleVersionID)
-		if rid != "" {
-			// The binding must point at a real rule on this tenant — a
-			// typo'd default silently prices nothing, the exact silence
-			// this PATCH exists to close.
-			if _, err := s.store.GetRatingRule(ctx, tenantID, rid); err != nil {
-				return domain.Meter{}, errs.Invalid("rating_rule_version_id", "rating rule not found")
-			}
-			// Currency coherence (ADR-100): the default binding is a live
-			// rating edge — the engine resolves it by rule_key at cycle
-			// close — so it must share the meter's / wired plans' currency.
-			if err := s.guardMeterBinding(ctx, tenantID, m.ID, rid); err != nil {
-				return domain.Meter{}, err
-			}
-		} else if m.RatingRuleVersionID != "" {
-			// Clearing the default: refused (409) when it is the meter's
-			// last price and a live subscription's plan wires the meter
-			// (#981; see guardMeterStaysPriced).
-			rules, err := s.store.ListMeterPricingRulesByMeter(ctx, tenantID, m.ID)
-			if err != nil {
-				return domain.Meter{}, fmt.Errorf("list pricing rules for meter %s: %w", m.ID, err)
-			}
-			if len(rules) == 0 {
-				if err := s.guardMeterStaysPriced(ctx, tenantID, m.ID, m.Key); err != nil {
-					return domain.Meter{}, err
-				}
-			}
+	want := m
+	guard := func(tx *sql.Tx) error {
+		locked, err := s.store.LockMeterTx(ctx, tx, m.ID)
+		if err != nil {
+			return err
 		}
-		m.RatingRuleVersionID = rid
+		if locked.Name != before.Name || locked.Unit != before.Unit || locked.Aggregation != before.Aggregation {
+			return errs.InvalidState("This meter changed while the request was running. Refresh the page and try again.")
+		}
+		if want.Aggregation != locked.Aggregation {
+			return s.refuseAggregationChange(ctx, tx, locked)
+		}
+		return nil
 	}
-	return s.store.UpdateMeterAudited(ctx, tenantID, m, s.meterUpdateEmission(ctx, input))
+	return s.store.UpdateMeterAudited(ctx, tenantID, m, guard, s.meterUpdateEmission(ctx, input))
+}
+
+// refuseAggregationChange refuses to change the locked meter's aggregation
+// once it has usage events (ADR-130 §2). Held rows do not count: they have
+// never been billed. It runs after LockMeterTx, whose FOR UPDATE waits for
+// any write of an event of the meter, an ingest or a held-usage release (the
+// event's foreign key holds KEY SHARE on the meter row), so an event that
+// commits first is seen here, and one written later waits for this commit.
+func (s *Service) refuseAggregationChange(ctx context.Context, tx *sql.Tx, locked domain.Meter) error {
+	has, err := s.store.MeterHasUsageTx(ctx, tx, locked)
+	if err != nil {
+		return err
+	}
+	if has {
+		return errs.InvalidState(fmt.Sprintf("Meter %q has usage events, so its aggregation stays %s: its events are counted under it. To count differently, make a new meter with another event name.", locked.EventName, locked.Aggregation)).WithCode(errs.CodeMeterHasUsage)
+	}
+	return nil
 }
 
 // meterUpdateEmission builds the in-tx audit emission for a meter PATCH.
@@ -426,21 +214,14 @@ func (s *Service) UpdateMeter(ctx context.Context, tenantID, id string, input Up
 // the meter CREATE row, so a meter's audit timeline stays one resource.
 //
 // Metadata records the fields the REQUEST actually set, valued from the
-// UPDATE's RETURNING row (read inside the tx). It is deliberately NOT a diff
-// against the service's pre-tx GetMeter snapshot: that snapshot is read
-// outside the write's transaction, so a concurrent PATCH could make the
-// "before" side of such a diff a value that was never the row's state at
-// write time. Request-intent + committed-value is the pair that cannot lie.
-//
-// rating_rule_version_id is emitted even when cleared to "" — unbinding a
-// meter's default rate is precisely the change that silently unbills usage,
-// so "the operator removed the default binding" must be visible, not absent.
+// UPDATE's RETURNING row (read inside the tx), never a diff against a pre-tx
+// read that a concurrent PATCH could have made untrue.
 func (s *Service) meterUpdateEmission(ctx context.Context, input UpdateMeterInput) func(tx *sql.Tx, out domain.Meter) error {
 	if s.auditLogger == nil {
 		return nil
 	}
 	return func(tx *sql.Tx, out domain.Meter) error {
-		meta := map[string]any{"key": out.Key}
+		meta := map[string]any{"event_name": out.EventName}
 		if input.Name != nil {
 			meta["name"] = out.Name
 		}
@@ -449,9 +230,6 @@ func (s *Service) meterUpdateEmission(ctx context.Context, input UpdateMeterInpu
 		}
 		if input.Aggregation != nil {
 			meta["aggregation"] = out.Aggregation
-		}
-		if input.RatingRuleVersionID != nil {
-			meta["rating_rule_version_id"] = out.RatingRuleVersionID
 		}
 		return s.auditLogger.LogInTx(ctx, tx, audit.Entry{
 			Action:        domain.AuditActionUpdate,
@@ -467,8 +245,21 @@ func (s *Service) GetMeter(ctx context.Context, tenantID, id string) (domain.Met
 	return s.store.GetMeter(ctx, tenantID, id)
 }
 
-func (s *Service) GetMeterByKey(ctx context.Context, tenantID, key string) (domain.Meter, error) {
-	return s.store.GetMeterByKey(ctx, tenantID, key)
+// GetMeterByEventName returns the meter usage events name by eventName.
+func (s *Service) GetMeterByEventName(ctx context.Context, tenantID, eventName string) (domain.Meter, error) {
+	return s.store.GetMeterByEventName(ctx, tenantID, eventName)
+}
+
+// GetMeterByEventNameTx reads the meter on tx FOR KEY SHARE (the recipe
+// install's adoption read).
+func (s *Service) GetMeterByEventNameTx(ctx context.Context, tx *sql.Tx, eventName string) (domain.Meter, error) {
+	return s.store.GetMeterByEventNameTx(ctx, tx, eventName)
+}
+
+// MeterHasUsage reports whether the meter has usage events, which fix its
+// aggregation (ADR-130 §2). Held rows do not count.
+func (s *Service) MeterHasUsage(ctx context.Context, tenantID string, m domain.Meter) (bool, error) {
+	return s.store.MeterHasUsage(ctx, tenantID, m)
 }
 
 func (s *Service) ListMeters(ctx context.Context, tenantID string) ([]domain.Meter, error) {
@@ -486,11 +277,11 @@ type CreatePlanInput struct {
 	Currency        string                 `json:"currency"`
 	BillingInterval domain.BillingInterval `json:"billing_interval"`
 	BaseAmountCents int64                  `json:"base_amount_cents"`
-	// BaseBillTiming is optional on create. Empty defaults to in_arrears
-	// (existing tenant behaviour). Setting in_advance opts the plan into
-	// first-invoice-on-create + cancel-proration semantics per ADR-031.
+	// BaseBillTiming is required when BaseAmountCents is above 0. With a
+	// base of 0 it may be left out and is stored in_arrears (ADR-130 §14).
 	BaseBillTiming domain.BillTiming `json:"base_bill_timing,omitempty"`
-	MeterIDs       []string          `json:"meter_ids"`
+	// Prices are the plan's usage prices, created with it.
+	Prices []PriceInput `json:"prices"`
 	// Status is optional and may only be "active": create always makes an
 	// active plan. It stays a field so a caller sending "active" is not
 	// refused as an unknown field.
@@ -498,7 +289,51 @@ type CreatePlanInput struct {
 	TaxCode string `json:"tax_code,omitempty"`
 }
 
-func (s *Service) CreatePlan(ctx context.Context, tenantID string, input CreatePlanInput) (domain.Plan, error) {
+// CreatePlan creates the plan and its prices in one transaction (ADR-130
+// §16).
+func (s *Service) CreatePlan(ctx context.Context, tenantID string, input CreatePlanInput) (domain.Plan, []domain.PlanPrice, error) {
+	p, err := planFromInput(input)
+	if err != nil {
+		return domain.Plan{}, nil, err
+	}
+	adds, err := priceAdds(input.Prices)
+	if err != nil {
+		return domain.Plan{}, nil, err
+	}
+	return s.store.CreatePlanWithPrices(ctx, tenantID, p, adds)
+}
+
+// CreatePlanWithPricesTx creates a plan with its prices on the caller's
+// transaction (the recipe install), with the checks CreatePlan runs.
+func (s *Service) CreatePlanWithPricesTx(ctx context.Context, tx *sql.Tx, tenantID string, plan domain.Plan, prices []domain.PlanPrice) (domain.Plan, []domain.PlanPrice, error) {
+	input := CreatePlanInput{
+		Code: plan.Code, Name: plan.Name, Description: plan.Description, Currency: plan.Currency,
+		BillingInterval: plan.BillingInterval, BaseAmountCents: plan.BaseAmountCents,
+		BaseBillTiming: plan.BaseBillTiming, Status: string(plan.Status), TaxCode: plan.TaxCode,
+	}
+	for _, p := range prices {
+		input.Prices = append(input.Prices, PriceInput{MeterID: p.MeterID, DimensionMatch: p.DimensionMatch, PriceShape: p.PriceShape})
+	}
+	p, err := planFromInput(input)
+	if err != nil {
+		return domain.Plan{}, nil, err
+	}
+	adds, err := priceAdds(input.Prices)
+	if err != nil {
+		return domain.Plan{}, nil, err
+	}
+	created, err := s.store.CreatePlanTx(ctx, tx, tenantID, p)
+	if err != nil {
+		return domain.Plan{}, nil, err
+	}
+	written, err := s.store.WritePricesTx(ctx, tx, created.ID, adds)
+	if err != nil {
+		return domain.Plan{}, nil, err
+	}
+	return created, written, nil
+}
+
+func planFromInput(input CreatePlanInput) (domain.Plan, error) {
 	code := strings.TrimSpace(input.Code)
 	name := strings.TrimSpace(input.Name)
 	currency := strings.ToUpper(strings.TrimSpace(input.Currency))
@@ -532,34 +367,15 @@ func (s *Service) CreatePlan(ctx context.Context, tenantID string, input CreateP
 	if input.Status != "" && domain.PlanStatus(input.Status) != domain.PlanActive {
 		return domain.Plan{}, errs.Invalid("status", "a plan is created active; archive it with PATCH")
 	}
-
-	baseBillTiming := input.BaseBillTiming
-	if baseBillTiming == "" {
-		baseBillTiming = domain.BillInArrears
+	timing, err := baseBillTiming(input.BaseAmountCents, input.BaseBillTiming)
+	if err != nil {
+		return domain.Plan{}, err
 	}
-	if !baseBillTiming.IsValid() {
-		return domain.Plan{}, errs.Invalid("base_bill_timing", "must be in_advance or in_arrears")
-	}
-
 	taxCode := strings.TrimSpace(input.TaxCode)
 	if err := domain.ValidateStripeTaxCode("tax_code", taxCode); err != nil {
 		return domain.Plan{}, err
 	}
-
-	if input.MeterIDs == nil {
-		input.MeterIDs = []string{}
-	}
-	if err := s.assertMetersPriced(ctx, tenantID, input.MeterIDs); err != nil {
-		return domain.Plan{}, err
-	}
-	// Currency coherence (ADR-100): the plan's currency labels the invoice;
-	// the wired meters' rules compute the amounts. They must agree or the
-	// invoice re-denominates rule cents without conversion.
-	if err := s.guardPlanMeterCurrencies(ctx, tenantID, currency, input.MeterIDs); err != nil {
-		return domain.Plan{}, err
-	}
-
-	return s.store.CreatePlan(ctx, tenantID, domain.Plan{
+	return domain.Plan{
 		Code:            code,
 		Name:            name,
 		Description:     strings.TrimSpace(input.Description),
@@ -567,21 +383,40 @@ func (s *Service) CreatePlan(ctx context.Context, tenantID string, input CreateP
 		BillingInterval: input.BillingInterval,
 		Status:          domain.PlanActive,
 		BaseAmountCents: input.BaseAmountCents,
-		BaseBillTiming:  baseBillTiming,
-		MeterIDs:        input.MeterIDs,
+		BaseBillTiming:  timing,
 		TaxCode:         taxCode,
-	})
+	}, nil
+}
+
+// baseBillTiming applies ADR-130 §14 to a plan's base fee and billing
+// timing. The timing is required when the base fee is above 0: peers default
+// it both ways, so the plan states it. With a base of 0 it may be left out
+// and is in_arrears. A base of 0 billed in_advance is refused: an in_advance
+// plan moves the cycle invoice's header to the next period even at base 0,
+// so a usage-only plan must be in_arrears.
+func baseBillTiming(base int64, timing domain.BillTiming) (domain.BillTiming, error) {
+	if timing != "" && !timing.IsValid() {
+		return "", errs.Invalid("base_bill_timing", "must be in_advance or in_arrears")
+	}
+	switch {
+	case base > 0 && timing == "":
+		return "", errs.Invalid("base_bill_timing", "is required when base_amount_cents is above 0: in_advance bills the base fee at the start of each period, in_arrears at the end")
+	case base == 0 && timing == domain.BillInAdvance:
+		return "", errs.Invalid("base_bill_timing", "must be in_arrears when base_amount_cents is 0: a plan with no base fee bills its usage at the end of each period")
+	case timing == "":
+		return domain.BillInArrears, nil
+	}
+	return timing, nil
 }
 
 func (s *Service) GetPlan(ctx context.Context, tenantID, id string) (domain.Plan, error) {
 	return s.store.GetPlan(ctx, tenantID, id)
 }
 
-// LiveSubscriptionCount is how many subscriptions UpdatePlan's lock counts
-// on this plan: every status but canceled and archived. The plan page reads
-// it to disable the price, timing and meter controls the server would
-// refuse, so the page and the refusal agree on one number. Zero when no
-// subscription reader is wired (the lock is then off too).
+// LiveSubscriptionCount is how many subscriptions keep the plan's base fee
+// fixed (ADR-034): every status but canceled. The plan page reads it to
+// disable the base fee input the server would refuse, so the page and the
+// refusal agree on one number. Zero when no subscription reader is wired.
 func (s *Service) LiveSubscriptionCount(ctx context.Context, tenantID, planID string) (int, error) {
 	if s.subPlanUsage == nil {
 		return 0, nil
@@ -589,49 +424,70 @@ func (s *Service) LiveSubscriptionCount(ctx context.Context, tenantID, planID st
 	return s.subPlanUsage.CountLiveSubsByPlan(ctx, tenantID, planID)
 }
 
+// PlanUsed reports whether any subscription ever used the plan: then a price
+// write applies from each subscriber's next period (ADR-130 §5).
+func (s *Service) PlanUsed(ctx context.Context, tenantID, planID string) (bool, error) {
+	return s.store.PlanUsed(ctx, tenantID, planID)
+}
+
 func (s *Service) ListPlans(ctx context.Context, tenantID string) ([]domain.Plan, error) {
 	return s.store.ListPlans(ctx, tenantID)
 }
 
 // UpdatePlanInput is the PATCH /v1/plans/{id} body. A field left out keeps
-// its stored value. Description and TaxCode are pointers because an empty
-// string is a real value for them (it clears the field), so "left out" has
-// to be told apart from "set to empty". The dashboard's meter attach sends
-// only meter_ids: a write-on-omit here cleared a tax code set through the
-// API, and the plan's base fee then fell back to the tenant default code.
-// code, currency and billing_interval cannot change, so they are not here.
+// its stored value. Description, TaxCode and BaseAmountCents are pointers
+// because an empty string or 0 is a real value for them, so "left out" has
+// to be told apart from "set to empty". code, currency and billing_interval
+// cannot change, so they are not here.
 type UpdatePlanInput struct {
 	Name            string            `json:"name,omitempty"`
 	Description     *string           `json:"description,omitempty"`
-	BaseAmountCents int64             `json:"base_amount_cents,omitempty"`
+	BaseAmountCents *int64            `json:"base_amount_cents,omitempty"`
 	BaseBillTiming  domain.BillTiming `json:"base_bill_timing,omitempty"`
-	MeterIDs        []string          `json:"meter_ids,omitempty"`
 	Status          string            `json:"status,omitempty"`
 	TaxCode         *string           `json:"tax_code,omitempty"`
 }
 
+// UpdatePlan patches a plan (ADR-130 §5):
+//   - name, description, tax_code and status change at once;
+//   - the base fee is fixed while a live subscription uses the plan
+//     (ADR-034; it becomes a next-period edit if PR-7 ships);
+//   - base_bill_timing is fixed once the plan is used;
+//   - in_advance with a base of 0 is refused (ADR-130 §14), so a used
+//     in_advance plan keeps a base fee above 0.
 func (s *Service) UpdatePlan(ctx context.Context, tenantID, id string, input UpdatePlanInput) (domain.Plan, error) {
+	if input.BaseBillTiming != "" && !input.BaseBillTiming.IsValid() {
+		return domain.Plan{}, errs.Invalid("base_bill_timing", "must be in_advance or in_arrears")
+	}
+	if input.BaseAmountCents != nil && *input.BaseAmountCents < 0 {
+		return domain.Plan{}, errs.Invalid("base_amount_cents", "base fee must be 0 or more")
+	}
+	if input.Status != "" {
+		// Checked here, not left to plans_status_check: the constraint's
+		// error is a 500, which the idempotency middleware caches.
+		switch domain.PlanStatus(input.Status) {
+		case domain.PlanActive, domain.PlanArchived:
+		default:
+			return domain.Plan{}, errs.Invalid("status", "must be active or archived")
+		}
+	}
+	var taxCode string
+	if input.TaxCode != nil {
+		taxCode = strings.TrimSpace(*input.TaxCode)
+		if err := domain.ValidateStripeTaxCode("tax_code", taxCode); err != nil {
+			return domain.Plan{}, err
+		}
+	}
+
 	existing, err := s.store.GetPlan(ctx, tenantID, id)
 	if err != nil {
 		return domain.Plan{}, err
 	}
-
-	// Plan-immutability guard. Billing-affecting fields can't change
-	// once any live sub references this plan — Stripe-parity (Prices
-	// are immutable for billing-relevant fields). Mutating in place
-	// would silently change what existing subs bill at their next
-	// cycle close, producing revenue gaps or surprise charges.
-	//
-	// Display-only fields (name, description, tax_code, status) stay
-	// mutable: changing them doesn't move money for existing subs.
-	//
-	// Operator escape hatch: create a new plan with the desired
-	// terms and (optionally) schedule existing subs to migrate at
-	// their next cycle close via the pending-plan-change machinery.
-	billingFieldChanged := (input.BaseAmountCents > 0 && input.BaseAmountCents != existing.BaseAmountCents) ||
-		(input.BaseBillTiming != "" && input.BaseBillTiming != existing.BaseBillTiming) ||
-		(input.MeterIDs != nil && !sameStringSet(input.MeterIDs, existing.MeterIDs))
-	if billingFieldChanged && s.subPlanUsage != nil {
+	// Base fee lock (ADR-034): a change to it would change what every live
+	// subscriber is billed at their next close. Counted before the write;
+	// the guard below re-checks the fee it locked against the one counted.
+	baseChanged := input.BaseAmountCents != nil && *input.BaseAmountCents != existing.BaseAmountCents
+	if baseChanged && s.subPlanUsage != nil {
 		count, err := s.subPlanUsage.CountLiveSubsByPlan(ctx, tenantID, existing.ID)
 		if err != nil {
 			return domain.Plan{}, fmt.Errorf("check sub usage: %w", err)
@@ -641,386 +497,67 @@ func (s *Service) UpdatePlan(ctx context.Context, tenantID, id string, input Upd
 		}
 	}
 
-	// Guard newly-attached meters are priced (ADR-096) — reject before the
-	// write so an unpriced meter can't silently bill $0 usage at cycle close.
-	// Runs after the immutability guard so a live-plan meter change still
-	// returns the immutability error first.
-	if input.MeterIDs != nil {
-		if err := s.assertMetersPriced(ctx, tenantID, input.MeterIDs); err != nil {
-			return domain.Plan{}, err
+	return s.store.UpdatePlan(ctx, tenantID, id, func(p domain.Plan, used bool) (domain.Plan, error) {
+		if p.BaseAmountCents != existing.BaseAmountCents {
+			return domain.Plan{}, errs.InvalidState("This plan changed while the request was running. Refresh the page and try again.")
 		}
-		// Currency coherence (ADR-100): meter attach on UPDATE is the same
-		// write edge as plan create — without this, a plan created meterless
-		// (vacuously coherent) gains differently-denominated rules here.
-		// Plan currency is immutable, so compare against the stored value.
-		if err := s.guardPlanMeterCurrencies(ctx, tenantID, existing.Currency, input.MeterIDs); err != nil {
-			return domain.Plan{}, err
+		if name := strings.TrimSpace(input.Name); name != "" {
+			p.Name = name
 		}
-	}
-
-	if name := strings.TrimSpace(input.Name); name != "" {
-		existing.Name = name
-	}
-	if input.Description != nil {
-		existing.Description = strings.TrimSpace(*input.Description)
-	}
-	if input.BaseAmountCents > 0 {
-		existing.BaseAmountCents = input.BaseAmountCents
-	}
-	if input.BaseBillTiming != "" {
-		if !input.BaseBillTiming.IsValid() {
-			return domain.Plan{}, errs.Invalid("base_bill_timing", "must be in_advance or in_arrears")
+		if input.Description != nil {
+			p.Description = strings.TrimSpace(*input.Description)
 		}
-		existing.BaseBillTiming = input.BaseBillTiming
-	}
-	if input.MeterIDs != nil {
-		existing.MeterIDs = input.MeterIDs
-	}
-	if input.Status != "" {
-		// Checked here, not left to plans_status_check: the constraint's
-		// error is a 500, which the idempotency middleware caches.
-		switch st := domain.PlanStatus(input.Status); st {
-		case domain.PlanDraft, domain.PlanActive, domain.PlanArchived:
-			existing.Status = st
-		default:
-			return domain.Plan{}, errs.Invalid("status", "must be draft, active or archived")
+		if input.BaseAmountCents != nil {
+			p.BaseAmountCents = *input.BaseAmountCents
 		}
-	}
-	if input.TaxCode != nil {
-		taxCode := strings.TrimSpace(*input.TaxCode)
-		if err := domain.ValidateStripeTaxCode("tax_code", taxCode); err != nil {
-			return domain.Plan{}, err
-		}
-		existing.TaxCode = taxCode
-	}
-
-	return s.store.UpdatePlan(ctx, tenantID, existing)
-}
-
-// assertMetersPriced rejects attaching a meter to a plan unless that meter
-// is priced — it carries a default rating-rule binding
-// (meters.rating_rule_version_id) OR at least one meter_pricing_rules row.
-//
-// Why here, at authoring time (ADR-096): the billing engine's usage-rating
-// loop has no rule to apply for an unpriced meter, so it drops that meter's
-// usage and bills $0 for it — a silent under-bill on the money-moving path.
-// The industry norm (Stripe rate, Orb/Lago price/charge) makes pricing an
-// explicit part of attaching a metric; this guard does the same and removes
-// the "a same-keyed rating rule LOOKS bound but isn't" trap. Recipes bind the
-// rule before creating the plan, so they pass; a genuinely metering-only
-// meter is deferred (it would carry an explicit flag — ADR-096).
-func (s *Service) assertMetersPriced(ctx context.Context, tenantID string, meterIDs []string) error {
-	for _, id := range meterIDs {
-		m, err := s.store.GetMeter(ctx, tenantID, id)
-		if err != nil {
-			if errors.Is(err, errs.ErrNotFound) {
-				return errs.Invalid("meter_ids", fmt.Sprintf("meter %q not found", id))
+		if input.BaseBillTiming != "" && input.BaseBillTiming != p.BaseBillTiming {
+			if used {
+				return domain.Plan{}, errs.Invalid("base_bill_timing", "A subscription has used this plan, so its billing timing is fixed. Create a new plan with the other timing instead.")
 			}
-			return err
+			p.BaseBillTiming = input.BaseBillTiming
 		}
-		if m.RatingRuleVersionID != "" {
-			continue
+		if p.BaseAmountCents == 0 && p.BaseBillTiming == domain.BillInAdvance {
+			field := "base_bill_timing"
+			if input.BaseAmountCents != nil {
+				field = "base_amount_cents"
+			}
+			// A used plan's timing is fixed (above), so advice to change it
+			// would be refused too.
+			if used {
+				return domain.Plan{}, errs.Invalid(field, "This plan bills its base fee in_advance, and a subscription has used it, so the base fee must stay above 0. To charge no base fee, create a new plan that bills in_arrears.")
+			}
+			return domain.Plan{}, errs.Invalid(field, "A plan with no base fee must bill in_arrears: set base_bill_timing to in_arrears, or keep a base fee above 0.")
 		}
-		rules, err := s.store.ListMeterPricingRulesByMeter(ctx, tenantID, id)
-		if err != nil {
-			return fmt.Errorf("list pricing rules for meter %s: %w", id, err)
+		if input.Status != "" {
+			p.Status = domain.PlanStatus(input.Status)
 		}
-		if len(rules) == 0 {
-			return errs.Invalid("meter_ids", unpricedMeterMessage(m))
+		if input.TaxCode != nil {
+			p.TaxCode = taxCode
 		}
-	}
-	return nil
+		return p, nil
+	})
 }
 
-// planInUseMessage is the refusal for a base price, billing timing or meter
-// change on a plan that live subscriptions use (ADR-034). It names the count,
-// not the fields: the caller knows what it sent, and an operator reads it
-// under the dialog that sent it. It doesn't point at Change plan: that action
-// only runs on active subscriptions and only to a plan with the same billing
-// timing and currency, so it is not a general way out of the lock.
+// planInUseMessage is the refusal for a base fee change on a plan that live
+// subscriptions use (ADR-034). It names the count, not the field: the caller
+// knows what it sent.
 func planInUseMessage(liveSubs int) string {
-	return fmt.Sprintf("%s this plan, so its price, billing timing and meters are locked. "+
-		"Create a new plan with the new terms instead.", subscriptionsUse(liveSubs))
+	return fmt.Sprintf("%s this plan, so its base fee is fixed. "+
+		"Create a new plan with the new fee instead.", subscriptionsUse(liveSubs))
 }
 
 // subscriptionsUse reads "1 subscription uses" or "3 subscriptions use".
 func subscriptionsUse(n int) string {
 	if n == 1 {
-		return subscriptionCount(n) + " uses"
+		return "1 subscription uses"
 	}
-	return subscriptionCount(n) + " use"
+	return fmt.Sprintf("%d subscriptions use", n)
 }
 
-// unpricedMeterMessage is the refusal for adding a meter with no price to a
-// plan (ADR-096). Its usage would match no price and bill nothing.
-func unpricedMeterMessage(m domain.Meter) string {
-	name := m.Name
-	if name == "" {
-		name = m.Key
+// ErrNotFoundAs maps a store not-found to the named resource's 404.
+func notFoundAs(err error, resource string) error {
+	if errors.Is(err, errs.ErrNotFound) {
+		return errs.NotFound(resource)
 	}
-	return fmt.Sprintf("Meter %q has no price, so its usage would bill nothing. "+
-		"Add a price on the meter's page, then add the meter to the plan.", name)
-}
-
-// sameStringSet returns true when two string slices contain the same
-// elements regardless of order. Used by the plan-immutability guard
-// to detect meter_ids mutations — list order isn't semantically
-// meaningful, set membership is.
-func sameStringSet(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	seen := make(map[string]struct{}, len(a))
-	for _, v := range a {
-		seen[v] = struct{}{}
-	}
-	for _, v := range b {
-		if _, ok := seen[v]; !ok {
-			return false
-		}
-	}
-	return true
-}
-
-// ---------------------------------------------------------------------------
-// Meter Pricing Rules — N-rules-per-meter dispatch.
-// ---------------------------------------------------------------------------
-
-// UpsertMeterPricingRuleInput is the public input shape. The combination
-// (meter_id, rating_rule_version_id) identifies the rule — re-issuing
-// the same point pair with new dimension_match / mode / priority
-// updates the existing rule (idempotent reconfigure).
-type UpsertMeterPricingRuleInput struct {
-	MeterID             string                 `json:"meter_id"`
-	RatingRuleVersionID string                 `json:"rating_rule_version_id"`
-	DimensionMatch      map[string]any         `json:"dimension_match"`
-	AggregationMode     domain.AggregationMode `json:"aggregation_mode"`
-	Priority            int                    `json:"priority"`
-}
-
-// maxDimensionKeys caps the size of the JSONB filter to keep aggregation
-// queries cheap and to bound pathological tenants. 16 dimensions is
-// generous for the AI use case (model × operation × cached × tier ≈ 4),
-// matches the open-question in the design doc, and is enforced here at
-// the service boundary so the store never has to deal with bloated
-// filters.
-const maxDimensionKeys = 16
-
-// UpsertMeterPricingRule validates the input and upserts the rule.
-// Concretely the validations are:
-//   - meter_id and rating_rule_version_id required
-//   - rating rule must exist for this tenant (404 surfaces as 400 to
-//     avoid leaking other tenants' IDs through the API surface)
-//   - meter must exist for this tenant (same reasoning)
-//   - aggregation_mode must be one of the five accepted values
-//   - dimension_match has ≤ maxDimensionKeys keys
-//   - dimension_match values are scalars (string / number / bool); object
-//     and array values are rejected — Postgres `@>` would still match
-//     them but the semantics aren't well-defined for v1
-func (s *Service) UpsertMeterPricingRule(ctx context.Context, tenantID string, input UpsertMeterPricingRuleInput) (domain.MeterPricingRule, error) {
-	meterID := strings.TrimSpace(input.MeterID)
-	rrvID := strings.TrimSpace(input.RatingRuleVersionID)
-	if meterID == "" {
-		return domain.MeterPricingRule{}, errs.Required("meter_id")
-	}
-	if rrvID == "" {
-		return domain.MeterPricingRule{}, errs.Required("rating_rule_version_id")
-	}
-
-	if _, err := s.store.GetMeter(ctx, tenantID, meterID); err != nil {
-		return domain.MeterPricingRule{}, errs.Invalid("meter_id", fmt.Sprintf("meter %q not found", meterID))
-	}
-	if _, err := s.store.GetRatingRule(ctx, tenantID, rrvID); err != nil {
-		return domain.MeterPricingRule{}, errs.Invalid("rating_rule_version_id", fmt.Sprintf("rating rule %q not found", rrvID))
-	}
-	// Currency coherence (ADR-100): binding is the third write edge that can
-	// put a differently-denominated rule under a plan (no republish, no plan
-	// create involved) — guard it like the other two.
-	if err := s.guardMeterBinding(ctx, tenantID, meterID, rrvID); err != nil {
-		return domain.MeterPricingRule{}, err
-	}
-
-	mode := input.AggregationMode
-	if mode == "" {
-		mode = domain.AggSum
-	}
-	if !mode.IsValid() {
-		return domain.MeterPricingRule{}, errs.Invalid("aggregation_mode", fmt.Sprintf("must be one of sum, count, last_during_period, last_ever, max; got %q", mode))
-	}
-
-	match := input.DimensionMatch
-	if match == nil {
-		match = map[string]any{}
-	}
-	if len(match) > maxDimensionKeys {
-		return domain.MeterPricingRule{}, errs.Invalid("dimension_match", fmt.Sprintf("at most %d keys (got %d)", maxDimensionKeys, len(match)))
-	}
-	for k, v := range match {
-		switch v.(type) {
-		case string, bool, float64, float32, int, int32, int64, nil:
-			// scalar — fine.
-		default:
-			return domain.MeterPricingRule{}, errs.Invalid("dimension_match", fmt.Sprintf("key %q value must be a scalar (string/number/bool), got %T", k, v))
-		}
-	}
-
-	return s.store.UpsertMeterPricingRule(ctx, tenantID, domain.MeterPricingRule{
-		MeterID:             meterID,
-		RatingRuleVersionID: rrvID,
-		DimensionMatch:      match,
-		AggregationMode:     mode,
-		Priority:            input.Priority,
-	})
-}
-
-// GetMeterPricingRule fetches one rule by id.
-func (s *Service) GetMeterPricingRule(ctx context.Context, tenantID, id string) (domain.MeterPricingRule, error) {
-	return s.store.GetMeterPricingRule(ctx, tenantID, id)
-}
-
-// ListMeterPricingRules returns every binding for the tenant.
-func (s *Service) ListMeterPricingRules(ctx context.Context, tenantID string) ([]domain.MeterPricingRule, error) {
-	return s.store.ListMeterPricingRules(ctx, tenantID)
-}
-
-// ListMeterPricingRulesByMeter returns rules in priority-DESC order; the
-// store already enforces the ordering so callers can iterate top-down.
-func (s *Service) ListMeterPricingRulesByMeter(ctx context.Context, tenantID, meterID string) ([]domain.MeterPricingRule, error) {
-	if strings.TrimSpace(meterID) == "" {
-		return nil, errs.Required("meter_id")
-	}
-	return s.store.ListMeterPricingRulesByMeter(ctx, tenantID, meterID)
-}
-
-// DeleteMeterPricingRule removes a rule. Pre-existing usage events are
-// not retroactively re-scored; deletion only affects future billing
-// finalize cycles.
-//
-// Deleting the meter's last price is refused (409) while a plan wiring the
-// meter has a live subscription: see guardMeterStaysPriced (#981). The last
-// price means no other rule remains and the meter has no default binding.
-//
-// The audit row rides the DELETE's own tx (ADR-090). Before this, the route
-// was covered only by the HTTP catch-all, which recorded it as
-// "delete meter {meter_id}" — a permanent, un-editable claim that the
-// operator destroyed the whole meter. resource_type stays the EXISTING
-// "meter_pricing_rule" string (the upsert emission and the dashboard's
-// filter vocabulary already use it), so a rule's create/update and its
-// delete land on one resource timeline.
-func (s *Service) DeleteMeterPricingRule(ctx context.Context, tenantID, id string) error {
-	rule, err := s.store.GetMeterPricingRule(ctx, tenantID, id)
-	if err != nil {
-		return err
-	}
-	meter, err := s.store.GetMeter(ctx, tenantID, rule.MeterID)
-	if err != nil {
-		return err
-	}
-	if meter.RatingRuleVersionID == "" {
-		rules, err := s.store.ListMeterPricingRulesByMeter(ctx, tenantID, meter.ID)
-		if err != nil {
-			return fmt.Errorf("list pricing rules for meter %s: %w", meter.ID, err)
-		}
-		othersRemain := false
-		for _, r := range rules {
-			if r.ID != id {
-				othersRemain = true
-				break
-			}
-		}
-		if !othersRemain {
-			if err := s.guardMeterStaysPriced(ctx, tenantID, meter.ID, meter.Key); err != nil {
-				return err
-			}
-		}
-	}
-	return s.store.DeleteMeterPricingRuleAudited(ctx, tenantID, id, s.pricingRuleDeleteEmission(ctx))
-}
-
-// pricingRuleDeleteEmission builds the in-tx audit emission for a
-// pricing-rule DELETE. Content comes from the DELETED row (RETURNING), not
-// from the request: meter_id is the rule's own, so the row is true even
-// though the route's {meter_id} segment is never checked against the rule.
-func (s *Service) pricingRuleDeleteEmission(ctx context.Context) func(tx *sql.Tx, deleted domain.MeterPricingRule) error {
-	if s.auditLogger == nil {
-		return nil
-	}
-	return func(tx *sql.Tx, deleted domain.MeterPricingRule) error {
-		return s.auditLogger.LogInTx(ctx, tx, audit.Entry{
-			Action:       domain.AuditActionDelete,
-			ResourceType: "meter_pricing_rule",
-			ResourceID:   deleted.ID,
-			Metadata: map[string]any{
-				"meter_id":               deleted.MeterID,
-				"rating_rule_version_id": deleted.RatingRuleVersionID,
-			},
-		})
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Tx variants — used by recipe.Service to compose pricing inserts inside a
-// single cross-domain transaction. Validation is intentionally skipped here
-// because the recipe template layer already validated the inputs against
-// the recipe schema; re-validating in the recipe path would only duplicate
-// what the template parser already enforced.
-// ---------------------------------------------------------------------------
-
-// CreateRatingRuleTx forwards to the store's tx-aware insert. Caller owns
-// the *sql.Tx and is responsible for Commit/Rollback.
-func (s *Service) CreateRatingRuleTx(ctx context.Context, tx *sql.Tx, tenantID string, rule domain.RatingRuleVersion) (domain.RatingRuleVersion, error) {
-	// Currency hardening (ADR-100): this Tx path used to skip every currency
-	// check on the promise that the recipe template layer validated — but
-	// that layer checks enum membership only, and the store persists
-	// verbatim (the lowercase class that broke analytics once). Normalize +
-	// allowlist here, and run the ADR-070/100 republish clauses when the key
-	// already has versions: a recipe CREATES only when no ACTIVE version
-	// exists (adoption otherwise), so a create over an all-archived key is a
-	// republish in disguise — the exact silent-reprice those guards block.
-	rule.Currency = strings.ToUpper(strings.TrimSpace(rule.Currency))
-	if err := domain.ValidateCurrency(rule.Currency); err != nil {
-		return domain.RatingRuleVersion{}, err
-	}
-	existing, err := s.store.ListRatingRules(ctx, RatingRuleFilter{
-		TenantID: tenantID, RuleKey: rule.RuleKey, LatestOnly: true,
-	})
-	if err != nil {
-		return domain.RatingRuleVersion{}, err
-	}
-	if len(existing) > 0 && existing[0].Currency != rule.Currency {
-		n, err := s.store.CountActiveOverridesByRuleKey(ctx, tenantID, rule.RuleKey)
-		if err != nil {
-			return domain.RatingRuleVersion{}, fmt.Errorf("check overrides for currency guard: %w", err)
-		}
-		if n > 0 {
-			return domain.RatingRuleVersion{}, errs.InvalidState(fmt.Sprintf(
-				"cannot change currency from %s to %s: %d active customer price override(s) reference rule %q and would be silently repriced in the new currency — remove the overrides first",
-				existing[0].Currency, rule.Currency, n, rule.RuleKey))
-		}
-		if err := s.guardRuleCurrencyChange(ctx, tenantID, rule.RuleKey, rule.Currency); err != nil {
-			return domain.RatingRuleVersion{}, err
-		}
-	}
-	return s.store.CreateRatingRuleTx(ctx, tx, tenantID, rule)
-}
-
-// CreateMeterTx forwards to the store's tx-aware insert.
-func (s *Service) CreateMeterTx(ctx context.Context, tx *sql.Tx, tenantID string, m domain.Meter) (domain.Meter, error) {
-	return s.store.CreateMeterTx(ctx, tx, tenantID, m)
-}
-
-// CreatePlanTx forwards to the store's tx-aware insert.
-func (s *Service) CreatePlanTx(ctx context.Context, tx *sql.Tx, tenantID string, p domain.Plan) (domain.Plan, error) {
-	return s.store.CreatePlanTx(ctx, tx, tenantID, p)
-}
-
-// UpsertMeterPricingRuleTx forwards to the store's tx-aware upsert. No
-// currency guard here BY DESIGN: within a recipe apply the bound rule was
-// created (or adopted with a conformance check) in the same call, and the
-// binding guard's committed-state reads cannot see this tx's own inserts —
-// it would falsely refuse every fresh install. Recipe-level coherence is
-// enforced in recipe.Instantiate (single {{ .currency }} + adopted-meter
-// currency check); the guarded public path is UpsertMeterPricingRule.
-func (s *Service) UpsertMeterPricingRuleTx(ctx context.Context, tx *sql.Tx, tenantID string, rule domain.MeterPricingRule) (domain.MeterPricingRule, error) {
-	return s.store.UpsertMeterPricingRuleTx(ctx, tx, tenantID, rule)
+	return err
 }

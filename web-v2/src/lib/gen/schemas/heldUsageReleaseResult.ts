@@ -8,6 +8,11 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * The counts are what Velox found when the release wrote the rows, as
+ * for `billing_status` (see `UsageBillingStatus`). The invoice is the
+ * final answer.
+ */
 export interface HeldUsageReleaseResult {
   /** The customer the rows were ingested for. */
   customer_id: string;
@@ -15,8 +20,9 @@ export interface HeldUsageReleaseResult {
   released: number;
   /**
      * Rows that were already usage events under the same idempotency
-     * key (LiteLLM resent the call after the customer existed). Marked
-     * released, not written again.
+     * key (LiteLLM resent the call after the customer existed), and
+     * LiteLLM cache-write rows whose call is already billed with the
+     * writes inside its input row. Marked released, not written again.
      */
   deduplicated: number;
   /**
@@ -31,23 +37,42 @@ export interface HeldUsageReleaseResult {
      */
   more_to_release: number;
   /**
-     * Released rows inside an active subscription's current billing
-     * period whose meter the subscription's plan prices. That period's
-     * invoice counts them.
+     * Released rows in a billing period not invoiced yet that a price
+     * of its plan takes. Rows Velox does not check count here too:
+     * rows after the current period's end, while the subscription
+     * continues, and rows after a trial's end while the subscription
+     * still trials. Rows of a sum or count meter stamped before the end
+     * of this period's spend-threshold invoice are not counted here:
+     * see `pending_threshold_invoice` and `outside_open_period`.
      */
   in_open_period: number;
   /**
-     * Released rows inside an active subscription's current billing
-     * period whose meter no plan on that subscription prices. No
-     * invoice charges them.
+     * Released rows in a billing period not invoiced yet whose plan
+     * prices the meter, but no price of that plan takes them (their
+     * dimensions do not include any price's `dimension_match`).
+     */
+  no_price: number;
+  /**
+     * Released rows in a billing period not invoiced yet whose plan
+     * does not price the meter.
      */
   not_on_plan: number;
   /**
-     * Released rows outside every current billing period: before the
-     * subscription started, or in an earlier period. A subscription
-     * invoice does not count them unless that period's invoice has not
-     * been built yet. Bill them with a one-off invoice if they should
-     * be charged.
+     * Released rows of a sum or count meter stamped before the end of
+     * this period's spend-threshold invoice, while that invoice is not
+     * paid. The period's invoice counts them only if that invoice is
+     * voided before the period closes. A written-off invoice can still
+     * be voided.
+     */
+  pending_threshold_invoice: number;
+  /**
+     * Released rows outside every subscription's time (before it
+     * started, in a free trial, after it ended or after its scheduled
+     * cancel, or in another, ended subscription's time), and rows in a
+     * period already invoiced. Also rows of a sum or count meter
+     * stamped before the end of this period's paid spend-threshold
+     * invoice. Bill them with a one-off invoice if they should be
+     * charged.
      */
   outside_open_period: number;
 }

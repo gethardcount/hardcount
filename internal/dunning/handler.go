@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -18,15 +18,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/platform/activity"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
-
-// PaymentCanceler stops an invoice from being payable at Stripe when a
-// dunning resolution voids it (expire live Checkout sessions, then cancel the
-// PI where Stripe allows). Satisfied by *payment.Stripe.
-type PaymentCanceler interface {
-	StopCollection(ctx context.Context, tenantID string, inv domain.Invoice)
-}
 
 // InvoiceVoider routes dunning resolution outcomes through the invoice
 // SERVICE (not the raw store), so they inherit the service's status guards,
@@ -35,7 +27,7 @@ type PaymentCanceler interface {
 // UpdateStatus(Voided) directly — a second, less-guarded void writer that
 // reversed no tax and emitted no event (an overlapping-flow hole). The
 // payment_recovered leg had the same hole until 2026-07-26: a raw
-// MarkPaid("") skipped the out_of_band: marker, the in-flight guard, and
+// MarkPaid("") skipped the out-of-band record, the in-flight guard, and
 // the invoice.payment_recorded webhook that the Record-offline-payment
 // dialog's path emits — two offline-payment writers with different
 // evidence trails for the same operator action.
@@ -57,7 +49,6 @@ type EventLiner interface {
 type Handler struct {
 	svc           *Service
 	invoiceVoider InvoiceVoider
-	paymentCancel PaymentCanceler
 	auditLogger   AuditWriter
 	resolver      clock.Resolver
 	eventLiner    EventLiner
@@ -97,20 +88,8 @@ func (h *Handler) SetResolver(r clock.Resolver) { h.resolver = r }
 // after the dunning handler), mirroring SetInvoiceUncollectibleMarker.
 func (h *Handler) SetInvoiceVoider(v InvoiceVoider) { h.invoiceVoider = v }
 
-// SetPaymentCanceler wires the collection-stop seam (lazy: the payment
-// service is built after this handler).
-func (h *Handler) SetPaymentCanceler(p PaymentCanceler) { h.paymentCancel = p }
-
-type HandlerDeps struct {
-	PaymentCancel PaymentCanceler
-}
-
-func NewHandler(svc *Service, deps ...HandlerDeps) *Handler {
-	h := &Handler{svc: svc}
-	if len(deps) > 0 {
-		h.paymentCancel = deps[0].PaymentCancel
-	}
-	return h
+func NewHandler(svc *Service) *Handler {
+	return &Handler{svc: svc}
 }
 
 func (h *Handler) Routes() chi.Router {
@@ -195,41 +174,68 @@ func (h *Handler) getPolicy(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, r, http.StatusOK, policy)
 }
 
-// decodePolicyBody decodes a policy payload and REFUSES the pre-ADR-112
-// `final_action` key by name.
-//
-// encoding/json drops unknown fields silently, so a caller still sending
-// `final_action: "cancel_subscription"` would have stored a policy that
-// pauses and never writes off — a terminal action they did not choose,
-// applied to real money, with a 200 on the way out. DisallowUnknownFields
-// would be the blunt version and would also reject harmless extra keys.
-func decodePolicyBody(r *http.Request) (domain.DunningPolicy, error) {
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		return domain.DunningPolicy{}, errors.New("invalid JSON body")
+// policyBody is a policy payload: the policy's fields, plus the keys it
+// replaced, declared only so they can be refused by name with what to send
+// instead: the pre-ADR-112 `final_action`, and the three schedule fields
+// that retry_days replaced (2026-10-23). A caller still sending
+// `final_action: "cancel_subscription"` would otherwise store a policy that
+// pauses and never writes off.
+type policyBody struct {
+	domain.DunningPolicy
+	FinalAction      *json.RawMessage `json:"final_action"`
+	RetrySchedule    *json.RawMessage `json:"retry_schedule"`
+	MaxRetryAttempts *json.RawMessage `json:"max_retry_attempts"`
+	GracePeriodDays  *json.RawMessage `json:"grace_period_days"`
+}
+
+// policyReadOnly are the policy fields the server sets: set-default moves
+// is_default, and an edit clears seeded (ADR-123). A body that sends one is
+// refused, naming it.
+var policyReadOnly = respond.ReadOnly("id", "tenant_id", "is_default", "seeded", "created_at", "updated_at")
+
+// decodePolicyBody decodes a policy payload strictly (respond.DecodeBody)
+// and refuses the replaced keys by name. It writes the refusal and returns
+// false; the handler returns on false.
+func decodePolicyBody(w http.ResponseWriter, r *http.Request) (domain.DunningPolicy, bool) {
+	var body policyBody
+	if err := respond.DecodeBody(r, &body, policyReadOnly); err != nil {
+		var typeErr *json.UnmarshalTypeError
+		// The field path names the embedded struct: DunningPolicy.retry_days.
+		if errors.As(err, &typeErr) && strings.HasPrefix(strings.TrimPrefix(typeErr.Field, "DunningPolicy."), "retry_days") {
+			respond.ValidationField(w, r, "retry_days", "retry_days is a list of whole days, for example [3, 4, 7]")
+			return domain.DunningPolicy{}, false
+		}
+		respond.WriteBodyError(w, r, err)
+		return domain.DunningPolicy{}, false
 	}
-	var legacy struct {
-		FinalAction *string `json:"final_action"`
-	}
-	if err := json.Unmarshal(body, &legacy); err == nil && legacy.FinalAction != nil {
-		return domain.DunningPolicy{}, errs.Invalid("final_action",
+	if body.FinalAction != nil {
+		respond.ValidationField(w, r, "final_action",
 			"final_action is no longer accepted — it decided two separate things. Send final_subscription_action (none|pause|cancel) and final_invoice_action (none|mark_uncollectible) instead")
+		return domain.DunningPolicy{}, false
 	}
-	var policy domain.DunningPolicy
-	if err := json.Unmarshal(body, &policy); err != nil {
-		return domain.DunningPolicy{}, errors.New("invalid JSON body")
+	for _, old := range []struct {
+		field string
+		sent  bool
+	}{
+		{"grace_period_days", body.GracePeriodDays != nil},
+		{"retry_schedule", body.RetrySchedule != nil},
+		{"max_retry_attempts", body.MaxRetryAttempts != nil},
+	} {
+		if old.sent {
+			respond.ValidationField(w, r, old.field,
+				old.field+" is no longer accepted. Send retry_days instead: the whole days to wait before each retry, the first counted from the failed payment (or the collection that found no card), for example [3, 4, 7] for retries on day 3, 7 and 14")
+			return domain.DunningPolicy{}, false
+		}
 	}
-	return policy, nil
+	return body.DunningPolicy, true
 }
 
 func (h *Handler) createPolicy(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
-	policy, err := decodePolicyBody(r)
-	if err != nil {
-		respond.FromError(w, r, err, "dunning_policy")
+	policy, ok := decodePolicyBody(w, r)
+	if !ok {
 		return
 	}
-	policy.ID = "" // server-assigned
 	result, err := h.svc.UpsertPolicy(r.Context(), tenantID, policy)
 	if err != nil {
 		respond.FromError(w, r, err, "dunning_policy")
@@ -252,9 +258,8 @@ func (h *Handler) createPolicy(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) updatePolicy(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
-	policy, err := decodePolicyBody(r)
-	if err != nil {
-		respond.FromError(w, r, err, "dunning_policy")
+	policy, ok := decodePolicyBody(w, r)
+	if !ok {
 		return
 	}
 	policy.ID = id
@@ -270,6 +275,9 @@ func (h *Handler) updatePolicy(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) deletePolicy(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 	err := h.svc.DeletePolicy(r.Context(), tenantID, id)
@@ -288,6 +296,9 @@ func (h *Handler) deletePolicy(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) setDefaultPolicy(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 	if err := h.svc.SetDefaultPolicy(r.Context(), tenantID, id); err != nil {
@@ -311,11 +322,20 @@ func (h *Handler) listRuns(w http.ResponseWriter, r *http.Request) {
 
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	// ?state= is a closed set: an unknown value matched no row and read as
+	// "none of those".
+	state := r.URL.Query().Get("state")
+	switch domain.DunningRunState(state) {
+	case "", domain.DunningActive, domain.DunningEscalated, domain.DunningResolved:
+	default:
+		respond.BadRequest(w, r, "state must be one of active, escalated, resolved")
+		return
+	}
 
 	runs, total, err := h.svc.ListRuns(r.Context(), RunListFilter{
 		TenantID:  tenantID,
 		InvoiceID: r.URL.Query().Get("invoice_id"),
-		State:     r.URL.Query().Get("state"),
+		State:     state,
 		Limit:     limit,
 		Offset:    offset,
 	})
@@ -405,8 +425,7 @@ func (h *Handler) resolveRun(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
 	var input ResolveInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &input) {
 		return
 	}
 
@@ -467,9 +486,9 @@ func (h *Handler) resolveRun(w http.ResponseWriter, r *http.Request) {
 		// hard-deleted by ADR-086 teardown, so this row is the only surviving
 		// record of WHY collection was closed out ("marked recovered when no
 		// payment came in") — precisely the question the comment above says
-		// finance asks. Nothing to resolve in live mode (no clock possible).
+		// finance asks. A live invoice has no clock, so the bind leaves ctx as is.
 		auditCtx := r.Context()
-		if h.resolver != nil && run.InvoiceID != "" && !postgres.Livemode(auditCtx) {
+		if h.resolver != nil && run.InvoiceID != "" {
 			auditCtx, _ = clock.BindEffectiveNow(auditCtx, h.resolver, clock.Pin{TenantID: tenantID, InvoiceID: run.InvoiceID})
 		}
 		_ = h.auditLogger.Log(auditCtx, tenantID, domain.AuditActionUpdate, "dunning_run", run.ID, "", map[string]any{
@@ -484,8 +503,7 @@ func (h *Handler) resolveRun(w http.ResponseWriter, r *http.Request) {
 
 // applyResolutionToInvoice carries an operator's dunning resolution to the
 // invoice: payment_recovered records an offline payment, invoice_voided
-// voids it (and then stops collection at Stripe). invoice_not_collectible
-// is written by ResolveRun itself. An unwired writer is a known-degraded
+// voids it. invoice_not_collectible is written by ResolveRun itself. An unwired writer is a known-degraded
 // construction and skips with a warning; a writer ERROR is returned.
 func (h *Handler) applyResolutionToInvoice(ctx context.Context, tenantID, invoiceID string, resolution domain.DunningResolution) error {
 	if invoiceID == "" {
@@ -508,8 +526,8 @@ func (h *Handler) applyResolutionToInvoice(ctx context.Context, tenantID, invoic
 	case domain.ResolutionPaymentRecovered:
 		// Route through the invoice service's offline-payment writer —
 		// the same path the invoice page's Record-offline-payment dialog
-		// uses — so the recovery gets the out_of_band: PaymentIntent
-		// marker, the in-flight-charge guard, the payment_recorded audit
+		// uses — so the recovery is recorded as paid out of band, with
+		// the in-flight-charge guard, the payment_recorded audit
 		// row, and the invoice.payment_recorded webhook. A raw MarkPaid
 		// here was a second offline-payment writer with a thinner
 		// evidence trail for the same operator action. The service binds
@@ -523,25 +541,19 @@ func (h *Handler) applyResolutionToInvoice(ctx context.Context, tenantID, invoic
 			return fmt.Errorf("record the recovered payment: %w", err)
 		}
 	case domain.ResolutionInvoiceVoided:
-		// Void through the invoice SERVICE (single void writer): status flip
-		// + atomic consumed-credit reversal + tax reversal + in-flight guard
-		// + single-writer invoice.voided event. The PI-cancel below is gated
-		// on the void SUCCEEDING — otherwise an in-flight invoice (which the
-		// service's guard refuses to void) would still get its live PI
-		// canceled, defeating the guard. It runs only after a confirmed void.
+		// Void through the invoice SERVICE, the one void path: the in-flight
+		// guard, the status flip with the credit reversal, then every void's
+		// post-commit legs (AfterVoid): stop collection at Stripe, reverse
+		// the tax, send invoice.voided, and resolve this run. A refused void
+		// runs none of them, so a charge in flight keeps its PaymentIntent.
+		// ResolveRun below then loses the resolve CAS and returns the run
+		// the void resolved.
 		if h.invoiceVoider == nil {
 			slog.WarnContext(ctx, "invoice voider unwired; skipping dunning manual-resolve void", "invoice_id", invoiceID)
 			return nil
 		}
-		voided, err := h.invoiceVoider.Void(ctx, tenantID, invoiceID)
-		if err != nil {
+		if _, err := h.invoiceVoider.Void(ctx, tenantID, invoiceID); err != nil {
 			return fmt.Errorf("void the invoice: %w", err)
-		}
-		// Stop collection at Stripe (only after a confirmed void):
-		// expire live Checkout sessions, then cancel the PI where
-		// cancelable. Credit reversal already happened inside Void.
-		if h.paymentCancel != nil {
-			h.paymentCancel.StopCollection(ctx, tenantID, voided)
 		}
 	}
 	return nil

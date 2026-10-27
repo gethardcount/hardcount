@@ -16,11 +16,38 @@ type SubPlanCurrency struct {
 	Currency string
 }
 
+// DunningPauseOutcome is what SetDunningPause did.
+type DunningPauseOutcome int
+
+const (
+	// DunningPauseWritten: this call paused collection.
+	DunningPauseWritten DunningPauseOutcome = iota + 1
+	// DunningPauseAlreadyHeld: a pause was already in force (the
+	// operator's, this run's earlier attempt, or another invoice's
+	// dunning), and was left as it is.
+	DunningPauseAlreadyHeld
+	// DunningPauseInvoiceSettled: the invoice was no longer owed, so
+	// nothing was paused.
+	DunningPauseInvoiceSettled
+)
+
 // ErrNotPaused is returned by ClearPauseCollection when the row exists but
-// carries no pause — the clear changed nothing, so nothing that announces a
-// resume may fire. Sentinel, not a DomainError: the operator path treats it
-// as an idempotent no-op, the schedule paths skip the row.
+// carries no pause, and by ResumeLiftedPause when the row no longer holds
+// the pause the resumer listed — the clear changed nothing, so nothing that
+// announces a resume may fire. Sentinel, not a DomainError: the operator
+// path treats it as an idempotent no-op, the schedule paths skip the row.
 var ErrNotPaused = errors.New("subscription: collection is not paused")
+
+// ErrPauseLifted is returned by ClearPauseCollection, after its commit,
+// when the pause had already lifted: the store resumed it with its own
+// trigger (payment or schedule) and announced that resume. The operator
+// resumed nothing, so the operator's resume announces nothing.
+var ErrPauseLifted = errors.New("subscription: the pause had already lifted")
+
+// ErrNoScheduledCancel is returned by ClearScheduledCancellation when the row
+// exists but has no cancel scheduled: the clear changed nothing, so
+// subscription.cancel_cleared must not be sent.
+var ErrNoScheduledCancel = errors.New("subscription: no cancel is scheduled")
 
 // PeriodSnapshot is the period state a writer derived its inputs from — the
 // status, period start and watermark it read before building an invoice or
@@ -39,10 +66,10 @@ func SnapshotOf(sub domain.Subscription) PeriodSnapshot {
 }
 
 // ErrWatermarkMoved: the row's period or status no longer matches the
-// caller's PeriodSnapshot — another closer (a cycle close, a threshold reset,
+// caller's PeriodSnapshot — another closer (a cycle close, a threshold fire,
 // a plan swap, a cancel) committed first. Everything derived from that
 // snapshot is stale; the caller wrote nothing, rolls back and re-reads.
-// A backward move is legal (a swap or a reset truncates a period); a STALE
+// A backward move is legal (a swap truncates a period); a STALE
 // move is not — the snapshot, not monotonicity, is the guard (ADR-115).
 var ErrWatermarkMoved = errors.New("subscription: billing period moved under the caller's snapshot")
 
@@ -98,7 +125,7 @@ type Store interface {
 	// the subscription and proves `expected` (status, period start, watermark)
 	// in the same statement, then re-stamps the period boundaries,
 	// next_billing_at and the billing anchor day. Every closer — cycle close,
-	// threshold fire (reset or verify-only), plan swap — runs it as the FIRST
+	// threshold fire (verify-only), plan swap — runs it as the FIRST
 	// statement of its tx, so nothing derived from a stale snapshot can commit.
 	// 0 rows → ErrWatermarkMoved (ErrNotFound if the row is gone).
 	ClosePeriodTx(ctx context.Context, tx *sql.Tx, tenantID, id string, expected PeriodSnapshot, periodStart, periodEnd, nextBillingAt time.Time, anchorDay int) error
@@ -113,6 +140,12 @@ type Store interface {
 	// across two transactions. When the source state does not match, a
 	// re-query distinguishes not-found from a stale-status conflict and
 	// surfaces the current status in the error message.
+	//
+	// Every cancel writer (this, CancelAtomicWithBill, CancelAtTrialEnd and
+	// both FireScheduledCancellation methods) stores and returns the canceled
+	// row with no cancel schedule and no pending plan change on its items
+	// (retireLiveOnlyStateTx). The collection pause stays: it still holds the
+	// subscription's unpaid invoices.
 	CancelAtomic(ctx context.Context, tenantID, id string) (domain.Subscription, error)
 
 	// CancelAtomicWithBill cancels the subscription AND runs billFn (the
@@ -139,8 +172,8 @@ type Store interface {
 	// ErrTrialCancelConflict (caller re-reads and routes).
 	CancelAtTrialEnd(ctx context.Context, tenantID, id string, observedTrialEnd time.Time) (domain.Subscription, error)
 
-	// ClearScheduledCancellation clears any cancel_at and cancel_at_period_end
-	// on the row. Idempotent.
+	// ClearScheduledCancellation clears cancel_at and cancel_at_period_end.
+	// A row with neither set returns ErrNoScheduledCancel and is not written.
 	ClearScheduledCancellation(ctx context.Context, tenantID, id string) (domain.Subscription, error)
 
 	// FireScheduledCancellationTx is the terminal cycle close (ADR-115): on
@@ -167,20 +200,43 @@ type Store interface {
 	// Permitted on any non-terminal status (active, paused, draft); a paused
 	// (hard) sub can also have collection paused, and clearing one without
 	// the other is supported. Service layer enforces behavior whitelist.
-	SetPauseCollection(ctx context.Context, tenantID, id string, pc domain.PauseCollection) (domain.Subscription, error)
+	//
+	// A lifted pause still on the row (its resumes_at has passed) is
+	// resumed first, in the same transaction, with its own trigger: this
+	// method, SetDunningPause, ClearPauseCollection and ResumeLiftedPause
+	// all go through one clear (PostgresStore.clearLiftedPauseTx), which
+	// runs onResume for the "Collection resumed" audit row and queues
+	// subscription.collection_resumed.
+	SetPauseCollection(ctx context.Context, tenantID, id string, pc domain.PauseCollection, onResume ResumeAudit) (domain.Subscription, error)
 
-	// ClearPauseCollection nulls the pause_collection_* columns as a CAS: it
-	// changes the row only if a pause is set and returns ErrNotPaused
-	// otherwise (ErrNotFound if the row does not exist). Callers that fire
-	// `subscription.collection_resumed` must fire it only on success — two
-	// leaders (a failover window, a resumed stale process) clearing the same
-	// pause used to each fire the event (HA-readiness hazard 5).
-	ClearPauseCollection(ctx context.Context, tenantID, id string) (domain.Subscription, error)
+	// SetDunningPause is dunning's pause final action for the unpaid invoice
+	// invoiceID (see PostgresStore.SetDunningPause). It pauses only while
+	// that invoice is still owed, and never overrides a pause in force.
+	// inTx, when set, runs in the pause's transaction only when it pauses
+	// (DunningPauseWritten); its error rolls the pause back. A lifted pause
+	// is resumed first, as in SetPauseCollection.
+	SetDunningPause(ctx context.Context, tenantID, subID, invoiceID string, inTx func(tx *sql.Tx, sub domain.Subscription) error, onResume ResumeAudit) (domain.Subscription, DunningPauseOutcome, error)
 
-	// SetBillingThresholds writes the (amount_gte, reset_cycle, item_thresholds)
-	// triple onto the row in one transaction. Replaces the full item_thresholds
+	// ClearPauseCollection is the operator's resume. It changes the row only
+	// if a pause is set and returns ErrNotPaused otherwise (ErrNotFound if
+	// the row does not exist). A lifted pause is resumed with its own
+	// trigger, as in SetPauseCollection, and the call returns ErrPauseLifted.
+	// The operator's resume is announced only on success — two clearers of
+	// the same pause used to each fire the event (HA-readiness hazard 5).
+	ClearPauseCollection(ctx context.Context, tenantID, id string, onResume ResumeAudit) (domain.Subscription, error)
+
+	// ResumeLiftedPause is the scheduled resumers' clear of the lifted pause
+	// on listed, the row as their list read it. It is a compare-and-set on
+	// that pause (PostgresStore.clearLiftedPauseTx): when another writer
+	// resumed or replaced it after the list, it returns ErrNotPaused and
+	// writes nothing. On success the audit row (onResume) and
+	// subscription.collection_resumed commit with the clear.
+	ResumeLiftedPause(ctx context.Context, tenantID string, listed domain.Subscription, onResume ResumeAudit) (domain.Subscription, error)
+
+	// SetBillingThresholds writes the (amount_gte, item_thresholds) pair onto
+	// the row in one transaction. Replaces the full item_thresholds
 	// set — the per-item rows for any item not in the new slice are deleted.
-	// Rejects rows in canceled/archived since a threshold on a terminated sub
+	// Rejects a canceled row since a threshold on a terminated sub
 	// has no meaning. The service layer is responsible for validating that
 	// every subscription_item_id in t.ItemThresholds belongs to this
 	// subscription.
@@ -313,8 +369,8 @@ type Store interface {
 	//
 	// Every write to subscription_items locks the subscription row first
 	// (#1270), so item writers wait for each other and for the period
-	// closers, and all of them lock in one order: subscription row, item
-	// rows, billing_intervals, invoices.
+	// closers. A write that references more than one plan takes them next,
+	// in ascending id, before any other row (LockPlansTx, D08 §4.21).
 
 	// LockForItemChangeTx locks the subscription row on the caller's tx and
 	// returns the subscription with its live items, read after the lock
@@ -324,6 +380,12 @@ type Store interface {
 	// changes price their proration from what this returns. ErrNotFound when
 	// the row is gone.
 	LockForItemChangeTx(ctx context.Context, tx *sql.Tx, tenantID, subscriptionID string) (domain.Subscription, error)
+
+	// LockPlansTx takes the plans FOR KEY SHARE on the caller's tx, in
+	// ascending id, in one statement (D08 §4.21). A writer that does other
+	// writes before its plan write, such as the cross-interval swap's refund
+	// drafts, calls it right after the subscription row lock.
+	LockPlansTx(ctx context.Context, tx *sql.Tx, planIDs []string) error
 
 	// WithTenantTx runs fn in one tenant-scoped transaction: commit when fn
 	// returns nil, rollback otherwise. An item change that prorates nothing
@@ -415,6 +477,10 @@ type MeterConflict struct {
 // ?billing= query parameter on GET /v1/subscriptions.
 const ListBillingFailing = "failing"
 
+// ListCollectionPaused is the one value of ListFilter.Collection and of the
+// ?collection= query parameter on GET /v1/subscriptions.
+const ListCollectionPaused = "paused"
+
 type ListFilter struct {
 	TenantID   string
 	CustomerID string
@@ -424,6 +490,14 @@ type ListFilter struct {
 	// record, retrying or parked (ADR-119). Empty = no filter. The handler
 	// rejects any other value.
 	Billing string
+	// Collection "paused" keeps only live (active or trialing) subscriptions
+	// whose pause_collection is in force now (set, by an operator or by
+	// dunning, and its resumes_at, if any, not yet reached on the
+	// subscription's clock). Paused
+	// collection is not a status: the subscription stays active and keeps
+	// billing into drafts. Empty = no filter. The handler rejects any other
+	// value.
+	Collection string
 	// Search filters by display_name OR code, case-insensitive
 	// substring (ILIKE, metacharacters escaped). Empty = no filter.
 	// Backs the dashboard list search box and the command palette.

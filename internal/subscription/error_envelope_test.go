@@ -86,7 +86,7 @@ func TestSetBillingThresholds_MultiCurrencyErrorEnvelope(t *testing.T) {
 	h.SetProrationDeps(&plansMock{plans: map[string]domain.Plan{
 		"plan_usd": {ID: "plan_usd", Currency: "USD"},
 		"plan_eur": {ID: "plan_eur", Currency: "EUR"},
-	}}, &invoicesMock{}, &creditsMock{})
+	}}, &invoicesMock{})
 
 	body, _ := json.Marshal(BillingThresholdsInput{AmountGTE: 5000})
 	req := withTenantRoute(httptest.NewRequest(http.MethodPut, "/subscriptions/"+sub.ID+"/billing-thresholds", bytes.NewReader(body)), "t1", map[string]string{"id": sub.ID})

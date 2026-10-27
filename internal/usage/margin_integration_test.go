@@ -7,16 +7,15 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/pricing"
 	"github.com/sagarsuperuser/velox/internal/usage"
 )
 
 // TestMargin_AttributionHonesty pins ADR-079 D6: per-model margin renders
-// ONLY where a pricing rule pins `model` in dimension_match; revenue from
-// rules without a model pin lands in the explicit unattributed bucket —
-// never allocated by heuristic. The headline (customer-level revenue vs
+// ONLY where the winning price's dimension_match names a `model` (ADR-130
+// §10); revenue from prices without a model label lands in the explicit
+// unattributed bucket — never allocated by heuristic. The headline (customer-level revenue vs
 // cost) is always computed.
 func TestMargin_AttributionHonesty(t *testing.T) {
 	if testing.Short() {
@@ -29,44 +28,22 @@ func TestMargin_AttributionHonesty(t *testing.T) {
 	cycleStart := time.Now().UTC().Truncate(time.Hour).Add(-24 * time.Hour)
 	cycleEnd := cycleStart.Add(30 * 24 * time.Hour)
 
-	// Rule A pins model → its revenue is per-model attributable.
-	rrvModel, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "sonnet_tokens", Name: "Sonnet", Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(3),
-	})
-	if err != nil {
-		t.Fatalf("create rrv model: %v", err)
-	}
-	// Rule B is a flat catch-all (no model pin) → unattributed bucket.
-	rrvFlat, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "flat_tokens", Name: "Flat", Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(1),
-	})
-	if err != nil {
-		t.Fatalf("create rrv flat: %v", err)
-	}
-	meter, err := f.pricingSvc.CreateMeter(ctx, f.tenantID, pricing.CreateMeterInput{
-		Key: "tokens", Name: "Tokens", Unit: "tokens",
-		Aggregation: "sum", RatingRuleVersionID: rrvFlat.ID,
-	})
-	if err != nil {
-		t.Fatalf("create meter: %v", err)
-	}
-	if _, err := f.pricingSvc.UpsertMeterPricingRule(ctx, f.tenantID, pricing.UpsertMeterPricingRuleInput{
-		MeterID: meter.ID, RatingRuleVersionID: rrvModel.ID,
-		DimensionMatch:  map[string]any{"model": "claude-3.5-sonnet"},
-		AggregationMode: domain.AggSum, Priority: 10,
-	}); err != nil {
-		t.Fatalf("upsert model rule: %v", err)
-	}
-
-	custID, _, _ := f.seedCustomerWithSub(t, ctx, "cus_margin", "pln_margin", meter.ID, cycleStart, cycleEnd)
+	// The model price names a model → its revenue is per-model
+	// attributable. The catch-all names none → unattributed bucket.
+	meter := f.meter(t, ctx, "tokens")
+	custID, _, _ := f.seedCustomerWithSub(t, ctx, "cus_margin", "pln_margin", []pricing.PriceInput{
+		price(meter.ID, 3, map[string]string{"model": "claude-3.5-sonnet"}),
+		price(meter.ID, 1, nil),
+	}, cycleStart, cycleEnd)
 
 	usageStore := usage.NewPostgresStore(f.db)
 	// COGS rate: $0.000004/token for the sonnet family.
-	seedRate(t, f.db, ctx, f.tenantID, "anthropic", "claude-3.5-sonnet", "input", "0.000004")
+	seedRate(t, f.db, ctx, f.tenantID, "anthropic", "claude-3.5-sonnet", "input", "0.0004")
 
-	// 1000 sonnet tokens (rule A: 1000 × 3c = $30 revenue; cost 1000 ×
-	// 4e-6 = 4000 micros) + 500 un-pinned tokens (rule B default: 500 ×
-	// 1c = $5, unattributed; no costable dims → not_applicable).
+	// 1000 sonnet tokens (the model price: 1000 × 3c = $30 revenue; cost
+	// 1000 × 4e-6 = 4000 micros) + 500 tokens no model price takes (the
+	// catch-all: 500 × 1c = $5, unattributed; no costable dims →
+	// not_applicable).
 	ts := cycleStart.Add(time.Hour)
 	if _, err := f.usageSvc.Ingest(ctx, f.tenantID, usage.IngestInput{
 		CustomerID: custID, MeterID: meter.ID, Quantity: decimal.NewFromInt(1000),
@@ -87,8 +64,8 @@ func TestMargin_AttributionHonesty(t *testing.T) {
 		t.Fatalf("margin: %v", err)
 	}
 
-	if rep.CostMicros != 4000 {
-		t.Errorf("cost = %d micros, want 4000", rep.CostMicros)
+	if rep.CostCents.String() != "0.4" {
+		t.Errorf("cost = %s cents, want 0.4 (4000 micro-dollars)", rep.CostCents)
 	}
 	if rep.UnresolvedEvents != 0 {
 		t.Errorf("unresolved = %d, want 0 before the gpt-4o event", rep.UnresolvedEvents)
@@ -107,8 +84,8 @@ func TestMargin_AttributionHonesty(t *testing.T) {
 	if !sonnet.Attributed || sonnet.RevenueCents != 3000 {
 		t.Errorf("sonnet row = attributed=%v revenue=%d, want attributed=true revenue=3000", sonnet.Attributed, sonnet.RevenueCents)
 	}
-	if sonnet.CostMicros != 4000 {
-		t.Errorf("sonnet cost = %d, want 4000", sonnet.CostMicros)
+	if sonnet.CostCents.String() != "0.4" {
+		t.Errorf("sonnet cost = %s cents, want 0.4", sonnet.CostCents)
 	}
 	// The row's own margin, by the headline's formula: 0.4c of cost on
 	// $30 → 9998.67 bps → 9999.
@@ -116,7 +93,7 @@ func TestMargin_AttributionHonesty(t *testing.T) {
 		t.Errorf("sonnet margin_bps = %v, want 9999", sonnet.MarginBps)
 	}
 	if rep.UnattributedRevenueCents == 0 {
-		t.Error("unattributed revenue = 0, want >0 (the flat-rule revenue must NOT be allocated per model)")
+		t.Error("unattributed revenue = 0, want >0 (the catch-all price's revenue must NOT be allocated per model)")
 	}
 	if rep.MarginBps == nil {
 		t.Fatal("margin_bps missing with revenue > 0")
@@ -146,8 +123,8 @@ func TestMargin_AttributionHonesty(t *testing.T) {
 	if rep.UnresolvedEvents != 1 {
 		t.Errorf("unresolved = %d, want 1 (the gpt-4o event)", rep.UnresolvedEvents)
 	}
-	if rep.CostMicros != 4000 || rep.CostedEvents == 0 {
-		t.Errorf("cost = %d micros over %d events, want 4000 over the sonnet event", rep.CostMicros, rep.CostedEvents)
+	if rep.CostCents.String() != "0.4" || rep.CostedEvents == 0 {
+		t.Errorf("cost = %s cents over %d events, want 0.4 over the sonnet event", rep.CostCents, rep.CostedEvents)
 	}
 	if rep.MarginBps != nil {
 		t.Errorf("margin_bps = %d, want none: one event's cost is unknown", *rep.MarginBps)
@@ -162,7 +139,7 @@ func TestMargin_AttributionHonesty(t *testing.T) {
 }
 
 // TestMargin_CurrencyIsNamedAndNeverMixed: the report names the currency of
-// its revenue (the customer's price rules) and of its cost (always USD), and
+// its revenue (the customer's plan) and of its cost (always USD), and
 // gives no margin when they differ. Before, a EUR customer's €30 of usage
 // against $0.004 of provider cost read as "$30.00" and a 99.9% margin.
 // Mutation-verify: drop the RevenueCurrency == CostCurrency check → red.
@@ -184,21 +161,9 @@ func TestMargin_CurrencyIsNamedAndNeverMixed(t *testing.T) {
 	} {
 		t.Run(tc.currency, func(t *testing.T) {
 			f := newCustomerUsageFixture(t, "Margin currency "+tc.currency)
-			rrv, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
-				RuleKey: "tokens_flat", Name: "Tokens", Mode: domain.PricingFlat,
-				Currency: tc.currency, FlatAmountCents: decimal.NewFromInt(3),
-			})
-			if err != nil {
-				t.Fatalf("rule: %v", err)
-			}
-			meter, err := f.pricingSvc.CreateMeter(ctx, f.tenantID, pricing.CreateMeterInput{
-				Key: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: "sum", RatingRuleVersionID: rrv.ID,
-			})
-			if err != nil {
-				t.Fatalf("meter: %v", err)
-			}
-			custID, _, _ := f.seedCustomerWithSubIn(t, ctx, "cus_cur", "pln_cur", meter.ID, tc.currency, cycleStart, cycleEnd)
-			seedRate(t, f.db, ctx, f.tenantID, "anthropic", "claude-3.5-sonnet", "input", "0.000004")
+			meter := f.meter(t, ctx, "tokens")
+			custID, _, _ := f.seedCustomerWithSubIn(t, ctx, "cus_cur", "pln_cur", []pricing.PriceInput{price(meter.ID, 3, nil)}, tc.currency, cycleStart, cycleEnd)
+			seedRate(t, f.db, ctx, f.tenantID, "anthropic", "claude-3.5-sonnet", "input", "0.0004")
 			ts := cycleStart.Add(time.Hour)
 			if _, err := f.usageSvc.Ingest(ctx, f.tenantID, usage.IngestInput{
 				CustomerID: custID, MeterID: meter.ID, Quantity: decimal.NewFromInt(1000),
@@ -215,8 +180,8 @@ func TestMargin_CurrencyIsNamedAndNeverMixed(t *testing.T) {
 			if rep.RevenueCents != 3000 || rep.RevenueCurrency != tc.currency {
 				t.Errorf("revenue = %d %q, want 3000 %q", rep.RevenueCents, rep.RevenueCurrency, tc.currency)
 			}
-			if rep.CostMicros != 4000 || rep.CostCurrency != "USD" {
-				t.Errorf("cost = %d %q, want 4000 USD", rep.CostMicros, rep.CostCurrency)
+			if rep.CostCents.String() != "0.4" || rep.CostCurrency != "USD" {
+				t.Errorf("cost = %s %q, want 0.4 USD cents", rep.CostCents, rep.CostCurrency)
 			}
 			if got := rep.MarginBps != nil; got != tc.wantMargin {
 				t.Errorf("margin_bps present = %v, want %v (revenue %s, cost USD)", got, tc.wantMargin, tc.currency)
@@ -241,19 +206,8 @@ func TestMargin_NoProviderCostMeansNoMargin(t *testing.T) {
 	cycleStart := time.Now().UTC().Truncate(time.Hour).Add(-24 * time.Hour)
 	cycleEnd := cycleStart.Add(30 * 24 * time.Hour)
 
-	rrv, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "api_calls", Name: "API calls", Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(2),
-	})
-	if err != nil {
-		t.Fatalf("rule: %v", err)
-	}
-	meter, err := f.pricingSvc.CreateMeter(ctx, f.tenantID, pricing.CreateMeterInput{
-		Key: "api_calls", Name: "API calls", Unit: "calls", Aggregation: "sum", RatingRuleVersionID: rrv.ID,
-	})
-	if err != nil {
-		t.Fatalf("meter: %v", err)
-	}
-	custID, _, _ := f.seedCustomerWithSub(t, ctx, "cus_nocost", "pln_nocost", meter.ID, cycleStart, cycleEnd)
+	meter := f.meter(t, ctx, "api_calls")
+	custID, _, _ := f.seedCustomerWithSub(t, ctx, "cus_nocost", "pln_nocost", []pricing.PriceInput{price(meter.ID, 2, nil)}, cycleStart, cycleEnd)
 	ts := cycleStart.Add(time.Hour)
 	if _, err := f.usageSvc.Ingest(ctx, f.tenantID, usage.IngestInput{
 		CustomerID: custID, MeterID: meter.ID, Quantity: decimal.NewFromInt(100), Timestamp: &ts,
@@ -277,7 +231,7 @@ func TestMargin_NoProviderCostMeansNoMargin(t *testing.T) {
 	}
 
 	// A rate that matches nothing here: rates exist, still no margin.
-	seedRate(t, f.db, ctx, f.tenantID, "anthropic", "claude-3.5-sonnet", "input", "0.000004")
+	seedRate(t, f.db, ctx, f.tenantID, "anthropic", "claude-3.5-sonnet", "input", "0.0004")
 	rep, err = asm.Get(ctx, f.tenantID, custID, cycleStart, cycleEnd)
 	if err != nil {
 		t.Fatalf("margin: %v", err)

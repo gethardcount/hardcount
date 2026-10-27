@@ -61,7 +61,7 @@ const (
 	AuditActionCollect = "collect"
 	AuditActionSend    = "send"
 	// AuditActionRetryTax covers operator-initiated tax recompute on a
-	// pending/failed invoice. Persists the actor + before/after attention
+	// pending invoice. Persists the actor + before/after attention
 	// so post-mortems can see who retried what and whether it cleared.
 	AuditActionRetryTax = "retry_tax"
 	// AuditActionRotate covers credential/token rotation (API keys,
@@ -100,7 +100,10 @@ type TenantSettings struct {
 	DefaultCurrency string `json:"default_currency"`
 	Timezone        string `json:"timezone"`
 	InvoicePrefix   string `json:"invoice_prefix"`
-	NetPaymentTerms int    `json:"net_payment_terms"`
+	// CreditNotePrefix starts every credit note number (CN-000001). Changing
+	// it renames no issued note: the number is stored when the note is made.
+	CreditNotePrefix string `json:"credit_note_prefix"`
+	NetPaymentTerms  int    `json:"net_payment_terms"`
 	// CreditBalanceLowThresholdCents arms the credit.balance_low outbound
 	// event: a ledger write that crosses a customer's balance from >= to
 	// < this value emits the event (ADR-078). Nil = low alerts off.

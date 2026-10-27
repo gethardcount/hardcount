@@ -70,7 +70,7 @@ func (s *Stripe) SettleSucceeded(ctx context.Context, tenantID string, inv domai
 			// (auto-refund deferred, ADR-068). An empty recorded PI counts:
 			// the invoice settled via credits/offline and a card charge
 			// still landed.
-			s.escalatePaymentAnomaly(ctx, tenantID, inv, domain.EventPaymentDuplicateCharge, paymentIntentID, capturedCents,
+			s.escalatePaymentAnomaly(ctx, tenantID, inv, domain.EventPaymentDuplicateCharge, paymentIntentID, capturedCents, nil,
 				"second successful charge on an already-paid invoice")
 			return nil
 		}
@@ -129,7 +129,7 @@ func (s *Stripe) SettleSucceeded(ctx context.Context, tenantID string, inv domai
 			// webhook forever is wrong — the transition will never succeed.
 			// Escalate the per-cause event (the money is owed BACK, distinct
 			// from duplicate_charge) and absorb.
-			s.escalatePaymentAnomaly(ctx, tenantID, inv, domain.EventPaymentReceivedOnVoidedInvoice, paymentIntentID, capturedCents,
+			s.escalatePaymentAnomaly(ctx, tenantID, inv, domain.EventPaymentReceivedOnVoidedInvoice, paymentIntentID, capturedCents, nil,
 				"payment succeeded against a non-payable invoice")
 			return nil
 		}
@@ -141,7 +141,7 @@ func (s *Stripe) SettleSucceeded(ctx context.Context, tenantID string, inv domai
 		// invoice records its PI only at settle, so the stale comparison
 		// would false-alarm on every routine concurrent same-PI redelivery).
 		if paymentIntentID != "" && fresh.StripePaymentIntentID != paymentIntentID {
-			s.escalatePaymentAnomaly(ctx, tenantID, fresh, domain.EventPaymentDuplicateCharge, paymentIntentID, capturedCents,
+			s.escalatePaymentAnomaly(ctx, tenantID, fresh, domain.EventPaymentDuplicateCharge, paymentIntentID, capturedCents, nil,
 				"second successful charge lost the settle race to a different PaymentIntent")
 			return nil
 		}
@@ -195,7 +195,7 @@ func (s *Stripe) SettleSucceeded(ctx context.Context, tenantID string, inv domai
 	// window) settles the invoice but books the WRONG figure — detect it,
 	// never silently absorb it.
 	if capturedCents > 0 && capturedCents != fresh.AmountPaidCents {
-		s.escalatePaymentAnomaly(ctx, tenantID, fresh, domain.EventPaymentAmountMismatch, paymentIntentID, capturedCents,
+		s.escalatePaymentAnomaly(ctx, tenantID, fresh, domain.EventPaymentAmountMismatch, paymentIntentID, capturedCents, nil,
 			"captured amount differs from the amount booked at settle")
 	}
 
@@ -294,24 +294,39 @@ type PaymentFailure struct {
 	// (domain.PaymentFailureReport), where a dunning retry reads them.
 	DeclineCode     string
 	PaymentMethodID string
+	// CardMessage is Stripe's message for a card error, when the source has
+	// one (cardErrorMessage): the reason the customer's payment-failed email
+	// shows. Message is the invoice's text, and can be Velox's own
+	// ("reconciled: requires_payment_method", "payment failed") or Stripe's
+	// developer text for another error type, so it is never emailed.
+	CardMessage string
 }
 
 // refusedCardCustomerMessage is the reason the customer's payment-failed
 // email gives when the bank refused the card for good (domain.IsHardDecline).
 // It does not say why: Stripe asks that lost, stolen and fraud declines be
 // shown to the customer as a plain decline
-// (https://docs.stripe.com/declines/codes). It says what to do, since
-// Velox will not charge that card again for this invoice.
-const refusedCardCustomerMessage = "Your bank declined this card, and we won't try it again. Please pay with a different card."
+// (https://docs.stripe.com/declines/codes). It says what to do. It does not
+// say the card won't be charged again: only dunning retries skip it, while
+// Collect payment and the customer's next invoice still charge it.
+const refusedCardCustomerMessage = "Your bank declined this card. Please pay with a different card."
 
 // customerFailureReason is the reason the payment-failed email shows the
-// customer: Stripe's own message, except for a card the bank refused for
-// good, where "try again later" would be the wrong advice.
+// customer: Stripe's message for a card error (CardMessage; none, so no
+// reason line, when the source has no such message), except for a card the
+// bank refused for good, where "try again later" would be the wrong advice,
+// and for a payment the bank wants the customer to confirm, whose email has
+// its own copy and no reason line: Stripe's message for it is written for
+// the developer ("If the customer is off session, ask them to return to
+// your application").
 func customerFailureReason(f PaymentFailure) string {
-	if domain.IsHardDecline(f.DeclineCode) {
+	switch domain.DeclineAskOf(f.DeclineCode) {
+	case domain.DeclineAskNewCard:
 		return refusedCardCustomerMessage
+	case domain.DeclineAskConfirm:
+		return ""
 	}
-	return f.Message
+	return f.CardMessage
 }
 
 // failureEmailSuppressed reports whether a failure of a PaymentIntent with
@@ -393,7 +408,7 @@ func (s *Stripe) settleFailed(ctx context.Context, tenantID string, inv domain.I
 	// on the first notice by the store — the same shape as the paid twin.
 	var failedTx func(tx *sql.Tx, fresh domain.Invoice) error
 	if !report.External && !failureEmailSuppressed(f.Purpose) {
-		failedTx = s.buildPaymentFailedHook(ctx, tenantID, inv, customerFailureReason(f))
+		failedTx = s.buildPaymentFailedHook(ctx, tenantID, inv, customerFailureReason(f), domain.DeclineAskOf(f.DeclineCode))
 	}
 	fresh, res, err := s.invoices.MarkPaymentFailedReportingTransition(ctx, tenantID, inv.ID, report, failedTx)
 	if err != nil {
@@ -481,28 +496,35 @@ func receiptAmountCents(capturedCents int64, fresh domain.Invoice) int64 {
 // and stamps the durable anomaly marker the dashboard attention banner reads
 // (operators — the load-bearing surface: with auto-refund deferred, the
 // operator IS the refund mechanism). Best-effort by design: detection must
-// never fail the settlement that triggered it.
-func (s *Stripe) escalatePaymentAnomaly(ctx context.Context, tenantID string, inv domain.Invoice, eventType, incomingPI string, capturedCents int64, msg string) {
+// never fail the settlement that triggered it. extra holds the event's
+// other keys (domain.WebhookEventExtras), such as currency_mismatch's
+// charge_currency; nil for none.
+func (s *Stripe) escalatePaymentAnomaly(ctx context.Context, tenantID string, inv domain.Invoice, eventType, incomingPI string, capturedCents int64, extra map[string]any, msg string) {
 	slog.ErrorContext(ctx, "payment anomaly: "+msg,
 		"event", eventType,
 		"invoice_id", inv.ID,
 		"tenant_id", tenantID,
 		"recorded_payment_intent_id", inv.StripePaymentIntentID,
+		"paid_out_of_band", inv.PaidOutOfBand,
 		"incoming_payment_intent_id", incomingPI,
 		"captured_cents", capturedCents,
 		"amount_paid_cents", inv.AmountPaidCents,
 	)
 	if s.events != nil {
-		if err := s.events.Dispatch(ctx, tenantID, eventType, map[string]any{
-			"invoice_id":                 inv.ID,
-			"invoice_number":             inv.InvoiceNumber,
-			"customer_id":                inv.CustomerID,
-			"recorded_payment_intent_id": inv.StripePaymentIntentID,
+		// The charge that raised the anomaly rides beside the invoice. The
+		// invoice is the row the caller passed: on duplicate_charge its
+		// stripe_payment_intent_id is the other charge it recorded; on
+		// amount_mismatch it is this charge (the settle just recorded it);
+		// on currency_mismatch and received_on_voided_invoice it is whatever
+		// the invoice held when the charge arrived (docs/webhooks.md).
+		data := map[string]any{
 			"incoming_payment_intent_id": incomingPI,
 			"captured_cents":             capturedCents,
-			"amount_paid_cents":          inv.AmountPaidCents,
-			"currency":                   inv.Currency,
-		}); err != nil {
+		}
+		for k, v := range extra {
+			data[k] = v
+		}
+		if err := s.events.Dispatch(ctx, tenantID, eventType, domain.InvoiceWebhookData(inv, data)); err != nil {
 			slog.ErrorContext(ctx, "payment anomaly: event dispatch failed", "event", eventType, "invoice_id", inv.ID, "error", err)
 		}
 	}
@@ -532,7 +554,7 @@ func (s *Stripe) escalatePaymentAnomaly(ctx context.Context, tenantID string, in
 // reuse path, ExpiresAt bounds the Stripe-side window, and the ADR-068
 // payment-received-on-voided-invoice anomaly remains the last backstop.
 func (s *Stripe) StopCollection(ctx context.Context, tenantID string, inv domain.Invoice) {
-	s.expireCheckoutSessionsBestEffort(ctx, tenantID, inv)
+	s.ExpireCheckoutSessions(ctx, tenantID, inv)
 	if inv.StripePaymentIntentID == "" {
 		return
 	}
@@ -544,6 +566,19 @@ func (s *Stripe) StopCollection(ctx context.Context, tenantID string, inv domain
 		return
 	}
 	slog.InfoContext(ctx, "stop collection: payment intent canceled", "invoice_id", inv.ID)
+}
+
+// ExpireCheckoutSessions is StopCollection's first leg on its own, for a
+// write-off: a written-off invoice must not stay payable on a Checkout page
+// the customer still has open (ADR-110 closes self-service payment on one).
+// The write-off's transaction already closed Velox's claims; this expires the
+// sessions at Stripe. Best-effort, as for a void: ExpiresAt (at most an hour)
+// bounds a session whose expire call fails, and a payment that still lands
+// settles the written-off invoice once (uncollectible -> paid). It does not
+// cancel the PaymentIntent: a write-off records that collection failed, and
+// money that still arrives is recorded (ADR-113).
+func (s *Stripe) ExpireCheckoutSessions(ctx context.Context, tenantID string, inv domain.Invoice) {
+	s.expireCheckoutSessionsBestEffort(ctx, tenantID, inv)
 }
 
 // expireCheckoutSessionsBestEffort expires, at Stripe, every session for the
@@ -564,7 +599,12 @@ func (s *Stripe) expireCheckoutSessionsBestEffort(ctx context.Context, tenantID 
 		return
 	}
 	for _, c := range claims {
-		sc := s.sessionClients.For(ctx, tenantID, c.Livemode)
+		sc, err := s.sessionClients.Resolve(ctx, tenantID, c.Livemode)
+		if err != nil {
+			slog.WarnContext(ctx, "settle: best-effort session expire skipped, Stripe credentials unreadable (ExpiresAt backstop applies)",
+				"invoice_id", inv.ID, "claim_id", c.ID, "session_id", c.StripeSessionID, "error", err)
+			continue
+		}
 		if sc == nil {
 			continue
 		}
@@ -661,8 +701,8 @@ func (s *Stripe) buildReceiptHook(ctx context.Context, tenantID string, inv doma
 // buildPaymentFailedHook is the decline-notice counterpart of
 // buildReceiptHook. SettleFailed skips it for a dunning retry
 // (failureEmailSuppressed) and for a hosted attempt — dunning still runs;
-// only this email is skipped.
-func (s *Stripe) buildPaymentFailedHook(ctx context.Context, tenantID string, inv domain.Invoice, failureMsg string) func(tx *sql.Tx, fresh domain.Invoice) error {
+// only this email is skipped. ask selects the email's copy.
+func (s *Stripe) buildPaymentFailedHook(ctx context.Context, tenantID string, inv domain.Invoice, failureMsg string, ask domain.DeclineAsk) func(tx *sql.Tx, fresh domain.Invoice) error {
 	if s.emailPaymentFailed == nil {
 		return nil
 	}
@@ -683,6 +723,6 @@ func (s *Stripe) buildPaymentFailedHook(ctx context.Context, tenantID string, in
 			return nil
 		}
 		return s.emailPaymentFailed.SendPaymentFailedTx(ctx, tx, tenantID, email, cc, name,
-			inv.InvoiceNumber, failureMsg, inv.PublicToken)
+			inv.InvoiceNumber, failureMsg, inv.PublicToken, ask)
 	}
 }

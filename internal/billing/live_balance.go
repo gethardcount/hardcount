@@ -3,20 +3,20 @@ package billing
 import (
 	"context"
 	"fmt"
-
-	"github.com/shopspring/decimal"
+	"sort"
+	"strings"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/subscription"
 )
 
-// CreditBalanceReader reads the credit a customer can spend right now: the
-// ledger sum, less what is left of any grant that is past its expiry but has
-// not been written off by the expiry sweep yet. A draw skips such a grant, so
-// counting it would promise credit no invoice can use. Implemented by
-// *credit.Service.
+// CreditBalanceReader reads the credit a customer can spend right now, per
+// currency: the ledger sum, less what is left of any grant that is past its
+// expiry but has not been written off by the expiry sweep yet. A draw skips
+// such a grant, so counting it would promise credit no invoice can use.
+// Implemented by *credit.Service.
 type CreditBalanceReader interface {
-	SpendableBalance(ctx context.Context, tenantID, customerID string) (int64, error)
+	SpendableBalance(ctx context.Context, tenantID, customerID string) (map[string]int64, error)
 }
 
 // CustomerSubscriptionLister lists a customer's subscriptions, hydrated with
@@ -34,9 +34,15 @@ func (e *Engine) SetLiveBalanceReaders(credits CreditBalanceReader, subs Custome
 
 // LiveCreditBalance is the one place a customer's live credit figure is
 // computed (issue #1019). The secret-key read and the public cost dashboard
-// both call it, so the two can never disagree.
+// both call it, so the two can never disagree. The figure is per currency
+// (ADR-129); in each one:
 //
 //	estimated remaining = max(spendable balance - unbilled usage, 0)
+//
+// A subscription's unbilled usage counts in the currency its close invoice
+// will be issued in (Engine.invoiceCurrency, the function that stamps it), so
+// it is set against the credit that invoice can draw. The result lists the
+// sorted union of the ledger's currencies and the subscriptions'.
 //
 // Unbilled usage is what the period close would bill for usage if every
 // billable subscription closed now: each subscription over its OWN current
@@ -50,8 +56,7 @@ func (e *Engine) SetLiveBalanceReaders(credits CreditBalanceReader, subs Custome
 // Left out on purpose, so the figure can read HIGH: tax, base fees billed in
 // arrears (until the period closes), amounts due on unpaid invoices, and a
 // grant that will expire before the period closes (it is spendable now, but
-// will not be there for the close to draw on). Currencies are added as raw
-// cents; the ledger has no currency.
+// will not be there for the close to draw on).
 //
 // The reads are separate transactions (balance, subscriptions, then per
 // subscription the watermark and intervals, and per meter the aggregation).
@@ -68,7 +73,7 @@ func (e *Engine) LiveCreditBalance(ctx context.Context, tenantID, customerID str
 	if e.creditBalances == nil || e.customerSubs == nil {
 		return domain.CreditLiveBalance{}, fmt.Errorf("live credit balance: readers not wired")
 	}
-	balance, err := e.creditBalances.SpendableBalance(ctx, tenantID, customerID)
+	balances, err := e.creditBalances.SpendableBalance(ctx, tenantID, customerID)
 	if err != nil {
 		return domain.CreditLiveBalance{}, fmt.Errorf("live credit balance: read balance: %w", err)
 	}
@@ -76,23 +81,52 @@ func (e *Engine) LiveCreditBalance(ctx context.Context, tenantID, customerID str
 	if err != nil {
 		return domain.CreditLiveBalance{}, fmt.Errorf("live credit balance: list subscriptions: %w", err)
 	}
-	var unbilled int64
+	unbilled := map[string]int64{}
 	for _, sub := range subs {
-		cents, err := e.unbilledUsageCents(ctx, sub)
+		cents, planCurrency, err := e.unbilledUsageCents(ctx, sub)
 		if err != nil {
 			// No partial figure: leaving one subscription out would report
 			// more credit than the customer has.
 			return domain.CreditLiveBalance{}, fmt.Errorf("live credit balance: subscription %s: %w", sub.ID, err)
 		}
-		unbilled += cents
+		currency, err := e.invoiceCurrency(ctx, sub, planCurrency)
+		if err != nil {
+			return domain.CreditLiveBalance{}, fmt.Errorf("live credit balance: subscription %s currency: %w", sub.ID, err)
+		}
+		cur := strings.ToUpper(currency)
+		if unbilled[cur], err = addCents(unbilled[cur], cents); err != nil {
+			return domain.CreditLiveBalance{}, fmt.Errorf("live credit balance: unbilled usage in %s: %w", cur, err)
+		}
 	}
-	return domain.CreditLiveBalance{
-		CustomerID:              customerID,
-		BalanceCents:            balance,
-		UnbilledUsageCents:      unbilled,
-		EstimatedRemainingCents: max(balance-unbilled, 0),
-		ComputedAt:              e.clock.Now(ctx),
-	}, nil
+	currencies := make([]string, 0, len(balances)+len(unbilled))
+	for c := range balances {
+		currencies = append(currencies, c)
+	}
+	for c := range unbilled {
+		if _, ok := balances[c]; !ok {
+			currencies = append(currencies, c)
+		}
+	}
+	sort.Strings(currencies)
+	out := domain.CreditLiveBalance{
+		CustomerID: customerID,
+		Balances:   make([]domain.CreditLiveCurrency, 0, len(currencies)),
+		ComputedAt: e.clock.Now(ctx),
+	}
+	for _, c := range currencies {
+		// unbilled is a sum of usage amounts, so never negative.
+		remaining, err := addCents(balances[c], -unbilled[c])
+		if err != nil {
+			return domain.CreditLiveBalance{}, fmt.Errorf("live credit balance: remaining in %s: %w", c, err)
+		}
+		out.Balances = append(out.Balances, domain.CreditLiveCurrency{
+			Currency:                c,
+			BalanceCents:            balances[c],
+			UnbilledUsageCents:      unbilled[c],
+			EstimatedRemainingCents: max(remaining, 0),
+		})
+	}
+	return out, nil
 }
 
 // billableSubscriptions returns the customer's subscriptions whose stored
@@ -160,55 +194,89 @@ func trialPeriodBilled(sub domain.Subscription) bool {
 
 // unbilledUsageCents is the usage amount the period close would bill for
 // this subscription's current period, given what a threshold invoice has
-// already billed (ADR-066 §4). It follows buildLineItems:
+// already billed (ADR-066 §4): the priced buckets of rateCurrentPeriod.
 //
-//   - Each meter is counted over the windows a plan carrying it was on the
-//     subscription (meterUsageIntervals, the close's own builder). After a
-//     mid-period plan swap the outgoing plan's meter still counts up to the
-//     swap and the incoming plan's meter counts only from it. A window starts
+// It also returns the currency of the subscription's first item's plan, the
+// input Engine.invoiceCurrency takes to name the close invoice's currency.
+func (e *Engine) unbilledUsageCents(ctx context.Context, sub domain.Subscription) (int64, string, error) {
+	cp, err := e.rateCurrentPeriod(ctx, sub, afterThresholdInvoice)
+	if err != nil {
+		return 0, "", err
+	}
+	var total int64
+	for _, b := range cp.buckets {
+		if b.priced {
+			if total, err = addCents(total, b.amount); err != nil {
+				return 0, "", fmt.Errorf("unbilled usage: %w", err)
+			}
+		}
+	}
+	return total, cp.planCurrency, nil
+}
+
+// currentPeriod is a subscription's current period rated as its close would
+// bill it now.
+type currentPeriod struct {
+	buckets      []ratedBucket
+	plans        map[string]domain.Plan
+	planCurrency string
+	// meterIDs are the meters the period's plans price at their pins.
+	meterIDs []string
+}
+
+// periodPart is how much of the current period rateCurrentPeriod rates.
+type periodPart int
+
+const (
+	// afterThresholdInvoice is what the close will still bill: the live
+	// balance's unbilled usage.
+	afterThresholdInvoice periodPart = iota
+	// wholePeriod is the period's usage as if no threshold invoice had
+	// billed part of it: customer usage and the cost dashboard.
+	wholePeriod
+)
+
+// rateCurrentPeriod rates the usage of this subscription's current period
+// the way buildLineItems will (part afterThresholdInvoice), or the whole
+// period as one close with no threshold invoice would bill it (part
+// wholePeriod):
+//
+//   - Each meter is counted over the windows a plan pricing it was on the
+//     subscription (meterUsageIntervals, the close's own builder), each by
+//     its own plan's prices at the plan's pin of the period (pinsOf). After
+//     a mid-period swap the outgoing plan's window counts up to the swap at
+//     its prices and the incoming plan's from it at its own. A window starts
 //     no earlier than the trial end or another subscription's coverage end
 //     of the meter that day (usageFloors).
 //   - No threshold invoice this period: every bucket over those windows.
-//   - A reset=false threshold invoice exists: it billed usage up to its
-//     billing_period_end, and credit already paid for it. Additive buckets
+//   - A threshold invoice exists (read only for afterThresholdInvoice): it
+//     billed usage up to its billing_period_end, and credit already paid
+//     for it. Additive buckets
 //     (sum, count) count only from that instant on, priced continuing the
 //     tiers the invoice reached. Non-additive buckets (max, last) that the
 //     invoice left off still count over the UNCLAMPED windows, because the
-//     close bills them once, full-window. Clamping those would drop a peak
-//     that predates the invoice.
+//     close bills them once, full-window.
 //
 // Usage is aggregated per customer and meter, with no subscription key, the
 // same as the close. Two live subscriptions on one meter would each bill the
 // same events, which is why the subscription service refuses that setup
-// (rejectMeterOverlap); if such rows exist the estimate counts the usage
-// once per subscription, as the closes will.
-func (e *Engine) unbilledUsageCents(ctx context.Context, sub domain.Subscription) (int64, error) {
+// (rejectMeterOverlap).
+func (e *Engine) rateCurrentPeriod(ctx context.Context, sub domain.Subscription, part periodPart) (currentPeriod, error) {
 	if sub.CurrentBillingPeriodStart == nil || sub.CurrentBillingPeriodEnd == nil {
-		return 0, nil
+		return currentPeriod{}, nil
 	}
 	periodStart, periodEnd := *sub.CurrentBillingPeriodStart, *sub.CurrentBillingPeriodEnd
 
-	wm, err := e.loadThresholdWatermark(ctx, sub.TenantID, sub.ID, periodStart, periodEnd)
+	var wm thresholdWatermark
+	if part == afterThresholdInvoice {
+		var err error
+		if wm, err = e.loadThresholdWatermark(ctx, sub.TenantID, sub.ID, periodStart, periodEnd); err != nil {
+			return currentPeriod{}, err
+		}
+	}
+	plans, err := e.itemPlans(ctx, sub)
 	if err != nil {
-		return 0, err
-	}
-
-	plans := map[string]domain.Plan{}
-	loadPlan := func(planID string) error {
-		if _, ok := plans[planID]; ok || planID == "" {
-			return nil
-		}
-		plan, err := e.pricing.GetPlan(ctx, sub.TenantID, planID)
-		if err != nil {
-			return fmt.Errorf("get plan %s: %w", planID, err)
-		}
-		plans[planID] = plan
-		return nil
-	}
-	for _, it := range sub.Items {
-		if err := loadPlan(it.PlanID); err != nil {
-			return 0, err
-		}
+		return currentPeriod{}, err
 	}
 	// A trialing subscription has no billing intervals yet: conversion opens
 	// one per item at the stored period start. With no segments,
@@ -218,96 +286,79 @@ func (e *Engine) unbilledUsageCents(ctx context.Context, sub domain.Subscription
 	if sub.Status != domain.SubscriptionTrialing {
 		segsByItem, err = e.windowSegments(ctx, sub, periodStart, periodEnd)
 		if err != nil {
-			return 0, fmt.Errorf("resolve segments: %w", err)
+			return currentPeriod{}, fmt.Errorf("resolve segments: %w", err)
 		}
-		for _, segs := range segsByItem {
-			for _, seg := range segs {
-				if err := loadPlan(seg.planID); err != nil {
-					return 0, err
-				}
-			}
+		if err := e.hydrateSegmentPlans(ctx, sub, segsByItem, plans); err != nil {
+			return currentPeriod{}, err
 		}
+	}
+	src := e.prices()
+	stretches := planStretches(sub, segsByItem, periodStart, periodEnd)
+	pins := pinsOf(sub, stretches, periodStart)
+	planMeters, err := planMetersAt(ctx, src, sub.TenantID, plans, pins)
+	if err != nil {
+		return currentPeriod{}, err
+	}
+	meters, err := e.readMeters(ctx, sub.TenantID, planMeters)
+	if err != nil {
+		return currentPeriod{}, err
 	}
 	floors, err := e.loadUsageFloors(ctx, sub, periodStart, periodEnd)
 	if err != nil {
-		return 0, err
+		return currentPeriod{}, err
 	}
-	clamped, full := meterUsageIntervals(sub, segsByItem, plans, periodStart, periodEnd, wm.billedThrough, floors)
-	meterIDs := map[string]struct{}{}
-	for mid := range clamped {
-		meterIDs[mid] = struct{}{}
-	}
-	for mid := range full {
-		meterIDs[mid] = struct{}{}
-	}
+	clamped, full := meterUsageIntervals(stretches, planMeters, wm.billedThrough, floors)
 
-	ladder := newUsageLadder(wm)
-	var total int64
-	for meterID := range meterIDs {
-		price := func(rule domain.RatingRuleVersion, bucketKey string, mode domain.AggregationMode, qty decimal.Decimal) (int64, error) {
-			return ladder.price(rule, meterID, bucketKey, mode, qty)
+	// The closer's two passes: every bucket except a deferred one over the
+	// clamped windows, then the deferred ones over the full windows. The full
+	// pass is skipped for a meter that cannot have a deferred bucket, so that
+	// after a fire a sum-only meter costs one aggregation over the short
+	// post-fire window instead of a second one over the whole period.
+	var windows []rateWindow
+	for _, k := range sortedPlanMeters(clamped, full) {
+		for _, iv := range mergeUsageIntervals(clamped[k]) {
+			windows = append(windows, rateWindow{planID: k.planID, meterID: k.meterID, iv: iv, pass: passClamped})
 		}
-		// sum adds the lines of one pass over the given windows: the clamped
-		// pass takes every bucket except those the fire deferred, the full
-		// pass only those. Rules are pinned at the period start (ADR-070).
-		sum := func(windows []usageInterval, deferred bool) error {
-			for _, iv := range mergeUsageIntervals(windows) {
-				lines, _, _, err := e.rateMeterWindow(ctx, sub.TenantID, sub.CustomerID, meterID, iv.start, iv.end, periodStart, price)
-				if err != nil {
-					return fmt.Errorf("rate meter %s [%v, %v): %w", meterID, iv.start, iv.end, err)
-				}
-				for _, l := range lines {
-					if wm.deferredBucket(l.AggregationMode, meterID, l.RatingRuleVersionID) == deferred {
-						total += l.AmountCents
-					}
-				}
-			}
-			return nil
-		}
-		if err := sum(clamped[meterID], false); err != nil {
-			return 0, err
-		}
-
-		// Full-window pass. Skipped for a meter that cannot have a deferred
-		// bucket, so that after a fire a sum-only meter costs one aggregation
-		// over the short post-fire window instead of a second one over the
-		// whole period.
-		if !wm.exists() {
+		if !wm.exists() || !nonAdditive(meters[k.meterID].Aggregation) {
 			continue
 		}
-		nonAdditive, err := e.meterHasNonAdditiveBucket(ctx, sub.TenantID, meterID)
-		if err != nil {
-			return 0, err
-		}
-		if !nonAdditive {
-			continue
-		}
-		if err := sum(full[meterID], true); err != nil {
-			return 0, err
+		for _, iv := range mergeUsageIntervals(full[k]) {
+			windows = append(windows, rateWindow{planID: k.planID, meterID: k.meterID, iv: iv, pass: passFull})
 		}
 	}
-	return total, nil
+	r := rater{
+		prices: closeMeters{PriceSource: src, meters: meters},
+		reads:  claimReads{usage: e.usage, tenantID: sub.TenantID, customerID: sub.CustomerID},
+		site: rateSite{preview: func(w rateWindow, err error) error {
+			return fmt.Errorf("rate meter %s [%v, %v): %w", w.meterID, w.iv.start, w.iv.end, err)
+		}},
+		pins:       pins,
+		tenantID:   sub.TenantID,
+		customerID: sub.CustomerID,
+	}
+	buckets, err := r.rateUsageWindows(ctx, windows, newUsageLadder(wm))
+	if err != nil {
+		return currentPeriod{}, err
+	}
+	out := currentPeriod{buckets: buckets, plans: plans, meterIDs: meterSet(planMeters)}
+	if len(sub.Items) > 0 {
+		out.planCurrency = plans[sub.Items[0].PlanID].Currency
+	}
+	return out, nil
 }
 
-// meterHasNonAdditiveBucket reports whether any bucket of the meter (its
-// default aggregation or a pricing rule's) is max / last, read from the
-// meter's configuration rather than from which buckets have usage.
-func (e *Engine) meterHasNonAdditiveBucket(ctx context.Context, tenantID, meterID string) (bool, error) {
-	meter, err := e.pricing.GetMeter(ctx, tenantID, meterID)
-	if err != nil {
-		return false, fmt.Errorf("get meter %s: %w", meterID, err)
-	}
-	if nonAdditiveMode(mapMeterAggregation(meter.Aggregation)) {
-		return true, nil
-	}
-	rules, err := e.pricing.ListMeterPricingRulesByMeter(ctx, tenantID, meterID)
-	if err != nil {
-		return false, fmt.Errorf("list pricing rules for meter %s: %w", meterID, err)
-	}
-	for _, r := range rules {
-		if nonAdditiveMode(r.AggregationMode) {
-			return true, nil
+// itemPlans reads the plan of each of sub's items.
+func (e *Engine) itemPlans(ctx context.Context, sub domain.Subscription) (map[string]domain.Plan, error) {
+	plans := make(map[string]domain.Plan, len(sub.Items))
+	for _, it := range sub.Items {
+		if _, ok := plans[it.PlanID]; ok || it.PlanID == "" {
+			continue
 		}
+		plan, err := e.pricing.GetPlan(ctx, sub.TenantID, it.PlanID)
+		if err != nil {
+			return nil, fmt.Errorf("get plan %s: %w", it.PlanID, err)
+		}
+		plans[it.PlanID] = plan
 	}
-	return false, nil
+	return plans, nil
 }

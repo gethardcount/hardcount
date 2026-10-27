@@ -106,29 +106,18 @@ func previewParityScenarios() []previewParityScenario {
 			name:      "mid-period-add-with-usage",
 			wantTotal: 3100 + 4200 + 7*10,
 			build: func(t *testing.T, f *parityFixture) domain.Subscription {
-				rule, err := f.pricing.CreateRatingRule(f.ctx, f.tenantID, domain.RatingRuleVersion{
-					RuleKey: "pp_calls", Name: "calls", Version: 1,
-					LifecycleState: domain.RatingRuleActive, Mode: domain.PricingFlat,
-					Currency: "USD", FlatAmountCents: decimal.NewFromInt(10),
-				})
-				if err != nil {
-					t.Fatalf("create rule: %v", err)
-				}
 				meter, err := f.pricing.CreateMeter(f.ctx, f.tenantID, domain.Meter{
-					Key: "pp_calls", Name: "Calls", Unit: "calls", Aggregation: "sum", RatingRuleVersionID: rule.ID,
+					EventName: "pp_calls", Name: "Calls", Unit: "calls", Aggregation: "sum",
 				})
 				if err != nil {
 					t.Fatalf("create meter: %v", err)
 				}
 				pA := f.plan(t, "mu-a", 3100)
-				pB, err := f.pricing.CreatePlan(f.ctx, f.tenantID, domain.Plan{
+				pB, _ := createPlanWithPrices(t, f.db, f.ctx, f.tenantID, domain.Plan{
 					Code: "mu-b", Name: "mu-b", Currency: "USD",
 					BillingInterval: domain.BillingMonthly, BaseBillTiming: domain.BillInArrears,
-					BaseAmountCents: 6200, Status: domain.PlanActive, MeterIDs: []string{meter.ID},
-				})
-				if err != nil {
-					t.Fatalf("create metered plan: %v", err)
-				}
+					BaseAmountCents: 6200, Status: domain.PlanActive,
+				}, priceOn{meterID: meter.ID, shape: domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(10)}})
 				sub := f.activeSub(t, "sub-mu", parityPS, domain.SubscriptionItem{PlanID: pA.ID, Quantity: 1})
 				if _, err := f.subs.AddItem(clock.WithEffectiveNow(f.ctx, day(10)), f.tenantID, domain.SubscriptionItem{SubscriptionID: sub.ID, PlanID: pB.ID, Quantity: 1}); err != nil {
 					t.Fatalf("add item: %v", err)
@@ -163,10 +152,7 @@ func TestPreview_MatchesCycleClose(t *testing.T) {
 			}
 
 			// Preview mid-period, after every change has landed.
-			pv, err := f.engine(t, parityPS.AddDate(0, 0, 25)).Preview(f.ctx, sub)
-			if err != nil {
-				t.Fatalf("preview: %v", err)
-			}
+			pv := f.createPreview(t, parityPS.AddDate(0, 0, 25), sub)
 			var got []string
 			for _, l := range pv.Lines {
 				got = append(got, previewFingerprint(l.LineType, l.Description, l.Quantity, l.AmountCents))
@@ -254,10 +240,7 @@ func TestPreview_TrialEndingOn30thMatchesFirstInvoice(t *testing.T) {
 				t.Fatalf("reload sub: %v", err)
 			}
 
-			pv, err := f.engine(t, time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)).Preview(f.ctx, sub)
-			if err != nil {
-				t.Fatalf("preview: %v", err)
-			}
+			pv := f.createPreview(t, time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC), sub)
 			var got []string
 			for _, l := range pv.Lines {
 				got = append(got, previewFingerprint(l.LineType, l.Description, l.Quantity, l.AmountCents))

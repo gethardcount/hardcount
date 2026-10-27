@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { toast } from 'sonner'
 
-import { api, formatCents, formatDate } from '@/lib/api'
+import { api, formatCents, formatCentsBare, formatDate } from '@/lib/api'
 import { creditExpiryLabel } from '@/lib/dates'
 import { creditTotalsLine, grantState, grantUsedCents, ledgerEntryLabel, ledgerEntryTitle, splitGrants } from '@/lib/customerCredits'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
@@ -16,14 +16,16 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { CreditDialog } from '@/pages/Credits'
 
 // CustomerCreditsSection is the customer page's credit picture: the balance
-// with where the credit went (granted, used, expired, canceled, deducted);
-// every grant, including the finished ones behind a toggle; the latest
-// ledger entries; and Grant credits.
+// in each currency with where that credit went (granted, used, expired,
+// canceled, deducted); every grant, including the finished ones behind a
+// toggle; the latest ledger entries; and Grant credits.
 // A grant that was fully applied to an invoice used to leave no trace here.
+// Every amount is shown in its own currency (ADR-129); `currency` is only
+// the customer's billing currency, the default of the grant dialog.
 export function CustomerCreditsSection({ customerId, customerName, currency, testClockId, readOnly }: {
   customerId: string
   customerName: string
-  currency: string
+  currency?: string
   testClockId?: string
   readOnly?: boolean
 }) {
@@ -50,7 +52,9 @@ export function CustomerCreditsSection({ customerId, customerName, currency, tes
 
   const split = splitGrants(grants.data?.grants ?? [], now)
   const shown = showFinished ? [...split.active, ...split.finished] : split.active
-  const totals = balance.data ? creditTotalsLine(balance.data, currency) : null
+  // One balance per currency, ordered by currency; never added together.
+  const balances = [...(balance.data?.data ?? [])].sort((a, b) => a.currency.localeCompare(b.currency))
+  const remaining = new Map((grants.data?.remaining_by_currency ?? []).map(r => [r.currency, r]))
 
   return (
     <Section
@@ -75,20 +79,34 @@ export function CustomerCreditsSection({ customerId, customerName, currency, tes
               <p className="text-xl font-semibold" title="Couldn't load the credit balance">—</p>
               <Button variant="outline" size="xs" onClick={() => balance.refetch()}>Retry</Button>
             </div>
+          ) : !balance.data ? (
+            <p className="mt-1 text-xl font-semibold tabular-nums">—</p>
+          ) : balances.length === 0 ? (
+            <p className="mt-1 text-xl font-semibold tabular-nums">{currency ? formatCents(0, currency) : formatCentsBare(0)}</p>
           ) : (
-            <p className="mt-1 text-xl font-semibold tabular-nums">
-              {balance.data ? formatCents(balance.data.balance_cents, currency) : '—'}
-            </p>
-          )}
-          {totals && <p className="mt-0.5 text-xs text-muted-foreground tabular-nums">{totals}</p>}
-          {grants.data && (grants.data.commit_remaining_cents > 0 || grants.data.promotional_remaining_cents > 0) && (
-            // Kind split: money-backed commit must not read as one number
-            // with free promotional credit.
-            <p className="mt-0.5 text-xs text-muted-foreground tabular-nums">
-              {grants.data.commit_remaining_cents > 0 && <>Commit {formatCents(grants.data.commit_remaining_cents, currency)}</>}
-              {grants.data.commit_remaining_cents > 0 && grants.data.promotional_remaining_cents > 0 && ' · '}
-              {grants.data.promotional_remaining_cents > 0 && <>Promotional {formatCents(grants.data.promotional_remaining_cents, currency)}</>}
-            </p>
+            // One block per currency: credit pays only invoices in its own
+            // currency and is never converted.
+            <div className="mt-1 flex flex-wrap gap-x-8 gap-y-3">
+              {balances.map(b => {
+                const totals = creditTotalsLine(b, b.currency)
+                const r = remaining.get(b.currency)
+                return (
+                  <div key={b.currency} className="min-w-0">
+                    <p className="text-xl font-semibold tabular-nums">{formatCents(b.balance_cents, b.currency)}</p>
+                    {totals && <p className="mt-0.5 text-xs text-muted-foreground tabular-nums">{totals}</p>}
+                    {r && (r.commit_remaining_cents > 0 || r.promotional_remaining_cents > 0) && (
+                      // Kind split: money-backed commit must not read as one
+                      // number with free promotional credit.
+                      <p className="mt-0.5 text-xs text-muted-foreground tabular-nums">
+                        {r.commit_remaining_cents > 0 && <>Commit {formatCents(r.commit_remaining_cents, b.currency)}</>}
+                        {r.commit_remaining_cents > 0 && r.promotional_remaining_cents > 0 && ' · '}
+                        {r.promotional_remaining_cents > 0 && <>Promotional {formatCents(r.promotional_remaining_cents, b.currency)}</>}
+                      </p>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
           )}
         </div>
 
@@ -128,14 +146,14 @@ export function CustomerCreditsSection({ customerId, customerName, currency, tes
                               {state === 'deducted' && <Badge variant="secondary">Deducted</Badge>}
                             </div>
                           </TableCell>
-                          <TableCell className="text-right text-sm tabular-nums">{formatCents(g.amount_cents, currency)}</TableCell>
+                          <TableCell className="text-right text-sm tabular-nums">{formatCents(g.amount_cents, g.currency)}</TableCell>
                           <TableCell className="text-right text-sm tabular-nums">
-                            {formatCents(grantUsedCents(g), currency)}
+                            {formatCents(grantUsedCents(g), g.currency)}
                             {(g.deducted_cents ?? 0) > 0 && (
-                              <div className="text-xs text-muted-foreground whitespace-nowrap">Deducted {formatCents(g.deducted_cents, currency)}</div>
+                              <div className="text-xs text-muted-foreground whitespace-nowrap">Deducted {formatCents(g.deducted_cents, g.currency)}</div>
                             )}
                           </TableCell>
-                          <TableCell className="text-right text-sm font-medium tabular-nums">{formatCents(g.remaining_cents, currency)}</TableCell>
+                          <TableCell className="text-right text-sm font-medium tabular-nums">{formatCents(g.remaining_cents, g.currency)}</TableCell>
                           <TableCell className="text-sm text-muted-foreground whitespace-nowrap">{g.expires_at ? creditExpiryLabel(g.expires_at) : 'Never'}</TableCell>
                         </TableRow>
                       )
@@ -176,7 +194,7 @@ export function CustomerCreditsSection({ customerId, customerName, currency, tes
                     </p>
                   </div>
                   <span className={e.amount_cents < 0 ? 'shrink-0 tabular-nums' : 'shrink-0 tabular-nums text-success-foreground'}>
-                    {e.amount_cents > 0 ? '+' : ''}{formatCents(e.amount_cents, currency)}
+                    {e.amount_cents > 0 ? '+' : ''}{formatCents(e.amount_cents, e.currency)}
                   </span>
                 </li>
               ))}

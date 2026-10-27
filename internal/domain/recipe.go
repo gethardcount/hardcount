@@ -2,19 +2,16 @@ package domain
 
 import (
 	"time"
-
-	"github.com/shopspring/decimal"
 )
 
 // RecipeInstance is the DB-backed record of a recipe being instantiated for
-// a tenant. The canonical entities a recipe creates (meters, rating rules,
-// pricing rules, plans, dunning policies, webhook endpoints) live in their
-// own per-domain tables; RecipeInstance only tracks instantiation metadata
-// so we can answer "is this recipe already installed?" idempotently and
+// a tenant. The canonical entities a recipe creates (meters, plans and their
+// prices) live in their own per-domain tables; RecipeInstance only tracks
+// instantiation metadata so we can answer "is this recipe already installed?" idempotently and
 // record what it created (CreatedObjects) for the dashboard's install badge.
 // (ADR-085: apply is idempotent additive — no force, no uninstall.)
 //
-// See docs/design/recipes.md.
+// See docs/dev/design/recipes.md.
 type RecipeInstance struct {
 	ID             string         `json:"id"`
 	TenantID       string         `json:"tenant_id,omitempty"`
@@ -28,26 +25,23 @@ type RecipeInstance struct {
 
 // CreatedObjects is the per-role map of entity IDs a recipe apply produced.
 // Persisted as JSONB on recipe_instances.created_object_ids and returned in
-// the apply response so the dashboard can deep-link directly to the new plan /
-// meter / webhook detail pages. It is the ledger of what a recipe made (a
-// recipe never creates customers or subscriptions). A recipe is free to leave
-// any of these slices empty if its YAML doesn't declare that role.
+// the apply response so the dashboard can link to the new plan and meter. It
+// is the ledger of what a recipe made: catalog objects only (ADR-130 §15). A
+// recipe never creates customers, subscriptions, dunning policies or webhook
+// endpoints.
 type CreatedObjects struct {
-	MeterIDs          []string `json:"meter_ids,omitempty"`
-	RatingRuleIDs     []string `json:"rating_rule_ids,omitempty"`
-	PricingRuleIDs    []string `json:"pricing_rule_ids,omitempty"`
-	PlanIDs           []string `json:"plan_ids,omitempty"`
-	DunningPolicyID   string   `json:"dunning_policy_id,omitempty"`
-	WebhookEndpointID string   `json:"webhook_endpoint_id,omitempty"`
+	MeterIDs []string `json:"meter_ids,omitempty"`
+	PlanIDs  []string `json:"plan_ids,omitempty"`
+	PriceIDs []string `json:"price_ids,omitempty"`
 }
 
 // Recipe is the parsed, validated form of a recipe YAML file. Loaded once
 // at process boot from the embedded FS and held in the registry; never
-// mutated after load. Render() applies overrides and produces a
-// RenderedRecipe ready for instantiation.
+// mutated after load. A recipe is catalog only (ADR-130 §15): meters, and
+// plans with their prices.
 //
 // JSON tags use snake_case to match the rest of /v1/* and the wire
-// contract in docs/design/recipes.md.
+// contract in docs/dev/design/recipes.md.
 type Recipe struct {
 	Key         string           `json:"key"`
 	Version     string           `json:"version"`
@@ -56,12 +50,8 @@ type Recipe struct {
 	Description string           `json:"description,omitempty"`
 	Overridable []RecipeOverride `json:"overridable"`
 
-	Meters        []RecipeMeter        `json:"meters"`
-	RatingRules   []RecipeRatingRule   `json:"rating_rules"`
-	PricingRules  []RecipePricingRule  `json:"pricing_rules"`
-	Plans         []RecipePlan         `json:"plans"`
-	DunningPolicy *RecipeDunningPolicy `json:"dunning_policy,omitempty"`
-	Webhook       *RecipeWebhook       `json:"webhook,omitempty"`
+	Meters []RecipeMeter `json:"meters"`
+	Plans  []RecipePlan  `json:"plans"`
 }
 
 // RecipeOverride is one override key declared in a recipe's `overridable`
@@ -77,30 +67,10 @@ type RecipeOverride struct {
 }
 
 type RecipeMeter struct {
-	Key         string `json:"key"`
+	EventName   string `json:"event_name"`
 	Name        string `json:"name"`
 	Unit        string `json:"unit"`
 	Aggregation string `json:"aggregation"`
-}
-
-type RecipeRatingRule struct {
-	Key                    string          `json:"key"`
-	Name                   string          `json:"name,omitempty"`
-	Mode                   PricingMode     `json:"mode"`
-	Currency               string          `json:"currency"`
-	FlatAmountCents        decimal.Decimal `json:"flat_amount_cents,omitempty"`
-	GraduatedTiers         []RatingTier    `json:"graduated_tiers,omitempty"`
-	PackageSize            int64           `json:"package_size,omitempty"`
-	PackageAmountCents     int64           `json:"package_amount_cents,omitempty"`
-	OverageUnitAmountCents decimal.Decimal `json:"overage_unit_amount_cents,omitempty"`
-}
-
-type RecipePricingRule struct {
-	MeterKey        string          `json:"meter_key"`
-	RatingRuleKey   string          `json:"rating_rule_key"`
-	DimensionMatch  map[string]any  `json:"dimension_match"`
-	AggregationMode AggregationMode `json:"aggregation_mode"`
-	Priority        int             `json:"priority"`
 }
 
 type RecipePlan struct {
@@ -113,18 +83,15 @@ type RecipePlan struct {
 	// in_arrears). Empty → CreatePlanTx defaults to in_arrears. Honored
 	// verbatim on the generated plan; the recipe never second-guesses it.
 	BaseBillTiming BillTiming `json:"base_bill_timing,omitempty"`
-	MeterKeys      []string   `json:"meter_keys"`
+	// Prices are the plan's usage prices. Each takes the plan's currency.
+	Prices []RecipePrice `json:"prices"`
 }
 
-type RecipeDunningPolicy struct {
-	Name                    string `json:"name"`
-	MaxRetries              int    `json:"max_retries"`
-	IntervalsHours          []int  `json:"intervals_hours"`
-	FinalSubscriptionAction string `json:"final_subscription_action"`
-	FinalInvoiceAction      string `json:"final_invoice_action"`
-}
-
-type RecipeWebhook struct {
-	Events         []string `json:"events"`
-	URLPlaceholder string   `json:"url_placeholder"`
+// RecipePrice is one usage price of a recipe plan: the recipe meter it is
+// on, the labels an event must carry, and its rate.
+type RecipePrice struct {
+	// Meter is the event_name of the recipe meter the price is on.
+	Meter          string            `json:"meter"`
+	DimensionMatch map[string]string `json:"dimension_match"`
+	PriceShape
 }

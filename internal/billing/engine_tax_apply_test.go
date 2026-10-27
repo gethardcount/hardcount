@@ -11,6 +11,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/tax"
 	"github.com/shopspring/decimal"
 )
@@ -452,17 +453,13 @@ func TestRunCycle_TaxErrorAbortsBeforeInvoiceAndCycleAdvance(t *testing.T) {
 				ID: "pln_1", Name: "Pro Plan", Currency: "USD",
 				BillingInterval: domain.BillingMonthly,
 				BaseAmountCents: 4900,
-				MeterIDs:        []string{"mtr_api"},
 			},
 		},
 		meters: map[string]domain.Meter{
-			"mtr_api": {ID: "mtr_api", Name: "API Calls", Unit: "calls", RatingRuleVersionID: "rrv_api"},
+			"mtr_api": {ID: "mtr_api", Name: "API Calls", Unit: "calls"},
 		},
-		rules: map[string]domain.RatingRuleVersion{
-			"rrv_api": {
-				ID: "rrv_api", RuleKey: "api_calls", Version: 1, Mode: domain.PricingFlat,
-				FlatAmountCents: decimal.NewFromInt(100),
-			},
+		prices: map[string][]domain.PlanPrice{
+			"pln_1": {priceOf("prc_api", "mtr_api", domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(100)})},
 		},
 	}
 
@@ -474,7 +471,7 @@ func TestRunCycle_TaxErrorAbortsBeforeInvoiceAndCycleAdvance(t *testing.T) {
 	engine := NewEngine(subs, usage, pricing, invoices, nil, &mockSettings{}, nil, nil, fakeClk)
 	engine.SetIntervalReader(subs)
 
-	count, errs := engine.RunCycle(context.Background(), 50, nil)
+	count, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil)
 
 	if len(errs) == 0 {
 		t.Fatal("expected a billing error when tax application fails, got none")

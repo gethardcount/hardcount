@@ -40,29 +40,27 @@ func NewPostgresStore(db *postgres.DB) *PostgresStore {
 
 // scanPolicy is the shared row decoder for the policy SELECTs below.
 // Returned columns are fixed: id, tenant_id, name, enabled, is_default,
-// retry_schedule (jsonb), max_retry_attempts, final_subscription_action,
-// final_invoice_action, grace_period_days, created_at, updated_at — in
-// that order.
+// seeded, retry_days (jsonb), final_subscription_action,
+// final_invoice_action, created_at, updated_at — in that order.
 func scanPolicy(row interface {
 	Scan(dest ...any) error
 }) (domain.DunningPolicy, error) {
 	var p domain.DunningPolicy
-	var scheduleJSON []byte
-	if err := row.Scan(&p.ID, &p.TenantID, &p.Name, &p.Enabled, &p.IsDefault, &p.Seeded, &scheduleJSON,
-		&p.MaxRetryAttempts, &p.FinalSubscriptionAction, &p.FinalInvoiceAction,
-		&p.GracePeriodDays, &p.CreatedAt, &p.UpdatedAt); err != nil {
+	var daysJSON []byte
+	if err := row.Scan(&p.ID, &p.TenantID, &p.Name, &p.Enabled, &p.IsDefault, &p.Seeded, &daysJSON,
+		&p.FinalSubscriptionAction, &p.FinalInvoiceAction,
+		&p.CreatedAt, &p.UpdatedAt); err != nil {
 		return domain.DunningPolicy{}, err
 	}
-	// A retry_schedule that does not decode is a broken row, not "no
-	// retries": read as empty, a run charges and then fails its bounds check
-	// without advancing, so it charges again every tick.
-	if err := json.Unmarshal(scheduleJSON, &p.RetrySchedule); err != nil {
-		return domain.DunningPolicy{}, fmt.Errorf("decode retry_schedule for dunning policy %s: %w", p.ID, err)
+	// The column's CHECK keeps retry_days a list of 1 to 15 whole days, so
+	// a decode error here is a broken database, not "no retries": fail.
+	if err := json.Unmarshal(daysJSON, &p.RetryDays); err != nil {
+		return domain.DunningPolicy{}, fmt.Errorf("decode retry_days for dunning policy %s: %w", p.ID, err)
 	}
 	return p, nil
 }
 
-const policyColumns = `id, tenant_id, name, enabled, is_default, seeded, retry_schedule, max_retry_attempts, final_subscription_action, final_invoice_action, grace_period_days, created_at, updated_at`
+const policyColumns = `id, tenant_id, name, enabled, is_default, seeded, retry_days, final_subscription_action, final_invoice_action, created_at, updated_at`
 
 // GetPolicyByID looks up a single policy by its id within the tenant.
 func (s *PostgresStore) GetPolicyByID(ctx context.Context, tenantID, id string) (domain.DunningPolicy, error) {
@@ -219,13 +217,6 @@ func (s *PostgresStore) UpsertPolicy(ctx context.Context, tenantID string, p dom
 	return stored, nil
 }
 
-// UpsertPolicyTx upserts the dunning policy inside an existing tx. Used by
-// recipe.Service.Instantiate so a recipe that opts into a custom dunning
-// schedule can land it atomically with the rest of the recipe's objects.
-func (s *PostgresStore) UpsertPolicyTx(ctx context.Context, tx *sql.Tx, tenantID string, p domain.DunningPolicy) (domain.DunningPolicy, error) {
-	return s.upsertPolicyTx(ctx, tx, tenantID, p)
-}
-
 // upsertPolicyTx inserts a new policy when p.ID is empty, updates the
 // existing row when p.ID is set. The migration to the campaigns model
 // (ADR-036) made tenant↔policy a 1:N relation, so the prior ON CONFLICT
@@ -237,8 +228,8 @@ func (s *PostgresStore) UpsertPolicyTx(ctx context.Context, tx *sql.Tx, tenantID
 // demote-all/promote-one path). The ONE exception is the initial default —
 // the FIRST policy inserted per (tenant, livemode) is auto-promoted to
 // is_default=true in-statement (ADR-036 amendment; see the INSERT branch),
-// so a recipe/first-create tenant resolves a working default with no extra
-// call. The partial UNIQUE index is the loud backstop against two defaults.
+// so a tenant's first policy is a working default with no extra call. The
+// partial UNIQUE index is the loud backstop against two defaults.
 func (s *PostgresStore) upsertPolicyTx(ctx context.Context, tx *sql.Tx, tenantID string, p domain.DunningPolicy) (domain.DunningPolicy, error) {
 	// A dunning policy is tenant-level operator config, not a per-customer
 	// billing event — its created_at/updated_at must record the real instant
@@ -246,14 +237,17 @@ func (s *PostgresStore) upsertPolicyTx(ctx context.Context, tx *sql.Tx, tenantID
 	// timestamps elsewhere DO use clock.Now(ctx) — those live on the customer's
 	// simulated timeline; policy config writes escape the simulation boundary.)
 	now := time.Now().UTC() //nolint:forbidigo // wall-clock: operator config write (ADR-030 addendum), never frozen_time
-	scheduleJSON, _ := json.Marshal(p.RetrySchedule)
+	daysJSON, err := json.Marshal(p.RetryDays)
+	if err != nil {
+		return domain.DunningPolicy{}, fmt.Errorf("encode retry_days: %w", err)
+	}
 	if p.ID == "" {
 		// INSERT new policy. The FIRST policy in a (tenant, livemode) scope is
 		// born is_default=true (ADR-036 amendment): NOT EXISTS(... WHERE is_default)
 		// is evaluated against the pre-insert table state, RLS-scoped to the
-		// current (tenant, livemode) — so a tenant that instantiates a recipe (or
-		// creates its first policy manually) gets a WORKING default with no extra
-		// SetDefaultPolicy step, closing the "policies exist but GetDefaultPolicy
+		// current (tenant, livemode) — so a tenant that creates its first
+		// policy gets a WORKING default with no extra SetDefaultPolicy step,
+		// closing the "policies exist but GetDefaultPolicy
 		// → not found" trap. Subsequent policies are is_default=false; the operator
 		// re-points via SetDefaultPolicy (the atomic demote-all/promote-one path).
 		// The partial unique index idx_dunning_policies_one_default_per_tenant is
@@ -266,8 +260,8 @@ func (s *PostgresStore) upsertPolicyTx(ctx context.Context, tx *sql.Tx, tenantID
 		// only holds the default until someone creates a policy of their
 		// own. Demote it first, so the NOT EXISTS below sees no default and
 		// this insert takes the slot, exactly as the first policy did before
-		// accounts had one. Without this, a recipe's policy (or the
-		// operator's first one) would be created non-default and assigned
+		// accounts had one. Without this, the operator's first policy
+		// would be created non-default and assigned
 		// to nobody, so it would never govern a run. A seeded policy that
 		// was edited or chosen as default has seeded = false and keeps the
 		// slot. A concurrent edit of the seeded row holds its row lock;
@@ -290,12 +284,11 @@ func (s *PostgresStore) upsertPolicyTx(ctx context.Context, tx *sql.Tx, tenantID
 		newID := postgres.NewID("vlx_dpol")
 		row := tx.QueryRowContext(ctx, `
 			INSERT INTO dunning_policies (id, tenant_id, name, enabled, is_default,
-				retry_schedule, max_retry_attempts, final_subscription_action,
-				final_invoice_action, grace_period_days, created_at, updated_at)
-			VALUES ($1,$2,$3,$4,NOT EXISTS(SELECT 1 FROM dunning_policies WHERE is_default),$5,$6,$7,$8,$9,$10,$10)
+				retry_days, final_subscription_action, final_invoice_action, created_at, updated_at)
+			VALUES ($1,$2,$3,$4,NOT EXISTS(SELECT 1 FROM dunning_policies WHERE is_default),$5,$6,$7,$8,$8)
 			RETURNING `+policyColumns,
-			newID, tenantID, p.Name, p.Enabled, scheduleJSON, p.MaxRetryAttempts,
-			p.FinalSubscriptionAction, p.FinalInvoiceAction, p.GracePeriodDays, now,
+			newID, tenantID, p.Name, p.Enabled, daysJSON,
+			p.FinalSubscriptionAction, p.FinalInvoiceAction, now,
 		)
 		return scanPolicy(row)
 	}
@@ -304,14 +297,13 @@ func (s *PostgresStore) upsertPolicyTx(ctx context.Context, tx *sql.Tx, tenantID
 	// operator's own, and a later create must not take its default (ADR-123).
 	row := tx.QueryRowContext(ctx, `
 		UPDATE dunning_policies
-		SET name = $2, enabled = $3, retry_schedule = $4, seeded = false,
-			max_retry_attempts = $5, final_subscription_action = $6,
-			final_invoice_action = $7, grace_period_days = $8,
-			updated_at = $9
+		SET name = $2, enabled = $3, retry_days = $4, seeded = false,
+			final_subscription_action = $5, final_invoice_action = $6,
+			updated_at = $7
 		WHERE id = $1
 		RETURNING `+policyColumns,
-		p.ID, p.Name, p.Enabled, scheduleJSON, p.MaxRetryAttempts,
-		p.FinalSubscriptionAction, p.FinalInvoiceAction, p.GracePeriodDays, now,
+		p.ID, p.Name, p.Enabled, daysJSON,
+		p.FinalSubscriptionAction, p.FinalInvoiceAction, now,
 	)
 	stored, err := scanPolicy(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -340,9 +332,9 @@ func (s *PostgresStore) SeedDefaultPoliciesTx(ctx context.Context, tx *sql.Tx, t
 		return fmt.Errorf("read livemode: %w", err)
 	}
 	now := time.Now().UTC() //nolint:forbidigo // wall-clock: operator config write (ADR-030 addendum), never frozen_time
-	scheduleJSON, err := json.Marshal(p.RetrySchedule)
+	daysJSON, err := json.Marshal(p.RetryDays)
 	if err != nil {
-		return fmt.Errorf("encode retry_schedule: %w", err)
+		return fmt.Errorf("encode retry_days: %w", err)
 	}
 	for _, livemode := range []bool{false, true} {
 		mode := "off"
@@ -354,12 +346,11 @@ func (s *PostgresStore) SeedDefaultPoliciesTx(ctx context.Context, tx *sql.Tx, t
 		}
 		stored, err := scanPolicy(tx.QueryRowContext(ctx, `
 			INSERT INTO dunning_policies (id, tenant_id, name, enabled, is_default, seeded,
-				retry_schedule, max_retry_attempts, final_subscription_action,
-				final_invoice_action, grace_period_days, created_at, updated_at)
-			VALUES ($1,$2,$3,$4,true,true,$5,$6,$7,$8,$9,$10,$10)
+				retry_days, final_subscription_action, final_invoice_action, created_at, updated_at)
+			VALUES ($1,$2,$3,$4,true,true,$5,$6,$7,$8,$8)
 			RETURNING `+policyColumns,
-			postgres.NewID("vlx_dpol"), tenantID, p.Name, p.Enabled, scheduleJSON, p.MaxRetryAttempts,
-			p.FinalSubscriptionAction, p.FinalInvoiceAction, p.GracePeriodDays, now,
+			postgres.NewID("vlx_dpol"), tenantID, p.Name, p.Enabled, daysJSON,
+			p.FinalSubscriptionAction, p.FinalInvoiceAction, now,
 		))
 		if err != nil {
 			return fmt.Errorf("seed %s-mode dunning policy: %w", mode, err)
@@ -425,11 +416,7 @@ func (s *PostgresStore) StartRun(ctx context.Context, tenantID string, run domai
 		return domain.InvoiceDunningRun{}, fmt.Errorf("started event: %w", err)
 	}
 	if s.outbox != nil {
-		if _, err := s.outbox.Enqueue(ctx, tx, tenantID, domain.EventDunningStarted, map[string]any{
-			"run_id":      run.ID,
-			"invoice_id":  run.InvoiceID,
-			"customer_id": run.CustomerID,
-		}); err != nil {
+		if _, err := s.outbox.Enqueue(ctx, tx, tenantID, domain.EventDunningStarted, domain.DunningRunWebhookData(run, nil)); err != nil {
 			return domain.InvoiceDunningRun{}, fmt.Errorf("enqueue %s: %w", domain.EventDunningStarted, err)
 		}
 	}
@@ -534,13 +521,19 @@ func (s *PostgresStore) ListRunsByInvoices(ctx context.Context, tenantID string,
 	}
 	defer postgres.Rollback(tx)
 
+	// The bound policy's retry count (the length of its retry_days) rides
+	// along (LEFT JOIN: a run is never dropped for its policy), so a reader
+	// can tell a run with a retry still to come from one whose next step is
+	// only its final action (InvoiceDunningRun.RetryScheduled).
 	rows, err := tx.QueryContext(ctx, `
-		SELECT id, tenant_id, invoice_id, COALESCE(customer_id,''), policy_id, state,
-			COALESCE(reason,''), attempt_count, last_attempt_at, next_action_at,
-			paused, resolved_at, COALESCE(resolution,''), created_at, updated_at
-		FROM invoice_dunning_runs
-		WHERE invoice_id = ANY($1::text[])
-	`, postgres.StringArray(invoiceIDs))
+		SELECT r.id, r.tenant_id, r.invoice_id, COALESCE(r.customer_id,''), r.policy_id, r.state,
+			COALESCE(r.reason,''), r.attempt_count, r.last_attempt_at, r.next_action_at,
+			r.paused, r.resolved_at, COALESCE(r.resolution,''), r.created_at, r.updated_at,
+			COALESCE(jsonb_array_length(p.retry_days), 0)
+		FROM invoice_dunning_runs r
+		LEFT JOIN dunning_policies p ON p.id = r.policy_id
+		WHERE r.invoice_id = ANY($1::text[])
+	`, invoiceIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -551,7 +544,8 @@ func (s *PostgresStore) ListRunsByInvoices(ctx context.Context, tenantID string,
 		var run domain.InvoiceDunningRun
 		if err := rows.Scan(&run.ID, &run.TenantID, &run.InvoiceID, &run.CustomerID, &run.PolicyID,
 			&run.State, &run.Reason, &run.AttemptCount, &run.LastAttemptAt, &run.NextActionAt,
-			&run.Paused, &run.ResolvedAt, &run.Resolution, &run.CreatedAt, &run.UpdatedAt); err != nil {
+			&run.Paused, &run.ResolvedAt, &run.Resolution, &run.CreatedAt, &run.UpdatedAt,
+			&run.MaxRetryAttempts); err != nil {
 			return nil, err
 		}
 		out = append(out, run)
@@ -635,16 +629,20 @@ func (s *PostgresStore) ListRuns(ctx context.Context, filter RunListFilter) ([]d
 	// the /dunning page (was: 1 list + N invoice fetches + N sub
 	// fetches + N clock fetches; now: 1 query). LEFT JOINs because
 	// invoice / sub / clock references can be NULL or unresolvable
-	// (RLS gap, deleted) without dropping the dunning row itself.
+	// (RLS gap, deleted) without dropping the dunning row itself. The bound
+	// policy's retry count rides along too, so the page can tell a
+	// run with a retry still to come from one whose next step is only its
+	// final action (InvoiceDunningRun.RetryScheduled).
 	query := `SELECT r.id, r.tenant_id, r.invoice_id, COALESCE(r.customer_id,''), r.policy_id, r.state,
 		COALESCE(r.reason,''), r.attempt_count, r.last_attempt_at, r.next_action_at,
 		r.paused, r.resolved_at, COALESCE(r.resolution,''), r.created_at, r.updated_at,
 		COALESCE(i.invoice_number, ''), COALESCE(i.amount_due_cents, 0), COALESCE(i.currency, ''),
-		tc.frozen_time, COALESCE(tc.id, '')
+		tc.frozen_time, COALESCE(tc.id, ''), COALESCE(jsonb_array_length(p.retry_days), 0)
 		FROM invoice_dunning_runs r
 		LEFT JOIN invoices i ON i.id = r.invoice_id
 		LEFT JOIN customers cu ON cu.id = i.customer_id
-		LEFT JOIN test_clocks tc ON tc.id = cu.test_clock_id` + whereClause + ` ORDER BY r.created_at DESC`
+		LEFT JOIN test_clocks tc ON tc.id = cu.test_clock_id
+		LEFT JOIN dunning_policies p ON p.id = r.policy_id` + whereClause + ` ORDER BY r.created_at DESC`
 	// Default 50, clamp to 100 — no-silent-fallbacks principle.
 	limit := filter.Limit
 	if limit <= 0 {
@@ -667,7 +665,8 @@ func (s *PostgresStore) ListRuns(ctx context.Context, filter RunListFilter) ([]d
 		if err := rows.Scan(&r.ID, &r.TenantID, &r.InvoiceID, &r.CustomerID, &r.PolicyID,
 			&r.State, &r.Reason, &r.AttemptCount, &r.LastAttemptAt, &r.NextActionAt,
 			&r.Paused, &r.ResolvedAt, &r.Resolution, &r.CreatedAt, &r.UpdatedAt,
-			&r.InvoiceNumber, &r.InvoiceAmountDue, &r.InvoiceCurrency, &r.EffectiveNow, &r.TestClockID); err != nil {
+			&r.InvoiceNumber, &r.InvoiceAmountDue, &r.InvoiceCurrency, &r.EffectiveNow, &r.TestClockID,
+			&r.MaxRetryAttempts); err != nil {
 			return nil, 0, err
 		}
 		runs = append(runs, r)
@@ -730,7 +729,7 @@ func (s *PostgresStore) ResolveRun(ctx context.Context, tenantID string, run dom
 // ListDueRuns' claim tx is rolled back before processing, so rows are not
 // leased) — both read N, both wrote N+1, and the charge-lease loser's rewind
 // then clobbered the winner's recorded attempt back to N: one charge burned
-// zero budget, and a tenant's MaxRetryAttempts over-ran by one charge per
+// zero budget, and a tenant's retry count over-ran by one charge per
 // overlap. The money itself was never double-charged (ClaimChargeForDunningRetry
 // is the per-invoice charge lease); the CAS makes the BOOKKEEPING honest, and
 // email-money-in-tx builds on it.
@@ -1109,8 +1108,22 @@ func (s *PostgresStore) ListEvents(ctx context.Context, tenantID, runID string) 
 
 // GetStats computes the dashboard-card payload in one round trip:
 // COUNT(*) GROUP BY state for the three states we surface (active,
-// escalated, resolved) + SUM(amount_due_cents) on the invoices behind
-// active+escalated runs (the at-risk total).
+// escalated, resolved), the resolved runs a payment closed (recovered),
+// and SUM(amount_due_cents) on the OPEN invoices behind active+escalated
+// runs (the at-risk total).
+//
+// Both filters exist because a run outlives its invoice's collection. A void
+// keeps its amount_due, and a write-off final action leaves the run escalated,
+// so without i.status = 'finalized' a voided or written-off invoice stayed
+// "at risk"; and a run resolved by a void or a write-off is resolved, not
+// recovered (sweep A6/E7, 2026-10-21).
+//
+// Recovered also needs money paid on the invoice (amount_paid_cents > 0). A
+// credit note or customer credit that leaves nothing due marks the invoice
+// paid with amount_paid 0 and closes its run as payment_recovered too
+// (ADR-061, 2026-10-19), from the note, the dunning retry or the paid check;
+// the resolution alone cannot tell a settle with no payment from a payment
+// (review of #1328). Credit is not a payment, even credit the customer bought.
 //
 // Single tenant-scoped query (RLS handles tenant_id), no pagination,
 // no client-side derivation. Cards stay accurate regardless of how
@@ -1140,10 +1153,12 @@ func (s *PostgresStore) GetStats(ctx context.Context, tenantID string) (Stats, e
 		    COUNT(*) FILTER (WHERE r.state = 'active')                                AS active_count,
 		    COUNT(*) FILTER (WHERE r.state = 'escalated')                             AS escalated_count,
 		    COUNT(*) FILTER (WHERE r.state = 'resolved')                              AS resolved_count,
-		    COALESCE(SUM(i.amount_due_cents) FILTER (WHERE r.state IN ('active','escalated') AND i.currency = $1), 0) AS at_risk_cents
+		    COUNT(*) FILTER (WHERE r.state = 'resolved' AND r.resolution = $2 AND i.amount_paid_cents > 0) AS recovered_count,
+		    COALESCE(SUM(i.amount_due_cents) FILTER (WHERE r.state IN ('active','escalated') AND i.status = $3 AND i.currency = $1), 0) AS at_risk_cents
 		FROM invoice_dunning_runs r
 		LEFT JOIN invoices i ON i.id = r.invoice_id
-	`, defaultCurrency).Scan(&stats.ActiveCount, &stats.EscalatedCount, &stats.ResolvedCount, &stats.AtRiskCents)
+	`, defaultCurrency, string(domain.ResolutionPaymentRecovered), string(domain.InvoiceFinalized)).Scan(
+		&stats.ActiveCount, &stats.EscalatedCount, &stats.ResolvedCount, &stats.RecoveredCount, &stats.AtRiskCents)
 	if err != nil {
 		return Stats{}, err
 	}
@@ -1152,11 +1167,11 @@ func (s *PostgresStore) GetStats(ctx context.Context, tenantID string) (Stats, e
 		SELECT i.currency, SUM(i.amount_due_cents)
 		FROM invoice_dunning_runs r
 		JOIN invoices i ON i.id = r.invoice_id
-		WHERE r.state IN ('active','escalated')
+		WHERE r.state IN ('active','escalated') AND i.status = $2
 		GROUP BY i.currency
 		HAVING SUM(i.amount_due_cents) > 0
 		ORDER BY (i.currency = $1) DESC, SUM(i.amount_due_cents) DESC, i.currency
-	`, defaultCurrency)
+	`, defaultCurrency, string(domain.InvoiceFinalized))
 	if err != nil {
 		return Stats{}, err
 	}

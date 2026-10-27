@@ -9,6 +9,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // TestThresholdScan_CreditApplyFailure_FlagsAndSkipsCharge locks the C1 fix:
@@ -30,7 +31,7 @@ func TestThresholdScan_CreditApplyFailure_FlagsAndSkipsCharge(t *testing.T) {
 		CurrentBillingPeriodStart: &periodStart,
 		CurrentBillingPeriodEnd:   &periodEnd,
 		NextBillingAt:             &nextBilling,
-		BillingThresholds:         &domain.BillingThresholds{AmountGTE: 100000, ResetBillingCycle: true},
+		BillingThresholds:         &domain.BillingThresholds{AmountGTE: 100000},
 	}
 	base := &mockSubs{subs: map[string]domain.Subscription{"sub_1": sub}, cycleUpdated: make(map[string]bool)}
 	subs := &thresholdMockSubs{mockSubs: base, candidates: []domain.Subscription{sub}}
@@ -39,13 +40,11 @@ func TestThresholdScan_CreditApplyFailure_FlagsAndSkipsCharge(t *testing.T) {
 		plans: map[string]domain.Plan{"pln_1": {
 			ID: "pln_1", Name: "Pro Plan", Currency: "USD",
 			BillingInterval: domain.BillingMonthly, BaseAmountCents: 4900,
-			MeterIDs: []string{"mtr_api"},
 		}},
-		meters: map[string]domain.Meter{"mtr_api": {ID: "mtr_api", Name: "API Calls", Unit: "calls", RatingRuleVersionID: "rrv_api"}},
-		rules: map[string]domain.RatingRuleVersion{"rrv_api": {
-			ID: "rrv_api", RuleKey: "api_calls", Version: 1, Mode: domain.PricingFlat,
-			FlatAmountCents: decimal.NewFromInt(100),
-		}},
+		meters: map[string]domain.Meter{"mtr_api": {ID: "mtr_api", Name: "API Calls", Unit: "calls"}},
+		prices: map[string][]domain.PlanPrice{
+			"pln_1": {priceOf("prc_api", "mtr_api", domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(100)})},
+		},
 	}
 	invoices := &mockInvoices{}
 	applier := &fakeCreditApplier{inv: invoices, err: errors.New("db blip during credit apply")}
@@ -54,7 +53,7 @@ func TestThresholdScan_CreditApplyFailure_FlagsAndSkipsCharge(t *testing.T) {
 
 	engine := wireBaseTax(NewEngine(subs, usage, pricing, invoices, applier, &mockSettings{}, pms, charger, billingTestClock()))
 
-	fired, errs := engine.ScanThresholds(context.Background(), 50)
+	fired, errs := engine.ScanThresholds(postgres.WithLivemode(context.Background(), true), 50)
 	if len(errs) != 0 {
 		t.Fatalf("scan errors: %v", errs)
 	}
@@ -97,7 +96,7 @@ func TestThresholdScan_CreditsApplied_ChargesRemainder(t *testing.T) {
 		CurrentBillingPeriodStart: &periodStart,
 		CurrentBillingPeriodEnd:   &periodEnd,
 		NextBillingAt:             &nextBilling,
-		BillingThresholds:         &domain.BillingThresholds{AmountGTE: 100000, ResetBillingCycle: true},
+		BillingThresholds:         &domain.BillingThresholds{AmountGTE: 100000},
 	}
 	base := &mockSubs{subs: map[string]domain.Subscription{"sub_1": sub}, cycleUpdated: make(map[string]bool)}
 	subs := &thresholdMockSubs{mockSubs: base, candidates: []domain.Subscription{sub}}
@@ -106,13 +105,11 @@ func TestThresholdScan_CreditsApplied_ChargesRemainder(t *testing.T) {
 		plans: map[string]domain.Plan{"pln_1": {
 			ID: "pln_1", Name: "Pro Plan", Currency: "USD",
 			BillingInterval: domain.BillingMonthly, BaseAmountCents: 4900,
-			MeterIDs: []string{"mtr_api"},
 		}},
-		meters: map[string]domain.Meter{"mtr_api": {ID: "mtr_api", Name: "API Calls", Unit: "calls", RatingRuleVersionID: "rrv_api"}},
-		rules: map[string]domain.RatingRuleVersion{"rrv_api": {
-			ID: "rrv_api", RuleKey: "api_calls", Version: 1, Mode: domain.PricingFlat,
-			FlatAmountCents: decimal.NewFromInt(100),
-		}},
+		meters: map[string]domain.Meter{"mtr_api": {ID: "mtr_api", Name: "API Calls", Unit: "calls"}},
+		prices: map[string][]domain.PlanPrice{
+			"pln_1": {priceOf("prc_api", "mtr_api", domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(100)})},
+		},
 	}
 	invoices := &mockInvoices{}
 	applier := &fakeCreditApplier{inv: invoices, applyCents: 4900}
@@ -121,7 +118,7 @@ func TestThresholdScan_CreditsApplied_ChargesRemainder(t *testing.T) {
 
 	engine := wireBaseTax(NewEngine(subs, usage, pricing, invoices, applier, &mockSettings{}, pms, charger, billingTestClock()))
 
-	fired, errs := engine.ScanThresholds(context.Background(), 50)
+	fired, errs := engine.ScanThresholds(postgres.WithLivemode(context.Background(), true), 50)
 	if len(errs) != 0 || fired != 1 {
 		t.Fatalf("fired/errs: %d/%v", fired, errs)
 	}

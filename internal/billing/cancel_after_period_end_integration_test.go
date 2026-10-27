@@ -21,6 +21,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/subscription"
 	"github.com/sagarsuperuser/velox/internal/testclock"
+	"github.com/sagarsuperuser/velox/internal/testutil"
 	"github.com/sagarsuperuser/velox/internal/usage"
 )
 
@@ -72,7 +73,6 @@ func newCancelRig(t *testing.T, name string) *cancelRig {
 	// The cancel's collaborators, as internal/api/router.go wires them.
 	creditNoteSvc := creditnote.NewService(creditnote.NewPostgresStore(f.db), f.invStore, nil, &cnGrantAdapter{r.credit})
 	creditNoteSvc.SetNumberGenerator(f.settings)
-	f.engine.SetCreditGranter(r.credit)
 	f.engine.SetInvoiceVoider(invoice.NewService(f.invStore, clock.Real(), f.settings))
 	f.engine.SetCreditNoteAdjuster(creditNoteSvc)
 	f.engine.SetCreditHeadroomReader(creditNoteSvc)
@@ -362,8 +362,8 @@ type payingBiller struct {
 	next subscription.DueBiller
 }
 
-func (b payingBiller) BillDueNow(ctx context.Context, tenantID, id string) (int, error) {
-	n, err := b.next.BillDueNow(ctx, tenantID, id)
+func (b payingBiller) BillDue(ctx context.Context, tenantID, id string, grace time.Duration) (int, error) {
+	n, err := b.next.BillDue(ctx, tenantID, id, grace)
 	for _, inv := range b.r.f.listInvoices(b.t, b.r.base) {
 		if inv.PaymentStatus != domain.PaymentSucceeded && inv.Status != domain.InvoiceVoided {
 			if _, perr := b.r.f.invStore.MarkPaid(b.r.base, tenantID, inv.ID, "pi_"+inv.ID, b.at); perr != nil {
@@ -427,7 +427,7 @@ func TestImmediateCancel_InAdvance_AfterPeriodEnd_KeepsEndedPeriodUsage(t *testi
 			if usage != 1000 || base != cancelFixtureBaseCents || renewal.TotalAmountCents != 1000+cancelFixtureBaseCents {
 				t.Fatalf("renewal invoice: usage=%dc base=%dc total=%dc, want 1000 + %d", usage, base, renewal.TotalAmountCents, cancelFixtureBaseCents)
 			}
-			bal, err := r.credit.GetBalance(r.base, r.f.tenantID, r.f.customerID)
+			bal, err := testutil.BalanceUSD(r.credit.GetBalance(r.base, r.f.tenantID, r.f.customerID))
 			if err != nil {
 				t.Fatalf("credit balance: %v", err)
 			}

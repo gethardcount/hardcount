@@ -28,9 +28,6 @@ func (f *latestCardFetcher) FetchCardForPaymentIntent(context.Context, string) (
 // pmCardStripe is the payment-methods side's Stripe: only card metadata is used.
 type pmCardStripe struct{ last4, fingerprint string }
 
-func (s *pmCardStripe) CreateSetupIntent(context.Context, string, map[string]string) (string, string, error) {
-	return "", "", nil
-}
 func (s *pmCardStripe) CreateSetupCheckoutSession(context.Context, string, string, string, map[string]string) (string, string, error) {
 	return "", "", nil
 }

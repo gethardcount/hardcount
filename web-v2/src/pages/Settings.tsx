@@ -39,7 +39,6 @@ import {
   COUNTRIES,
   COUNTRY_NAME,
   CURRENCIES as GEO_CURRENCIES,
-  CURRENCY_BY_CODE,
   TIMEZONES,
   timezoneOption,
   normalizeTimezone,
@@ -56,7 +55,7 @@ import { EmailSettingsPanel } from '@/components/settings/EmailSettingsPanel'
 import { Callout } from '@/components/Callout'
 import { stripeVerifyNotice, STRIPE_VERIFY_TOAST_BODY } from '@/lib/stripeVerify'
 import { CONTENT_BAND } from '@/lib/contentBand'
-import { COMPANY_EMAIL_HINT, sharedSettingsNotice, invoiceNumberPreview } from '@/lib/settingsCopy'
+import { COMPANY_EMAIL_HINT, CREDIT_LOW_THRESHOLD_HINT, sharedSettingsNotice, invoiceNumberPreview } from '@/lib/settingsCopy'
 
 const settingsSchema = z.object({
   company_name: z.string().max(255, 'Must be at most 255 characters'),
@@ -73,9 +72,15 @@ const settingsSchema = z.object({
   tax_id: z.string().max(50, 'Must be at most 50 characters'),
   support_url: z.string().regex(/^https?:\/\/.+/i, 'Must start with http:// or https://').or(z.literal('')),
   invoice_footer: z.string().max(1000, 'Must be at most 1000 characters'),
+  // Either case passes, as on the server, which stores prefixes in capitals.
+  // A prefix stored in lowercase before that (set through the API) used to
+  // fail this check on load, so every save failed on a field that looked right.
   invoice_prefix: z.string()
     .max(20, 'Must be at most 20 characters')
-    .regex(/^[A-Z0-9-]*$/, 'Letters, numbers, and hyphens only'),
+    .regex(/^[A-Za-z0-9-]*$/, 'Letters, numbers, and hyphens only'),
+  credit_note_prefix: z.string()
+    .max(20, 'Must be at most 20 characters')
+    .regex(/^[A-Za-z0-9-]*$/, 'Letters, numbers, and hyphens only'),
   net_payment_terms: z.number({ error: 'Enter a number of days from 0 to 365' })
     .min(0, 'Enter a number of days from 0 to 365')
     .max(365, 'Enter a number of days from 0 to 365'),
@@ -175,7 +180,7 @@ export default function SettingsPage() {
       company_address_line1: '', company_address_line2: '',
       company_city: '', company_state: '', company_postal_code: '', company_country: '',
       logo_url: '', brand_color: '', tax_id: '', support_url: '', invoice_footer: '',
-      invoice_prefix: '', net_payment_terms: 0,
+      invoice_prefix: '', credit_note_prefix: '', net_payment_terms: 0,
       tax_provider: 'manual', tax_rate: 0, tax_name: '', tax_inclusive: false,
       default_product_tax_code: '',
       default_currency: '', timezone: '',
@@ -210,7 +215,8 @@ export default function SettingsPage() {
         logo_url: s.logo_url || '',
         brand_color: (s.brand_color || '').toLowerCase(),
         tax_id: s.tax_id || '', support_url: s.support_url || '', invoice_footer: s.invoice_footer || '',
-        invoice_prefix: s.invoice_prefix || '', net_payment_terms: s.net_payment_terms || 0,
+        invoice_prefix: s.invoice_prefix || '', credit_note_prefix: s.credit_note_prefix || '',
+        net_payment_terms: s.net_payment_terms || 0,
         tax_provider: (s.tax_provider as 'none' | 'manual' | 'stripe_tax') || 'manual',
         tax_rate: s.tax_rate || 0, tax_name: s.tax_name || '', tax_inclusive: s.tax_inclusive || false,
         default_product_tax_code: s.default_product_tax_code || '',
@@ -275,7 +281,8 @@ export default function SettingsPage() {
         logo_url: updated.logo_url || '',
         brand_color: (updated.brand_color || '').toLowerCase(),
         tax_id: updated.tax_id || '', support_url: updated.support_url || '', invoice_footer: updated.invoice_footer || '',
-        invoice_prefix: updated.invoice_prefix || '', net_payment_terms: updated.net_payment_terms || 0,
+        invoice_prefix: updated.invoice_prefix || '', credit_note_prefix: updated.credit_note_prefix || '',
+        net_payment_terms: updated.net_payment_terms || 0,
         tax_provider: (updated.tax_provider as 'none' | 'manual' | 'stripe_tax') || 'manual',
         tax_rate: updated.tax_rate || 0, tax_name: updated.tax_name || '', tax_inclusive: updated.tax_inclusive || false,
         default_product_tax_code: updated.default_product_tax_code || '',
@@ -302,7 +309,7 @@ export default function SettingsPage() {
         'company_state', 'company_postal_code', 'company_country',
         'logo_url', 'brand_color',
         'tax_id', 'support_url', 'invoice_footer',
-        'invoice_prefix', 'net_payment_terms', 'tax_provider', 'tax_rate', 'tax_name', 'tax_inclusive',
+        'invoice_prefix', 'credit_note_prefix', 'net_payment_terms', 'tax_provider', 'tax_rate', 'tax_name', 'tax_inclusive',
         'default_product_tax_code', 'default_currency', 'timezone',
       ], { toastTitle: 'Failed to save settings' })
       // applyApiError marks a field the server named; if that field is on
@@ -328,8 +335,6 @@ export default function SettingsPage() {
     </Layout>
   )
 
-  const currencyObj = CURRENCY_BY_CODE[form.default_currency]
-  const symbol = currencyObj?.symbol || '$'
   const statesList = statesForCountry(form.company_country)
   const stateLabel = stateLabelForCountry(form.company_country)
   const postalPlaceholder = postalPlaceholderForCountry(form.company_country)
@@ -599,8 +604,25 @@ export default function SettingsPage() {
                     {formErrors.invoice_prefix
                       ? <p className="text-xs text-destructive mt-1">{formErrors.invoice_prefix.message}</p>
                       : form.invoice_prefix && nextInvoiceSeq != null
-                        ? <p className="text-xs text-muted-foreground mt-1">{invoiceNumberPreview(form.invoice_prefix, nextInvoiceSeq, livemode)}</p>
+                        ? <p className="text-xs text-muted-foreground mt-1">{invoiceNumberPreview(form.invoice_prefix.toUpperCase(), nextInvoiceSeq, livemode)}</p>
                         : <p className="text-xs text-muted-foreground mt-1">Letters, numbers, and hyphens only</p>}
+                  </div>
+                  <div>
+                    <Label htmlFor="settings-credit-note-prefix">Credit note prefix</Label>
+                    <Input id="settings-credit-note-prefix" type="text" maxLength={20}
+                      {...register('credit_note_prefix', {
+                        onChange: (e) => { e.target.value = e.target.value.toUpperCase() },
+                      })}
+                      className={cn('mt-1 font-mono uppercase', formErrors.credit_note_prefix && 'border-destructive')}
+                      placeholder="CN" />
+                    {formErrors.credit_note_prefix
+                      ? <p className="text-xs text-destructive mt-1">{formErrors.credit_note_prefix.message}</p>
+                      : <p className="text-xs text-muted-foreground mt-1">
+                          {form.credit_note_prefix
+                            ? <>New credit note numbers start <span className="font-mono">{form.credit_note_prefix.toUpperCase()}-</span>. </>
+                            : 'Letters, numbers, and hyphens only. '}
+                          Issued ones keep their numbers.
+                        </p>}
                   </div>
                   <div>
                     <Label>Payment terms</Label>
@@ -636,19 +658,17 @@ export default function SettingsPage() {
                   </div>
                   <div>
                     <Label htmlFor="settings-credit-balance-low-threshold">Credit low-balance alert</Label>
-                    <div className="relative mt-1 max-w-[200px]">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none">{symbol}</span>
+                    {/* No currency symbol: the amount applies in each
+                        currency's own units (settingsCopy). */}
+                    <div className="mt-1 max-w-[200px]">
                       <Input id="settings-credit-balance-low-threshold" inputMode="decimal"
                         {...register('credit_balance_low_threshold')}
                         className={cn(formErrors.credit_balance_low_threshold && 'border-destructive')}
-                        // The prefix runs from "$" to "CA$": pad by its length
-                        // so the value and placeholder start after it.
-                        style={{ paddingLeft: `calc(0.75rem + ${symbol.length}ch + 0.25rem)` }}
                         placeholder="Off" />
                     </div>
                     {formErrors.credit_balance_low_threshold
                       ? <p className="text-xs text-destructive mt-1">{formErrors.credit_balance_low_threshold.message}</p>
-                      : <p className="text-xs text-muted-foreground mt-1.5">Velox tells your app (by webhook) when a customer's credit balance drops below this amount. Leave blank to turn off. A balance that runs out always sends its own message.</p>}
+                      : <p className="text-xs text-muted-foreground mt-1.5">{CREDIT_LOW_THRESHOLD_HINT}</p>}
                   </div>
                   <div className="md:col-span-2">
                     <Label htmlFor="settings-invoice-footer">Invoice footer</Label>

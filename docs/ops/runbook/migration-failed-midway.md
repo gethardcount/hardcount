@@ -56,7 +56,205 @@ If the error is about rows the migration did not expect, the migration
 itself may need a fix: report it with the error text.
 
 If it says `waited 5s for a table lock`, see
-[An upgrade waited for a table lock](migration-lock-timeout.md).
+[It waited 5s for a table lock](#it-waited-5s-for-a-table-lock).
+
+## 00201 found rows no Velox version wrote
+
+**Symptom:**
+
+```
+migration 00201_remove_dead_contract.sql failed: ERROR: migration 00201 removes values that no Velox code writes, and this database has rows that hold them:
+  1 subscription(s) with status archived ...
+```
+
+**Why:** migration 201 removes values that no Velox version ever wrote,
+such as subscription status `archived` and the `billed_entries` table. A
+row that holds one was written outside Velox, for example by hand in
+`psql`. Nothing was changed.
+
+**Fix:** find the rows the error lists. Set each to a value that is true
+for it, or delete it if nothing needs it. Then run `velox migrate` again.
+
+## 00206: a dunning schedule is not whole days
+
+**Symptom:**
+
+```
+migration 00206_dunning_retry_days.sql failed: ERROR: migration 00206 writes each dunning schedule as whole days, and these policies cannot be converted exactly:
+  dunning policy vlx_dpol_...: retry_schedule entry 1 (36h) is not a whole number of days from 1 to 30
+```
+
+**Why:** migration 206 rewrites each dunning policy's schedule as
+`retry_days`, a list of whole days from 1 to 30. A wait one of the
+policy's retries uses, such as `"36h"`, or a wait over 30 days, has no
+exact value in days. The error also lists values Velox's own policy form
+never saved, such as a retry count over 15. Rounding would retry on a day
+nobody chose, so the migration changed nothing. A one-retry policy saved
+without a schedule (stored as `null`) is not an error: it converts to its
+grace period.
+
+**Fix:** choose the days yourself. For each policy the error lists,
+change only the value it names. Do not delete the policy: one that has
+had a dunning run cannot be deleted, and without the account's default
+policy, customers with no policy of their own are not dunned at all.
+
+For a wait, entry 1 of `retry_schedule` is index 0. In `psql` as the
+database owner, this sets entry 1 to `72h` (3 days) and keeps the others:
+
+```sql
+BEGIN;
+SET LOCAL app.bypass_rls = 'on';
+UPDATE dunning_policies SET retry_schedule = jsonb_set(retry_schedule, '{0}', '"72h"') WHERE id = '<policy id>';
+COMMIT;
+```
+
+For a count or first wait, set `max_retry_attempts` (1 to 15) or
+`grace_period_days` (1 to 30) the same way.
+
+Then run `velox migrate` again.
+
+## 00208 found rows it cannot keep as they bill
+
+**Symptom:** one or both of these lines:
+
+```
+migration 00208_meter_one_aggregation.sql failed: ERROR: migration 00208 gives each meter one aggregation for all its pricing rules, and this database has rows it cannot keep as they bill:
+  2 pricing rule(s) whose aggregation_mode is not their meter's aggregation
+  1 meter(s) whose aggregation is not sum, count, max or last
+```
+
+**Why:** from this release a meter has one aggregation, and every pricing
+rule of the meter bills under it. The migration stops for two kinds of rows:
+
+- A pricing rule whose own mode differed from its meter's aggregation, or
+  was `last_ever`. It would bill differently.
+- A meter whose aggregation is not `sum`, `count`, `max` or `last`, such as
+  an empty value written by raw SQL. This release adds a check that refuses
+  any other value.
+
+It does not convert them, and nothing was changed. This release has no
+upgrade path from Velox 0.8.x, so a production database never reaches this
+step: install fresh (see the v0.9.0 release notes).
+
+**Fix:** on a development database, find the rows (as the database owner,
+with `SET LOCAL app.bypass_rls = 'on'` in a transaction):
+
+```sql
+SELECT r.id, r.meter_id, r.aggregation_mode, m.aggregation
+FROM meter_pricing_rules r JOIN meters m ON m.id = r.meter_id
+WHERE r.aggregation_mode IS DISTINCT FROM CASE m.aggregation WHEN 'last' THEN 'last_during_period' ELSE m.aggregation END;
+
+SELECT id, key, aggregation FROM meters WHERE aggregation NOT IN ('sum', 'count', 'max', 'last');
+```
+
+Delete each rule, or put it on a meter with the aggregation it needs. Set
+each meter's aggregation to the one it should bill by. Then run
+`velox migrate` again. Or re-create the database.
+
+## 00210 found prices it does not convert
+
+**Symptom:** a line like this, with one count for each kind of row found:
+
+```
+migration 00210_price_shapes.sql failed: ERROR: migration 00210 renames the price shapes and moves provider costs to cents, and this database has rows it does not convert:
+  3 rating rule version(s)
+  1 customer price override(s)
+  5 provider cost rate(s)
+  12 invoice line(s) priced flat
+```
+
+**Why:** from this release a price's shape has new names (`flat` is
+`per_unit`, an open last tier is `"up_to": null`), a package rounds a part
+package up to a whole one, and a provider cost rate is in cents, not
+dollars. Every row of these tables would need converting, and so would
+every invoice line labelled `flat`. The migration converts nothing, and
+nothing was changed. This release has no upgrade path from Velox 0.8.x, so a
+production database never reaches this step: install fresh (see the v0.9.0
+release notes).
+
+**Fix:** a development database cannot keep these rows. Re-create it (drop
+and create the database, then run `velox-bootstrap`), or point Velox at a
+new one. Never run `docker compose down -v` on a volume another checkout
+uses.
+
+## 00212 found prices it does not move
+
+**Symptom:** a line like this, with one count for each kind of row found:
+
+```
+migration 00212_plan_prices.sql failed: ERROR: migration 00212 moves usage prices from meters to plans, and this database has prices it does not move:
+  3 rating rule version(s)
+  2 meter pricing rule(s)
+  1 customer price override(s)
+  2 plan(s) with meters
+  12 invoice line(s) priced by a rating rule
+```
+
+**Why:** from this release a usage price belongs to a plan (ADR-130). Rating
+rules, meter pricing rules and a meter's default price are gone, a price
+override names a plan price, and a plan's meters are the meters it has a
+price for. The migration moves no price, and nothing was changed. This
+release has no upgrade path from Velox 0.8.x, so a production database never
+reaches this step: install fresh (see the v0.9.0 release notes).
+
+**Fix:** a development database cannot keep these rows. Re-create it (drop
+and create the database, then run `velox-bootstrap`), or point Velox at a
+new one. Never run `docker compose down -v` on a volume another checkout
+uses.
+
+## It waited 5s for a table lock
+
+First stop the API: see [Before anything else](#before-anything-else).
+
+**Symptom:**
+
+```
+migration 00181_example.sql waited 5s for a table lock and stopped: another database session, usually a long-running transaction, holds a lock on a table it changes. Postgres undid the whole migration and the database is still at version 180, so nothing needs repair ...
+```
+
+**Why:** to change a table, a migration needs a lock on it. While the
+migration waits for that lock, every other query on the table waits behind
+it, so a migration stuck behind one long transaction can stall that table
+for everyone. To keep that wait short, Velox gives each migration 5 seconds
+to get its locks. If it cannot, the migration stops and leaves nothing
+behind. Index builds (`CREATE INDEX CONCURRENTLY`) have no time limit,
+because they do not block reads or writes while they wait.
+
+**Check:** find what holds the lock. In `psql` as the database owner, list
+the open transactions, oldest first:
+
+```sql
+SELECT pid, now() - xact_start AS open_for, state, usename, left(query, 80) AS query
+FROM pg_stat_activity
+WHERE xact_start IS NOT NULL AND pid <> pg_backend_pid()
+ORDER BY xact_start
+LIMIT 10;
+```
+
+**You see:** one or more sessions open for longer than a few seconds.
+Common causes: a report or export still running, a `psql` session left in
+a transaction (`state` is `idle in transaction`), or a backup tool.
+
+**Fix:** pick one, then run the upgrade again.
+
+- **Wait.** Run the upgrade again when the long transaction has finished
+  or traffic is lower.
+- **End the blocking session**, if it is safe to stop it:
+
+  ```sql
+  SELECT pg_terminate_backend(12345);  -- the pid from the Check step
+  ```
+
+- **Wait longer for the lock.** Set `MIGRATION_LOCK_TIMEOUT` for this one
+  run, for example `MIGRATION_LOCK_TIMEOUT=30s velox migrate`. With
+  Docker Compose: `docker compose run --rm -e MIGRATION_LOCK_TIMEOUT=30s velox-api migrate`.
+  While the migration waits, queries on that table wait too. `0` means no
+  limit.
+
+If the upgrade instead says `another Velox process is migrating this
+database`, it waited 30 minutes for another process's migration, not for
+a table. `velox migrate status` shows that process under `running now`:
+wait for it.
 
 ## An index build failed
 
@@ -78,88 +276,32 @@ the INVALID index goes away and is built again.
 
 ## Velox tables, but no migration record
 
-**Symptom:**
+**Symptom:** `velox migrate`, or Velox at start-up, stops with:
 
 ```
-migration 00180 v0.8.1 baseline failed: ERROR: function "leader_fence" already exists with same argument types (SQLSTATE 42723). This database already has Velox tables but no migration record, and none of the baseline was applied. ...
+this database has Velox tables but no migration record (goose_db_version has no row for 180), so Velox cannot tell which version they are at. Nothing was changed. ...
 ```
 
-**Why:** the database has Velox's tables but neither `goose_db_version`
-(this release's record) nor `schema_migrations` (the v0.8 record). Velox
-cannot tell which version the tables are at. This happens when a backup
-was restored without its migration table, or when the record was dropped
-by hand.
+`velox migrate status` prints
+`state:        no migration record, velox migrate will not run`.
+
+**Why:** the database has Velox's tables but no row 180 in
+`goose_db_version`, the migration record. Velox cannot tell which version
+the tables are at, so it changes nothing. This happens when a backup was
+restored without its migration table, when the record was dropped by hand,
+or when the database is from Velox 0.8.x. Velox looks for a `tenants`
+table in `public` and in every schema on the connecting user's
+`search_path`, so Velox 0.8.x tables kept in the admin user's own schema
+count too.
 
 **Fix:** restore the backup again, with its migration table, into an empty
 database, or point Velox at an empty database. Then run `velox migrate`.
+Upgrading from Velox 0.8.x is not supported; install fresh.
 
-## A dirty database from v0.8.x
-
-**Symptom:**
-
-```
-This database's v0.8 migration record (schema_migrations) says version 179, dirty=true. This release takes over only a clean v0.8.0, v0.8.1 or v0.8.2 database at version 180. ...
-```
-
-**Why:** v0.9.0 takes over a database from v0.8.0, v0.8.1 or v0.8.2 at version 180,
-not dirty. Any other v0.8 state must be finished with v0.8.1 first.
-
-**Fix:** with Velox v0.8.1, run `velox migrate`. If it reports the database
-dirty, follow v0.8.1's
-[A database upgrade failed midway](https://github.com/getvelox/velox/blob/v0.8.1/docs/ops/runbook/migration-failed-midway.md).
-When v0.8.1's `velox migrate status` prints `version: 180, dirty: false`,
-run v0.9.0's `velox migrate`.
-
-A version above 180 came from a development build. Use an empty database.
-
-## Two migration records
-
-**Symptom:**
-
-```
-public.schema_migrations (version 180, dirty=false, without the comment this release adds when it takes a database over) does not match this release's record in goose_db_version (version 180). ...
-```
-
-**Why:** when v0.9.0 takes over a v0.8 database, it keeps
-`schema_migrations` frozen at 180 and marks it with a table comment. Its
-own record is `goose_db_version`. The two now disagree, so something
-changed `schema_migrations` after the upgrade. Velox will not guess which
-schema is present, and changes nothing.
-
-**Fix:** pick the case.
-
-- **`goose_db_version` says 180, and the record says version 180,
-  dirty=false, without the comment.** The comment was lost: a copy tool
-  left comments out (`pg_dump --no-comments`, some database migration
-  services), or a v0.8.x backup was restored over a database still at 180.
-  Either way the tables are v0.8.1's, at the 180 both records name. Put the
-  comment back, then start this release:
-
-  ```sql
-  COMMENT ON TABLE public.schema_migrations IS 'velox: frozen at 180; the migration record moved to public.goose_db_version';
-  ```
-
-  This case is only for `goose_db_version` at 180. Above 180, newer
-  migrations changed tables a v0.8.x backup does not have: see the next
-  case.
-- **A v0.8.x backup was restored over this database.** `scripts/restore.sh`
-  replaces only the objects in the backup. It leaves `goose_db_version` and
-  any table a newer migration created. Restore the backup into an **empty**
-  database instead, then run `velox migrate`.
-- **A v0.8.x binary ran on a database this release set up.** The record
-  shows version 1, dirty. v0.8.x tried its first migration and failed on
-  the existing tables, inside one transaction, so it changed nothing else.
-  Drop its record, then start this release:
-
-  ```sql
-  DROP TABLE public.schema_migrations;
-  ```
-
-- **A v0.8.x `migrate rollback` or `migrate force` ran after the upgrade.**
-  Run v0.8.1's `velox migrate` to return the database to 180. Then start
-  this release, which checks the record again. If you cannot tell what the
-  rollback changed, restore the backup taken before the upgrade, into an
-  empty database.
+If `velox migrate` instead stops with
+`migration 00180 baseline failed: ... already exists`, the database holds
+some of the objects the baseline creates but no `tenants` table. Point
+Velox at an empty database.
 
 ## Verify
 

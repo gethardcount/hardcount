@@ -7,14 +7,15 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
-import type { GetV1PublicCostDashboardToken200UsageItemRulesItem } from './getV1PublicCostDashboardToken200UsageItemRulesItem';
+import type { GetV1PublicCostDashboardToken200UsageItemPricesItem } from './getV1PublicCostDashboardToken200UsageItemPricesItem';
 
 export type GetV1PublicCostDashboardToken200UsageItem = {
-  meter_key?: string;
+  event_name?: string;
   meter_name?: string;
   unit?: string;
   currency?: string;
   total_quantity?: string;
   total_amount_cents?: number;
-  rules?: GetV1PublicCostDashboardToken200UsageItemRulesItem[];
+  /** One row per price that took usage this period. */
+  prices?: GetV1PublicCostDashboardToken200UsageItemPricesItem[];
 };

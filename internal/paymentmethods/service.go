@@ -17,11 +17,6 @@ import (
 // tested with a fake and so internal/payment doesn't gain a reverse
 // dependency.
 type StripeAPI interface {
-	// CreateSetupIntent makes a SetupIntent for the Stripe customer and
-	// returns the client_secret the frontend needs for confirmCardSetup().
-	// Used by integrations that build an inline Stripe Elements UI.
-	CreateSetupIntent(ctx context.Context, stripeCustomerID string, metadata map[string]string) (clientSecret, setupIntentID string, err error)
-
 	// CreateSetupCheckoutSession creates a Stripe Checkout Session in
 	// setup mode and returns a hosted URL the customer can redirect to.
 	// successURL and cancelURL are separate so the SPA can render
@@ -141,26 +136,6 @@ func (s *Service) CustomersWithDefault(ctx context.Context, tenantID string, cus
 	return s.store.CustomersWithDefault(ctx, tenantID, customerIDs)
 }
 
-// CreateSetupIntent returns the client_secret a browser needs to run
-// stripe.confirmCardSetup(). The actual payment_methods row is written by
-// the webhook handler once Stripe confirms the setup — we don't trust
-// the browser's "success" callback.
-func (s *Service) CreateSetupIntent(ctx context.Context, tenantID, customerID string) (clientSecret, setupIntentID string, err error) {
-	if tenantID == "" || customerID == "" {
-		return "", "", errs.Required("tenant_id, customer_id")
-	}
-	stripeCustomerID, err := s.stripe.EnsureStripeCustomer(ctx, tenantID, customerID)
-	if err != nil {
-		return "", "", fmt.Errorf("ensure stripe customer: %w", err)
-	}
-	metadata := map[string]string{
-		"velox_tenant_id":   tenantID,
-		"velox_customer_id": customerID,
-		"velox_livemode":    livemodeLabel(ctx),
-	}
-	return s.stripe.CreateSetupIntent(ctx, stripeCustomerID, metadata)
-}
-
 // CreateSetupSession returns a hosted Stripe Checkout URL the customer can
 // be redirected to for adding a new card without being charged. On
 // success Stripe fires setup_intent.succeeded, which the webhook handler
@@ -169,8 +144,18 @@ func (s *Service) CreateSetupSession(ctx context.Context, tenantID, customerID, 
 	if tenantID == "" || customerID == "" {
 		return "", "", errs.Required("tenant_id, customer_id")
 	}
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return "", "", err
+	}
 	stripeCustomerID, err := s.stripe.EnsureStripeCustomer(ctx, tenantID, customerID)
 	if err != nil {
+		// A refusal (Stripe not connected) reaches the caller as it is, so
+		// its sentence is the whole message.
+		var de *errs.DomainError
+		if errors.As(err, &de) {
+			return "", "", err
+		}
 		return "", "", fmt.Errorf("ensure stripe customer: %w", err)
 	}
 	// Build the default return URL: portalBaseURL + setupCompletePath
@@ -194,7 +179,7 @@ func (s *Service) CreateSetupSession(ctx context.Context, tenantID, customerID, 
 	metadata := map[string]string{
 		"velox_tenant_id":   tenantID,
 		"velox_customer_id": customerID,
-		"velox_livemode":    livemodeLabel(ctx),
+		"velox_livemode":    livemodeLabel(live),
 		"velox_purpose":     "portal_add_payment_method",
 	}
 	checkoutURL, sessionID, err = s.stripe.CreateSetupCheckoutSession(ctx, stripeCustomerID, successURL, cancelURL, metadata)
@@ -365,13 +350,21 @@ func (s *Service) Detach(ctx context.Context, tenantID, customerID, pmID string)
 	return detached, nil
 }
 
-// AttachForWebhook is the error-only variant of AttachFromSetupIntent,
-// used by payment.Stripe.HandleWebhook which doesn't need the PM row. Keeps
-// the webhook-facing signature narrow so payment/ doesn't have to know
-// about PaymentMethod.
-func (s *Service) AttachForWebhook(ctx context.Context, tenantID, customerID, stripePaymentMethodID string, makeDefault bool) error {
-	_, err := s.AttachFromSetupIntent(ctx, tenantID, customerID, stripePaymentMethodID, makeDefault)
-	return err
+// AttachForWebhook is AttachFromSetupIntent for payment.Stripe.HandleWebhook:
+// it returns the card as the API shows it (domain.PaymentMethodView), which
+// the payment_method.* webhooks carry, so payment/ does not have to know
+// about PaymentMethod. It returns nil for a card already removed, which
+// stays removed: the API does not list it, so no event may carry it.
+func (s *Service) AttachForWebhook(ctx context.Context, tenantID, customerID, stripePaymentMethodID string, makeDefault bool) (*domain.PaymentMethodView, error) {
+	pm, err := s.AttachFromSetupIntent(ctx, tenantID, customerID, stripePaymentMethodID, makeDefault)
+	if err != nil {
+		return nil, err
+	}
+	if !pm.IsActive() {
+		return nil, nil
+	}
+	view := pm.View()
+	return &view, nil
 }
 
 // AttachFromSetupIntent is the entry point the P5 webhook handler uses:
@@ -476,8 +469,8 @@ func pmLabel(pm PaymentMethod) string {
 	return fmt.Sprintf("%s ····%s", pm.CardBrand, pm.CardLast4)
 }
 
-func livemodeLabel(ctx context.Context) string {
-	if postgres.Livemode(ctx) {
+func livemodeLabel(live bool) string {
+	if live {
 		return "true"
 	}
 	return "false"

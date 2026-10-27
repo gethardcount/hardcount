@@ -175,6 +175,41 @@ func EmailNotConfigured() *DomainError {
 	return InvalidState("Email isn't set up on this server, so nothing was sent.").WithCode(CodeEmailNotConfigured)
 }
 
+// CodeStripeNotConnected is the stable code an operator action that needs
+// Stripe answers with when the account has no Stripe keys for the mode.
+const CodeStripeNotConnected = "stripe_not_connected"
+
+// StripeNotConnected is the 409 for an operator action that needs Stripe in
+// a mode the account has not connected. It is the caller's state to fix, so
+// it is not a 500. A failure to READ the credentials is a different thing
+// and stays an error (a 500).
+func StripeNotConnected() *DomainError {
+	return InvalidState("Stripe is not connected for this mode. Connect it under Settings, then try again.").WithCode(CodeStripeNotConnected)
+}
+
+// CodeOnlinePaymentUnavailable is the customer-facing code for the same
+// state on a public page (hosted invoice Pay, update payment method): the
+// seller has not connected Stripe for the mode. The page explains it in its
+// own words; the code names no setting the customer could change.
+const CodeOnlinePaymentUnavailable = "online_payment_unavailable"
+
+// The 409 codes of a plan price write (ADR-130 §4, §16). price_exists: the
+// plan already has a price on the meter with the same dimension_match.
+// price_conflict: another price on the plan and meter could take the same
+// events with the same number of labels, so neither would win. meter_overlap:
+// the price would add a meter to a plan whose subscriber already has that
+// meter on another subscription.
+const (
+	CodePriceExists   = "price_exists"
+	CodePriceConflict = "price_conflict"
+	CodeMeterOverlap  = "meter_overlap"
+)
+
+// CodeMeterHasUsage is the 409 code for a change to a meter's aggregation
+// once the meter has events (ADR-130 §2): its usage so far was counted
+// under the aggregation it has.
+const CodeMeterHasUsage = "meter_has_usage"
+
 // Sentinel errors for store and service layers.
 var (
 	ErrNotFound           = errors.New("not found")
@@ -199,7 +234,6 @@ var (
 // Error code constants.
 const (
 	CodeBillingSetupIncomplete = "billing_setup_incomplete"
-	CodeStripeRequired         = "stripe_credentials_required"
 	CodeInvoiceFetchFailed     = "invoice_fetch_failed"
 	CodePaymentRetryFailed     = "payment_retry_failed"
 	CodeSubscriptionInvalid    = "subscription_invalid"
