@@ -268,8 +268,8 @@ func TestDescribeSubscriptionAction_NetNegativeUsage(t *testing.T) {
 	l := describeSubscriptionAction("subscription.net_negative_usage", map[string]any{
 		"billing_reason": "subscription_cycle",
 		"meters": []any{
-			map[string]any{"meter_id": "mtr_1", "meter_key": "api_calls", "meter_name": "API calls", "quantity": "-50"},
-			map[string]any{"meter_id": "mtr_2", "meter_key": "tokens", "quantity": "-12.5"},
+			map[string]any{"meter_id": "mtr_1", "event_name": "api_calls", "meter_name": "API calls", "quantity": "-50"},
+			map[string]any{"meter_id": "mtr_2", "event_name": "tokens", "quantity": "-12.5"},
 		},
 	}, lineLabels{})
 	if l.Title != "Usage below zero billed as zero" || l.Tone != activity.ToneWarning {

@@ -100,6 +100,15 @@ func newLagRigGranted(t *testing.T, timing string, withAddOn bool, grantCents in
 	return r
 }
 
+// centPrices is a 1c-per-unit price for every event of each meter.
+func centPrices(meters []string) []map[string]any {
+	out := []map[string]any{}
+	for _, m := range meters {
+		out = append(out, map[string]any{"meter_id": m, "mode": "per_unit", "unit_amount_cents": "1"})
+	}
+	return out
+}
+
 // newLagRigBare is the rig's meter, plans and customer, with no subscription
 // yet: r.subID is empty until the test creates one.
 func newLagRigBare(t *testing.T, timing string, grantCents int64, opts ...ServerOption) *lagRig {
@@ -111,17 +120,14 @@ func newLagRigBare(t *testing.T, timing string, grantCents int64, opts ...Server
 	r.tenantID = tenantID
 	r.auth = "Bearer " + createTestAPIKey(t, db, tenantID)
 
-	rule := r.must(http.MethodPost, "/v1/rating-rules", lagP0, map[string]any{
-		"rule_key": "calls", "name": "Calls", "mode": "per_unit", "currency": "USD", "unit_amount_cents": 1,
-	}, http.StatusCreated)
 	meter := r.must(http.MethodPost, "/v1/meters", lagP0, map[string]any{
-		"event_name": "calls", "name": "Calls", "unit": "calls", "aggregation": "sum", "rating_rule_version_id": rule["id"],
+		"event_name": "calls", "name": "Calls", "unit": "calls", "aggregation": "sum",
 	}, http.StatusCreated)
 	r.meterID = meter["id"].(string)
 	plan := func(code, interval string, base int64, meters []string) string {
 		p := r.must(http.MethodPost, "/v1/plans", lagP0, map[string]any{
 			"code": code, "name": code, "currency": "USD", "billing_interval": interval,
-			"base_amount_cents": base, "base_bill_timing": timing, "meter_ids": meters,
+			"base_amount_cents": base, "base_bill_timing": timing, "prices": centPrices(meters),
 		}, http.StatusCreated)
 		return p["id"].(string)
 	}
@@ -595,7 +601,7 @@ func TestCloseLag_ItemWritesWhileBillingFails_Refused(t *testing.T) {
 	// A second add-on with no meter, so the add is valid on its own merits.
 	planD := r.must(http.MethodPost, "/v1/plans", lagP0, map[string]any{
 		"code": "plan_d", "name": "plan_d", "currency": "USD", "billing_interval": "monthly",
-		"base_amount_cents": 500, "base_bill_timing": "in_advance", "meter_ids": []string{},
+		"base_amount_cents": 500, "base_bill_timing": "in_advance",
 	}, http.StatusCreated)["id"].(string)
 	r.exec(`UPDATE tenant_settings SET net_payment_terms = -1 WHERE tenant_id = (SELECT tenant_id FROM subscriptions WHERE id = $1)`, r.subID)
 	var addOn string

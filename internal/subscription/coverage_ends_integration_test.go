@@ -10,7 +10,6 @@ import (
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
-	"github.com/sagarsuperuser/velox/internal/pricing"
 	"github.com/sagarsuperuser/velox/internal/testutil"
 )
 
@@ -27,17 +26,14 @@ func TestListCustomerMeterCoverageEnds(t *testing.T) {
 	otherCust := ivCustomer(t, db, ctx, tenantID, "cus_cov_other")
 	plan := func(code string, meters ...string) string {
 		t.Helper()
-		p, err := pricing.NewPostgresStore(db).CreatePlan(ctx, tenantID, domain.Plan{
+		return createPlanPricing(t, db, ctx, tenantID, domain.Plan{
 			Code: code, Name: code, Currency: "USD", BillingInterval: domain.BillingMonthly,
-			BaseBillTiming: domain.BillInArrears, Status: domain.PlanActive, MeterIDs: meters,
-		})
-		if err != nil {
-			t.Fatalf("create plan %s: %v", code, err)
-		}
-		return p.ID
+			BaseBillTiming: domain.BillInArrears, Status: domain.PlanActive,
+		}, meters...).ID
 	}
 	planM := plan("cov-m", "mtr_m")
 	planN := plan("cov-n", "mtr_n")
+	planO := plan("cov-o", "mtr_o")
 	planNone := plan("cov-none")
 	store := NewPostgresStore(db)
 	day := func(n int) time.Time { return ivPS.Add(time.Duration(n) * 24 * time.Hour) }
@@ -90,7 +86,7 @@ func TestListCustomerMeterCoverageEnds(t *testing.T) {
 	// anything); another customer's cancel; a cancel past the period end
 	// (sealed AT the period end, the window's bound); a zero-width row (an
 	// item added on day 10 under a cancel backdated to day 8).
-	ivActiveSub(t, store, ctx, tenantID, cust, "cov-open", items(planN))
+	ivActiveSub(t, store, ctx, tenantID, cust, "cov-open", items(planO))
 	draft, err := store.Create(ctx, tenantID, domain.Subscription{
 		Code: "cov-draft", DisplayName: "cov-draft", CustomerID: cust,
 		Status: domain.SubscriptionDraft, BillingTime: domain.BillingTimeCalendar, Items: items(planM),

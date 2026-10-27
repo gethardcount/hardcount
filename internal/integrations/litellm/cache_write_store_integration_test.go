@@ -157,27 +157,36 @@ func (f *writeFixture) expectRows(what, table, id, heldStatus string, want map[s
 }
 
 // ingestLegacy stores a call the way the mapper before the split did, one
-// event at a time, as a copy of the previous release still does.
+// event at a time with the held rules, as a copy of the previous release
+// did: each event is its own call with no pre-split mapping.
 func (f *writeFixture) ingestLegacy(id, customerID, meterID string) {
 	f.t.Helper()
 	for tt, q := range legacyRows {
-		if _, err := f.svc.IngestResolvingHeld(f.ctx, f.tenantID, usage.IngestInput{
-			CustomerID: customerID, MeterID: meterID, Quantity: decimal.NewFromInt(q),
-			Dimensions:     map[string]any{"model": "claude-sonnet-4.5", "provider": "anthropic", "token_type": tt},
-			IdempotencyKey: id + ":" + tt,
+		if _, err := f.svc.IngestCall(f.ctx, f.tenantID, usage.CallInput{
+			CustomerID: customerID, MeterID: meterID,
+			Events: []usage.CallEvent{{
+				Quantity:       decimal.NewFromInt(q),
+				Dimensions:     map[string]any{"model": "claude-sonnet-4.5", "provider": "anthropic", "token_type": tt},
+				IdempotencyKey: id + ":" + tt,
+			}},
 		}); err != nil {
 			f.t.Fatalf("legacy ingest %s: %v", tt, err)
 		}
 	}
 }
 
+// holdLegacy holds a call the way the mapper before the split did, one
+// event at a time.
 func (f *writeFixture) holdLegacy(id, user string) {
 	f.t.Helper()
 	for tt, q := range legacyRows {
-		if _, err := f.svc.Hold(f.ctx, f.tenantID, usage.HoldInput{
-			ExternalCustomerID: user, EventName: EventNameTokens, Quantity: decimal.NewFromInt(q),
-			Dimensions:     map[string]any{"model": "claude-sonnet-4.5", "provider": "anthropic", "token_type": tt},
-			IdempotencyKey: id + ":" + tt, Reason: domain.HeldReasonCustomerNotFound,
+		if _, err := f.svc.HoldCall(f.ctx, f.tenantID, usage.HoldCallInput{
+			ExternalCustomerID: user, EventName: EventNameTokens, Reason: domain.HeldReasonCustomerNotFound,
+			Events: []usage.CallEvent{{
+				Quantity:       decimal.NewFromInt(q),
+				Dimensions:     map[string]any{"model": "claude-sonnet-4.5", "provider": "anthropic", "token_type": tt},
+				IdempotencyKey: id + ":" + tt,
+			}},
 		}); err != nil {
 			f.t.Fatalf("legacy hold %s: %v", tt, err)
 		}
@@ -668,8 +677,8 @@ func TestRelease_WaitsForInFlightOldInput_RealStore(t *testing.T) {
 		t.Fatalf("hold commit: %v", err)
 	}
 
-	// The previous release's IngestResolvingHeld for :input, mid-flight: it
-	// has locked the held :input and written the old :input.
+	// The previous release's per-event ingest of :input, mid-flight: it has
+	// locked the held :input and written the old :input.
 	old, err := f.db.BeginTx(f.ctx, postgres.TxTenant, f.tenantID)
 	if err != nil {
 		t.Fatalf("begin: %v", err)

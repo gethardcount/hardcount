@@ -293,7 +293,7 @@ func (s *PostgresStore) GetMany(ctx context.Context, tenantID string, ids []stri
 	defer postgres.Rollback(tx)
 
 	rows, err := tx.QueryContext(ctx,
-		`SELECT `+customerFullCols+` FROM customers WHERE id = ANY($1::text[])`, postgres.StringArray(ids))
+		`SELECT `+customerFullCols+` FROM customers WHERE id = ANY($1::text[])`, ids)
 	if err != nil {
 		return nil, err
 	}

@@ -15,8 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shopspring/decimal"
-
 	"github.com/sagarsuperuser/velox/internal/audit"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/invoice"
@@ -37,7 +35,7 @@ func netNegativeNotes(t *testing.T, ctx context.Context, logger *audit.Logger, t
 	return entries
 }
 
-// noteQuantities maps meter_key → quantity from one row's metadata, as it
+// noteQuantities maps event_name → quantity from one row's metadata, as it
 // comes back from JSON.
 func noteQuantities(t *testing.T, e domain.AuditEntry) map[string]string {
 	t.Helper()
@@ -48,7 +46,7 @@ func noteQuantities(t *testing.T, e domain.AuditEntry) map[string]string {
 	out := map[string]string{}
 	for _, m := range ms {
 		mm, _ := m.(map[string]any)
-		key, _ := mm["meter_key"].(string)
+		key, _ := mm["event_name"].(string)
 		qty, _ := mm["quantity"].(string)
 		out[key] = qty
 	}
@@ -62,7 +60,7 @@ func noteFrom(t *testing.T, e domain.AuditEntry, meterKey string) string {
 	ms, _ := e.Metadata["meters"].([]any)
 	for _, m := range ms {
 		mm, _ := m.(map[string]any)
-		if mm["meter_key"] == meterKey {
+		if mm["event_name"] == meterKey {
 			from, _ := mm["from"].(string)
 			return from
 		}
@@ -71,18 +69,11 @@ func noteFrom(t *testing.T, e domain.AuditEntry, meterKey string) string {
 	return ""
 }
 
-// seatsMeter creates a single-rule sum meter priced at 5c a seat.
+// seatsMeter creates a sum meter; its plans price it at 5c a seat.
 func seatsMeter(t *testing.T, ctx context.Context, f *thresholdFixture, key string) domain.Meter {
 	t.Helper()
-	rr, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: key + "_flat", Name: key, Mode: domain.PricingPerUnit,
-		Currency: "USD", UnitAmountCents: decimal.NewFromInt(5),
-	})
-	if err != nil {
-		t.Fatalf("create rule: %v", err)
-	}
 	m, err := f.pricingSvc.CreateMeter(ctx, f.tenantID, pricing.CreateMeterInput{
-		EventName: key, Name: "Seats", Unit: "seats", Aggregation: "sum", RatingRuleVersionID: rr.ID,
+		EventName: key, Name: "Seats", Unit: "seats", Aggregation: "sum",
 	})
 	if err != nil {
 		t.Fatalf("create meter: %v", err)
@@ -91,15 +82,15 @@ func seatsMeter(t *testing.T, ctx context.Context, f *thresholdFixture, key stri
 }
 
 // netNegativePlan is one plan with three meters: the fixture's calls meter
-// (single rule, 1c a call), a tokens meter priced by a pricing rule (1c a
-// model=a token) and a seats meter (single rule, 5c a seat).
+// (one catch-all price, 1c a call), a tokens meter priced only for model=a
+// (1c a token) and a seats meter (one catch-all price, 5c a seat).
 func netNegativePlan(t *testing.T, ctx context.Context, f *thresholdFixture, suffix string) (tokens, seats domain.Meter, planID string) {
 	t.Helper()
 	tokens = tokensMeter(t, ctx, f, "tok_"+suffix)
 	seats = seatsMeter(t, ctx, f, "seats_"+suffix)
-	plan, err := f.pricingSvc.CreatePlan(ctx, f.tenantID, pricing.CreatePlanInput{
+	plan, _, err := f.pricingSvc.CreatePlan(ctx, f.tenantID, pricing.CreatePlanInput{
 		Code: "pln_neg_" + suffix, Name: "Neg " + suffix, Currency: "USD",
-		BillingInterval: domain.BillingMonthly, MeterIDs: []string{f.meterID, tokens.ID, seats.ID},
+		BillingInterval: domain.BillingMonthly, Prices: []pricing.PriceInput{{MeterID: f.meterID, PriceShape: perUnitShape("1")}, modelA(tokens.ID), {MeterID: seats.ID, PriceShape: perUnitShape("5")}},
 	})
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
@@ -108,8 +99,8 @@ func netNegativePlan(t *testing.T, ctx context.Context, f *thresholdFixture, suf
 }
 
 // TestNetNegativeUsage_CycleClose_BillsZeroAndRecordsIt: calls bill as usual;
-// the tokens bucket (pricing-rule path) nets -50 and seats (single-rule path)
-// net -7. The invoice is made with the calls line only, and one row records
+// the tokens bucket (read per price) nets -50 and seats (one catch-all
+// price) net -7. The invoice is made with the calls line only, and one row records
 // both meters below zero.
 func TestNetNegativeUsage_CycleClose_BillsZeroAndRecordsIt(t *testing.T) {
 	if testing.Short() {

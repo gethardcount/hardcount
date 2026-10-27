@@ -13,7 +13,6 @@ import (
 	"github.com/sagarsuperuser/velox/internal/billing"
 	"github.com/sagarsuperuser/velox/internal/customer"
 	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/pricing"
 	"github.com/sagarsuperuser/velox/internal/subscription"
 )
 
@@ -25,7 +24,10 @@ import (
 // threshold invoice and its evaluation, and the period close or an immediate
 // cancel. Each case records every output of those paths as text; the
 // expected text was recorded on main before the change (1717f4a8), so the
-// same test passing on both builds is the proof.
+// same test passing on both builds is the proof. Since ADR-130 PR-4 the
+// prices are plan prices: the two pricing rules are two prices for model=a
+// and model=b, and the meter's own price is the plan's catch-all price. A
+// line names its price as it named its rule's key before.
 //
 // The events are at distinct instants: a timestamp tie on a `last` meter is
 // the one place the change bills differently on purpose (the id breaks it on
@@ -51,22 +53,14 @@ func TestOneAggregationPerMeter_EveryPathUnchanged(t *testing.T) {
 					lf := newLiveFixture(t, "One aggregation "+name, 0)
 					ctx := lf.ctx
 					bypassExec(t, lf, `UPDATE meters SET aggregation = $1 WHERE id = $2`, agg, lf.meterID)
-					keys := map[string]string{lf.seededRule(t, ctx).ID: "calls_flat"}
+					keys := map[string]string{lf.priceID: "calls_flat"}
 					if shape == "two pricing rules and the meter's own price" {
-						a := createRule(t, lf, flatRule("model_a", "2"))
-						b := createRule(t, lf, gradRule("model_b", []domain.RatingTier{
+						a := createRule(t, lf, map[string]string{"model": "a"}, flatRule("model_a", "2"))
+						b := createRule(t, lf, map[string]string{"model": "b"}, gradRule("model_b", []domain.RatingTier{
 							{UpTo: new(int64(3)), UnitAmountCents: decimal.NewFromInt(5)},
 							{UpTo: nil, UnitAmountCents: decimal.NewFromInt(1)},
 						}))
 						keys[a.ID], keys[b.ID] = "model_a", "model_b"
-						for _, r := range []struct {
-							id, model string
-						}{{a.ID, "a"}, {b.ID, "b"}} {
-							seedPricingRule(t, lf.db, ctx, lf.tenantID, pricing.UpsertMeterPricingRuleInput{
-								MeterID: lf.meterID, RatingRuleVersionID: r.id, DimensionMatch: map[string]any{"model": r.model},
-								Priority: 10,
-							})
-						}
 					}
 					for i, ev := range events {
 						insertUsageAt(t, lf, lf.cycleStart.Add(time.Duration(i+1)*time.Minute), ev.qty, map[string]any{"model": ev.model})
@@ -80,7 +74,7 @@ func TestOneAggregationPerMeter_EveryPathUnchanged(t *testing.T) {
 						if err != nil {
 							t.Fatalf("preview: %v", err)
 						}
-						writePreview(&out, stage+" preview", p)
+						writePreview(&out, stage+" preview", p, keys)
 						p, err = previews.CreatePreview(ctx, lf.tenantID, billing.CreatePreviewRequest{
 							CustomerID: lf.customerID, SubscriptionID: lf.subID,
 							Period: billing.CreatePreviewPeriod{From: lf.cycleStart, To: time.Now().UTC()},
@@ -88,7 +82,7 @@ func TestOneAggregationPerMeter_EveryPathUnchanged(t *testing.T) {
 						if err != nil {
 							t.Fatalf("preview, explicit window: %v", err)
 						}
-						writePreview(&out, stage+" window preview", p)
+						writePreview(&out, stage+" window preview", p, keys)
 						fmt.Fprintf(&out, "%s live: unbilled=%d\n", stage, lf.live(t).UnbilledUsageCents)
 					}
 					readAll("open")
@@ -149,7 +143,7 @@ func TestOneAggregationPerMeter_EveryPathUnchanged(t *testing.T) {
 						}
 						for _, l := range lines {
 							fmt.Fprintf(&out, "  line %s %q qty=%s unit=%d amount=%d mode=%s rule=%s\n",
-								l.LineType, l.Description, l.QuantityDecimal.String(), l.UnitAmountCents, l.AmountCents, l.PricingMode, keys[l.RatingRuleVersionID])
+								l.LineType, l.Description, l.QuantityDecimal.String(), l.UnitAmountCents, l.AmountCents, l.PricingMode, keys[l.PriceID])
 						}
 					}
 
@@ -167,7 +161,7 @@ func TestOneAggregationPerMeter_EveryPathUnchanged(t *testing.T) {
 	}
 }
 
-func writePreview(out *strings.Builder, stage string, p billing.PreviewResult) {
+func writePreview(out *strings.Builder, stage string, p billing.PreviewResult, keys map[string]string) {
 	fmt.Fprintf(out, "%s:\n", stage)
 	for _, l := range p.Lines {
 		var dm []string
@@ -176,7 +170,7 @@ func writePreview(out *strings.Builder, stage string, p billing.PreviewResult) {
 		}
 		sort.Strings(dm)
 		fmt.Fprintf(out, "  line %s %q qty=%s unit=%d amount=%d mode=%s rule=%s match=%s\n",
-			l.LineType, l.Description, l.Quantity.String(), l.UnitAmountCents, l.AmountCents, l.PricingMode, l.RuleKey, strings.Join(dm, ","))
+			l.LineType, l.Description, l.Quantity.String(), l.UnitAmountCents, l.AmountCents, l.PricingMode, keys[l.PriceID], strings.Join(dm, ","))
 	}
 	for _, tot := range p.Totals {
 		fmt.Fprintf(out, "  total %+v\n", tot)

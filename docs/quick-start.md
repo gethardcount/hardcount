@@ -97,10 +97,8 @@ says what went wrong. So a finished run means each step below worked. The IDs (t
 2. **Load ready-made prices for Claude tokens.** One call applies the
    `anthropic_style` recipe. It creates a meter named Tokens, a price for
    each Claude model and each kind of token, and a monthly plan named
-   "AI API" with no base fee. It also creates a schedule for retrying failed
-   card payments, which takes over from the account's starting "Default
-   retries" schedule. The kinds of token are input, output, cache read and cache
-   write. The prices start at Anthropic's public list prices, which you can
+   "AI API" with no base fee. The kinds of token are input, output, cache
+   read and cache write. The prices start at Anthropic's public list prices, which you can
    change later. If you run the demo again, this step reuses the same setup.
 
    **You see:** `✓ Prices loaded: a tokens meter, a price for each model and token type, and plan vlx_pln_…`

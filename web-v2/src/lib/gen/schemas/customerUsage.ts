@@ -15,6 +15,14 @@ import type { CustomerUsageTotalsItem } from './customerUsageTotalsItem';
 
 export interface CustomerUsage {
   customer_id: string;
+  /**
+     * The window the response covers. With no `from` and `to`
+     * (`current_billing_cycle`), each subscription is rated over its
+     * own current billing period, and the period runs from the
+     * earliest start to the latest end of those periods. A meter's
+     * totals and daily `buckets` cover its own subscription's whole
+     * period, including usage a threshold invoice already billed.
+     */
   period: CustomerUsagePeriod;
   /**
      * One entry per item of each active or trialing subscription. A
@@ -25,6 +33,10 @@ export interface CustomerUsage {
   meters: CustomerUsageMeter[];
   /** One entry per currency. */
   totals: CustomerUsageTotalsItem[];
+  /**
+     * Problems found working out this usage, in words, such as usage
+     * that no price takes or a meter whose usage went below zero.
+     */
   warnings: string[];
   /** One entry per UTC day in the period, including days with no usage. */
   buckets: CustomerUsageBucketsItem[];

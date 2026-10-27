@@ -50,8 +50,9 @@ const (
 	raceMeterBCents = 2000
 )
 
-// raceMeter is billed by both the meter-a and the meter-b plan: one
-// subscription may have an item on one of them, never on both.
+// raceMeter (with the tenant id after it) is billed by both the meter-a and
+// the meter-b plan: one subscription may have an item on one of them, never
+// on both.
 const raceMeter = "mtr_item_race_tokens"
 
 // holdFirst blocks the first call that reaches it until release is closed.
@@ -262,24 +263,23 @@ func newItemRaceRig(t *testing.T, db *postgres.DB, name string, qty int64, withK
 	if err != nil {
 		t.Fatalf("create customer: %v", err)
 	}
-	ps := pricing.NewPostgresStore(db)
 	plans := map[string]domain.Plan{}
-	for _, p := range []domain.Plan{
-		{Code: "basic", Name: "Basic", BillingInterval: domain.BillingMonthly, BaseAmountCents: raceBasicCents},
-		{Code: "pro", Name: "Pro", BillingInterval: domain.BillingMonthly, BaseAmountCents: raceProCents},
-		{Code: "keeper", Name: "Keeper", BillingInterval: domain.BillingMonthly, BaseAmountCents: raceKeeperCents},
-		{Code: "basic-yearly", Name: "Basic Yearly", BillingInterval: domain.BillingYearly, BaseAmountCents: raceBasicCents * 10},
-		{Code: "meter-a", Name: "Meter A", BillingInterval: domain.BillingMonthly, BaseAmountCents: raceMeterACents, MeterIDs: []string{raceMeter}},
-		{Code: "meter-b", Name: "Meter B", BillingInterval: domain.BillingMonthly, BaseAmountCents: raceMeterBCents, MeterIDs: []string{raceMeter}},
+	for _, pm := range []struct {
+		p      domain.Plan
+		meters []string
+	}{
+		{domain.Plan{Code: "basic", Name: "Basic", BillingInterval: domain.BillingMonthly, BaseAmountCents: raceBasicCents}, nil},
+		{domain.Plan{Code: "pro", Name: "Pro", BillingInterval: domain.BillingMonthly, BaseAmountCents: raceProCents}, nil},
+		{domain.Plan{Code: "keeper", Name: "Keeper", BillingInterval: domain.BillingMonthly, BaseAmountCents: raceKeeperCents}, nil},
+		{domain.Plan{Code: "basic-yearly", Name: "Basic Yearly", BillingInterval: domain.BillingYearly, BaseAmountCents: raceBasicCents * 10}, nil},
+		{domain.Plan{Code: "meter-a", Name: "Meter A", BillingInterval: domain.BillingMonthly, BaseAmountCents: raceMeterACents}, []string{raceMeter + "_" + tenantID}},
+		{domain.Plan{Code: "meter-b", Name: "Meter B", BillingInterval: domain.BillingMonthly, BaseAmountCents: raceMeterBCents}, []string{raceMeter + "_" + tenantID}},
 	} {
+		p := pm.p
 		p.Currency = "USD"
 		p.BaseBillTiming = domain.BillInAdvance
 		p.Status = domain.PlanActive
-		created, err := ps.CreatePlan(ctx, tenantID, p)
-		if err != nil {
-			t.Fatalf("create plan %s: %v", p.Code, err)
-		}
-		plans[p.Code] = created
+		plans[p.Code] = createPlanPricing(t, db, ctx, tenantID, p, pm.meters...)
 	}
 
 	items := []domain.SubscriptionItem{{PlanID: plans["basic"].ID, Quantity: qty}}
@@ -326,6 +326,7 @@ func newItemRaceRig(t *testing.T, db *postgres.DB, name string, qty int64, withK
 
 	svc := svcWithStore(store)
 	svc.SetPlanReader(reader)
+	svc.SetPlanMeterReader(pricing.NewPostgresStore(db))
 	h := NewHandler(svc)
 	h.SetDB(db)
 	h.SetProrationDeps(reader, invoices)

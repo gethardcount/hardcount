@@ -9,13 +9,10 @@
  */
 
 /**
- * Per-role map of entity IDs a recipe apply produced (including ADOPTED catalog objects — apply reconnects to an existing meter/rule graph rather than duplicating it, ADR-085). Every field is omitted when empty; clients must guard reads.
+ * Per-role map of entity IDs a recipe apply produced (including ADOPTED meters — apply reconnects to an existing meter rather than duplicating it, ADR-085). Every field is omitted when empty; clients must guard reads.
  */
 export interface RecipeCreatedObjects {
   meter_ids?: string[];
-  rating_rule_ids?: string[];
-  pricing_rule_ids?: string[];
   plan_ids?: string[];
-  dunning_policy_id?: string;
-  webhook_endpoint_id?: string;
+  price_ids?: string[];
 }

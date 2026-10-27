@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/table'
 import { formatCents, formatDate, getCurrencySymbol } from '@/lib/api'
 import { formatCivilPeriod } from '@/lib/dates'
+import { USAGE_ESTIMATE_NOTE } from '@/lib/activityPeriod'
 import { marginCardView } from '@/lib/actionOutcomes'
 import { formatMarginBps, marginCostNote, marginCostState } from '@/lib/marginCost'
 import {
@@ -23,7 +24,7 @@ import { useCurrentCycleUsage, useLastInvoicedPeriod, useLatestUsageAt } from '@
 // Margin (ADR-079): rated usage revenue vs stamped provider COGS over an
 // operator-picked window. Operator-only surface — COGS never renders on
 // customer-facing pages. Attribution is honest by design: per-model margin
-// shows only where pricing rules pin the model; everything else appears as
+// shows only where the price that billed the usage names the model; everything else appears as
 // "not model-attributed" rather than being split by heuristic.
 //
 // The card opens on the customer's current billing period, with the last
@@ -122,6 +123,10 @@ export function MarginCard({ customerId, customerTestClockId, currency }: { cust
                 {formatCivilPeriod(marginWindow.from, marginWindow.to, undefined)}
               </p>
             )}
+            {/* The report always prices a window the card sends, so its
+                "Usage billed" is an estimate at current prices, without
+                canceled subscriptions (ADR-130 §10). */}
+            <p className="text-xs text-muted-foreground mt-1">{USAGE_ESTIMATE_NOTE}</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <select

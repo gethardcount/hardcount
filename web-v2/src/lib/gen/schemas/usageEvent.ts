@@ -7,7 +7,7 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
-import type { UsageEventBillingStatus } from './usageEventBillingStatus';
+import type { UsageBillingStatus } from './usageBillingStatus';
 import type { UsageEventDimensions } from './usageEventDimensions';
 import type { UsageEventOrigin } from './usageEventOrigin';
 import type { UsageEventProviderCostSource } from './usageEventProviderCostSource';
@@ -40,15 +40,5 @@ export interface UsageEvent {
      * the cost is unknown.
      */
   provider_cost_source?: UsageEventProviderCostSource;
-  /**
-     * Sent only on the 201 that wrote the event. `after_close`: a
-     * subscription that prices this meter already invoiced the
-     * event's time, so the event is stored but billed on no invoice,
-     * now or later. Bill it with a one-off invoice if it should be
-     * charged. A spend-threshold invoice counts only once it is
-     * paid: until then it can be voided, and then the period's
-     * invoice bills the event. Absent otherwise, which is not a promise that the event
-     * will be billed. Never sent on a replay or a read.
-     */
-  billing_status?: UsageEventBillingStatus;
+  billing_status?: UsageBillingStatus;
 }

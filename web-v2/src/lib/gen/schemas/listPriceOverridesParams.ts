@@ -13,4 +13,8 @@ export type ListPriceOverridesParams = {
  * Only this customer's overrides.
  */
 customer_id?: string;
+/**
+ * Only this price's overrides.
+ */
+price_id?: string;
 };

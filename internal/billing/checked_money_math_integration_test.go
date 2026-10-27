@@ -225,10 +225,7 @@ func TestCheckedMath_PreviewBaseFee(t *testing.T) {
 func twoHugeBuckets(t *testing.T, lf *liveFixture) {
 	t.Helper()
 	for _, m := range []string{"a", "b"} {
-		v := createRule(t, lf, flatRule("model_"+m+"_max", "999999999999999999"))
-		seedPricingRule(t, lf.db, lf.ctx, lf.tenantID, pricing.UpsertMeterPricingRuleInput{
-			MeterID: lf.meterID, RatingRuleVersionID: v.ID, DimensionMatch: map[string]any{"model": m}, Priority: 10,
-		})
+		createRule(t, lf, map[string]string{"model": m}, flatRule("model_"+m+"_max", "999999999999999999"))
 		insertUsageAt(t, lf, lf.cycleStart.Add(time.Minute), "5", map[string]any{"model": m})
 	}
 }
@@ -291,9 +288,9 @@ func TestCheckedMath_ThresholdRunningTotalPastInt64(t *testing.T) {
 func TestCheckedMath_OnCreateSubtotalPastInt64(t *testing.T) {
 	lf := newLiveFixture(t, "Checked On Create", 0)
 	const base = 290_000_000_000_000_000 // × 31 days fits int64
-	lf.exec(t, `UPDATE plans SET base_bill_timing = 'in_advance', base_amount_cents = $1, meter_ids = '[]'::jsonb WHERE id = $2`, base, lf.planID)
+	lf.exec(t, `UPDATE plans SET base_bill_timing = 'in_advance', base_amount_cents = $1 WHERE id = $2`, base, lf.planID)
 	for i := range 34 {
-		p, err := lf.pricingSvc.CreatePlan(lf.ctx, lf.tenantID, pricing.CreatePlanInput{
+		p, _, err := lf.pricingSvc.CreatePlan(lf.ctx, lf.tenantID, pricing.CreatePlanInput{
 			Code: fmt.Sprintf("pln_big_%d", i), Name: fmt.Sprintf("Big %d", i), Currency: "USD",
 			BillingInterval: domain.BillingMonthly, BaseAmountCents: base, BaseBillTiming: domain.BillInAdvance,
 		})
@@ -364,10 +361,7 @@ func TestCheckedMath_ThresholdFiresWhenBasePlusUsagePastInt64(t *testing.T) {
 			lf := newLiveFixture(t, "Checked Threshold "+tc.name, 0)
 			setBase(t, lf, tc.base, tc.qty)
 			if tc.huge {
-				v := createRule(t, lf, flatRule("model_huge", "999999999999999999"))
-				seedPricingRule(t, lf.db, lf.ctx, lf.tenantID, pricing.UpsertMeterPricingRuleInput{
-					MeterID: lf.meterID, RatingRuleVersionID: v.ID, DimensionMatch: map[string]any{"model": "huge"}, Priority: 10,
-				})
+				createRule(t, lf, map[string]string{"model": "huge"}, flatRule("model_huge", "999999999999999999"))
 				insertUsageAt(t, lf, lf.cycleStart.Add(time.Minute), "5", map[string]any{"model": "huge"})
 			} else {
 				insertUsageAt(t, lf, lf.cycleStart.Add(time.Minute), "100", nil)
@@ -404,20 +398,19 @@ func TestCheckedMath_ThresholdFiresWhenBasePlusUsagePastInt64(t *testing.T) {
 // total below the cap that skips the fire.
 func TestCheckedMath_ThresholdCapRunningPastInt64(t *testing.T) {
 	lf := newLiveFixture(t, "Checked Threshold Cap Running", 0)
-	v := createRule(t, lf, flatRule("model_huge", "999999999999999999"))
-	seedPricingRule(t, lf.db, lf.ctx, lf.tenantID, pricing.UpsertMeterPricingRuleInput{
-		MeterID: lf.meterID, RatingRuleVersionID: v.ID, DimensionMatch: map[string]any{"model": "huge"}, Priority: 10,
-	})
+	createRule(t, lf, map[string]string{"model": "huge"}, flatRule("model_huge", "999999999999999999"))
 	insertUsageAt(t, lf, lf.cycleStart.Add(time.Minute), "5", map[string]any{"model": "huge"})
 
-	maxRule := createRule(t, lf, flatRule("gpu_peak", "999999999999999999"))
 	maxMeter, err := lf.pricingSvc.CreateMeter(lf.ctx, lf.tenantID, pricing.CreateMeterInput{
-		EventName: "gpu", Name: "GPU Concurrency", Unit: "gpus", Aggregation: "max", RatingRuleVersionID: maxRule.ID,
+		EventName: "gpu", Name: "GPU Concurrency", Unit: "gpus", Aggregation: "max",
 	})
 	if err != nil {
 		t.Fatalf("create max meter: %v", err)
 	}
-	lf.exec(t, `UPDATE plans SET meter_ids = meter_ids || to_jsonb($1::text) WHERE id = $2`, maxMeter.ID, lf.planID)
+	// The plan is used, so the price is backdated to before the period
+	// opened, as createRule does.
+	gpu := addPrice(t, lf.db, lf.ctx, lf.tenantID, lf.planID, priceOn{meterID: maxMeter.ID, shape: perUnitShape("999999999999999999")})
+	backdatePriceVersions(t, lf.db, lf.ctx, gpu.ID, lf.cycleStart.Add(-2*time.Hour))
 	lf.insertUsage(t, maxMeter.ID, 5, lf.cycleStart.Add(time.Minute))
 
 	if _, err := lf.subSvc.SetBillingThresholds(lf.ctx, lf.tenantID, lf.subID, subscription.BillingThresholdsInput{AmountGTE: 1}); err != nil {

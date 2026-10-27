@@ -177,6 +177,31 @@ and create the database, then run `velox-bootstrap`), or point Velox at a
 new one. Never run `docker compose down -v` on a volume another checkout
 uses.
 
+## 00212 found prices it does not move
+
+**Symptom:** a line like this, with one count for each kind of row found:
+
+```
+migration 00212_plan_prices.sql failed: ERROR: migration 00212 moves usage prices from meters to plans, and this database has prices it does not move:
+  3 rating rule version(s)
+  2 meter pricing rule(s)
+  1 customer price override(s)
+  2 plan(s) with meters
+  12 invoice line(s) priced by a rating rule
+```
+
+**Why:** from this release a usage price belongs to a plan (ADR-130). Rating
+rules, meter pricing rules and a meter's default price are gone, a price
+override names a plan price, and a plan's meters are the meters it has a
+price for. The migration moves no price, and nothing was changed. This
+release has no upgrade path from Velox 0.8.x, so a production database never
+reaches this step: install fresh (see the v0.9.0 release notes).
+
+**Fix:** a development database cannot keep these rows. Re-create it (drop
+and create the database, then run `velox-bootstrap`), or point Velox at a
+new one. Never run `docker compose down -v` on a volume another checkout
+uses.
+
 ## It waited 5s for a table lock
 
 First stop the API: see [Before anything else](#before-anything-else).

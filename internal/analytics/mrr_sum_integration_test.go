@@ -35,7 +35,7 @@ func TestMRRMovement_TotalPastInt64Fails(t *testing.T) {
 		t.Helper()
 		p, err := pstore.CreatePlan(ctx, tenantID, domain.Plan{
 			Code: "pln-" + code, Name: code, Currency: "USD", BillingInterval: domain.BillingMonthly,
-			Status: domain.PlanActive, BaseAmountCents: 5_000_000_000_000_000_000, MeterIDs: []string{},
+			Status: domain.PlanActive, BaseAmountCents: 5_000_000_000_000_000_000,
 		})
 		if err != nil {
 			t.Fatalf("create plan: %v", err)

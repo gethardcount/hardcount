@@ -16,15 +16,6 @@ first. Every shipped change, with its date, is in the
 - **Done:** each prepaid credit carries its own currency and pays only
   invoices in that currency. Grant and adjust take a `currency`
   ([ADR-129](adr/129-credit-carries-its-own-currency.md)).
-- **Done:** while a draft, trialing or active subscription uses a meter,
-  Velox refuses three edits that would reprice the billing period already
-  open. A new price version applies from the next period
-  ([how](ai-pricing.md#change-a-price)). The three edits:
-  - editing or deleting a pricing rule;
-  - a new rule that could take usage from a price that bills it now;
-  - pointing the default price at another price, or removing it.
-
-  Per-plan usage prices (below) replace this check before the release.
 - **Done:** a meter has one aggregation, which every price of it bills
   under. It is fixed once the meter has a usage event; held usage does
   not count. A meter's `key` is now
@@ -45,22 +36,31 @@ first. Every shipped change, with its date, is in the
   signatures must change.
 - **Planned:** the commands in the [first-invoice guide](first-invoice.md)
   run in CI, so a change that breaks them fails.
-- **Planned: usage prices set per plan.** Today a usage price is set on the
-  meter, so two plans that charge different token rates need two meters.
-  In v0.9.0, each plan sets its own price for each meter, and a price edit
-  takes effect at each subscriber's next billing period. The pricing API
-  changes. The design is
-  [ADR-130](adr/130-usage-prices-belong-to-the-plan.md). v0.9.0 is
-  released after this ships.
+- **Done: usage prices are set per plan.** A price belongs to a plan, so
+  two plans can charge different rates for one meter. A price change applies
+  at once on a plan no one has subscribed to, and from each subscriber's next
+  billing period otherwise, on a test clock too. A subscriber who first
+  joins the plan in a period after a change pays it from then. A customer's negotiated
+  rate names one plan price. Rating rules, meter pricing rules and a meter's
+  default price are gone
+  ([ADR-130](adr/130-usage-prices-belong-to-the-plan.md)).
+- **Done:** a recipe file holds only meters and plans with their
+  prices, and an install creates nothing else: no dunning policy and no
+  webhook endpoint.
+- **Done:** the answer to a usage event says when Velox, as it stored
+  the event, found a reason it is not billed: no price of the plan takes
+  it, the plan does not price its meter, no subscription covers its time,
+  or its period was already invoiced. A batch answer gives each event's status
+  ([ADR-130](adr/130-usage-prices-belong-to-the-plan.md) §12).
+- **Not in v0.9.0:** a base fee change that waits for each subscriber's
+  next period. The base fee stays locked while a subscription that is not
+  canceled uses the plan; to change it, create a new plan and move subscribers to it
+  ([ADR-130](adr/130-usage-prices-belong-to-the-plan.md) section 5).
 
 Everything else v0.9.0 changes: [Unreleased](../CHANGELOG.md#unreleased).
 
 Also now, in v0.9.0 or right after it:
 
-- The answer to a usage event says when Velox stores it but will not bill
-  it: the customer's plan does not price that meter, or no subscription
-  covers the event's time. It already says so for usage that arrives after its period was
-  invoiced. A batch answer will give each event's status.
 - A secret API key that can only send usage, for LiteLLM and other
   gateways.
 
@@ -75,6 +75,10 @@ Also now, in v0.9.0 or right after it:
 - **Generated SDKs for Go and TypeScript,** built from
   [`api/openapi.yaml`](../api/openapi.yaml), once the per-plan pricing API
   has settled.
+- **Billed or not, on each usage event.** The Usage page shows whether an
+  invoice billed each event and, if not, why, with a filter. Velox records
+  it when it invoices the period, so it says what the invoice did. Today
+  only the answer to the event says what Velox found when it arrived.
 
 ## Later
 
@@ -90,6 +94,9 @@ Each item waits until someone using Velox needs it:
   expects more than 5 million a day ([scale](scale.md#if-you-need-more)).
 - Quarterly billing, volume tiers, a start date on subscriptions, and
   currencies with no minor unit, such as JPY.
+- Monthly usage on a yearly plan, on one subscription. Today a yearly plan
+  bills its usage at the end of the year; for monthly usage, add a monthly
+  subscription ([how](ai-pricing.md#usage-on-a-yearly-plan)).
 - Billing late usage on the next invoice.
 - Automatic credit top-ups.
 - Importing LLM prices from a public price list.
@@ -97,6 +104,8 @@ Each item waits until someone using Velox needs it:
 - Data deletion, compliance documents (SOC 2, audit-log retention), and
   roles that limit what a team member can do. Every team member has full
   access today.
+- A base fee edit on a used plan that applies from each subscriber's next
+  period.
 - Bulk actions, moving many subscriptions to a new plan at once, and a tool
   to move from Stripe Billing.
 - A Helm chart and a Terraform module. Docker Compose is the supported

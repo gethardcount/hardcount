@@ -58,7 +58,7 @@ func TestE2E_CustomerIDIsTenantAndModeScoped(t *testing.T) {
 
 	resp := doPost(t, ts, "/v1/plans", aLive, map[string]any{
 		"code": "scope-plan", "name": "Scope Plan", "currency": "USD",
-		"billing_interval": "monthly", "base_amount_cents": 1000,
+		"billing_interval": "monthly", "base_amount_cents": 1000, "base_bill_timing": "in_arrears",
 	})
 	assertStatus(t, resp, 201)
 	planID := readJSON(t, resp)["id"].(string)
@@ -135,22 +135,22 @@ func TestE2E_CustomerIDIsTenantAndModeScoped(t *testing.T) {
 // scopeRefs is one set of objects a request can name: the caller's own, or a
 // set the caller must not be able to reference.
 type scopeRefs struct {
-	cus, ext, rule, meter, meterKey, plan, plan2, plan3 string
-	sub, item, activeSub, activeItem                    string
-	draftInv, finalInv, creditNote, dunningRun          string
-	policy, override, hook, rate, apiKey                string
+	cus, ext, price, meter, meterKey, plan, plan2, plan3 string
+	sub, item, activeSub, activeItem                     string
+	draftInv, finalInv, creditNote, dunningRun           string
+	policy, override, hook, rate, apiKey                 string
 }
 
 func (r scopeRefs) ids() []string {
 	return []string{
-		r.cus, r.ext, r.rule, r.meter, r.meterKey, r.plan, r.plan2, r.plan3, r.sub, r.item, r.activeSub, r.activeItem,
+		r.cus, r.ext, r.price, r.meter, r.meterKey, r.plan, r.plan2, r.plan3, r.sub, r.item, r.activeSub, r.activeItem,
 		r.draftInv, r.finalInv, r.creditNote, r.dunningRun, r.policy, r.override, r.hook, r.rate, r.apiKey,
 	}
 }
 
 // TestE2E_ReferencedIDsAreTenantAndModeScoped widens the test above from
 // three endpoints to every operator endpoint that writes a row naming another
-// object: by a customer, subscription, invoice, plan, meter, rating rule,
+// object: by a customer, subscription, invoice, plan, meter, price,
 // dunning policy or test clock id in the body, or by the id in the path.
 //
 // Each request is sent three times, naming another tenant's object, the same
@@ -221,22 +221,25 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 			return out
 		}
 		id := func(m map[string]any) string { return m["id"].(string) }
-		plan := func(code string, cents int, meters []string) string {
-			return id(create("POST", "/v1/plans", map[string]any{
+		plan := func(code string, cents int, meters []string) map[string]any {
+			prices := []map[string]any{}
+			for _, m := range meters {
+				prices = append(prices, map[string]any{"meter_id": m, "mode": "per_unit", "unit_amount_cents": "100"})
+			}
+			return create("POST", "/v1/plans", map[string]any{
 				"code": code, "name": code, "currency": "USD", "billing_interval": "monthly",
-				"base_amount_cents": cents, "meter_ids": meters,
-			}))
+				"base_amount_cents": cents, "base_bill_timing": "in_arrears", "prices": prices,
+			})
 		}
 		r := scopeRefs{ext: tag + "_cus", meterKey: tag + "_meter"}
-		r.rule = id(create("POST", "/v1/rating-rules", map[string]any{
-			"rule_key": tag + "_rule", "name": "rule", "mode": "per_unit", "currency": "USD", "unit_amount_cents": 100,
-		}))
 		r.meter = id(create("POST", "/v1/meters", map[string]any{
-			"event_name": r.meterKey, "name": "meter", "unit": "unit", "aggregation": "sum", "rating_rule_version_id": r.rule,
+			"event_name": r.meterKey, "name": "meter", "unit": "unit", "aggregation": "sum",
 		}))
-		r.plan = plan(tag+"-plan", 1000, []string{r.meter})
-		r.plan2 = plan(tag+"-plan2", 2000, nil)
-		r.plan3 = plan(tag+"-plan3", 3000, nil)
+		withPrice := plan(tag+"-plan", 1000, []string{r.meter})
+		r.plan = id(withPrice)
+		r.price = id(withPrice["prices"].([]any)[0].(map[string]any))
+		r.plan2 = id(plan(tag+"-plan2", 2000, nil))
+		r.plan3 = id(plan(tag+"-plan3", 3000, nil))
 		r.cus = id(create("POST", "/v1/customers", map[string]any{"external_id": r.ext, "display_name": tag}))
 		sub := create("POST", "/v1/subscriptions", map[string]any{
 			"code": tag + "-sub", "display_name": "sub", "customer_id": r.cus, "items": []map[string]any{{"plan_id": r.plan}},
@@ -264,7 +267,7 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 			}
 		})
 		r.override = id(create("POST", "/v1/price-overrides", map[string]any{
-			"customer_id": cus2, "rating_rule_version_id": r.rule, "mode": "per_unit", "unit_amount_cents": 50,
+			"customer_id": cus2, "price_id": r.price, "mode": "per_unit", "unit_amount_cents": "50",
 		}))
 		r.hook = id(create("POST", "/v1/webhook-endpoints/endpoints", map[string]any{"url": "https://example.com/" + tag})["endpoint"].(map[string]any))
 		r.rate = id(create("PUT", "/v1/provider-costs", map[string]any{
@@ -283,7 +286,7 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 		{"another tenant's", seed(bLive, keyBLive, "tenant")},
 		{"same tenant, other mode", seed(aTest, keyATest, "mode")},
 		{"unknown id", scopeRefs{
-			cus: "vlx_cus_missing", ext: "missing_cus", rule: "vlx_rrv_missing", meter: "vlx_mtr_missing", meterKey: "missing_meter",
+			cus: "vlx_cus_missing", ext: "missing_cus", price: "vlx_prc_missing", meter: "vlx_mtr_missing", meterKey: "missing_meter",
 			plan: "vlx_pln_missing", plan2: "vlx_pln_missing2", plan3: "vlx_pln_missing3",
 			sub: "vlx_sub_missing", item: "vlx_si_missing", activeSub: "vlx_sub_missing2", activeItem: "vlx_si_missing2",
 			draftInv: "vlx_inv_missing", finalInv: "vlx_inv_missing2", creditNote: "vlx_cn_missing", dunningRun: "vlx_drun_missing",
@@ -362,7 +365,7 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 			return map[string]any{"customer_id": f.cus, "line_items": line}
 		}, 404, "customer not found", 201},
 		{"fixed: price override create [customer_id]", "POST", fixed("/v1/price-overrides"), func(o, f scopeRefs) any {
-			return map[string]any{"customer_id": f.cus, "rating_rule_version_id": o.rule, "mode": "per_unit", "unit_amount_cents": 50}
+			return map[string]any{"customer_id": f.cus, "price_id": o.price, "mode": "per_unit", "unit_amount_cents": "50"}
 		}, 404, "customer not found", 201},
 		{"fixed: billing profile upsert [path customer]", "PUT", at("/v1/customers/%s/billing-profile", cus), func(_, _ scopeRefs) any {
 			return map[string]any{"legal_name": "Legal", "country": "US"}
@@ -406,37 +409,31 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 			return map[string]any{"resolution": "invoice_voided"}
 		}, 404, "", 0},
 
-		// --- meter and rating rule ids ---
-		{"plan create [meter_ids]", "POST", fixed("/v1/plans"), func(_, f scopeRefs) any {
-			return map[string]any{"code": "p-" + suffix(f.meter), "name": "p", "currency": "USD", "billing_interval": "monthly", "base_amount_cents": 1000, "meter_ids": []string{f.meter}}
-		}, 422, "", 201},
-		{"plan update [meter_ids]", "PATCH", func(o, _ scopeRefs) string { return "/v1/plans/" + o.plan3 }, func(_, f scopeRefs) any {
-			return map[string]any{"meter_ids": []string{f.meter}}
-		}, 422, "not found", 0},
+		// --- meter and price ids ---
+		{"plan create [prices[].meter_id]", "POST", fixed("/v1/plans"), func(_, f scopeRefs) any {
+			return map[string]any{"code": "p-" + suffix(f.meter), "name": "p", "currency": "USD", "billing_interval": "monthly",
+				"base_amount_cents": 1000, "base_bill_timing": "in_arrears",
+				"prices": []map[string]any{{"meter_id": f.meter, "mode": "per_unit", "unit_amount_cents": "1"}}}
+		}, 422, "not found", 201},
+		{"plan price add [meter_id]", "POST", func(o, _ scopeRefs) string { return "/v1/plans/" + o.plan3 + "/prices" }, func(_, f scopeRefs) any {
+			return map[string]any{"meter_id": f.meter, "dimension_match": map[string]any{"k": "by-meter"}, "mode": "per_unit", "unit_amount_cents": "1"}
+		}, 422, "not found", 201},
+		{"plan price add [path plan]", "POST", at("/v1/plans/%s/prices", func(f scopeRefs) string { return f.plan3 }), func(o, _ scopeRefs) any {
+			return map[string]any{"meter_id": o.meter, "dimension_match": map[string]any{"k": "by-path"}, "mode": "per_unit", "unit_amount_cents": "1"}
+		}, 404, "", 201},
+		{"plan price edit [path price]", "PATCH", func(o, f scopeRefs) string { return "/v1/plans/" + o.plan + "/prices/" + f.price }, func(_, _ scopeRefs) any {
+			return map[string]any{"mode": "per_unit", "unit_amount_cents": "2"}
+		}, 404, "", 200},
+		{"plan price remove [path price]", "DELETE", func(o, f scopeRefs) string { return "/v1/plans/" + o.plan + "/prices/" + f.price }, none, 404, "", 0},
 		{"plan update [path plan]", "PATCH", at("/v1/plans/%s", func(f scopeRefs) string { return f.plan2 }), func(_, _ scopeRefs) any {
 			return map[string]any{"name": "renamed"}
 		}, 404, "", 200},
-		{"fixed: meter create [rating_rule_version_id]", "POST", fixed("/v1/meters"), func(_, f scopeRefs) any {
-			return map[string]any{"event_name": "m_" + suffix(f.rule), "name": "m", "unit": "unit", "aggregation": "sum", "rating_rule_version_id": f.rule}
-		}, 422, "rating rule not found", 201},
-		{"meter update [rating_rule_version_id]", "PATCH", func(o, _ scopeRefs) string { return "/v1/meters/" + o.meter }, func(_, f scopeRefs) any {
-			return map[string]any{"rating_rule_version_id": f.rule}
-		}, 422, "", 200},
 		{"meter update [path meter]", "PATCH", at("/v1/meters/%s", func(f scopeRefs) string { return f.meter }), func(_, _ scopeRefs) any {
 			return map[string]any{"name": "renamed"}
 		}, 404, "", 200},
-		// Control 409: the own meter and rule resolve, then the meter-in-use
-		// guard (D05) refuses, because two subscriptions use the meter and it
-		// has a default price. The guard runs only after both ids resolved.
-		{"meter pricing rule upsert [path meter]", "POST", at("/v1/meters/%s/pricing-rules", func(f scopeRefs) string { return f.meter }), func(o, _ scopeRefs) any {
-			return map[string]any{"rating_rule_version_id": o.rule, "dimension_match": map[string]any{"k": "v"}}
-		}, 422, "", 409},
-		{"meter pricing rule upsert [rating_rule_version_id]", "POST", func(o, _ scopeRefs) string { return "/v1/meters/" + o.meter + "/pricing-rules" }, func(_, f scopeRefs) any {
-			return map[string]any{"rating_rule_version_id": f.rule, "dimension_match": map[string]any{"k": "v"}}
-		}, 422, "", 409},
-		{"price override create [rating_rule_version_id]", "POST", fixed("/v1/price-overrides"), func(o, f scopeRefs) any {
-			return map[string]any{"customer_id": o.cus, "rating_rule_version_id": f.rule, "mode": "per_unit", "unit_amount_cents": 50}
-		}, 422, "", 201},
+		{"price override create [price_id]", "POST", fixed("/v1/price-overrides"), func(o, f scopeRefs) any {
+			return map[string]any{"customer_id": o.cus, "price_id": f.price, "mode": "per_unit", "unit_amount_cents": "50"}
+		}, 422, "not found", 201},
 		{"price override delete [path override]", "DELETE", at("/v1/price-overrides/%s", func(f scopeRefs) string { return f.override }), none, 404, "", 200},
 		{"usage ingest [event_name]", "POST", fixed("/v1/usage-events"), func(o, f scopeRefs) any {
 			return map[string]any{"external_customer_id": o.ext, "event_name": f.meterKey, "quantity": 1, "idempotency_key": "scope-ingest-meter-" + f.meterKey}

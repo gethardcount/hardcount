@@ -19,7 +19,6 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/customer"
 	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/pricing"
 	"github.com/sagarsuperuser/velox/internal/usage"
@@ -56,29 +55,22 @@ func unpricedCounter(t *testing.T, meterID string) float64 {
 	return 0
 }
 
-// tokensMeter creates a sum meter with ONE pricing rule {model: a} at 1c and
-// no default binding, so model=b usage matches no price.
+// tokensMeter creates a sum meter. Its plans price it with modelA alone, so
+// model=b usage matches no price.
 func tokensMeter(t *testing.T, ctx context.Context, f *thresholdFixture, key string) domain.Meter {
 	t.Helper()
-	rr, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: key + "_a", Name: key + " a", Mode: domain.PricingPerUnit,
-		Currency: "USD", UnitAmountCents: decimal.NewFromInt(1),
-	})
-	if err != nil {
-		t.Fatalf("create rule: %v", err)
-	}
 	m, err := f.pricingSvc.CreateMeter(ctx, f.tenantID, pricing.CreateMeterInput{
 		EventName: key, Name: key, Unit: "tokens", Aggregation: "sum",
 	})
 	if err != nil {
 		t.Fatalf("create meter: %v", err)
 	}
-	if _, err := f.pricingSvc.UpsertMeterPricingRule(ctx, f.tenantID, pricing.UpsertMeterPricingRuleInput{
-		MeterID: m.ID, RatingRuleVersionID: rr.ID, DimensionMatch: map[string]any{"model": "a"},
-	}); err != nil {
-		t.Fatalf("bind rule: %v", err)
-	}
 	return m
+}
+
+// modelA is the one price of a tokens meter: model=a at 1c.
+func modelA(meterID string) pricing.PriceInput {
+	return pricing.PriceInput{MeterID: meterID, DimensionMatch: map[string]string{"model": "a"}, PriceShape: perUnitShape("1")}
 }
 
 // seedUnpricedSub creates a customer and an active subscription on planID
@@ -178,9 +170,9 @@ func TestUnpricedUsage_ThresholdThenCycle_CountedOnce(t *testing.T) {
 	logs := captureLogs(t)
 
 	tok := tokensMeter(t, ctx, f, "tok_thr")
-	plan, err := f.pricingSvc.CreatePlan(ctx, f.tenantID, pricing.CreatePlanInput{
+	plan, _, err := f.pricingSvc.CreatePlan(ctx, f.tenantID, pricing.CreatePlanInput{
 		Code: "pln_unpriced_thr", Name: "Unpriced Thr", Currency: "USD",
-		BillingInterval: domain.BillingMonthly, MeterIDs: []string{f.meterID, tok.ID},
+		BillingInterval: domain.BillingMonthly, Prices: []pricing.PriceInput{{MeterID: f.meterID, PriceShape: perUnitShape("1")}, modelA(tok.ID)},
 	})
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
@@ -205,7 +197,7 @@ func TestUnpricedUsage_ThresholdThenCycle_CountedOnce(t *testing.T) {
 	if got := unpricedCounter(t, tok.ID); got != 70 {
 		t.Fatalf("after the threshold invoice: counter = %v, want 70 (the pre-fire unpriced quantity)", got)
 	}
-	if !strings.Contains(logs.String(), "threshold: usage matched no rating rule and meter has no default binding") ||
+	if !strings.Contains(logs.String(), "threshold: usage matched no price of its plan") ||
 		!strings.Contains(logs.String(), "quantity=70") {
 		t.Errorf("threshold invoice must log the unpriced quantity like the cycle path does; logs:\n%s", logs.String())
 	}
@@ -231,11 +223,11 @@ func TestUnpricedUsage_ThresholdThenCycle_CountedOnce(t *testing.T) {
 	}
 }
 
-// TestUnpricedUsage_CycleClose_CountsBothPaths: one invoice built with a
-// priced line, an unpriced dimension (multi-rule path) and a meter whose only
-// price was unlinked before the subscription existed (single-rule path).
-// The preview warning carries each quantity; the close counts each one once.
-func TestUnpricedUsage_CycleClose_CountsBothPaths(t *testing.T) {
+// TestUnpricedUsage_CycleClose_CountsEachMeter: one invoice built with a
+// priced line and the unpriced usage of two meters: a model=b event, and an
+// event with no labels on a meter its plan prices only for region=eu. The
+// preview warning carries each quantity; the close counts each one once.
+func TestUnpricedUsage_CycleClose_CountsEachMeter(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration: skipped in -short mode")
 	}
@@ -244,30 +236,19 @@ func TestUnpricedUsage_CycleClose_CountsBothPaths(t *testing.T) {
 	defer cancel()
 
 	tok := tokensMeter(t, ctx, f, "tok_cyc")
-	rr, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "seats_flat", Name: "Seats", Mode: domain.PricingPerUnit,
-		Currency: "USD", UnitAmountCents: decimal.NewFromInt(5),
-	})
-	if err != nil {
-		t.Fatalf("create rule: %v", err)
-	}
 	single, err := f.pricingSvc.CreateMeter(ctx, f.tenantID, pricing.CreateMeterInput{
-		EventName: "seats_cyc", Name: "Seats", Unit: "seats", Aggregation: "sum", RatingRuleVersionID: rr.ID,
+		EventName: "seats_cyc", Name: "Seats", Unit: "seats", Aggregation: "sum",
 	})
 	if err != nil {
 		t.Fatalf("create meter: %v", err)
 	}
-	plan, err := f.pricingSvc.CreatePlan(ctx, f.tenantID, pricing.CreatePlanInput{
+	plan, _, err := f.pricingSvc.CreatePlan(ctx, f.tenantID, pricing.CreatePlanInput{
 		Code: "pln_unpriced_cyc", Name: "Unpriced Cyc", Currency: "USD",
-		BillingInterval: domain.BillingMonthly, MeterIDs: []string{tok.ID, single.ID},
+		BillingInterval: domain.BillingMonthly, Prices: []pricing.PriceInput{modelA(tok.ID),
+			{MeterID: single.ID, DimensionMatch: map[string]string{"region": "eu"}, PriceShape: perUnitShape("1")}},
 	})
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
-	}
-	// No live subscription yet, so unlinking the only price is allowed.
-	empty := ""
-	if _, err := f.pricingSvc.UpdateMeter(ctx, f.tenantID, single.ID, pricing.UpdateMeterInput{RatingRuleVersionID: &empty}); err != nil {
-		t.Fatalf("unlink before any subscription: %v", err)
 	}
 	custID, subID := seedUnpricedSub(t, ctx, f, "cus_unpriced_cyc", plan.ID, 0)
 
@@ -290,10 +271,10 @@ func TestUnpricedUsage_CycleClose_CountsBothPaths(t *testing.T) {
 		t.Fatalf("generated = %d, want 1 (the model=a line)", generated)
 	}
 	if got := unpricedCounter(t, tok.ID); got != 25 {
-		t.Errorf("multi-rule meter: counter = %v, want 25", got)
+		t.Errorf("tokens meter: counter = %v, want 25", got)
 	}
 	if got := unpricedCounter(t, single.ID); got != 7 {
-		t.Errorf("single-rule meter: counter = %v, want 7", got)
+		t.Errorf("seats meter: counter = %v, want 7", got)
 	}
 }
 
@@ -309,9 +290,9 @@ func TestUnpricedUsage_ImmediateCancel_NoInvoice_Counted(t *testing.T) {
 	defer cancel()
 
 	tok := tokensMeter(t, ctx, f, "tok_cxl")
-	plan, err := f.pricingSvc.CreatePlan(ctx, f.tenantID, pricing.CreatePlanInput{
+	plan, _, err := f.pricingSvc.CreatePlan(ctx, f.tenantID, pricing.CreatePlanInput{
 		Code: "pln_unpriced_cxl", Name: "Unpriced Cxl", Currency: "USD",
-		BillingInterval: domain.BillingMonthly, MeterIDs: []string{tok.ID},
+		BillingInterval: domain.BillingMonthly, Prices: []pricing.PriceInput{modelA(tok.ID)},
 	})
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
@@ -359,27 +340,15 @@ func TestUnpricedUsage_MaxMeter_ThresholdLeavesItToClose(t *testing.T) {
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 120*time.Second)
 	defer cancel()
 
-	rr, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "gpu_a", Name: "GPU a", Mode: domain.PricingPerUnit,
-		Currency: "USD", UnitAmountCents: decimal.NewFromInt(1),
-	})
-	if err != nil {
-		t.Fatalf("create rule: %v", err)
-	}
 	gpu, err := f.pricingSvc.CreateMeter(ctx, f.tenantID, pricing.CreateMeterInput{
 		EventName: "gpu_max", Name: "GPU", Unit: "gpus", Aggregation: "max",
 	})
 	if err != nil {
 		t.Fatalf("create meter: %v", err)
 	}
-	if _, err := f.pricingSvc.UpsertMeterPricingRule(ctx, f.tenantID, pricing.UpsertMeterPricingRuleInput{
-		MeterID: gpu.ID, RatingRuleVersionID: rr.ID, DimensionMatch: map[string]any{"model": "a"},
-	}); err != nil {
-		t.Fatalf("bind rule: %v", err)
-	}
-	plan, err := f.pricingSvc.CreatePlan(ctx, f.tenantID, pricing.CreatePlanInput{
+	plan, _, err := f.pricingSvc.CreatePlan(ctx, f.tenantID, pricing.CreatePlanInput{
 		Code: "pln_unpriced_max", Name: "Unpriced Max", Currency: "USD",
-		BillingInterval: domain.BillingMonthly, MeterIDs: []string{f.meterID, gpu.ID},
+		BillingInterval: domain.BillingMonthly, Prices: []pricing.PriceInput{{MeterID: f.meterID, PriceShape: perUnitShape("1")}, modelA(gpu.ID)},
 	})
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
@@ -422,9 +391,9 @@ func TestUnpricedUsage_ImmediateCancelTx_WithInvoice_Counted(t *testing.T) {
 	defer cancel()
 
 	tok := tokensMeter(t, ctx, f, "tok_cxltx")
-	plan, err := f.pricingSvc.CreatePlan(ctx, f.tenantID, pricing.CreatePlanInput{
+	plan, _, err := f.pricingSvc.CreatePlan(ctx, f.tenantID, pricing.CreatePlanInput{
 		Code: "pln_unpriced_cxltx", Name: "Unpriced Cxl Tx", Currency: "USD",
-		BillingInterval: domain.BillingMonthly, MeterIDs: []string{tok.ID},
+		BillingInterval: domain.BillingMonthly, Prices: []pricing.PriceInput{modelA(tok.ID)},
 	})
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
@@ -476,46 +445,35 @@ func TestUnpricedUsage_ImmediateCancelTx_WithInvoice_Counted(t *testing.T) {
 	}
 }
 
-// TestUnpricedUsage_PricedAfterThresholdFire pins what the meter-in-use
-// guard's allowed edits bill (ADR-070 and ADR-085 amendments, #1362). A new
-// rule for a model no rule prices is allowed on a meter in use. When a spend
-// threshold already invoiced the subscription this period, the close bills a
-// sum or count price only for the usage after that invoice: the usage before
-// it stays unbilled (the threshold invoice left it out, ADR-096). A max price
-// is billed over the whole period, because the close reads non-additive
-// prices the fire did not bill over the full window (ADR-066 §4).
-func TestUnpricedUsage_PricedAfterThresholdFire(t *testing.T) {
+// TestUnpricedUsage_PriceAddedMidPeriodBillsNextPeriod: a price added to a
+// used plan takes part from each subscriber's next period (ADR-130 §5).
+// There is no exception for a price that only prices unpriced usage: the
+// period open at the add leaves model=b unbilled, on the threshold invoice
+// and on the close, for a sum meter and a max meter alike, and the next
+// period bills it.
+func TestUnpricedUsage_PriceAddedMidPeriodBillsNextPeriod(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration: skipped in -short mode")
 	}
-	cases := []struct {
-		name string
-		mode string // the tokens meter's aggregation
-		want int64
-	}{
-		{"sum price bills only the usage after the threshold invoice", domain.AggregationSum, 30},
-		{"max price bills the whole period", domain.AggregationMax, 70},
-	}
-	for i, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			f := newThresholdFixture(t, "Priced After Fire "+string(tc.mode))
+	for _, mode := range []string{domain.AggregationSum, domain.AggregationMax} {
+		t.Run(mode, func(t *testing.T) {
+			f := newThresholdFixture(t, "Priced After Fire "+mode)
 			ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 120*time.Second)
 			defer cancel()
 
-			key := "tok_paf_" + string(tc.mode)
-			tok := tokensMeter(t, ctx, f, key)
+			tok := tokensMeter(t, ctx, f, "tok_paf_"+mode)
 			// The meter has no events yet, so its aggregation can change.
-			if _, err := f.pricingSvc.UpdateMeter(ctx, f.tenantID, tok.ID, pricing.UpdateMeterInput{Aggregation: &tc.mode}); err != nil {
+			if _, err := f.pricingSvc.UpdateMeter(ctx, f.tenantID, tok.ID, pricing.UpdateMeterInput{Aggregation: &mode}); err != nil {
 				t.Fatalf("set the tokens meter's aggregation: %v", err)
 			}
-			plan, err := f.pricingSvc.CreatePlan(ctx, f.tenantID, pricing.CreatePlanInput{
-				Code: "pln_paf_" + string(tc.mode), Name: "Priced After Fire", Currency: "USD",
-				BillingInterval: domain.BillingMonthly, MeterIDs: []string{f.meterID, tok.ID},
+			plan, _, err := f.pricingSvc.CreatePlan(ctx, f.tenantID, pricing.CreatePlanInput{
+				Code: "pln_paf_" + mode, Name: "Priced After Fire", Currency: "USD",
+				BillingInterval: domain.BillingMonthly, Prices: []pricing.PriceInput{{MeterID: f.meterID, PriceShape: perUnitShape("1")}, modelA(tok.ID)},
 			})
 			if err != nil {
 				t.Fatalf("create plan: %v", err)
 			}
-			custID, subID := seedUnpricedSub(t, ctx, f, "cus_paf_"+string(tc.mode), plan.ID, 500)
+			custID, subID := seedUnpricedSub(t, ctx, f, "cus_paf_"+mode, plan.ID, 500)
 
 			// Pre-fire: 1000c of priced calls crosses the 500c cap; 70 tokens
 			// of model=b match no price.
@@ -524,38 +482,18 @@ func TestUnpricedUsage_PricedAfterThresholdFire(t *testing.T) {
 			}
 			ingestUnpricedAt(t, ctx, f, custID, tok.ID, 70, f.cycleStart.Add(20*time.Minute), map[string]any{"model": "b"})
 			fired, scanErrs := f.engine.ScanThresholds(ctx, 50)
-			if len(scanErrs) > 0 {
-				t.Fatalf("scan errors: %v", scanErrs)
-			}
-			if fired != 1 {
-				t.Fatalf("fired = %d, want 1", fired)
+			if len(scanErrs) > 0 || fired != 1 {
+				t.Fatalf("fired = %d, errs %v; want 1", fired, scanErrs)
 			}
 
-			rrB, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
-				RuleKey: key + "_b", Name: key + " b", Mode: domain.PricingPerUnit,
-				Currency: "USD", UnitAmountCents: decimal.NewFromInt(int64(2 + i)),
+			pw, err := f.pricingSvc.AddPrice(ctx, f.tenantID, plan.ID, pricing.PriceInput{
+				MeterID: tok.ID, DimensionMatch: map[string]string{"model": "b"}, PriceShape: perUnitShape("2"),
 			})
 			if err != nil {
-				t.Fatalf("create rule b: %v", err)
+				t.Fatalf("add a price for model b: %v", err)
 			}
-			// The guard counts this subscription: changing model a's rule is
-			// refused.
-			rules, err := f.pricingSvc.ListMeterPricingRulesByMeter(ctx, f.tenantID, tok.ID)
-			if err != nil || len(rules) != 1 {
-				t.Fatalf("list rules: %v (%d rules)", err, len(rules))
-			}
-			if _, err := f.pricingSvc.UpsertMeterPricingRule(ctx, f.tenantID, pricing.UpsertMeterPricingRuleInput{
-				MeterID: tok.ID, RatingRuleVersionID: rules[0].RatingRuleVersionID,
-				DimensionMatch: map[string]any{"model": "a"}, Priority: 5,
-			}); errs.Code(err) != "meter_in_use" {
-				t.Fatalf("editing model a's rule: want meter_in_use, got %v", err)
-			}
-			// A rule for model b, which no rule prices, is allowed.
-			if _, err := f.pricingSvc.UpsertMeterPricingRule(ctx, f.tenantID, pricing.UpsertMeterPricingRuleInput{
-				MeterID: tok.ID, RatingRuleVersionID: rrB.ID,
-				DimensionMatch: map[string]any{"model": "b"},
-			}); err != nil {
-				t.Fatalf("pricing model b on a meter in use must be allowed: %v", err)
+			if pw.Effective != pricing.EffectiveNextPeriod {
+				t.Fatalf("effective = %q, want next_period on a used plan", pw.Effective)
 			}
 
 			time.Sleep(10 * time.Millisecond)
@@ -580,16 +518,35 @@ func TestUnpricedUsage_PricedAfterThresholdFire(t *testing.T) {
 					t.Fatalf("lines: %v", err)
 				}
 				for _, li := range lines {
-					if li.RatingRuleVersionID == rrB.ID {
+					if li.PriceID == pw.Price.ID {
 						billedB += li.QuantityDecimal.IntPart()
 					}
 				}
 			}
-			if cycles != 1 {
-				t.Fatalf("cycle invoices = %d, want 1", cycles)
+			// The close has nothing left to bill (the calls were on the
+			// threshold invoice and model b has no price this period), so it
+			// issues no invoice; it still closes the period.
+			if cycles != 0 {
+				t.Fatalf("cycle invoices = %d, want 0", cycles)
 			}
-			if billedB != tc.want {
-				t.Errorf("model b billed quantity = %d, want %d", billedB, tc.want)
+			if sub, err := f.subStore.Get(ctx, f.tenantID, subID); err != nil || sub.CurrentBillingPeriodStart == nil || sub.CurrentBillingPeriodStart.Equal(f.cycleStart) {
+				t.Fatalf("the period must have closed: %+v, %v", sub.CurrentBillingPeriodStart, err)
+			}
+			if billedB != 0 {
+				t.Errorf("model b billed %d in the period the price was added in, want 0: it takes part from the next period", billedB)
+			}
+
+			// The next period prices model b at the added price: 5 tokens at 2c.
+			time.Sleep(10 * time.Millisecond)
+			ingestUnpricedAt(t, ctx, f, custID, tok.ID, 5, time.Now().UTC(), map[string]any{"model": "b"})
+			var nextB int64
+			for _, l := range f.createPreview(t, ctx, custID, subID).Lines {
+				if l.PriceID == pw.Price.ID {
+					nextB += l.AmountCents
+				}
+			}
+			if nextB != 10 {
+				t.Errorf("model b in the next period = %dc, want 10c (5 tokens at the added 2c)", nextB)
 			}
 		})
 	}

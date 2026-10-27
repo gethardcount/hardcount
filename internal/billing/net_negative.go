@@ -16,7 +16,7 @@ import (
 // corrections, so a usage bucket can total below zero over a billing window
 // when the corrections are larger than the usage in that window. A negative
 // quantity has no price (ComputeAmountCents refuses it). Before #1193 the
-// period close and the cancel's final invoice failed on a pricing-rule
+// period close and the cancel's final invoice failed on a price's
 // bucket below zero, so the whole invoice, base fee included, was not made
 // and the close was retried. A single-rule meter below zero was billed 0
 // with no word, because the usage store dropped meter totals at or below
@@ -36,7 +36,7 @@ import (
 // usage usually means an earlier invoice billed the usage it corrects, so
 // that invoice may need a credit note.
 //
-// Granularity: one usage bucket (a meter, or one pricing rule of a meter)
+// Granularity: one usage bucket (the usage one price of a meter took)
 // over one billing window, the unit each path prices. A meter whose buckets
 // or windows have different signs bills its positive ones in full. The
 // window is not always the billing period: after a threshold invoice the
@@ -97,11 +97,11 @@ func (e *Engine) noteNetNegativeTx(ctx context.Context, tx *sql.Tx, sub domain.S
 	meters := make([]map[string]any, 0, len(ids))
 	for _, id := range ids {
 		m := map[string]any{
-			"meter_id":  id,
-			"meter_key": n[id].key,
-			"quantity":  n[id].qty.String(),
-			"from":      n[id].from.UTC().Format(time.RFC3339Nano),
-			"to":        n[id].to.UTC().Format(time.RFC3339Nano),
+			"meter_id":   id,
+			"event_name": n[id].key,
+			"quantity":   n[id].qty.String(),
+			"from":       n[id].from.UTC().Format(time.RFC3339Nano),
+			"to":         n[id].to.UTC().Format(time.RFC3339Nano),
 		}
 		if n[id].name != "" {
 			// The activity line names the meter by its name (ADR-128 rule 5:

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
@@ -110,6 +111,12 @@ func (s *PostgresStore) CreateTx(ctx context.Context, tx *sql.Tx, inst domain.Re
 
 	out, err := scanInstance(row)
 	if err != nil {
+		// Another install of this recipe committed after this one read the
+		// badge. Answer 409 like the meter and plan-code conflicts; a retry
+		// returns that install.
+		if postgres.IsUniqueViolation(err) {
+			return domain.RecipeInstance{}, errs.AlreadyExists("recipe_key", fmt.Sprintf("recipe %q is already installed", inst.RecipeKey))
+		}
 		return domain.RecipeInstance{}, err
 	}
 	return out, nil

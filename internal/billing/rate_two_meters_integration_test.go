@@ -26,23 +26,24 @@ func TestTwoGraduatedMeters_EachContinuesItsOwnTiersAcrossFire_RealStore(t *test
 	lf := newLiveFixture(t, "Two Graduated Meters", 100000)
 	ctx := lf.ctx
 	calls := lf.meterID
-	publishCallsRule(t, lf, gradRule("calls_flat", []domain.RatingTier{
-		{UpTo: new(int64(1000)), UnitAmountCents: decimal.NewFromInt(10)},
-		{UpTo: nil, UnitAmountCents: decimal.NewFromInt(2)},
-	}))
-	tokensRule := createRule(t, lf, gradRule("tokens_grad", []domain.RatingTier{
-		{UpTo: new(int64(500)), UnitAmountCents: decimal.NewFromInt(4)},
-		{UpTo: nil, UnitAmountCents: decimal.NewFromInt(1)},
-	}))
 	tokens, err := lf.pricingSvc.CreateMeter(ctx, lf.tenantID, pricing.CreateMeterInput{
-		EventName: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: "sum", RatingRuleVersionID: tokensRule.ID,
+		EventName: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: "sum",
 	})
 	if err != nil {
 		t.Fatalf("create tokens meter: %v", err)
 	}
-	plan, err := lf.pricingSvc.CreatePlan(ctx, lf.tenantID, pricing.CreatePlanInput{
+	plan, _, err := lf.pricingSvc.CreatePlan(ctx, lf.tenantID, pricing.CreatePlanInput{
 		Code: "pln_two_grad", Name: "Two Graduated", Currency: "USD", BillingInterval: domain.BillingMonthly,
-		MeterIDs: []string{calls, tokens.ID},
+		Prices: []pricing.PriceInput{
+			{MeterID: calls, PriceShape: gradRule("calls", []domain.RatingTier{
+				{UpTo: new(int64(1000)), UnitAmountCents: decimal.NewFromInt(10)},
+				{UpTo: nil, UnitAmountCents: decimal.NewFromInt(2)},
+			}).shape},
+			{MeterID: tokens.ID, PriceShape: gradRule("tokens", []domain.RatingTier{
+				{UpTo: new(int64(500)), UnitAmountCents: decimal.NewFromInt(4)},
+				{UpTo: nil, UnitAmountCents: decimal.NewFromInt(1)},
+			}).shape},
+		},
 	})
 	if err != nil {
 		t.Fatalf("create plan: %v", err)

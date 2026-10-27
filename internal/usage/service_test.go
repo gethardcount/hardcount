@@ -150,7 +150,7 @@ func (m *memStore) AggregateForBillingPeriodByAgg(_ context.Context, _, _ string
 	return map[string]decimal.Decimal{}, nil
 }
 
-func (m *memStore) AggregateClaims(_ context.Context, _, _, _, _ string, _ []domain.UsageClaim, _, _ time.Time) ([]domain.RuleAggregation, error) {
+func (m *memStore) AggregateClaims(_ context.Context, _, _, _, _ string, _ []domain.UsageClaim, _, _ time.Time) ([]domain.ClaimedUsage, error) {
 	return nil, nil
 }
 

@@ -63,37 +63,21 @@ func TestE2E_FullBillingCycle(t *testing.T) {
 		}
 	})
 
-	// 2. Create rating rule (flat $10 per unit)
-	var ruleID string
-	t.Run("create rating rule", func(t *testing.T) {
-		resp := doPost(t, ts, "/v1/rating-rules", auth, map[string]any{
-			"rule_key":          "api_calls",
-			"name":              "API Call Pricing",
-			"mode":              "per_unit",
-			"currency":          "USD",
-			"unit_amount_cents": 1000,
-		})
-		assertStatus(t, resp, 201)
-		body := readJSON(t, resp)
-		ruleID = body["id"].(string)
-	})
-
-	// 3. Create meter linked to the rating rule
+	// 2. Create meter
 	var meterID string
 	t.Run("create meter", func(t *testing.T) {
 		resp := doPost(t, ts, "/v1/meters", auth, map[string]any{
-			"event_name":             "api_calls",
-			"name":                   "API Calls",
-			"unit":                   "calls",
-			"aggregation":            "sum",
-			"rating_rule_version_id": ruleID,
+			"event_name":  "api_calls",
+			"name":        "API Calls",
+			"unit":        "calls",
+			"aggregation": "sum",
 		})
 		assertStatus(t, resp, 201)
 		body := readJSON(t, resp)
 		meterID = body["id"].(string)
 	})
 
-	// 4. Create plan with base fee + meter
+	// 3-4. Create plan with base fee + a $10 per call price on the meter
 	var planID string
 	t.Run("create plan", func(t *testing.T) {
 		resp := doPost(t, ts, "/v1/plans", auth, map[string]any{
@@ -102,7 +86,10 @@ func TestE2E_FullBillingCycle(t *testing.T) {
 			"currency":          "USD",
 			"billing_interval":  "monthly",
 			"base_amount_cents": 2900,
-			"meter_ids":         []string{meterID},
+			"base_bill_timing":  "in_arrears",
+			"prices": []map[string]any{{
+				"meter_id": meterID, "mode": "per_unit", "unit_amount_cents": "1000",
+			}},
 		})
 		assertStatus(t, resp, 201)
 		body := readJSON(t, resp)

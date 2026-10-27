@@ -53,7 +53,7 @@ func TestProperty_Pricing_MonotonicInQuantity(t *testing.T) {
 	r := pricingRand()
 	for i := 0; i < pricingIters; i++ {
 		tiers := genLadder(r)
-		rule := RatingRuleVersion{Mode: PricingGraduated, Tiers: tiers}
+		rule := PriceShape{Mode: PricingGraduated, Tiers: tiers}
 
 		q1 := int64(r.IntN(2000) + 1)
 		q2 := int64(r.IntN(2000) + 1)
@@ -77,14 +77,14 @@ func TestProperty_Pricing_MonotonicInQuantity(t *testing.T) {
 func TestProperty_Pricing_ZeroQuantityIsFree(t *testing.T) {
 	r := pricingRand()
 	for i := 0; i < pricingIters; i++ {
-		var rule RatingRuleVersion
+		var rule PriceShape
 		switch r.IntN(3) {
 		case 0:
-			rule = RatingRuleVersion{Mode: PricingPerUnit, UnitAmountCents: decimal.NewFromInt(int64(r.IntN(10000)))}
+			rule = PriceShape{Mode: PricingPerUnit, UnitAmountCents: decimal.NewFromInt(int64(r.IntN(10000)))}
 		case 1:
-			rule = RatingRuleVersion{Mode: PricingGraduated, Tiers: genLadder(r)}
+			rule = PriceShape{Mode: PricingGraduated, Tiers: genLadder(r)}
 		default:
-			rule = RatingRuleVersion{
+			rule = PriceShape{
 				Mode: PricingPackage, PackageSize: int64(r.IntN(100) + 1),
 				PackageAmountCents: decimal.NewFromInt(int64(r.IntN(10000))),
 			}
@@ -105,7 +105,7 @@ func TestProperty_Pricing_NeverNegative(t *testing.T) {
 	r := pricingRand()
 	for i := 0; i < pricingIters; i++ {
 		tiers := genLadder(r)
-		rule := RatingRuleVersion{Mode: PricingGraduated, Tiers: tiers}
+		rule := PriceShape{Mode: PricingGraduated, Tiers: tiers}
 		q := int64(r.IntN(2000) + 1)
 		got, err := ComputeAmountCents(rule, decimal.NewFromInt(q))
 		if err != nil {
@@ -130,7 +130,7 @@ func TestProperty_Pricing_GraduatedIsSumOfItsTiers(t *testing.T) {
 	r := pricingRand()
 	for i := 0; i < pricingIters; i++ {
 		tiers := genLadder(r)
-		rule := RatingRuleVersion{Mode: PricingGraduated, Tiers: tiers}
+		rule := PriceShape{Mode: PricingGraduated, Tiers: tiers}
 		q := int64(r.IntN(2000) + 1)
 
 		got, err := ComputeAmountCents(rule, decimal.NewFromInt(q))
@@ -174,7 +174,7 @@ func TestProperty_Pricing_PackageChargesWholePackages(t *testing.T) {
 	for i := 0; i < pricingIters; i++ {
 		size := int64(r.IntN(100) + 1)
 		pkgCents := int64(r.IntN(10000))
-		rule := RatingRuleVersion{
+		rule := PriceShape{
 			Mode: PricingPackage, PackageSize: size,
 			PackageAmountCents: decimal.NewFromInt(pkgCents),
 		}
@@ -205,7 +205,7 @@ func TestProperty_Pricing_PackageCountsAnyPart(t *testing.T) {
 	for i := 0; i < pricingIters; i++ {
 		size := r.Int64N(1_000_000_000_000) + 1
 		pkgCents := int64(r.IntN(10000))
-		rule := RatingRuleVersion{
+		rule := PriceShape{
 			Mode: PricingPackage, PackageSize: size,
 			PackageAmountCents: decimal.NewFromInt(pkgCents),
 		}
@@ -237,7 +237,7 @@ func TestProperty_Pricing_PackageCountsAnyPart(t *testing.T) {
 func TestProperty_Pricing_RejectsNegativeQuantity(t *testing.T) {
 	r := pricingRand()
 	for i := 0; i < 500; i++ {
-		rule := RatingRuleVersion{Mode: PricingGraduated, Tiers: genLadder(r)}
+		rule := PriceShape{Mode: PricingGraduated, Tiers: genLadder(r)}
 		q := decimal.NewFromInt(-int64(r.IntN(1000) + 1))
 		if _, err := ComputeAmountCents(rule, q); err == nil {
 			t.Fatalf("negative quantity %s was accepted", q)
@@ -253,7 +253,7 @@ func TestProperty_Pricing_RejectsOpenTierBeforeEnd(t *testing.T) {
 	for i := 0; i < 500; i++ {
 		tiers := genLadder(r)
 		bad := append([]RatingTier{{UpTo: nil, UnitAmountCents: decimal.NewFromInt(5)}}, tiers...)
-		rule := RatingRuleVersion{Mode: PricingGraduated, Tiers: bad}
+		rule := PriceShape{Mode: PricingGraduated, Tiers: bad}
 		if _, err := ComputeAmountCents(rule, decimal.NewFromInt(int64(r.IntN(100)+1))); err == nil {
 			t.Fatalf("an open tier before the end was accepted: %+v", bad)
 		}
@@ -272,7 +272,7 @@ func TestProperty_Pricing_RejectsBoundedLastTier(t *testing.T) {
 			last = *tiers[len(tiers)-2].UpTo + 1
 		}
 		tiers[len(tiers)-1].UpTo = new(last + int64(r.IntN(100)))
-		rule := RatingRuleVersion{Mode: PricingGraduated, Tiers: tiers}
+		rule := PriceShape{Mode: PricingGraduated, Tiers: tiers}
 		if _, err := ComputeAmountCents(rule, decimal.NewFromInt(1)); err == nil {
 			t.Fatalf("a bounded last tier was accepted: %+v", tiers)
 		}

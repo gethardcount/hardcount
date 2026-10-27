@@ -9,7 +9,7 @@
  */
 
 /**
- * As on RatingRule.
+ * As on PriceShape.
  */
 export type CustomerPriceOverrideMode = typeof CustomerPriceOverrideMode[keyof typeof CustomerPriceOverrideMode];
 

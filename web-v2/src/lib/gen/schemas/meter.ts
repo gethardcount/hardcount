@@ -18,7 +18,7 @@ export interface Meter {
   unit?: string;
   /**
      * How the meter rolls its events into one quantity per billing
-     * period. Every pricing rule of the meter bills under it. `last`
+     * period. Every price of the meter bills under it. `last`
      * is the latest event by timestamp, then by id. Fixed once the
      * meter has a usage event (see `has_usage`).
      */
@@ -31,7 +31,6 @@ export interface Meter {
      * or update that succeeded leaves it out if it could not be read.
      */
   has_usage?: boolean;
-  rating_rule_version_id?: string;
   created_at?: string;
   updated_at?: string;
 }

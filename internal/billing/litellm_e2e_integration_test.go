@@ -14,7 +14,6 @@ import (
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/customer"
 	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/dunning"
 	"github.com/sagarsuperuser/velox/internal/integrations/litellm"
 	"github.com/sagarsuperuser/velox/internal/invoice"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
@@ -25,7 +24,6 @@ import (
 	"github.com/sagarsuperuser/velox/internal/subscription/subscriptiontest"
 	"github.com/sagarsuperuser/velox/internal/testutil"
 	"github.com/sagarsuperuser/velox/internal/usage"
-	"github.com/sagarsuperuser/velox/internal/webhook"
 )
 
 // TestLiteLLM_WedgeE2E is the AI-native wedge as a CI test: a REALISTIC LiteLLM
@@ -72,9 +70,7 @@ func TestLiteLLM_WedgeE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load recipe registry: %v", err)
 	}
-	recipeSvc := recipe.NewService(db, recipe.NewPostgresStore(db), registry,
-		pricingSvc, dunning.NewService(dunning.NewPostgresStore(db), nil, nil),
-		webhook.NewService(webhook.NewPostgresStore(db), nil, "local"))
+	recipeSvc := recipe.NewService(db, recipe.NewPostgresStore(db), registry, pricingSvc)
 	if _, err := recipeSvc.Instantiate(ctx, tenantID, "anthropic_style", nil, recipe.InstantiateOptions{}); err != nil {
 		t.Fatalf("instantiate anthropic_style: %v", err)
 	}
@@ -187,16 +183,22 @@ func TestLiteLLM_WedgeE2E(t *testing.T) {
 	}
 
 	// 3b. Verify the events landed with the canonical family + token roles.
-	rules, err := pricing.NewPostgresStore(db).ListMeterPricingRulesByMeter(ctx, tenantID, plan.MeterIDs[0])
-	if err != nil {
-		t.Fatalf("list rules: %v", err)
+	prices, err := pricing.NewPostgresStore(db).PlanPricesAt(ctx, tenantID, plan.ID, periodStart, "")
+	if err != nil || len(prices) == 0 {
+		t.Fatalf("plan prices: %v (%d)", err, len(prices))
 	}
-	events, err := usageStore.AggregateClaims(ctx, tenantID, cust.ID, plan.MeterIDs[0], domain.AggregationSum, domain.ClaimsOfRules(rules), periodStart, periodEnd)
+	events, err := usageStore.AggregateClaims(ctx, tenantID, cust.ID, prices[0].MeterID, domain.AggregationSum, domain.ClaimsOf(prices), periodStart, periodEnd)
 	if err != nil {
-		t.Fatalf("aggregate by rules: %v", err)
+		t.Fatalf("aggregate by price: %v", err)
 	}
-	if len(events) == 0 {
-		t.Fatal("no rule aggregations — events didn't match recipe rules (model normalization failed?)")
+	claimed := 0
+	for _, e := range events {
+		if e.PriceID != "" {
+			claimed++
+		}
+	}
+	if claimed == 0 {
+		t.Fatal("no price took an event — events didn't match the recipe prices (model normalization failed?)")
 	}
 
 	// 4. Run the cycle → invoice for the elapsed period.

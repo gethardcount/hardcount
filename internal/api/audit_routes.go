@@ -223,15 +223,15 @@ var auditRouteRegistry = map[routeKey]auditDecl{
 	{"DELETE", "/v1/customers/{customer_id}/payment-methods/{pmID}"}:         explicit("paymentmethods.Service.Detach → Log(delete, payment_method) + Log(update) on any promoted new default."),
 
 	// --- pricing --------------------------------------------------------
-	{"POST", "/v1/meters"}:                                 explicit("pricing.Handler.createMeter → Log(create, meter)."),
-	{"PATCH", "/v1/meters/{id}"}:                           explicit("pricing.Service.UpdateMeter → LogInTx(update, meter) on the meter's own tx."),
-	{"POST", "/v1/meters/{meter_id}/pricing-rules"}:        explicit("pricing.Handler.upsertMeterPricingRule → Log(update, meter_pricing_rule)."),
-	{"DELETE", "/v1/meters/{meter_id}/pricing-rules/{id}"}: explicit("pricing.Service.DeleteMeterPricingRule → LogInTx(delete, meter_pricing_rule). The catch-all recorded this as 'deleted meter {meter_id}' — ADR-090's headline fabrication."),
-	{"POST", "/v1/plans"}:                                  explicit("pricing.Handler.createPlan → Log(create, plan)."),
-	{"PATCH", "/v1/plans/{id}"}:                            explicit("pricing.Handler.updatePlan → Log(update, plan)."),
-	{"POST", "/v1/rating-rules"}:                           explicit("pricing.Handler.createRatingRule → Log(create, rating_rule)."),
-	{"POST", "/v1/price-overrides"}:                        explicit("pricing.Handler.createOverride → Log(create, price_override)."),
-	{"DELETE", "/v1/price-overrides/{id}"}:                 explicit("pricing.Handler.deleteOverride → Log(delete, price_override)."),
+	{"POST", "/v1/meters"}:                         explicit("pricing.Handler.createMeter → Log(create, meter)."),
+	{"PATCH", "/v1/meters/{id}"}:                   explicit("pricing.Service.UpdateMeter → LogInTx(update, meter) on the meter's own tx."),
+	{"POST", "/v1/plans"}:                          explicit("pricing.Handler.createPlan → Log(create, plan)."),
+	{"PATCH", "/v1/plans/{id}"}:                    explicit("pricing.Handler.updatePlan → Log(update, plan)."),
+	{"POST", "/v1/plans/{id}/prices"}:              explicit("pricing.Service.AddPrice → LogInTx(create, plan_price) on the price write's tx, with the content and when it applies."),
+	{"PATCH", "/v1/plans/{id}/prices/{price_id}"}:  explicit("pricing.Service.EditPrice → LogInTx(update, plan_price) on the price write's tx, with the content before and after."),
+	{"DELETE", "/v1/plans/{id}/prices/{price_id}"}: explicit("pricing.Service.RemovePrice → LogInTx(delete, plan_price) on the price write's tx, with the overrides it ended."),
+	{"POST", "/v1/price-overrides"}:                explicit("pricing.Handler.createOverride → Log(create, price_override)."),
+	{"DELETE", "/v1/price-overrides/{id}"}:         explicit("pricing.Handler.deleteOverride → Log(delete, price_override)."),
 
 	// --- recipes --------------------------------------------------------
 	{"POST", "/v1/recipes/{key}/instantiate"}: explicit("recipe.Service.Instantiate → LogInTx(create, recipe) on the generate-plan tx (ADR-085 born-unique install). An idempotent re-apply installs nothing, emits nothing, and declares audit.MarkSkip on the badge-exists branch — a no-op deserves no record (the catch-all fabricated a 'created recipe' row for it)."),

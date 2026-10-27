@@ -132,8 +132,11 @@ type Service struct {
 	customers CustomerReader
 	profiles  ProfileCurrencyReader
 	plans     PlanReader
-	biller    Biller
-	dueBiller DueBiller
+	// planMeters reads each plan's meters for the overlap guard
+	// (rejectMeterOverlap). Unwired (narrow unit tests), the guard is off.
+	planMeters PlanMeterReader
+	biller     Biller
+	dueBiller  DueBiller
 	// invoiceGrace is INVOICE_GRACE_PERIOD (ADR-120). Only dunning's final
 	// pause and cancel wait for it; see SetInvoiceGrace.
 	invoiceGrace time.Duration
@@ -213,6 +216,11 @@ func (s *Service) SetProfileReader(r ProfileCurrencyReader) {
 // router.go.
 func (s *Service) SetPlanReader(r PlanReader) {
 	s.plans = r
+}
+
+// SetPlanMeterReader wires the plan meter read the overlap guard uses.
+func (s *Service) SetPlanMeterReader(r PlanMeterReader) {
+	s.planMeters = r
 }
 
 // SetBiller wires the billing engine for the in_advance first-invoice
@@ -579,17 +587,20 @@ func (s *Service) rejectCurrencyMismatch(ctx context.Context, tenantID, customer
 // when PlanReader isn't wired (narrow unit tests) — mirrors every sibling
 // guard.
 func (s *Service) rejectMeterOverlap(ctx context.Context, tenantID, customerID, currentSubID, excludeItemID string, planIDs []string) error {
-	if s.plans == nil {
+	if s.plans == nil || s.planMeters == nil {
 		return nil
 	}
 	meterPlan := make(map[string]string) // meter id → first candidate plan billing it
 	meters := make([]string, 0, len(planIDs))
 	for _, pid := range planIDs {
-		plan, err := s.plans.GetPlan(ctx, tenantID, pid)
-		if err != nil {
+		if _, err := s.plans.GetPlan(ctx, tenantID, pid); err != nil {
 			return errs.Invalid("items", fmt.Sprintf("plan %q not found", pid))
 		}
-		for _, m := range plan.MeterIDs {
+		planMeters, err := s.planMeters.PlanMeterIDs(ctx, tenantID, pid)
+		if err != nil {
+			return fmt.Errorf("read the meters of plan %s: %w", pid, err)
+		}
+		for _, m := range planMeters {
 			if prev, dup := meterPlan[m]; dup {
 				if prev == pid {
 					continue // same plan listing a meter twice — harmless

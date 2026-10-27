@@ -10,6 +10,7 @@
 import type { PostV1PlansBodyBaseBillTiming } from './postV1PlansBodyBaseBillTiming';
 import type { PostV1PlansBodyBillingInterval } from './postV1PlansBodyBillingInterval';
 import type { PostV1PlansBodyStatus } from './postV1PlansBodyStatus';
+import type { PriceInput } from './priceInput';
 
 export type PostV1PlansBody = {
   code: string;
@@ -19,11 +20,17 @@ export type PostV1PlansBody = {
   billing_interval: PostV1PlansBodyBillingInterval;
   base_amount_cents?: number;
   /**
-     * Optional. Defaults to in_arrears. See Plan.base_bill_timing
-     * for semantics (ADR-031).
+     * Required when `base_amount_cents` is above 0. With a base
+     * of 0 it may be left out, and the plan is in_arrears;
+     * `in_advance` with a base of 0 is refused. See
+     * Plan.base_bill_timing (ADR-031).
      */
   base_bill_timing?: PostV1PlansBodyBaseBillTiming;
-  meter_ids?: string[];
+  /**
+     * The plan's usage prices, created with it in one request.
+     * Each takes the plan's currency.
+     */
+  prices?: PriceInput[];
   /** Optional. A plan is created active; archive it with PATCH. */
   status?: PostV1PlansBodyStatus;
   /**

@@ -748,7 +748,7 @@ func (s *PostgresStore) updateStatusInTx(ctx context.Context, tx *sql.Tx, id str
 		WHERE id = $5 AND status = ANY($6)
 		RETURNING `+invCols,
 		status, postgres.NullableTime(voidedAt), postgres.NullableTime(uncollectibleAt), now, id,
-		postgres.StringArray(allowedSources),
+		allowedSources,
 	).Scan(s.scanInvDest(&inv)...)
 
 	if err == sql.ErrNoRows {
@@ -1792,6 +1792,19 @@ func (s *PostgresStore) SettleZeroDue(ctx context.Context, tenantID, id string, 
 // nominalRateArg returns the driver value for the nullable
 // nominal_unit_amount_decimal column: the decimal (via its Valuer) when set,
 // else nil → SQL NULL. See domain.InvoiceLineItem.NominalUnitAmountDecimal.
+// matchArg is a line's dimension_match as a column value: NULL for a line
+// that names no labels.
+func matchArg(m map[string]string) any {
+	if len(m) == 0 {
+		return nil
+	}
+	raw, err := json.Marshal(m)
+	if err != nil {
+		return nil
+	}
+	return raw
+}
+
 func nominalRateArg(p *decimal.Decimal) any {
 	if p == nil {
 		return nil
@@ -1826,26 +1839,26 @@ func (s *PostgresStore) CreateLineItem(ctx context.Context, tenantID string, ite
 	err = tx.QueryRowContext(ctx, `
 		INSERT INTO invoice_line_items (id, invoice_id, tenant_id, line_type, meter_id,
 			description, quantity, unit_amount_cents, amount_cents, tax_rate, tax_amount_cents,
-			total_amount_cents, currency, pricing_mode, rating_rule_version_id,
+			total_amount_cents, currency, pricing_mode, price_id,
 			billing_period_start, billing_period_end, metadata, created_at,
-			tax_jurisdiction, tax_code, tax_reason, quantity_decimal, nominal_unit_amount_decimal, meter_unit)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
+			tax_jurisdiction, tax_code, tax_reason, quantity_decimal, nominal_unit_amount_decimal, meter_unit, dimension_match)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)
 		RETURNING id, invoice_id, tenant_id, line_type, COALESCE(meter_id,''), description,
 			quantity, unit_amount_cents, amount_cents, tax_rate, tax_amount_cents,
 			total_amount_cents, currency, COALESCE(pricing_mode,''),
-			COALESCE(rating_rule_version_id,''), billing_period_start, billing_period_end,
+			COALESCE(price_id,''), billing_period_start, billing_period_end,
 			metadata, created_at, tax_jurisdiction, tax_code, tax_reason, quantity_decimal
 	`, id, item.InvoiceID, tenantID, item.LineType, postgres.NullableString(item.MeterID),
 		item.Description, item.Quantity, item.UnitAmountCents, item.AmountCents,
 		item.TaxRate, item.TaxAmountCents, item.TotalAmountCents, item.Currency,
-		postgres.NullableString(item.PricingMode), postgres.NullableString(item.RatingRuleVersionID),
+		postgres.NullableString(item.PricingMode), postgres.NullableString(item.PriceID),
 		postgres.NullableTime(item.BillingPeriodStart), postgres.NullableTime(item.BillingPeriodEnd),
 		metaJSON, now, item.TaxJurisdiction, item.TaxCode, item.TaxabilityReason, item.QuantityDecimal,
-		nominalRateArg(item.NominalUnitAmountDecimal), postgres.NullableString(item.MeterUnit),
+		nominalRateArg(item.NominalUnitAmountDecimal), postgres.NullableString(item.MeterUnit), matchArg(item.DimensionMatch),
 	).Scan(&item.ID, &item.InvoiceID, &item.TenantID, &item.LineType, &item.MeterID,
 		&item.Description, &item.Quantity, &item.UnitAmountCents, &item.AmountCents,
 		&item.TaxRate, &item.TaxAmountCents, &item.TotalAmountCents, &item.Currency,
-		&item.PricingMode, &item.RatingRuleVersionID,
+		&item.PricingMode, &item.PriceID,
 		&item.BillingPeriodStart, &item.BillingPeriodEnd, &metaJSON, &item.CreatedAt,
 		&item.TaxJurisdiction, &item.TaxCode, &item.TaxabilityReason, &item.QuantityDecimal)
 
@@ -1870,9 +1883,9 @@ func (s *PostgresStore) ListLineItems(ctx context.Context, tenantID, invoiceID s
 		SELECT id, invoice_id, tenant_id, line_type, COALESCE(meter_id,''), description,
 			quantity, unit_amount_cents, amount_cents, tax_rate, tax_amount_cents,
 			total_amount_cents, currency, COALESCE(pricing_mode,''),
-			COALESCE(rating_rule_version_id,''), billing_period_start, billing_period_end,
+			COALESCE(price_id,''), billing_period_start, billing_period_end,
 			metadata, created_at, tax_jurisdiction, tax_code, tax_reason, quantity_decimal,
-			commit_granted_cents, commit_expires_at, nominal_unit_amount_decimal, COALESCE(meter_unit,'')
+			commit_granted_cents, commit_expires_at, nominal_unit_amount_decimal, COALESCE(meter_unit,''), dimension_match
 		FROM invoice_line_items WHERE invoice_id = $1
 		ORDER BY created_at ASC
 	`, invoiceID)
@@ -1884,18 +1897,23 @@ func (s *PostgresStore) ListLineItems(ctx context.Context, tenantID, invoiceID s
 	var items []domain.InvoiceLineItem
 	for rows.Next() {
 		var item domain.InvoiceLineItem
-		var metaJSON []byte
+		var metaJSON, match []byte
 		var nominal decimal.NullDecimal
 		if err := rows.Scan(&item.ID, &item.InvoiceID, &item.TenantID, &item.LineType,
 			&item.MeterID, &item.Description, &item.Quantity, &item.UnitAmountCents,
 			&item.AmountCents, &item.TaxRate, &item.TaxAmountCents, &item.TotalAmountCents,
-			&item.Currency, &item.PricingMode, &item.RatingRuleVersionID,
+			&item.Currency, &item.PricingMode, &item.PriceID,
 			&item.BillingPeriodStart, &item.BillingPeriodEnd, &metaJSON, &item.CreatedAt,
 			&item.TaxJurisdiction, &item.TaxCode, &item.TaxabilityReason, &item.QuantityDecimal,
-			&item.CommitGrantedCents, &item.CommitExpiresAt, &nominal, &item.MeterUnit); err != nil {
+			&item.CommitGrantedCents, &item.CommitExpiresAt, &nominal, &item.MeterUnit, &match); err != nil {
 			return nil, err
 		}
 		item.NominalUnitAmountDecimal = scanNominalRate(nominal)
+		if len(match) > 0 {
+			if err := json.Unmarshal(match, &item.DimensionMatch); err != nil {
+				return nil, fmt.Errorf("decode dimension_match of line %s: %w", item.ID, err)
+			}
+		}
 		_ = json.Unmarshal(metaJSON, &item.Metadata)
 		items = append(items, item)
 	}
@@ -2036,29 +2054,29 @@ func (s *PostgresStore) AddLineItemAtomicAudited(
 	err = tx.QueryRowContext(ctx, `
 		INSERT INTO invoice_line_items (id, invoice_id, tenant_id, line_type, meter_id,
 			description, quantity, unit_amount_cents, amount_cents, tax_rate, tax_amount_cents,
-			total_amount_cents, currency, pricing_mode, rating_rule_version_id,
+			total_amount_cents, currency, pricing_mode, price_id,
 			billing_period_start, billing_period_end, metadata, created_at,
 			tax_jurisdiction, tax_code, tax_reason, quantity_decimal,
-			commit_granted_cents, commit_expires_at, nominal_unit_amount_decimal, meter_unit)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)
+			commit_granted_cents, commit_expires_at, nominal_unit_amount_decimal, meter_unit, dimension_match)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)
 		RETURNING id, invoice_id, tenant_id, line_type, COALESCE(meter_id,''), description,
 			quantity, unit_amount_cents, amount_cents, tax_rate, tax_amount_cents,
 			total_amount_cents, currency, COALESCE(pricing_mode,''),
-			COALESCE(rating_rule_version_id,''), billing_period_start, billing_period_end,
+			COALESCE(price_id,''), billing_period_start, billing_period_end,
 			metadata, created_at, tax_jurisdiction, tax_code, tax_reason, quantity_decimal,
 			commit_granted_cents, commit_expires_at
 	`, itemID, invoiceID, tenantID, item.LineType, postgres.NullableString(item.MeterID),
 		item.Description, item.Quantity, item.UnitAmountCents, item.AmountCents,
 		item.TaxRate, item.TaxAmountCents, item.TotalAmountCents, currency,
-		postgres.NullableString(item.PricingMode), postgres.NullableString(item.RatingRuleVersionID),
+		postgres.NullableString(item.PricingMode), postgres.NullableString(item.PriceID),
 		postgres.NullableTime(item.BillingPeriodStart), postgres.NullableTime(item.BillingPeriodEnd),
 		metaJSON, now, item.TaxJurisdiction, item.TaxCode, item.TaxabilityReason, item.QuantityDecimal,
 		item.CommitGrantedCents, postgres.NullableTime(item.CommitExpiresAt),
-		nominalRateArg(item.NominalUnitAmountDecimal), postgres.NullableString(item.MeterUnit),
+		nominalRateArg(item.NominalUnitAmountDecimal), postgres.NullableString(item.MeterUnit), matchArg(item.DimensionMatch),
 	).Scan(&item.ID, &item.InvoiceID, &item.TenantID, &item.LineType, &item.MeterID,
 		&item.Description, &item.Quantity, &item.UnitAmountCents, &item.AmountCents,
 		&item.TaxRate, &item.TaxAmountCents, &item.TotalAmountCents, &item.Currency,
-		&item.PricingMode, &item.RatingRuleVersionID,
+		&item.PricingMode, &item.PriceID,
 		&item.BillingPeriodStart, &item.BillingPeriodEnd, &metaJSON, &item.CreatedAt,
 		&item.TaxJurisdiction, &item.TaxCode, &item.TaxabilityReason, &item.QuantityDecimal,
 		&item.CommitGrantedCents, &item.CommitExpiresAt)
@@ -2399,19 +2417,19 @@ func (s *PostgresStore) createWithLineItemsInTx(ctx context.Context, tx *sql.Tx,
 			INSERT INTO invoice_line_items (id, invoice_id, tenant_id, line_type, meter_id,
 				description, quantity, unit_amount_cents, amount_cents, tax_rate,
 				tax_amount_cents, total_amount_cents, currency, pricing_mode,
-				rating_rule_version_id, billing_period_start, billing_period_end, metadata, created_at,
+				price_id, billing_period_start, billing_period_end, metadata, created_at,
 				tax_jurisdiction, tax_code, tax_reason, quantity_decimal,
-				commit_granted_cents, commit_expires_at, nominal_unit_amount_decimal, meter_unit)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)
+				commit_granted_cents, commit_expires_at, nominal_unit_amount_decimal, meter_unit, dimension_match)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)
 		`, itemID, inv.ID, tenantID, items[i].LineType, postgres.NullableString(items[i].MeterID),
 			items[i].Description, items[i].Quantity, items[i].UnitAmountCents, items[i].AmountCents,
 			items[i].TaxRate, items[i].TaxAmountCents, items[i].TotalAmountCents,
 			items[i].Currency, postgres.NullableString(items[i].PricingMode),
-			postgres.NullableString(items[i].RatingRuleVersionID),
+			postgres.NullableString(items[i].PriceID),
 			postgres.NullableTime(items[i].BillingPeriodStart), postgres.NullableTime(items[i].BillingPeriodEnd),
 			itemMetaJSON, now, items[i].TaxJurisdiction, items[i].TaxCode, items[i].TaxabilityReason, items[i].QuantityDecimal,
 			items[i].CommitGrantedCents, postgres.NullableTime(items[i].CommitExpiresAt),
-			nominalRateArg(items[i].NominalUnitAmountDecimal), postgres.NullableString(items[i].MeterUnit),
+			nominalRateArg(items[i].NominalUnitAmountDecimal), postgres.NullableString(items[i].MeterUnit), matchArg(items[i].DimensionMatch),
 		)
 		if err != nil {
 			return domain.Invoice{}, fmt.Errorf("create line item %d: %w", i, err)
@@ -2771,8 +2789,8 @@ func (s *PostgresStore) ListStaleChargeHolds(ctx context.Context, limit int, ski
 	if limit <= 0 {
 		limit = 50
 	}
-	// COALESCE: a nil skip list can reach Postgres as NULL, and
-	// NOT (id = ANY(NULL)) would filter out every row (see postgres.StringArray).
+	// COALESCE: pgx sends a nil skip list as NULL, and
+	// NOT (id = ANY(NULL)) would filter out every row.
 	rows, err := tx.QueryContext(ctx, `
 		SELECT `+qualifiedInvCols("i")+`, i.auto_charge_claimed_until, COALESCE(c.stripe_customer_id, ''),
 		       i.auto_charge_claimed_until < now() - make_interval(secs => $6)
@@ -2785,7 +2803,7 @@ func (s *PostgresStore) ListStaleChargeHolds(ctx context.Context, limit int, ski
 		ORDER BY (i.status = 'finalized' AND i.payment_status IN ('pending', 'failed')) DESC,
 		         i.provider_synced_at ASC NULLS FIRST, i.auto_charge_claimed_until ASC, i.id ASC
 		LIMIT $4
-	`, domain.StaleChargeHoldWait.Seconds(), live, staleHoldRecheckAfter.Seconds(), limit, postgres.StringArray(skip),
+	`, domain.StaleChargeHoldWait.Seconds(), live, staleHoldRecheckAfter.Seconds(), limit, skip,
 		domain.ParkedNothingWait.Seconds())
 	if err != nil {
 		return nil, err
@@ -3397,7 +3415,7 @@ func (s *PostgresStore) ListPendingTaxRetry(ctx context.Context, batch int, retr
 		  AND i.is_simulated = false
 		ORDER BY i.tax_next_retry_at ASC NULLS FIRST
 		LIMIT $4
-	`, livemode, postgres.StringArray(retryableCodes), maxAttempts, batch)
+	`, livemode, retryableCodes, maxAttempts, batch)
 	if err != nil {
 		return nil, err
 	}
@@ -3655,7 +3673,7 @@ func (s *PostgresStore) ListPendingTaxRetryForClock(ctx context.Context, tenantI
 		  AND i.tax_retry_count < $4
 		ORDER BY i.created_at ASC
 		LIMIT $5
-	`, tenantID, clockID, postgres.StringArray(retryableCodes), maxAttempts, limit)
+	`, tenantID, clockID, retryableCodes, maxAttempts, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -4706,7 +4724,7 @@ func (s *PostgresStore) PaymentPagesLive(ctx context.Context, tenantID string, i
 	}
 	defer postgres.Rollback(tx)
 	rows, err := tx.QueryContext(ctx, `SELECT q.id FROM unnest($1::text[]) AS q(id) WHERE `+
-		domain.HostedCheckoutLiveSQL("q.id"), postgres.StringArray(invoiceIDs))
+		domain.HostedCheckoutLiveSQL("q.id"), invoiceIDs)
 	if err != nil {
 		return nil, fmt.Errorf("payment pages live: %w", err)
 	}
@@ -4755,7 +4773,7 @@ func (s *PostgresStore) RetryBlockingDecline(ctx context.Context, tenantID, invo
 		  AND decline_code <> ''
 		ORDER BY decline_code = ANY($3::text[]) DESC, created_at DESC, id DESC
 		LIMIT 1`,
-		invoiceID, stripePaymentMethodID, postgres.StringArray(domain.HardDeclineCodes()),
+		invoiceID, stripePaymentMethodID, domain.HardDeclineCodes(),
 	).Scan(&code)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return "", fmt.Errorf("read retry-blocking decline on card: %w", err)
@@ -4797,7 +4815,7 @@ func (s *PostgresStore) RetryBlockingDeclinesOnDefaultCards(ctx context.Context,
 		  AND a.stripe_payment_method_id <> ''
 		  AND a.decline_code <> ''
 		ORDER BY a.invoice_id, a.decline_code = ANY($2::text[]) DESC, a.created_at DESC, a.id DESC`,
-		postgres.StringArray(invoiceIDs), postgres.StringArray(domain.HardDeclineCodes()))
+		invoiceIDs, domain.HardDeclineCodes())
 	if err != nil {
 		return nil, fmt.Errorf("read retry-blocking declines on default cards: %w", err)
 	}

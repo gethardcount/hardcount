@@ -15,7 +15,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/customer"
 	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/dunning"
+	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/integrations/litellm"
 	"github.com/sagarsuperuser/velox/internal/invoice"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
@@ -28,7 +28,6 @@ import (
 	"github.com/sagarsuperuser/velox/internal/subscription/subscriptiontest"
 	"github.com/sagarsuperuser/velox/internal/testutil"
 	"github.com/sagarsuperuser/velox/internal/usage"
-	"github.com/sagarsuperuser/velox/internal/webhook"
 )
 
 // recipeTenant is one tenant with the anthropic_style recipe installed and
@@ -40,6 +39,7 @@ type recipeTenant struct {
 	tenantID     string
 	customerID   string
 	subID        string
+	planID       string
 	meterID      string
 	pricingSvc   *pricing.Service
 	usageSvc     *usage.Service
@@ -64,9 +64,7 @@ func newRecipeTenant(t *testing.T, db *postgres.DB, name string) *recipeTenant {
 	if err != nil {
 		t.Fatalf("load recipes: %v", err)
 	}
-	recipeSvc := recipe.NewService(db, recipe.NewPostgresStore(db), registry,
-		pricingSvc, dunning.NewService(dunning.NewPostgresStore(db), nil, nil),
-		webhook.NewService(webhook.NewPostgresStore(db), nil, "local"))
+	recipeSvc := recipe.NewService(db, recipe.NewPostgresStore(db), registry, pricingSvc)
 	if _, err := recipeSvc.Instantiate(ctx, tenantID, "anthropic_style", nil, recipe.InstantiateOptions{}); err != nil {
 		t.Fatalf("instantiate anthropic_style: %v", err)
 	}
@@ -80,8 +78,9 @@ func newRecipeTenant(t *testing.T, db *postgres.DB, name string) *recipeTenant {
 			plan = p
 		}
 	}
-	if plan.ID == "" || len(plan.MeterIDs) != 1 {
-		t.Fatalf("recipe plan not found or not on one meter: %+v", plan)
+	planMeters, err := pricingStore.PlanMeterIDs(ctx, tenantID, plan.ID)
+	if plan.ID == "" || err != nil || len(planMeters) != 1 {
+		t.Fatalf("recipe plan not found or not on one meter: %+v (meters %v, %v)", plan, planMeters, err)
 	}
 	cust, err := customerStore.Create(ctx, tenantID, domain.Customer{ExternalID: "cus_fam", DisplayName: "Families"})
 	if err != nil {
@@ -103,7 +102,7 @@ func newRecipeTenant(t *testing.T, db *postgres.DB, name string) *recipeTenant {
 
 	return &recipeTenant{
 		t: t, db: db, ctx: ctx, authCtx: auth.WithTenantID(ctx, tenantID),
-		tenantID: tenantID, customerID: cust.ID, subID: sub.ID, meterID: plan.MeterIDs[0],
+		tenantID: tenantID, customerID: cust.ID, subID: sub.ID, planID: plan.ID, meterID: planMeters[0],
 		pricingSvc: pricingSvc, usageSvc: usageSvc, usageStore: usageStore,
 		invoiceStore: invoice.NewPostgresStore(db),
 		handler:      litellm.New(customerStore, pricingSvc, usageSvc, usageSvc),
@@ -133,23 +132,14 @@ func (rt *recipeTenant) spend(id, model string, prompt, cached, output int64) st
 	return rec.Body.String()
 }
 
-// priceRule makes a new rating rule and a pricing rule on the tokens meter.
-// The pricing rule is seeded past the meter-in-use guard: these tests check
-// which rule claims an event, and the tenant's subscription already exists.
-// A model_raw rule at 101 outranks the model rules, so the guard would refuse
-// it on a live meter (pricing/meter_edit_guard.go).
-func (rt *recipeTenant) priceRule(key, cents string, match map[string]any, priority int) {
+// priceRule adds a price for match to the recipe plan's tokens meter, in
+// force from before the period opened: these tests check which price takes
+// an event, and the tenant's subscription already exists (on a used plan an
+// added price takes part from the next period).
+func (rt *recipeTenant) priceRule(cents string, match map[string]string) {
 	rt.t.Helper()
-	rr, err := rt.pricingSvc.CreateRatingRule(rt.ctx, rt.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: key, Name: key, Mode: domain.PricingPerUnit, Currency: "USD",
-		UnitAmountCents: decimal.RequireFromString(cents),
-	})
-	if err != nil {
-		rt.t.Fatalf("create rating rule %s: %v", key, err)
-	}
-	seedPricingRule(rt.t, rt.db, rt.ctx, rt.tenantID, pricing.UpsertMeterPricingRuleInput{
-		MeterID: rt.meterID, RatingRuleVersionID: rr.ID, DimensionMatch: match, Priority: priority,
-	})
+	p := addPrice(rt.t, rt.db, rt.ctx, rt.tenantID, rt.planID, priceOn{meterID: rt.meterID, match: match, shape: perUnitShape(cents)})
+	backdatePriceVersions(rt.t, rt.db, rt.ctx, p.ID, rt.periodStart.Add(-time.Hour))
 }
 
 // storeOldRow writes one event as the release before this change stored it.
@@ -246,7 +236,7 @@ func TestLiteLLM_ModelFamiliesE2E(t *testing.T) {
 		t.Errorf("unknown model's events: %+v, want one with model = the raw name", evs)
 	}
 	// ...until a price is added before the invoice is made.
-	rt.priceRule("opus49_input_by_hand", "0.0001", map[string]any{"model_raw": "claude-opus-4-9", "token_type": "input"}, 101)
+	rt.priceRule("0.0001", map[string]string{"model": "claude-opus-4-9", "token_type": "input"})
 
 	subtotal, lines := rt.close()
 	want := map[string]int64{
@@ -284,90 +274,80 @@ func TestLiteLLM_ModelFamiliesE2E(t *testing.T) {
 	}
 }
 
-// TestLiteLLM_StoredRowRepricedByModelRaw pins the docs' remedy for usage
-// stored before the upgrade (review F1): a Vertex Opus 4.6 call stored as
-// claude-opus-4 bills at Opus 4 prices unless a pricing rule on model_raw
-// claims it, and that rule must outrank the recipe's (priority 101). At
-// equal priority the older rule, the recipe's, wins.
-func TestLiteLLM_StoredRowRepricedByModelRaw(t *testing.T) {
+// TestLiteLLM_ModelRawPriceNeedsOneMoreLabel: a call on a platform name,
+// here Google Cloud's Opus 4.6, arrives with the model's name in model and
+// the platform's name in model_raw, and bills at the recipe's
+// {model, token_type} price unless a price that also names model_raw takes
+// it. Priority is gone (ADR-130 §4), so such a price needs one more label
+// than the price it refines; a {model_raw, token_type} price beside it ties
+// and is refused when saved, naming the other price, and the call keeps
+// billing at the recipe's price.
+func TestLiteLLM_ModelRawPriceNeedsOneMoreLabel(t *testing.T) {
 	db := testutil.SetupTestDB(t)
-	for _, tc := range []struct {
-		priority  int
-		wantCents int64
-		wantDesc  string
-	}{
-		{101, 500, "Tokens (vertex_ai/claude-opus-4-6@default · input)"},
-		{100, 1500, "Tokens (claude-opus-4 · input)"},
-	} {
-		t.Run(fmt.Sprintf("priority_%d", tc.priority), func(t *testing.T) {
-			rt := newRecipeTenant(t, db, fmt.Sprintf("Stored Row Corp %d", tc.priority))
-			rt.storeOldRow("old_vertex:input", 1_000_000, map[string]any{
-				"model": "claude-opus-4", "model_raw": "vertex_ai/claude-opus-4-6@default",
-				"provider": "vertex_ai", "token_type": "input",
-			})
-			rt.priceRule("opus46_input_stored_vertex", "0.0005", map[string]any{
-				"model_raw": "vertex_ai/claude-opus-4-6@default", "token_type": "input",
-			}, tc.priority)
-			subtotal, lines := rt.close()
-			if subtotal != tc.wantCents || lines[tc.wantDesc] != tc.wantCents {
-				t.Errorf("subtotal %d¢, want %d¢ on %q. Lines:%s", subtotal, tc.wantCents, tc.wantDesc, dumpLines(lines))
-			}
-		})
-	}
+	const raw = "vertex_ai/claude-opus-4-6@default"
+	t.Run("one more label wins", func(t *testing.T) {
+		rt := newRecipeTenant(t, db, "Model Raw Corp more")
+		rt.spend("raw_vertex_more", raw, 1_000_000, 0, 0)
+		rt.priceRule("0.0007", map[string]string{"model": "claude-opus-4.6", "model_raw": raw, "token_type": "input"})
+		subtotal, lines := rt.close()
+		desc := "Tokens (claude-opus-4.6 · " + raw + " · input)"
+		if subtotal != 700 || lines[desc] != 700 {
+			t.Errorf("subtotal %d¢, want 700¢ on %q. Lines:%s", subtotal, desc, dumpLines(lines))
+		}
+	})
+	t.Run("equal labels refused", func(t *testing.T) {
+		rt := newRecipeTenant(t, db, "Model Raw Corp equal")
+		rt.spend("raw_vertex_equal", raw, 1_000_000, 0, 0)
+		_, err := pricing.NewPostgresStore(db).WritePrice(rt.ctx, rt.tenantID, rt.planID, pricing.PriceChange{
+			Op: pricing.PriceAdd, MeterID: rt.meterID, Match: map[string]string{"model_raw": raw, "token_type": "input"}, Shape: perUnitShape("0.0007"),
+		}, nil)
+		if errs.Code(err) != errs.CodePriceConflict || !strings.Contains(err.Error(), "vlx_prc_") {
+			t.Fatalf("a {model_raw, token_type} price beside {model, token_type}: got %v, want price_conflict naming the other price", err)
+		}
+		subtotal, lines := rt.close()
+		if subtotal != 500 || lines["Tokens (claude-opus-4.6 · input)"] != 500 {
+			t.Errorf("subtotal %d¢, want 500¢ at the recipe's Opus 4.6 price. Lines:%s", subtotal, dumpLines(lines))
+		}
+	})
 }
 
-// TestLiteLLM_RawRowStoredBeforeUpgradeBilledByModelRule pins the docs' remedy
-// for usage stored under a raw name that now maps to a model (second review,
-// finding 3): such a row, here a Google Cloud dated Haiku 4.5 name, has no
-// price after the upgrade, while a new call with the same name bills at the
-// recipe price. A rule on model with the raw name bills the old row, and
-// only it: a new call carries the model's name in model.
-func TestLiteLLM_RawRowStoredBeforeUpgradeBilledByModelRule(t *testing.T) {
+// TestLiteLLM_DatedNameBillsAtItsModelsPrice: a call on a Google Cloud dated
+// name of Haiku 4.5 bills at the recipe's Haiku 4.5 price, because the call
+// carries the model's name in model. So a price on model with the raw name
+// takes nothing: to price a platform name apart, name it in model_raw
+// (TestLiteLLM_ModelRawPriceNeedsOneMoreLabel).
+func TestLiteLLM_DatedNameBillsAtItsModelsPrice(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	const raw = "vertex_ai/claude-haiku-4-5@20251001"
 	for _, tc := range []struct {
 		name     string
-		addRule  bool
-		wantSub  int64
-		wantRows map[string]int64
+		addPrice bool
 	}{
-		{"no rule", false, 100, map[string]int64{"Tokens (claude-haiku-4.5 · input)": 100}},
-		{"rule on model", true, 200, map[string]int64{
-			"Tokens (claude-haiku-4.5 · input)": 100,
-			"Tokens (" + raw + " · input)":      100,
-		}},
+		{"recipe prices only", false},
+		{"with a price on model = the raw name", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			rt := newRecipeTenant(t, db, "Raw Row Corp "+tc.name)
-			// The previous release kept this name raw on model: no family matched.
-			rt.storeOldRow("old_raw_haiku45:input", 1_000_000, map[string]any{
-				"model": raw, "model_raw": raw, "provider": "vertex_ai", "token_type": "input",
-			})
-			rt.spend("new_raw_haiku45", raw, 1_000_000, 0, 0)
-			if tc.addRule {
-				rt.priceRule("haiku45_input_stored_raw", "0.0001", map[string]any{"model": raw, "token_type": "input"}, 100)
+			rt := newRecipeTenant(t, db, "Dated Name Corp "+tc.name)
+			rt.spend("dated_haiku45", raw, 1_000_000, 0, 0)
+			if tc.addPrice {
+				rt.priceRule("0.0001", map[string]string{"model": raw, "token_type": "input"})
 			}
 			subtotal, lines := rt.close()
-			if subtotal != tc.wantSub {
-				t.Errorf("subtotal %d¢, want %d¢. Lines:%s", subtotal, tc.wantSub, dumpLines(lines))
-			}
-			for desc, cents := range tc.wantRows {
-				if lines[desc] != cents {
-					t.Errorf("line %q = %d¢, want %d¢. Lines:%s", desc, lines[desc], cents, dumpLines(lines))
-				}
+			if subtotal != 100 || len(lines) != 1 || lines["Tokens (claude-haiku-4.5 · input)"] != 100 {
+				t.Errorf("subtotal %d¢, want 100¢ on one line at the recipe's Haiku 4.5 price. Lines:%s", subtotal, dumpLines(lines))
 			}
 		})
 	}
 }
 
-// TestLiteLLM_ProviderCostsAfterUpgrade pins what the docs say about provider
-// costs (second review, findings 1 and 2). A cost saved on an older model's
-// name does not cover the model's new name: Opus 5.5 events arrive as
-// claude-opus-5.5 with no cost, which leaves the period's margin unmeasured
-// until a cost is saved for the new name, and only for events after that.
-// And provider costs have no context_tier: one Haiku 5.5 cost is stamped on
-// both prompt tiers.
-func TestLiteLLM_ProviderCostsAfterUpgrade(t *testing.T) {
+// TestLiteLLM_ProviderCostIsPerModelName pins what the docs say about
+// provider costs. A cost names one model: a cost saved for an older model,
+// claude-opus-5, does not cover Opus 5.5 calls, which arrive as
+// claude-opus-5.5, so those calls have no cost and the period's margin is
+// not measured for them. A cost saved for claude-opus-5.5 covers the calls
+// that arrive after it, never earlier ones. And provider costs have no
+// context_tier: one Haiku 5.5 cost is stamped on both prompt tiers.
+func TestLiteLLM_ProviderCostIsPerModelName(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	rt := newRecipeTenant(t, db, "Provider Cost Corp")
 	saveCost := func(model, tokenType, centsPerToken string) {
@@ -398,7 +378,7 @@ func TestLiteLLM_ProviderCostsAfterUpgrade(t *testing.T) {
 		return n
 	}
 
-	// Costs saved before the upgrade, on the name Opus 5.5 used to arrive as.
+	// Costs saved for the older model only.
 	saveCost("claude-opus-5", "input", "0.0004")
 	saveCost("claude-opus-5", "output", "0.002")
 	rt.spend("pc_opus55_before", "claude-opus-5-5", 1_000_000, 0, 100_000)
@@ -439,5 +419,73 @@ func TestLiteLLM_ProviderCostsAfterUpgrade(t *testing.T) {
 		if e.ProviderCostMicros == nil || *e.ProviderCostMicros != 20_000 {
 			t.Errorf("%s: cost %v micros, want 20000: provider costs have no context_tier, so the one Haiku 5.5 cost covers both tiers", e.IdempotencyKey, e.ProviderCostMicros)
 		}
+	}
+}
+
+// TestLiteLLM_RawNamesOnAFreshInstall: the anthropic_style recipe prices
+// Claude by the family the LiteLLM mapper puts in `model`, so a fresh install
+// bills platform names (a Foundry azure_ai/ name, a Google Cloud @date name, a
+// Bedrock cross-region name) at their model's list price, and a name the
+// mapper does not know keeps itself and has no price (ADR-130 §15, design
+// §4.22). One raw name is priced apart by a price with one more label than
+// the recipe's price it refines: `model_raw` beside the recipe's labels. For
+// Haiku 5.5, whose recipe prices carry context_tier, that is four labels; a
+// three-label price there ties the recipe's and is refused.
+func TestLiteLLM_RawNamesOnAFreshInstall(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	rt := newRecipeTenant(t, db, "Raw Names Corp")
+	const vertexOpus46 = "vertex_ai/claude-opus-4-6@default"
+	const bedrockHaiku55 = "us.anthropic.claude-haiku-5-5"
+
+	rt.spend("raw_azure_opus45", "azure_ai/claude-opus-4-5", 1_000_000, 0, 0)
+	rt.spend("raw_vertex_sonnet45", "vertex_ai/claude-sonnet-4-5@20250929", 1_000_000, 0, 0)
+	rt.spend("raw_bedrock_haiku45", "bedrock/eu.anthropic.claude-haiku-4-5-20251001-v1:0", 1_000_000, 0, 0)
+	rt.spend("raw_unknown", "claude-opus-5-9", 1_000_000, 0, 0)
+	rt.spend("raw_vertex_opus46", vertexOpus46, 1_000_000, 0, 0)
+	rt.spend("raw_direct_opus46", "claude-opus-4-6", 1_000_000, 0, 0)
+	rt.spend("raw_bedrock_haiku55", bedrockHaiku55, 100_000, 0, 0)
+	rt.spend("raw_direct_haiku55", "claude-haiku-5-5", 100_000, 0, 0)
+
+	rt.priceRule("0.0006", map[string]string{"model": "claude-opus-4.6", "model_raw": vertexOpus46, "token_type": "input"})
+	rt.priceRule("0.00002", map[string]string{
+		"model": "claude-haiku-5.5", "model_raw": bedrockHaiku55, "context_tier": "prompt_up_to_100k", "token_type": "input",
+	})
+	_, err := pricing.NewPostgresStore(db).WritePrice(rt.ctx, rt.tenantID, rt.planID, pricing.PriceChange{
+		Op: pricing.PriceAdd, MeterID: rt.meterID,
+		Match: map[string]string{"model": "claude-haiku-5.5", "model_raw": bedrockHaiku55, "token_type": "input"},
+		Shape: perUnitShape("0.00002"),
+	}, nil)
+	if errs.Code(err) != errs.CodePriceConflict || !strings.Contains(err.Error(), "vlx_prc_") {
+		t.Errorf("a three-label Haiku 5.5 model_raw price: got %v, want price_conflict naming the recipe's price", err)
+	}
+
+	subtotal, lines := rt.close()
+	want := map[string]int64{
+		"Tokens (claude-opus-4.5 · input)":                                               500,
+		"Tokens (claude-sonnet-4.5 · input)":                                             300,
+		"Tokens (claude-haiku-4.5 · input)":                                              100,
+		"Tokens (claude-opus-4.6 · " + vertexOpus46 + " · input)":                        600,
+		"Tokens (claude-opus-4.6 · input)":                                               500,
+		"Tokens (prompt_up_to_100k · claude-haiku-5.5 · " + bedrockHaiku55 + " · input)": 2,
+		"Tokens (prompt_up_to_100k · claude-haiku-5.5 · input)":                          1,
+	}
+	var wantTotal int64
+	for desc, cents := range want {
+		wantTotal += cents
+		if lines[desc] != cents {
+			t.Errorf("line %q = %d¢, want %d¢", desc, lines[desc], cents)
+		}
+	}
+	if subtotal != wantTotal || len(lines) != len(want) {
+		t.Errorf("subtotal %d¢ over %d lines, want %d¢ over %d. Lines:%s", subtotal, len(lines), wantTotal, len(want), dumpLines(lines))
+	}
+	evs, _, err := rt.usageStore.List(rt.ctx, usage.ListFilter{
+		TenantID: rt.tenantID, Dimensions: map[string]any{"model_raw": "claude-opus-5-9"}, Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	if len(evs) != 1 || evs[0].Dimensions["model"] != "claude-opus-5-9" {
+		t.Errorf("unknown model's events: %+v, want one with model = the raw name", evs)
 	}
 }

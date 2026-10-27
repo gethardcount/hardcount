@@ -77,7 +77,7 @@ func TestAnalyticsBuckets_AreUTCWhateverTheSessionTimeZone(t *testing.T) {
 	plan, err := pricing.NewPostgresStore(db).CreatePlan(ctx, tenantID, domain.Plan{
 		Code: "pln-utc", Name: "pln-utc", Currency: "USD",
 		BillingInterval: domain.BillingMonthly, Status: domain.PlanActive,
-		BaseAmountCents: 1000, MeterIDs: []string{},
+		BaseAmountCents: 1000,
 	})
 	if err != nil {
 		t.Fatalf("create plan: %v", err)

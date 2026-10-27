@@ -65,7 +65,7 @@ func TestAuthRequired_AllProtectedRoutes(t *testing.T) {
 		{"POST", "/v1/customers"},
 		{"GET", "/v1/meters"},
 		{"GET", "/v1/plans"},
-		{"GET", "/v1/rating-rules"},
+		{"GET", "/v1/plans/pln_123/prices"},
 		{"GET", "/v1/subscriptions"},
 		{"GET", "/v1/usage-events"},
 		{"GET", "/v1/invoices"},

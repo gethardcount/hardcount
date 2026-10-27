@@ -1,7 +1,7 @@
 # ADR-122: LiteLLM usage for an unknown customer is held and released by its key, never re-timed
 
 **Date:** 2026-10-17
-**Status:** Accepted
+**Status:** Accepted (amended 2026-10-27: release counts follow the plan stretches and count `no_price`)
 
 ## Summary
 
@@ -81,14 +81,18 @@ release it once with an honest statement of what it will bill.
 
 1. **Hold.** Migration 0179 adds `usage_held_events` (row-level security,
    livemode from the session, `UNIQUE (tenant_id, livemode,
-   idempotency_key)`). The LiteLLM handler calls `usage.Service.Hold` (through
-   a consumer-defined `Holder`) when the customer or meter lookup returns
-   not-found. The insert is `ON CONFLICT DO NOTHING`; a resend of a held row
-   is counted as `deduplicated`. A hold that cannot be written is a 503, so
+   idempotency_key)`). The LiteLLM handler calls `usage.Service.HoldCall`
+   (through a consumer-defined `Holder`) when the customer or meter lookup
+   returns not-found. It holds the call's rows in one transaction. When a
+   row already stored or held under the call's input key has the quantity
+   the mapper wrote before the 2026-10-22 cache-write split, it holds the
+   rows in that older form, with no cache-write rows (item 6).
+   Each insert is `ON CONFLICT DO NOTHING`; a resend of a held row is
+   counted as `deduplicated`. A hold that cannot be written is a 503, so
    LiteLLM resends. A payload with no `id` (no key) or no `user` stays an
    error and is not held.
 2. **Show.** `GET /v1/usage-events/held` groups the held rows by external id,
-   meter key and reason, with whether a matching customer and meter exist
+   event name and reason, with whether a matching customer and meter exist
    now. It lists the 200 external ids held most recently, each with all its
    groups, and returns `total_customers` and `total_rows` over every held
    row so the notice can say when the list is cut. The Usage page shows
@@ -110,10 +114,18 @@ release it once with an honest statement of what it will bill.
    active subscription's current period on a meter its plan prices
    (`in_open_period`), inside that period on a meter no plan on it prices
    (`not_on_plan`, never invoiced), and outside it
-   (`outside_open_period`). The plan check reads each item's current plan,
-   so a row from before a mid-period plan change is judged by the new plan. The second kind is not billed by a subscription
-   invoice unless that period's invoice is not built yet; the operator bills
-   it with a one-off invoice, as for any late usage (ADR-120). Since
+   (`outside_open_period`). The plan check read each item's current plan,
+   so a row from before a mid-period plan change was judged by the new plan.
+   Since 2026-10-27 (ADR-120 amendment of that date) it reads the plan
+   stretches the close bills by, so such a row is judged by the plan it was
+   on, and a row that plan prices but no price of it takes counts as
+   `no_price`. The counts are what Velox found when the release wrote the
+   rows, as for ingest's `billing_status` (ADR-120 amendment of
+   2026-10-27). An `outside_open_period` row was then outside every
+   subscription's billed time, in a period already invoiced (whatever plan
+   the subscription is on now), or before a paid threshold invoice's
+   end. The operator bills it with a one-off invoice,
+   as for any late usage (ADR-120). Since
    2026-10-22 the counts follow ADR-120's after-close rule, spend-threshold
    invoices included: a sum or count row before the end of a paid one
    counts as `outside_open_period`, and before the end of an unpaid one as
@@ -121,12 +133,18 @@ release it once with an honest statement of what it will bill.
    threshold invoice is voided first).
 5. **Discard.** `POST /v1/usage-events/held/discard` marks rows discarded.
    They are kept as a record and never billed. Audited.
-6. **A resend after the customer exists.** The LiteLLM door ingests through
-   `IngestResolvingHeld`: in one transaction it locks the held row with the
-   same key (`SELECT … FOR UPDATE`, the lock release and discard take).
+6. **A resend after the customer exists.** The LiteLLM door writes each
+   call through `IngestCall`, in one transaction per call. It first locks
+   the held rows with the call's keys (`SELECT … FOR UPDATE`, the lock
+   release and discard take).
    A `discarded` row means nothing is written and the resend counts as
    deduplicated, so discard stays final. A `held` row is written and marked
    released, so a later discard cannot mark usage that is already billed.
+   Two cases mark a `held` row released and write nothing, so its
+   `released_event_id` stays empty: `usage_events` already has its key (the
+   usage is billed), or it is a cache-write row of a call whose input row
+   has the quantity from before the 2026-10-22 cache-write split, which
+   counted the writes inside the input.
 
 ## Why this design
 

@@ -80,15 +80,15 @@ func NewCostDashboardAssembler(customers CustomerTokenLookup, usageSvc *Customer
 //   - email, display_name, external_id, metadata (customer PII)
 //   - billing_profile (legal name, address, tax_id)
 //   - warnings (operator-facing tech messages from CustomerUsageService)
-//   - plan_id (internal identifier; plan_name is enough for display)
-//   - rating_rule_version_id (internal identifier)
+//   - plan_id and price_id (internal identifiers; plan_name is enough for
+//     display)
 //
 // What's PRESENT:
 //   - customer_id + tenant_id (caller already has the token, so these
 //     are not secrets)
 //   - billing_period { start, end, source }
 //   - subscriptions (id + plan_name + currency + period only)
-//   - usage[] (meter + per-rule breakdown for multi-dim)
+//   - usage[] (meter + per-price breakdown, by the events each price takes)
 //   - totals[] (per-currency rollup)
 //   - projected_total_cents (sum across currencies — Stripe-style
 //     single-number summary the widget surfaces as the headline)
@@ -120,12 +120,10 @@ type CostDashboardProjection struct {
 // is the figure a "live balance" widget wants: the balance minus
 // UnbilledUsageCents, never below zero.
 //
-// UnbilledUsageCents is NOT projected_total_cents. The projection is this
-// period's usage over one window; unbilled usage leaves out what a threshold
-// invoice already billed and what a trial will never bill, and counts each
-// subscription over its own period. Subtracting the projection was wrong in
-// exactly those cases (issue #1019), so the three live fields come from
-// CostDashboardLiveBalance and the block adds up on its own:
+// UnbilledUsageCents is NOT projected_total_cents. The projection is the
+// current period's whole usage; unbilled usage leaves out what a threshold
+// invoice already billed. So the three live fields come from
+// CostDashboardLiveBalance (issue #1019) and the block adds up on its own:
 // estimated = max(balance - unbilled, 0).
 type CostDashboardCredits struct {
 	Currency                  string `json:"currency"`
@@ -151,21 +149,22 @@ type CostDashboardSubscription struct {
 }
 
 type CostDashboardMeter struct {
-	EventName        string              `json:"event_name"`
-	MeterName        string              `json:"meter_name"`
-	Unit             string              `json:"unit"`
-	Currency         string              `json:"currency"`
-	TotalQuantity    string              `json:"total_quantity"`
-	TotalAmountCents int64               `json:"total_amount_cents"`
-	Rules            []CostDashboardRule `json:"rules"`
+	EventName        string               `json:"event_name"`
+	MeterName        string               `json:"meter_name"`
+	Unit             string               `json:"unit"`
+	Currency         string               `json:"currency"`
+	TotalQuantity    string               `json:"total_quantity"`
+	TotalAmountCents int64                `json:"total_amount_cents"`
+	Prices           []CostDashboardPrice `json:"prices"`
 }
 
-type CostDashboardRule struct {
-	RuleKey           string         `json:"rule_key"`
-	DimensionMatch    map[string]any `json:"dimension_match,omitempty"`
-	Quantity          string         `json:"quantity"`
-	AmountCents       int64          `json:"amount_cents"`
-	UnitAmountDecimal *string        `json:"unit_amount_decimal,omitempty"`
+// CostDashboardPrice is the usage one price took this period. A catch-all
+// price has no dimension_match.
+type CostDashboardPrice struct {
+	DimensionMatch    map[string]string `json:"dimension_match,omitempty"`
+	Quantity          string            `json:"quantity"`
+	AmountCents       int64             `json:"amount_cents"`
+	UnitAmountDecimal *string           `json:"unit_amount_decimal,omitempty"`
 }
 
 type CostDashboardTotal struct {
@@ -314,20 +313,19 @@ func (a *CostDashboardAssembler) GetByToken(ctx context.Context, token string) (
 	}
 
 	for _, m := range res.Meters {
-		rules := make([]CostDashboardRule, 0, len(m.Rules))
-		for _, ru := range m.Rules {
-			if ru.Unmatched {
-				// Unmatched-usage rows are operator information (a
-				// pricing-config gap, ADR-044 matrix); the customer-facing
-				// projection shows only billed usage.
+		prices := make([]CostDashboardPrice, 0, len(m.Prices))
+		for _, p := range m.Prices {
+			if p.NoPrice {
+				// Usage no price took is operator information (a pricing
+				// gap); the customer-facing projection shows only billed
+				// usage.
 				continue
 			}
-			rules = append(rules, CostDashboardRule{
-				RuleKey:           ru.RuleKey,
-				DimensionMatch:    ru.DimensionMatch,
-				Quantity:          ru.Quantity.String(),
-				AmountCents:       ru.AmountCents,
-				UnitAmountDecimal: ru.UnitAmountDecimal,
+			prices = append(prices, CostDashboardPrice{
+				DimensionMatch:    p.DimensionMatch,
+				Quantity:          p.Quantity.String(),
+				AmountCents:       p.AmountCents,
+				UnitAmountDecimal: p.UnitAmountDecimal,
 			})
 		}
 		proj.Usage = append(proj.Usage, CostDashboardMeter{
@@ -337,7 +335,7 @@ func (a *CostDashboardAssembler) GetByToken(ctx context.Context, token string) (
 			Currency:         m.Currency,
 			TotalQuantity:    m.TotalQuantity.String(),
 			TotalAmountCents: m.TotalAmountCents,
-			Rules:            rules,
+			Prices:           prices,
 		})
 	}
 

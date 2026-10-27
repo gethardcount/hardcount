@@ -1,9 +1,9 @@
 # ADR-085: A recipe is an idempotent, additive provisioning event — one verb, no uninstall
 
 **Date:** 2026-07-08
-**Status:** Accepted (amended 2026-07-26 and 2026-10-23); superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md) (rule adoption goes; recipes stop creating dunning policies and webhook endpoints), not built yet
+**Status:** Accepted (amended 2026-07-26 and 2026-10-23); superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md) (rule adoption is gone, built in PR-4 #1386; recipes create no dunning policy or webhook endpoint, built in PR-5 #1389)
 
-**Superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23 and not built yet. Until it is built, this ADR describes the code. Rating-rule adoption, its conformance check ("Never republish an existing rule key") and the 2026-10-23 amendment go, because a recipe's prices belong to its new plan and touch no other plan (PR-4). The plan's currency comes from the recipe, not from adopted rules (PR-4). Step 4 goes: recipes no longer create a dunning policy or a webhook endpoint (PR-5). The fresh plan per apply, the badge and the meter aggregation check stay; the meter is read inside the apply's transaction (PR-4).
+**Superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23. Built in PR-4 (#1386): rating-rule adoption, its conformance check ("Never republish an existing rule key") and the 2026-10-23 amendment are gone, because a recipe's prices belong to its new plan and touch no other plan. The plan's currency comes from the recipe, not from adopted rules. The meter is read inside the apply's transaction. Built in PR-5 (#1389): step 4 is gone, so a recipe creates no dunning policy and no webhook endpoint, and a recipe file holds only meters and plans with their prices. The fresh plan per apply, the badge and the meter aggregation check stay.
 
 ## Summary
 
@@ -37,7 +37,7 @@ A recipe is an **idempotent, additive provisioning EVENT**, not an owned resourc
 
 ### Idempotency
 
-The badge is the gate, checked before any write. Re-applying an already-installed recipe is a **no-op that returns the existing instance** — same `id`, same `created_objects`, same HTTP `201`. Never a 409, never a duplicate plan.
+The badge is the gate, checked before any write. Re-applying an already-installed recipe is a **no-op that returns the existing instance** — same `id`, same `created_objects`, same HTTP `201`. Never a 409, never a duplicate plan. Amended 2026-10-26: two applies that run at the same time can conflict. The second gets a 409 (the meter, the plan code or the badge already exists) and installs nothing; a retry returns the first one's install.
 
 **Amendment (2026-07-26, m0157): the badge is scoped per livemode.** `0055` shipped the badge mode-blind while everything a recipe provisions is mode-partitioned (0020) — so a test-mode install's badge gated the live-mode install of the same recipe, which "no-op'd" into a Live dashboard showing *Installed* with zero live pricing objects. The badge now carries `livemode` (0020 treatment: mode-scoped unique, RLS predicate, session-stamped insert trigger), so "applied once" means *once per mode*, matching the objects the badge records. The class lesson: a mode-blind tenant table is only safe when its lookups ride FK-scoped mode-aware parents; the badge is addressed by a **natural key** (`recipe_key`), the one shape that argument doesn't cover — `TestRLSIsolation_AllModeAwareTablesHaveLivemodePredicate` now derives the mode-aware set from the schema so the next such table can't ship silently.
 

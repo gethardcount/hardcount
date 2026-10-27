@@ -75,7 +75,7 @@ func (r *aggReads) AggregateForBillingPeriodByAgg(ctx context.Context, tenantID,
 func TestCloser_ReadsEachMeterOnce(t *testing.T) {
 	billedThrough := time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC)
 	apiOnly := thresholdWatermark{billedThrough: &billedThrough, lines: []domain.InvoiceLineItem{
-		usageLine("mtr_api", "rrv_api", 700, 7000),
+		usageLine("mtr_api", "prc_api", 700, 7000),
 	}}
 	for name, run := range map[string]func(e *Engine, sub domain.Subscription, plans map[string]domain.Plan) error{
 		"cancel": func(e *Engine, sub domain.Subscription, plans map[string]domain.Plan) error {

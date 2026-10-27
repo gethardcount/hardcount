@@ -453,17 +453,13 @@ func TestRunCycle_TaxErrorAbortsBeforeInvoiceAndCycleAdvance(t *testing.T) {
 				ID: "pln_1", Name: "Pro Plan", Currency: "USD",
 				BillingInterval: domain.BillingMonthly,
 				BaseAmountCents: 4900,
-				MeterIDs:        []string{"mtr_api"},
 			},
 		},
 		meters: map[string]domain.Meter{
-			"mtr_api": {ID: "mtr_api", Name: "API Calls", Unit: "calls", RatingRuleVersionID: "rrv_api"},
+			"mtr_api": {ID: "mtr_api", Name: "API Calls", Unit: "calls"},
 		},
-		rules: map[string]domain.RatingRuleVersion{
-			"rrv_api": {
-				ID: "rrv_api", RuleKey: "api_calls", Version: 1, Mode: domain.PricingPerUnit,
-				UnitAmountCents: decimal.NewFromInt(100),
-			},
+		prices: map[string][]domain.PlanPrice{
+			"pln_1": {priceOf("prc_api", "mtr_api", domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(100)})},
 		},
 	}
 

@@ -60,7 +60,7 @@ func WithLivemode(ctx context.Context, live bool) context.Context {
 // ErrLivemodeUnset means ctx carries no livemode. Every entry point sets one
 // with WithLivemode, so this is a bug at the entry point. Nothing guesses a
 // mode in its place: the database refuses an insert, and shows no row, when
-// app.livemode is unset (migrations 00212 and 00213).
+// app.livemode is unset (migrations 00213 and 00214).
 var ErrLivemodeUnset = errors.New("postgres: livemode was never set on ctx (set postgres.WithLivemode at the entry point)")
 
 // ErrTenantUnset means a tenant-scoped transaction was asked for with no
@@ -285,86 +285,4 @@ func NullableTime(v *time.Time) any {
 		return nil
 	}
 	return *v
-}
-
-// StringArray is a []string that implements sql.Scanner and driver.Valuer
-// for PostgreSQL TEXT[] columns.
-type StringArray []string
-
-// Value converts the StringArray to a PostgreSQL array literal.
-//
-// Observed with the pgx stdlib driver: a nil StringArray reaches Postgres as
-// NULL, not '{}', despite the nil branch below. For a negated test that
-// matters: NOT (x = ANY(NULL)) is NULL and filters out every row. COALESCE
-// the parameter in SQL when nil can reach a NOT ANY / <> ALL
-// (TestDueScans_ExcludeAppliesBeforeLimit fails without it).
-func (a StringArray) Value() (interface{}, error) {
-	if a == nil {
-		return "{}", nil
-	}
-	if len(a) == 0 {
-		return "{}", nil
-	}
-	elements := make([]string, len(a))
-	for i, s := range a {
-		// Escape double quotes and backslashes inside elements
-		escaped := strings.ReplaceAll(s, `\`, `\\`)
-		escaped = strings.ReplaceAll(escaped, `"`, `\"`)
-		elements[i] = `"` + escaped + `"`
-	}
-	return "{" + strings.Join(elements, ",") + "}", nil
-}
-
-// Scan parses a PostgreSQL TEXT[] value into a StringArray.
-func (a *StringArray) Scan(src interface{}) error {
-	if src == nil {
-		*a = StringArray{}
-		return nil
-	}
-	var s string
-	switch v := src.(type) {
-	case string:
-		s = v
-	case []byte:
-		s = string(v)
-	default:
-		return fmt.Errorf("StringArray.Scan: unsupported type %T", src)
-	}
-	// Trim outer braces
-	s = strings.TrimSpace(s)
-	if s == "{}" || s == "" {
-		*a = StringArray{}
-		return nil
-	}
-	s = s[1 : len(s)-1] // Remove { and }
-	var result []string
-	var current strings.Builder
-	inQuote := false
-	escaped := false
-	for _, ch := range s {
-		if escaped {
-			current.WriteRune(ch)
-			escaped = false
-			continue
-		}
-		if ch == '\\' {
-			escaped = true
-			continue
-		}
-		if ch == '"' {
-			inQuote = !inQuote
-			continue
-		}
-		if ch == ',' && !inQuote {
-			result = append(result, current.String())
-			current.Reset()
-			continue
-		}
-		current.WriteRune(ch)
-	}
-	if current.Len() > 0 {
-		result = append(result, current.String())
-	}
-	*a = result
-	return nil
 }

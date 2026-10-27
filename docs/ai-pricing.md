@@ -10,19 +10,20 @@ terminal.
 | Word | Meaning |
 |---|---|
 | Dimensions | Labels on a usage event, such as `model` and `token_type`. |
-| Rating rule | A price: an amount per unit, tiers, or packages. |
-| Pricing rule | A line on a meter that says which events a rating rule prices, by their dimensions. |
-| Default price | The price a meter uses for events that no pricing rule picks. |
+| Price | One usage rate of a plan: a meter, the labels an event must carry (`dimension_match`), and an amount per unit, tiers, or packages. |
+| Used plan | A plan a subscription has used. A price change on it applies from each subscriber's next billing period. A subscriber who joins the plan after the change pays it from the join, unless the same subscription was on the plan earlier in that period. |
 
 ## Ready-made recipes
 
-A recipe creates a meter, a price for each model and kind of token, and a
-monthly plan with no base fee, in one call. It also creates a schedule for
-retrying failed card payments, and a webhook endpoint (a URL in your app
-that Velox calls when something happens). The endpoint starts turned off,
-with a placeholder address: set your own address and turn it on under
-**Webhooks**. The prices start at the provider's public list prices, which you can change
-later.
+A recipe creates, in one call, a monthly plan with no base fee and its
+prices: one for each model and kind of token, or for each GPU type in
+`replicate_style`. The prices bill the meter in the table below. If you
+have no meter with that event name, the recipe creates it. If you have one
+with the same aggregation, the recipe uses it. If yours has another
+aggregation, the recipe is refused with 409 and creates nothing. It creates
+nothing else: set payment retries under **Dunning policies** and webhook
+endpoints under **Webhooks**. The prices start at the provider's public
+list prices, which you can change later.
 
 | Recipe | Meter | Models it prices | Kinds of token (`token_type`) |
 |---|---|---|---|
@@ -44,8 +45,8 @@ dimension. A LiteLLM proxy does this for you: Velox turns a name such as
   tokens pays the higher one, for every token of the call, output included.
   The prompt counts input, cache reads and cache writes. Its events carry
   `context_tier`: `prompt_up_to_100k` or `prompt_over_100k`. The recipe has
-  a rule for each. If you price Haiku 5.5 yourself, put `context_tier` in
-  every rule: a rule without it prices both at one rate. A provider cost
+  a price for each. If you price Haiku 5.5 yourself, put `context_tier` in
+  every price: a price without it prices both at one rate. A provider cost
   has no `context_tier`, so your margin on Haiku 5.5 is wrong for one of
   the two prices ([more](#see-your-margin)).
 - **The prices are Anthropic's list prices.** On Bedrock and Google Cloud,
@@ -54,8 +55,7 @@ dimension. A LiteLLM proxy does this for you: Velox turns a name such as
   inference and batch prices are not applied.
 
 The two AI recipes share the `tokens` meter, so you can apply both. Each
-adds its own plan. All prices on one meter must be in one currency, so
-apply the second recipe in the currency of the first.
+adds its own plan with its own prices, in the plan's currency.
 
 To see the recipes, and to apply one with your own plan name:
 
@@ -83,335 +83,211 @@ the first time, so the overrides count only on the first apply.
 
 ## Price a model a recipe does not cover
 
-You need two calls: one makes the price, and one tells the meter which
-events it prices.
+Add a price to the plan. It names the meter, the labels an event must carry
+(`dimension_match`), and the rate. `mode: "per_unit"` bills each unit at
+`unit_amount_cents`, the price of one unit in cents, which can be a
+fraction: `0.0002` cents per token is $2.00 per million tokens. The price
+takes the plan's currency.
 
-1. **Make the price.** This is a rating rule. `mode: "per_unit"` bills each
-   unit at `unit_amount_cents`, the price of one unit in cents, which can be a
-   fraction: `0.0002` cents per token is $2.00 per million tokens.
-
-   ```bash
-   RATE_ID=$(curl -s -X POST "$VELOX/v1/rating-rules" \
-     -H "Authorization: Bearer $VELOX_KEY" \
-     -H "Content-Type: application/json" \
-     -d '{"rule_key": "my_model_input", "name": "My model input", "mode": "per_unit",
-          "currency": "USD", "unit_amount_cents": "0.0002"}' | jq -r .id)
-   echo "$RATE_ID"
-   ```
-
-   **You see:** the price ID, such as `vlx_rrv_…`.
-
-2. **Find the `tokens` meter.**
+1. **Find the `tokens` meter and your plan.**
 
    ```bash
    METER_ID=$(curl -s "$VELOX/v1/meters" -H "Authorization: Bearer $VELOX_KEY" \
      | jq -r '.data[] | select(.event_name == "tokens") | .id')
-   echo "$METER_ID"
+   PLAN_ID=$(curl -s "$VELOX/v1/plans" -H "Authorization: Bearer $VELOX_KEY" \
+     | jq -r '.data[] | select(.name == "GPT API") | .id')
+   echo "$METER_ID $PLAN_ID"
    ```
 
-   **You see:** the meter ID, such as `vlx_mtr_…`.
+   **You see:** the two IDs, such as `vlx_mtr_… vlx_pln_…`.
 
-3. **Add a pricing rule to the meter.** It prices the events whose
-   dimensions match `dimension_match`.
+2. **Add the price.**
 
    ```bash
-   jq -n --arg rate "$RATE_ID" \
-       '{dimension_match: {model: "my-model", token_type: "input"},
-         rating_rule_version_id: $rate, priority: 100}' \
-     | curl -s -X POST "$VELOX/v1/meters/$METER_ID/pricing-rules" \
+   jq -n --arg meter "$METER_ID" \
+       '{meter_id: $meter, dimension_match: {model: "my-model", token_type: "input"},
+         mode: "per_unit", unit_amount_cents: "0.0002"}' \
+     | curl -s -X POST "$VELOX/v1/plans/$PLAN_ID/prices" \
        -H "Authorization: Bearer $VELOX_KEY" \
        -H "Content-Type: application/json" \
-       -d @- | jq '{id, dimension_match, priority}'
+       -d @- | jq -c '{id, dimension_match, unit_amount_cents, effective}'
    ```
 
    **You see:**
+   `{"id":"vlx_prc_…","dimension_match":{"model":"my-model","token_type":"input"},"unit_amount_cents":"0.0002","effective":"next_period"}`
 
-   ```json
-   {
-     "id": "vlx_mpr_…",
-     "dimension_match": {
-       "model": "my-model",
-       "token_type": "input"
-     },
-     "priority": 100
-   }
-   ```
-
-Every plan that charges for the `tokens` meter now prices `my-model` input
-tokens. Add one rule for each kind of token you sell.
-
-**While subscriptions use the meter,** Velox accepts a new rule only if it
-takes no usage that a price bills now. The meter must have no default
-price, and every rule that could match the same events must have a higher
-priority. A rule for a new model at priority 100 passes when the other
-rules at 100 or below each name a model, as the recipes' rules do.
-Otherwise the answer is 409 `meter_in_use`. See [Change a price](#change-a-price).
+`effective` says when it applies. On a plan no subscription has used it is
+`now`. On a used plan it is `next_period`: each subscriber pays it from
+their next billing period, and the period already open keeps the prices it
+started with. A subscriber who joins the plan after the change pays it from
+the moment they join ([Change a price](#change-a-price)). Add one price for
+each kind of token you sell. Other plans that price the `tokens` meter are
+not changed.
 
 ## How Velox picks the price for an event
 
-- **One price for each event.** Each event is priced by at most one pricing
-  rule: the one with the highest priority among the rules that match. So
-  nothing is counted twice.
-- **One rule for each model and kind of token.** Kinds of token do not
-  overlap, so with one rule for each `{model, token_type}`, every event
-  matches exactly one rule. This is what the recipes do.
-- **A broad rule and finer rules together.** You can add a rule for a whole
-  model (`{"model": "my-model"}`) next to rules for each kind of token.
-  Priority decides which rule prices each event.
+- **One price for each event.** A price takes an event whose labels include
+  every label of the price. When several prices of the plan take an event,
+  the one with the most labels bills it. So nothing is counted twice.
+- **One price for each model and kind of token.** Kinds of token do not
+  overlap, so with one price for each `{model, token_type}`, every event
+  fits exactly one price. This is what the recipes do.
+- **A broad price and finer prices together.** A price for a whole model
+  (`{"model": "my-model"}`) next to prices for each kind of token bills the
+  kinds of token that have no price of their own. A price with no labels
+  takes every event no other price takes.
+- **Two prices that could tie are refused.** Two prices with the same
+  number of labels that could both take one event, such as
+  `{"model": "a"}` and `{"token_type": "input"}`, have no winner. The second
+  one is refused with 409 `price_conflict`, which names the first. Add a
+  label to one of them, or give a shared label another value.
 
-**Usage that no rule picks has no price.** The usual cause is a new model
-name. If the meter has a default price, or a broader rule such as
-`{"token_type": "input"}` matches it, that price bills it, with no notice. To set one,
-send `PATCH /v1/meters/{id}` with `rating_rule_version_id`. If the meter has
-no default price, Velox makes and sends the invoice without that usage. You
-see it in four places:
+**Usage that no price takes is not billed.** The usual cause is a new model
+name. Velox makes and sends the invoice without that usage. You see it in
+five places:
 
+- the answer that sent the event: `billing_status: "no_price"` on its 201,
+  or a `no_price` count on a batch or a LiteLLM delivery, counted in
+  `velox_usage_unbilled_total{reason="no_price"}`. It is what Velox found
+  when the event arrived. An event with no `billing_status` is not
+  promised to be billed
+  ([more](api-surface.md#what-velox-found-when-the-event-arrived));
 - the "not billed" row of the customer's usage, on the customer page and
   in `GET /v1/customers/{id}/usage` (the current billing period, unless
-  you pass `from` and `to`);
+  you pass `from` and `to`), marked `no_price`;
 - the warning on the invoice preview, which gives the quantity;
 - the `velox_usage_unpriced_quantity_total{meter_id, mode}` metric (usage
   of customers on a test clock is not counted);
 - a server log line when the invoice is made.
 
-To bill it, add a rule or a default price. Invoices not made yet then
-include it. If a spend threshold already invoiced the subscription this
-period, a sum or count price bills only the usage after that invoice. For a period that is already invoiced, bill it with a one-off
-invoice ([runbook](ops/runbook/usage-with-no-price.md)). A first default
-price is accepted while subscriptions use the meter. A new rule is accepted while subscriptions use the
-meter only as described above.
+To bill it from the next period, add a price. For usage already left out,
+bill it with a one-off invoice
+([runbook](ops/runbook/usage-with-no-price.md)).
 
 ## Change a price
 
-Usage is priced when its invoice is made, from the meter as it is then. So
-while a draft, trialing or active subscription uses the meter, Velox refuses
-(409 `meter_in_use`) any change that would reprice the current period:
+A price's rate changes with `PATCH /v1/plans/{id}/prices/{price_id}`, and
+`DELETE` removes it. Its meter and labels never change: for other events,
+add another price. Each billing period of a subscription pays the plan's
+prices as they were at the period's start. If the subscription joined the
+plan during the period, it pays them as they were when it first joined the
+plan in that period. So:
 
-- editing or deleting a pricing rule;
-- a new rule that could take usage from a price that bills it now;
-- pointing the default price at another price, or removing it.
+- On a plan no subscription has used, a change applies at once
+  (`effective: now`).
+- On a used plan, it applies from each subscriber's next billing period
+  (`effective: next_period`). The period already open keeps the prices it
+  started with, also after a quantity change. A customer on a test clock
+  follows the clock: the change applies from the clock's next period.
+- A subscriber who joins the plan after a change pays it at once: a new
+  subscription from its start (after a trial, from the trial's end), an
+  immediate plan change onto the plan from the change, an added item from
+  the add. So a subscription that starts later on the day of a change pays
+  the new rate, bills a price added earlier and does not bill a price
+  removed earlier, from its first period.
+- A customer's negotiated rate (a price override) keeps applying when the
+  price's rate changes. Removing the price ends it, and the answer lists the
+  overrides it ended.
+- A subscription that leaves the plan and joins it again in the same
+  period keeps the prices of its first join for that period. That holds for
+  an item removed and added back, and for a plan change and back. A change
+  made in between applies from its next period.
+- An override follows the same rule. It applies from the subscriber's next
+  period, or from the join when the subscription first joins the plan in a
+  period after the override was created. So one created before a
+  subscription starts (after a trial, before the trial ends), even on the
+  same day, applies from its first period.
+- When an item leaves a plan and an item joins it again later in the
+  period, each part bills on its own, with its own peak and tiers. An item
+  added on the period's first day bills from the period start, so its part
+  starts where the part before it ended. On one plan those two parts bill
+  as one: a `max` meter bills one peak, and tiers run on.
+- On a test clock, a change or an override takes effect just after the
+  clock's current time. A subscription, an immediate plan change or an
+  added item at that same clock time gets the earlier prices, so advance
+  the clock first.
+
+On the dashboard, open the plan under **Pricing**. Its **Usage prices**
+card says which of the two applies before you save.
 
 The meter's aggregation has its own rule: it can change until the meter has
 a usage event, then it is fixed (409 `meter_has_usage`). Held usage does not
-count until it is released. Every price on the meter bills under it.
+count until it is released. Every price of the meter bills under it.
 
-The message says how many subscriptions use the meter. To change a rate,
-publish a new version of the rating rule (`POST /v1/rating-rules` with the
-same `rule_key`). It applies from each subscription's next billing period,
-and the current period keeps the old rate. On the dashboard, that is **New
-version** on the Prices tab. A subscription on a test clock is the
-exception: a version is stamped with the real time, so if the clock's
-current period started later than now, the new version applies to that
-period. In test mode the 409 message says so.
+## Usage on a yearly plan
+
+A subscription has one billing period. On a yearly plan, usage is billed
+once a year, on the invoice at the end of the year.
+
+- **To bill some usage sooner,** set a spend threshold on the subscription
+  (`amount_gte` on `PUT /v1/subscriptions/{id}/billing-thresholds`). The
+  first time the year's usage reaches it, Velox invoices the usage so far.
+  A threshold fires at most once a billing period, so once a year here:
+  usage after it waits for the invoice at the end of the year. Usage of a
+  `max` or `last` meter is never billed early.
+- **To bill usage every month beside a yearly fee,** give the customer two
+  subscriptions: one on a yearly plan with the fee and no prices, and one
+  on a monthly plan with the usage prices. The two plans share no meter, so
+  Velox allows both.
 
 ## Price a Claude model Velox does not know
 
-A Claude name Velox does not know keeps its own name in both `model` and
-`model_raw`. Price it on `model_raw` at priority 101: that value is the
-name exactly as LiteLLM sent it, and it does not change when a later
-Velox release learns the model. Make one rating rule for each kind of
-token, with its own `rule_key`, and add it as in [Price a model a recipe
-does not cover](#price-a-model-a-recipe-does-not-cover), with this
-pricing rule:
+A Claude name Velox does not know keeps its own name in `model`, such as
+`claude-opus-4-9`. Price it as in [Price a model a recipe does not
+cover](#price-a-model-a-recipe-does-not-cover), with one price for each kind
+of token. This example adds it to the `anthropic_style` plan "AI API":
 
 ```bash
-jq -n --arg rate "$RATE_ID" \
-    '{dimension_match: {model_raw: "claude-opus-4-9", token_type: "input"},
-      rating_rule_version_id: $rate, priority: 101}' \
-  | curl -s -X POST "$VELOX/v1/meters/$METER_ID/pricing-rules" \
+CLAUDE_PLAN_ID=$(curl -s "$VELOX/v1/plans" -H "Authorization: Bearer $VELOX_KEY" \
+  | jq -r '.data[] | select(.name == "AI API") | .id')
+jq -n --arg meter "$METER_ID" \
+    '{meter_id: $meter, dimension_match: {model: "claude-opus-4-9", token_type: "input"},
+      mode: "per_unit", unit_amount_cents: "0.0015"}' \
+  | curl -s -X POST "$VELOX/v1/plans/$CLAUDE_PLAN_ID/prices" \
     -H "Authorization: Bearer $VELOX_KEY" \
     -H "Content-Type: application/json" \
-    -d @- | jq -c '{dimension_match, priority}'
+    -d @- | jq -c '{dimension_match, effective}'
 ```
 
-**You see:**
-`{"dimension_match":{"model_raw":"claude-opus-4-9","token_type":"input"},"priority":101}`
+**You see,** on a plan a subscription has used (on an unused plan,
+`effective` is `now`):
+`{"dimension_match":{"model":"claude-opus-4-9","token_type":"input"},"effective":"next_period"}`
 
-Usage not invoiced yet bills at that price, including usage that arrived
-before you added it.
+If a later release learns the model and renames it, the price stops
+matching, and the usage shows as not billed until you price the new name.
 
-While subscriptions use the meter, Velox refuses this rule (409
-`meter_in_use`). At priority 101 it ranks above the model rules of the same
-`token_type`, and Velox cannot tell that no event matches both. Then price
-the name on `model` instead, at priority 100: `{"model": "claude-opus-4-9",
-"token_type": "input"}`. If a later release learns the model and renames it,
-that rule stops matching, and the usage shows as not billed until you price
-the new name.
+## Price one platform's model name differently
 
-## Claude models added after you installed
-
-Applying a recipe again returns the setup it made the first time and adds
-nothing. So an install of `anthropic_style` 5.0.0 or earlier does not get
-the 6.0.0 prices. After you upgrade Velox:
-
-- Claude Opus 5.5, Sonnet 5.5, Fable 5.1 and Mythos 5.1 usage arrives as
-  `claude-opus-5.5`, `claude-sonnet-5.5`, `claude-fable-5.1` and
-  `claude-mythos-5.1`. Before, Velox billed it at Opus 5, Sonnet 5, Fable 5
-  and Mythos 5 prices. With no rule for the new name, it has no price.
-- Claude Haiku 5.5 usage arrives as `claude-haiku-5.5` with `context_tier`.
-  Before, it kept its raw name and had no price.
-- Claude Sonnet 5 keeps the old $3 / $15 recipe prices until you change
-  them. Anthropic now charges $2 / $10.
-- A [provider cost](#see-your-margin) saved on `claude-opus-5`,
-  `claude-sonnet-5`, `claude-fable-5` or `claude-mythos-5` does not cover
-  the new names. Nor does one on `claude-opus-4` or `claude-sonnet-4` cover
-  Google Cloud `@default` and `@date` names of Opus 4.1 to 4.8, Sonnet 4.5
-  and Sonnet 4.6, which now arrive as their own model, such as
-  `claude-opus-4.6`. Save a cost for each new name before you upgrade. A
-  cost applies only to usage that arrives after you save it, and while any
-  of a customer's usage has no cost, their margin shows no percentage.
-
-Add the 30 prices **before you upgrade**, so no usage arrives without a
-price. A rule on `claude-opus-5.5` matches nothing until the new release
-sends that name. This script makes them with the recipe's own rule keys,
-names and prices:
+Each event keeps the name LiteLLM sent in `model_raw`, such as
+`vertex_ai/claude-opus-4-6@default`. To charge that name another rate,
+add a price with one more label than the recipe's price for the model:
+`model_raw` beside its labels. The price with more labels wins. This
+example charges Claude Opus 4.6 input tokens sent under that name $5.50
+per million, on the `anthropic_style` plan "AI API":
 
 ```bash
-CURRENCY=USD   # the currency you installed the recipe in
-METER_ID=$(curl -s "$VELOX/v1/meters" -H "Authorization: Bearer $VELOX_KEY" \
-  | jq -r '.data[] | select(.event_name == "tokens") | .id')
-
-# add_price <rule key> <name> <cents per token> <model> <token type> [context tier]
-add_price() {
-  rate_id=$(jq -n --arg key "$1" --arg name "$2" --arg cents "$3" --arg cur "$CURRENCY" \
-      '{rule_key: $key, name: $name, mode: "per_unit", currency: $cur, unit_amount_cents: $cents}' \
-    | curl -s -X POST "$VELOX/v1/rating-rules" \
-      -H "Authorization: Bearer $VELOX_KEY" -H "Content-Type: application/json" \
-      -d @- | jq -r .id)
-  jq -n --arg rate "$rate_id" --arg model "$4" --arg type "$5" --arg tier "${6:-}" \
-      '{dimension_match: ({model: $model, token_type: $type}
-          + (if $tier == "" then {} else {context_tier: $tier} end)),
-        rating_rule_version_id: $rate, priority: 100}' \
-    | curl -s -X POST "$VELOX/v1/meters/$METER_ID/pricing-rules" \
-      -H "Authorization: Bearer $VELOX_KEY" -H "Content-Type: application/json" \
-      -d @- | jq -c .dimension_match
-}
-
-for m in "fable51|Claude Fable 5.1|claude-fable-5.1|0.001|0.005|0.000025|0.00125|0.002" \
-         "mythos51|Claude Mythos 5.1|claude-mythos-5.1|0.001|0.005|0.000025|0.00125|0.002" \
-         "opus55|Claude Opus 5.5|claude-opus-5.5|0.0004|0.002|0.00002|0.0005|0.0008" \
-         "sonnet55|Claude Sonnet 5.5|claude-sonnet-5.5|0.0002|0.001|0.00001|0.00025|0.0004"; do
-  IFS='|' read -r key name model in out read w5m w1h <<<"$m"
-  add_price "${key}_input" "$name input" "$in" "$model" input
-  add_price "${key}_output" "$name output" "$out" "$model" output
-  add_price "${key}_cache_read" "$name cache read" "$read" "$model" cache_read
-  add_price "${key}_cache_write_5m" "$name cache write (5m)" "$w5m" "$model" cache_write_5m
-  add_price "${key}_cache_write_1h" "$name cache write (1h)" "$w1h" "$model" cache_write_1h
-done
-
-for t in "std|prompt_up_to_100k|up to|0.00001|0.00005|0.000001|0.0000125|0.00002" \
-         "long|prompt_over_100k|over|0.00005|0.00025|0.000005|0.0000625|0.0001"; do
-  IFS='|' read -r key tier words in out read w5m w1h <<<"$t"
-  suffix=" (prompts $words 100K tokens)"
-  add_price "haiku55_${key}_input" "Claude Haiku 5.5 input$suffix" "$in" claude-haiku-5.5 input "$tier"
-  add_price "haiku55_${key}_output" "Claude Haiku 5.5 output$suffix" "$out" claude-haiku-5.5 output "$tier"
-  add_price "haiku55_${key}_cache_read" "Claude Haiku 5.5 cache read$suffix" "$read" claude-haiku-5.5 cache_read "$tier"
-  add_price "haiku55_${key}_cache_write_5m" "Claude Haiku 5.5 cache write (5m)$suffix" "$w5m" claude-haiku-5.5 cache_write_5m "$tier"
-  add_price "haiku55_${key}_cache_write_1h" "Claude Haiku 5.5 cache write (1h)$suffix" "$w1h" claude-haiku-5.5 cache_write_1h "$tier"
-done
+CLAUDE_PLAN_ID=$(curl -s "$VELOX/v1/plans" -H "Authorization: Bearer $VELOX_KEY" \
+  | jq -r '.data[] | select(.name == "AI API") | .id')
+jq -n --arg meter "$METER_ID" \
+    '{meter_id: $meter,
+      dimension_match: {model: "claude-opus-4.6", model_raw: "vertex_ai/claude-opus-4-6@default", token_type: "input"},
+      mode: "per_unit", unit_amount_cents: "0.00055"}' \
+  | curl -s -X POST "$VELOX/v1/plans/$CLAUDE_PLAN_ID/prices" \
+    -H "Authorization: Bearer $VELOX_KEY" \
+    -H "Content-Type: application/json" \
+    -d @- | jq -c '{dimension_match, effective}'
 ```
 
-**You see:** 30 lines, the first and last:
+**You see,** on a plan a subscription has used (on an unused plan,
+`effective` is `now`):
+`{"dimension_match":{"model":"claude-opus-4.6","model_raw":"vertex_ai/claude-opus-4-6@default","token_type":"input"},"effective":"next_period"}`
 
-```text
-{"model":"claude-fable-5.1","token_type":"input"}
-…
-{"context_tier":"prompt_over_100k","model":"claude-haiku-5.5","token_type":"cache_write_1h"}
-```
-
-The prices are cents per token in your recipe's currency, like the
-recipe's. Change them to your own prices if you resell at a margin.
-
-**Sonnet 5.** To charge Anthropic's new price, publish a new version of
-each Sonnet 5 rule. It applies from each subscription's next billing
-period; the current period keeps the old price.
-
-```bash
-CURRENCY=USD   # the currency you installed the recipe in
-
-# new_version <rule key> <name> <cents per token>
-new_version() {
-  jq -n --arg key "$1" --arg name "$2" --arg cents "$3" --arg cur "$CURRENCY" \
-      '{rule_key: $key, name: $name, mode: "per_unit", currency: $cur, unit_amount_cents: $cents}' \
-    | curl -s -X POST "$VELOX/v1/rating-rules" \
-      -H "Authorization: Bearer $VELOX_KEY" -H "Content-Type: application/json" \
-      -d @- | jq -c '{rule_key, version, unit_amount_cents}'
-}
-new_version sonnet5_input "Claude Sonnet 5 input" 0.0002
-new_version sonnet5_output "Claude Sonnet 5 output" 0.001
-new_version sonnet5_cache_read "Claude Sonnet 5 cache read" 0.00002
-new_version sonnet5_cache_write_5m "Claude Sonnet 5 cache write (5m)" 0.00025
-new_version sonnet5_cache_write_1h "Claude Sonnet 5 cache write (1h)" 0.0004
-```
-
-**You see:** five lines such as
-`{"rule_key":"sonnet5_input","version":2,"unit_amount_cents":"0.0002"}`.
-
-### Rules you wrote on a raw Claude name
-
-Some Claude names used to keep their raw name in `model`, so a rule you
-added for one keyed on it. They are Haiku 5.5, Bedrock cross-region names
-such as `bedrock/us.anthropic.claude-sonnet-4-6`, `converse/` and
-`azure_ai/` names, and some Google Cloud dated names such as
-`claude-haiku-4-5@20251001`. Those names now arrive as the model's name,
-such as `claude-sonnet-4.6`, so such a rule stops matching.
-
-**Change it before you upgrade:** set its `dimension_match` to `model_raw`
-with the raw name, at priority 101. The release you run now also puts the
-raw name in `model_raw`, so the rule matches the same usage before and
-after the upgrade.
-
-After the upgrade, while a subscription uses the meter, Velox refuses that
-change (409 `meter_in_use`). The usage then bills at the price of a rule
-on the model's name, if there is one. If there is none and the meter has
-no default price, add one with its own rating rule, as in [Price a model a recipe does not
-cover](#price-a-model-a-recipe-does-not-cover).
-
-### Usage stored before you upgraded
-
-Velox does not change usage it already stored. Usage stored before the
-upgrade keeps the model it was stored with, and bills at that model's
-price when its period is invoiced:
-
-- **Google Cloud Opus 4.5 to 4.8** (names with `@default` or `@date`, such
-  as `vertex_ai/claude-opus-4-6@default`) were stored as `claude-opus-4`,
-  and bill at $15 / $75, 3 times Anthropic's price.
-- **Opus 5.5, Sonnet 5.5, Fable 5.1 and Mythos 5.1** were stored as Opus 5,
-  Sonnet 5, Fable 5 and Mythos 5, and bill at those prices.
-
-To bill those rows at the right price, **before you upgrade**, add a
-rating rule with its own `rule_key`, and a pricing rule on the raw name at
-**priority 101**. That priority wins over the recipe's rule; at equal
-priority, the older rule wins. Add one for each raw name and kind of
-token, such as
-`{"model_raw": "vertex_ai/claude-opus-4-6@default", "token_type": "input"}`
-at the Opus 4.6 input price. It also prices later calls with that name,
-which bill at the same price.
-
-After the upgrade, while a subscription uses the meter, Velox refuses this
-rule (409 `meter_in_use`): it takes usage that the recipe's rule bills now.
-The period's invoice then bills those rows at the old price. Once it is
-made, give the difference back with a credit note (`POST /v1/credit-notes`).
-
-**Usage stored under a raw name that now finds a price** has no price.
-These are the names in [Rules you wrote on a raw Claude
-name](#rules-you-wrote-on-a-raw-claude-name) other than Haiku 5.5 (below), such as
-`vertex_ai/claude-haiku-4-5@20251001` or
-`bedrock/us.anthropic.claude-sonnet-4-6`. Velox did not bill those rows,
-and still does not; later calls with the same name bill at the model's
-price. To bill the rows, add a rule on `model` with the raw name, such as
-`{"model": "vertex_ai/claude-haiku-4-5@20251001", "token_type": "input"}`,
-at the model's price. Only rows stored before the upgrade carry the raw
-name in `model`.
-
-**Haiku 5.5 usage stored before the upgrade** has its raw name in `model`
-and no `context_tier`, so the recipe's Haiku 5.5 rules never match it.
-Velox cannot tell which of the two prices applies to those rows. To bill
-them, add a rule on `model` with the raw name, such as
-`{"model": "claude-haiku-5-5", "token_type": "input"}`, at the price you
-choose. Only rows stored before the upgrade carry that value in `model`.
-Do not use `model_raw` here: it would also price later Haiku 5.5 calls at
-one rate.
+- Keep `model` in the price. `{model_raw, token_type}` beside the recipe's
+  `{model, token_type}` has as many labels, and both could take one event,
+  so it is refused with 409 `price_conflict`.
+- Claude Haiku 5.5's recipe prices also carry `context_tier`, so a price
+  for one of its names needs four labels: `model`, `model_raw`,
+  `context_tier` and `token_type`.
 
 ## Sell prepaid credit (a prepaid commit)
 

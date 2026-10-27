@@ -15,8 +15,8 @@
 
 import { getCurrencySymbol } from './api'
 
-// PricedRule is the structural shape both the hand-rolled catalog RatingRule
-// and the generated RecipeRatingRule satisfy.
+// PricedRule is the structural shape a plan price and a recipe price both
+// satisfy.
 export interface PricedRule {
   mode: string
   currency?: string

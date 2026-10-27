@@ -14,7 +14,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/errs"
 )
 
-// The three amounts of a rating rule and a price override (unit_amount_cents,
+// The three amounts of a plan price and a price override (unit_amount_cents,
 // tiers[].unit_amount_cents, package_amount_cents) are request
 // decimals with documented limits: a JSON number or a string holding one, at
 // most 100 characters, 0 or more, under 10^18 cents, at most 12 decimal
@@ -34,7 +34,7 @@ type rateField struct {
 	pick  func(r rates) decimal.Decimal
 }
 
-// rates is the three rates of a stored rule or override, or of a response.
+// rates is the three rates of a stored price or override, or of a response.
 type rates struct {
 	UnitAmountCents    decimal.Decimal     `json:"unit_amount_cents"`
 	Tiers              []domain.RatingTier `json:"tiers"`
@@ -80,14 +80,18 @@ type rateDoor struct {
 
 var rateDoors = []rateDoor{
 	{
-		name: "rating rule",
+		name: "plan price",
 		send: func(t *testing.T, frag string) (*httptest.ResponseRecorder, func(rateField) decimal.Decimal, bool) {
 			store := newMemStore()
+			plan, seeded := seedPlanWithPrice(store, "tnt_test")
 			h := NewHandler(NewService(store))
-			rr := doJSON(t, h.createRatingRule, http.MethodPost, "/", `{"rule_key":"r","name":"r","currency":"USD",`+frag+`}`, nil)
-			for _, r := range store.rules {
+			rr := doJSON(t, h.addPrice, http.MethodPost, "/", `{"meter_id":"`+seeded.MeterID+`","dimension_match":{"model":"a"},`+frag+`}`, map[string]string{"id": plan.ID})
+			for id, p := range store.prices {
+				if id == seeded.ID {
+					continue
+				}
 				return rr, func(f rateField) decimal.Decimal {
-					return f.pick(rates{r.UnitAmountCents, r.Tiers, r.PackageAmountCents})
+					return f.pick(rates{p.UnitAmountCents, p.Tiers, p.PackageAmountCents})
 				}, true
 			}
 			return rr, nil, false
@@ -97,15 +101,9 @@ var rateDoors = []rateDoor{
 		name: "price override",
 		send: func(t *testing.T, frag string) (*httptest.ResponseRecorder, func(rateField) decimal.Decimal, bool) {
 			store := newMemStore()
-			svc := NewService(store)
-			rule, err := svc.CreateRatingRule(context.Background(), "tnt_test", CreateRatingRuleInput{
-				RuleKey: "r", Name: "r", Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(1),
-			})
-			if err != nil {
-				t.Fatalf("seed rule: %v", err)
-			}
-			h := NewHandler(svc)
-			rr := doJSON(t, h.createOverride, http.MethodPost, "/", `{"customer_id":"vlx_cus_1","rating_rule_version_id":"`+rule.ID+`",`+frag+`}`, nil)
+			_, price := seedPlanWithPrice(store, "tnt_test")
+			h := NewHandler(NewService(store))
+			rr := doJSON(t, h.createOverride, http.MethodPost, "/", `{"customer_id":"vlx_cus_1","price_id":"`+price.ID+`",`+frag+`}`, nil)
 			for _, o := range store.overrides {
 				return rr, func(f rateField) decimal.Decimal {
 					return f.pick(rates{o.UnitAmountCents, o.Tiers, o.PackageAmountCents})
@@ -276,36 +274,39 @@ func TestRates_ExtremeExponents(t *testing.T) {
 	}
 }
 
-// The recipe installer saves rules through CreateRatingRuleTx, not the
-// public route, so that entrypoint takes the same limits.
+// The recipe installer saves a plan and its prices through
+// CreatePlanWithPricesTx, not the public route, so that entrypoint takes the
+// same limits, and nothing is written when one is out.
 //
-// Mutation-verify: drop the checkRates call in CreateRatingRuleTx → red.
-func TestCreateRatingRuleTx_RatesTakeTheLimits(t *testing.T) {
+// Mutation-verify: drop the priceAdds call in CreatePlanWithPricesTx → red.
+func TestCreatePlanWithPricesTx_RatesTakeTheLimits(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		rule domain.RatingRuleVersion
+		name  string
+		shape domain.PriceShape
 	}{
-		{"per_unit 13 places", domain.RatingRuleVersion{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.RequireFromString("0.0000000000001")}},
-		{"tier 10^18", domain.RatingRuleVersion{Mode: domain.PricingGraduated, Tiers: []domain.RatingTier{{UpTo: nil, UnitAmountCents: decimal.RequireFromString("1e18")}}}},
-		{"negative package amount", domain.RatingRuleVersion{Mode: domain.PricingPackage, PackageSize: 10, PackageAmountCents: decimal.NewFromInt(-1)}},
+		{"per_unit 13 places", domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.RequireFromString("0.0000000000001")}},
+		{"tier 10^18", domain.PriceShape{Mode: domain.PricingGraduated, Tiers: []domain.RatingTier{{UpTo: nil, UnitAmountCents: decimal.RequireFromString("1e18")}}}},
+		{"negative package amount", domain.PriceShape{Mode: domain.PricingPackage, PackageSize: 10, PackageAmountCents: decimal.NewFromInt(-1)}},
 	} {
 		store := newMemStore()
-		tc.rule.RuleKey, tc.rule.Name, tc.rule.Currency = "r", "r", "USD"
-		if _, err := NewService(store).CreateRatingRuleTx(context.Background(), nil, "tnt_test", tc.rule); err == nil {
+		if _, _, err := NewService(store).CreatePlanWithPricesTx(context.Background(), nil, "tnt_test", recipePlan(), []domain.PlanPrice{{MeterID: "m", PriceShape: tc.shape}}); err == nil {
 			t.Errorf("%s: accepted", tc.name)
 		}
-		if len(store.rules) != 0 {
-			t.Errorf("%s: %d rules stored, want 0", tc.name, len(store.rules))
+		if len(store.plans) != 0 || len(store.prices) != 0 {
+			t.Errorf("%s: %d plans and %d prices stored, want none", tc.name, len(store.plans), len(store.prices))
 		}
 	}
 	// A zero is stored as plain 0 here too.
-	store := newMemStore()
-	got, err := NewService(store).CreateRatingRuleTx(context.Background(), nil, "tnt_test", domain.RatingRuleVersion{
-		RuleKey: "r", Name: "r", Currency: "USD", Mode: domain.PricingPerUnit, UnitAmountCents: decimal.RequireFromString("0e99999"),
-	})
-	if err != nil || got.UnitAmountCents.Exponent() != 0 {
-		t.Errorf("zero: got %s (exponent %d), err %v; want plain 0", got.UnitAmountCents, got.UnitAmountCents.Exponent(), err)
+	_, got, err := NewService(newMemStore()).CreatePlanWithPricesTx(context.Background(), nil, "tnt_test", recipePlan(), []domain.PlanPrice{{
+		MeterID: "m", PriceShape: domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.RequireFromString("0e99999")},
+	}})
+	if err != nil || len(got) != 1 || got[0].UnitAmountCents.Exponent() != 0 {
+		t.Errorf("zero: got %+v, err %v; want plain 0", got, err)
 	}
+}
+
+func recipePlan() domain.Plan {
+	return domain.Plan{Code: "r", Name: "r", Currency: "USD", BillingInterval: domain.BillingMonthly, Status: domain.PlanActive}
 }
 
 // The recipe installer's save entrypoint takes the public route's shape
@@ -313,34 +314,32 @@ func TestCreateRatingRuleTx_RatesTakeTheLimits(t *testing.T) {
 // fields. The recipe parser checks the same before an install, but the
 // save path does not rely on it.
 //
-// Mutation-verify: drop the validatePricingShape call in CreateRatingRuleTx
-// → red.
-func TestCreateRatingRuleTx_ShapeChecked(t *testing.T) {
+// Mutation-verify: drop the checkShape call in priceAdd → red.
+func TestCreatePlanWithPricesTx_ShapeChecked(t *testing.T) {
 	upTo := func(n int64) *int64 { return &n }
 	one := decimal.NewFromInt(1)
 	open := []domain.RatingTier{{UpTo: upTo(100), UnitAmountCents: one}, {UpTo: nil, UnitAmountCents: one}}
 	for _, tc := range []struct {
 		name, param string
-		rule        domain.RatingRuleVersion
+		shape       domain.PriceShape
 	}{
-		{"a bounded last tier", "tiers", domain.RatingRuleVersion{Mode: domain.PricingGraduated, Tiers: []domain.RatingTier{{UpTo: upTo(100), UnitAmountCents: one}, {UpTo: upTo(1000), UnitAmountCents: one}}}},
-		{"an open tier before the last", "tiers", domain.RatingRuleVersion{Mode: domain.PricingGraduated, Tiers: []domain.RatingTier{{UpTo: nil, UnitAmountCents: one}, {UpTo: upTo(100), UnitAmountCents: one}}}},
-		{"graduated with no tiers", "tiers", domain.RatingRuleVersion{Mode: domain.PricingGraduated}},
-		{"a package of size 0", "package_size", domain.RatingRuleVersion{Mode: domain.PricingPackage, PackageAmountCents: one}},
-		{"per_unit with tiers", "tiers", domain.RatingRuleVersion{Mode: domain.PricingPerUnit, UnitAmountCents: one, Tiers: open}},
-		{"package with a unit amount", "unit_amount_cents", domain.RatingRuleVersion{Mode: domain.PricingPackage, PackageSize: 10, PackageAmountCents: one, UnitAmountCents: one}},
-		{"an unknown mode", "mode", domain.RatingRuleVersion{Mode: "flat", UnitAmountCents: one}},
+		{"a bounded last tier", "prices[0].tiers", domain.PriceShape{Mode: domain.PricingGraduated, Tiers: []domain.RatingTier{{UpTo: upTo(100), UnitAmountCents: one}, {UpTo: upTo(1000), UnitAmountCents: one}}}},
+		{"an open tier before the last", "prices[0].tiers", domain.PriceShape{Mode: domain.PricingGraduated, Tiers: []domain.RatingTier{{UpTo: nil, UnitAmountCents: one}, {UpTo: upTo(100), UnitAmountCents: one}}}},
+		{"graduated with no tiers", "prices[0].tiers", domain.PriceShape{Mode: domain.PricingGraduated}},
+		{"a package of size 0", "prices[0].package_size", domain.PriceShape{Mode: domain.PricingPackage, PackageAmountCents: one}},
+		{"per_unit with tiers", "prices[0].tiers", domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: one, Tiers: open}},
+		{"package with a unit amount", "prices[0].unit_amount_cents", domain.PriceShape{Mode: domain.PricingPackage, PackageSize: 10, PackageAmountCents: one, UnitAmountCents: one}},
+		{"an unknown mode", "prices[0].mode", domain.PriceShape{Mode: "flat", UnitAmountCents: one}},
 	} {
 		store := newMemStore()
-		tc.rule.RuleKey, tc.rule.Name, tc.rule.Currency = "r", "r", "USD"
-		_, err := NewService(store).CreateRatingRuleTx(context.Background(), nil, "tnt_test", tc.rule)
+		_, _, err := NewService(store).CreatePlanWithPricesTx(context.Background(), nil, "tnt_test", recipePlan(), []domain.PlanPrice{{MeterID: "m", PriceShape: tc.shape}})
 		if err == nil {
 			t.Errorf("%s: accepted", tc.name)
 		} else if field := errs.Field(err); field != tc.param {
 			t.Errorf("%s: refused naming %q (%v), want %q", tc.name, field, err, tc.param)
 		}
-		if len(store.rules) != 0 {
-			t.Errorf("%s: %d rules stored, want 0", tc.name, len(store.rules))
+		if len(store.plans) != 0 || len(store.prices) != 0 {
+			t.Errorf("%s: something was stored", tc.name)
 		}
 	}
 }

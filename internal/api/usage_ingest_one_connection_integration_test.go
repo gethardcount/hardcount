@@ -37,11 +37,11 @@ func TestIngest_ReadsTheAggregationOnItsOwnConnection(t *testing.T) {
 	const ext, eventName = "ext_ingest_one_conn", "tokens_ingest_one_conn"
 	now := time.Now().UTC()
 	at := now.Add(-time.Hour).Truncate(time.Second)
-	for _, key := range []string{"one-conn-held", "one-conn-call:input"} {
-		if _, err := usageSvc.Hold(ctx, tenantID, usage.HoldInput{
+	for _, key := range []string{"one-conn-call:input"} {
+		if _, err := usageSvc.HoldCall(ctx, tenantID, usage.HoldCallInput{
 			Source: domain.HeldUsageSourceLiteLLM, ExternalCustomerID: ext, EventName: eventName,
-			Quantity: decimal.NewFromInt(5), IdempotencyKey: key, EventAt: &at,
 			Reason: domain.HeldReasonCustomerNotFound,
+			Events: []usage.CallEvent{{Quantity: decimal.NewFromInt(5), IdempotencyKey: key, Timestamp: &at}},
 		}); err != nil {
 			t.Fatalf("hold %s: %v", key, err)
 		}
@@ -58,7 +58,7 @@ func TestIngest_ReadsTheAggregationOnItsOwnConnection(t *testing.T) {
 	}
 	usageSvc.SetOpenPeriodReader(usageOpenPeriods{
 		subs:       releaseSubs{meterID: meter.ID, start: now.Add(-2 * time.Hour), end: now.Add(24 * time.Hour)},
-		pricing:    pricingStore,
+		pricing:    releasePricing{PostgresStore: pricingStore, meterID: meter.ID},
 		thresholds: releaseThresholds{at: now.Add(-30 * time.Minute)},
 	})
 	in := func(key string) usage.IngestInput {
@@ -82,14 +82,10 @@ func TestIngest_ReadsTheAggregationOnItsOwnConnection(t *testing.T) {
 			if len(errs) > 0 {
 				return 0, 2, errs[0]
 			}
-			return res.AfterClose, 2, nil
+			return res.Unbilled.AfterClose, 2, nil
 		}},
 		{"backfill", func(ctx context.Context) (int, int, error) {
 			ev, err := usageSvc.Backfill(ctx, tenantID, in("one-conn-backfill"))
-			return statusCount(ev), 1, err
-		}},
-		{"litellm event, resend of a held key", func(ctx context.Context) (int, int, error) {
-			ev, err := usageSvc.IngestResolvingHeld(ctx, tenantID, in("one-conn-held"))
 			return statusCount(ev), 1, err
 		}},
 		{"litellm call, resend of a held key", func(ctx context.Context) (int, int, error) {
@@ -97,7 +93,7 @@ func TestIngest_ReadsTheAggregationOnItsOwnConnection(t *testing.T) {
 				{Quantity: decimal.NewFromInt(5), IdempotencyKey: "one-conn-call:input", Timestamp: &at},
 				{Quantity: decimal.NewFromInt(7), IdempotencyKey: "one-conn-call:output", Timestamp: &at},
 			}})
-			return res.AfterClose, 2, err
+			return res.Unbilled.AfterClose, 2, err
 		}},
 	} {
 		t.Run(door.name, func(t *testing.T) {

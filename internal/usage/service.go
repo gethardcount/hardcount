@@ -28,8 +28,8 @@ type Service struct {
 	// held keeps usage rows that could not be ingested yet (#1044). Taken
 	// from the store when it implements HeldStore (PostgresStore does).
 	held HeldStore
-	// periods reads the customer's open periods, to flag an event that
-	// arrives after its period was invoiced; see SetOpenPeriodReader.
+	// periods reads the customer's open periods, to answer an event with
+	// its billing_status; see SetOpenPeriodReader.
 	periods OpenPeriodReader
 }
 
@@ -47,9 +47,9 @@ func NewService(store Store) *Service {
 // for a period that may already have closed, so that action is recorded.
 func (s *Service) SetAuditLogger(a AuditEmitter) { s.audit = a }
 
-// SetOpenPeriodReader wires the open-period reads that flag an event
-// written after its period was invoiced (billing_status "after_close",
-// open_period.go). Optional: unwired, nothing is flagged (narrow tests).
+// SetOpenPeriodReader wires the open-period reads that answer an event with
+// its billing_status (open_period.go). Optional:
+// unwired, nothing is flagged (narrow tests).
 func (s *Service) SetOpenPeriodReader(r OpenPeriodReader) { s.periods = r }
 
 // SetResolver wires the unified clock.Resolver (implemented by
@@ -200,10 +200,11 @@ func (s *Service) backfillEmission(ctx context.Context) func(tx *sql.Tx, out dom
 }
 
 // MaxDimensionKeys caps the size of the JSONB dimensions map on each
-// usage event. Dimensions feed pricing-rule dispatch via @> subset
-// matches at finalize time; bounding the per-event JSONB size protects
-// the GIN index from pathological tenants and matches the equivalent
-// cap on meter_pricing_rules.dimension_match (16 keys).
+// usage event. Dimensions decide which plan price takes the event (a price
+// takes an event whose dimensions include all of its dimension_match);
+// bounding the per-event JSONB size protects the GIN index from
+// pathological tenants and matches the cap on a price's dimension_match
+// (domain.MaxDimensionKeys, 16 labels).
 const MaxDimensionKeys = 16
 
 // usageFutureSkew is how far ahead of wall-clock a live usage event timestamp
@@ -223,8 +224,9 @@ func checkQuantity(q decimal.Decimal) (decimal.Decimal, error) {
 // validateDimensions enforces the v1 dimension contract: at most
 // MaxDimensionKeys keys, scalar values only (string, number, bool, nil).
 // Object/array values are rejected — Postgres `@>` would still match
-// them but the priority+claim semantics aren't well-defined for nested
-// containers in v1 (revisit if a design partner needs it).
+// them, but a price's dimension_match holds string values only, so a
+// nested value could never be priced (revisit if a design partner needs
+// it).
 func validateDimensions(dims map[string]any) error {
 	if len(dims) > MaxDimensionKeys {
 		return errs.Invalid("dimensions", fmt.Sprintf("at most %d keys (got %d)", MaxDimensionKeys, len(dims)))
@@ -276,20 +278,17 @@ func (s *Service) ingestAudited(ctx context.Context, tenantID string, input Inge
 		// count here; batch and the LiteLLM doors count their own written
 		// rows.
 		mw.RecordUsageIngested(1)
-		markAfterClose(ctx, &event, class)
+		s.markWritten(ctx, &event, class)
 	}
 	return event, err
 }
 
-// markAfterClose sets billing_status on a row the write just inserted and
-// records it, when the write classified the row AfterClose. A replay never
-// reaches here: it is an error out of the store.
-func markAfterClose(ctx context.Context, event *domain.UsageEvent, class Class) {
-	if class != AfterClose {
-		return
-	}
-	event.BillingStatus = BillingStatusAfterClose
-	recordAfterClose(ctx, *event)
+// markWritten sets billing_status on a row the write just inserted and
+// records it, when the row has one (open_period.go). A replay never reaches
+// here: it is an error out of the store.
+func (s *Service) markWritten(ctx context.Context, event *domain.UsageEvent, class Class) {
+	event.BillingStatus = s.statusOf(class)
+	recordUnbilled(ctx, *event, event.BillingStatus)
 }
 
 // lateUsageEvents counts events, other than backfills, whose timestamp is
@@ -297,9 +296,9 @@ func markAfterClose(ctx context.Context, event *domain.UsageEvent, class Class) 
 // logs a WARN for each. That is all it measures. It is a proxy for "missed
 // its invoice": an event one minute after its invoice was built is not
 // counted, and a 25h-old event in a period that is still open is. The exact
-// per-event signal is velox_usage_after_close_total and billing_status
-// "after_close" (open_period.go); a per-customer list of those events is
-// deferred (ADR-120). Backfill-origin events are
+// per-event signal is billing_status "after_close" and
+// velox_usage_unbilled_total{reason="after_close"} (open_period.go); a
+// per-customer list of those events is deferred (ADR-120). Backfill-origin events are
 // excluded: an operator posting history on purpose is not the silent leak
 // this counter exists to surface.
 var lateUsageEvents *prometheus.CounterVec
@@ -437,9 +436,25 @@ type BatchResult struct {
 	Inserted int
 	// Deduplicated counts rows already stored under the same key.
 	Deduplicated int
-	// AfterClose counts written rows whose period was already invoiced:
-	// stored, billed on no invoice (open_period.go).
-	AfterClose int
+	// Results is each event's result, in request order.
+	Results []BatchEventResult
+	// Unbilled counts the written rows by billing_status (open_period.go).
+	Unbilled UnbilledCounts
+}
+
+// The results of one batch event.
+const (
+	BatchIngested     = "ingested"
+	BatchDeduplicated = "deduplicated"
+)
+
+// BatchEventResult is what a batch did with one event: wrote it
+// ("ingested") or found it already stored under its key ("deduplicated").
+// BillingStatus is set only on a row the batch wrote, when it has one: a
+// deduplicated row was answered when it was first written.
+type BatchEventResult struct {
+	Status        string `json:"status"`
+	BillingStatus string `json:"billing_status,omitempty"`
 }
 
 // BatchIngest validates every event, then writes them ALL in one store
@@ -494,17 +509,20 @@ func (s *Service) BatchIngest(ctx context.Context, tenantID string, events []Ing
 	if err != nil {
 		return BatchResult{}, []error{err}
 	}
-	res := BatchResult{Inserted: len(inserted), Deduplicated: deduped}
+	res := BatchResult{Inserted: len(inserted), Deduplicated: deduped, Results: make([]BatchEventResult, len(prepared))}
+	for i := range res.Results {
+		res.Results[i].Status = BatchDeduplicated
+	}
 	if res.Inserted > 0 {
 		mw.RecordUsageIngested(res.Inserted)
 	}
 	// Only rows this batch inserted: a row deduplicated against an earlier
 	// write was flagged, or not, when that write happened.
 	for _, i := range inserted {
-		if classes[i] == AfterClose {
-			res.AfterClose++
-			recordAfterClose(ctx, prepared[i])
-		}
+		status := s.statusOf(classes[i])
+		res.Results[i] = BatchEventResult{Status: BatchIngested, BillingStatus: status}
+		res.Unbilled.Add(status)
+		recordUnbilled(ctx, prepared[i], status)
 	}
 	return res, nil
 }
@@ -560,7 +578,7 @@ func (s *Service) AggregateClaims(
 	tenantID, customerID, meterID, aggregation string,
 	claims []domain.UsageClaim,
 	from, to time.Time,
-) ([]domain.RuleAggregation, error) {
+) ([]domain.ClaimedUsage, error) {
 	if !domain.ValidAggregation(aggregation) {
 		return nil, errs.Invalid("aggregation", fmt.Sprintf("must be one of sum, count, max, last; got %q", aggregation))
 	}

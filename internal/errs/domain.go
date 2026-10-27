@@ -175,10 +175,17 @@ func EmailNotConfigured() *DomainError {
 	return InvalidState("Email isn't set up on this server, so nothing was sent.").WithCode(CodeEmailNotConfigured)
 }
 
-// CodeMeterInUse is the 409 code for a meter pricing edit refused while
-// subscriptions use the meter (pricing.Service, D05): the edit would reprice
-// a billing period already open. A recipe apply returns it unwrapped too.
-const CodeMeterInUse = "meter_in_use"
+// The 409 codes of a plan price write (ADR-130 §4, §16). price_exists: the
+// plan already has a price on the meter with the same dimension_match.
+// price_conflict: another price on the plan and meter could take the same
+// events with the same number of labels, so neither would win. meter_overlap:
+// the price would add a meter to a plan whose subscriber already has that
+// meter on another subscription.
+const (
+	CodePriceExists   = "price_exists"
+	CodePriceConflict = "price_conflict"
+	CodeMeterOverlap  = "meter_overlap"
+)
 
 // CodeMeterHasUsage is the 409 code for a change to a meter's aggregation
 // once the meter has events (ADR-130 §2): its usage so far was counted

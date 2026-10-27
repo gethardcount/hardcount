@@ -555,19 +555,22 @@ type InvoiceLineItem struct {
 	// non-trivial values, and the PDF appends a legend when a line is
 	// customer- or product-exempt or a prepaid credit purchase. Otherwise
 	// empty for non-Stripe providers.
-	TaxabilityReason    string `json:"tax_reason,omitempty"`
-	TotalAmountCents    int64  `json:"total_amount_cents"`
-	Currency            string `json:"currency"`
-	PricingMode         string `json:"pricing_mode,omitempty"`
-	RatingRuleVersionID string `json:"rating_rule_version_id,omitempty"`
+	TaxabilityReason string `json:"tax_reason,omitempty"`
+	TotalAmountCents int64  `json:"total_amount_cents"`
+	Currency         string `json:"currency"`
+	PricingMode      string `json:"pricing_mode,omitempty"`
+	// PriceID is the plan price that billed a usage line, and DimensionMatch
+	// the events that price takes (ADR-130 §16). Empty on other lines.
+	PriceID        string            `json:"price_id,omitempty"`
+	DimensionMatch map[string]string `json:"dimension_match,omitempty"`
 	// NominalUnitAmountDecimal is the actually-billed CONFIGURED per-unit rate
 	// (decimal cents) for per_unit usage lines — the clean rate-card figure
 	// (0.0003 = $0.000003/token), unlike EffectiveUnitAmountDecimal
 	// (amount÷quantity) which drifts by the cent-rounding of the line total
 	// (e.g. 6,000 tokens billed 2¢ → effective 0.00033¢, nominal 0.0003¢).
 	// It is STAMPED at build from the override-applied rule.UnitAmountCents,
-	// NOT derived on read: a CustomerPriceOverride preserves the
-	// rating_rule_versions id while swapping the price, so re-reading that row
+	// NOT derived on read: a CustomerPriceOverride keeps the price id while
+	// swapping the rate, so re-reading the price
 	// yields list price, not the negotiated price billed (ADR-054
 	// re-examination). Nil for every line with no single configured rate —
 	// base_fee/proration (effective per-seat is the honest figure),
@@ -648,12 +651,12 @@ func EffectiveUnitAmountDecimalFor(amountCents int64, quantity decimal.Decimal) 
 }
 
 // DisplayUnitAmountDecimalFor is the per-unit price to SHOW for a LIVE-resolved
-// rule (decimal cents): the configured nominal rate for per_unit rules, else the
+// price (decimal cents): the configured nominal rate for per_unit, else the
 // effective amount÷quantity. It mirrors InvoiceLineItem.DisplayUnitAmountDecimal
 // — which reads the nominal stamped at invoice build — for surfaces that resolve
-// the rating rule live (the usage Activity panel and the public cost dashboard),
+// the price live (the usage Activity panel and the public cost dashboard),
 // so the unit price matches the invoice on every screen (ADR-054).
-func DisplayUnitAmountDecimalFor(rule RatingRuleVersion, amountCents int64, quantity decimal.Decimal) decimal.Decimal {
+func DisplayUnitAmountDecimalFor(rule PriceShape, amountCents int64, quantity decimal.Decimal) decimal.Decimal {
 	if nominal := NominalUnitAmountDecimal(rule); nominal != nil {
 		return *nominal
 	}

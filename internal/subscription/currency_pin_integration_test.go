@@ -34,15 +34,11 @@ func TestCurrencyPin(t *testing.T) {
 
 	pricingStore := pricing.NewPostgresStore(db)
 	newPlan := func(code, currency, meterID string) domain.Plan {
-		p, err := pricingStore.CreatePlan(ctx, tenantID, domain.Plan{
+		return createPlanPricing(t, db, ctx, tenantID, domain.Plan{
 			Code: code, Name: code, Currency: currency,
 			BillingInterval: domain.BillingMonthly, BaseBillTiming: domain.BillInArrears,
-			BaseAmountCents: 1000, Status: domain.PlanActive, MeterIDs: []string{meterID},
-		})
-		if err != nil {
-			t.Fatalf("create plan %s: %v", code, err)
-		}
-		return p
+			BaseAmountCents: 1000, Status: domain.PlanActive,
+		}, meterID)
 	}
 	// Distinct meters so the meter-overlap guard stays out of the way.
 	usdA := newPlan("pin-usd-a", "USD", "mtr_pin_a")
@@ -52,6 +48,7 @@ func TestCurrencyPin(t *testing.T) {
 
 	svc := NewService(NewPostgresStore(db), nil)
 	svc.SetPlanReader(pricingStore)
+	svc.SetPlanMeterReader(pricingStore)
 	svc.SetProfileReader(custStore)
 
 	create := func(code string, planIDs ...string) (domain.Subscription, error) {

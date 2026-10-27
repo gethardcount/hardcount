@@ -119,7 +119,7 @@ func (s *PostgresStore) CustomersWithDefault(ctx context.Context, tenantID strin
 	rows, err := tx.QueryContext(ctx, `
 		SELECT DISTINCT customer_id FROM payment_methods
 		WHERE tenant_id = $1 AND customer_id = ANY($2::text[])
-		  AND is_default AND detached_at IS NULL`, tenantID, postgres.StringArray(customerIDs))
+		  AND is_default AND detached_at IS NULL`, tenantID, customerIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -299,7 +299,7 @@ func (s *PostgresStore) Upsert(ctx context.Context, tenantID string, pm PaymentM
 				  AND pm.is_default AND pm.detached_at IS NULL
 				  AND pm.stripe_payment_method_id <> $3
 				  AND a.decline_code = ANY($4::text[]))`,
-			tenantID, pm.CustomerID, pm.StripePaymentMethodID, postgres.StringArray(domain.HardDeclineCodes()),
+			tenantID, pm.CustomerID, pm.StripePaymentMethodID, domain.HardDeclineCodes(),
 		).Scan(&replaceRefused); err != nil {
 			return PaymentMethod{}, false, fmt.Errorf("check refused default: %w", err)
 		}

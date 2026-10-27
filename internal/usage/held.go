@@ -12,7 +12,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/shopspring/decimal"
 
-	mw "github.com/sagarsuperuser/velox/internal/api/middleware"
 	"github.com/sagarsuperuser/velox/internal/audit"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
@@ -41,7 +40,7 @@ type HoldInput struct {
 	Reason             domain.HeldUsageReason
 }
 
-// ErrHoldUnavailable is returned by Hold when the service has no held
+// ErrHoldUnavailable is returned by HoldCall when the service has no held
 // store wired. Callers treat it like any store failure.
 var ErrHoldUnavailable = errors.New("usage: held store not wired")
 
@@ -61,25 +60,6 @@ func init() {
 	} else {
 		heldUsageEvents = c
 	}
-}
-
-// Hold keeps one row that could not be ingested. It runs the same row
-// checks as ingest (dimensions, quantity, future time), so a held row can
-// later be released without failing them. Returns errs.ErrDuplicateKey when
-// the key is already held.
-func (s *Service) Hold(ctx context.Context, tenantID string, in HoldInput) (domain.HeldUsageEvent, error) {
-	if s.held == nil {
-		return domain.HeldUsageEvent{}, ErrHoldUnavailable
-	}
-	ev, err := heldEvent(in)
-	if err != nil {
-		return domain.HeldUsageEvent{}, err
-	}
-	out, err := s.held.Hold(ctx, tenantID, ev)
-	if err == nil {
-		heldUsageEvents.WithLabelValues(string(in.Reason)).Inc()
-	}
-	return out, err
 }
 
 // heldEvent checks one row to hold and builds it. A row the checks refuse
@@ -147,39 +127,6 @@ func (s *Service) ListHeld(ctx context.Context, tenantID string) (HeldSummary, e
 	return s.held.ListHeldSummary(ctx, tenantID)
 }
 
-// IngestResolvingHeld is Ingest for the LiteLLM callback. A row whose key
-// was held and then discarded is not written (errs.ErrDuplicateKey, so the
-// callback counts it as deduplicated), and a row whose key is still held is
-// written and its held row marked released. See
-// PostgresStore.IngestResolvingHeld. Without a held store no row can be
-// held, so it is a plain Ingest.
-func (s *Service) IngestResolvingHeld(ctx context.Context, tenantID string, input IngestInput) (domain.UsageEvent, error) {
-	if s.held == nil {
-		return s.Ingest(ctx, tenantID, input)
-	}
-	prepared, err := s.prepare(ctx, tenantID, input, domain.UsageOriginAPI)
-	if err != nil {
-		return domain.UsageEvent{}, err
-	}
-	// The open periods are read BEFORE the write, the meter's aggregation on
-	// the write's transaction after the insert: see open_period.go.
-	periods, err := s.openPeriodsFor(ctx, tenantID, prepared.CustomerID, periodCacheFrom(ctx))
-	if err != nil {
-		return domain.UsageEvent{}, err
-	}
-	var class Class
-	event, err := s.held.IngestResolvingHeld(ctx, tenantID, prepared, func(tx *sql.Tx, _ domain.UsageEvent) error {
-		c, err := s.classifyWritten(ctx, tx, prepared, periods, map[string]MeterBuckets{})
-		class = c
-		return err
-	})
-	if err == nil {
-		mw.RecordUsageIngested(1)
-		markAfterClose(ctx, &event, class)
-	}
-	return event, err
-}
-
 // HeldFor returns the event names and row count still held for one external
 // customer id.
 func (s *Service) HeldFor(ctx context.Context, tenantID, externalCustomerID string) ([]string, int, error) {
@@ -197,7 +144,10 @@ type ReleaseInput struct {
 	MeterIDs map[string]string
 }
 
-// ReleaseResult is the response of POST /v1/usage-events/held/release.
+// ReleaseResult is the response of POST /v1/usage-events/held/release. Its
+// counts are what Velox found when the release wrote the rows, as for an
+// ingest's billing_status (open_period.go): not a promise. The invoice is the
+// final answer.
 type ReleaseResult struct {
 	CustomerID string `json:"customer_id"`
 	// Released counts rows newly written to usage_events.
@@ -215,32 +165,37 @@ type ReleaseResult struct {
 	// most 5,000 rows. Release again to take them.
 	MoreToRelease int `json:"more_to_release"`
 	// InOpenPeriod counts released rows whose time falls in an active
-	// subscription's current billing period and whose meter that
-	// subscription's plan prices: that period's invoice counts them. A row
-	// after the period end, released before that period's invoice is built
-	// (the grace), counts here when the next period's plan prices it. A row
-	// of a sum or count meter before the time a threshold invoice of the
-	// period billed through does not count here: see
-	// PendingThresholdInvoice and OutsideOpenPeriod.
+	// subscription's current billing period and that a price of the plan the
+	// subscription was on then takes. Rows Velox does not check count here
+	// too: a row after the period end, released before that period's invoice
+	// is built (the grace), when the subscription goes on, and a row at or
+	// after the trial end of a subscription still trialing. A row of a sum or count
+	// meter before the time a threshold invoice of the period billed
+	// through does not count here: see PendingThresholdInvoice and
+	// OutsideOpenPeriod.
 	InOpenPeriod int `json:"in_open_period"`
 	// PendingThresholdInvoice counts released rows of a sum or count meter
 	// stamped before the time a threshold invoice of the current period
-	// billed through, while that invoice is not paid. If it is paid or
-	// written off, no invoice counts them. If it is voided before the period
-	// closes, the period's invoice counts them.
+	// billed through, while that invoice is not paid. The period's invoice
+	// counts them only if that invoice is voided before the period closes.
+	// A written-off invoice can still be voided.
 	PendingThresholdInvoice int `json:"pending_threshold_invoice"`
-	// NotOnPlan counts released rows whose time falls in an active
-	// subscription's current billing period, but whose meter no plan on that
-	// subscription prices: no invoice charges them.
+	// NoPrice counts released rows whose time falls in a billing period not
+	// invoiced yet, whose meter the plan that bills that time prices, but no
+	// price of that plan takes their labels (dimension_match).
+	NoPrice int `json:"no_price"`
+	// NotOnPlan counts released rows whose time falls in a subscription's
+	// billing period not invoiced yet, but whose meter the subscription's
+	// plan does not price.
 	NotOnPlan int `json:"not_on_plan"`
-	// OutsideOpenPeriod counts released rows outside every current billing
-	// period: before the subscription started, or in a period whose invoice
-	// is already built. It also counts rows of a sum or count meter stamped
-	// before the time a paid threshold invoice of the current period billed
-	// through. A subscription invoice does not count them (unless that
-	// period's invoice has not been built yet); bill them with a one-off
-	// invoice if they should be charged. Velox never moves usage onto a
-	// later invoice (ADR-120).
+	// OutsideOpenPeriod counts released rows outside every subscription's
+	// time (before it started, in a free trial, after it ends or after its
+	// scheduled cancel, or in another, ended subscription's time), and rows
+	// in a period whose invoice is already built. It also counts rows of a
+	// sum or count meter stamped before the time a paid threshold invoice of
+	// the current period billed through. Bill them with a one-off invoice if
+	// they should be charged.
+	// Velox never moves usage onto a later invoice (ADR-120).
 	OutsideOpenPeriod int `json:"outside_open_period"`
 }
 
@@ -300,10 +255,15 @@ func (s *Service) Release(ctx context.Context, tenantID string, in ReleaseInput)
 			continue
 		}
 		out.Released++
-		written = append(written, ReleasedUsage{At: r.EventAt, MeterID: in.MeterIDs[r.EventName]})
+		written = append(written, ReleasedUsage{At: r.EventAt, MeterID: in.MeterIDs[r.EventName], Labels: r.Dimensions})
 	}
-	if out.Released > 0 {
-		out.InOpenPeriod, out.NotOnPlan, out.PendingThresholdInvoice, out.OutsideOpenPeriod = countReleased(written, periods, buckets)
+	classes := countReleased(&out, written, periods, buckets)
+	// The release has committed: count each written row answered with a
+	// billing_status, as every ingest door does (origin backfill, as written).
+	for i, row := range written {
+		recordUnbilled(ctx, domain.UsageEvent{
+			CustomerID: in.CustomerID, MeterID: row.MeterID, Timestamp: row.At, Origin: domain.UsageOriginBackfill,
+		}, s.statusOf(classes[i]))
 	}
 	return out, nil
 }
@@ -382,6 +342,8 @@ func (s *Service) Discard(ctx context.Context, tenantID, externalCustomerID, eve
 type ReleasedUsage struct {
 	At      time.Time
 	MeterID string
+	// Labels are the row's dimensions, which decide the price that takes it.
+	Labels map[string]any
 }
 
 // releasePeriods reads the customer's open periods. With no reader wired it
@@ -426,34 +388,43 @@ func (s *Service) releaseBuckets(ctx context.Context, tx *sql.Tx, in ReleaseInpu
 	return buckets, nil
 }
 
-// countReleased splits released rows four ways by classify:
+// countReleased counts released rows into out by classify:
 //
-//   - inOpen (InOpen): an open period's invoice counts it.
-//   - notOnPlan (NotOnPlan): the time falls in an open period, but no plan
-//     on the subscription prices the meter. No invoice counts it.
-//   - pending (Unsettled): before the time a threshold invoice that is not
-//     paid billed through. Counted if that invoice is voided before the
-//     period closes, else on no invoice.
-//   - outside (Outside, AfterClose): everything else, including a time in a
-//     period whose invoice is already built (Velox never re-opens a built
-//     invoice, ADR-120), before a paid threshold invoice's end, and after
-//     the end of a subscription that ends there.
+//   - InOpenPeriod (InOpen, Later): a price of an open period's plan takes
+//     it, or it is not checked: after the current period's end, in a period
+//     not invoiced yet, or after the trial end of a subscription still
+//     trialing.
+//   - NoPrice (NoPrice): the time falls in an open period whose plan prices
+//     the meter, but no price takes the row's labels.
+//   - NotOnPlan (NotOnPlan): the time falls in an open period, but its
+//     plan does not price the meter.
+//   - PendingThresholdInvoice (Unsettled): before the time a threshold
+//     invoice that is not paid billed through. Counted if that invoice is
+//     voided before the period closes, else on no invoice.
+//   - OutsideOpenPeriod (Outside, AfterClose): everything else, including a
+//     time in a period whose invoice is already built (Velox never re-opens
+//     a built invoice, ADR-120), before a paid threshold invoice's end, and
+//     after the end of a subscription that ends there.
 //
 // buckets holds each row's meter; a meter missing from it is read as not
-// additive.
-func countReleased(rows []ReleasedUsage, periods []OpenPeriod, buckets map[string]MeterBuckets) (inOpen, notOnPlan, pending, outside int) {
+// additive. It returns each row's class, in the order of rows.
+func countReleased(out *ReleaseResult, rows []ReleasedUsage, periods []OpenPeriod, buckets map[string]MeterBuckets) []Class {
+	classes := make([]Class, 0, len(rows))
 	for _, row := range rows {
-		c, _ := classify(row.At, row.MeterID, periods, func() (MeterBuckets, error) { return buckets[row.MeterID], nil })
+		c, _ := classify(row.At, row.MeterID, row.Labels, periods, func() (MeterBuckets, error) { return buckets[row.MeterID], nil })
+		classes = append(classes, c)
 		switch c {
-		case InOpen:
-			inOpen++
+		case InOpen, Later:
+			out.InOpenPeriod++
+		case NoPrice:
+			out.NoPrice++
 		case NotOnPlan:
-			notOnPlan++
+			out.NotOnPlan++
 		case Unsettled:
-			pending++
+			out.PendingThresholdInvoice++
 		default:
-			outside++
+			out.OutsideOpenPeriod++
 		}
 	}
-	return inOpen, notOnPlan, pending, outside
+	return classes
 }

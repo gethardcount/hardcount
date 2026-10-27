@@ -58,6 +58,15 @@ func (e *Engine) SetIntervalReader(snap IntervalSnapshotter) {
 // (their sealed intervals still intersect it); callers iterate it for
 // the removed-item pass.
 func (e *Engine) windowSegments(ctx context.Context, sub domain.Subscription, windowStart, windowEnd time.Time) (map[string][]baseSegment, error) {
+	rowsByItem, err := e.intervalRows(ctx, sub)
+	if err != nil {
+		return nil, err
+	}
+	return intervalSegmentsByItem(rowsByItem, windowStart, windowEnd), nil
+}
+
+// intervalRows reads sub's billing intervals, by item.
+func (e *Engine) intervalRows(ctx context.Context, sub domain.Subscription) (map[string][]domain.ItemInterval, error) {
 	intervals, err := e.intervalSnap.ListItemIntervals(ctx, sub.TenantID, sub.ID)
 	if err != nil {
 		return nil, fmt.Errorf("billing-intervals read: %w", err)
@@ -77,14 +86,35 @@ func (e *Engine) windowSegments(ctx context.Context, sub domain.Subscription, wi
 			return nil, fmt.Errorf("billing-intervals: active item %s on sub %s has no interval rows (writer bug — refusing to bill it as zero)", it.ID, sub.ID)
 		}
 	}
-	return intervalSegmentsByItem(rowsByItem, windowStart, windowEnd), nil
+	return rowsByItem, nil
+}
+
+// estimateSegments is, for an estimate over [from, to] (customer usage over
+// a chosen window, a preview of one), sub's segments over the window and the
+// pins it is priced at: those of sub's current period (pinsOf), from one
+// read of its billing intervals. An estimate is priced at today's prices,
+// not at each past period's own (ADR-130 §10); a plan not on sub in the
+// current period is read at that period's start. A subscription with no
+// current period is pinned as if its period started at from.
+func (e *Engine) estimateSegments(ctx context.Context, sub domain.Subscription, from, to time.Time) (map[string][]baseSegment, periodPins, error) {
+	rowsByItem, err := e.intervalRows(ctx, sub)
+	if err != nil {
+		return nil, periodPins{}, err
+	}
+	segs := intervalSegmentsByItem(rowsByItem, from, to)
+	if sub.CurrentBillingPeriodStart == nil || sub.CurrentBillingPeriodEnd == nil {
+		return segs, pinsOf(sub, planStretches(sub, segs, from, to), from), nil
+	}
+	start, end := *sub.CurrentBillingPeriodStart, *sub.CurrentBillingPeriodEnd
+	current := planStretches(sub, intervalSegmentsByItem(rowsByItem, start, end), start, end)
+	return segs, pinsOf(sub, current, start), nil
 }
 
 // intervalSegmentsByItem derives segments from billing_intervals rows:
 // clip each row to the window, drop empty slices, merge adjacent
 // equal-(plan, qty) slices. No policy here — the day-grade decisions
 // were made at write time; this is the "dumb intersection" the ADR
-// promises.
+// promises. Each segment carries its item's creation.
 func intervalSegmentsByItem(rowsByItem map[string][]domain.ItemInterval, windowStart, windowEnd time.Time) map[string][]baseSegment {
 	out := make(map[string][]baseSegment, len(rowsByItem))
 	for itemID, rows := range rowsByItem {
@@ -101,7 +131,7 @@ func intervalSegmentsByItem(rowsByItem map[string][]domain.ItemInterval, windowS
 			if !end.After(start) {
 				continue
 			}
-			segs = append(segs, baseSegment{start: start, end: end, planID: iv.PlanID, quantity: iv.Quantity})
+			segs = append(segs, baseSegment{start: start, end: end, planID: iv.PlanID, quantity: iv.Quantity, itemCreatedAt: iv.ItemCreatedAt})
 		}
 		if merged := mergeEqualAdjacent(segs); len(merged) > 0 {
 			out[itemID] = merged

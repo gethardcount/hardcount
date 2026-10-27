@@ -133,18 +133,15 @@ func TestRunCycle_NetNegativeBucket_MultiRuleMeter(t *testing.T) {
 	aud := &fakeEngineAudit{}
 	engine.SetAuditLogger(aud)
 	pricing.meters["mtr_api"] = domain.Meter{ID: "mtr_api", EventName: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: "sum"}
-	pricing.rules["rrv_in"] = domain.RatingRuleVersion{ID: "rrv_in", RuleKey: "tok_in", Version: 1, Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(1)}
-	pricing.rules["rrv_out"] = domain.RatingRuleVersion{ID: "rrv_out", RuleKey: "tok_out", Version: 1, Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(2)}
-	pricing.meterPricingRules = map[string][]domain.MeterPricingRule{
-		"mtr_api": {
-			{ID: "mpr_in", MeterID: "mtr_api", RatingRuleVersionID: "rrv_in", DimensionMatch: map[string]any{"type": "in"}},
-			{ID: "mpr_out", MeterID: "mtr_api", RatingRuleVersionID: "rrv_out", DimensionMatch: map[string]any{"type": "out"}},
-		},
+	pricing.prices["pln_1"] = []domain.PlanPrice{
+		priceWith("prc_in", "mtr_api", map[string]string{"type": "in"}, domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(1)}),
+		priceWith("prc_out", "mtr_api", map[string]string{"type": "out"}, domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(2)}),
+		pricing.prices["pln_1"][1], // storage
 	}
-	usage.ruleAggs = map[string][]domain.RuleAggregation{
+	usage.priceAggs = map[string][]domain.ClaimedUsage{
 		"mtr_api": {
-			{RuleID: "mpr_in", RatingRuleVersionID: "rrv_in", Quantity: decimal.NewFromInt(1000)},
-			{RuleID: "mpr_out", RatingRuleVersionID: "rrv_out", Quantity: decimal.NewFromInt(-300)},
+			{PriceID: "prc_in", Quantity: decimal.NewFromInt(1000)},
+			{PriceID: "prc_out", Quantity: decimal.NewFromInt(-300)},
 		},
 	}
 	usage.totals["mtr_api"] = 700
@@ -161,8 +158,8 @@ func TestRunCycle_NetNegativeBucket_MultiRuleMeter(t *testing.T) {
 			tokenLines = append(tokenLines, li)
 		}
 	}
-	if len(tokenLines) != 1 || tokenLines[0].RatingRuleVersionID != "rrv_in" || tokenLines[0].AmountCents != 1000 {
-		t.Fatalf("token lines = %+v, want one rrv_in line of 1000¢", tokenLines)
+	if len(tokenLines) != 1 || tokenLines[0].PriceID != "prc_in" || tokenLines[0].AmountCents != 1000 {
+		t.Fatalf("token lines = %+v, want one prc_in line of 1000¢", tokenLines)
 	}
 	rows := netNegativeRows(t, aud)
 	if len(rows) != 1 {
@@ -222,31 +219,24 @@ func TestBillFinalOnImmediateCancel_NetNegativeUsage(t *testing.T) {
 	pricing := &mockPricing{
 		plans: map[string]domain.Plan{
 			"pln_neg": {ID: "pln_neg", Name: "Neg", Currency: "USD",
-				BillingInterval: domain.BillingMonthly, BaseBillTiming: domain.BillInArrears,
-				MeterIDs: []string{"mtr_tokens", "mtr_seats"}},
+				BillingInterval: domain.BillingMonthly, BaseBillTiming: domain.BillInArrears},
 		},
 		meters: map[string]domain.Meter{
 			"mtr_tokens": {ID: "mtr_tokens", EventName: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: "sum"},
-			"mtr_seats":  {ID: "mtr_seats", EventName: "seats", Name: "Seats", Unit: "seats", Aggregation: "sum", RatingRuleVersionID: "rrv_seat"},
+			"mtr_seats":  {ID: "mtr_seats", EventName: "seats", Name: "Seats", Unit: "seats", Aggregation: "sum"},
 		},
-		rules: map[string]domain.RatingRuleVersion{
-			"rrv_in":   {ID: "rrv_in", RuleKey: "tok_in", Version: 1, Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(1)},
-			"rrv_out":  {ID: "rrv_out", RuleKey: "tok_out", Version: 1, Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(2)},
-			"rrv_seat": {ID: "rrv_seat", RuleKey: "seat", Version: 1, Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(5)},
-		},
-		meterPricingRules: map[string][]domain.MeterPricingRule{
-			"mtr_tokens": {
-				{ID: "mpr_in", MeterID: "mtr_tokens", RatingRuleVersionID: "rrv_in", DimensionMatch: map[string]any{"type": "in"}},
-				{ID: "mpr_out", MeterID: "mtr_tokens", RatingRuleVersionID: "rrv_out", DimensionMatch: map[string]any{"type": "out"}},
-			},
+		prices: map[string][]domain.PlanPrice{
+			"pln_neg": {priceWith("prc_in", "mtr_tokens", map[string]string{"type": "in"}, domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(1)}),
+				priceWith("prc_out", "mtr_tokens", map[string]string{"type": "out"}, domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(2)}),
+				priceOf("prc_seat", "mtr_seats", domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(5)})},
 		},
 	}
 	usage := &mockUsage{
 		totals: map[string]int64{"mtr_tokens": 300, "mtr_seats": -7},
-		ruleAggs: map[string][]domain.RuleAggregation{
+		priceAggs: map[string][]domain.ClaimedUsage{
 			"mtr_tokens": {
-				{RuleID: "mpr_in", RatingRuleVersionID: "rrv_in", Quantity: decimal.NewFromInt(400)},
-				{RuleID: "mpr_out", RatingRuleVersionID: "rrv_out", Quantity: decimal.NewFromInt(-100)},
+				{PriceID: "prc_in", Quantity: decimal.NewFromInt(400)},
+				{PriceID: "prc_out", Quantity: decimal.NewFromInt(-100)},
 			},
 		},
 	}
@@ -262,7 +252,7 @@ func TestBillFinalOnImmediateCancel_NetNegativeUsage(t *testing.T) {
 	if inv.ID == "" || inv.SubtotalCents != 400 {
 		t.Fatalf("final invoice = %q, subtotal %d; want one invoice of 400¢ (input tokens only)", inv.ID, inv.SubtotalCents)
 	}
-	if len(invoices.lineItems) != 1 || invoices.lineItems[0].RatingRuleVersionID != "rrv_in" {
+	if len(invoices.lineItems) != 1 || invoices.lineItems[0].PriceID != "prc_in" {
 		t.Fatalf("lines = %+v, want one rrv_in line", invoices.lineItems)
 	}
 	rows := netNegativeRows(t, aud)
@@ -325,15 +315,15 @@ func TestBillFinalOnImmediateCancel_AfterThresholdFire_NetNegativeRow(t *testing
 	pricing := &mockPricing{
 		plans: map[string]domain.Plan{
 			"pln_1": {ID: "pln_1", Name: "P", Currency: "USD", BillingInterval: domain.BillingMonthly,
-				BaseBillTiming: domain.BillInArrears, MeterIDs: []string{"mtr_api", "mtr_storage"}},
+				BaseBillTiming: domain.BillInArrears},
 		},
 		meters: map[string]domain.Meter{
-			"mtr_api":     {ID: "mtr_api", EventName: "api_calls", Name: "API", Unit: "calls", Aggregation: "sum", RatingRuleVersionID: "rrv_api"},
-			"mtr_storage": {ID: "mtr_storage", EventName: "storage", Name: "Storage", Unit: "GB", Aggregation: "sum", RatingRuleVersionID: "rrv_storage"},
+			"mtr_api":     {ID: "mtr_api", EventName: "api_calls", Name: "API", Unit: "calls", Aggregation: "sum"},
+			"mtr_storage": {ID: "mtr_storage", EventName: "storage", Name: "Storage", Unit: "GB", Aggregation: "sum"},
 		},
-		rules: map[string]domain.RatingRuleVersion{
-			"rrv_api":     {ID: "rrv_api", RuleKey: "api", Version: 1, Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(1)},
-			"rrv_storage": {ID: "rrv_storage", RuleKey: "storage", Version: 1, Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(100)},
+		prices: map[string][]domain.PlanPrice{
+			"pln_1": {priceOf("prc_api", "mtr_api", domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(1)}),
+				priceOf("prc_storage", "mtr_storage", domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(100)})},
 		},
 	}
 	usage := &mockUsage{

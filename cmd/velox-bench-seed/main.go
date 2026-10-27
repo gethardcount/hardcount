@@ -143,11 +143,11 @@ func bootstrapFixtures(ctx context.Context, db *postgres.DB, customers int, live
 	// `customers` and `meters` carry the same BEFORE INSERT set_livemode
 	// trigger as usage_events: it overwrites whatever the INSERT supplied
 	// with the app.livemode GUC, and refuses the insert when the GUC is unset
-	// (migration 00212). BeginTx sets that GUC only for TxTenant — the
+	// (migration 00213). BeginTx sets that GUC only for TxTenant — the
 	// TxBypass branch sets app.bypass_rls and nothing else. So
 	// postgres.WithLivemode on the context is INERT here.
 	//
-	// Before 00212 an unset GUC meant LIVE, and this seeder once wrote its
+	// Before 00213 an unset GUC meant LIVE, and this seeder once wrote its
 	// fixtures live next to a test-mode key; every ingest then answered 422
 	// `customer "bench-customer" not found`. The ON CONFLICT DO UPDATE path
 	// below hid it on a reused database: the trigger is INSERT-only, so a

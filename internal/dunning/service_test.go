@@ -119,10 +119,6 @@ func (m *memStore) UpsertPolicy(_ context.Context, tenantID string, p domain.Dun
 	return p, nil
 }
 
-func (m *memStore) UpsertPolicyTx(ctx context.Context, _ *sql.Tx, tenantID string, p domain.DunningPolicy) (domain.DunningPolicy, error) {
-	return m.UpsertPolicy(ctx, tenantID, p)
-}
-
 // SeedDefaultPoliciesTx records the policy it was handed (one mode only —
 // the in-memory store has no modes) so a unit test can check what the
 // service passed down; the per-mode writes are pinned against Postgres.
@@ -937,12 +933,6 @@ func TestUpsertPolicy_RetryDaysBounds(t *testing.T) {
 			for writer, upsert := range map[string]func() error{
 				"UpsertPolicy": func() error {
 					_, err := svc.UpsertPolicy(ctx, "t1", domain.DunningPolicy{Name: "P", Enabled: true, RetryDays: tc.days})
-					return err
-				},
-				// The recipe path runs the same validation: recipe/parse.go
-				// does not check the schedule.
-				"UpsertPolicyTx": func() error {
-					_, err := svc.UpsertPolicyTx(ctx, nil, "t1", domain.DunningPolicy{Name: "P", Enabled: true, RetryDays: tc.days})
 					return err
 				},
 			} {

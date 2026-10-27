@@ -87,6 +87,27 @@ func OpenTracedDB(t *testing.T, tracer pgx.QueryTracer) *postgres.DB {
 	return postgres.NewDB(pool, 5*time.Second)
 }
 
+// OpenExecModeDB opens an app-user connection to the test database that sends
+// every statement in the given pgx exec mode. An operator can pick the mode
+// with default_query_exec_mode in the database URL
+// (docs/ops/postgres-requirements.md), so a test of how a parameter is
+// encoded runs in each one. It needs no migrations or clean tables.
+func OpenExecModeDB(t *testing.T, mode pgx.QueryExecMode) *sql.DB {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("skipping integration test (use -short=false)")
+	}
+	cfg, err := pgx.ParseConfig(envOr("TEST_DATABASE_URL", defaultAppDBURL))
+	if err != nil {
+		t.Fatalf("parse test db url: %v", err)
+	}
+	cfg.DefaultQueryExecMode = mode
+	pool := stdlib.OpenDB(*cfg)
+	pool.SetMaxOpenConns(2)
+	t.Cleanup(func() { _ = pool.Close() })
+	return pool
+}
+
 func openPool(t *testing.T, url string) *sql.DB {
 	t.Helper()
 

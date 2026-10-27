@@ -67,13 +67,6 @@ func (s *PostgresStore) CreateEndpoint(ctx context.Context, tenantID string, ep 
 	return created, nil
 }
 
-// CreateEndpointTx inserts a webhook endpoint inside an existing tx. Used
-// by recipe.Service.Instantiate so a recipe that wants a default outbound
-// receiver lands its endpoint atomically with the rest of the recipe.
-func (s *PostgresStore) CreateEndpointTx(ctx context.Context, tx *sql.Tx, tenantID string, ep domain.WebhookEndpoint) (domain.WebhookEndpoint, error) {
-	return s.createEndpointTx(ctx, tx, tenantID, ep)
-}
-
 func (s *PostgresStore) createEndpointTx(ctx context.Context, tx *sql.Tx, tenantID string, ep domain.WebhookEndpoint) (domain.WebhookEndpoint, error) {
 	id := postgres.NewID("vlx_whe")
 	now := time.Now().UTC()
@@ -386,7 +379,7 @@ func (s *PostgresStore) CreateEvent(ctx context.Context, tenantID string, event 
 }
 
 // CreateEventWithDeliveries creates the event AND all its delivery rows
-// in ONE transaction (P5, CreateEndpointTx precedent) — the old shape
+// in ONE transaction (P5) — the old shape
 // committed the event, then each fan-out goroutine inserted its own
 // delivery row: a crash in between minted an event no delivery row
 // referenced, so no endpoint ever received it and nothing retried.

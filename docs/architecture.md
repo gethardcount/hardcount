@@ -25,7 +25,7 @@ your app → usage → billing → invoice → payment → paid
    period end plus `INVOICE_GRACE_PERIOD` (default 1 hour). It runs every
    hour, or every 5 minutes when `APP_ENV=local`.
 3. **`billing`** asks `usage` for the period's totals per meter and
-   `pricing` for the rating rules, adds the plan's flat fees, and builds the
+   `pricing` for the plan's prices, adds the plan's flat fees, and builds the
    invoice through `invoice`.
 4. **`invoice`** finalizes it. Tax comes from the tenant's tax provider
    ([Tax providers](#tax-providers)); if tax cannot be worked out yet, the
@@ -63,7 +63,7 @@ A paid invoice cannot be voided or written off; issue a credit note instead.
   - `velox-bench-seed`, which sets up a database for a benchmark.
 - **Every tenant-scoped operation states its mode.** Test mode and live mode are separate data in one tenant. Each entry point puts the mode on the request context with `postgres.WithLivemode`: the auth middleware from the key or session, public links from their row, background jobs per row or per mode. Nothing guesses a missing mode:
   - `postgres.Livemode` returns `ErrLivemodeUnset`, and `BeginTx` refuses a `TxTenant` without a mode or a tenant ID;
-  - the database refuses an insert into a table with a `livemode` column when `app.livemode` is not `on` or `off`, and its RLS policies show no row (migrations 00212 and 00213).
+  - the database refuses an insert into a table with a `livemode` column when `app.livemode` is not `on` or `off`, and its RLS policies show no row (migrations 00213 and 00214).
 - **PaymentIntent-only Stripe.** No Stripe Billing or Stripe Invoices. Velox owns invoices end to end; Stripe executes the card charge.
 - **Billing engine as coordinator.** `billing` is the one package that works across domains. It calls usage, pricing, invoice, payment and the others only through small interfaces it defines itself (`UsageAggregator`, `PricingReader`, `InvoiceWriter`, `InvoiceCharger` and so on). The other domains do not know about each other, and the engine can be tested with fakes.
 - **Ledger and audit records for money.** Credit grants, usage, expiry and adjustments are entries in one credit ledger. The ledger is not strictly append-only: each grant entry keeps a running count of what has been used of it (`consumed_cents`, `cn_retired_cents`), updated in place. The audit log is append-only: the database refuses any change or delete in it.
@@ -77,7 +77,7 @@ internal/                     (abridged — one package per domain)
   domain/                   — pure domain models, zero deps
   auth/                     — API key auth (3 stored key types plus dashboard sessions, per-route permissions)
   customer/                 — customer CRUD + billing profiles
-  pricing/                  — meters, rating rules, plans, price overrides
+  pricing/                  — meters, plans and their prices, price overrides
   subscription/             — lifecycle (created trialing or active, or as a draft until activated; trialing → active → canceled)
   usage/                    — event ingestion + multi-dim aggregation
   invoice/                  — lifecycle (draft → finalized → paid, or voided / uncollectible) + PDF

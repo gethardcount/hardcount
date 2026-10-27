@@ -159,6 +159,9 @@ type Mapping struct {
 	// call first stored that way must be stored that way again, or the
 	// writes bill twice; the store decides which applies from the row
 	// already under LegacyKey (usage.PostgresStore.IngestCallResolvingHeld).
+	// An install upgraded from a main build from #1198 up to #1349 has
+	// such calls (CHANGELOG "Before upgrading"), so this stays while that
+	// upgrade is supported.
 	Legacy []ExternalIngest
 	// LegacyKey is the call's input key, which Events and Legacy both
 	// carry with different quantities. Set with Legacy.
@@ -472,7 +475,7 @@ func MapPayload(p StandardLoggingPayload) (Mapping, error) {
 	modelDim := fam.recipeToken
 	if !known {
 		modelDim = p.Model
-		slog.Warn("litellm: unknown model, kept under its raw name; its usage has no price until a pricing rule for that name exists (an unknown version is never priced as an older model)",
+		slog.Warn("litellm: unknown model, kept under its raw name; its usage has no price until a plan has a price for that name (an unknown version is never priced as an older model)",
 			"model", p.Model, "litellm_id", p.ID)
 	}
 	dims := map[string]any{
@@ -483,8 +486,8 @@ func MapPayload(p StandardLoggingPayload) (Mapping, error) {
 	if tier, ok := promptTiers[fam.recipeToken]; known && ok {
 		dims[DimContextTier] = tier.of(u)
 	}
-	// Forward useful operator-set metadata into dimensions for
-	// pricing-rule dispatch. We promote `team_id` and `tags`
+	// Forward useful operator-set metadata into dimensions, where a
+	// price's dimension_match can name them. We promote `team_id` and `tags`
 	// specifically because LiteLLM's spend page uses them as the
 	// primary slice axes; everything else stays in the event's
 	// metadata column for audit.

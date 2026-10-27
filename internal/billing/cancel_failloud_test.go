@@ -34,15 +34,14 @@ func cancelFailLoudFixture() (domain.Subscription, *mockPricing, *mockUsage, *mo
 		plans: map[string]domain.Plan{
 			"pln_api": {ID: "pln_api", Name: "API", Currency: "USD",
 				BillingInterval: domain.BillingMonthly, BaseAmountCents: 3000,
-				BaseBillTiming: domain.BillInArrears, MeterIDs: []string{"mtr_api"}},
+				BaseBillTiming: domain.BillInArrears},
 		},
 		meters: map[string]domain.Meter{
 			"mtr_api": {ID: "mtr_api", EventName: "api", Name: "API Calls",
-				Unit: "calls", Aggregation: "sum", RatingRuleVersionID: "rrv_api"},
+				Unit: "calls", Aggregation: "sum"},
 		},
-		rules: map[string]domain.RatingRuleVersion{
-			"rrv_api": {ID: "rrv_api", RuleKey: "api_calls", Version: 1,
-				Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(2)},
+		prices: map[string][]domain.PlanPrice{
+			"pln_api": {priceOf("prc_api", "mtr_api", domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(2)})},
 		},
 	}
 	return sub, pricing, &mockUsage{totals: map[string]int64{"mtr_api": 500}}, &mockInvoices{}
@@ -91,7 +90,7 @@ func TestBillFinalOnImmediateCancel_SegmentPlanLookupFailsLoud(t *testing.T) {
 	if err == nil {
 		t.Fatal("segment-plan lookup failure must fail the cancel bill, not silently drop the segment")
 	}
-	if !strings.Contains(err.Error(), "get segment plan pln_gone on cancel") {
+	if !strings.Contains(err.Error(), "on cancel: get segment plan pln_gone") {
 		t.Errorf("error should name the missing segment plan, got %v", err)
 	}
 	if len(invoices.invoices) != 0 {

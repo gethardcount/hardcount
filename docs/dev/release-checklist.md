@@ -53,11 +53,13 @@ clean.
 
 A dunning run is the automatic retries after a failed payment.
 
-- [ ] Dunning policies page: "Default retries" is the default and enabled. A bootstrap creates it in both modes (ADR-123). Its row reads "3 retries, on day 3, 7 and 14". When its retries run out it changes nothing: final actions none and none. If you ran the demo first, its recipe's "AI default retry" is the default instead, and "Default retries" stays listed.
+- [ ] Dunning policies page: "Default retries" is the default and enabled. A bootstrap creates it in both modes (ADR-123). Its row reads "3 retries, on day 3, 7 and 14". When its retries run out it changes nothing: final actions none and none. Running the demo first does not change this: a recipe creates no dunning policy.
 - [ ] Mint a test clock, create a customer with an email, pinned to the clock, and subscribe it to a plan with a base fee (plans bill in arrears by default).
 - [ ] With `stripe listen` running, open the customer's setup link (Add payment method) and save card `0341` in Checkout → the card is listed on the customer. Do this before you advance the clock.
 - [ ] Advance the clock past the renewal → the renewal invoice is declined and a dunning run starts.
 - [ ] Open the invoice link in the payment-failed email and pay with `4242` → the invoice is paid, and the dunning run shows recovered.
+- [ ] Price change on a test clock: give the plan a usage price and send usage. Change the price on the plan's page → before you save, the page says the change applies from each subscriber's next billing period. Advance the clock past the renewal → that invoice bills the old price; send usage and advance again → the next invoice bills the new one. Its PDF usage line names the meter and the price's label values, with the new rate.
+- [ ] A new subscriber after a price change, on a test clock: change a usage price of a plan that has a subscriber, advance the clock an hour, then subscribe a new customer of the clock to the plan and send usage. Advance past its first renewal → its first invoice bills the new price.
 
 ## Email, PDF, LiteLLM
 
@@ -65,9 +67,10 @@ A dunning run is the automatic retries after a failed payment.
 - [ ] Invoice → Email: the message arrives in Mailpit; open it, read it, and check the amount and the links.
 - [ ] The emailed PDF opens, and its total, lines, tax and buyer address match the invoice page.
 - [ ] Run a real LiteLLM proxy with the callback from [the LiteLLM guide](../integrations/litellm.md) → one completion creates one `input` and one `output` usage event on the customer (plus `cache_read` if the prompt was cached).
+- [ ] With the same proxy, send one completion on a model the customer's plan has no price for → `velox_usage_unbilled_total{reason="no_price"}` on `/metrics` goes up by the call's events, and the customer page shows them in its "not billed" row.
 - [ ] Open [Anthropic's pricing page](https://platform.claude.com/docs/en/about-claude/pricing) and the models overview. Update `anthropicListPrices` and `anthropicPricesChecked` in `internal/recipe/anthropic_prices_test.go`. If a price moved, fix `anthropic_style.yaml`, bump its version, and add a CHANGELOG line telling existing installs to update that price. If a model was added, also:
   - Add its id to `modelFamilies` in `internal/integrations/litellm/mapper.go`. If its price depends on the prompt's length, add it to `promptTiers` too.
-  - Add its rules to `anthropic_style.yaml`, bump the version, and add a CHANGELOG line telling existing installs to add its prices.
+  - Add its prices to the plan in `anthropic_style.yaml`, bump the version, and add a CHANGELOG line telling existing installs to add its prices.
   - In `internal/integrations/litellm/model_families_test.go`, add it to `pricingPageClaudeIDs`, and remove it from `mustStayRaw` if it is there.
   - In `internal/integrations/litellm/testdata/list_claude_model_ids.py`, add it to `FAMILIES` and `PAGE`, and remove it from `PROBES` if it is there. Then regenerate the list (do not edit it by hand):
 

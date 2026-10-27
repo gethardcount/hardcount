@@ -13,256 +13,285 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
-	"github.com/sagarsuperuser/velox/internal/platform/clock"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
-// Override methods on the existing PostgresStore.
+// Customer price overrides (ADR-130 §6). An override is keyed by (customer,
+// price) and replaces the price's shape for that customer over
+// [created_at, deactivated_at). A create, replace or delete stamps that
+// window after the write's locks, in the customer's own time: wall time read
+// with clock_timestamp(), or the customer's clock time plus 1 microsecond.
+// Not now(): that is the transaction's start, so a write that waited for a
+// lock across a period start would change the period already open. A plan
+// is priced at its pin of the period (ADR-130 §4 step 3), so an override
+// write applies from the customer's next period. A subscription whose first
+// join of the plan in a period comes after the write gets it in that period.
 
-func (s *PostgresStore) CreateOverride(ctx context.Context, tenantID string, o domain.CustomerPriceOverride) (domain.CustomerPriceOverride, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return domain.CustomerPriceOverride{}, err
-	}
-	defer postgres.Rollback(tx)
+const overrideColumns = `o.id, o.tenant_id, o.customer_id, o.price_id, o.mode, o.unit_amount_cents, o.tiers,
+	o.package_size, o.package_amount_cents, COALESCE(o.reason, ''), o.active, o.created_at, o.deactivated_at, o.updated_at`
 
-	id := postgres.NewID("vlx_cpo")
-	// Honors ctx-bound effective-now (ADR-030) — overrides on
-	// clock-pinned customers stamp sim-time. Fallback to wall-clock
-	// otherwise.
-	now := clock.Now(ctx)
-	tiersJSON, _ := json.Marshal(o.Tiers)
-
-	// Append-only effectivity rows (ADR-070): re-issuing a key closes
-	// the prior row's window (deactivated_at) and inserts a fresh one —
-	// the one-active-row partial unique index (0128) turns a concurrent
-	// double-write into a clean retryable conflict below.
-	// [created_at, deactivated_at) is what the as-of lookup resolves —
-	// a mid-period edit therefore prices from the NEXT period open; the
-	// period in flight keeps the row that was live when it opened.
-	// rating_rule_version_id records the version the operator
-	// referenced (provenance, not identity).
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE customer_price_overrides
-		SET active = false, deactivated_at = $1, updated_at = $1
-		WHERE customer_id = $2 AND rule_key = $3 AND active = true
-	`, now, o.CustomerID, o.RuleKey); err != nil {
-		return domain.CustomerPriceOverride{}, fmt.Errorf("close prior override window: %w", err)
-	}
-
-	err = tx.QueryRowContext(ctx, `
-		INSERT INTO customer_price_overrides (id, tenant_id, customer_id, rule_key, rating_rule_version_id,
-			mode, unit_amount_cents, tiers, package_size, package_amount_cents,
-			reason, active, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$13)
-		RETURNING id, tenant_id, customer_id, rule_key, rating_rule_version_id, mode,
-			unit_amount_cents, tiers, package_size, package_amount_cents,
-			COALESCE(reason,''), active, created_at, updated_at
-	`, id, tenantID, o.CustomerID, o.RuleKey, o.RatingRuleVersionID,
-		o.Mode, o.UnitAmountCents, tiersJSON, o.PackageSize,
-		o.PackageAmountCents,
-		postgres.NullableString(o.Reason), true, now,
-	).Scan(&o.ID, &o.TenantID, &o.CustomerID, &o.RuleKey, &o.RatingRuleVersionID, &o.Mode,
-		&o.UnitAmountCents, &tiersJSON, &o.PackageSize, &o.PackageAmountCents,
-		&o.Reason, &o.Active, &o.CreatedAt, &o.UpdatedAt)
-
-	if err != nil {
-		if postgres.IsUniqueViolation(err) {
-			// Two concurrent upserts for the same key: the loser's
-			// deactivate saw no row (the winner's wasn't committed) and
-			// its insert hit the one-active-row partial unique. Rare
-			// operator race — surface for a clean retry, never a
-			// silent second live row.
-			return domain.CustomerPriceOverride{}, errs.AlreadyExists("rule_key",
-				"a concurrent write created this override — retry")
-		}
-		return domain.CustomerPriceOverride{}, err
-	}
-	if len(tiersJSON) > 0 {
-		if err := json.Unmarshal(tiersJSON, &o.Tiers); err != nil {
-			return domain.CustomerPriceOverride{}, fmt.Errorf("unmarshal tiers: %w", err)
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return domain.CustomerPriceOverride{}, err
-	}
-	return o, nil
-}
-
-// GetOverrideByKeyAsOf resolves the override row in force at asOf for
-// (customer, rule_key) — ADR-070: rule_key is the override's identity
-// (a version publish never detaches it) and asOf is the billing
-// period's open, so a mid-period upsert or deactivate prices from the
-// NEXT period while the period in flight keeps the price it opened
-// with. errs.ErrNotFound means "no override in force — list price";
-// any other error must be treated as a real failure by rating paths,
-// never as absence (no-silent-fallbacks).
-func (s *PostgresStore) GetOverrideByKeyAsOf(ctx context.Context, tenantID, customerID, ruleKey string, asOf time.Time) (domain.CustomerPriceOverride, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return domain.CustomerPriceOverride{}, err
-	}
-	defer postgres.Rollback(tx)
-
-	var o domain.CustomerPriceOverride
-	var tiersJSON []byte
-	// Effectivity window: [created_at, deactivated_at). Post-0128,
-	// windows never overlap (each writer closes the prior window in the
-	// same tx), so at most one row spans any instant. The one exception
-	// is the 0128 collapse itself: pre-migration duplicates all had
-	// open-ended windows closed at the SAME migration instant, so for
-	// an asOf inside that legacy span both winner and demoted rows
-	// match — `active DESC` prefers the collapse winner there and is
-	// inert everywhere else (an active row's created_at bounds it out
-	// of any earlier window).
-	err = tx.QueryRowContext(ctx, `
-		SELECT id, tenant_id, customer_id, rule_key, rating_rule_version_id, mode,
-			unit_amount_cents, tiers, package_size, package_amount_cents,
-			COALESCE(reason,''), active, created_at, updated_at
-		FROM customer_price_overrides
-		WHERE customer_id = $1 AND rule_key = $2
-		  AND created_at <= $3
-		  AND (deactivated_at IS NULL OR deactivated_at > $3)
-		ORDER BY active DESC, created_at DESC LIMIT 1
-	`, customerID, ruleKey, asOf).Scan(&o.ID, &o.TenantID, &o.CustomerID, &o.RuleKey, &o.RatingRuleVersionID,
-		&o.Mode, &o.UnitAmountCents, &tiersJSON, &o.PackageSize, &o.PackageAmountCents,
-		&o.Reason, &o.Active, &o.CreatedAt, &o.UpdatedAt)
-
+func scanOverride(row rowScanner) (domain.CustomerPriceOverride, error) {
+	var (
+		o     domain.CustomerPriceOverride
+		tiers []byte
+		deact sql.NullTime
+	)
+	err := row.Scan(&o.ID, &o.TenantID, &o.CustomerID, &o.PriceID, &o.Mode, &o.UnitAmountCents, &tiers,
+		&o.PackageSize, &o.PackageAmountCents, &o.Reason, &o.Active, &o.CreatedAt, &deact, &o.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return domain.CustomerPriceOverride{}, errs.ErrNotFound
 	}
 	if err != nil {
 		return domain.CustomerPriceOverride{}, err
 	}
-	if len(tiersJSON) > 0 {
-		if err := json.Unmarshal(tiersJSON, &o.Tiers); err != nil {
-			return domain.CustomerPriceOverride{}, fmt.Errorf("unmarshal tiers: %w", err)
+	if deact.Valid {
+		t := deact.Time
+		o.DeactivatedAt = &t
+	}
+	if len(tiers) > 0 {
+		if err := json.Unmarshal(tiers, &o.Tiers); err != nil {
+			return domain.CustomerPriceOverride{}, fmt.Errorf("decode tiers of override %s: %w", o.ID, err)
 		}
 	}
 	return o, nil
 }
 
-// DeactivateOverride soft-ends a negotiated price: the row flips
-// active=false with its effectivity window closed at deactivated_at;
-// the row is kept for audit and for as-of resolution of periods that
-// opened while it was live (a period in flight still bills it; the
-// next period resolves list price). CAS on active=true — a second
-// DELETE is a clean 404.
-func (s *PostgresStore) DeactivateOverride(ctx context.Context, tenantID, id string) error {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return err
+// overrideLocksTx takes the locks an override write holds before it reads
+// the customer's clock (ADR-130 §8): the price's plan FOR KEY SHARE, then the
+// price FOR KEY SHARE. So it waits for a price write in progress on the
+// plan, a removal included, and reads the price as that write left it. It
+// returns whether the price takes part from now on.
+func overrideLocksTx(ctx context.Context, tx *sql.Tx, priceID string) (taking bool, err error) {
+	var planID string
+	if err := tx.QueryRowContext(ctx, `SELECT plan_id FROM plan_prices WHERE id = $1`, priceID).Scan(&planID); err != nil {
+		if err == sql.ErrNoRows {
+			return false, errs.ErrNotFound
+		}
+		return false, fmt.Errorf("read price %s: %w", priceID, err)
 	}
-	defer postgres.Rollback(tx)
-
-	now := clock.Now(ctx)
-	res, err := tx.ExecContext(ctx, `
-		UPDATE customer_price_overrides
-		SET active = false, deactivated_at = $1, updated_at = $1
-		WHERE id = $2 AND active = true
-	`, now, id)
-	if err != nil {
-		return err
+	if _, err := tx.ExecContext(ctx, `SELECT 1 FROM plans WHERE id = $1 FOR KEY SHARE`, planID); err != nil {
+		return false, fmt.Errorf("lock plan %s: %w", planID, err)
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return err
+	if _, err := tx.ExecContext(ctx, `SELECT 1 FROM plan_prices WHERE id = $1 FOR KEY SHARE`, priceID); err != nil {
+		return false, fmt.Errorf("lock price %s: %w", priceID, err)
 	}
-	if n == 0 {
-		return errs.ErrNotFound
-	}
-	return tx.Commit()
-}
-
-// CountActiveOverridesByRuleKey backs the publish-time currency guard
-// (ADR-070): a currency change within a rule_key is rejected while any
-// customer's active override references the key — a rule_key-following
-// override would silently reinterpret its integer cents in the new
-// currency.
-func (s *PostgresStore) CountActiveOverridesByRuleKey(ctx context.Context, tenantID, ruleKey string) (int, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return 0, err
-	}
-	defer postgres.Rollback(tx)
-
-	var n int
+	var removed bool
 	err = tx.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM customer_price_overrides
-		WHERE rule_key = $1 AND active = true
-	`, ruleKey).Scan(&n)
-	return n, err
+		SELECT removed FROM plan_price_versions WHERE price_id = $1
+		ORDER BY valid_from DESC LIMIT 1`, priceID).Scan(&removed)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read price %s: %w", priceID, err)
+	}
+	return !removed, nil
 }
 
-func (s *PostgresStore) ListOverrides(ctx context.Context, tenantID, customerID string) ([]domain.CustomerPriceOverride, error) {
+// customerStampTx is the instant an override write for the customer stamps:
+// the customer's clock time plus 1 microsecond, its clock read FOR SHARE
+// (ADR-130 §8 step 5) so a clock advance or teardown is ordered with the
+// write; or wall time, clock_timestamp(), for a customer without a clock.
+func customerStampTx(ctx context.Context, tx *sql.Tx, customerID string) (time.Time, error) {
+	var clockID sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT test_clock_id FROM customers WHERE id = $1`, customerID).Scan(&clockID); err != nil {
+		if err == sql.ErrNoRows {
+			return time.Time{}, errs.NotFound("customer")
+		}
+		return time.Time{}, fmt.Errorf("read customer %s: %w", customerID, err)
+	}
+	var at time.Time
+	if clockID.Valid && clockID.String != "" {
+		err := tx.QueryRowContext(ctx, `
+			SELECT frozen_time + interval '1 microsecond' FROM test_clocks WHERE id = $1 FOR SHARE`, clockID.String).Scan(&at)
+		if err == sql.ErrNoRows {
+			// A teardown of the clock committed while this waited for it,
+			// and deleted the customer with it.
+			return time.Time{}, errs.NotFound("customer")
+		}
+		if err != nil {
+			return time.Time{}, fmt.Errorf("lock test clock %s: %w", clockID.String, err)
+		}
+		return at, nil
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT clock_timestamp()`).Scan(&at); err != nil {
+		return time.Time{}, err
+	}
+	return at, nil
+}
+
+// WriteOverride closes the customer's active override of the price, if any,
+// and inserts o, both at the customer's stamp.
+func (s *PostgresStore) WriteOverride(ctx context.Context, tenantID string, o domain.CustomerPriceOverride) (domain.CustomerPriceOverride, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return domain.CustomerPriceOverride{}, err
+	}
+	defer postgres.Rollback(tx)
+
+	taking, err := overrideLocksTx(ctx, tx, o.PriceID)
+	if errors.Is(err, errs.ErrNotFound) {
+		return domain.CustomerPriceOverride{}, errs.Invalid("price_id", fmt.Sprintf("price %q not found", o.PriceID))
+	}
+	if err != nil {
+		return domain.CustomerPriceOverride{}, err
+	}
+	if !taking {
+		return domain.CustomerPriceOverride{}, errs.InvalidState(fmt.Sprintf(
+			"Price %s was removed from its plan, so it takes no part from now on. Override a price the plan has.", o.PriceID))
+	}
+	at, err := customerStampTx(ctx, tx, o.CustomerID)
+	if err != nil {
+		return domain.CustomerPriceOverride{}, err
+	}
+
+	// One active row per (customer, price): the prior window closes where
+	// the new one opens. The partial unique index turns a concurrent double
+	// write into a clean retryable conflict below.
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE customer_price_overrides
+		SET active = false, deactivated_at = $1, updated_at = now()
+		WHERE customer_id = $2 AND price_id = $3 AND active`, at, o.CustomerID, o.PriceID); err != nil {
+		return domain.CustomerPriceOverride{}, fmt.Errorf("close the prior override window: %w", err)
+	}
+	tiers, err := json.Marshal([]domain.RatingTier(o.Tiers))
+	if err != nil {
+		return domain.CustomerPriceOverride{}, fmt.Errorf("encode tiers: %w", err)
+	}
+	if o.Tiers == nil {
+		tiers = []byte("[]")
+	}
+	created, err := scanOverride(tx.QueryRowContext(ctx, `
+		INSERT INTO customer_price_overrides AS o (id, tenant_id, customer_id, price_id,
+			mode, unit_amount_cents, tiers, package_size, package_amount_cents,
+			reason, active, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true, $11, now())
+		RETURNING `+overrideColumns,
+		postgres.NewID("vlx_cpo"), tenantID, o.CustomerID, o.PriceID,
+		o.Mode, o.UnitAmountCents, tiers, o.PackageSize, o.PackageAmountCents,
+		postgres.NullableString(o.Reason), at))
+	if err != nil {
+		if postgres.IsUniqueViolation(err) {
+			return domain.CustomerPriceOverride{}, errs.AlreadyExists("price_id", "a concurrent write created this override — retry")
+		}
+		return domain.CustomerPriceOverride{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.CustomerPriceOverride{}, err
+	}
+	return created, nil
+}
+
+// DeactivateOverride ends a negotiated price at the customer's stamp: the
+// period in flight keeps it, the next period is at list price. The row is
+// kept. A second delete is a clean 404.
+func (s *PostgresStore) DeactivateOverride(ctx context.Context, tenantID, id string) (domain.CustomerPriceOverride, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return domain.CustomerPriceOverride{}, err
+	}
+	defer postgres.Rollback(tx)
+
+	cur, err := scanOverride(tx.QueryRowContext(ctx, `SELECT `+overrideColumns+` FROM customer_price_overrides o WHERE o.id = $1 AND o.active`, id))
+	if err != nil {
+		return domain.CustomerPriceOverride{}, err
+	}
+	if _, err := overrideLocksTx(ctx, tx, cur.PriceID); err != nil {
+		return domain.CustomerPriceOverride{}, err
+	}
+	at, err := customerStampTx(ctx, tx, cur.CustomerID)
+	if err != nil {
+		return domain.CustomerPriceOverride{}, err
+	}
+	out, err := scanOverride(tx.QueryRowContext(ctx, `
+		UPDATE customer_price_overrides AS o
+		SET active = false, deactivated_at = GREATEST(o.created_at, $1), updated_at = now()
+		WHERE o.id = $2 AND o.active
+		RETURNING `+overrideColumns, at, id))
+	if err != nil {
+		// A removal of the price ended it while this waited for the locks.
+		return domain.CustomerPriceOverride{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.CustomerPriceOverride{}, err
+	}
+	return out, nil
+}
+
+// GetOverrideAt resolves the override of (customer, price) in force at `at`.
+// Windows never overlap (each writer closes the prior window in the same
+// transaction), so at most one row spans any instant. errs.ErrNotFound means
+// list price; any other error is a real failure to every rating path, never
+// absence.
+func (s *PostgresStore) GetOverrideAt(ctx context.Context, tenantID, customerID, priceID string, at time.Time) (domain.CustomerPriceOverride, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return domain.CustomerPriceOverride{}, err
+	}
+	defer postgres.Rollback(tx)
+	return scanOverride(tx.QueryRowContext(ctx, `
+		SELECT `+overrideColumns+`
+		FROM customer_price_overrides o
+		WHERE o.customer_id = $1 AND o.price_id = $2
+		  AND o.created_at <= $3
+		  AND (o.deactivated_at IS NULL OR o.deactivated_at > $3)
+		ORDER BY o.created_at DESC LIMIT 1`, customerID, priceID, at))
+}
+
+// ListOverrides returns active overrides, of one customer and of one price
+// when those are given.
+func (s *PostgresStore) ListOverrides(ctx context.Context, tenantID, customerID, priceID string) ([]domain.CustomerPriceOverride, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return nil, err
 	}
 	defer postgres.Rollback(tx)
 
-	query := `SELECT id, tenant_id, customer_id, rule_key, rating_rule_version_id, mode,
-		unit_amount_cents, tiers, package_size, package_amount_cents,
-		COALESCE(reason,''), active, created_at, updated_at
-		FROM customer_price_overrides WHERE active = true`
-
-	args := []any{}
+	query := `SELECT ` + overrideColumns + ` FROM customer_price_overrides o WHERE o.active`
+	var args []any
 	if customerID != "" {
-		query += fmt.Sprintf(" AND customer_id = $%d", len(args)+1)
 		args = append(args, customerID)
+		query += fmt.Sprintf(" AND o.customer_id = $%d", len(args))
 	}
-	query += " ORDER BY created_at DESC LIMIT 500"
-
+	if priceID != "" {
+		args = append(args, priceID)
+		query += fmt.Sprintf(" AND o.price_id = $%d", len(args))
+	}
+	query += " ORDER BY o.created_at DESC LIMIT 500"
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
-
-	var overrides []domain.CustomerPriceOverride
+	var out []domain.CustomerPriceOverride
 	for rows.Next() {
-		var o domain.CustomerPriceOverride
-		var tiersJSON []byte
-		if err := rows.Scan(&o.ID, &o.TenantID, &o.CustomerID, &o.RuleKey, &o.RatingRuleVersionID,
-			&o.Mode, &o.UnitAmountCents, &tiersJSON, &o.PackageSize, &o.PackageAmountCents,
-			&o.Reason, &o.Active, &o.CreatedAt, &o.UpdatedAt); err != nil {
+		o, err := scanOverride(rows)
+		if err != nil {
 			return nil, err
 		}
-		if len(tiersJSON) > 0 {
-			if err := json.Unmarshal(tiersJSON, &o.Tiers); err != nil {
-				return nil, fmt.Errorf("unmarshal tiers: %w", err)
-			}
-		}
-		overrides = append(overrides, o)
+		out = append(out, o)
 	}
-	return overrides, rows.Err()
+	return out, rows.Err()
 }
 
-// Override handler methods on the pricing service.
-
+// CreateOverrideInput is POST /v1/price-overrides.
 type CreateOverrideInput struct {
 	CustomerID string `json:"customer_id"`
-	// RatingRuleVersionID identifies WHICH rule to override; it is
-	// resolved to the rule's rule_key at this boundary — the key is the
-	// override's identity (ADR-070), so the override survives version
-	// publishes regardless of which version the caller referenced.
-	RatingRuleVersionID string              `json:"rating_rule_version_id"`
-	Mode                domain.PricingMode  `json:"mode"`
-	UnitAmountCents     decimal.Decimal     `json:"unit_amount_cents"`
-	Tiers               []domain.RatingTier `json:"tiers"`
-	PackageSize         int64               `json:"package_size"`
-	PackageAmountCents  decimal.Decimal     `json:"package_amount_cents"`
-	Reason              string              `json:"reason,omitempty"`
+	PriceID    string `json:"price_id"`
+	domain.PriceShape
+	Reason string `json:"reason,omitempty"`
 }
 
+// CreateOverride sets the customer's negotiated price for one plan price,
+// from the customer's next period. A second create for the same (customer,
+// price) replaces the first from then on.
 func (s *Service) CreateOverride(ctx context.Context, tenantID string, input CreateOverrideInput) (domain.CustomerPriceOverride, error) {
 	if strings.TrimSpace(input.CustomerID) == "" {
 		return domain.CustomerPriceOverride{}, errs.Required("customer_id")
 	}
-	if strings.TrimSpace(input.RatingRuleVersionID) == "" {
-		return domain.CustomerPriceOverride{}, errs.Required("rating_rule_version_id")
+	if strings.TrimSpace(input.PriceID) == "" {
+		return domain.CustomerPriceOverride{}, errs.Required("price_id")
 	}
-
 	// The customer must be the caller's. The foreign key on customer_id is on
 	// the id alone and foreign-key checks do not apply row-level security, so
 	// without this read the insert accepts any existing customer id,
@@ -275,65 +304,36 @@ func (s *Service) CreateOverride(ctx context.Context, tenantID string, input Cre
 			return domain.CustomerPriceOverride{}, fmt.Errorf("get customer: %w", err)
 		}
 	}
-
-	// Resolve the referenced rule IN-TENANT (RLS scopes the read): a
-	// typo'd or cross-tenant id is a clean 422 here — previously the
-	// only check was the global FK, which produced a raw constraint
-	// error and doubled as a cross-tenant id-existence oracle. The
-	// resolved rule also supplies the rule_key the override is keyed by.
-	rule, err := s.store.GetRatingRule(ctx, tenantID, input.RatingRuleVersionID)
+	shape, err := checkShape("", input.PriceShape)
 	if err != nil {
-		return domain.CustomerPriceOverride{}, errs.Invalid("rating_rule_version_id",
-			fmt.Sprintf("rating rule %q not found", input.RatingRuleVersionID))
-	}
-
-	// Full shape validation — same contract as rule authoring. The old
-	// qty=1 compute probe never reached tier 2+, so a non-monotonic or
-	// bounded-final tier table was accepted here and then hard-failed
-	// billOnePeriod at cycle close.
-	if input.UnitAmountCents, input.Tiers, input.PackageAmountCents, err = checkRates(
-		input.UnitAmountCents, input.Tiers, input.PackageAmountCents); err != nil {
 		return domain.CustomerPriceOverride{}, err
 	}
-	if err := validatePricingShape(input.Mode, input.UnitAmountCents, input.Tiers, input.PackageSize, input.PackageAmountCents); err != nil {
-		return domain.CustomerPriceOverride{}, err
-	}
-	// Compute probe against the PATCHED rule — validates the override
-	// exactly as the rating paths will apply it.
-	o := domain.CustomerPriceOverride{
-		CustomerID:          input.CustomerID,
-		RuleKey:             rule.RuleKey,
-		RatingRuleVersionID: input.RatingRuleVersionID,
-		Mode:                input.Mode,
-		UnitAmountCents:     input.UnitAmountCents,
-		Tiers:               input.Tiers,
-		PackageSize:         input.PackageSize,
-		PackageAmountCents:  input.PackageAmountCents,
-		Reason:              strings.TrimSpace(input.Reason),
-	}
-	if _, err := domain.ComputeAmountCents(o.ApplyTo(rule), decimal.NewFromInt(1)); err != nil {
+	if _, err := domain.ComputeAmountCents(shape, decimal.NewFromInt(1)); err != nil {
 		return domain.CustomerPriceOverride{}, errs.Invalid("pricing", fmt.Sprintf("invalid pricing configuration: %v", err))
 	}
-
-	return s.store.CreateOverride(ctx, tenantID, o)
+	return s.store.WriteOverride(ctx, tenantID, domain.CustomerPriceOverride{
+		CustomerID: input.CustomerID,
+		PriceID:    input.PriceID,
+		PriceShape: shape,
+		Reason:     strings.TrimSpace(input.Reason),
+	})
 }
 
-// DeleteOverride soft-deactivates a negotiated price (ADR-070): list
-// price resolves from the next period open; the period in flight keeps
-// the price it opened with. The row is kept for audit.
-func (s *Service) DeleteOverride(ctx context.Context, tenantID, id string) error {
+// DeleteOverride ends a negotiated price from the customer's next period.
+func (s *Service) DeleteOverride(ctx context.Context, tenantID, id string) (domain.CustomerPriceOverride, error) {
 	if strings.TrimSpace(id) == "" {
-		return errs.Required("id")
+		return domain.CustomerPriceOverride{}, errs.Required("id")
 	}
 	return s.store.DeactivateOverride(ctx, tenantID, id)
 }
 
-// GetOverrideByKeyAsOf resolves the override in force at asOf — the
-// rating paths' lookup (engine close/cancel, threshold, preview).
-func (s *Service) GetOverrideByKeyAsOf(ctx context.Context, tenantID, customerID, ruleKey string, asOf time.Time) (domain.CustomerPriceOverride, error) {
-	return s.store.GetOverrideByKeyAsOf(ctx, tenantID, customerID, ruleKey, asOf)
+// GetOverrideAt resolves the override in force at `at`: the rating paths'
+// lookup.
+func (s *Service) GetOverrideAt(ctx context.Context, tenantID, customerID, priceID string, at time.Time) (domain.CustomerPriceOverride, error) {
+	return s.store.GetOverrideAt(ctx, tenantID, customerID, priceID, at)
 }
 
-func (s *Service) ListOverrides(ctx context.Context, tenantID, customerID string) ([]domain.CustomerPriceOverride, error) {
-	return s.store.ListOverrides(ctx, tenantID, customerID)
+// ListOverrides lists active overrides.
+func (s *Service) ListOverrides(ctx context.Context, tenantID, customerID, priceID string) ([]domain.CustomerPriceOverride, error) {
+	return s.store.ListOverrides(ctx, tenantID, customerID, priceID)
 }

@@ -1,10 +1,10 @@
 # ADR-044: Canonical AI token-metering model (one `tokens` meter + `token_type` dimension)
 
-**Status:** Accepted; superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md) (decision 4: token prices become plan prices, most specific wins), not built yet
+**Status:** Accepted; superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md) (decision 4: token prices are plan prices, most specific wins), built in PR-4 (#1386)
 **Date:** 2026-06-01
 **Related:** ADR-033 (LiteLLM spend adapter), multi-dimensional metering (`internal/usage` `AggregateByPricingRules`), pricing recipes (`internal/recipe`), `project_positioning_wedge.md`
 
-**Superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23 and not built yet. Until it is built, this ADR describes the code. Decision 4 changes. Token prices become plan prices on the `tokens` meter, matched on `{model, token_type}`, and the most specific matching price wins, with no `priority` and no `meter_pricing_rules` (PR-4). The one `tokens` meter, the `token_type` dimension and the mapper rules stay.
+**Superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23 and built in PR-4 (#1386). Where this ADR differs, ADR-130 describes the code. Decision 4 changes. Token prices are plan prices on the `tokens` meter, matched on `{model, token_type}`, and the most specific matching price wins, with no `priority` and no `meter_pricing_rules` (PR-4). The one `tokens` meter, the `token_type` dimension and the mapper rules stay.
 
 ## Summary
 

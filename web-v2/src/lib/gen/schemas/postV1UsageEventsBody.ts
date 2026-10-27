@@ -23,7 +23,7 @@ export type PostV1UsageEventsBody = {
      * refused with 422 and `param: quantity`.
      */
   quantity: number | string;
-  /** Scalar dimension values used for pricing-rule dispatch (e.g. {"model", "token_type"}). */
+  /** Scalar labels of the event (e.g. {"model", "token_type"}). A price takes an event whose labels include the price's `dimension_match`. */
   dimensions?: PostV1UsageEventsBodyDimensions;
   /**
      * Your unique ID for this event. Pick it once, before the

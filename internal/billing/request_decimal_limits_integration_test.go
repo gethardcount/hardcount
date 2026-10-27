@@ -21,21 +21,22 @@ import (
 
 // Request decimals are validated with one helper and their limits are
 // documented. These cases send rates at the edges of those limits through the
-// public create routes, store them in Postgres, and bill them at the real
+// public routes (a price edit and an override create), store them in
+// Postgres, and bill them at the real
 // period close: each invoice line must come out to the cents worked out by
 // hand below. The same amounts billed before the limits existed, so valid
 // rates bill as they did.
 func TestRequestRates_ValidEdgesBillAsBefore(t *testing.T) {
 	cases := []struct {
 		name string
-		// rule is the body fragment of the rating rule published for the
-		// fixture meter; override, when set, is a price override fragment
-		// for the fixture customer on it.
+		// rule is the body fragment of the fixture's price, edited to it;
+		// override, when set, is a price override fragment for the fixture
+		// customer on it.
 		rule, override string
 		qty            []string
 		wantCents      int64
 		// stored is the rate as Postgres must hold it, read back from the
-		// store (the rule's, or the override's when one is set).
+		// store (the price's, or the override's when one is set).
 		stored func(unit decimal.Decimal, tiers []domain.RatingTier, pkg decimal.Decimal) string
 		want   string
 	}{
@@ -98,37 +99,35 @@ func TestRequestRates_ValidEdgesBillAsBefore(t *testing.T) {
 			lf := newLiveFixture(t, "Request Rates "+tc.name, 0)
 			ctx := lf.ctx
 			h := pricing.NewHandler(lf.pricingSvc)
-			post := func(routes http.Handler, body string) []byte {
+			send := func(routes http.Handler, method, path, body string, want int) []byte {
 				t.Helper()
-				req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body)).
+				req := httptest.NewRequest(method, path, strings.NewReader(body)).
 					WithContext(auth.WithTenantID(ctx, lf.tenantID))
 				rr := httptest.NewRecorder()
 				routes.ServeHTTP(rr, req)
-				if rr.Code != http.StatusCreated {
-					t.Fatalf("POST %s: status %d, want 201; body %s", body, rr.Code, rr.Body.String())
+				if rr.Code != want {
+					t.Fatalf("%s %s %s: status %d, want %d; body %s", method, path, body, rr.Code, want, rr.Body.String())
 				}
 				return rr.Body.Bytes()
 			}
 
-			v1 := lf.seededRule(t, ctx)
-			backdateRuleVersion(t, lf.thresholdFixture, ctx, v1.ID, lf.cycleStart.Add(-3*time.Hour))
-			var v2 domain.RatingRuleVersion
-			if err := json.Unmarshal(post(h.RatingRuleRoutes(), `{"rule_key":"calls_flat","name":"Calls","currency":"USD",`+tc.rule+`}`), &v2); err != nil {
-				t.Fatalf("decode rule: %v", err)
+			// The fixture's price, edited through the API to the case's
+			// rate, in force from before the period opened.
+			send(h.PlanRoutes(), http.MethodPatch, "/"+lf.planID+"/prices/"+lf.priceID, `{`+tc.rule+`}`, http.StatusOK)
+			backdateLatestVersion(t, lf.db, ctx, lf.priceID, lf.cycleStart.Add(-2*time.Hour))
+			listed, err := lf.pricingSvc.ListPlanPrices(ctx, lf.tenantID, lf.planID)
+			if err != nil || len(listed) != 1 {
+				t.Fatalf("read price: %v (%d prices)", err, len(listed))
 			}
-			backdateRuleVersion(t, lf.thresholdFixture, ctx, v2.ID, lf.cycleStart.Add(-2*time.Hour))
-			stored, err := lf.pricingSvc.GetRatingRule(ctx, lf.tenantID, v2.ID)
-			if err != nil {
-				t.Fatalf("read rule: %v", err)
-			}
+			stored := listed[0]
 			got := tc.stored(stored.UnitAmountCents, stored.Tiers, stored.PackageAmountCents)
 			if tc.override != "" {
 				var o domain.CustomerPriceOverride
-				if err := json.Unmarshal(post(h.OverrideRoutes(), `{"customer_id":"`+lf.customerID+`","rating_rule_version_id":"`+v2.ID+`",`+tc.override+`}`), &o); err != nil {
+				if err := json.Unmarshal(send(h.OverrideRoutes(), http.MethodPost, "/", `{"customer_id":"`+lf.customerID+`","price_id":"`+lf.priceID+`",`+tc.override+`}`, http.StatusCreated), &o); err != nil {
 					t.Fatalf("decode override: %v", err)
 				}
 				bypassExec(t, lf, `UPDATE customer_price_overrides SET created_at = $1 WHERE id = $2`, lf.cycleStart.Add(-time.Hour), o.ID)
-				os, err := lf.pricingSvc.ListOverrides(ctx, lf.tenantID, lf.customerID)
+				os, err := lf.pricingSvc.ListOverrides(ctx, lf.tenantID, lf.customerID, "")
 				if err != nil || len(os) != 1 {
 					t.Fatalf("read override: %v (%d rows)", err, len(os))
 				}
@@ -220,8 +219,8 @@ func TestRequestUsageGTE_StoredExactlyInPostgres(t *testing.T) {
 // tax, is past what an int64 product holds. The manual tax provider works
 // those products in 128 bits, so the tax is exact; an invoice whose total
 // does not fit int64 cents fails the close with ErrAmountOverflow and no
-// invoice is written. The rule is posted through the route and billed at the
-// real period close.
+// invoice is written. The price is edited through the route and billed at
+// the real period close.
 func TestRequestRates_LargeAmountsTaxedExactly(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -260,21 +259,15 @@ func TestRequestRates_LargeAmountsTaxedExactly(t *testing.T) {
 				}
 			}
 			h := pricing.NewHandler(lf.pricingSvc)
-			v1 := lf.seededRule(t, ctx)
-			backdateRuleVersion(t, lf.thresholdFixture, ctx, v1.ID, lf.cycleStart.Add(-3*time.Hour))
-			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(
-				`{"rule_key":"calls_flat","name":"Calls","currency":"USD","mode":"per_unit","unit_amount_cents":"`+tc.rate+`"}`)).
+			req := httptest.NewRequest(http.MethodPatch, "/"+lf.planID+"/prices/"+lf.priceID, strings.NewReader(
+				`{"mode":"per_unit","unit_amount_cents":"`+tc.rate+`"}`)).
 				WithContext(auth.WithTenantID(ctx, lf.tenantID))
 			rr := httptest.NewRecorder()
-			h.RatingRuleRoutes().ServeHTTP(rr, req)
-			if rr.Code != http.StatusCreated {
-				t.Fatalf("POST rule: status %d; body %s", rr.Code, rr.Body.String())
+			h.PlanRoutes().ServeHTTP(rr, req)
+			if rr.Code != http.StatusOK {
+				t.Fatalf("PATCH price: status %d; body %s", rr.Code, rr.Body.String())
 			}
-			var v2 domain.RatingRuleVersion
-			if err := json.Unmarshal(rr.Body.Bytes(), &v2); err != nil {
-				t.Fatalf("decode rule: %v", err)
-			}
-			backdateRuleVersion(t, lf.thresholdFixture, ctx, v2.ID, lf.cycleStart.Add(-2*time.Hour))
+			backdateLatestVersion(t, lf.db, ctx, lf.priceID, lf.cycleStart.Add(-2*time.Hour))
 
 			ts := lf.cycleStart.Add(time.Minute)
 			if _, err := lf.usageSvc.Ingest(ctx, lf.tenantID, usage.IngestInput{

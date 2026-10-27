@@ -32,30 +32,23 @@ func TestPreview_ScheduledPlanChangeMatchesCycleClose(t *testing.T) {
 
 	mkPlan := func(t *testing.T, f *parityFixture, code string, cents int64, interval domain.BillingInterval, timing domain.BillTiming, meters ...string) domain.Plan {
 		t.Helper()
-		p, err := f.pricing.CreatePlan(f.ctx, f.tenantID, domain.Plan{
+		var prices []priceOn
+		for _, m := range meters {
+			prices = append(prices, catchAll(m, "10"))
+		}
+		p, _ := createPlanWithPrices(t, f.db, f.ctx, f.tenantID, domain.Plan{
 			Code: code, Name: code, Currency: "USD",
 			BillingInterval: interval, BaseBillTiming: timing,
-			BaseAmountCents: cents, Status: domain.PlanActive, MeterIDs: meters,
-		})
-		if err != nil {
-			t.Fatalf("create plan %s: %v", code, err)
-		}
+			BaseAmountCents: cents, Status: domain.PlanActive,
+		}, prices...)
 		return p
 	}
 	// callsMeter is a $0.10-per-call meter with 5 calls recorded on day 10
 	// of the parity period.
 	callsMeter := func(t *testing.T, f *parityFixture) domain.Meter {
 		t.Helper()
-		rule, err := f.pricing.CreateRatingRule(f.ctx, f.tenantID, domain.RatingRuleVersion{
-			RuleKey: "a5_calls", Name: "calls", Version: 1,
-			LifecycleState: domain.RatingRuleActive, Mode: domain.PricingPerUnit,
-			Currency: "USD", UnitAmountCents: decimal.NewFromInt(10),
-		})
-		if err != nil {
-			t.Fatalf("create rule: %v", err)
-		}
 		meter, err := f.pricing.CreateMeter(f.ctx, f.tenantID, domain.Meter{
-			EventName: "a5_calls", Name: "Calls", Unit: "calls", Aggregation: "sum", RatingRuleVersionID: rule.ID,
+			EventName: "a5_calls", Name: "Calls", Unit: "calls", Aggregation: "sum",
 		})
 		if err != nil {
 			t.Fatalf("create meter: %v", err)
@@ -197,9 +190,9 @@ func TestThresholdScan_IgnoresPlanChangeScheduledForPeriodEnd(t *testing.T) {
 	f := newThresholdFixture(t, "Threshold Pending Plan")
 	ctx := postgres.WithLivemode(context.Background(), false)
 
-	next, err := f.pricingSvc.CreatePlan(ctx, f.tenantID, pricing.CreatePlanInput{
+	next, _, err := f.pricingSvc.CreatePlan(ctx, f.tenantID, pricing.CreatePlanInput{
 		Code: "pln_thresh_next", Name: "Next Plan", Currency: "USD",
-		BillingInterval: domain.BillingMonthly, BaseAmountCents: 5000,
+		BillingInterval: domain.BillingMonthly, BaseAmountCents: 5000, BaseBillTiming: domain.BillInArrears,
 	})
 	if err != nil {
 		t.Fatalf("create next plan: %v", err)

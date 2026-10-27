@@ -13,7 +13,7 @@ export interface MarginReport {
   customer_id: string;
   from: string;
   to: string;
-  /** Total rated usage revenue in the window. */
+  /** Total rated usage revenue in the window, an estimate at each subscription's current prices. Only active and trialing subscriptions are counted. */
   revenue_cents: number;
   /** Currency of revenue_cents (the customer's price rules). Omitted when the window's revenue spans more than one currency or the customer has no priced meter. */
   revenue_currency?: string;

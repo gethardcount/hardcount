@@ -25,6 +25,7 @@ export function createPlan(currency = 'USD'): Promise<Plan> {
     currency,
     billing_interval: 'monthly',
     base_amount_cents: 4900,
+    base_bill_timing: 'in_arrears',
   })
 }
 

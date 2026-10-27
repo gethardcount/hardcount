@@ -8,6 +8,8 @@ import {
   type Customer, type Invoice, type Plan, type Seed, type Subscription,
 } from './fixtures/seed'
 
+const USAGE_ESTIMATE = "Estimate at each subscription's current prices. Canceled subscriptions are not counted. Past invoices may differ."
+
 // The few things an operator does most. Each test seeds what it needs through
 // the API, does one job through the screen, and checks that the screen shows
 // what the API holds. The arithmetic behind the numbers is tested in Go.
@@ -716,6 +718,9 @@ test("Margin shows no margin without a provider cost, and each model's margin wi
   await expect(card.getByRole('link', { name: 'Set up provider costs' })).toHaveAttribute('href', '/provider-costs')
   await expect(card.getByText('Provider cost', { exact: true }).locator('..')).toContainText('—')
   await expect(card.getByText('Margin', { exact: true }).locator('..').last()).not.toContainText('%')
+  // The report prices the window at current prices, so the card says it is
+  // an estimate (ADR-130 §10).
+  await expect(card.getByText(USAGE_ESTIMATE)).toBeVisible()
 
   // With a provider cost for the model, its row shows its own margin: the
   // number the server worked out, in the same form as the headline. The rate
@@ -766,6 +771,55 @@ test("Margin shows no margin without a provider cost, and each model's margin wi
   const row = pricedCard.getByRole('row').filter({ hasText: 'claude-haiku-4.5' })
   await expect(row.getByRole('cell').last()).toHaveText(`${(haiku!.margin_bps! / 100).toFixed(1)}%`)
   await expect(pricedCard.getByRole('columnheader', { name: 'Margin' })).toBeVisible()
+})
+
+// The Activity card's Cycle view is the billing period, priced as its
+// invoice will be. A 7, 30 or 90-day view is priced at each subscription's
+// current prices, so it says it is an estimate. That is not a problem: it
+// used to show "Usage may be incomplete" for every such view.
+test("the customer's Activity card says a chosen window is an estimate, not a problem", async ({ page }) => {
+  const { clock, customer } = await subscribedCustomer()
+  await page.goto(`/customers/${customer.id}`)
+  const activity = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Activity', exact: true }) })
+  await expect(activity.getByText('Billed usage', { exact: true })).toBeVisible()
+  await expect(activity.getByText(USAGE_ESTIMATE)).toHaveCount(0)
+
+  await activity.getByRole('tab', { name: '30d' }).click()
+  await expect(activity.getByText(USAGE_ESTIMATE)).toBeVisible()
+  await expect(activity.getByText('Usage may be incomplete')).toHaveCount(0)
+
+  // The API says the same: source "explicit" and no warning.
+  const to = new Date(clock.frozen_time)
+  const from = new Date(to.getTime() - 30 * 86_400_000)
+  const iso = (d: Date) => d.toISOString().replace(/\.\d+Z$/, 'Z')
+  const usage = await api<{ period: { source: string }; warnings: string[] }>(
+    'GET', `/customers/${customer.id}/usage?from=${iso(from)}&to=${iso(to)}`)
+  expect([usage.period.source, usage.warnings]).toEqual(['explicit', []])
+})
+
+// The Daily usage chart's quantity axis is as wide as its longest label. A
+// fixed 40px axis cut a tick of 0.00008 to "00008", which reads as 8.
+test('the Daily usage chart shows each axis label whole: 0.00008 GB-hours reads 0.00008', async ({ page }) => {
+  const id = uniq()
+  const meter = await api<{ id: string; event_name: string }>('POST', '/meters', {
+    event_name: `e2e_gb_hours_${id}`, name: `E2E GB-hours ${id}`, unit: 'GB-hour', aggregation: 'sum',
+  })
+  const plan = await api<Plan>('POST', '/plans', {
+    code: `e2e-gb-hours-${id}`, name: `E2E GB-hours ${id}`, currency: 'USD', billing_interval: 'monthly', base_amount_cents: 0,
+    prices: [{ meter_id: meter.id, mode: 'per_unit', unit_amount_cents: '1' }],
+  })
+  const customer = await createCustomer()
+  await createSubscription(customer.id, plan.id)
+  await api('POST', '/usage-events', { external_customer_id: customer.external_id, event_name: meter.event_name, quantity: '0.00008', idempotency_key: `e2e_${uniq()}` })
+
+  await page.goto(`/customers/${customer.id}`)
+  const chart = page.getByRole('main').locator('[data-slot="card"]').filter({ has: page.getByText('Daily usage', { exact: true }) })
+  const ticks = chart.locator('.recharts-yAxis-tick-labels text')
+  await expect(ticks.filter({ hasText: /^0\.00008$/ })).toHaveCount(1)
+  const surface = chart.locator('svg.recharts-surface').first()
+  for (const tick of await ticks.all()) {
+    expect(await boxInside(tick, surface), `axis label "${await tick.textContent()}" fits the chart`).toBe(true)
+  }
 })
 
 test('grant credits from the customer page', async ({ page }) => {
@@ -916,6 +970,8 @@ test('held LiteLLM usage is shown on the Usage page and released once', async ({
   await expect(notice.getByText(`2 usage rows held for customer '${ext}'`)).toBeVisible()
   await notice.getByRole('button', { name: `Release held usage for ${ext}` }).click()
   await expect(page.getByText('Released 2 usage rows')).toBeVisible()
+  // The customer has no subscription, so no subscription bills the rows.
+  await expect(page.getByText('2 fall in time no subscription bills (before it starts, in a free trial, or after it ends) or in time already invoiced. Bill them with a one-off invoice if needed.')).toBeVisible()
   await expect(page.getByText(`held for customer '${ext}'`)).toHaveCount(0)
 
   const events = await api<{ data: unknown[]; total: number }>('GET', `/usage-events?customer_id=${customer.id}`)
@@ -931,4 +987,57 @@ test('held LiteLLM usage is shown on the Usage page and released once', async ({
     endTime: Math.floor(Date.now() / 1000) - 60,
   })
   expect(resend).toMatchObject({ deduplicated: 2, accepted: 0 })
+})
+
+// D08 PR-6: held rows released into a subscription whose plan has no price
+// that takes them are never called invoiced. The release toast says no
+// price matches them, and the API answer counts them as no_price.
+test('held usage released into a plan with no matching price says so', async ({ page }) => {
+  const meters = await api<{ data: { id: string; event_name: string }[] }>('GET', '/meters')
+  let tokens = meters.data.find(m => m.event_name === 'tokens')
+  if (!tokens) {
+    try {
+      tokens = await api<{ id: string; event_name: string }>('POST', '/meters', { event_name: 'tokens', name: 'Tokens', unit: 'token', aggregation: 'sum' })
+    } catch (e) {
+      const again = await api<{ data: { id: string; event_name: string }[] }>('GET', '/meters')
+      tokens = again.data.find(m => m.event_name === 'tokens')
+      if (!tokens) throw e
+    }
+  }
+
+  const id = uniq()
+  const ext = `noprice_${id}`
+  const spend = await api<{ held: number }>('POST', '/integrations/litellm/spend', {
+    id: `e2e-noprice-${id}`,
+    call_type: 'completion',
+    model: 'gpt-4o',
+    custom_llm_provider: 'openai',
+    user: ext,
+    usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 },
+    endTime: Math.floor(Date.now() / 1000) - 60,
+  })
+  expect(spend).toMatchObject({ held: 2 })
+
+  // A plan that prices tokens for another model only.
+  const plan = await api<{ id: string }>('POST', '/plans', {
+    code: `noprice-${id}`, name: `No price ${id}`, currency: 'USD', billing_interval: 'monthly',
+    base_amount_cents: 0, base_bill_timing: 'in_arrears',
+    prices: [{ meter_id: tokens.id, dimension_match: { model: 'claude-other' }, mode: 'per_unit', unit_amount_cents: '1' }],
+  })
+  const customer = await api<Customer>('POST', '/customers', {
+    external_id: ext,
+    display_name: `E2E No price ${id}`,
+    email: `noprice-${id}@example.com`,
+  })
+  await api('POST', '/subscriptions', {
+    code: `noprice-${id}`, display_name: `No price ${id}`, customer_id: customer.id,
+    items: [{ plan_id: plan.id, quantity: 1 }],
+  })
+
+  await page.goto('/usage')
+  const notice = page.getByRole('status').filter({ hasText: 'Usage held, not billed' })
+  await notice.getByRole('button', { name: `Release held usage for ${ext}` }).click()
+  await expect(page.getByText('Released 2 usage rows')).toBeVisible()
+  await expect(page.getByText("2 fall in a billing period not invoiced yet, but no price on the subscription's plan matches them.")).toBeVisible()
+  await expect(page.getByText('will be invoiced')).toHaveCount(0)
 })

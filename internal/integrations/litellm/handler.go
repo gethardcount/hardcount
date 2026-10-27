@@ -85,10 +85,14 @@ func (h *Handler) Routes() chi.Router {
 // the existing /v1/usage-events/batch response so partners using
 // both surfaces see one shape:
 //
-//	{ "accepted": N, "deduplicated": D, "held": H, "skipped": M, "cache_hits": C, "after_close": A, "errors": [{ "id": "...", "error": "..." }] }
+//	{ "accepted": N, "deduplicated": D, "held": H, "skipped": M, "cache_hits": C,
+//	  "after_close": A, "no_price": P, "not_on_plan": O, "outside_subscription": S,
+//	  "errors": [{ "id": "...", "error": "..." }] }
 //
-// after_close counts accepted rows whose period was already invoiced: they
-// are stored and billed on no invoice (ADR-120). A replay never counts.
+// after_close, no_price, not_on_plan and outside_subscription count accepted
+// rows by the billing_status a single ingest would
+// answer them with (usage open_period.go). They are stored all the same. A
+// replay never counts.
 //
 // held counts rows whose customer or meter does not exist yet. They are
 // kept in usage_held_events, not billed, and shown to the operator, who
@@ -108,13 +112,13 @@ func (h *Handler) Routes() chi.Router {
 // cache_hits counts the cache hits among them, so an operator can
 // reconcile against LiteLLM's own spend, which counts a hit as $0.
 type SpendResponse struct {
-	Accepted     int             `json:"accepted"`
-	Deduplicated int             `json:"deduplicated"`
-	Held         int             `json:"held"`
-	Skipped      int             `json:"skipped"`
-	CacheHits    int             `json:"cache_hits"`
-	AfterClose   int             `json:"after_close"`
-	Errors       []SpendRowError `json:"errors,omitempty"`
+	Accepted     int `json:"accepted"`
+	Deduplicated int `json:"deduplicated"`
+	Held         int `json:"held"`
+	Skipped      int `json:"skipped"`
+	CacheHits    int `json:"cache_hits"`
+	usage.UnbilledCounts
+	Errors []SpendRowError `json:"errors,omitempty"`
 }
 
 // SpendRowError carries the per-payload reason a particular row was
@@ -200,7 +204,7 @@ func (h *Handler) spend(w http.ResponseWriter, r *http.Request) {
 				resp.Held += res.Inserted
 			} else {
 				resp.Accepted += res.Inserted
-				resp.AfterClose += res.AfterClose
+				resp.UnbilledCounts = resp.Plus(res.Unbilled)
 			}
 			// Rows the store already had, or already held. Still a
 			// success — LiteLLM retrying a delivered batch is the happy

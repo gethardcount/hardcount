@@ -357,13 +357,18 @@ func goldenActionCases(t *testing.T) []actionCase {
 			}
 		case domain.AuditActionSubscriptionNetNegativeUsage:
 			add(action+"/named", action, map[string]any{"meters": []any{
-				map[string]any{"meter_id": "mtr_1", "meter_key": "api_calls", "meter_name": "API calls", "quantity": "-120"},
+				map[string]any{"meter_id": "mtr_1", "event_name": "api_calls", "meter_name": "API calls", "quantity": "-120"},
 			}})
 			add(action+"/two meters", action, map[string]any{"meters": []any{
-				map[string]any{"meter_id": "mtr_1", "meter_key": "api_calls", "meter_name": "API calls", "quantity": "-120"},
-				map[string]any{"meter_id": "mtr_2", "meter_key": "tokens", "meter_name": "Tokens", "quantity": "-0.5"},
+				map[string]any{"meter_id": "mtr_1", "event_name": "api_calls", "meter_name": "API calls", "quantity": "-120"},
+				map[string]any{"meter_id": "mtr_2", "event_name": "tokens", "meter_name": "Tokens", "quantity": "-0.5"},
 			}})
-			add(action+"/legacy key only", action, map[string]any{"meters": []any{
+			add(action+"/event name only", action, map[string]any{"meters": []any{
+				map[string]any{"meter_id": "mtr_1", "event_name": "api_calls", "quantity": "-120"},
+			}})
+			// Written by a build of main before 2026-10-27, which named the
+			// event name meter_key.
+			add(action+"/meter_key only", action, map[string]any{"meters": []any{
 				map[string]any{"meter_id": "mtr_1", "meter_key": "api_calls", "quantity": "-120"},
 			}})
 		}

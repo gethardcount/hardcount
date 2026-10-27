@@ -65,7 +65,7 @@ func TestSpecEnumsMatchColumnChecks(t *testing.T) {
 		{"invoice_dunning_runs_resolution_check", "DunningRun", "resolution"},
 		{"invoice_dunning_events_event_type_check", "DunningRunEvent", "event_type"},
 		{"invoice_dunning_events_state_check", "DunningRunEvent", "state"},
-		{"rating_rule_versions_mode_check", "RatingRule", "mode"},
+		{"plan_price_versions_mode_check", "PlanPrice", "mode"},
 		{"customer_price_overrides_mode_check", "CustomerPriceOverride", "mode"},
 	} {
 		var def string

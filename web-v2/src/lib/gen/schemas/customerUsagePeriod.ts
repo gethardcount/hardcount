@@ -9,8 +9,26 @@
  */
 import type { CustomerUsagePeriodSource } from './customerUsagePeriodSource';
 
+/**
+ * The window the response covers. With no `from` and `to`
+ * (`current_billing_cycle`), each subscription is rated over its
+ * own current billing period, and the period runs from the
+ * earliest start to the latest end of those periods. A meter's
+ * totals and daily `buckets` cover its own subscription's whole
+ * period, including usage a threshold invoice already billed.
+ */
 export type CustomerUsagePeriod = {
   from: string;
   to: string;
+  /**
+     * `current_billing_cycle`: no `from` and `to` were sent, and
+     * the amounts are what the period's invoices bill.
+     * `explicit`: the window you sent. Its amounts are an
+     * estimate, so a past window can differ from its invoices.
+     * Only active and trialing subscriptions are counted: the
+     * usage of a canceled subscription is left out. Each
+     * subscription's usage in the window is priced at the
+     * prices of its current billing period.
+     */
   source: CustomerUsagePeriodSource;
 };

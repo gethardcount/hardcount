@@ -5,12 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"testing"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
-	"github.com/shopspring/decimal"
 )
 
 // memStore is a non-tx in-memory fake of recipe.Store used by unit tests
@@ -68,7 +66,7 @@ func loadRegistry(t *testing.T) *Registry {
 }
 
 func TestService_GetRecipe(t *testing.T) {
-	svc := NewService(nil, newMemStore(), loadRegistry(t), nil, nil, nil)
+	svc := NewService(nil, newMemStore(), loadRegistry(t), nil)
 
 	r, err := svc.GetRecipe("anthropic_style")
 	if err != nil {
@@ -87,7 +85,7 @@ func TestService_GetRecipe(t *testing.T) {
 }
 
 func TestService_Preview_RendersTemplates(t *testing.T) {
-	svc := NewService(nil, newMemStore(), loadRegistry(t), nil, nil, nil)
+	svc := NewService(nil, newMemStore(), loadRegistry(t), nil)
 
 	rendered, err := svc.Preview(context.Background(), "anthropic_style", map[string]any{
 		"currency":  "EUR",
@@ -109,8 +107,9 @@ func TestService_Preview_RendersTemplates(t *testing.T) {
 	if got := rendered.Objects.Plans[0].Currency; got != "EUR" {
 		t.Errorf("plan.currency: got %q, want EUR", got)
 	}
-	if got := rendered.Objects.RatingRules[0].Currency; got != "EUR" {
-		t.Errorf("rating_rule.currency: got %q, want EUR", got)
+	// A price carries no currency: it takes its plan's (ADR-130 §11).
+	if len(rendered.Objects.Plans[0].Prices) != 125 {
+		t.Errorf("plan prices: got %d, want the recipe's 125", len(rendered.Objects.Plans[0].Prices))
 	}
 	if rendered.Warnings == nil {
 		t.Error("Warnings must be non-nil so JSON serializes as [] not null")
@@ -118,14 +117,14 @@ func TestService_Preview_RendersTemplates(t *testing.T) {
 }
 
 func TestService_Preview_UnknownRecipe(t *testing.T) {
-	svc := NewService(nil, newMemStore(), loadRegistry(t), nil, nil, nil)
+	svc := NewService(nil, newMemStore(), loadRegistry(t), nil)
 	if _, err := svc.Preview(context.Background(), "no_such_recipe", nil); !errors.Is(err, errs.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
 }
 
 func TestService_Preview_RejectsBadOverride(t *testing.T) {
-	svc := NewService(nil, newMemStore(), loadRegistry(t), nil, nil, nil)
+	svc := NewService(nil, newMemStore(), loadRegistry(t), nil)
 
 	// "currency" enum is [USD, EUR, GBP]; "JPY" must fail.
 	_, err := svc.Preview(context.Background(), "anthropic_style", map[string]any{
@@ -145,7 +144,7 @@ func TestService_ListRecipes_TagsInstalled(t *testing.T) {
 		ID: "vlx_rci_existing", TenantID: "t1",
 		RecipeKey: "anthropic_style", RecipeVersion: "1.0.0",
 	}
-	svc := NewService(nil, store, loadRegistry(t), nil, nil, nil)
+	svc := NewService(nil, store, loadRegistry(t), nil)
 
 	items, err := svc.ListRecipes(context.Background(), "t1")
 	if err != nil {
@@ -173,7 +172,7 @@ func TestService_ListRecipes_TagsInstalled(t *testing.T) {
 }
 
 func TestService_Instantiate_UnknownRecipe(t *testing.T) {
-	svc := NewService(nil, newMemStore(), loadRegistry(t), nil, nil, nil)
+	svc := NewService(nil, newMemStore(), loadRegistry(t), nil)
 
 	_, err := svc.Instantiate(context.Background(), "t1", "no_such_recipe", nil, InstantiateOptions{})
 	if !errors.Is(err, errs.ErrNotFound) {
@@ -186,7 +185,7 @@ func TestService_Instantiate_UnknownRecipe(t *testing.T) {
 // to PascalCase) breaks the dashboard at runtime, so we assert the
 // snake_case field names + creates summary + preview wrapper directly.
 func TestWireShape_SnakeCase(t *testing.T) {
-	svc := NewService(nil, newMemStore(), loadRegistry(t), nil, nil, nil)
+	svc := NewService(nil, newMemStore(), loadRegistry(t), nil)
 
 	t.Run("ListRecipes", func(t *testing.T) {
 		items, err := svc.ListRecipes(context.Background(), "t1")
@@ -201,12 +200,12 @@ func TestWireShape_SnakeCase(t *testing.T) {
 		if err := json.Unmarshal(blob, &raw); err != nil {
 			t.Fatalf("unmarshal: %v", err)
 		}
-		for _, k := range []string{"key", "version", "name", "summary", "overridable", "meters", "rating_rules", "pricing_rules", "plans", "creates"} {
+		for _, k := range []string{"key", "version", "name", "summary", "overridable", "meters", "plans", "creates"} {
 			if _, ok := raw[k]; !ok {
 				t.Errorf("list response missing %q key (raw=%v)", k, raw)
 			}
 		}
-		for _, k := range []string{"Key", "Version", "Name", "Summary", "RatingRules", "PricingRules", "DunningPolicy"} {
+		for _, k := range []string{"Key", "Version", "Name", "Summary", "Meters", "Plans"} {
 			if _, ok := raw[k]; ok {
 				t.Errorf("list response should not have PascalCase key %q", k)
 			}
@@ -215,7 +214,10 @@ func TestWireShape_SnakeCase(t *testing.T) {
 		if !ok {
 			t.Fatalf("creates not an object: %T", raw["creates"])
 		}
-		for _, k := range []string{"meters", "rating_rules", "pricing_rules", "plans", "dunning_policies", "webhook_endpoints"} {
+		if len(creates) != 3 {
+			t.Errorf("creates = %v, want meters, plans and prices", creates)
+		}
+		for _, k := range []string{"meters", "plans", "prices"} {
 			if _, ok := creates[k]; !ok {
 				t.Errorf("creates missing %q", k)
 			}
@@ -264,7 +266,7 @@ func TestWireShape_SnakeCase(t *testing.T) {
 		if !ok {
 			t.Fatalf("objects not an object: %T", raw["objects"])
 		}
-		for _, k := range []string{"meters", "rating_rules", "pricing_rules", "plans", "dunning_policies", "webhook_endpoints"} {
+		for _, k := range []string{"meters", "plans"} {
 			if _, ok := objects[k]; !ok {
 				t.Errorf("preview.objects missing %q", k)
 			}
@@ -281,60 +283,4 @@ func mapKeys(m map[string]any) []string {
 		out = append(out, k)
 	}
 	return out
-}
-
-func TestRatingRuleFromRecipe(t *testing.T) {
-	got := ratingRuleFromRecipe(domain.RecipeRatingRule{
-		Key: "tier1", Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(100),
-	})
-	if got.RuleKey != "tier1" {
-		t.Errorf("RuleKey: got %q", got.RuleKey)
-	}
-	if got.Name != "tier1" {
-		t.Errorf("Name should default to Key: got %q", got.Name)
-	}
-	if got.Version != 0 {
-		t.Errorf("Version: got %d, want 0 (allocated in SQL by the store — MAX+1 per key, so reinstall lands the next version instead of 409ing; ADR-070)", got.Version)
-	}
-	if got.LifecycleState != domain.RatingRuleActive {
-		t.Errorf("LifecycleState: got %q, want active", got.LifecycleState)
-	}
-}
-
-func TestDunningFromRecipe(t *testing.T) {
-	got := dunningFromRecipe(domain.RecipeDunningPolicy{
-		Name: "Test", RetryDays: []int{3, 1, 3, 7},
-		FinalSubscriptionAction: "cancel", FinalInvoiceAction: "mark_uncollectible",
-	})
-	if !got.Enabled {
-		t.Error("Enabled should be true")
-	}
-	if fmt.Sprint(got.RetryDays) != "[3 1 3 7]" {
-		t.Errorf("RetryDays: got %v, want [3 1 3 7]", got.RetryDays)
-	}
-	// Discriminating fixture: cancel+write-off is the combination the old
-	// single enum could NOT express (ADR-112), so a translation that dropped
-	// either half would fail here. A pause/none pair would not have.
-	if got.FinalSubscriptionAction != domain.SubActionCancel {
-		t.Errorf("FinalSubscriptionAction: got %q, want cancel", got.FinalSubscriptionAction)
-	}
-	if got.FinalInvoiceAction != domain.InvActionMarkUncollectible {
-		t.Errorf("FinalInvoiceAction: got %q, want mark_uncollectible", got.FinalInvoiceAction)
-	}
-}
-
-// TestDunningFromRecipe_NoSilentDefault replaces a test that asserted the
-// opposite. dunningFromRecipe used to default an absent final action to
-// manual_review; ADR-112 moved that decision to parse-time validation, which
-// REFUSES a recipe missing either half.
-//
-// Defaulting here would be the silent fallback the recipe parser now exists
-// to prevent: a recipe author who omits the key gets an error naming both
-// fields, not a terminal action nobody chose.
-func TestDunningFromRecipe_NoSilentDefault(t *testing.T) {
-	got := dunningFromRecipe(domain.RecipeDunningPolicy{Name: "T", RetryDays: []int{1}})
-	if got.FinalSubscriptionAction != "" || got.FinalInvoiceAction != "" {
-		t.Errorf("got (%q, %q) — dunningFromRecipe must not invent a terminal action; parse rejects the recipe instead",
-			got.FinalSubscriptionAction, got.FinalInvoiceAction)
-	}
 }

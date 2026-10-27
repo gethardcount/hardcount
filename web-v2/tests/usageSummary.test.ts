@@ -47,11 +47,6 @@ test('fillDays with no end date runs to today, zero on quiet recent days', () =>
   assert.deepEqual(fillDays(daily, '2026-03-01', '2026-03-02', '2026-03-09'), [0, 4])
 })
 
-test('a mixed meter is named as a raw sum that billing may count differently', () => {
-  assert.equal(meterModeBadge('mixed'), 'Mixed')
-  assert.match(meterValueCaption('mixed', 3), /^Sum of reported values\. .*may differ\.$/)
-})
-
 test('fillDays keeps the newest days when the window is too long', () => {
   const daily = [{ date: '2026-03-10', value: '9' }]
   const out = fillDays(daily, '2020-01-01', '2026-03-10', undefined, 5)

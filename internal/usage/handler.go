@@ -34,13 +34,11 @@ type MeterResolver interface {
 	GetMeterByEventName(ctx context.Context, tenantID, eventName string) (domain.Meter, error)
 }
 
-// MeterLister lists the tenant's meters and their pricing rules. The
-// aggregate endpoint reads each meter's aggregation from them (see
-// BillingModes) so a Maximum meter reports its peak, not a sum of
-// readings. Wired in router.go (pricing.Service).
+// MeterLister lists the tenant's meters. The aggregate endpoint reads each
+// meter's aggregation from them (see BillingModes) so a Maximum meter reports
+// its peak, not a sum of readings. Wired in router.go (pricing.Service).
 type MeterLister interface {
 	ListMeters(ctx context.Context, tenantID string) ([]domain.Meter, error)
-	ListMeterPricingRules(ctx context.Context, tenantID string) ([]domain.MeterPricingRule, error)
 }
 
 type Handler struct {
@@ -554,13 +552,7 @@ func (h *Handler) aggregate(w http.ResponseWriter, r *http.Request) {
 			slog.ErrorContext(r.Context(), "aggregate usage events: list meters", "error", err)
 			return
 		}
-		rules, err := h.meterModes.ListMeterPricingRules(r.Context(), filter.TenantID)
-		if err != nil {
-			respond.InternalError(w, r)
-			slog.ErrorContext(r.Context(), "aggregate usage events: list pricing rules", "error", err)
-			return
-		}
-		modes = BillingModes(meters, rules)
+		modes = BillingModes(meters)
 	}
 
 	agg, err := h.svc.Aggregate(r.Context(), filter, modes)
@@ -661,14 +653,24 @@ func (h *Handler) batchIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// after_close counts written rows whose period was already invoiced:
-	// stored, billed on no invoice (ADR-120).
-	respond.JSON(w, r, http.StatusCreated, map[string]any{
-		"ingested":     res.Inserted,
-		"deduplicated": res.Deduplicated,
-		"after_close":  res.AfterClose,
-		"total":        len(events),
+	respond.JSON(w, r, http.StatusCreated, batchResponse{
+		Ingested:       res.Inserted,
+		Deduplicated:   res.Deduplicated,
+		Total:          len(events),
+		UnbilledCounts: res.Unbilled,
+		Results:        res.Results,
 	})
+}
+
+// batchResponse is the batch 201. The counts by billing_status count written
+// rows answered with each status (open_period.go); results holds each event's
+// result at its index in the request.
+type batchResponse struct {
+	Ingested     int `json:"ingested"`
+	Deduplicated int `json:"deduplicated"`
+	Total        int `json:"total"`
+	UnbilledCounts
+	Results []BatchEventResult `json:"results"`
 }
 
 // respondBatchRejected writes the batch 422 the spec documents: every

@@ -1298,6 +1298,162 @@ func (e PlanStatus) Valid() bool {
 	}
 }
 
+// Defines values for PlanDetailBaseBillTiming.
+const (
+	PlanDetailBaseBillTimingInAdvance PlanDetailBaseBillTiming = "in_advance"
+	PlanDetailBaseBillTimingInArrears PlanDetailBaseBillTiming = "in_arrears"
+)
+
+// Valid indicates whether the value is a known member of the PlanDetailBaseBillTiming enum.
+func (e PlanDetailBaseBillTiming) Valid() bool {
+	switch e {
+	case PlanDetailBaseBillTimingInAdvance:
+		return true
+	case PlanDetailBaseBillTimingInArrears:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PlanDetailBillingInterval.
+const (
+	PlanDetailBillingIntervalMonthly PlanDetailBillingInterval = "monthly"
+	PlanDetailBillingIntervalYearly  PlanDetailBillingInterval = "yearly"
+)
+
+// Valid indicates whether the value is a known member of the PlanDetailBillingInterval enum.
+func (e PlanDetailBillingInterval) Valid() bool {
+	switch e {
+	case PlanDetailBillingIntervalMonthly:
+		return true
+	case PlanDetailBillingIntervalYearly:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PlanDetailStatus.
+const (
+	PlanDetailStatusActive   PlanDetailStatus = "active"
+	PlanDetailStatusArchived PlanDetailStatus = "archived"
+)
+
+// Valid indicates whether the value is a known member of the PlanDetailStatus enum.
+func (e PlanDetailStatus) Valid() bool {
+	switch e {
+	case PlanDetailStatusActive:
+		return true
+	case PlanDetailStatusArchived:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PlanPriceMode.
+const (
+	PlanPriceModeGraduated PlanPriceMode = "graduated"
+	PlanPriceModePackage   PlanPriceMode = "package"
+	PlanPriceModePerUnit   PlanPriceMode = "per_unit"
+)
+
+// Valid indicates whether the value is a known member of the PlanPriceMode enum.
+func (e PlanPriceMode) Valid() bool {
+	switch e {
+	case PlanPriceModeGraduated:
+		return true
+	case PlanPriceModePackage:
+		return true
+	case PlanPriceModePerUnit:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PriceInputMode.
+const (
+	PriceInputModeGraduated PriceInputMode = "graduated"
+	PriceInputModePackage   PriceInputMode = "package"
+	PriceInputModePerUnit   PriceInputMode = "per_unit"
+)
+
+// Valid indicates whether the value is a known member of the PriceInputMode enum.
+func (e PriceInputMode) Valid() bool {
+	switch e {
+	case PriceInputModeGraduated:
+		return true
+	case PriceInputModePackage:
+		return true
+	case PriceInputModePerUnit:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PriceShapeMode.
+const (
+	PriceShapeModeGraduated PriceShapeMode = "graduated"
+	PriceShapeModePackage   PriceShapeMode = "package"
+	PriceShapeModePerUnit   PriceShapeMode = "per_unit"
+)
+
+// Valid indicates whether the value is a known member of the PriceShapeMode enum.
+func (e PriceShapeMode) Valid() bool {
+	switch e {
+	case PriceShapeModeGraduated:
+		return true
+	case PriceShapeModePackage:
+		return true
+	case PriceShapeModePerUnit:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PriceWriteEffective.
+const (
+	NextPeriod PriceWriteEffective = "next_period"
+	Now        PriceWriteEffective = "now"
+)
+
+// Valid indicates whether the value is a known member of the PriceWriteEffective enum.
+func (e PriceWriteEffective) Valid() bool {
+	switch e {
+	case NextPeriod:
+		return true
+	case Now:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PriceWriteMode.
+const (
+	PriceWriteModeGraduated PriceWriteMode = "graduated"
+	PriceWriteModePackage   PriceWriteMode = "package"
+	PriceWriteModePerUnit   PriceWriteMode = "per_unit"
+)
+
+// Valid indicates whether the value is a known member of the PriceWriteMode enum.
+func (e PriceWriteMode) Valid() bool {
+	switch e {
+	case PriceWriteModeGraduated:
+		return true
+	case PriceWriteModePackage:
+		return true
+	case PriceWriteModePerUnit:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ProviderCostRateCurrency.
 const (
 	ProviderCostRateCurrencyUSD ProviderCostRateCurrency = "USD"
@@ -1307,48 +1463,6 @@ const (
 func (e ProviderCostRateCurrency) Valid() bool {
 	switch e {
 	case ProviderCostRateCurrencyUSD:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for RatingRuleLifecycleState.
-const (
-	RatingRuleLifecycleStateActive   RatingRuleLifecycleState = "active"
-	RatingRuleLifecycleStateArchived RatingRuleLifecycleState = "archived"
-	RatingRuleLifecycleStateDraft    RatingRuleLifecycleState = "draft"
-)
-
-// Valid indicates whether the value is a known member of the RatingRuleLifecycleState enum.
-func (e RatingRuleLifecycleState) Valid() bool {
-	switch e {
-	case RatingRuleLifecycleStateActive:
-		return true
-	case RatingRuleLifecycleStateArchived:
-		return true
-	case RatingRuleLifecycleStateDraft:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for RatingRuleMode.
-const (
-	RatingRuleModeGraduated RatingRuleMode = "graduated"
-	RatingRuleModePackage   RatingRuleMode = "package"
-	RatingRuleModePerUnit   RatingRuleMode = "per_unit"
-)
-
-// Valid indicates whether the value is a known member of the RatingRuleMode enum.
-func (e RatingRuleMode) Valid() bool {
-	switch e {
-	case RatingRuleModeGraduated:
-		return true
-	case RatingRuleModePackage:
-		return true
-	case RatingRuleModePerUnit:
 		return true
 	default:
 		return false
@@ -1370,45 +1484,6 @@ func (e ReadinessReportStatus) Valid() bool {
 	case ReadinessReportStatusDraining:
 		return true
 	case ReadinessReportStatusOk:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for RecipeDunningPolicyFinalInvoiceAction.
-const (
-	RecipeDunningPolicyFinalInvoiceActionMarkUncollectible RecipeDunningPolicyFinalInvoiceAction = "mark_uncollectible"
-	RecipeDunningPolicyFinalInvoiceActionNone              RecipeDunningPolicyFinalInvoiceAction = "none"
-)
-
-// Valid indicates whether the value is a known member of the RecipeDunningPolicyFinalInvoiceAction enum.
-func (e RecipeDunningPolicyFinalInvoiceAction) Valid() bool {
-	switch e {
-	case RecipeDunningPolicyFinalInvoiceActionMarkUncollectible:
-		return true
-	case RecipeDunningPolicyFinalInvoiceActionNone:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for RecipeDunningPolicyFinalSubscriptionAction.
-const (
-	RecipeDunningPolicyFinalSubscriptionActionCancel RecipeDunningPolicyFinalSubscriptionAction = "cancel"
-	RecipeDunningPolicyFinalSubscriptionActionNone   RecipeDunningPolicyFinalSubscriptionAction = "none"
-	RecipeDunningPolicyFinalSubscriptionActionPause  RecipeDunningPolicyFinalSubscriptionAction = "pause"
-)
-
-// Valid indicates whether the value is a known member of the RecipeDunningPolicyFinalSubscriptionAction enum.
-func (e RecipeDunningPolicyFinalSubscriptionAction) Valid() bool {
-	switch e {
-	case RecipeDunningPolicyFinalSubscriptionActionCancel:
-		return true
-	case RecipeDunningPolicyFinalSubscriptionActionNone:
-		return true
-	case RecipeDunningPolicyFinalSubscriptionActionPause:
 		return true
 	default:
 		return false
@@ -1469,21 +1544,21 @@ func (e RecipePlanBillingInterval) Valid() bool {
 	}
 }
 
-// Defines values for RecipeRatingRuleMode.
+// Defines values for RecipePriceMode.
 const (
-	RecipeRatingRuleModeGraduated RecipeRatingRuleMode = "graduated"
-	RecipeRatingRuleModePackage   RecipeRatingRuleMode = "package"
-	RecipeRatingRuleModePerUnit   RecipeRatingRuleMode = "per_unit"
+	RecipePriceModeGraduated RecipePriceMode = "graduated"
+	RecipePriceModePackage   RecipePriceMode = "package"
+	RecipePriceModePerUnit   RecipePriceMode = "per_unit"
 )
 
-// Valid indicates whether the value is a known member of the RecipeRatingRuleMode enum.
-func (e RecipeRatingRuleMode) Valid() bool {
+// Valid indicates whether the value is a known member of the RecipePriceMode enum.
+func (e RecipePriceMode) Valid() bool {
 	switch e {
-	case RecipeRatingRuleModeGraduated:
+	case RecipePriceModeGraduated:
 		return true
-	case RecipeRatingRuleModePackage:
+	case RecipePriceModePackage:
 		return true
-	case RecipeRatingRuleModePerUnit:
+	case RecipePriceModePerUnit:
 		return true
 	default:
 		return false
@@ -1862,15 +1937,24 @@ func (e TestClockStatus) Valid() bool {
 	}
 }
 
-// Defines values for UsageEventBillingStatus.
+// Defines values for UsageBillingStatus.
 const (
-	AfterClose UsageEventBillingStatus = "after_close"
+	AfterClose          UsageBillingStatus = "after_close"
+	NoPrice             UsageBillingStatus = "no_price"
+	NotOnPlan           UsageBillingStatus = "not_on_plan"
+	OutsideSubscription UsageBillingStatus = "outside_subscription"
 )
 
-// Valid indicates whether the value is a known member of the UsageEventBillingStatus enum.
-func (e UsageEventBillingStatus) Valid() bool {
+// Valid indicates whether the value is a known member of the UsageBillingStatus enum.
+func (e UsageBillingStatus) Valid() bool {
 	switch e {
 	case AfterClose:
+		return true
+	case NoPrice:
+		return true
+	case NotOnPlan:
+		return true
+	case OutsideSubscription:
 		return true
 	default:
 		return false
@@ -1910,6 +1994,24 @@ func (e UsageEventProviderCostSource) Valid() bool {
 	case Observed:
 		return true
 	case Table:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for UsageEventBatchEventResultStatus.
+const (
+	Deduplicated UsageEventBatchEventResultStatus = "deduplicated"
+	Ingested     UsageEventBatchEventResultStatus = "ingested"
+)
+
+// Valid indicates whether the value is a known member of the UsageEventBatchEventResultStatus enum.
+func (e UsageEventBatchEventResultStatus) Valid() bool {
+	switch e {
+	case Deduplicated:
+		return true
+	case Ingested:
 		return true
 	default:
 		return false
@@ -2543,60 +2645,6 @@ func (e PostV1PlansJSONBodyStatus) Valid() bool {
 	}
 }
 
-// Defines values for GetPlan200JSONResponseBodyBaseBillTiming.
-const (
-	GetPlan200JSONResponseBodyBaseBillTimingInAdvance GetPlan200JSONResponseBodyBaseBillTiming = "in_advance"
-	GetPlan200JSONResponseBodyBaseBillTimingInArrears GetPlan200JSONResponseBodyBaseBillTiming = "in_arrears"
-)
-
-// Valid indicates whether the value is a known member of the GetPlan200JSONResponseBodyBaseBillTiming enum.
-func (e GetPlan200JSONResponseBodyBaseBillTiming) Valid() bool {
-	switch e {
-	case GetPlan200JSONResponseBodyBaseBillTimingInAdvance:
-		return true
-	case GetPlan200JSONResponseBodyBaseBillTimingInArrears:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for GetPlan200JSONResponseBodyBillingInterval.
-const (
-	GetPlan200JSONResponseBodyBillingIntervalMonthly GetPlan200JSONResponseBodyBillingInterval = "monthly"
-	GetPlan200JSONResponseBodyBillingIntervalYearly  GetPlan200JSONResponseBodyBillingInterval = "yearly"
-)
-
-// Valid indicates whether the value is a known member of the GetPlan200JSONResponseBodyBillingInterval enum.
-func (e GetPlan200JSONResponseBodyBillingInterval) Valid() bool {
-	switch e {
-	case GetPlan200JSONResponseBodyBillingIntervalMonthly:
-		return true
-	case GetPlan200JSONResponseBodyBillingIntervalYearly:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for GetPlan200JSONResponseBodyStatus.
-const (
-	GetPlan200JSONResponseBodyStatusActive   GetPlan200JSONResponseBodyStatus = "active"
-	GetPlan200JSONResponseBodyStatusArchived GetPlan200JSONResponseBodyStatus = "archived"
-)
-
-// Valid indicates whether the value is a known member of the GetPlan200JSONResponseBodyStatus enum.
-func (e GetPlan200JSONResponseBodyStatus) Valid() bool {
-	switch e {
-	case GetPlan200JSONResponseBodyStatusActive:
-		return true
-	case GetPlan200JSONResponseBodyStatusArchived:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for UpdatePlanJSONBodyBaseBillTiming.
 const (
 	InAdvance UpdatePlanJSONBodyBaseBillTiming = "in_advance"
@@ -2696,48 +2744,6 @@ func (e GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSource) Val
 	case GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSourceNoSubscription:
 		return true
 	case GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSourceSubscription:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for GetV1RatingRulesParamsLifecycleState.
-const (
-	GetV1RatingRulesParamsLifecycleStateActive   GetV1RatingRulesParamsLifecycleState = "active"
-	GetV1RatingRulesParamsLifecycleStateArchived GetV1RatingRulesParamsLifecycleState = "archived"
-	GetV1RatingRulesParamsLifecycleStateDraft    GetV1RatingRulesParamsLifecycleState = "draft"
-)
-
-// Valid indicates whether the value is a known member of the GetV1RatingRulesParamsLifecycleState enum.
-func (e GetV1RatingRulesParamsLifecycleState) Valid() bool {
-	switch e {
-	case GetV1RatingRulesParamsLifecycleStateActive:
-		return true
-	case GetV1RatingRulesParamsLifecycleStateArchived:
-		return true
-	case GetV1RatingRulesParamsLifecycleStateDraft:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for PostV1RatingRulesJSONBodyMode.
-const (
-	PostV1RatingRulesJSONBodyModeGraduated PostV1RatingRulesJSONBodyMode = "graduated"
-	PostV1RatingRulesJSONBodyModePackage   PostV1RatingRulesJSONBodyMode = "package"
-	PostV1RatingRulesJSONBodyModePerUnit   PostV1RatingRulesJSONBodyMode = "per_unit"
-)
-
-// Valid indicates whether the value is a known member of the PostV1RatingRulesJSONBodyMode enum.
-func (e PostV1RatingRulesJSONBodyMode) Valid() bool {
-	switch e {
-	case PostV1RatingRulesJSONBodyModeGraduated:
-		return true
-	case PostV1RatingRulesJSONBodyModePackage:
-		return true
-	case PostV1RatingRulesJSONBodyModePerUnit:
 		return true
 	default:
 		return false
@@ -4091,26 +4097,33 @@ type CustomerOverview struct {
 	RecentInvoices []Invoice `json:"recent_invoices"`
 }
 
-// CustomerPriceOverride defines model for CustomerPriceOverride.
+// CustomerPriceOverride A customer's negotiated rate for one plan price. It keeps applying
+// when the price's rate changes, and ends when the price is removed.
+// It takes the plan's currency.
 type CustomerPriceOverride struct {
-	Active     bool      `json:"active"`
+	Active bool `json:"active"`
+
+	// CreatedAt When the override starts, in the customer's time: wall time, or
+	// its test clock's time. A subscription already on the plan gets
+	// it from its next period; one that first joins the plan in a
+	// period after this instant gets it from the join.
 	CreatedAt  time.Time `json:"created_at"`
 	CustomerId string    `json:"customer_id"`
-	Id         string    `json:"id"`
 
-	// Mode As on RatingRule.
+	// DeactivatedAt When the override ended, in the customer's time. Absent while it is active.
+	DeactivatedAt time.Time `json:"deactivated_at,omitempty"`
+	Id            string    `json:"id"`
+
+	// Mode As on PriceShape.
 	Mode CustomerPriceOverrideMode `json:"mode"`
 
 	// PackageAmountCents Price of one package in cents, as a decimal string.
 	PackageAmountCents string `json:"package_amount_cents,omitempty"`
 	PackageSize        int64  `json:"package_size,omitempty"`
 
-	// RatingRuleVersionId The rule version named when the override was created. For reference only.
-	RatingRuleVersionId string `json:"rating_rule_version_id"`
-	Reason              string `json:"reason,omitempty"`
-
-	// RuleKey The rating rule this override replaces the price of, across all its versions.
-	RuleKey  string `json:"rule_key"`
+	// PriceId The plan price this override replaces the rate of, for this customer.
+	PriceId  string `json:"price_id"`
+	Reason   string `json:"reason,omitempty"`
 	TenantId string `json:"tenant_id,omitempty"`
 
 	// Tiers Empty (`[]`) unless `mode` is `graduated`.
@@ -4121,7 +4134,7 @@ type CustomerPriceOverride struct {
 	UpdatedAt       time.Time `json:"updated_at"`
 }
 
-// CustomerPriceOverrideMode As on RatingRule.
+// CustomerPriceOverrideMode As on PriceShape.
 type CustomerPriceOverrideMode string
 
 // CustomerUsage defines model for CustomerUsage.
@@ -4135,8 +4148,24 @@ type CustomerUsage struct {
 	} `json:"buckets"`
 	CustomerId string               `json:"customer_id"`
 	Meters     []CustomerUsageMeter `json:"meters"`
-	Period     struct {
-		From   time.Time                 `json:"from"`
+
+	// Period The window the response covers. With no `from` and `to`
+	// (`current_billing_cycle`), each subscription is rated over its
+	// own current billing period, and the period runs from the
+	// earliest start to the latest end of those periods. A meter's
+	// totals and daily `buckets` cover its own subscription's whole
+	// period, including usage a threshold invoice already billed.
+	Period struct {
+		From time.Time `json:"from"`
+
+		// Source `current_billing_cycle`: no `from` and `to` were sent, and
+		// the amounts are what the period's invoices bill.
+		// `explicit`: the window you sent. Its amounts are an
+		// estimate, so a past window can differ from its invoices.
+		// Only active and trialing subscriptions are counted: the
+		// usage of a canceled subscription is left out. Each
+		// subscription's usage in the window is priced at the
+		// prices of its current billing period.
 		Source CustomerUsagePeriodSource `json:"source"`
 		To     time.Time                 `json:"to"`
 	} `json:"period"`
@@ -4158,10 +4187,20 @@ type CustomerUsage struct {
 		AmountCents int64  `json:"amount_cents"`
 		Currency    string `json:"currency"`
 	} `json:"totals"`
+
+	// Warnings Problems found working out this usage, in words, such as usage
+	// that no price takes or a meter whose usage went below zero.
 	Warnings []string `json:"warnings"`
 }
 
-// CustomerUsagePeriodSource defines model for CustomerUsage.Period.Source.
+// CustomerUsagePeriodSource `current_billing_cycle`: no `from` and `to` were sent, and
+// the amounts are what the period's invoices bill.
+// `explicit`: the window you sent. Its amounts are an
+// estimate, so a past window can differ from its invoices.
+// Only active and trialing subscriptions are counted: the
+// usage of a canceled subscription is left out. Each
+// subscription's usage in the window is priced at the
+// prices of its current billing period.
 type CustomerUsagePeriodSource string
 
 // CustomerUsageMeter defines model for CustomerUsageMeter.
@@ -4171,24 +4210,29 @@ type CustomerUsageMeter struct {
 	MeterId   string `json:"meter_id"`
 	MeterName string `json:"meter_name"`
 
-	// Rules One row per pricing rule that claimed events.
-	Rules []struct {
-		AmountCents    int64                  `json:"amount_cents"`
-		DimensionMatch map[string]interface{} `json:"dimension_match,omitempty"`
+	// Prices One row per (plan, price) that took usage, and a `no_price` row
+	// per plan for the usage no price of that plan took. Two plans can
+	// price one meter differently.
+	Prices []struct {
+		AmountCents int64 `json:"amount_cents"`
+
+		// DimensionMatch The labels the price takes. Absent for a price that takes every event.
+		DimensionMatch map[string]string `json:"dimension_match,omitempty"`
+
+		// NoPrice True for usage no price of the plan took. Velox bills
+		// nothing for it, and it is left out of the meter's totals.
+		NoPrice bool   `json:"no_price,omitempty"`
+		PlanId  string `json:"plan_id"`
+
+		// PriceId Absent on a `no_price` row.
+		PriceId string `json:"price_id,omitempty"`
 
 		// Quantity Decimal string.
-		Quantity            string `json:"quantity"`
-		RatingRuleVersionId string `json:"rating_rule_version_id"`
-		RuleKey             string `json:"rule_key"`
+		Quantity string `json:"quantity"`
 
 		// UnitAmountDecimal Price per unit in cents, as a decimal string; the same figure the invoice line shows.
 		UnitAmountDecimal string `json:"unit_amount_decimal,omitempty"`
-
-		// Unmatched True for events that matched no pricing rule. Velox
-		// bills nothing for them, and they are left out of the
-		// meter's totals.
-		Unmatched bool `json:"unmatched,omitempty"`
-	} `json:"rules"`
+	} `json:"prices"`
 	TotalAmountCents int64 `json:"total_amount_cents"`
 
 	// TotalQuantity Decimal string.
@@ -4274,8 +4318,8 @@ type DunningPolicy struct {
 
 	// Seeded True for the "Default retries" policy the account was created
 	// with, until you edit it or make it the default. While it is
-	// true, the next enabled policy you create (by hand or from a
-	// recipe) becomes the default instead. Ignored in request bodies.
+	// true, the next enabled policy you create becomes the default
+	// instead. Ignored in request bodies.
 	Seeded    bool      `json:"seeded"`
 	TenantId  string    `json:"tenant_id,omitempty"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -4349,8 +4393,8 @@ type DunningPolicyListItem struct {
 
 	// Seeded True for the "Default retries" policy the account was created
 	// with, until you edit it or make it the default. While it is
-	// true, the next enabled policy you create (by hand or from a
-	// recipe) becomes the default instead. Ignored in request bodies.
+	// true, the next enabled policy you create becomes the default
+	// instead. Ignored in request bodies.
 	Seeded    bool      `json:"seeded"`
 	TenantId  string    `json:"tenant_id,omitempty"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -4548,7 +4592,9 @@ type HeldUsageGroup struct {
 // HeldUsageGroupReason What was missing when the rows arrived.
 type HeldUsageGroupReason string
 
-// HeldUsageReleaseResult defines model for HeldUsageReleaseResult.
+// HeldUsageReleaseResult The counts are what Velox found when the release wrote the rows, as
+// for `billing_status` (see `UsageBillingStatus`). The invoice is the
+// final answer.
 type HeldUsageReleaseResult struct {
 	// CustomerId The customer the rows were ingested for.
 	CustomerId string `json:"customer_id"`
@@ -4559,38 +4605,42 @@ type HeldUsageReleaseResult struct {
 	// writes inside its input row. Marked released, not written again.
 	Deduplicated int `json:"deduplicated"`
 
-	// InOpenPeriod Released rows inside an active subscription's current billing
-	// period whose meter the subscription's plan prices. That period's
-	// invoice counts them. A row after the period end, released before
-	// that period's invoice is built, counts here when the subscription
-	// continues and its plan from then on prices the meter. Rows of a
-	// sum or count meter stamped before the end of this period's
-	// spend-threshold invoice are not counted here: see
-	// `pending_threshold_invoice` and `outside_open_period`.
+	// InOpenPeriod Released rows in a billing period not invoiced yet that a price
+	// of its plan takes. Rows Velox does not check count here too:
+	// rows after the current period's end, while the subscription
+	// continues, and rows after a trial's end while the subscription
+	// still trials. Rows of a sum or count meter stamped before the end
+	// of this period's spend-threshold invoice are not counted here:
+	// see `pending_threshold_invoice` and `outside_open_period`.
 	InOpenPeriod int `json:"in_open_period"`
 
 	// MoreToRelease Rows for this external ID still held only because one release
 	// takes at most 5,000 rows. Release again to take them.
 	MoreToRelease int `json:"more_to_release"`
 
-	// NotOnPlan Released rows inside an active subscription's current billing
-	// period whose meter no plan on that subscription prices. No
-	// invoice charges them.
+	// NoPrice Released rows in a billing period not invoiced yet whose plan
+	// prices the meter, but no price of that plan takes them (their
+	// dimensions do not include any price's `dimension_match`).
+	NoPrice int `json:"no_price"`
+
+	// NotOnPlan Released rows in a billing period not invoiced yet whose plan
+	// does not price the meter.
 	NotOnPlan int `json:"not_on_plan"`
 
-	// OutsideOpenPeriod Released rows outside every current billing period: before the
-	// subscription started, or in an earlier period. Also rows of a
-	// sum or count meter stamped before the end of this period's paid
-	// spend-threshold invoice. A subscription invoice does not count
-	// them unless that period's invoice has not been built yet. Bill
-	// them with a one-off invoice if they should be charged.
+	// OutsideOpenPeriod Released rows outside every subscription's time (before it
+	// started, in a free trial, after it ended or after its scheduled
+	// cancel, or in another, ended subscription's time), and rows in a
+	// period already invoiced. Also rows of a sum or count meter
+	// stamped before the end of this period's paid spend-threshold
+	// invoice. Bill them with a one-off invoice if they should be
+	// charged.
 	OutsideOpenPeriod int `json:"outside_open_period"`
 
 	// PendingThresholdInvoice Released rows of a sum or count meter stamped before the end of
 	// this period's spend-threshold invoice, while that invoice is not
-	// paid. If it is paid or written off, no invoice counts them. If
-	// it is voided before the period closes, the period's invoice
-	// counts them.
+	// paid. The period's invoice counts them only if that invoice is
+	// voided before the period closes. A written-off invoice can still
+	// be voided.
 	PendingThresholdInvoice int `json:"pending_threshold_invoice"`
 
 	// Released Rows newly written as usage events.
@@ -5051,8 +5101,11 @@ type InvoiceLineItem struct {
 	CreatedAt          time.Time `json:"created_at"`
 	Currency           string    `json:"currency"`
 	Description        string    `json:"description"`
-	Id                 string    `json:"id"`
-	InvoiceId          string    `json:"invoice_id"`
+
+	// DimensionMatch On a usage line, the labels its price takes. Absent for a price that takes every event, and on other lines.
+	DimensionMatch map[string]string `json:"dimension_match,omitempty"`
+	Id             string            `json:"id"`
+	InvoiceId      string            `json:"invoice_id"`
 
 	// LineType `discount` and `tax` appear only on lines added before 2026-10-22;
 	// a new line cannot use them.
@@ -5063,15 +5116,17 @@ type InvoiceLineItem struct {
 	// MeterUnit The meter's unit ("tokens", "seconds", …), stamped on usage lines at write time so invoice surfaces can apply the display-scale convention (token rates read "$3.00 / 1M tokens"). Empty on non-usage lines and on lines written before the 0173 backfill.
 	MeterUnit string `json:"meter_unit,omitempty"`
 
+	// PriceId On a usage line, the plan price that billed it. Absent on other lines.
+	PriceId string `json:"price_id,omitempty"`
+
 	// PricingMode On a usage line, the shape of its price: `per_unit`, `graduated` or `package`. Absent on other lines.
 	PricingMode string `json:"pricing_mode,omitempty"`
 
 	// Quantity The line's exact quantity as a decimal string, for example "3" or "1.5". Line amounts stay whole cents.
-	Quantity            string `json:"quantity"`
-	RatingRuleVersionId string `json:"rating_rule_version_id,omitempty"`
-	TaxAmountCents      int64  `json:"tax_amount_cents"`
-	TaxCode             string `json:"tax_code,omitempty"`
-	TaxJurisdiction     string `json:"tax_jurisdiction,omitempty"`
+	Quantity        string `json:"quantity"`
+	TaxAmountCents  int64  `json:"tax_amount_cents"`
+	TaxCode         string `json:"tax_code,omitempty"`
+	TaxJurisdiction string `json:"tax_jurisdiction,omitempty"`
 
 	// TaxRate Tax rate as a percent (18.50 = 18.50%), up to 4-decimal precision. ADR-042/043.
 	TaxRate float64 `json:"tax_rate"`
@@ -5171,18 +5226,19 @@ type InvoicePreviewLine struct {
 	Currency    string `json:"currency"`
 	Description string `json:"description"`
 
-	// DimensionMatch For a meter with several pricing rules, the dimension values this line's rule matches.
-	DimensionMatch map[string]interface{}        `json:"dimension_match,omitempty"`
-	LineType       InvoicePreviewLineLineType    `json:"line_type"`
-	MeterId        string                        `json:"meter_id,omitempty"`
-	MeterUnit      string                        `json:"meter_unit,omitempty"`
-	PricingMode    InvoicePreviewLinePricingMode `json:"pricing_mode,omitempty"`
+	// DimensionMatch On a usage line, the labels its price takes. Absent for a price that takes every event.
+	DimensionMatch map[string]string          `json:"dimension_match,omitempty"`
+	LineType       InvoicePreviewLineLineType `json:"line_type"`
+	MeterId        string                     `json:"meter_id,omitempty"`
+	MeterUnit      string                     `json:"meter_unit,omitempty"`
+
+	// PriceId On a usage line, the plan price that priced it.
+	PriceId     string                        `json:"price_id,omitempty"`
+	PricingMode InvoicePreviewLinePricingMode `json:"pricing_mode,omitempty"`
 
 	// Quantity Exact quantity as a decimal string.
-	Quantity            string `json:"quantity"`
-	RatingRuleVersionId string `json:"rating_rule_version_id,omitempty"`
-	RuleKey             string `json:"rule_key,omitempty"`
-	UnitAmountCents     int64  `json:"unit_amount_cents"`
+	Quantity        string `json:"quantity"`
+	UnitAmountCents int64  `json:"unit_amount_cents"`
 }
 
 // InvoicePreviewLineLineType defines model for InvoicePreviewLine.LineType.
@@ -5365,9 +5421,9 @@ type LitellmSpendResult struct {
 	// Accepted Usage events newly recorded.
 	Accepted int `json:"accepted"`
 
-	// AfterClose Of `accepted`, the events whose period a subscription already
-	// invoiced: stored, billed on no invoice. A replay never counts
-	// here.
+	// AfterClose Of `accepted`, the events answered `billing_status:
+	// after_close`: their time was already invoiced. A replay never
+	// counts here.
 	AfterClose int `json:"after_close"`
 
 	// CacheHits The LiteLLM response-cache hits among `skipped`. LiteLLM's own spend counts them as $0.
@@ -5389,6 +5445,21 @@ type LitellmSpendResult struct {
 	// `POST /v1/usage-events/held/release`.
 	Held int `json:"held"`
 
+	// NoPrice Of `accepted`, the events no price of the subscription's plan
+	// takes (`billing_status: no_price`), such as a model no price
+	// names. A replay never counts here.
+	NoPrice int `json:"no_price"`
+
+	// NotOnPlan Of `accepted`, the events whose meter the subscription's plan
+	// does not price (`billing_status: not_on_plan`). A replay never
+	// counts here.
+	NotOnPlan int `json:"not_on_plan"`
+
+	// OutsideSubscription Of `accepted`, the events whose time no subscription of the
+	// customer bills (`billing_status: outside_subscription`). A replay
+	// never counts here.
+	OutsideSubscription int `json:"outside_subscription"`
+
 	// Skipped Records that bill nothing - a call type with no tokens, zero tokens, a failed call (`status` `failure`) or a LiteLLM response-cache hit.
 	Skipped int `json:"skipped"`
 }
@@ -5396,7 +5467,7 @@ type LitellmSpendResult struct {
 // MarginReport defines model for MarginReport.
 type MarginReport struct {
 	ByModel []struct {
-		// Attributed True only when a pricing rule pins this model — margin is never heuristically allocated.
+		// Attributed True only when the price that billed the usage names this model — margin is never heuristically allocated.
 		Attributed bool `json:"attributed"`
 
 		// CostCents This model's stamped provider cost in US cents, as a decimal string.
@@ -5425,7 +5496,7 @@ type MarginReport struct {
 	// MarginBps (revenue − cost) / revenue in basis points. Omitted when revenue is 0, when revenue_currency is not cost_currency, when costed_events is 0 (no provider cost known), or when unresolved_events is above 0 (part of the cost unknown, so the margin would read too high).
 	MarginBps int64 `json:"margin_bps,omitempty"`
 
-	// RevenueCents Total rated usage revenue in the window.
+	// RevenueCents Total rated usage revenue in the window, an estimate at each subscription's current prices. Only active and trialing subscriptions are counted.
 	RevenueCents int64 `json:"revenue_cents"`
 
 	// RevenueCurrency Currency of revenue_cents (the customer's price rules). Omitted when the window's revenue spans more than one currency or the customer has no priced meter.
@@ -5460,7 +5531,7 @@ type MemberInvitationStatus string
 // Meter defines model for Meter.
 type Meter struct {
 	// Aggregation How the meter rolls its events into one quantity per billing
-	// period. Every pricing rule of the meter bills under it. `last`
+	// period. Every price of the meter bills under it. `last`
 	// is the latest event by timestamp, then by id. Fixed once the
 	// meter has a usage event (see `has_usage`).
 	Aggregation MeterAggregation `json:"aggregation,omitempty"`
@@ -5474,36 +5545,19 @@ type Meter struct {
 	// does not count until it is released. Returned when you create,
 	// get or update one meter; the meter list leaves it out. A create
 	// or update that succeeded leaves it out if it could not be read.
-	HasUsage            bool      `json:"has_usage,omitempty"`
-	Id                  string    `json:"id,omitempty"`
-	Name                string    `json:"name,omitempty"`
-	RatingRuleVersionId string    `json:"rating_rule_version_id,omitempty"`
-	TenantId            string    `json:"tenant_id,omitempty"`
-	Unit                string    `json:"unit,omitempty"`
-	UpdatedAt           time.Time `json:"updated_at,omitempty"`
+	HasUsage  bool      `json:"has_usage,omitempty"`
+	Id        string    `json:"id,omitempty"`
+	Name      string    `json:"name,omitempty"`
+	TenantId  string    `json:"tenant_id,omitempty"`
+	Unit      string    `json:"unit,omitempty"`
+	UpdatedAt time.Time `json:"updated_at,omitempty"`
 }
 
 // MeterAggregation How the meter rolls its events into one quantity per billing
-// period. Every pricing rule of the meter bills under it. `last`
+// period. Every price of the meter bills under it. `last`
 // is the latest event by timestamp, then by id. Fixed once the
 // meter has a usage event (see `has_usage`).
 type MeterAggregation string
-
-// MeterPricingRule defines model for MeterPricingRule.
-type MeterPricingRule struct {
-	CreatedAt time.Time `json:"created_at"`
-
-	// DimensionMatch Dimensions an event must have for this rule to bill it. `{}` matches every event. The rule bills them under the meter's `aggregation`.
-	DimensionMatch map[string]interface{} `json:"dimension_match"`
-	Id             string                 `json:"id"`
-	MeterId        string                 `json:"meter_id"`
-
-	// Priority Rules are tried highest first.
-	Priority            int       `json:"priority"`
-	RatingRuleVersionId string    `json:"rating_rule_version_id"`
-	TenantId            string    `json:"tenant_id,omitempty"`
-	UpdatedAt           time.Time `json:"updated_at"`
-}
 
 // PaymentMethod defines model for PaymentMethod.
 type PaymentMethod struct {
@@ -5523,10 +5577,11 @@ type Plan struct {
 	BaseAmountCents int64 `json:"base_amount_cents,omitempty"`
 
 	// BaseBillTiming When the recurring base fee is invoiced relative to the period it covers.
-	// in_arrears (default): base + usage billed at period end.
+	// in_arrears: base + usage billed at period end.
 	// in_advance: base billed at period start (day 1 on create; cycle-close invoice
 	// carries upcoming period's base + elapsed period's usage). Usage lines are
-	// always arrears regardless of this flag. See ADR-031.
+	// always arrears regardless of this field. A plan with no base fee is
+	// in_arrears. See ADR-031.
 	BaseBillTiming  PlanBaseBillTiming  `json:"base_bill_timing,omitempty"`
 	BillingInterval PlanBillingInterval `json:"billing_interval,omitempty"`
 	Code            string              `json:"code,omitempty"`
@@ -5534,9 +5589,12 @@ type Plan struct {
 	Currency        string              `json:"currency,omitempty"`
 	Description     string              `json:"description,omitempty"`
 	Id              string              `json:"id,omitempty"`
-	MeterIds        []string            `json:"meter_ids,omitempty"`
 	Name            string              `json:"name,omitempty"`
-	Status          PlanStatus          `json:"status,omitempty"`
+
+	// Prices The plan's usage prices from now on. A plan's meters are the
+	// meters it has a price for.
+	Prices []PlanPrice `json:"prices,omitempty"`
+	Status PlanStatus  `json:"status,omitempty"`
 
 	// TaxCode Stripe tax code for this plan. Absent means the tenant's `default_product_tax_code`.
 	TaxCode   string    `json:"tax_code,omitempty"`
@@ -5545,10 +5603,11 @@ type Plan struct {
 }
 
 // PlanBaseBillTiming When the recurring base fee is invoiced relative to the period it covers.
-// in_arrears (default): base + usage billed at period end.
+// in_arrears: base + usage billed at period end.
 // in_advance: base billed at period start (day 1 on create; cycle-close invoice
 // carries upcoming period's base + elapsed period's usage). Usage lines are
-// always arrears regardless of this flag. See ADR-031.
+// always arrears regardless of this field. A plan with no base fee is
+// in_arrears. See ADR-031.
 type PlanBaseBillTiming string
 
 // PlanBillingInterval defines model for Plan.BillingInterval.
@@ -5556,6 +5615,151 @@ type PlanBillingInterval string
 
 // PlanStatus defines model for Plan.Status.
 type PlanStatus string
+
+// PlanDetail defines model for PlanDetail.
+type PlanDetail struct {
+	BaseAmountCents int64 `json:"base_amount_cents,omitempty"`
+
+	// BaseBillTiming When the recurring base fee is invoiced relative to the period it covers.
+	// in_arrears: base + usage billed at period end.
+	// in_advance: base billed at period start (day 1 on create; cycle-close invoice
+	// carries upcoming period's base + elapsed period's usage). Usage lines are
+	// always arrears regardless of this field. A plan with no base fee is
+	// in_arrears. See ADR-031.
+	BaseBillTiming  PlanDetailBaseBillTiming  `json:"base_bill_timing,omitempty"`
+	BillingInterval PlanDetailBillingInterval `json:"billing_interval,omitempty"`
+	Code            string                    `json:"code,omitempty"`
+	CreatedAt       time.Time                 `json:"created_at,omitempty"`
+	Currency        string                    `json:"currency,omitempty"`
+	Description     string                    `json:"description,omitempty"`
+	Id              string                    `json:"id,omitempty"`
+
+	// LiveSubscriptionCount Subscriptions on this plan that are not canceled. While it
+	// is above 0, `base_amount_cents` cannot change (see Update
+	// plan).
+	LiveSubscriptionCount int    `json:"live_subscription_count"`
+	Name                  string `json:"name,omitempty"`
+
+	// Prices The plan's usage prices from now on. A plan's meters are the
+	// meters it has a price for.
+	Prices []PlanPrice      `json:"prices"`
+	Status PlanDetailStatus `json:"status,omitempty"`
+
+	// TaxCode Stripe tax code for this plan. Absent means the tenant's `default_product_tax_code`.
+	TaxCode   string    `json:"tax_code,omitempty"`
+	TenantId  string    `json:"tenant_id,omitempty"`
+	UpdatedAt time.Time `json:"updated_at,omitempty"`
+
+	// Used Whether a subscription has ever used the plan (canceled ones
+	// and scheduled plan changes included). On a plan no one has
+	// used, a price change applies at once; on a used plan, from
+	// each subscriber's next billing period, and from the join for
+	// a subscriber who first joins the plan in a period after it.
+	Used bool `json:"used"`
+}
+
+// PlanDetailBaseBillTiming When the recurring base fee is invoiced relative to the period it covers.
+// in_arrears: base + usage billed at period end.
+// in_advance: base billed at period start (day 1 on create; cycle-close invoice
+// carries upcoming period's base + elapsed period's usage). Usage lines are
+// always arrears regardless of this field. A plan with no base fee is
+// in_arrears. See ADR-031.
+type PlanDetailBaseBillTiming string
+
+// PlanDetailBillingInterval defines model for PlanDetail.BillingInterval.
+type PlanDetailBillingInterval string
+
+// PlanDetailStatus defines model for PlanDetail.Status.
+type PlanDetailStatus string
+
+// PlanPrice One usage price of a plan: a meter, the events it takes
+// (`dimension_match`) and its rate. The price takes the plan's
+// currency. Its id stays the same when its rate changes; its meter
+// and `dimension_match` are its identity and never change.
+type PlanPrice struct {
+	CreatedAt time.Time `json:"created_at"`
+
+	// DimensionMatch The labels an event must carry for this price to take it, for
+	// example `{"model": "claude-opus-4.5", "token_type": "input"}`.
+	// `{}` takes every event of the meter. Of the prices whose labels
+	// an event carries, the one with the most labels takes it.
+	DimensionMatch map[string]string `json:"dimension_match"`
+	Id             string            `json:"id"`
+	MeterId        string            `json:"meter_id"`
+
+	// Mode As on PriceShape.
+	Mode PlanPriceMode `json:"mode"`
+
+	// PackageAmountCents Price of one package in cents, as a decimal string.
+	PackageAmountCents string `json:"package_amount_cents,omitempty"`
+	PackageSize        int64  `json:"package_size,omitempty"`
+	PlanId             string `json:"plan_id"`
+
+	// Tiers Empty (`[]`) unless `mode` is `graduated`.
+	Tiers []PriceTier `json:"tiers,omitempty"`
+
+	// UnitAmountCents Price per unit in cents, as a decimal string.
+	UnitAmountCents string `json:"unit_amount_cents,omitempty"`
+
+	// UpdatedAt When the content shown was saved.
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// PlanPriceMode As on PriceShape.
+type PlanPriceMode string
+
+// PriceInput defines model for PriceInput.
+type PriceInput struct {
+	// DimensionMatch The labels an event must carry for the price to take it.
+	// Values are strings of 1 to 100 characters, keys too; at
+	// most 16 labels. Omitted or `{}` takes every event of the
+	// meter. Two prices of one plan and meter that could both take
+	// one event with the same number of labels are refused (409
+	// `price_conflict`).
+	DimensionMatch map[string]string `json:"dimension_match,omitempty"`
+	MeterId        string            `json:"meter_id"`
+
+	// Mode `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one.
+	Mode PriceInputMode `json:"mode"`
+
+	// PackageAmountCents Price of one package in cents, as a decimal string (e.g. "0.2" with `package_size` 1000 = $0.002 per 1,000 units), with the limits of `unit_amount_cents`. Used when `mode` is `package`.
+	PackageAmountCents string `json:"package_amount_cents,omitempty"`
+
+	// PackageSize Used when `mode` is `package`. Must be above 0.
+	PackageSize int64 `json:"package_size,omitempty"`
+
+	// Tiers Used when `mode` is `graduated`. Each `up_to` is a whole number above the one before. The last tier has `up_to: null` (no upper bound), and only the last. Otherwise 422 with `param` `tiers`. A tier's rate takes the limits of `unit_amount_cents`; a refusal names `tiers[i].unit_amount_cents` (i counts from 0).
+	Tiers []PriceTier `json:"tiers,omitempty"`
+
+	// UnitAmountCents Price per unit in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units). Used when `mode` is `per_unit`. 0 or more, under 10^18, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. A value outside them is refused with 422 and `param` naming the field. Invoice line amounts round to whole cents.
+	UnitAmountCents string `json:"unit_amount_cents,omitempty"`
+}
+
+// PriceInputMode `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one.
+type PriceInputMode string
+
+// PriceShape How a price bills a quantity. Send only the mode's fields: a field the
+// mode does not use must be 0 or left out (`tiers`: `[]` or left out),
+// or the request is refused with 422 and `param` naming it.
+type PriceShape struct {
+	// Mode `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one.
+	Mode PriceShapeMode `json:"mode"`
+
+	// PackageAmountCents Price of one package in cents, as a decimal string (e.g. "0.2" with `package_size` 1000 = $0.002 per 1,000 units), with the limits of `unit_amount_cents`. Used when `mode` is `package`.
+	PackageAmountCents string `json:"package_amount_cents,omitempty"`
+
+	// PackageSize Used when `mode` is `package`. Must be above 0.
+	PackageSize int64 `json:"package_size,omitempty"`
+
+	// Tiers Used when `mode` is `graduated`. Each `up_to` is a whole number above the one before. The last tier has `up_to: null` (no upper bound), and only the last. Otherwise 422 with `param` `tiers`. A tier's rate takes the limits of `unit_amount_cents`; a refusal names `tiers[i].unit_amount_cents` (i counts from 0).
+	Tiers []PriceTier `json:"tiers,omitempty"`
+
+	// UnitAmountCents Price per unit in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units). Used when `mode` is `per_unit`. 0 or more, under 10^18, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. A value outside them is refused with 422 and `param` naming the field. Invoice line amounts round to whole cents.
+	UnitAmountCents string `json:"unit_amount_cents,omitempty"`
+}
+
+// PriceShapeMode `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one.
+type PriceShapeMode string
 
 // PriceTier defines model for PriceTier.
 type PriceTier struct {
@@ -5565,6 +5769,53 @@ type PriceTier struct {
 	// UpTo The tier's upper bound in whole units: the tier prices the quantity above the previous tier's bound, up to this one. `null` on the last tier, which has no upper bound. Only the last tier is `null`, and it must be.
 	UpTo int64 `json:"up_to"`
 }
+
+// PriceWrite defines model for PriceWrite.
+type PriceWrite struct {
+	CreatedAt time.Time `json:"created_at"`
+
+	// DimensionMatch The labels an event must carry for this price to take it, for
+	// example `{"model": "claude-opus-4.5", "token_type": "input"}`.
+	// `{}` takes every event of the meter. Of the prices whose labels
+	// an event carries, the one with the most labels takes it.
+	DimensionMatch map[string]string   `json:"dimension_match"`
+	Effective      PriceWriteEffective `json:"effective"`
+
+	// EndedOverrides On a removal, the customer overrides of the price it ended.
+	// Each ends when the removal takes effect for its customer.
+	EndedOverrides []struct {
+		CustomerId string `json:"customer_id"`
+		Id         string `json:"id"`
+	} `json:"ended_overrides,omitempty"`
+	Id      string `json:"id"`
+	MeterId string `json:"meter_id"`
+
+	// Mode As on PriceShape.
+	Mode PriceWriteMode `json:"mode"`
+
+	// PackageAmountCents Price of one package in cents, as a decimal string.
+	PackageAmountCents string `json:"package_amount_cents,omitempty"`
+	PackageSize        int64  `json:"package_size,omitempty"`
+	PlanId             string `json:"plan_id"`
+
+	// Removed True on the answer to a removal.
+	Removed bool `json:"removed,omitempty"`
+
+	// Tiers Empty (`[]`) unless `mode` is `graduated`.
+	Tiers []PriceTier `json:"tiers,omitempty"`
+
+	// UnitAmountCents Price per unit in cents, as a decimal string.
+	UnitAmountCents string `json:"unit_amount_cents,omitempty"`
+
+	// UpdatedAt When the content shown was saved.
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// PriceWriteEffective defines model for PriceWrite.Effective.
+type PriceWriteEffective string
+
+// PriceWriteMode As on PriceShape.
+type PriceWriteMode string
 
 // ProviderCostRate defines model for ProviderCostRate.
 type ProviderCostRate struct {
@@ -5608,37 +5859,6 @@ type PublicPaymentUpdate struct {
 	InvoiceStatus InvoiceStatus `json:"invoice_status"`
 }
 
-// RatingRule defines model for RatingRule.
-type RatingRule struct {
-	CreatedAt      time.Time                `json:"created_at,omitempty"`
-	Currency       string                   `json:"currency,omitempty"`
-	Id             string                   `json:"id,omitempty"`
-	LifecycleState RatingRuleLifecycleState `json:"lifecycle_state,omitempty"`
-
-	// Mode `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one.
-	Mode RatingRuleMode `json:"mode,omitempty"`
-	Name string         `json:"name,omitempty"`
-
-	// PackageAmountCents Price of one package in cents, as a decimal string (e.g. "0.2" = $0.002).
-	PackageAmountCents string `json:"package_amount_cents,omitempty"`
-	PackageSize        int64  `json:"package_size,omitempty"`
-	RuleKey            string `json:"rule_key,omitempty"`
-	TenantId           string `json:"tenant_id,omitempty"`
-
-	// Tiers Empty (`[]`) unless `mode` is `graduated`.
-	Tiers []PriceTier `json:"tiers,omitempty"`
-
-	// UnitAmountCents Price per unit in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units), returned as stored. The limits on a new rate are on `POST /v1/rating-rules`. Invoice line amounts and totals still round to whole cents.
-	UnitAmountCents string `json:"unit_amount_cents,omitempty"`
-	Version         int    `json:"version,omitempty"`
-}
-
-// RatingRuleLifecycleState defines model for RatingRule.LifecycleState.
-type RatingRuleLifecycleState string
-
-// RatingRuleMode `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one.
-type RatingRuleMode string
-
 // ReadinessReport defines model for ReadinessReport.
 type ReadinessReport struct {
 	// Checks One entry per check. `api` is `ok` or `draining`. `database` is
@@ -5652,80 +5872,47 @@ type ReadinessReport struct {
 // ReadinessReportStatus defines model for ReadinessReport.Status.
 type ReadinessReportStatus string
 
-// Recipe A recipe template as served by list/detail: the full parsed YAML (meters, rating rules, pricing rules, plans, optional dunning policy and webhook), not just display metadata.
+// Recipe A recipe template as served by list/detail: the full parsed YAML, its meters and its plans with their prices, not just display metadata. A recipe creates nothing else.
 type Recipe struct {
-	Description   string              `json:"description,omitempty"`
-	DunningPolicy RecipeDunningPolicy `json:"dunning_policy,omitempty"`
-	Key           string              `json:"key"`
-	Meters        []RecipeMeter       `json:"meters"`
-	Name          string              `json:"name"`
-	Overridable   []RecipeOverride    `json:"overridable"`
-	Plans         []RecipePlan        `json:"plans"`
-	PricingRules  []RecipePricingRule `json:"pricing_rules"`
-	RatingRules   []RecipeRatingRule  `json:"rating_rules"`
-	Summary       string              `json:"summary"`
-	Version       string              `json:"version"`
-	Webhook       RecipeWebhook       `json:"webhook,omitempty"`
+	Description string           `json:"description,omitempty"`
+	Key         string           `json:"key"`
+	Meters      []RecipeMeter    `json:"meters"`
+	Name        string           `json:"name"`
+	Overridable []RecipeOverride `json:"overridable"`
+	Plans       []RecipePlan     `json:"plans"`
+	Summary     string           `json:"summary"`
+	Version     string           `json:"version"`
 }
 
-// RecipeCreatedObjects Per-role map of entity IDs a recipe apply produced (including ADOPTED catalog objects — apply reconnects to an existing meter/rule graph rather than duplicating it, ADR-085). Every field is omitted when empty; clients must guard reads.
+// RecipeCreatedObjects Per-role map of entity IDs a recipe apply produced (including ADOPTED meters — apply reconnects to an existing meter rather than duplicating it, ADR-085). Every field is omitted when empty; clients must guard reads.
 type RecipeCreatedObjects struct {
-	DunningPolicyId   string   `json:"dunning_policy_id,omitempty"`
-	MeterIds          []string `json:"meter_ids,omitempty"`
-	PlanIds           []string `json:"plan_ids,omitempty"`
-	PricingRuleIds    []string `json:"pricing_rule_ids,omitempty"`
-	RatingRuleIds     []string `json:"rating_rule_ids,omitempty"`
-	WebhookEndpointId string   `json:"webhook_endpoint_id,omitempty"`
+	MeterIds []string `json:"meter_ids,omitempty"`
+	PlanIds  []string `json:"plan_ids,omitempty"`
+	PriceIds []string `json:"price_ids,omitempty"`
 }
 
 // RecipeCreates Per-role count of objects a recipe will produce when instantiated. Recipes create no product entity — there is no `products` count.
 type RecipeCreates struct {
-	DunningPolicies  int `json:"dunning_policies"`
-	Meters           int `json:"meters"`
-	Plans            int `json:"plans"`
-	PricingRules     int `json:"pricing_rules"`
-	RatingRules      int `json:"rating_rules"`
-	WebhookEndpoints int `json:"webhook_endpoints"`
+	Meters int `json:"meters"`
+	Plans  int `json:"plans"`
+
+	// Prices The prices the install puts on its plans.
+	Prices int `json:"prices"`
 }
 
 // RecipeDetail defines model for RecipeDetail.
 type RecipeDetail struct {
 	// Creates Per-role count of objects a recipe will produce when instantiated. Recipes create no product entity — there is no `products` count.
-	Creates       RecipeCreates       `json:"creates"`
-	Description   string              `json:"description,omitempty"`
-	DunningPolicy RecipeDunningPolicy `json:"dunning_policy,omitempty"`
-	Key           string              `json:"key"`
-	Meters        []RecipeMeter       `json:"meters"`
-	Name          string              `json:"name"`
-	Overridable   []RecipeOverride    `json:"overridable"`
-	Plans         []RecipePlan        `json:"plans"`
-	PricingRules  []RecipePricingRule `json:"pricing_rules"`
-	RatingRules   []RecipeRatingRule  `json:"rating_rules"`
-	Summary       string              `json:"summary"`
-	Version       string              `json:"version"`
-	Webhook       RecipeWebhook       `json:"webhook,omitempty"`
+	Creates     RecipeCreates    `json:"creates"`
+	Description string           `json:"description,omitempty"`
+	Key         string           `json:"key"`
+	Meters      []RecipeMeter    `json:"meters"`
+	Name        string           `json:"name"`
+	Overridable []RecipeOverride `json:"overridable"`
+	Plans       []RecipePlan     `json:"plans"`
+	Summary     string           `json:"summary"`
+	Version     string           `json:"version"`
 }
-
-// RecipeDunningPolicy defines model for RecipeDunningPolicy.
-type RecipeDunningPolicy struct {
-	// FinalInvoiceAction What exhausting all retries does to the unpaid invoice. `mark_uncollectible` writes it off as bad debt — the receivable closes, the invoice stays on the books for audit, and it remains settleable out of band. `none` leaves it finalized and due, which means it stays open until a human closes or collects it.
-	// Independent of `final_subscription_action` (ADR-112): the two were one enum until 2026-08-05, which made "cancel and write off" inexpressible.
-	FinalInvoiceAction RecipeDunningPolicyFinalInvoiceAction `json:"final_invoice_action"`
-
-	// FinalSubscriptionAction What exhausting all retries does to the subscription behind the unpaid invoice. `pause` pauses collection only (the cycle keeps drafting invoices), and collection resumes by itself once that invoice is paid; a pause you set is kept as it is. `cancel` cancels the subscription. No-op on a one-off invoice, which has no subscription.
-	FinalSubscriptionAction RecipeDunningPolicyFinalSubscriptionAction `json:"final_subscription_action"`
-	Name                    string                                     `json:"name"`
-
-	// RetryDays The policy's schedule, as `retry_days` on a dunning policy.
-	RetryDays []int `json:"retry_days"`
-}
-
-// RecipeDunningPolicyFinalInvoiceAction What exhausting all retries does to the unpaid invoice. `mark_uncollectible` writes it off as bad debt — the receivable closes, the invoice stays on the books for audit, and it remains settleable out of band. `none` leaves it finalized and due, which means it stays open until a human closes or collects it.
-// Independent of `final_subscription_action` (ADR-112): the two were one enum until 2026-08-05, which made "cancel and write off" inexpressible.
-type RecipeDunningPolicyFinalInvoiceAction string
-
-// RecipeDunningPolicyFinalSubscriptionAction What exhausting all retries does to the subscription behind the unpaid invoice. `pause` pauses collection only (the cycle keeps drafting invoices), and collection resumes by itself once that invoice is paid; a pause you set is kept as it is. `cancel` cancels the subscription. No-op on a one-off invoice, which has no subscription.
-type RecipeDunningPolicyFinalSubscriptionAction string
 
 // RecipeInstance The install badge: the record of a recipe being applied for a tenant (scoped per livemode since m0157). Field names are `recipe_key` / `recipe_version` — NOT `key`/`version`, which the recipe template itself uses.
 type RecipeInstance struct {
@@ -5734,7 +5921,7 @@ type RecipeInstance struct {
 	// CreatedBy Operator email or API key ID. Omitted when empty.
 	CreatedBy string `json:"created_by,omitempty"`
 
-	// CreatedObjects Per-role map of entity IDs a recipe apply produced (including ADOPTED catalog objects — apply reconnects to an existing meter/rule graph rather than duplicating it, ADR-085). Every field is omitted when empty; clients must guard reads.
+	// CreatedObjects Per-role map of entity IDs a recipe apply produced (including ADOPTED meters — apply reconnects to an existing meter rather than duplicating it, ADR-085). Every field is omitted when empty; clients must guard reads.
 	CreatedObjects RecipeCreatedObjects   `json:"created_objects"`
 	Id             string                 `json:"id"`
 	Overrides      map[string]interface{} `json:"overrides"`
@@ -5748,22 +5935,18 @@ type RecipeInstance struct {
 // RecipeListItem defines model for RecipeListItem.
 type RecipeListItem struct {
 	// Creates Per-role count of objects a recipe will produce when instantiated. Recipes create no product entity — there is no `products` count.
-	Creates       RecipeCreates       `json:"creates"`
-	Description   string              `json:"description,omitempty"`
-	DunningPolicy RecipeDunningPolicy `json:"dunning_policy,omitempty"`
+	Creates     RecipeCreates `json:"creates"`
+	Description string        `json:"description,omitempty"`
 
 	// Instantiated The install badge: the record of a recipe being applied for a tenant (scoped per livemode since m0157). Field names are `recipe_key` / `recipe_version` — NOT `key`/`version`, which the recipe template itself uses.
-	Instantiated RecipeInstance      `json:"instantiated,omitempty"`
-	Key          string              `json:"key"`
-	Meters       []RecipeMeter       `json:"meters"`
-	Name         string              `json:"name"`
-	Overridable  []RecipeOverride    `json:"overridable"`
-	Plans        []RecipePlan        `json:"plans"`
-	PricingRules []RecipePricingRule `json:"pricing_rules"`
-	RatingRules  []RecipeRatingRule  `json:"rating_rules"`
-	Summary      string              `json:"summary"`
-	Version      string              `json:"version"`
-	Webhook      RecipeWebhook       `json:"webhook,omitempty"`
+	Instantiated RecipeInstance   `json:"instantiated,omitempty"`
+	Key          string           `json:"key"`
+	Meters       []RecipeMeter    `json:"meters"`
+	Name         string           `json:"name"`
+	Overridable  []RecipeOverride `json:"overridable"`
+	Plans        []RecipePlan     `json:"plans"`
+	Summary      string           `json:"summary"`
+	Version      string           `json:"version"`
 }
 
 // RecipeMeter defines model for RecipeMeter.
@@ -5792,79 +5975,64 @@ type RecipeOverrideType string
 type RecipePlan struct {
 	BaseAmountCents int64 `json:"base_amount_cents"`
 
-	// BaseBillTiming Optional; empty defaults to in_arrears at plan creation (ADR-031).
+	// BaseBillTiming Optional when the base fee is 0; the plan is then in_arrears (ADR-031).
 	BaseBillTiming  RecipePlanBaseBillTiming  `json:"base_bill_timing,omitempty"`
 	BillingInterval RecipePlanBillingInterval `json:"billing_interval"`
 	Code            string                    `json:"code"`
 	Currency        string                    `json:"currency"`
+	Name            string                    `json:"name"`
 
-	// EventNames The recipe meters the plan bills.
-	EventNames []string `json:"event_names"`
-	Name       string   `json:"name"`
+	// Prices The plan's usage prices. Each takes the plan's currency.
+	Prices []RecipePrice `json:"prices"`
 }
 
-// RecipePlanBaseBillTiming Optional; empty defaults to in_arrears at plan creation (ADR-031).
+// RecipePlanBaseBillTiming Optional when the base fee is 0; the plan is then in_arrears (ADR-031).
 type RecipePlanBaseBillTiming string
 
 // RecipePlanBillingInterval defines model for RecipePlan.BillingInterval.
 type RecipePlanBillingInterval string
 
-// RecipePreviewObjects Would-be-created object graph, grouped by role. All arrays are always present (possibly empty); optional singletons (dunning, webhook) are emitted as 0-or-1-length arrays so clients iterate without null guards.
+// RecipePreviewObjects What an install creates: the meters, and each plan with its prices. Both arrays are always present. An install reuses a meter that already exists with the same `event_name` and aggregation.
 type RecipePreviewObjects struct {
-	DunningPolicies  []RecipeDunningPolicy `json:"dunning_policies"`
-	Meters           []RecipeMeter         `json:"meters"`
-	Plans            []RecipePlan          `json:"plans"`
-	PricingRules     []RecipePricingRule   `json:"pricing_rules"`
-	RatingRules      []RecipeRatingRule    `json:"rating_rules"`
-	WebhookEndpoints []RecipeWebhook       `json:"webhook_endpoints"`
+	Meters []RecipeMeter `json:"meters"`
+	Plans  []RecipePlan  `json:"plans"`
 }
 
 // RecipePreviewResult defines model for RecipePreviewResult.
 type RecipePreviewResult struct {
 	Key string `json:"key"`
 
-	// Objects Would-be-created object graph, grouped by role. All arrays are always present (possibly empty); optional singletons (dunning, webhook) are emitted as 0-or-1-length arrays so clients iterate without null guards.
+	// Objects What an install creates: the meters, and each plan with its prices. Both arrays are always present. An install reuses a meter that already exists with the same `event_name` and aggregation.
 	Objects  RecipePreviewObjects `json:"objects"`
 	Version  string               `json:"version"`
 	Warnings []string             `json:"warnings"`
 }
 
-// RecipePricingRule defines model for RecipePricingRule.
-type RecipePricingRule struct {
-	DimensionMatch map[string]interface{} `json:"dimension_match"`
+// RecipePrice defines model for RecipePrice.
+type RecipePrice struct {
+	DimensionMatch map[string]string `json:"dimension_match"`
 
-	// EventName The recipe meter the rule prices.
-	EventName     string `json:"event_name"`
-	Priority      int    `json:"priority"`
-	RatingRuleKey string `json:"rating_rule_key"`
+	// Meter The `event_name` of the recipe meter the price is on.
+	Meter string `json:"meter"`
+
+	// Mode `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one.
+	Mode RecipePriceMode `json:"mode"`
+
+	// PackageAmountCents Price of one package in cents, as a decimal string (e.g. "0.2" with `package_size` 1000 = $0.002 per 1,000 units), with the limits of `unit_amount_cents`. Used when `mode` is `package`.
+	PackageAmountCents string `json:"package_amount_cents,omitempty"`
+
+	// PackageSize Used when `mode` is `package`. Must be above 0.
+	PackageSize int64 `json:"package_size,omitempty"`
+
+	// Tiers Used when `mode` is `graduated`. Each `up_to` is a whole number above the one before. The last tier has `up_to: null` (no upper bound), and only the last. Otherwise 422 with `param` `tiers`. A tier's rate takes the limits of `unit_amount_cents`; a refusal names `tiers[i].unit_amount_cents` (i counts from 0).
+	Tiers []PriceTier `json:"tiers,omitempty"`
+
+	// UnitAmountCents Price per unit in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units). Used when `mode` is `per_unit`. 0 or more, under 10^18, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. A value outside them is refused with 422 and `param` naming the field. Invoice line amounts round to whole cents.
+	UnitAmountCents string `json:"unit_amount_cents,omitempty"`
 }
 
-// RecipeRatingRule defines model for RecipeRatingRule.
-type RecipeRatingRule struct {
-	Currency string `json:"currency"`
-	Key      string `json:"key"`
-
-	// Mode As on RatingRule.
-	Mode RecipeRatingRuleMode `json:"mode"`
-	Name string               `json:"name,omitempty"`
-
-	// PackageAmountCents Price of one package in cents, as a decimal string.
-	PackageAmountCents string      `json:"package_amount_cents"`
-	PackageSize        int64       `json:"package_size,omitempty"`
-	Tiers              []PriceTier `json:"tiers,omitempty"`
-
-	// UnitAmountCents Price per unit in cents, as a decimal string (see RatingRule.unit_amount_cents).
-	UnitAmountCents string `json:"unit_amount_cents"`
-}
-
-// RecipeRatingRuleMode As on RatingRule.
-type RecipeRatingRuleMode string
-
-// RecipeWebhook defines model for RecipeWebhook.
-type RecipeWebhook struct {
-	Events         []string `json:"events"`
-	UrlPlaceholder string   `json:"url_placeholder"`
-}
+// RecipePriceMode `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one.
+type RecipePriceMode string
 
 // RecoveryWarning What an operator must know BEFORE recording an OFFLINE payment on a
 // written-off invoice (`status = uncollectible`) — a consequence that
@@ -6470,12 +6638,8 @@ type UsageAggregate struct {
 	// ByMeter One row per meter, largest total first.
 	ByMeter []struct {
 		// Aggregation The meter's aggregation (`sum`, `count`, `max`, `last`),
-		// which every pricing rule of the meter bills under. `mixed`
-		// when a `max` or `last` meter is billed in more than one
-		// part (several rules, or a rule plus the events no rule
-		// claims), since peaks of the parts added up are not one
-		// peak: `value` is then the plain sum, which billing does not
-		// use. Empty when unknown.
+		// which every price of the meter bills under. Empty when
+		// unknown.
 		Aggregation string `json:"aggregation"`
 
 		// Customers Distinct customers with events on this meter.
@@ -6511,18 +6675,82 @@ type UsageAggregate struct {
 	TotalUnits string `json:"total_units"`
 }
 
+// UsageBillingStatus What Velox found when the event arrived. It checked the event
+// against the customer's subscriptions, the plans and prices in force,
+// and the invoices already built at that moment. Sent only on the
+// answer that wrote the event; the event is stored all the same.
+//
+// A status that is present was true at that moment:
+//
+//   - `after_close`: the event's time is already invoiced. A
+//     spend-threshold invoice counts only once it is paid. Bill the
+//     event with a one-off invoice if it should be charged.
+//   - `not_on_plan`: a billing period not invoiced yet holds the event's
+//     time, but its plan has no price for this meter.
+//   - `outside_subscription`: no active or trialing subscription of the
+//     customer bills the event's time. For example, it has none, or the
+//     time is before one starts, in a free trial, or after one ends or
+//     its scheduled cancel.
+//   - `no_price`: the plan that bills the event's time prices this
+//     meter, but no price of that plan takes the event's `dimensions`.
+//     A price takes an event whose dimensions include all of its
+//     `dimension_match`, compared as strings: the number `1` is not the
+//     string `"1"`.
+//
+// No `billing_status` means Velox found no reason then. It is not a
+// promise that the event will be billed. Velox checks only the
+// customer's current billing periods: time after a period end whose
+// invoice is not built yet is not checked, nor is time after a trial's
+// end before Velox ends the trial. A later change can change the
+// outcome either way: a subscription created, activated or changed, a
+// trial extended, a scheduled cancel undone, or a price added. The
+// invoice is the final answer.
+//
+// Two cases can make a present status wrong: a price change whose
+// save began before a billing period started and finished after the
+// request read the prices, and a subscription change saved while the
+// request is in flight. Absent on a replay and on a read.
+type UsageBillingStatus string
+
 // UsageEvent defines model for UsageEvent.
 type UsageEvent struct {
-	// BillingStatus Sent only on the 201 that wrote the event. `after_close`: a
-	// subscription that prices this meter already invoiced the
-	// event's time, so the event is stored but billed on no invoice,
-	// now or later. Bill it with a one-off invoice if it should be
-	// charged. A spend-threshold invoice counts only once it is
-	// paid: until then it can be voided, and then the period's
-	// invoice bills the event. Absent otherwise, which is not a promise that the event
-	// will be billed. Never sent on a replay or a read.
-	BillingStatus UsageEventBillingStatus `json:"billing_status,omitempty"`
-	CustomerId    string                  `json:"customer_id"`
+	// BillingStatus What Velox found when the event arrived. It checked the event
+	// against the customer's subscriptions, the plans and prices in force,
+	// and the invoices already built at that moment. Sent only on the
+	// answer that wrote the event; the event is stored all the same.
+	//
+	// A status that is present was true at that moment:
+	//
+	// - `after_close`: the event's time is already invoiced. A
+	//   spend-threshold invoice counts only once it is paid. Bill the
+	//   event with a one-off invoice if it should be charged.
+	// - `not_on_plan`: a billing period not invoiced yet holds the event's
+	//   time, but its plan has no price for this meter.
+	// - `outside_subscription`: no active or trialing subscription of the
+	//   customer bills the event's time. For example, it has none, or the
+	//   time is before one starts, in a free trial, or after one ends or
+	//   its scheduled cancel.
+	// - `no_price`: the plan that bills the event's time prices this
+	//   meter, but no price of that plan takes the event's `dimensions`.
+	//   A price takes an event whose dimensions include all of its
+	//   `dimension_match`, compared as strings: the number `1` is not the
+	//   string `"1"`.
+	//
+	// No `billing_status` means Velox found no reason then. It is not a
+	// promise that the event will be billed. Velox checks only the
+	// customer's current billing periods: time after a period end whose
+	// invoice is not built yet is not checked, nor is time after a trial's
+	// end before Velox ends the trial. A later change can change the
+	// outcome either way: a subscription created, activated or changed, a
+	// trial extended, a scheduled cancel undone, or a price added. The
+	// invoice is the final answer.
+	//
+	// Two cases can make a present status wrong: a price change whose
+	// save began before a billing period started and finished after the
+	// request read the prices, and a subscription change saved while the
+	// request is in flight. Absent on a replay and on a read.
+	BillingStatus UsageBillingStatus `json:"billing_status,omitempty"`
+	CustomerId    string             `json:"customer_id"`
 
 	// Dimensions The dimension values sent with the event. Absent when none were sent.
 	Dimensions     map[string]interface{} `json:"dimensions,omitempty"`
@@ -6552,16 +6780,6 @@ type UsageEvent struct {
 	Timestamp time.Time `json:"timestamp"`
 }
 
-// UsageEventBillingStatus Sent only on the 201 that wrote the event. `after_close`: a
-// subscription that prices this meter already invoiced the
-// event's time, so the event is stored but billed on no invoice,
-// now or later. Bill it with a one-off invoice if it should be
-// charged. A spend-threshold invoice counts only once it is
-// paid: until then it can be voided, and then the period's
-// invoice bills the event. Absent otherwise, which is not a promise that the event
-// will be billed. Never sent on a replay or a read.
-type UsageEventBillingStatus string
-
 // UsageEventOrigin How the event arrived. `backfill` means `POST /v1/usage-events/backfill`.
 type UsageEventOrigin string
 
@@ -6570,6 +6788,84 @@ type UsageEventOrigin string
 // `not_applicable` (the meter has no costed dimensions). Absent when
 // the cost is unknown.
 type UsageEventProviderCostSource string
+
+// UsageEventBatchEventResult defines model for UsageEventBatchEventResult.
+type UsageEventBatchEventResult struct {
+	// BillingStatus What Velox found when the event arrived. It checked the event
+	// against the customer's subscriptions, the plans and prices in force,
+	// and the invoices already built at that moment. Sent only on the
+	// answer that wrote the event; the event is stored all the same.
+	//
+	// A status that is present was true at that moment:
+	//
+	// - `after_close`: the event's time is already invoiced. A
+	//   spend-threshold invoice counts only once it is paid. Bill the
+	//   event with a one-off invoice if it should be charged.
+	// - `not_on_plan`: a billing period not invoiced yet holds the event's
+	//   time, but its plan has no price for this meter.
+	// - `outside_subscription`: no active or trialing subscription of the
+	//   customer bills the event's time. For example, it has none, or the
+	//   time is before one starts, in a free trial, or after one ends or
+	//   its scheduled cancel.
+	// - `no_price`: the plan that bills the event's time prices this
+	//   meter, but no price of that plan takes the event's `dimensions`.
+	//   A price takes an event whose dimensions include all of its
+	//   `dimension_match`, compared as strings: the number `1` is not the
+	//   string `"1"`.
+	//
+	// No `billing_status` means Velox found no reason then. It is not a
+	// promise that the event will be billed. Velox checks only the
+	// customer's current billing periods: time after a period end whose
+	// invoice is not built yet is not checked, nor is time after a trial's
+	// end before Velox ends the trial. A later change can change the
+	// outcome either way: a subscription created, activated or changed, a
+	// trial extended, a scheduled cancel undone, or a price added. The
+	// invoice is the final answer.
+	//
+	// Two cases can make a present status wrong: a price change whose
+	// save began before a billing period started and finished after the
+	// request read the prices, and a subscription change saved while the
+	// request is in flight. Absent on a replay and on a read.
+	BillingStatus UsageBillingStatus `json:"billing_status,omitempty"`
+
+	// Status `ingested`: the batch wrote the event. `deduplicated`: an event
+	// with its `idempotency_key` was already stored, earlier or in
+	// this batch, so it was not stored again.
+	Status UsageEventBatchEventResultStatus `json:"status"`
+}
+
+// UsageEventBatchEventResultStatus `ingested`: the batch wrote the event. `deduplicated`: an event
+// with its `idempotency_key` was already stored, earlier or in
+// this batch, so it was not stored again.
+type UsageEventBatchEventResultStatus string
+
+// UsageEventBatchResult defines model for UsageEventBatchResult.
+type UsageEventBatchResult struct {
+	// AfterClose Of `ingested`, the events answered `billing_status` `after_close`.
+	AfterClose int `json:"after_close"`
+
+	// Deduplicated Idempotency replays — already ingested, counted as success.
+	Deduplicated int `json:"deduplicated"`
+
+	// Ingested Newly written events.
+	Ingested int `json:"ingested"`
+
+	// NoPrice Of `ingested`, the events answered `billing_status` `no_price`.
+	NoPrice int `json:"no_price"`
+
+	// NotOnPlan Of `ingested`, the events answered `billing_status` `not_on_plan`.
+	NotOnPlan int `json:"not_on_plan"`
+
+	// OutsideSubscription Of `ingested`, the events answered `billing_status` `outside_subscription`.
+	OutsideSubscription int `json:"outside_subscription"`
+
+	// Results One entry per event, in the order sent: `results[i]` is the
+	// request's event `i`.
+	Results []UsageEventBatchEventResult `json:"results"`
+
+	// Total Events in the request.
+	Total int `json:"total"`
+}
 
 // WebhookDeliveryReplayResult defines model for WebhookDeliveryReplayResult.
 type WebhookDeliveryReplayResult struct {
@@ -7747,10 +8043,9 @@ type PostV1MetersJSONBody struct {
 	Aggregation PostV1MetersJSONBodyAggregation `json:"aggregation,omitempty"`
 
 	// EventName The `event_name` usage events will send for this meter. Letters, digits, `-` and `_`; at most 100 characters.
-	EventName           string `json:"event_name"`
-	Name                string `json:"name"`
-	RatingRuleVersionId string `json:"rating_rule_version_id,omitempty"`
-	Unit                string `json:"unit,omitempty"`
+	EventName string `json:"event_name"`
+	Name      string `json:"name"`
+	Unit      string `json:"unit,omitempty"`
 }
 
 // PostV1MetersParams defines parameters for PostV1Meters.
@@ -7771,10 +8066,7 @@ type PostV1MetersJSONBodyAggregation string
 type PatchV1MetersIdJSONBody struct {
 	Aggregation PatchV1MetersIdJSONBodyAggregation `json:"aggregation,omitempty"`
 	Name        string                             `json:"name,omitempty"`
-
-	// RatingRuleVersionId Default rating rule; empty string clears.
-	RatingRuleVersionId string `json:"rating_rule_version_id,omitempty"`
-	Unit                string `json:"unit,omitempty"`
+	Unit        string                             `json:"unit,omitempty"`
 }
 
 // PatchV1MetersIdParams defines parameters for PatchV1MetersId.
@@ -7791,44 +8083,24 @@ type PatchV1MetersIdParams struct {
 // PatchV1MetersIdJSONBodyAggregation defines parameters for PatchV1MetersId.
 type PatchV1MetersIdJSONBodyAggregation string
 
-// UpsertMeterPricingRuleJSONBody defines parameters for UpsertMeterPricingRule.
-type UpsertMeterPricingRuleJSONBody struct {
-	// DimensionMatch Event dimensions this rule claims, for example
-	// `{"model": "gpt-4o", "token_type": "input"}`. Values must be
-	// strings, numbers or booleans. Omitted or `{}` matches every event.
-	DimensionMatch map[string]interface{} `json:"dimension_match,omitempty"`
-
-	// Priority Higher wins when an event matches more than one rule.
-	Priority int `json:"priority,omitempty"`
-
-	// RatingRuleVersionId The rating rule that prices the matched usage. Must exist in this tenant and mode.
-	RatingRuleVersionId string `json:"rating_rule_version_id"`
-}
-
-// UpsertMeterPricingRuleParams defines parameters for UpsertMeterPricingRule.
-type UpsertMeterPricingRuleParams struct {
-	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
-	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
-}
-
 // PostV1PlansJSONBody defines parameters for PostV1Plans.
 type PostV1PlansJSONBody struct {
 	BaseAmountCents int64 `json:"base_amount_cents,omitempty"`
 
-	// BaseBillTiming Optional. Defaults to in_arrears. See Plan.base_bill_timing
-	// for semantics (ADR-031).
+	// BaseBillTiming Required when `base_amount_cents` is above 0. With a base
+	// of 0 it may be left out, and the plan is in_arrears;
+	// `in_advance` with a base of 0 is refused. See
+	// Plan.base_bill_timing (ADR-031).
 	BaseBillTiming  PostV1PlansJSONBodyBaseBillTiming  `json:"base_bill_timing,omitempty"`
 	BillingInterval PostV1PlansJSONBodyBillingInterval `json:"billing_interval"`
 	Code            string                             `json:"code"`
 	Currency        string                             `json:"currency"`
 	Description     string                             `json:"description,omitempty"`
-	MeterIds        []string                           `json:"meter_ids,omitempty"`
 	Name            string                             `json:"name"`
+
+	// Prices The plan's usage prices, created with it in one request.
+	// Each takes the plan's currency.
+	Prices []PriceInput `json:"prices,omitempty"`
 
 	// Status Optional. A plan is created active; archive it with PATCH.
 	Status PostV1PlansJSONBodyStatus `json:"status,omitempty"`
@@ -7859,26 +8131,14 @@ type PostV1PlansJSONBodyBillingInterval string
 // PostV1PlansJSONBodyStatus defines parameters for PostV1Plans.
 type PostV1PlansJSONBodyStatus string
 
-// GetPlan200JSONResponseBodyBaseBillTiming defines parameters for GetPlan.
-type GetPlan200JSONResponseBodyBaseBillTiming string
-
-// GetPlan200JSONResponseBodyBillingInterval defines parameters for GetPlan.
-type GetPlan200JSONResponseBodyBillingInterval string
-
-// GetPlan200JSONResponseBodyStatus defines parameters for GetPlan.
-type GetPlan200JSONResponseBodyStatus string
-
 // UpdatePlanJSONBody defines parameters for UpdatePlan.
 type UpdatePlanJSONBody struct {
-	// BaseAmountCents Ignored when 0 or less.
+	// BaseAmountCents 0 or more. Omit to keep the current base fee.
 	BaseAmountCents int64                            `json:"base_amount_cents,omitempty"`
 	BaseBillTiming  UpdatePlanJSONBodyBaseBillTiming `json:"base_bill_timing,omitempty"`
 
 	// Description Whitespace is trimmed. Omit to keep the current description; an empty string clears it.
 	Description string `json:"description,omitempty"`
-
-	// MeterIds Replaces the plan's meters. Omit to keep them.
-	MeterIds []string `json:"meter_ids,omitempty"`
 
 	// Name Whitespace is trimmed. Empty or omitted keeps the current name.
 	Name   string                   `json:"name,omitempty"`
@@ -7905,17 +8165,42 @@ type UpdatePlanJSONBodyBaseBillTiming string
 // UpdatePlanJSONBodyStatus defines parameters for UpdatePlan.
 type UpdatePlanJSONBodyStatus string
 
+// AddPlanPriceParams defines parameters for AddPlanPrice.
+type AddPlanPriceParams struct {
+	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
+	// the same value on every retry. For 24 hours, a repeat with the same
+	// key, method, path and body gets the first response again, with an
+	// `Idempotent-Replayed: true` header, instead of running again. The
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
+// UpdatePlanPriceParams defines parameters for UpdatePlanPrice.
+type UpdatePlanPriceParams struct {
+	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
+	// the same value on every retry. For 24 hours, a repeat with the same
+	// key, method, path and body gets the first response again, with an
+	// `Idempotent-Replayed: true` header, instead of running again. The
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
 // ListPriceOverridesParams defines parameters for ListPriceOverrides.
 type ListPriceOverridesParams struct {
 	// CustomerId Only this customer's overrides.
 	CustomerId string `form:"customer_id,omitempty" json:"customer_id,omitempty"`
+
+	// PriceId Only this price's overrides.
+	PriceId string `form:"price_id,omitempty" json:"price_id,omitempty"`
 }
 
 // CreatePriceOverrideJSONBody defines parameters for CreatePriceOverride.
 type CreatePriceOverrideJSONBody struct {
 	CustomerId string `json:"customer_id"`
 
-	// Mode As on `POST /v1/rating-rules`, also for the fields a mode does not use.
+	// Mode As on PriceShape, also for the fields a mode does not use.
 	Mode CreatePriceOverrideJSONBodyMode `json:"mode"`
 
 	// PackageAmountCents Price of one package in cents, as a decimal string, with the limits of `unit_amount_cents`. Used when `mode` is `package`.
@@ -7924,9 +8209,9 @@ type CreatePriceOverrideJSONBody struct {
 	// PackageSize Used when `mode` is `package`. Must be above 0.
 	PackageSize int64 `json:"package_size,omitempty"`
 
-	// RatingRuleVersionId Any version of the rule to override.
-	RatingRuleVersionId string `json:"rating_rule_version_id"`
-	Reason              string `json:"reason,omitempty"`
+	// PriceId The plan price to override.
+	PriceId string `json:"price_id"`
+	Reason  string `json:"reason,omitempty"`
 
 	// Tiers Used when `mode` is `graduated`. Each `up_to` is a whole number above the one before. The last tier has `up_to: null` (no upper bound), and only the last. Otherwise 422 with `param` `tiers`.
 	Tiers []struct {
@@ -7989,59 +8274,6 @@ type PutV1ProviderCostsJSONBodyCurrency string
 
 // GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSource defines parameters for GetV1PublicCostDashboardToken.
 type GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSource string
-
-// GetV1RatingRulesParams defines parameters for GetV1RatingRules.
-type GetV1RatingRulesParams struct {
-	// RuleKey Only versions of this rule.
-	RuleKey        string                               `form:"rule_key,omitempty" json:"rule_key,omitempty"`
-	LifecycleState GetV1RatingRulesParamsLifecycleState `form:"lifecycle_state,omitempty" json:"lifecycle_state,omitempty"`
-
-	// Latest When true, only the newest version of each rule.
-	Latest bool `form:"latest,omitempty" json:"latest,omitempty"`
-}
-
-// GetV1RatingRulesParamsLifecycleState defines parameters for GetV1RatingRules.
-type GetV1RatingRulesParamsLifecycleState string
-
-// PostV1RatingRulesJSONBody defines parameters for PostV1RatingRules.
-type PostV1RatingRulesJSONBody struct {
-	Currency string `json:"currency"`
-
-	// Mode `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one. Send only the mode's fields: a field the mode does not use must be 0 or left out (`tiers`: `[]` or left out). Otherwise 422 with `param` naming it.
-	Mode PostV1RatingRulesJSONBodyMode `json:"mode"`
-	Name string                        `json:"name"`
-
-	// PackageAmountCents Price of one package in cents, as a decimal string (e.g. "0.2" with `package_size` 1000 = $0.002 per 1,000 units), with the limits of `unit_amount_cents`. Used when `mode` is `package`.
-	PackageAmountCents string `json:"package_amount_cents,omitempty"`
-
-	// PackageSize Used when `mode` is `package`. Must be above 0.
-	PackageSize int64  `json:"package_size,omitempty"`
-	RuleKey     string `json:"rule_key"`
-
-	// Tiers Used when `mode` is `graduated`. Each `up_to` is a whole number above the one before. The last tier has `up_to: null` (no upper bound), and only the last. Otherwise 422 with `param` `tiers`.
-	Tiers []struct {
-		// UnitAmountCents Price per unit in cents in this tier, as a decimal string, with the limits of `unit_amount_cents`. A refusal names `tiers[i].unit_amount_cents` (i counts from 0).
-		UnitAmountCents string `json:"unit_amount_cents,omitempty"`
-		UpTo            int64  `json:"up_to,omitempty"`
-	} `json:"tiers,omitempty"`
-
-	// UnitAmountCents Price per unit in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units). Used when `mode` is `per_unit`. 0 or more, under 10^18, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. A value outside them is refused with 422 and `param` naming the field.
-	UnitAmountCents string `json:"unit_amount_cents,omitempty"`
-}
-
-// PostV1RatingRulesParams defines parameters for PostV1RatingRules.
-type PostV1RatingRulesParams struct {
-	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
-	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
-}
-
-// PostV1RatingRulesJSONBodyMode defines parameters for PostV1RatingRules.
-type PostV1RatingRulesJSONBodyMode string
 
 // InstantiateRecipeJSONBody defines parameters for InstantiateRecipe.
 type InstantiateRecipeJSONBody struct {
@@ -8500,7 +8732,7 @@ type GetV1UsageEventsParams struct {
 
 // PostV1UsageEventsJSONBody defines parameters for PostV1UsageEvents.
 type PostV1UsageEventsJSONBody struct {
-	// Dimensions Scalar dimension values used for pricing-rule dispatch (e.g. {"model", "token_type"}).
+	// Dimensions Scalar labels of the event (e.g. {"model", "token_type"}). A price takes an event whose labels include the price's `dimension_match`.
 	Dimensions map[string]interface{} `json:"dimensions,omitempty"`
 
 	// EventName The meter's `event_name` (e.g. "tokens").
@@ -8566,7 +8798,7 @@ type AggregateUsageEventsParams struct {
 
 // BackfillUsageEventJSONBody defines parameters for BackfillUsageEvent.
 type BackfillUsageEventJSONBody struct {
-	// Dimensions Scalar dimension values used to pick the pricing rule.
+	// Dimensions Scalar labels of the event. A price takes an event whose labels include the price's `dimension_match`.
 	Dimensions map[string]interface{} `json:"dimensions,omitempty"`
 
 	// EventName The meter's `event_name` (e.g. "tokens").
@@ -8856,23 +9088,23 @@ type PostV1MetersJSONRequestBody PostV1MetersJSONBody
 // PatchV1MetersIdJSONRequestBody defines body for PatchV1MetersId for application/json ContentType.
 type PatchV1MetersIdJSONRequestBody PatchV1MetersIdJSONBody
 
-// UpsertMeterPricingRuleJSONRequestBody defines body for UpsertMeterPricingRule for application/json ContentType.
-type UpsertMeterPricingRuleJSONRequestBody UpsertMeterPricingRuleJSONBody
-
 // PostV1PlansJSONRequestBody defines body for PostV1Plans for application/json ContentType.
 type PostV1PlansJSONRequestBody PostV1PlansJSONBody
 
 // UpdatePlanJSONRequestBody defines body for UpdatePlan for application/json ContentType.
 type UpdatePlanJSONRequestBody UpdatePlanJSONBody
 
+// AddPlanPriceJSONRequestBody defines body for AddPlanPrice for application/json ContentType.
+type AddPlanPriceJSONRequestBody = PriceInput
+
+// UpdatePlanPriceJSONRequestBody defines body for UpdatePlanPrice for application/json ContentType.
+type UpdatePlanPriceJSONRequestBody = PriceShape
+
 // CreatePriceOverrideJSONRequestBody defines body for CreatePriceOverride for application/json ContentType.
 type CreatePriceOverrideJSONRequestBody CreatePriceOverrideJSONBody
 
 // PutV1ProviderCostsJSONRequestBody defines body for PutV1ProviderCosts for application/json ContentType.
 type PutV1ProviderCostsJSONRequestBody PutV1ProviderCostsJSONBody
-
-// PostV1RatingRulesJSONRequestBody defines body for PostV1RatingRules for application/json ContentType.
-type PostV1RatingRulesJSONRequestBody PostV1RatingRulesJSONBody
 
 // InstantiateRecipeJSONRequestBody defines body for InstantiateRecipe for application/json ContentType.
 type InstantiateRecipeJSONRequestBody InstantiateRecipeJSONBody
@@ -9501,9 +9733,6 @@ type ServerInterface interface {
 	// Remove a member from the workspace
 	// (DELETE /v1/members/{userID})
 	RemoveMember(w http.ResponseWriter, r *http.Request, userID string)
-	// List all meter pricing rules
-	// (GET /v1/meter-pricing-rules)
-	ListAllMeterPricingRules(w http.ResponseWriter, r *http.Request)
 	// List meters
 	// (GET /v1/meters)
 	GetV1Meters(w http.ResponseWriter, r *http.Request)
@@ -9513,21 +9742,9 @@ type ServerInterface interface {
 	// Get meter
 	// (GET /v1/meters/{id})
 	GetMeter(w http.ResponseWriter, r *http.Request, id string)
-	// Update meter (incl. the default rating-rule binding)
+	// Update meter
 	// (PATCH /v1/meters/{id})
 	PatchV1MetersId(w http.ResponseWriter, r *http.Request, id string, params PatchV1MetersIdParams)
-	// List a meter's pricing rules
-	// (GET /v1/meters/{meter_id}/pricing-rules)
-	ListMeterPricingRules(w http.ResponseWriter, r *http.Request, meterId string)
-	// Create or update a meter pricing rule
-	// (POST /v1/meters/{meter_id}/pricing-rules)
-	UpsertMeterPricingRule(w http.ResponseWriter, r *http.Request, meterId string, params UpsertMeterPricingRuleParams)
-	// Delete a meter pricing rule
-	// (DELETE /v1/meters/{meter_id}/pricing-rules/{id})
-	DeleteMeterPricingRule(w http.ResponseWriter, r *http.Request, meterId string, id string)
-	// Get a meter pricing rule
-	// (GET /v1/meters/{meter_id}/pricing-rules/{id})
-	GetMeterPricingRule(w http.ResponseWriter, r *http.Request, meterId string, id string)
 	// List plans
 	// (GET /v1/plans)
 	GetV1Plans(w http.ResponseWriter, r *http.Request)
@@ -9540,6 +9757,18 @@ type ServerInterface interface {
 	// Update plan
 	// (PATCH /v1/plans/{id})
 	UpdatePlan(w http.ResponseWriter, r *http.Request, id string, params UpdatePlanParams)
+	// List a plan's prices
+	// (GET /v1/plans/{id}/prices)
+	ListPlanPrices(w http.ResponseWriter, r *http.Request, id string)
+	// Add a price to a plan
+	// (POST /v1/plans/{id}/prices)
+	AddPlanPrice(w http.ResponseWriter, r *http.Request, id string, params AddPlanPriceParams)
+	// Remove a price from a plan
+	// (DELETE /v1/plans/{id}/prices/{price_id})
+	RemovePlanPrice(w http.ResponseWriter, r *http.Request, id string, priceId string)
+	// Change a price's rate
+	// (PATCH /v1/plans/{id}/prices/{price_id})
+	UpdatePlanPrice(w http.ResponseWriter, r *http.Request, id string, priceId string, params UpdatePlanPriceParams)
 	// List active price overrides
 	// (GET /v1/price-overrides)
 	ListPriceOverrides(w http.ResponseWriter, r *http.Request, params ListPriceOverridesParams)
@@ -9576,15 +9805,6 @@ type ServerInterface interface {
 	// Start adding a card in Stripe Checkout
 	// (POST /v1/public/payment-updates/{token}/checkout)
 	CreatePublicPaymentUpdateCheckout(w http.ResponseWriter, r *http.Request, token string)
-	// List rating rules
-	// (GET /v1/rating-rules)
-	GetV1RatingRules(w http.ResponseWriter, r *http.Request, params GetV1RatingRulesParams)
-	// Create rating rule
-	// (POST /v1/rating-rules)
-	PostV1RatingRules(w http.ResponseWriter, r *http.Request, params PostV1RatingRulesParams)
-	// Get rating rule
-	// (GET /v1/rating-rules/{id})
-	GetRatingRule(w http.ResponseWriter, r *http.Request, id string)
 	// List recipes
 	// (GET /v1/recipes)
 	ListRecipes(w http.ResponseWriter, r *http.Request)
@@ -10347,12 +10567,6 @@ func (_ Unimplemented) RemoveMember(w http.ResponseWriter, r *http.Request, user
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// List all meter pricing rules
-// (GET /v1/meter-pricing-rules)
-func (_ Unimplemented) ListAllMeterPricingRules(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
 // List meters
 // (GET /v1/meters)
 func (_ Unimplemented) GetV1Meters(w http.ResponseWriter, r *http.Request) {
@@ -10371,33 +10585,9 @@ func (_ Unimplemented) GetMeter(w http.ResponseWriter, r *http.Request, id strin
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Update meter (incl. the default rating-rule binding)
+// Update meter
 // (PATCH /v1/meters/{id})
 func (_ Unimplemented) PatchV1MetersId(w http.ResponseWriter, r *http.Request, id string, params PatchV1MetersIdParams) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-// List a meter's pricing rules
-// (GET /v1/meters/{meter_id}/pricing-rules)
-func (_ Unimplemented) ListMeterPricingRules(w http.ResponseWriter, r *http.Request, meterId string) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-// Create or update a meter pricing rule
-// (POST /v1/meters/{meter_id}/pricing-rules)
-func (_ Unimplemented) UpsertMeterPricingRule(w http.ResponseWriter, r *http.Request, meterId string, params UpsertMeterPricingRuleParams) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-// Delete a meter pricing rule
-// (DELETE /v1/meters/{meter_id}/pricing-rules/{id})
-func (_ Unimplemented) DeleteMeterPricingRule(w http.ResponseWriter, r *http.Request, meterId string, id string) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-// Get a meter pricing rule
-// (GET /v1/meters/{meter_id}/pricing-rules/{id})
-func (_ Unimplemented) GetMeterPricingRule(w http.ResponseWriter, r *http.Request, meterId string, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10422,6 +10612,30 @@ func (_ Unimplemented) GetPlan(w http.ResponseWriter, r *http.Request, id string
 // Update plan
 // (PATCH /v1/plans/{id})
 func (_ Unimplemented) UpdatePlan(w http.ResponseWriter, r *http.Request, id string, params UpdatePlanParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// List a plan's prices
+// (GET /v1/plans/{id}/prices)
+func (_ Unimplemented) ListPlanPrices(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Add a price to a plan
+// (POST /v1/plans/{id}/prices)
+func (_ Unimplemented) AddPlanPrice(w http.ResponseWriter, r *http.Request, id string, params AddPlanPriceParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Remove a price from a plan
+// (DELETE /v1/plans/{id}/prices/{price_id})
+func (_ Unimplemented) RemovePlanPrice(w http.ResponseWriter, r *http.Request, id string, priceId string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Change a price's rate
+// (PATCH /v1/plans/{id}/prices/{price_id})
+func (_ Unimplemented) UpdatePlanPrice(w http.ResponseWriter, r *http.Request, id string, priceId string, params UpdatePlanPriceParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10494,24 +10708,6 @@ func (_ Unimplemented) GetPublicPaymentUpdate(w http.ResponseWriter, r *http.Req
 // Start adding a card in Stripe Checkout
 // (POST /v1/public/payment-updates/{token}/checkout)
 func (_ Unimplemented) CreatePublicPaymentUpdateCheckout(w http.ResponseWriter, r *http.Request, token string) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-// List rating rules
-// (GET /v1/rating-rules)
-func (_ Unimplemented) GetV1RatingRules(w http.ResponseWriter, r *http.Request, params GetV1RatingRulesParams) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-// Create rating rule
-// (POST /v1/rating-rules)
-func (_ Unimplemented) PostV1RatingRules(w http.ResponseWriter, r *http.Request, params PostV1RatingRulesParams) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-// Get rating rule
-// (GET /v1/rating-rules/{id})
-func (_ Unimplemented) GetRatingRule(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -15382,26 +15578,6 @@ func (siw *ServerInterfaceWrapper) RemoveMember(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
-// ListAllMeterPricingRules operation middleware
-func (siw *ServerInterfaceWrapper) ListAllMeterPricingRules(w http.ResponseWriter, r *http.Request) {
-
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListAllMeterPricingRules(w, r)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
 // GetV1Meters operation middleware
 func (siw *ServerInterfaceWrapper) GetV1Meters(w http.ResponseWriter, r *http.Request) {
 
@@ -15548,176 +15724,6 @@ func (siw *ServerInterfaceWrapper) PatchV1MetersId(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PatchV1MetersId(w, r, id, params)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// ListMeterPricingRules operation middleware
-func (siw *ServerInterfaceWrapper) ListMeterPricingRules(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "meter_id" -------------
-	var meterId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "meter_id", chi.URLParam(r, "meter_id"), &meterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "meter_id", Err: err})
-		return
-	}
-
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListMeterPricingRules(w, r, meterId)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// UpsertMeterPricingRule operation middleware
-func (siw *ServerInterfaceWrapper) UpsertMeterPricingRule(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "meter_id" -------------
-	var meterId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "meter_id", chi.URLParam(r, "meter_id"), &meterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "meter_id", Err: err})
-		return
-	}
-
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params UpsertMeterPricingRuleParams
-
-	headers := r.Header
-
-	// ------------- Optional header parameter "Idempotency-Key" -------------
-	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
-		var IdempotencyKey IdempotencyKey
-		n := len(valueList)
-		if n != 1 {
-			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
-			return
-		}
-
-		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
-		if err != nil {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
-			return
-		}
-
-		params.IdempotencyKey = IdempotencyKey
-
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.UpsertMeterPricingRule(w, r, meterId, params)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// DeleteMeterPricingRule operation middleware
-func (siw *ServerInterfaceWrapper) DeleteMeterPricingRule(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "meter_id" -------------
-	var meterId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "meter_id", chi.URLParam(r, "meter_id"), &meterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "meter_id", Err: err})
-		return
-	}
-
-	// ------------- Path parameter "id" -------------
-	var id string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
-		return
-	}
-
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.DeleteMeterPricingRule(w, r, meterId, id)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// GetMeterPricingRule operation middleware
-func (siw *ServerInterfaceWrapper) GetMeterPricingRule(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "meter_id" -------------
-	var meterId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "meter_id", chi.URLParam(r, "meter_id"), &meterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "meter_id", Err: err})
-		return
-	}
-
-	// ------------- Path parameter "id" -------------
-	var id string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
-		return
-	}
-
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetMeterPricingRule(w, r, meterId, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -15882,6 +15888,200 @@ func (siw *ServerInterfaceWrapper) UpdatePlan(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
+// ListPlanPrices operation middleware
+func (siw *ServerInterfaceWrapper) ListPlanPrices(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListPlanPrices(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AddPlanPrice operation middleware
+func (siw *ServerInterfaceWrapper) AddPlanPrice(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params AddPlanPriceParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AddPlanPrice(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RemovePlanPrice operation middleware
+func (siw *ServerInterfaceWrapper) RemovePlanPrice(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "price_id" -------------
+	var priceId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "price_id", chi.URLParam(r, "price_id"), &priceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "price_id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RemovePlanPrice(w, r, id, priceId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdatePlanPrice operation middleware
+func (siw *ServerInterfaceWrapper) UpdatePlanPrice(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "price_id" -------------
+	var priceId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "price_id", chi.URLParam(r, "price_id"), &priceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "price_id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params UpdatePlanPriceParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdatePlanPrice(w, r, id, priceId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListPriceOverrides operation middleware
 func (siw *ServerInterfaceWrapper) ListPriceOverrides(w http.ResponseWriter, r *http.Request) {
 
@@ -15906,6 +16106,19 @@ func (siw *ServerInterfaceWrapper) ListPriceOverrides(w http.ResponseWriter, r *
 			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "customer_id"})
 		} else {
 			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "customer_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "price_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "price_id", r.URL.Query(), &params.PriceId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "price_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "price_id", Err: err})
 		}
 		return
 	}
@@ -16246,150 +16459,6 @@ func (siw *ServerInterfaceWrapper) CreatePublicPaymentUpdateCheckout(w http.Resp
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreatePublicPaymentUpdateCheckout(w, r, token)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// GetV1RatingRules operation middleware
-func (siw *ServerInterfaceWrapper) GetV1RatingRules(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params GetV1RatingRulesParams
-
-	// ------------- Optional query parameter "rule_key" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "rule_key", r.URL.Query(), &params.RuleKey, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "rule_key"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "rule_key", Err: err})
-		}
-		return
-	}
-
-	// ------------- Optional query parameter "lifecycle_state" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "lifecycle_state", r.URL.Query(), &params.LifecycleState, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "lifecycle_state"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "lifecycle_state", Err: err})
-		}
-		return
-	}
-
-	// ------------- Optional query parameter "latest" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "latest", r.URL.Query(), &params.Latest, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "latest"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "latest", Err: err})
-		}
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1RatingRules(w, r, params)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// PostV1RatingRules operation middleware
-func (siw *ServerInterfaceWrapper) PostV1RatingRules(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1RatingRulesParams
-
-	headers := r.Header
-
-	// ------------- Optional header parameter "Idempotency-Key" -------------
-	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
-		var IdempotencyKey IdempotencyKey
-		n := len(valueList)
-		if n != 1 {
-			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
-			return
-		}
-
-		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
-		if err != nil {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
-			return
-		}
-
-		params.IdempotencyKey = IdempotencyKey
-
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1RatingRules(w, r, params)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// GetRatingRule operation middleware
-func (siw *ServerInterfaceWrapper) GetRatingRule(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "id" -------------
-	var id string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
-		return
-	}
-
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetRatingRule(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -19581,9 +19650,6 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Delete(options.BaseURL+"/v1/members/{userID}", wrapper.RemoveMember)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/meter-pricing-rules", wrapper.ListAllMeterPricingRules)
-	})
-	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/meters", wrapper.GetV1Meters)
 	})
 	r.Group(func(r chi.Router) {
@@ -19596,18 +19662,6 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Patch(options.BaseURL+"/v1/meters/{id}", wrapper.PatchV1MetersId)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/meters/{meter_id}/pricing-rules", wrapper.ListMeterPricingRules)
-	})
-	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/meters/{meter_id}/pricing-rules", wrapper.UpsertMeterPricingRule)
-	})
-	r.Group(func(r chi.Router) {
-		r.Delete(options.BaseURL+"/v1/meters/{meter_id}/pricing-rules/{id}", wrapper.DeleteMeterPricingRule)
-	})
-	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/meters/{meter_id}/pricing-rules/{id}", wrapper.GetMeterPricingRule)
-	})
-	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/plans", wrapper.GetV1Plans)
 	})
 	r.Group(func(r chi.Router) {
@@ -19618,6 +19672,18 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Patch(options.BaseURL+"/v1/plans/{id}", wrapper.UpdatePlan)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/plans/{id}/prices", wrapper.ListPlanPrices)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/plans/{id}/prices", wrapper.AddPlanPrice)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/v1/plans/{id}/prices/{price_id}", wrapper.RemovePlanPrice)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/v1/plans/{id}/prices/{price_id}", wrapper.UpdatePlanPrice)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/price-overrides", wrapper.ListPriceOverrides)
@@ -19654,15 +19720,6 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/public/payment-updates/{token}/checkout", wrapper.CreatePublicPaymentUpdateCheckout)
-	})
-	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/rating-rules", wrapper.GetV1RatingRules)
-	})
-	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/rating-rules", wrapper.PostV1RatingRules)
-	})
-	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/rating-rules/{id}", wrapper.GetRatingRule)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/recipes", wrapper.ListRecipes)

@@ -22,13 +22,41 @@ type releaseSubs struct {
 	start, end time.Time
 }
 
-func (s releaseSubs) ListLiveByCustomer(context.Context, string, string) ([]domain.Subscription, map[string][]string, error) {
+func (s releaseSubs) ListLiveByCustomer(context.Context, string, string) ([]domain.Subscription, error) {
 	started := s.start.Add(-time.Hour)
 	return []domain.Subscription{{
 		ID: "sub_release", Status: domain.SubscriptionActive,
 		CurrentBillingPeriodStart: &s.start, CurrentBillingPeriodEnd: &s.end, StartedAt: &started,
-		Items: []domain.SubscriptionItem{{PlanID: "pln_release"}},
-	}}, map[string][]string{"pln_release": {s.meterID}}, nil
+		Items: []domain.SubscriptionItem{{ID: "si_release", PlanID: "pln_release"}},
+	}}, nil
+}
+
+// ListItemIntervals answers the item on its plan since before the period.
+func (s releaseSubs) ListItemIntervals(context.Context, string, string) ([]domain.ItemInterval, error) {
+	return []domain.ItemInterval{{SubscriptionItemID: "si_release", PlanID: "pln_release", Quantity: 1, StartsAt: s.start.Add(-time.Hour)}}, nil
+}
+
+// ListCustomerMeterCoverageEnds answers no other subscription.
+func (s releaseSubs) ListCustomerMeterCoverageEnds(context.Context, string, string, string, time.Time, time.Time) ([]domain.MeterCoverageEnd, error) {
+	return nil, nil
+}
+
+// releasePricing reads meters from the store and answers that plan
+// pln_release prices meterID for every event.
+type releasePricing struct {
+	*pricing.PostgresStore
+	meterID string
+}
+
+func (p releasePricing) PriceMatchesAt(_ context.Context, _ string, pins []pricing.PlanPin) ([]pricing.PinPrices, error) {
+	out := make([]pricing.PinPrices, len(pins))
+	for i, pin := range pins {
+		out[i].Passed = true
+		if pin.PlanID == "pln_release" {
+			out[i].Matches = []pricing.PriceMatch{{MeterID: p.meterID, Match: map[string]string{}}}
+		}
+	}
+	return out, nil
 }
 
 // releaseThresholds answers a paid threshold invoice that billed through at.
@@ -61,10 +89,10 @@ func TestRelease_ReadsTheAggregationOnItsOwnConnection(t *testing.T) {
 	now := time.Now().UTC()
 	at := now.Add(-time.Hour).Truncate(time.Second)
 	for _, key := range []string{"one-conn:input", "one-conn:output"} {
-		if _, err := usageSvc.Hold(ctx, tenantID, usage.HoldInput{
+		if _, err := usageSvc.HoldCall(ctx, tenantID, usage.HoldCallInput{
 			Source: domain.HeldUsageSourceLiteLLM, ExternalCustomerID: ext, EventName: eventName,
-			Quantity: decimal.NewFromInt(5), IdempotencyKey: key, EventAt: &at,
 			Reason: domain.HeldReasonCustomerNotFound,
+			Events: []usage.CallEvent{{Quantity: decimal.NewFromInt(5), IdempotencyKey: key, Timestamp: &at}},
 		}); err != nil {
 			t.Fatalf("hold %s: %v", key, err)
 		}
@@ -81,7 +109,7 @@ func TestRelease_ReadsTheAggregationOnItsOwnConnection(t *testing.T) {
 	}
 	usageSvc.SetOpenPeriodReader(usageOpenPeriods{
 		subs:       releaseSubs{meterID: meter.ID, start: now.Add(-2 * time.Hour), end: now.Add(24 * time.Hour)},
-		pricing:    pricingStore,
+		pricing:    releasePricing{PostgresStore: pricingStore, meterID: meter.ID},
 		thresholds: releaseThresholds{at: now.Add(-30 * time.Minute)},
 	})
 

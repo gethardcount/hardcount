@@ -22,8 +22,8 @@ import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts'
 import { api, amountsByCurrencyText, formatCents, formatRate, formatDate } from '@/lib/api'
-import { utcBucketLabel } from '@/lib/chartLabels'
-import type { CustomerUsage, CustomerUsageMeter, CustomerUsageRule, Subscription, Invoice, InvoicePreview } from '@/lib/api'
+import { compactAxisTick, utcBucketLabel } from '@/lib/chartLabels'
+import type { CustomerUsage, CustomerUsageMeter, CustomerUsagePrice, Subscription, Invoice, InvoicePreview } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { cycleProgress, rollingWindow, sinceMs, type EffectiveNow } from '@/lib/effectiveNow'
 import { useEffectiveNow, useEffectiveNowResolver } from '@/hooks/useClockFrozenMap'
@@ -35,7 +35,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { LoadError } from '@/components/LoadError'
 import { Callout } from '@/components/Callout'
 import { Button } from '@/components/ui/button'
-import { activityCyclePeriodLabel } from '@/lib/activityPeriod'
+import { activityCyclePeriodLabel, usageEstimateNote } from '@/lib/activityPeriod'
 import { UNPRICED_SENTENCE, UNPRICED_TITLE, meterQuantityLine, unpricedLine, unpricedMeters } from '@/lib/unpricedUsage'
 import { previewView } from '@/lib/invoicePreview'
 import { invoicePreviewNotes } from '@/lib/invoicePreviewNotes'
@@ -426,6 +426,7 @@ function ActivitySection({ customerId, customerTestClockId, currency }: { custom
   // below show each quantity with its unit.
   const zeroCurrency = data?.totals[0]?.currency ?? currency
   const totalText = data ? (amountsByCurrencyText(data.totals) ?? (zeroCurrency ? formatCents(0, zeroCurrency) : '—')) : ''
+  const estimateNote = data ? usageEstimateNote(data.period) : null
 
   return (
     <section>
@@ -482,6 +483,9 @@ function ActivitySection({ customerId, customerTestClockId, currency }: { custom
             <CardContent className="px-5 py-4">
               <p className="text-xs uppercase tracking-wide text-muted-foreground">Billed usage</p>
               <p className="text-2xl font-semibold tabular-nums mt-1">{totalText}</p>
+              {estimateNote && (
+                <p className="text-xs text-muted-foreground mt-1">{estimateNote}</p>
+              )}
               {latestAt && latestHref && (
                 <p className="text-xs text-muted-foreground mt-2">
                   No usage in this window. Latest usage: {formatDate(latestAt)}.{' '}
@@ -498,7 +502,7 @@ function ActivitySection({ customerId, customerTestClockId, currency }: { custom
               their per-customer view around. Hidden if no events. */}
           {data.buckets.length > 0 && data.meters.length > 0 && <UsageChart usage={data} />}
 
-          {/* Usage with no price: a plain notice built from the unmatched
+          {/* Usage with no price: a plain notice built from the no_price
               rows, with the quantity per meter and a link to the meter. The
               server's own warning sentences go in Details. */}
           {unpriced.length > 0 ? (
@@ -611,7 +615,8 @@ function UsageChart({ usage }: { usage: CustomerUsage }) {
               tick={{ fontSize: 10, fill: 'currentColor' }}
               tickLine={false}
               axisLine={false}
-              width={40}
+              width="auto"
+              tickFormatter={compactAxisTick}
             />
             <Tooltip
               contentStyle={{
@@ -657,16 +662,19 @@ function UsageChart({ usage }: { usage: CustomerUsage }) {
 // adopted exactly. Operators who want the long tail go to CSV.
 const RULE_TOP_N = 9
 
+// The id of the folded "(N more prices)" row.
+const OTHER = '__other__'
+
 function MeterRow({ meter }: { meter: CustomerUsageMeter }) {
   const [expanded, setExpanded] = useState(false)
-  const hasUnmatched = meter.rules.some(r => r.unmatched)
-  const hasMultipleRules = meter.rules.length > 1 || hasUnmatched
+  const hasUnmatched = meter.prices.some(r => r.no_price)
+  const hasMultipleRules = meter.prices.length > 1 || hasUnmatched
 
-  const visibleRules = useMemo<CustomerUsageRule[]>(() => {
-    // Unmatched rows never fold into the "(N more)" bucket and always
+  const visibleRules = useMemo<CustomerUsagePrice[]>(() => {
+    // no_price rows never fold into the "(N more)" bucket and always
     // render last — a not-billed warning must not hide in the long tail.
-    const matched = meter.rules.filter(r => !r.unmatched)
-    const unmatched = meter.rules.filter(r => r.unmatched)
+    const matched = meter.prices.filter(r => !r.no_price)
+    const unmatched = meter.prices.filter(r => r.no_price)
     const sorted = [...matched].sort((a, b) => b.amount_cents - a.amount_cents)
     if (sorted.length <= RULE_TOP_N + 1) return [...sorted, ...unmatched]
     const top = sorted.slice(0, RULE_TOP_N)
@@ -676,15 +684,15 @@ function MeterRow({ meter }: { meter: CustomerUsageMeter }) {
     return [
       ...top,
       {
-        rating_rule_version_id: '__other__',
-        rule_key: `(${tail.length} more rules)`,
+        price_id: OTHER,
+        plan_id: '',
         dimension_match: undefined,
         quantity: String(otherQty),
         amount_cents: otherCents,
       },
       ...unmatched,
     ]
-  }, [meter.rules])
+  }, [meter.prices])
 
   return (
     <Card>
@@ -730,8 +738,9 @@ function MeterRow({ meter }: { meter: CustomerUsageMeter }) {
             </p>
             {visibleRules.map(r => (
               <RuleRow
-                key={r.rating_rule_version_id}
+                key={`${r.plan_id}:${r.price_id ?? 'no_price'}`}
                 rule={r}
+                otherCount={meter.prices.filter(p => !p.no_price).length - RULE_TOP_N}
                 totalCents={meter.total_amount_cents}
                 unit={meter.unit}
                 currency={meter.currency}
@@ -746,11 +755,13 @@ function MeterRow({ meter }: { meter: CustomerUsageMeter }) {
 
 function RuleRow({
   rule,
+  otherCount,
   totalCents,
   unit,
   currency,
 }: {
-  rule: CustomerUsageRule
+  rule: CustomerUsagePrice
+  otherCount?: number
   totalCents: number
   unit: string
   currency: string
@@ -766,12 +777,12 @@ function RuleRow({
   // (no-heuristic-proxies / no-silent-fallbacks). Rendered via formatRate so a
   // real sub-cent rate never collapses to $0.0000.
   const rateCents = rule.unit_amount_decimal ?? null
-  const isOther = rule.rating_rule_version_id === '__other__'
+  const isOther = rule.price_id === OTHER
   const hasDimensions =
     !isOther && rule.dimension_match && Object.keys(rule.dimension_match).length > 0
 
-  if (rule.unmatched) {
-    // Events that matched no pricing rule: billed nothing. This row is a
+  if (rule.no_price) {
+    // Usage no price of the plan took: billed nothing. This row is a
     // warning, not a spend line — no rate, no share bar, amber treatment.
     return (
       <div className="px-5 py-3 border-b border-border last:border-b-0 space-y-1">
@@ -804,10 +815,10 @@ function RuleRow({
               </span>
             ))
           ) : isOther ? (
-            <span className="text-xs text-muted-foreground italic">{rule.rule_key}</span>
+            <span className="text-xs text-muted-foreground italic">({otherCount ?? 0} more prices)</span>
           ) : (
             <Badge variant="secondary" className="font-mono text-[10px] py-0 px-1.5">
-              {rule.rule_key || 'catch-all'}
+              all events
             </Badge>
           )}
         </div>
