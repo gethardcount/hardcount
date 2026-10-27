@@ -4161,9 +4161,11 @@ type CustomerUsage struct {
 		// Source `current_billing_cycle`: no `from` and `to` were sent, and
 		// the amounts are what the period's invoices bill.
 		// `explicit`: the window you sent. Its amounts are an
-		// estimate: each subscription's usage in the window is
-		// priced at the prices of its current billing period, so a
-		// past window can differ from its invoices.
+		// estimate, so a past window can differ from its invoices.
+		// Only active and trialing subscriptions are counted: the
+		// usage of a canceled subscription is left out. Each
+		// subscription's usage in the window is priced at the
+		// prices of its current billing period.
 		Source CustomerUsagePeriodSource `json:"source"`
 		To     time.Time                 `json:"to"`
 	} `json:"period"`
@@ -4194,9 +4196,11 @@ type CustomerUsage struct {
 // CustomerUsagePeriodSource `current_billing_cycle`: no `from` and `to` were sent, and
 // the amounts are what the period's invoices bill.
 // `explicit`: the window you sent. Its amounts are an
-// estimate: each subscription's usage in the window is
-// priced at the prices of its current billing period, so a
-// past window can differ from its invoices.
+// estimate, so a past window can differ from its invoices.
+// Only active and trialing subscriptions are counted: the
+// usage of a canceled subscription is left out. Each
+// subscription's usage in the window is priced at the
+// prices of its current billing period.
 type CustomerUsagePeriodSource string
 
 // CustomerUsageMeter defines model for CustomerUsageMeter.
@@ -5492,7 +5496,7 @@ type MarginReport struct {
 	// MarginBps (revenue − cost) / revenue in basis points. Omitted when revenue is 0, when revenue_currency is not cost_currency, when costed_events is 0 (no provider cost known), or when unresolved_events is above 0 (part of the cost unknown, so the margin would read too high).
 	MarginBps int64 `json:"margin_bps,omitempty"`
 
-	// RevenueCents Total rated usage revenue in the window.
+	// RevenueCents Total rated usage revenue in the window, an estimate at each subscription's current prices. Only active and trialing subscriptions are counted.
 	RevenueCents int64 `json:"revenue_cents"`
 
 	// RevenueCurrency Currency of revenue_cents (the customer's price rules). Omitted when the window's revenue spans more than one currency or the customer has no priced meter.

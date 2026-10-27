@@ -453,7 +453,8 @@ type UpdatePlanInput struct {
 //   - the base fee is fixed while a live subscription uses the plan
 //     (ADR-034; it becomes a next-period edit if PR-7 ships);
 //   - base_bill_timing is fixed once the plan is used;
-//   - in_advance with a base of 0 is refused (ADR-130 §14).
+//   - in_advance with a base of 0 is refused (ADR-130 §14), so a used
+//     in_advance plan keeps a base fee above 0.
 func (s *Service) UpdatePlan(ctx context.Context, tenantID, id string, input UpdatePlanInput) (domain.Plan, error) {
 	if input.BaseBillTiming != "" && !input.BaseBillTiming.IsValid() {
 		return domain.Plan{}, errs.Invalid("base_bill_timing", "must be in_advance or in_arrears")
@@ -519,6 +520,11 @@ func (s *Service) UpdatePlan(ctx context.Context, tenantID, id string, input Upd
 			field := "base_bill_timing"
 			if input.BaseAmountCents != nil {
 				field = "base_amount_cents"
+			}
+			// A used plan's timing is fixed (above), so advice to change it
+			// would be refused too.
+			if used {
+				return domain.Plan{}, errs.Invalid(field, "This plan bills its base fee in_advance, and a subscription has used it, so the base fee must stay above 0. To charge no base fee, create a new plan that bills in_arrears.")
 			}
 			return domain.Plan{}, errs.Invalid(field, "A plan with no base fee must bill in_arrears: set base_bill_timing to in_arrears, or keep a base fee above 0.")
 		}

@@ -615,7 +615,7 @@ function UsageChart({ usage }: { usage: CustomerUsage }) {
               tick={{ fontSize: 10, fill: 'currentColor' }}
               tickLine={false}
               axisLine={false}
-              width={40}
+              width="auto"
               tickFormatter={compactAxisTick}
             />
             <Tooltip

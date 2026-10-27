@@ -124,7 +124,8 @@ export function MarginCard({ customerId, customerTestClockId, currency }: { cust
               </p>
             )}
             {/* The report always prices a window the card sends, so its
-                "Usage billed" is an estimate at current prices (ADR-130 §10). */}
+                "Usage billed" is an estimate at current prices, without
+                canceled subscriptions (ADR-130 §10). */}
             <p className="text-xs text-muted-foreground mt-1">{USAGE_ESTIMATE_NOTE}</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">

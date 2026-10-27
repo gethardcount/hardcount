@@ -814,7 +814,7 @@ test('the Daily usage chart shows each axis label whole: 0.00008 GB-hours reads 
 
   await page.goto(`/customers/${customer.id}`)
   const chart = page.getByRole('main').locator('[data-slot="card"]').filter({ has: page.getByText('Daily usage', { exact: true }) })
-  const ticks = chart.locator('.recharts-yAxis .recharts-cartesian-axis-tick-value')
+  const ticks = chart.locator('.recharts-yAxis-tick-labels text')
   await expect(ticks.filter({ hasText: /^0\.00008$/ })).toHaveCount(1)
   const surface = chart.locator('svg.recharts-surface').first()
   for (const tick of await ticks.all()) {

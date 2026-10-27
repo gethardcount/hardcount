@@ -26,9 +26,11 @@ export function activityCyclePeriodLabel(
 // A window the operator chose (source "explicit": the Activity card's 7d,
 // 30d and 90d, and every Margin card window) is priced at each
 // subscription's current prices, not at the prices each past period had
-// (ADR-130 §10). The page says so under the figure. The current billing
-// cycle is exact, so it says nothing.
-export const USAGE_ESTIMATE_NOTE = "Estimate at each subscription's current prices. Past invoices may differ."
+// (ADR-130 §10). Only active and trialing subscriptions are rated
+// (usage.filterActiveSubs), so a canceled one's usage is not counted. The
+// page says both under the figure. The current billing cycle is exact, so
+// it says nothing.
+export const USAGE_ESTIMATE_NOTE = "Estimate at each subscription's current prices. Canceled subscriptions are not counted. Past invoices may differ."
 
 export function usageEstimateNote(period: { source: string }): string | null {
   return period.source === 'explicit' ? USAGE_ESTIMATE_NOTE : null
