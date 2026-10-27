@@ -278,16 +278,23 @@ func TestExhaust_HoldSetDuringTheFinalRetry_HoldsTheFinalAction(t *testing.T) {
 
 // 10c. The auto-charge sweep charging a no-card invoice whose card was just
 // attached, and dunning's final action canceling its subscription, race. They
-// must never both happen: the final action takes the charge hold, and the
+// must never overlap: the final action takes the charge hold, and the
 // charge claim refuses any hold. Deterministic in both orders, then raced
 // with goroutines.
+//
+// A charge that claims after the cancel has committed is not an overlap: the
+// final action leaves the invoice open and queued, and the sweep collects an
+// owed invoice of a canceled subscription by design. So the check is that no
+// charge claimed while the subscription was still live ends with it canceled.
 func TestExhaust_RacesTheAutoCharge_NeverChargedAndCanceled(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	acts := finalActions{name: "cancel", sub: domain.SubActionCancel, inv: domain.InvActionNone}
 
 	// The charge as the auto-charge sweep makes it once the card exists:
 	// claim, then (Stripe succeeding) the paid write. Returns whether it
-	// charged.
+	// charged a subscription that was still live when it claimed. The claim
+	// holds the invoice, so the cancel cannot start between the claim and
+	// the read of the subscription after it.
 	charge := func(t *testing.T, f *exhaustFixture) bool {
 		t.Helper()
 		claimed, err := claimAutoCharge(f.ctx, f.invoices, f.tenantID, f.invoiceID)
@@ -298,11 +305,16 @@ func TestExhaust_RacesTheAutoCharge_NeverChargedAndCanceled(t *testing.T) {
 		if !claimed {
 			return false
 		}
+		sub, err := f.subs.Get(f.ctx, f.tenantID, f.subID)
+		if err != nil {
+			t.Errorf("read subscription after the claim: %v", err)
+			return false
+		}
 		if _, err := f.invoices.MarkPaid(f.ctx, f.tenantID, f.invoiceID, "pi_autocharge", time.Now().UTC()); err != nil {
 			t.Errorf("auto-charge settle: %v", err)
 			return false
 		}
-		return true
+		return sub.Status != domain.SubscriptionCanceled
 	}
 	// noCardInvoice turns the fixture's invoice into the no-card dunning
 	// shape the auto-charge sweep still visits every tick.
@@ -327,7 +339,7 @@ func TestExhaust_RacesTheAutoCharge_NeverChargedAndCanceled(t *testing.T) {
 			t.Fatalf("read subscription: %v", err)
 		}
 		if charged && sub.Status == domain.SubscriptionCanceled {
-			t.Errorf("the invoice was charged AND its subscription canceled by dunning: a paying customer canceled")
+			t.Errorf("the invoice was charged while its subscription was live AND dunning then canceled it: a paying customer canceled")
 		}
 	}
 
