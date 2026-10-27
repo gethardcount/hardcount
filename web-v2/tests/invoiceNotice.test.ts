@@ -105,7 +105,7 @@ test('messageLines keeps all three lines of a no-card commit invoice', () => {
 
 // #1109: Finalize asks first, and says what it will do for this customer.
 test('the finalize confirmation says what finalizing does', () => {
-  const card = finalizeConfirmLines({ hasCard: true, hasEmail: true, taxAtFinalize: false })
+  const card = finalizeConfirmLines({ hasCard: true, hasEmail: true, canEmailSetupLinks: true, taxAtFinalize: false })
   assert.match(card[0], /can't edit it afterwards/)
   assert.match(card[0], /void/)
   assert.equal(card.length, 2)
@@ -113,20 +113,35 @@ test('the finalize confirmation says what finalizing does', () => {
   assert.match(card[1], /charges their card on file/)
   assert.doesNotMatch(card[1], /emails/)
 
-  const noCard = finalizeConfirmLines({ hasCard: false, hasEmail: true, taxAtFinalize: false })
+  const noCard = finalizeConfirmLines({ hasCard: false, hasEmail: true, canEmailSetupLinks: true, taxAtFinalize: false })
   assert.match(noCard[1], /no card on file/)
   assert.match(noCard[1], /emails them a link/)
   assert.doesNotMatch(noCard[1], /charges/)
 
-  const nowhere = finalizeConfirmLines({ hasCard: false, hasEmail: false, taxAtFinalize: false })
+  const nowhere = finalizeConfirmLines({ hasCard: false, hasEmail: false, canEmailSetupLinks: true, taxAtFinalize: false })
   assert.match(nowhere[1], /nothing is charged/)
   assert.doesNotMatch(nowhere[1], /emails/)
 
-  const unknown = finalizeConfirmLines({ hasCard: undefined, hasEmail: true, taxAtFinalize: false })
+  const unknown = finalizeConfirmLines({ hasCard: undefined, hasEmail: true, canEmailSetupLinks: true, taxAtFinalize: false })
   assert.match(unknown[1], /charges their card on file, or emails them a link/)
 
   // A manual invoice gets its tax at finalize.
-  const manual = finalizeConfirmLines({ hasCard: true, hasEmail: true, taxAtFinalize: true })
+  const manual = finalizeConfirmLines({ hasCard: true, hasEmail: true, canEmailSetupLinks: true, taxAtFinalize: true })
   assert.equal(manual.length, 3)
   assert.match(manual[1], /Tax is worked out now/)
+})
+
+// A server without SMTP or PAYMENT_UPDATE_URL sends no setup-link email, so
+// the confirmation must not promise one (whoami.can_email_setup_links).
+test('the finalize confirmation does not promise an email the server cannot send', () => {
+  for (const canEmailSetupLinks of [false, undefined]) {
+    const noCard = finalizeConfirmLines({ hasCard: false, hasEmail: true, canEmailSetupLinks, taxAtFinalize: false })
+    assert.doesNotMatch(noCard[1], /emails/)
+    assert.match(noCard[1], /can't email setup links/)
+    assert.match(noCard[1], /customer page/)
+
+    const unknown = finalizeConfirmLines({ hasCard: undefined, hasEmail: true, canEmailSetupLinks, taxAtFinalize: false })
+    assert.doesNotMatch(unknown[1], /emails/)
+    assert.match(unknown[1], /charges their card on file if they have one/)
+  }
 })

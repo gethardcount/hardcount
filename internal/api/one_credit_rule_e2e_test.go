@@ -51,7 +51,15 @@ type seatRig struct {
 // seats Team seats starting at start (calendar billing).
 func newSeatRig(t *testing.T, start time.Time, seats int) *seatRig {
 	t.Helper()
-	r := &seatRig{lagRig: newLagRigBare(t, "in_advance", 0)}
+	return newSeatRigGranted(t, start, seats, 0)
+}
+
+// newSeatRigGranted is newSeatRig with grantCents of customer credit granted
+// before the subscription, so its first invoice applies them. 0 grants
+// nothing.
+func newSeatRigGranted(t *testing.T, start time.Time, seats int, grantCents int64) *seatRig {
+	t.Helper()
+	r := &seatRig{lagRig: newLagRigBare(t, "in_advance", grantCents)}
 	r.planTeam = r.newPlan("team", "in_advance", 1000)
 	addOn := r.must(http.MethodPost, "/v1/plans", lagP0, map[string]any{
 		"code": "addon_b", "name": "addon_b", "currency": "USD", "billing_interval": "monthly",

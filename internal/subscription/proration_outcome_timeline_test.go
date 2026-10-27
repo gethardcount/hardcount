@@ -153,6 +153,24 @@ func TestDescribeSubscriptionAction_RendersProrationOutcome(t *testing.T) {
 			wantDesc: "Quantity changed", wantContains: "Credit $1.67, open invoice adjusted by $15.00",
 		},
 		{
+			name:   "a credit held on a draft invoice says it waits for the draft",
+			action: "subscription.item_updated",
+			meta: map[string]any{
+				"action": "item_quantity_changed", "immediate": true, "quantity": float64(1),
+				"proration_type": "adjustment", "proration_amount_cents": float64(1419), "held_cents": float64(1419), "currency": "USD",
+			},
+			wantDesc: "Quantity changed", wantContains: "Credit $14.19 held until the draft invoice is finalized",
+		},
+		{
+			name:   "a credit partly to the balance and partly held names both",
+			action: "subscription.item_updated",
+			meta: map[string]any{
+				"action": "item_quantity_changed", "immediate": true, "quantity": float64(1),
+				"proration_type": "credit", "proration_amount_cents": float64(1919), "held_cents": float64(1419), "currency": "USD",
+			},
+			wantDesc: "Quantity changed", wantContains: "Credit $5.00, $14.19 held until the draft invoice is finalized",
+		},
+		{
 			name:   "an adjustment across two open invoices does not name one",
 			action: "subscription.item_updated",
 			meta: map[string]any{

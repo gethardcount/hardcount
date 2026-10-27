@@ -90,6 +90,12 @@ test('plan change toast: scheduled vs changed now', () => {
     title: 'Plan changed',
     description: 'A new billing period started. Invoice VLX-000042 for $300.00 was created for it.',
   })
+  // Written as a draft (collection paused, or tax not calculated yet): its
+  // total may still change, so the toast gives none.
+  assert.deepEqual(planChangeToast({ pending_plan_id: null }, undefined, { invoiceNumber: 'VLX-000042', amountLabel: '$300.00', draft: true }), {
+    title: 'Plan changed',
+    description: 'A new billing period started. Invoice VLX-000042 was created for it as a draft; its total may change before it is finalized.',
+  })
 })
 
 // #1280: a change now to another billing interval is not a price difference
