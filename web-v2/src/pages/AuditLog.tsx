@@ -580,7 +580,7 @@ export default function AuditLogPage() {
               {/* Pagination — Previous/Next by offset. */}
               {(page > 1 || hasNext) && (
                 <div className="border-t border-border px-4 py-3 flex items-center justify-between">
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-xs text-muted-foreground shrink-0 whitespace-nowrap">
                     Page {page}{total > 0 ? ` · ${formatTotal(total)} total` : ''}
                   </p>
                   <Pagination>
