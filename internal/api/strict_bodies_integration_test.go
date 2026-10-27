@@ -170,14 +170,79 @@ func TestStrictBodies_EveryJSONRouteRefusesAnUnknownKey(t *testing.T) {
 		if res.status != http.StatusUnprocessableEntity || flowStr(res.body, "error", "param") != probeKey {
 			t.Errorf("%s %s with an unknown key: %d %s, want 422 with param %q", k.Method, k.Pattern, res.status, res.raw, probeKey)
 		}
+		// A field the server sets is refused by name too. null decodes into
+		// any type, so without the refusal the body would be accepted.
+		for field, why := range rb.undocumented {
+			if why != serverSet {
+				continue
+			}
+			res := r.call(k.Method, probePath(k.Pattern), map[string]any{field: nil})
+			if res.status != http.StatusUnprocessableEntity || flowStr(res.body, "error", "param") != field {
+				t.Errorf("%s %s with server-set %q: %d %s, want 422 with param %q", k.Method, k.Pattern, field, res.status, res.raw, field)
+			}
+		}
 	}
-	if probed < 50 {
-		t.Fatalf("probed %d routes: the walk or the spec read is broken", probed)
+	// Every spec body is probed: none hides behind a route the walk missed.
+	if want := len(schemas) - len(bodiesNotChecked); probed != want {
+		t.Errorf("probed %d JSON-body routes, the spec has %d outside bodiesNotChecked", probed, want)
 	}
 	if lenient != len(bodiesNotChecked) {
 		t.Errorf("skipped %d provider-body routes, bodiesNotChecked lists %d", lenient, len(bodiesNotChecked))
 	}
 	t.Logf("probed %d JSON-body routes; %d provider-body routes stay lenient", probed, lenient)
+}
+
+// TestStrictBodies_BodylessRoutesRefuseABody: a route whose spec operation
+// has no request body lists no field, so a body with any field is a 422
+// naming it, and nothing runs. An empty body, `{}` and `null` are fine.
+// Before, these handlers never read the body: `{"at_period_end": true}` to
+// /cancel answered 200 and canceled at once.
+func TestStrictBodies_BodylessRoutesRefuseABody(t *testing.T) {
+	r := newStrictRig(t)
+
+	schemas, _ := specBodySchemas(t)
+	withBody := make(map[string]bool, len(schemas))
+	for op := range schemas {
+		method, path, _ := strings.Cut(op, " ")
+		withBody[routeShape(method, path)] = true
+	}
+	bodyless := 0
+	for shape := range specOperations(t) {
+		method, _, _ := strings.Cut(shape, " ")
+		if isMutatingMethod(method) && !withBody[shape] {
+			bodyless++
+		}
+	}
+
+	var keys []routeKey
+	for k := range walkMutatingRoutes(t) {
+		if _, notInSpec := routesNotInSpec[k.Method+" "+k.Pattern]; notInSpec || withBody[routeShape(k.Method, k.Pattern)] {
+			continue
+		}
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].Pattern != keys[j].Pattern {
+			return keys[i].Pattern < keys[j].Pattern
+		}
+		return keys[i].Method < keys[j].Method
+	})
+	for _, k := range keys {
+		res := r.call(k.Method, probePath(k.Pattern), map[string]any{probeKey: true})
+		if res.status != http.StatusUnprocessableEntity || flowStr(res.body, "error", "param") != probeKey {
+			t.Errorf("%s %s with a body: %d %s, want 422 with param %q", k.Method, k.Pattern, res.status, res.raw, probeKey)
+		}
+	}
+	if len(keys) != bodyless {
+		t.Errorf("probed %d body-less routes, the spec has %d", len(keys), bodyless)
+	}
+
+	// An empty object is no field: the route runs as it would with no body.
+	cus := flowStr(r.call("POST", "/v1/customers", map[string]any{
+		"external_id": "bodyless-cus", "display_name": "Bodyless", "email": "ap@bodyless.test",
+	}).want(t, 201, "create customer").body, "id")
+	r.call("POST", "/v1/customers/"+cus+"/rotate-cost-dashboard-token", map[string]any{}).want(t, 200, "rotate with {}")
+	r.call("POST", "/v1/customers/"+cus+"/rotate-cost-dashboard-token", nil).want(t, 200, "rotate with no body")
 }
 
 // TestStrictBodies_PatchRefusesFieldsItCannotChange: every PATCH route names

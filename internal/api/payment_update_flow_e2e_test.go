@@ -118,4 +118,23 @@ func TestE2E_PaymentUpdateLink(t *testing.T) {
 	if u := stripe.unexpected(); len(u) != 0 {
 		t.Errorf("unexpected Stripe calls: %v", u)
 	}
+
+	// The seller then disconnects Stripe. The customer now has a Stripe
+	// customer, so EnsureStripeCustomer returns it without reading the keys.
+	// The next invoice's link must still answer 409, not 502: Stripe is not
+	// connected, and Stripe is never called.
+	flowDo(t, ts, "DELETE", "/v1/settings/stripe/test", flowReq{bearer: key}).want(t, 204, "disconnect Stripe")
+	invoice2 := flowStr(flowDo(t, ts, "POST", "/v1/invoices", flowReq{bearer: key, body: map[string]any{
+		"customer_id": customerID,
+		"line_items":  []map[string]any{{"description": "Seats", "quantity": 1, "unit_amount_cents": 4400}},
+	}}).want(t, 201, "create second invoice").body, "id")
+	flowDo(t, ts, "POST", "/v1/invoices/"+invoice2+"/finalize", flowReq{bearer: key}).want(t, 200, "finalize second invoice")
+	token = flowEmailLinkToken(t, db, "payment_setup_request", "update_url")
+	if res := checkout().want(t, 409, "checkout after Stripe is disconnected"); res.errCode() != "online_payment_unavailable" {
+		t.Errorf("checkout after disconnect: code %q, want online_payment_unavailable", res.errCode())
+	}
+	page().want(t, 200, "open the second link after the refused checkout")
+	if n := stripe.count("POST /v1/checkout/sessions"); n != 1 {
+		t.Errorf("Checkout sessions created: %d, want still 1", n)
+	}
 }

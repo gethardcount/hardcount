@@ -169,3 +169,36 @@ func TestNoRequestBodyDecodeOutsideRespond(t *testing.T) {
 		t.Errorf("%s is listed in requestBodyReaders but no longer reads a request body; remove it.", k)
 	}
 }
+
+// TestReadsRequestBody_Patterns pins what counts as reading a body. A wrapped
+// or aliased body is still read; only closing it, or capping it in place
+// with http.MaxBytesReader before the strict decoder reads it, is not.
+func TestReadsRequestBody_Patterns(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want bool
+	}{
+		{"direct decode", `json.NewDecoder(r.Body).Decode(&v)`, true},
+		{"io.ReadAll", `io.ReadAll(r.Body)`, true},
+		{"method on the body", `r.Body.Read(buf)`, true},
+		{"wrapped in MaxBytesReader", `json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&v)`, true},
+		{"aliased first", `body := r.Body; json.NewDecoder(body).Decode(&v)`, true},
+		{"read in a closure", `func() { io.ReadAll(r.Body) }()`, true},
+		{"capped in place, then the strict decoder", `r.Body = http.MaxBytesReader(w, r.Body, 1<<20); respond.DecodeStrict(w, r, &v)`, false},
+		{"closed", `defer r.Body.Close()`, false},
+		{"nil check", `if r.Body == nil { return }`, false},
+		{"strict decoder", `respond.DecodeStrict(w, r, &v)`, false},
+	}
+	for _, tc := range cases {
+		src := "package p\nfunc h(w http.ResponseWriter, r *http.Request) {\n" + tc.src + "\n}\n"
+		f, err := parser.ParseFile(token.NewFileSet(), "p.go", src, parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatalf("%s: parse: %v", tc.name, err)
+		}
+		fd := f.Decls[0].(*ast.FuncDecl)
+		if got := readsRequestBody(fd); got != tc.want {
+			t.Errorf("%s: readsRequestBody = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
