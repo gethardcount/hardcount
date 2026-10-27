@@ -235,6 +235,45 @@ test('a one-off invoice: save a draft from the customer page, add a line, finali
   await expect(recentInvoice(page, sent!.invoice_number)).toContainText('Open')
 })
 
+// With Stripe connected, the Finalize confirmation of a customer with no card
+// says Velox emails them a link to add one only when this server can email
+// setup links (whoami.can_email_setup_links), and otherwise sends the
+// operator to copy one. CI connects no Stripe and sets no PAYMENT_UPDATE_URL,
+// so both answers are set in the browser: the page must read them on a draft.
+test('finalize confirmation with Stripe connected: the no-card email is promised only when the server can send it', async ({ page }) => {
+  const customer = await createCustomer()
+  const draft = await api<Invoice>('POST', '/invoices', {
+    customer_id: customer.id,
+    currency: 'USD',
+    line_items: [{ description: 'E2E finalize copy', line_type: 'add_on', quantity: 1, unit_amount_cents: 4900 }],
+  })
+  await page.route(url => url.pathname === '/v1/settings/stripe', route => route.request().method() === 'GET'
+    ? route.fulfill({ json: { data: [{ id: 'e2e_stripe_test', livemode: false, secret_key_last4: '0000', publishable_key: 'pk_test_e2e', has_webhook_secret: true }] } })
+    : route.fallback())
+  let canEmail = true
+  await page.route(url => url.pathname === '/v1/whoami', async route => {
+    const answer = await route.fetch({ headers: { ...route.request().headers(), 'sec-fetch-site': 'same-origin' } })
+    await route.fulfill({ response: answer, json: { ...(await answer.json()), can_email_setup_links: canEmail } })
+  })
+
+  for (const can of [true, false]) {
+    canEmail = can
+    await page.goto(`/invoices/${draft.id}`)
+    await expect(page.getByRole('heading', { level: 1, name: draft.invoice_number, exact: true })).toBeVisible()
+    await page.getByRole('button', { name: 'Finalize', exact: true }).click()
+    const confirm = page.getByRole('alertdialog', { name: `Finalize invoice ${draft.invoice_number}?` })
+    if (can) {
+      await expect(confirm).toContainText('The customer has no card on file, so if anything is left to pay, Velox emails them a link to add one.')
+    } else {
+      await expect(confirm).toContainText("The customer has no card on file and this server can't email setup links, so if anything is left to pay, copy a setup link from the customer page and send it to them.")
+    }
+    await expect(confirm).not.toContainText("Stripe isn't connected")
+    await confirm.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(confirm).toBeHidden()
+  }
+  expect((await getInvoice(draft.id)).invoice.status).toBe('draft')
+})
+
 test('an open invoice: a credit note lowers what is owed, an offline payment settles it, and a credit note on the paid invoice goes to the credit balance', async ({ page }) => {
   const { customer, invoice } = await billedCustomer()
   const id = uniq()

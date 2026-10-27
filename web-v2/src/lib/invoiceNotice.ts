@@ -104,7 +104,14 @@ export function stripePaymentUrl(paymentIntentId: string, livemode: boolean): st
 //     needs SMTP and PAYMENT_UPDATE_URL; without them nothing is sent, so
 //     only true promises one.
 //   - taxAtFinalize: a manual invoice, whose tax is worked out at finalize.
+//   - stripeConnected: whether Stripe is connected in this mode (GET
+//     /settings/stripe has a row for it, the same test as the server's
+//     StripeClients.HasFor); undefined while not known. Without it no card
+//     can be charged, a setup link is refused (409 stripe_not_connected) and
+//     the update-payment page says adding a card isn't available, so the
+//     confirmation promises none of them.
 export function finalizeConfirmLines(o: {
+  stripeConnected: boolean | undefined
   hasCard: boolean | undefined
   hasEmail: boolean
   canEmailSetupLinks: boolean | undefined
@@ -114,7 +121,11 @@ export function finalizeConfirmLines(o: {
   if (o.taxAtFinalize) lines.push('Tax is worked out now, so the total may change.')
   const collect = "Velox then collects payment right away. It uses the customer's credit balance first."
   const canEmail = o.canEmailSetupLinks === true
-  if (o.hasCard === true) {
+  if (o.stripeConnected === false) {
+    lines.push(`${collect} Stripe isn't connected in this mode, so no card can be charged or added online. Connect Stripe under Settings to collect by card.`)
+  } else if (o.stripeConnected === undefined) {
+    lines.push(`${collect} If anything is left to pay, it charges their card on file if they have one and if Stripe is connected.`)
+  } else if (o.hasCard === true) {
     lines.push(`${collect} If anything is left to pay, it charges their card on file.`)
   } else if (o.hasCard === false) {
     if (!o.hasEmail) {

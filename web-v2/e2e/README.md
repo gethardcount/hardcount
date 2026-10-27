@@ -44,7 +44,9 @@ the screen, and that the main things an operator does work end to end.
   back.
 - `invoices.spec.ts` takes invoices through their life on screen: a one-off
   invoice from draft to finalized, through the Finalize confirmation (and
-  Save & send), a credit note before and
+  Save & send), the Finalize confirmation's email line with Stripe connected
+  (the Stripe connection and the server's email setting are set in the
+  browser), a credit note before and
   after an offline payment, void and write-off, and the credit notes page.
   Each journey checks the dashboard and the customer's payment page against
   the API.

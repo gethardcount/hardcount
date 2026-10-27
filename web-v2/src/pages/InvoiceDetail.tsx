@@ -23,6 +23,7 @@ import { Callout } from '@/components/Callout'
 import { finalizeConfirmLines, pickInvoiceNotice, writtenOffCardLine, writtenOffSubscriptionLine } from '@/lib/invoiceNotice'
 import { issueDates, sellerBlock, sellerMissing, SELLER_SETTINGS_PATH } from '@/lib/invoiceDocument'
 import { authApi } from '@/lib/auth'
+import { useAuth } from '@/contexts/AuthContext'
 import { classifyError } from '@/lib/errorCopy'
 import { useGetInvoice } from '@/lib/gen/queries.gen'
 import type { Invoice } from '@/lib/gen/schemas/invoice'
@@ -371,13 +372,25 @@ export default function InvoiceDetailPage() {
   })
 
   // Server config (SMTP + PAYMENT_UPDATE_URL): whether "Email a payment-method
-  // link" on a written-off invoice can really send. Read only for that case.
+  // link" on a written-off invoice can really send, and whether the Finalize
+  // confirmation on a draft may promise the no-card email. Read only for those.
   const { data: whoami } = useQuery({
     queryKey: ['whoami'],
     queryFn: () => authApi.whoami(),
-    enabled: invoice?.status === 'uncollectible',
+    enabled: invoice?.status === 'uncollectible' || invoice?.status === 'draft',
     staleTime: Infinity,
   })
+
+  // Whether Stripe is connected in this mode, for the Finalize confirmation:
+  // without it no card is charged and none can be added online. Same query
+  // key as Settings, so connecting Stripe there refreshes it.
+  const { user } = useAuth()
+  const { data: stripeCreds } = useQuery({
+    queryKey: ['stripe-credentials'],
+    queryFn: () => api.listStripeCredentials(),
+    enabled: invoice?.status === 'draft' && !!user,
+  })
+  const stripeConnected = stripeCreds && user ? stripeCreds.data.some(c => c.livemode === user.livemode) : undefined
 
   const invalidateAll = () => {
     queryClient.invalidateQueries({ queryKey: ['invoice', id] })
@@ -1517,6 +1530,7 @@ export default function InvoiceDetailPage() {
           </AlertDialogHeader>
           <div className="space-y-2 text-sm text-muted-foreground">
             {finalizeConfirmLines({
+              stripeConnected,
               hasCard: paymentMethodsList === undefined ? undefined : hasPaymentMethod,
               hasEmail: !!customer?.email,
               canEmailSetupLinks: whoami?.can_email_setup_links,
