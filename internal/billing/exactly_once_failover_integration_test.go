@@ -33,11 +33,12 @@ import (
 // Exactly-once under leader failure.
 //
 // The guarantee under test is not application logic. It is a partial unique
-// index (migration 0101):
+// index (migration 00215):
 //
-//	CREATE UNIQUE INDEX idx_invoices_billing_idempotency
+//	CREATE UNIQUE INDEX idx_invoices_billing_period_dedup
 //	  ON invoices (tenant_id, subscription_id, billing_period_start, billing_period_end)
-//	  WHERE status <> 'voided' AND source_plan_changed_at IS NULL;
+//	  WHERE status <> 'voided' AND source_plan_changed_at IS NULL
+//	    AND billing_reason IS DISTINCT FROM 'manual';
 //
 // So "we bill each period once" is enforced by Postgres, and the interesting
 // question is whether a leader dying mid-run leaves the system in a state its

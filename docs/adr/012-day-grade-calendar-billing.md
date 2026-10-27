@@ -115,14 +115,19 @@ take over. No backfill needed.
 
 ### Plan-change proration (mid-cycle)
 
-The current implementation in `internal/subscription/handler.go` uses
-`remainingPeriodFactor(sub, time.Now().UTC())` for proration credits.
-With snapped boundaries, the factor's denominator is now a clean
-whole-day count, but the numerator still uses `time.Now()` to the
-second. This is acceptable: plan-change proration semantics are about
-"how much of the remaining cycle is already paid for", which is
-naturally precise to the moment the operator initiates the change.
-Keeping it timestamp-precise matches Stripe behaviour.
+A mid-period change is prorated in whole days, rounded at the change
+instant. An in-advance change counts the days from the change to the period
+end, rounded to whole days (`remainingPeriodRatio` in
+`internal/subscription/handler.go`). An in-arrears base fee is billed per
+segment at the period close: a segment's days are its two boundaries
+rounded to whole days from the period start, then subtracted
+(`emitBaseSegmentLine` in `internal/billing/engine.go`). So a period's
+segments always add up to the period. Rounding each segment on its own
+could bill 29 or 31 days of a 30-day period (#1274, fixed 2026-10-28). An
+immediate cancel's final invoice uses the same rule. The two rules round
+from different ends of the period, so for the same change instant they can
+count one day apart: at an exact half day, or in a period that crosses a
+daylight-saving change in the tenant's timezone.
 
 ### Tests
 

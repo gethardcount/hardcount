@@ -25,7 +25,7 @@ func TestMapInvoiceUniqueViolation_RoutesByConstraint(t *testing.T) {
 		wantField      string
 		wantCode       string
 	}{
-		{"billing idempotency → billing_period", idxInvoicesBillingIdempotency, "billing_period", "invoice_billing_period_taken"},
+		{"billing period dedup → billing_period", idxInvoicesBillingPeriodDedup, "billing_period", "invoice_billing_period_taken"},
 		{"proration dedup → proration_source", idxInvoicesProrationDedup, "proration_source", "invoice_proration_source_taken"},
 		{"invoice number → invoice_number", idxInvoicesInvoiceNumberUnique, "invoice_number", "invoice_number_taken"},
 		{"public token → public_token", idxInvoicesPublicTokenUnique, "public_token", "invoice_public_token_collision"},
@@ -84,7 +84,7 @@ func TestMapInvoiceUniqueViolation_BillingPeriodMessageIsInclusive(t *testing.T)
 	if err != nil {
 		t.Fatalf("load zone: %v", err)
 	}
-	pgErr := &pgconn.PgError{Code: "23505", ConstraintName: idxInvoicesBillingIdempotency}
+	pgErr := &pgconn.PgError{Code: "23505", ConstraintName: idxInvoicesBillingPeriodDedup}
 	cases := []struct {
 		name string
 		inv  domain.Invoice

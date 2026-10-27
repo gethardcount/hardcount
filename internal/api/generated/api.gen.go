@@ -5005,7 +5005,7 @@ type InvoiceCreateRequest struct {
 	// NetPaymentTermDays Days until the invoice is due. 0 means due on receipt. Defaults to the tenant's net payment terms.
 	NetPaymentTermDays int `json:"net_payment_term_days,omitempty"`
 
-	// SubscriptionId Optional. Must belong to `customer_id`. Leave out for a one-off invoice.
+	// SubscriptionId Optional. Must belong to `customer_id`. Leave out for a one-off invoice. The subscription's own cycle invoices are still billed, also for the same period.
 	SubscriptionId string `json:"subscription_id,omitempty"`
 }
 
