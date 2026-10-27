@@ -2672,21 +2672,6 @@ func (e CreatePriceOverrideJSONBodyMode) Valid() bool {
 	}
 }
 
-// Defines values for DeletePriceOverride200JSONResponseBodyActive.
-const (
-	False DeletePriceOverride200JSONResponseBodyActive = false
-)
-
-// Valid indicates whether the value is a known member of the DeletePriceOverride200JSONResponseBodyActive enum.
-func (e DeletePriceOverride200JSONResponseBodyActive) Valid() bool {
-	switch e {
-	case False:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for PutV1ProviderCostsJSONBodyCurrency.
 const (
 	PutV1ProviderCostsJSONBodyCurrencyUSD PutV1ProviderCostsJSONBodyCurrency = "USD"
@@ -3926,8 +3911,8 @@ type Customer struct {
 	// Normalized to lowercase bare addresses, deduped, capped at 10,
 	// never equal to the primary email. Stored encrypted at rest.
 	AdditionalEmails []string  `json:"additional_emails,omitempty"`
-	CreatedAt        time.Time `json:"created_at,omitempty"`
-	DisplayName      string    `json:"display_name,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	DisplayName      string    `json:"display_name"`
 
 	// DunningPolicyId Assigned dunning policy; absent means the tenant default.
 	DunningPolicyId    string    `json:"dunning_policy_id,omitempty"`
@@ -3937,10 +3922,10 @@ type Customer struct {
 
 	// EmailStatus Deliverability of `email`, learned from bounce and complaint reports.
 	EmailStatus CustomerEmailStatus `json:"email_status,omitempty"`
-	ExternalId  string              `json:"external_id,omitempty"`
-	Id          string              `json:"id,omitempty"`
+	ExternalId  string              `json:"external_id"`
+	Id          string              `json:"id"`
 	Livemode    bool                `json:"livemode,omitempty"`
-	Status      CustomerStatus      `json:"status,omitempty"`
+	Status      CustomerStatus      `json:"status"`
 
 	// StripeCustomerId The Stripe customer. Absent until the first payment-method action.
 	StripeCustomerId string `json:"stripe_customer_id,omitempty"`
@@ -3952,7 +3937,7 @@ type Customer struct {
 	// dashboard reads it to show the "test clock" badge + simulated-time
 	// banner on the customer and its invoices.
 	TestClockId string    `json:"test_clock_id,omitempty"`
-	UpdatedAt   time.Time `json:"updated_at,omitempty"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // CustomerEmailStatus Deliverability of `email`, learned from bounce and complaint reports.
@@ -4088,8 +4073,8 @@ type CustomerPriceOverride struct {
 	Mode CustomerPriceOverrideMode `json:"mode"`
 
 	// PackageAmountCents Price of one package in cents, as a decimal string.
-	PackageAmountCents string `json:"package_amount_cents,omitempty"`
-	PackageSize        int64  `json:"package_size,omitempty"`
+	PackageAmountCents string `json:"package_amount_cents"`
+	PackageSize        int64  `json:"package_size"`
 
 	// PriceId The plan price this override replaces the rate of, for this customer.
 	PriceId  string `json:"price_id"`
@@ -4097,10 +4082,10 @@ type CustomerPriceOverride struct {
 	TenantId string `json:"tenant_id,omitempty"`
 
 	// Tiers Empty (`[]`) unless `mode` is `graduated`.
-	Tiers []PriceTier `json:"tiers,omitempty"`
+	Tiers []PriceTier `json:"tiers"`
 
 	// UnitAmountCents Price per unit in cents, as a decimal string.
-	UnitAmountCents string    `json:"unit_amount_cents,omitempty"`
+	UnitAmountCents string    `json:"unit_amount_cents"`
 	UpdatedAt       time.Time `json:"updated_at"`
 }
 
@@ -4800,7 +4785,7 @@ type Invoice struct {
 	// clock-pinned; manual composer: the customer is clock-pinned). The
 	// dashboard renders a "simulated" badge from this authoritative flag
 	// instead of inferring it. Always false in live mode.
-	IsSimulated bool `json:"is_simulated,omitempty"`
+	IsSimulated bool `json:"is_simulated"`
 
 	// IssuedAt Set when the invoice transitions out of draft.
 	IssuedAt           time.Time              `json:"issued_at,omitempty"`
@@ -4819,7 +4804,7 @@ type Invoice struct {
 	// or a payment recovery run resolved as `payment_recovered`). Such
 	// an invoice has no `stripe_payment_intent_id`, so there is no card
 	// to refund.
-	PaidOutOfBand bool `json:"paid_out_of_band,omitempty"`
+	PaidOutOfBand bool `json:"paid_out_of_band"`
 
 	// PaymentAnomalyCapturedCents The amount Stripe took in that unexpected payment.
 	PaymentAnomalyCapturedCents int64 `json:"payment_anomaly_captured_cents,omitempty"`
@@ -5522,11 +5507,11 @@ type Meter struct {
 	// period. Every price of the meter bills under it. `last`
 	// is the latest event by timestamp, then by id. Fixed once the
 	// meter has a usage event (see `has_usage`).
-	Aggregation MeterAggregation `json:"aggregation,omitempty"`
-	CreatedAt   time.Time        `json:"created_at,omitempty"`
+	Aggregation MeterAggregation `json:"aggregation"`
+	CreatedAt   time.Time        `json:"created_at"`
 
 	// EventName The `event_name` usage events send for this meter.
-	EventName string `json:"event_name,omitempty"`
+	EventName string `json:"event_name"`
 
 	// HasUsage Whether the meter has usage events. Once it has, its
 	// `aggregation` cannot change. Held usage for its `event_name`
@@ -5534,11 +5519,11 @@ type Meter struct {
 	// get or update one meter; the meter list leaves it out. A create
 	// or update that succeeded leaves it out if it could not be read.
 	HasUsage  bool      `json:"has_usage,omitempty"`
-	Id        string    `json:"id,omitempty"`
-	Name      string    `json:"name,omitempty"`
+	Id        string    `json:"id"`
+	Name      string    `json:"name"`
 	TenantId  string    `json:"tenant_id,omitempty"`
-	Unit      string    `json:"unit,omitempty"`
-	UpdatedAt time.Time `json:"updated_at,omitempty"`
+	Unit      string    `json:"unit"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // MeterAggregation How the meter rolls its events into one quantity per billing
@@ -5562,7 +5547,7 @@ type PaymentMethod struct {
 
 // Plan defines model for Plan.
 type Plan struct {
-	BaseAmountCents int64 `json:"base_amount_cents,omitempty"`
+	BaseAmountCents int64 `json:"base_amount_cents"`
 
 	// BaseBillTiming When the recurring base fee is invoiced relative to the period it covers.
 	// in_arrears: base + usage billed at period end.
@@ -5570,24 +5555,24 @@ type Plan struct {
 	// carries upcoming period's base + elapsed period's usage). Usage lines are
 	// always arrears regardless of this field. A plan with no base fee is
 	// in_arrears. See ADR-031.
-	BaseBillTiming  PlanBaseBillTiming  `json:"base_bill_timing,omitempty"`
-	BillingInterval PlanBillingInterval `json:"billing_interval,omitempty"`
-	Code            string              `json:"code,omitempty"`
-	CreatedAt       time.Time           `json:"created_at,omitempty"`
-	Currency        string              `json:"currency,omitempty"`
+	BaseBillTiming  PlanBaseBillTiming  `json:"base_bill_timing"`
+	BillingInterval PlanBillingInterval `json:"billing_interval"`
+	Code            string              `json:"code"`
+	CreatedAt       time.Time           `json:"created_at"`
+	Currency        string              `json:"currency"`
 	Description     string              `json:"description,omitempty"`
-	Id              string              `json:"id,omitempty"`
-	Name            string              `json:"name,omitempty"`
+	Id              string              `json:"id"`
+	Name            string              `json:"name"`
 
 	// Prices The plan's usage prices from now on. A plan's meters are the
 	// meters it has a price for.
-	Prices []PlanPrice `json:"prices,omitempty"`
-	Status PlanStatus  `json:"status,omitempty"`
+	Prices []PlanPrice `json:"prices"`
+	Status PlanStatus  `json:"status"`
 
 	// TaxCode Stripe tax code for this plan. Absent means the tenant's `default_product_tax_code`.
 	TaxCode   string    `json:"tax_code,omitempty"`
 	TenantId  string    `json:"tenant_id,omitempty"`
-	UpdatedAt time.Time `json:"updated_at,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // PlanBaseBillTiming When the recurring base fee is invoiced relative to the period it covers.
@@ -5606,7 +5591,7 @@ type PlanStatus string
 
 // PlanDetail defines model for PlanDetail.
 type PlanDetail struct {
-	BaseAmountCents int64 `json:"base_amount_cents,omitempty"`
+	BaseAmountCents int64 `json:"base_amount_cents"`
 
 	// BaseBillTiming When the recurring base fee is invoiced relative to the period it covers.
 	// in_arrears: base + usage billed at period end.
@@ -5614,29 +5599,29 @@ type PlanDetail struct {
 	// carries upcoming period's base + elapsed period's usage). Usage lines are
 	// always arrears regardless of this field. A plan with no base fee is
 	// in_arrears. See ADR-031.
-	BaseBillTiming  PlanDetailBaseBillTiming  `json:"base_bill_timing,omitempty"`
-	BillingInterval PlanDetailBillingInterval `json:"billing_interval,omitempty"`
-	Code            string                    `json:"code,omitempty"`
-	CreatedAt       time.Time                 `json:"created_at,omitempty"`
-	Currency        string                    `json:"currency,omitempty"`
+	BaseBillTiming  PlanDetailBaseBillTiming  `json:"base_bill_timing"`
+	BillingInterval PlanDetailBillingInterval `json:"billing_interval"`
+	Code            string                    `json:"code"`
+	CreatedAt       time.Time                 `json:"created_at"`
+	Currency        string                    `json:"currency"`
 	Description     string                    `json:"description,omitempty"`
-	Id              string                    `json:"id,omitempty"`
+	Id              string                    `json:"id"`
 
 	// LiveSubscriptionCount Subscriptions on this plan that are not canceled. While it
 	// is above 0, `base_amount_cents` cannot change (see Update
 	// plan).
 	LiveSubscriptionCount int    `json:"live_subscription_count"`
-	Name                  string `json:"name,omitempty"`
+	Name                  string `json:"name"`
 
 	// Prices The plan's usage prices from now on. A plan's meters are the
 	// meters it has a price for.
 	Prices []PlanPrice      `json:"prices"`
-	Status PlanDetailStatus `json:"status,omitempty"`
+	Status PlanDetailStatus `json:"status"`
 
 	// TaxCode Stripe tax code for this plan. Absent means the tenant's `default_product_tax_code`.
 	TaxCode   string    `json:"tax_code,omitempty"`
 	TenantId  string    `json:"tenant_id,omitempty"`
-	UpdatedAt time.Time `json:"updated_at,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
 
 	// Used Whether a subscription has ever used the plan (canceled ones
 	// and scheduled plan changes included). On a plan no one has
@@ -5679,15 +5664,16 @@ type PlanPrice struct {
 	Mode PlanPriceMode `json:"mode"`
 
 	// PackageAmountCents Price of one package in cents, as a decimal string.
-	PackageAmountCents string `json:"package_amount_cents,omitempty"`
-	PackageSize        int64  `json:"package_size,omitempty"`
+	PackageAmountCents string `json:"package_amount_cents"`
+	PackageSize        int64  `json:"package_size"`
 	PlanId             string `json:"plan_id"`
+	TenantId           string `json:"tenant_id,omitempty"`
 
 	// Tiers Empty (`[]`) unless `mode` is `graduated`.
-	Tiers []PriceTier `json:"tiers,omitempty"`
+	Tiers []PriceTier `json:"tiers"`
 
 	// UnitAmountCents Price per unit in cents, as a decimal string.
-	UnitAmountCents string `json:"unit_amount_cents,omitempty"`
+	UnitAmountCents string `json:"unit_amount_cents"`
 
 	// UpdatedAt When the content shown was saved.
 	UpdatedAt time.Time `json:"updated_at"`
@@ -5782,18 +5768,19 @@ type PriceWrite struct {
 	Mode PriceWriteMode `json:"mode"`
 
 	// PackageAmountCents Price of one package in cents, as a decimal string.
-	PackageAmountCents string `json:"package_amount_cents,omitempty"`
-	PackageSize        int64  `json:"package_size,omitempty"`
+	PackageAmountCents string `json:"package_amount_cents"`
+	PackageSize        int64  `json:"package_size"`
 	PlanId             string `json:"plan_id"`
 
 	// Removed True on the answer to a removal.
-	Removed bool `json:"removed,omitempty"`
+	Removed  bool   `json:"removed,omitempty"`
+	TenantId string `json:"tenant_id,omitempty"`
 
 	// Tiers Empty (`[]`) unless `mode` is `graduated`.
-	Tiers []PriceTier `json:"tiers,omitempty"`
+	Tiers []PriceTier `json:"tiers"`
 
 	// UnitAmountCents Price per unit in cents, as a decimal string.
-	UnitAmountCents string `json:"unit_amount_cents,omitempty"`
+	UnitAmountCents string `json:"unit_amount_cents"`
 
 	// UpdatedAt When the content shown was saved.
 	UpdatedAt time.Time `json:"updated_at"`
@@ -5807,7 +5794,7 @@ type PriceWriteMode string
 
 // ProviderCostRate defines model for ProviderCostRate.
 type ProviderCostRate struct {
-	CreatedAt time.Time `json:"created_at,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
 
 	// Currency Always USD. Cost and margin count every rate in US cents.
 	Currency  ProviderCostRateCurrency `json:"currency"`
@@ -5819,7 +5806,7 @@ type ProviderCostRate struct {
 
 	// UnitCostCents US cents per token, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 tokens).
 	UnitCostCents string    `json:"unit_cost_cents"`
-	UpdatedAt     time.Time `json:"updated_at,omitempty"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // ProviderCostRateCurrency Always USD. Cost and margin count every rate in US cents.
@@ -8358,9 +8345,6 @@ type CreatePriceOverrideParams struct {
 
 // CreatePriceOverrideJSONBodyMode defines parameters for CreatePriceOverride.
 type CreatePriceOverrideJSONBodyMode string
-
-// DeletePriceOverride200JSONResponseBodyActive defines parameters for DeletePriceOverride.
-type DeletePriceOverride200JSONResponseBodyActive bool
 
 // GetV1ProviderCostsParams defines parameters for GetV1ProviderCosts.
 type GetV1ProviderCostsParams struct {

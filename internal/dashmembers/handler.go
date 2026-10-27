@@ -81,17 +81,17 @@ func (h *Handler) RegisterPublicRoutes(r chi.Router) {
 	r.Post("/accept-invite", h.acceptInvite)
 }
 
-// memberView mirrors web-v2/src/lib/members.ts MemberView.
-type memberView struct {
+// MemberView mirrors web-v2/src/lib/members.ts MemberView.
+type MemberView struct {
 	UserID   string `json:"user_id"`
 	Email    string `json:"email"`
 	Role     string `json:"role"`
 	JoinedAt string `json:"joined_at"`
 }
 
-// invitationView mirrors members.ts InvitationView. status is derived
+// InvitationView mirrors members.ts InvitationView. status is derived
 // server-side; clients treat it as authoritative.
-type invitationView struct {
+type InvitationView struct {
 	ID             string  `json:"id"`
 	Email          string  `json:"email"`
 	Role           string  `json:"role"`
@@ -113,8 +113,8 @@ func fmtTimePtr(t *time.Time) *string {
 	return &s
 }
 
-func (h *Handler) invitationView(inv Invitation, now time.Time) invitationView {
-	return invitationView{
+func (h *Handler) invitationView(inv Invitation, now time.Time) InvitationView {
+	return InvitationView{
 		ID:             inv.ID,
 		Email:          inv.Email,
 		Role:           inv.Role,
@@ -136,14 +136,14 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := h.svc.clock.Now(ctx)
-	mv := make([]memberView, 0, len(members))
+	mv := make([]MemberView, 0, len(members))
 	for _, m := range members {
-		mv = append(mv, memberView{
+		mv = append(mv, MemberView{
 			UserID: m.UserID, Email: m.Email, Role: m.Role,
 			JoinedAt: m.JoinedAt.Format(rfc3339),
 		})
 	}
-	iv := make([]invitationView, 0, len(invs))
+	iv := make([]InvitationView, 0, len(invs))
 	for _, inv := range invs {
 		iv = append(iv, h.invitationView(inv, now))
 	}

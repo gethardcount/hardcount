@@ -85,7 +85,8 @@ func (h *PublicPaymentHandler) Routes() chi.Router {
 	return r
 }
 
-type tokenValidateResponse struct {
+// TokenValidateResponse is GET /v1/public/payment-updates/{token}.
+type TokenValidateResponse struct {
 	CustomerName  string `json:"customer_name"`
 	InvoiceNumber string `json:"invoice_number"`
 	// InvoiceStatus lets the page tell the truth about a terminal
@@ -193,7 +194,7 @@ func (h *PublicPaymentHandler) validateToken(w http.ResponseWriter, r *http.Requ
 		FROM tenant_settings WHERE tenant_id = $1
 	`, token.TenantID).Scan(&branding.CompanyName, &branding.CompanyEmail, &branding.LogoURL, &branding.BrandColor, &branding.SupportURL)
 
-	respond.JSON(w, r, http.StatusOK, tokenValidateResponse{
+	respond.JSON(w, r, http.StatusOK, TokenValidateResponse{
 		CustomerName:   cust.DisplayName,
 		InvoiceNumber:  invoiceNumber,
 		InvoiceStatus:  invoiceStatus,
@@ -212,7 +213,8 @@ func writeOnlinePaymentUnavailable(w http.ResponseWriter, r *http.Request) {
 		"Adding a card online isn't available for this account right now. Please contact your billing administrator.")
 }
 
-type checkoutResponse struct {
+// CheckoutResponse is POST /v1/public/payment-updates/{token}/checkout.
+type CheckoutResponse struct {
 	URL string `json:"url"`
 }
 
@@ -408,7 +410,7 @@ func (h *PublicPaymentHandler) createCheckoutSession(w http.ResponseWriter, r *h
 		"session_id", sess.ID,
 	)
 
-	respond.JSON(w, r, http.StatusCreated, checkoutResponse{
+	respond.JSON(w, r, http.StatusCreated, CheckoutResponse{
 		URL: sess.URL,
 	})
 }

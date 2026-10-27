@@ -30,7 +30,7 @@ export type GetV1Whoami200 = {
      * means no email of any kind is sent. Settings → Email
      * (`GET /v1/settings/email`) has the details.
      */
-  smtp_configured?: boolean;
+  smtp_configured: boolean;
   user_id?: string;
   email?: string;
   key_id?: string;

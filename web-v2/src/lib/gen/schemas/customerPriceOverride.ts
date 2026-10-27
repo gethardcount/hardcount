@@ -24,12 +24,12 @@ export interface CustomerPriceOverride {
   /** As on PriceShape. */
   mode: CustomerPriceOverrideMode;
   /** Price per unit in cents, as a decimal string. */
-  unit_amount_cents?: string;
+  unit_amount_cents: string;
   /** Empty (`[]`) unless `mode` is `graduated`. */
-  tiers?: PriceTier[];
-  package_size?: number;
+  tiers: PriceTier[];
+  package_size: number;
   /** Price of one package in cents, as a decimal string. */
-  package_amount_cents?: string;
+  package_amount_cents: string;
   reason?: string;
   active: boolean;
   /**

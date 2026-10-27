@@ -167,7 +167,7 @@ export interface Invoice {
      * an invoice has no `stripe_payment_intent_id`, so there is no card
      * to refund.
      */
-  paid_out_of_band?: boolean;
+  paid_out_of_band: boolean;
   last_payment_error?: string;
   auto_charge_pending?: boolean;
   /**
@@ -227,7 +227,7 @@ export interface Invoice {
      * dashboard renders a "simulated" badge from this authoritative flag
      * instead of inferring it. Always false in live mode.
      */
-  is_simulated?: boolean;
+  is_simulated: boolean;
   /**
      * The test clock this invoice's dates follow: the clock its customer
      * is pinned to, for cycle and one-off invoices alike. Read from the

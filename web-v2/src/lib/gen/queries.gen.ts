@@ -60,7 +60,6 @@ import type {
   CustomerPriceOverride,
   CustomerUsage,
   DeleteDunningPolicy200,
-  DeletePriceOverride200,
   DeleteV1TestClocksId200,
   DeleteV1WebhookEndpointsEndpointsId200,
   DiscardHeldUsage200,
@@ -184,10 +183,12 @@ import type {
   PostV1AuthLoginBody,
   PostV1AuthMode200,
   PostV1AuthModeBody,
+  PostV1AuthPasswordResetConfirm200,
   PostV1AuthPasswordResetConfirmBody,
   PostV1AuthPasswordResetRequest200,
   PostV1AuthPasswordResetRequestBody,
   PostV1BillingRun200,
+  PostV1BillingRun206,
   PostV1CreditNotesBody,
   PostV1CreditNotesIdSend200,
   PostV1CreditNotesIdSendBody,
@@ -2044,12 +2045,13 @@ export const getGetV1PublicCostDashboardTokenUrl = (token: string,) => {
  * Unauthenticated. The `vlx_pcd_…` token in the URL is the sole
  * credential — partners embed via iframe / fetch from their own
  * app without an API key. Sanitized projection: customer_id,
- * tenant_id, billing_period, subscriptions, usage[], totals,
- * projected_total_cents. PII (email, display_name, external_id,
+ * tenant_id, livemode, billing_period, subscriptions, usage[],
+ * totals, projected_total_cents, credits. PII (email, display_name, external_id,
  * metadata, billing_profile) is NEVER on this response. Wrong
  * prefix or unknown token → 401 (anti-enumeration). No active
- * sub → 200 with `billing_period.source = "no_subscription"`
- * and empty arrays.
+ * sub → 200 with `billing_period.source = "no_subscription"`:
+ * `subscriptions`, `usage` and `totals` are empty, and `credits`
+ * still lists the customer's credit balance.
  * @summary Public cost-dashboard projection (ADR-032)
  */
 export const getV1PublicCostDashboardToken = async (token: string, options?: RequestInit): Promise<GetV1PublicCostDashboardToken200> => {
@@ -10671,9 +10673,9 @@ export const getPostV1AuthPasswordResetConfirmUrl = () => {
  * The token is invalidated on use; reuse or expired tokens return 422.
  * @summary Set a new password using a reset token
  */
-export const postV1AuthPasswordResetConfirm = async (postV1AuthPasswordResetConfirmBody: PostV1AuthPasswordResetConfirmBody, options?: RequestInit): Promise<void> => {
+export const postV1AuthPasswordResetConfirm = async (postV1AuthPasswordResetConfirmBody: PostV1AuthPasswordResetConfirmBody, options?: RequestInit): Promise<PostV1AuthPasswordResetConfirm200> => {
 
-  return orvalClient<void>(getPostV1AuthPasswordResetConfirmUrl(),
+  return orvalClient<PostV1AuthPasswordResetConfirm200>(getPostV1AuthPasswordResetConfirmUrl(),
   {
     ...options,
     method: 'POST',
@@ -11479,9 +11481,9 @@ export const getPostV1BillingRunUrl = () => {
 /**
  * @summary Trigger billing cycle
  */
-export const postV1BillingRun = async ( options?: RequestInit): Promise<PostV1BillingRun200> => {
+export const postV1BillingRun = async ( options?: RequestInit): Promise<PostV1BillingRun200 | PostV1BillingRun206> => {
 
-  return orvalClient<PostV1BillingRun200>(getPostV1BillingRunUrl(),
+  return orvalClient<PostV1BillingRun200 | PostV1BillingRun206>(getPostV1BillingRunUrl(),
   {
     ...options,
     method: 'POST'
@@ -15639,9 +15641,9 @@ export const getDeletePriceOverrideUrl = (id: string,) => {
  * change, an added item) pays the price's rate from the join.
  * @summary End a customer price override
  */
-export const deletePriceOverride = async (id: string, options?: RequestInit): Promise<DeletePriceOverride200> => {
+export const deletePriceOverride = async (id: string, options?: RequestInit): Promise<CustomerPriceOverride> => {
 
-  return orvalClient<DeletePriceOverride200>(getDeletePriceOverrideUrl(id),
+  return orvalClient<CustomerPriceOverride>(getDeletePriceOverrideUrl(id),
   {
     ...options,
     method: 'DELETE'

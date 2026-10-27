@@ -13,14 +13,14 @@ import type { PlanPrice } from './planPrice';
 import type { PlanStatus } from './planStatus';
 
 export interface Plan {
-  id?: string;
+  id: string;
   tenant_id?: string;
-  code?: string;
-  name?: string;
-  currency?: string;
-  billing_interval?: PlanBillingInterval;
-  status?: PlanStatus;
-  base_amount_cents?: number;
+  code: string;
+  name: string;
+  currency: string;
+  billing_interval: PlanBillingInterval;
+  status: PlanStatus;
+  base_amount_cents: number;
   /**
      * When the recurring base fee is invoiced relative to the period it covers.
      * in_arrears: base + usage billed at period end.
@@ -29,15 +29,15 @@ export interface Plan {
      * always arrears regardless of this field. A plan with no base fee is
      * in_arrears. See ADR-031.
      */
-  base_bill_timing?: PlanBaseBillTiming;
+  base_bill_timing: PlanBaseBillTiming;
   /**
      * The plan's usage prices from now on. A plan's meters are the
      * meters it has a price for.
      */
-  prices?: PlanPrice[];
+  prices: PlanPrice[];
   description?: string;
   /** Stripe tax code for this plan. Absent means the tenant's `default_product_tax_code`. */
   tax_code?: string;
-  created_at?: string;
-  updated_at?: string;
+  created_at: string;
+  updated_at: string;
 }

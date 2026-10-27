@@ -2922,10 +2922,10 @@ func max64(a, b int64) int64 {
 // and no RLS gap since audit.Logger.Query already runs under the
 // tenant-scoped tx.
 
-// timelineEvent is the wire shape the SPA's timeline component consumes.
+// TimelineEvent is the wire shape the SPA's timeline component consumes.
 // Kept structurally compatible with the invoice payment-timeline event
 // so the React renderer can handle both without branching logic.
-type timelineEvent struct {
+type TimelineEvent struct {
 	Timestamp   string `json:"timestamp"`
 	Source      string `json:"source"`
 	EventType   string `json:"event_type"`
@@ -2996,7 +2996,7 @@ type timelineEvent struct {
 // into the older fields: the title is the description, the meta line
 // without the actor is the detail (the card shows the actor from
 // actor_name), the problem is the error and the tone is the status.
-func (e *timelineEvent) fillFromLine(id string, actor *activity.Actor) {
+func (e *TimelineEvent) fillFromLine(id string, actor *activity.Actor) {
 	e.Line.ID = id
 	e.Line.Actor = actor
 	e.Line = activity.Stamp(e.Line, e.sortAt, e.recordedAt, e.IsSimulated)
@@ -3153,7 +3153,7 @@ func (h *Handler) activityTimeline(w http.ResponseWriter, r *http.Request) {
 	// clock everywhere, so the heuristic became actively wrong.
 	// Per-row metadata check below.
 
-	events := []timelineEvent{}
+	events := []TimelineEvent{}
 	truncated := false
 
 	if h.auditLogger != nil {
@@ -3229,7 +3229,7 @@ func (h *Handler) activityTimeline(w http.ResponseWriter, r *http.Request) {
 						sortAt = t
 					}
 				}
-				ev := timelineEvent{
+				ev := TimelineEvent{
 					Timestamp:      e.CreatedAt.UTC().Format(time.RFC3339),
 					Source:         "audit",
 					EventType:      e.Action,
@@ -3273,8 +3273,8 @@ func (h *Handler) activityTimeline(w http.ResponseWriter, r *http.Request) {
 	// query's DESC.
 	slices.Reverse(events)
 	timeline.SortStable(events,
-		func(e timelineEvent) time.Time { return e.sortAt },
-		func(a, b timelineEvent) bool { return a.recordedAt.Before(b.recordedAt) })
+		func(e TimelineEvent) time.Time { return e.sortAt },
+		func(a, b TimelineEvent) bool { return a.recordedAt.Before(b.recordedAt) })
 
 	respond.JSON(w, r, http.StatusOK, map[string]any{
 		"events": events,

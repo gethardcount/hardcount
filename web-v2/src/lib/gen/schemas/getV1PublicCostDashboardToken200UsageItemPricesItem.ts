@@ -12,8 +12,8 @@ import type { GetV1PublicCostDashboardToken200UsageItemPricesItemDimensionMatch 
 export type GetV1PublicCostDashboardToken200UsageItemPricesItem = {
   /** The labels the price takes. Absent for a price that takes every event. */
   dimension_match?: GetV1PublicCostDashboardToken200UsageItemPricesItemDimensionMatch;
-  quantity?: string;
-  amount_cents?: number;
+  quantity: string;
+  amount_cents: number;
   /** Per-unit price in DECIMAL CENTS (ADR-045, the Stripe unit_amount_decimal model) — NOT dollars. "0.0003" is 0.0003 CENTS per unit ($3.00 per 1M units); multiplying it by `quantity` yields CENTS, matching the sibling `amount_cents`. Reading it as dollars overstates the cost 100x. */
   unit_amount_decimal?: string;
 };

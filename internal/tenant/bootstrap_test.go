@@ -89,7 +89,7 @@ func TestBootstrap_Success(t *testing.T) {
 		t.Errorf("Cache-Control: got %q, want no-store (credentials transit once)", cc)
 	}
 
-	var resp bootstrapResponse
+	var resp BootstrapResponse
 	_ = json.NewDecoder(rec.Body).Decode(&resp)
 
 	if resp.Tenant.Name != "Test Corp" {
@@ -285,7 +285,7 @@ func TestBootstrap_DefaultTenantName(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.Routes().ServeHTTP(rec, req)
 
-	var resp bootstrapResponse
+	var resp BootstrapResponse
 	_ = json.NewDecoder(rec.Body).Decode(&resp)
 	if resp.Tenant.Name != "Demo Tenant" {
 		t.Errorf("default name: got %q, want 'Demo Tenant' (unified with the CLI default — one writer, one default)", resp.Tenant.Name)

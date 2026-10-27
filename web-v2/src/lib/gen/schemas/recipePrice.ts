@@ -17,4 +17,8 @@ export type RecipePrice = PriceShape & {
   /** The `event_name` of the recipe meter the price is on. */
   meter: string;
   dimension_match: RecipePriceDimensionMatch;
-};
+} & Required<Pick<PriceShape & {
+  /** The `event_name` of the recipe meter the price is on. */
+  meter: string;
+  dimension_match: RecipePriceDimensionMatch;
+}, 'unit_amount_cents' | 'tiers' | 'package_size' | 'package_amount_cents'>>;

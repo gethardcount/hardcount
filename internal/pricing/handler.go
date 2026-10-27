@@ -156,13 +156,13 @@ func (h *Handler) createMeter(w http.ResponseWriter, r *http.Request) {
 	h.respondMeter(w, r, http.StatusCreated, tenantID, meter, true)
 }
 
-// meterResponse is one meter as POST, GET and PATCH /v1/meters answer it:
+// MeterResponse is one meter as POST, GET and PATCH /v1/meters answer it:
 // the meter and whether it has usage events. Once it has, its aggregation is
 // fixed (ADR-130 §2), and the dashboard says so before an edit. Held rows do
 // not count. The list leaves has_usage out: proving a meter has no events
 // scans the account's events (ADR-130 §18), once per meter. A create or
 // update whose has_usage read fails leaves it out too (respondMeter).
-type meterResponse struct {
+type MeterResponse struct {
 	domain.Meter
 	HasUsage *bool `json:"has_usage,omitempty"`
 }
@@ -181,10 +181,10 @@ func (h *Handler) respondMeter(w http.ResponseWriter, r *http.Request, status in
 			respond.InternalError(w, r)
 			return
 		}
-		respond.JSON(w, r, status, meterResponse{Meter: meter})
+		respond.JSON(w, r, status, MeterResponse{Meter: meter})
 		return
 	}
-	respond.JSON(w, r, status, meterResponse{Meter: meter, HasUsage: &has})
+	respond.JSON(w, r, status, MeterResponse{Meter: meter, HasUsage: &has})
 }
 
 func (h *Handler) listMeters(w http.ResponseWriter, r *http.Request) {
@@ -243,15 +243,21 @@ func (h *Handler) updateMeter(w http.ResponseWriter, r *http.Request) {
 // Plans
 // ---------------------------------------------------------------------------
 
-// planResponse is a plan as the API answers it: the plan and its prices from
-// now on. GET /v1/plans/{id} adds whether the plan was ever used, which
-// decides when a price edit applies (ADR-130 §5), and the number of live
-// subscriptions that keep its base fee fixed (ADR-034).
-type planResponse struct {
+// PlanResponse is a plan as GET /v1/plans lists it: the plan and its prices
+// from now on.
+type PlanResponse struct {
 	domain.Plan
-	Prices                []domain.PlanPrice `json:"prices"`
-	Used                  *bool              `json:"used,omitempty"`
-	LiveSubscriptionCount *int               `json:"live_subscription_count,omitempty"`
+	Prices []domain.PlanPrice `json:"prices"`
+}
+
+// PlanDetailResponse is one plan as POST, GET and PATCH /v1/plans/{id}
+// answer it. It adds whether the plan was ever used, which decides when a
+// price edit applies (ADR-130 §5), and the number of live subscriptions that
+// keep its base fee fixed (ADR-034).
+type PlanDetailResponse struct {
+	PlanResponse
+	Used                  bool `json:"used"`
+	LiveSubscriptionCount int  `json:"live_subscription_count"`
 }
 
 func pricesOrEmpty(p []domain.PlanPrice) []domain.PlanPrice {
@@ -281,9 +287,7 @@ func (h *Handler) createPlan(w http.ResponseWriter, r *http.Request) {
 	if h.auditLogger != nil {
 		_ = h.auditLogger.Log(r.Context(), tenantID, domain.AuditActionCreate, "plan", plan.ID, plan.Name, map[string]any{"prices": len(prices)})
 	}
-	used := false
-	live := 0
-	respond.JSON(w, r, http.StatusCreated, planResponse{Plan: plan, Prices: pricesOrEmpty(prices), Used: &used, LiveSubscriptionCount: &live})
+	respond.JSON(w, r, http.StatusCreated, PlanDetailResponse{PlanResponse: PlanResponse{Plan: plan, Prices: pricesOrEmpty(prices)}})
 }
 
 func (h *Handler) listPlans(w http.ResponseWriter, r *http.Request) {
@@ -308,9 +312,9 @@ func (h *Handler) listPlans(w http.ResponseWriter, r *http.Request) {
 		slog.ErrorContext(r.Context(), "list plans: prices", "error", err)
 		return
 	}
-	out := make([]planResponse, 0, len(plans))
+	out := make([]PlanResponse, 0, len(plans))
 	for _, p := range plans {
-		out = append(out, planResponse{Plan: p, Prices: pricesOrEmpty(prices[p.ID])})
+		out = append(out, PlanResponse{Plan: p, Prices: pricesOrEmpty(prices[p.ID])})
 	}
 	respond.List(w, r, out, total)
 }
@@ -351,7 +355,7 @@ func (h *Handler) respondPlan(w http.ResponseWriter, r *http.Request, status int
 		slog.ErrorContext(r.Context(), "get plan: live subscriptions", "error", err)
 		return
 	}
-	respond.JSON(w, r, status, planResponse{Plan: plan, Prices: pricesOrEmpty(prices[plan.ID]), Used: &used, LiveSubscriptionCount: &live})
+	respond.JSON(w, r, status, PlanDetailResponse{PlanResponse: PlanResponse{Plan: plan, Prices: pricesOrEmpty(prices[plan.ID])}, Used: used, LiveSubscriptionCount: live})
 }
 
 func (h *Handler) updatePlan(w http.ResponseWriter, r *http.Request) {
@@ -377,18 +381,18 @@ func (h *Handler) updatePlan(w http.ResponseWriter, r *http.Request) {
 // Plan prices
 // ---------------------------------------------------------------------------
 
-// priceWriteResponse is how a price write answers: the price, and when the
+// PriceWriteResponse is how a price write answers: the price, and when the
 // write applies (ADR-130 §5). A removal also says it removed the price and
 // which customer overrides it ended.
-type priceWriteResponse struct {
+type PriceWriteResponse struct {
 	domain.PlanPrice
 	Effective      Effective       `json:"effective"`
 	Removed        bool            `json:"removed,omitempty"`
 	EndedOverrides []EndedOverride `json:"ended_overrides,omitempty"`
 }
 
-func writeResponse(pw PriceWrite) priceWriteResponse {
-	out := priceWriteResponse{PlanPrice: pw.Price, Effective: pw.Effective, Removed: pw.Removed}
+func writeResponse(pw PriceWrite) PriceWriteResponse {
+	out := PriceWriteResponse{PlanPrice: pw.Price, Effective: pw.Effective, Removed: pw.Removed}
 	if pw.Removed {
 		out.EndedOverrides = pw.EndedOverrides
 		if out.EndedOverrides == nil {

@@ -14,16 +14,16 @@ import type { GetV1PublicCostDashboardToken200TotalsItem } from './getV1PublicCo
 import type { GetV1PublicCostDashboardToken200UsageItem } from './getV1PublicCostDashboardToken200UsageItem';
 
 export type GetV1PublicCostDashboardToken200 = {
-  customer_id?: string;
-  tenant_id?: string;
-  livemode?: boolean;
-  billing_period?: GetV1PublicCostDashboardToken200BillingPeriod;
-  subscriptions?: GetV1PublicCostDashboardToken200SubscriptionsItem[];
-  usage?: GetV1PublicCostDashboardToken200UsageItem[];
+  customer_id: string;
+  tenant_id: string;
+  livemode: boolean;
+  billing_period: GetV1PublicCostDashboardToken200BillingPeriod;
+  subscriptions: GetV1PublicCostDashboardToken200SubscriptionsItem[];
+  usage: GetV1PublicCostDashboardToken200UsageItem[];
   /** One entry per currency present in `usage`. */
-  totals?: GetV1PublicCostDashboardToken200TotalsItem[];
+  totals: GetV1PublicCostDashboardToken200TotalsItem[];
   /** The metered cost of the current billing period so far, in cents, including usage a threshold invoice already billed. Recurring base fees are not included — an in_advance base is already invoiced at period open. */
-  projected_total_cents?: number;
+  projected_total_cents: number;
   /** The customer's credit position, one entry per currency, ordered by currency. `balance_cents` is the ledger balance in that currency, less any grant past its expiry date that is not yet written off: credit is drawn down when an invoice is issued, so it does not move with usage. `unbilled_usage_cents` is the usage no invoice has billed yet that will be invoiced in that currency, and `estimated_remaining_cents` is the balance minus that, never below zero. These three are the same figures `GET /v1/credits/balance/{customer_id}/live` returns. `unbilled_usage_cents` differs from `projected_total_cents` after a threshold invoice: it leaves out the usage that invoice billed. It is an estimate: tax, base fees billed at period end and unpaid invoices are not subtracted. */
-  credits?: GetV1PublicCostDashboardToken200CreditsItem[];
+  credits: GetV1PublicCostDashboardToken200CreditsItem[];
 };

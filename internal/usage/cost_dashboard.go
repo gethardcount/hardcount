@@ -210,9 +210,10 @@ func mergeCredits(summary []CostDashboardCredits, live domain.CreditLiveBalance)
 // 401 (anti-enumeration).
 //
 // Empty-state contract: when the customer has no active subscription
-// (no_subscription branch), the response carries empty arrays + a
-// `billing_period.source = "no_subscription"` instead of a 5xx so
-// the embed widget can render a clean empty state.
+// (no_subscription branch), the response carries empty subscriptions,
+// usage and totals, the customer's credits, and
+// `billing_period.source = "no_subscription"` instead of a 5xx, so the
+// embed widget can render a clean empty state that still shows the balance.
 func (a *CostDashboardAssembler) GetByToken(ctx context.Context, token string) (any, error) {
 	token = strings.TrimSpace(token)
 	if token == "" {

@@ -122,7 +122,9 @@ type SetupSessionRequest struct {
 	ReturnURL string `json:"return_url,omitempty"`
 }
 
-type setupSessionResponse struct {
+// SetupSessionResponse is the setup-session 201: the Stripe Checkout page
+// that saves a card, and its session id.
+type SetupSessionResponse struct {
 	URL       string `json:"url"`
 	SessionID string `json:"session_id"`
 }
@@ -236,11 +238,11 @@ type SendSetupEmailRequest struct {
 	Note string `json:"note,omitempty"`
 }
 
-// sendSetupEmailResponse echoes the recipient address back to the
+// SendSetupEmailResponse echoes the recipient address back to the
 // dashboard so the toast can read "Setup link sent to billing@acme.com"
 // — useful confirmation when a customer has multiple addresses on
 // different surfaces (profile vs billing_profile vs portal session).
-type sendSetupEmailResponse struct {
+type SendSetupEmailResponse struct {
 	To      string `json:"to"`
 	Subject string `json:"subject"`
 }
@@ -367,7 +369,7 @@ func (h *Handler) operatorSendSetupEmail(w http.ResponseWriter, r *http.Request)
 		})
 	}
 
-	respond.JSON(w, r, http.StatusAccepted, sendSetupEmailResponse{
+	respond.JSON(w, r, http.StatusAccepted, SendSetupEmailResponse{
 		To:      email,
 		Subject: "Add a payment method",
 	})
@@ -394,5 +396,5 @@ func (h *Handler) operatorCreateSetupSession(w http.ResponseWriter, r *http.Requ
 		respond.FromError(w, r, err, "payment_method")
 		return
 	}
-	respond.JSON(w, r, http.StatusCreated, setupSessionResponse{URL: url, SessionID: sessionID})
+	respond.JSON(w, r, http.StatusCreated, SetupSessionResponse{URL: url, SessionID: sessionID})
 }

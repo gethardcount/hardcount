@@ -80,7 +80,7 @@ func TestDisputeTimelineEvents(t *testing.T) {
 
 	// Same instant as the payment it disputes: the dispute sorts after it.
 	at := opened
-	events := []timelineEvent{
+	events := []TimelineEvent{
 		{EventType: domain.EventPaymentDisputeOpened, sortAt: at, tieRank: rankDisputeOpened},
 		{EventType: "invoice.paid", sortAt: at, tieRank: rankLifecycleTerminal},
 	}

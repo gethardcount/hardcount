@@ -632,7 +632,7 @@ func (h *Handler) batchIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respond.JSON(w, r, http.StatusCreated, batchResponse{
+	respond.JSON(w, r, http.StatusCreated, BatchResponse{
 		Ingested:       res.Inserted,
 		Deduplicated:   res.Deduplicated,
 		Total:          len(events),
@@ -641,10 +641,10 @@ func (h *Handler) batchIngest(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// batchResponse is the batch 201. The counts by billing_status count written
+// BatchResponse is the batch 201. The counts by billing_status count written
 // rows answered with each status (open_period.go); results holds each event's
 // result at its index in the request.
-type batchResponse struct {
+type BatchResponse struct {
 	Ingested     int `json:"ingested"`
 	Deduplicated int `json:"deduplicated"`
 	Total        int `json:"total"`

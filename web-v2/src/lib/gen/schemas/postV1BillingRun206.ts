@@ -8,7 +8,7 @@
  * OpenAPI spec version: 2026-04-07
  */
 
-export type DeletePriceOverride200 = {
-  id: string;
-  active: false;
+export type PostV1BillingRun206 = {
+  invoices_generated: number;
+  errors: string[];
 };
