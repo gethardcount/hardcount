@@ -40,8 +40,9 @@ interface ItemChange {
     invoice_id?: string
     credited_to_balance_cents: number
     reduced_open_invoices_cents: number
+    held_on_draft_invoices_cents: number
   }
-  new_period_invoice?: { id: string; invoice_number: string; total_amount_cents: number; currency: string }
+  new_period_invoice?: { id: string; invoice_number: string; status: string; total_amount_cents: number; currency: string }
 }
 interface Preview {
   lines: { description: string; amount_cents: number }[]
@@ -292,6 +293,44 @@ test('a seat decrease that credits a paid and an open invoice says where each pa
   // The parts are what happened: the open upgrade invoice owes less by its part.
   const { invoice: upgrade } = await api<{ invoice: Invoice }>('GET', `/invoices/${up.proration!.invoice_id}`)
   expect(upgrade.amount_due_cents).toBe(up.proration!.amount_cents - p.reduced_open_invoices_cents)
+})
+
+// A credit on a draft invoice waits for the draft to be finalized. Collection
+// is paused with keep_as_draft, so the renewal stays a draft; a seat
+// decrease's credit is held on it, neither taken off it yet nor put on the
+// balance, and the toast says so.
+test('a seat decrease over a draft renewal says its credit waits for the draft', async ({ page }) => {
+  const seat = await planBilledInAdvance(1000)
+  const clock = await createClock()
+  const customer = await createCustomer(clock.id)
+  const id = uniq()
+  const subscription = await api<Sub>('POST', '/subscriptions', {
+    code: `e2e-seats-${id}`, display_name: `E2E Seats ${id}`, customer_id: customer.id,
+    items: [{ plan_id: seat.id, quantity: 5 }], billing_time: 'anniversary',
+  })
+  const [first] = await invoicesFor(customer.id)
+  await api('POST', `/invoices/${first.id}/record-payment`, { note: 'E2E paid outside Stripe' })
+  await api('PUT', `/subscriptions/${subscription.id}/pause-collection`, { behavior: 'keep_as_draft' })
+  await advanceDays(clock, 40)
+  const renewal = (await subscriptionInvoices(subscription.id)).find(i => i.id !== first.id)!
+  expect(renewal.status).toBe('draft')
+
+  await page.goto(`/subscriptions/${subscription.id}`)
+  await itemsCard(page).getByRole('button', { name: 'Change quantity' }).click()
+  const quantity = page.getByRole('dialog', { name: 'Change quantity' })
+  await quantity.getByLabel('Quantity').fill('1')
+  const changing = apiCall(page, 'PATCH', /\/items\/[^/]+$/)
+  await quantity.getByRole('button', { name: 'Save' }).click()
+  const res = await changing
+  expect(res.ok()).toBe(true)
+  const p = ((await res.json()) as ItemChange).proration!
+  expect(p.type).toBe('adjustment')
+  expect(p.held_on_draft_invoices_cents).toBeGreaterThan(0)
+  expect([p.held_on_draft_invoices_cents, p.credited_to_balance_cents, p.reduced_open_invoices_cents]).toEqual([p.amount_cents, 0, 0])
+  await expect(toasts(page).getByText(`${usd(p.held_on_draft_invoices_cents)} held until the draft invoice is finalized`, { exact: true })).toBeVisible()
+  // Nothing has moved yet: the draft still asks for all of it.
+  const { invoice: draft } = await api<{ invoice: Invoice }>('GET', `/invoices/${renewal.id}`)
+  expect(draft.amount_due_cents).toBe(renewal.amount_due_cents)
 })
 
 test('cancel at period end shows its date and can be undone; cancel now needs CANCEL typed, reads "Ended" and bills the days used', async ({ page }) => {

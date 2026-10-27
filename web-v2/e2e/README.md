@@ -23,7 +23,8 @@ the screen, and that the main things an operator does work end to end.
 - `subscriptions.spec.ts` changes subscriptions on screen: a plan change now
   (with its proration invoice) and at renewal, a change now to a yearly plan
   (the dialog's words and the invoice the toast names), a seat decrease whose
-  credit goes partly to the balance and partly off an open invoice, cancel at
+  credit goes partly to the balance and partly off an open invoice, a seat
+  decrease over a draft renewal (its credit waits for the draft), cancel at
   period end, undo and cancel now, quantity and item changes against the
   upcoming invoice, and the trial and collection controls. Each journey checks
   the page, the toast and any invoice the change made against the API.
