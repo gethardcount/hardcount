@@ -9,9 +9,9 @@
  */
 
 export type GetV1PublicCostDashboardToken200SubscriptionsItem = {
-  id?: string;
-  plan_name?: string;
-  currency?: string;
-  current_period_start?: string;
-  current_period_end?: string;
+  id: string;
+  plan_name: string;
+  currency: string;
+  current_period_start: string;
+  current_period_end: string;
 };

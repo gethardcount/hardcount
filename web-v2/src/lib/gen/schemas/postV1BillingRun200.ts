@@ -9,6 +9,6 @@
  */
 
 export type PostV1BillingRun200 = {
-  invoices_generated?: number;
-  errors?: string[];
+  invoices_generated: number;
+  errors: string[];
 };

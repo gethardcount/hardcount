@@ -25,5 +25,5 @@ export type PostV1SubscriptionsIdRetryBilling200 = {
      * The attempt did not complete and nothing was saved;
      * the next billing run attempts the subscription.
      */
-  still_due?: boolean;
+  still_due: boolean;
 };

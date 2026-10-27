@@ -9,6 +9,6 @@
  */
 
 export type GetV1PublicCostDashboardToken200TotalsItem = {
-  currency?: string;
-  amount_cents?: number;
+  currency: string;
+  amount_cents: number;
 };

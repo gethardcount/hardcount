@@ -9,12 +9,12 @@
  */
 
 export type GetV1PublicCostDashboardToken200CreditsItem = {
-  currency?: string;
-  balance_cents?: number;
-  unbilled_usage_cents?: number;
+  currency: string;
+  balance_cents: number;
+  unbilled_usage_cents: number;
   /** What is left of the customer's prepaid commit. */
-  commit_remaining_cents?: number;
+  commit_remaining_cents: number;
   /** What is left of promotional credit. */
-  promotional_remaining_cents?: number;
-  estimated_remaining_cents?: number;
+  promotional_remaining_cents: number;
+  estimated_remaining_cents: number;
 };

@@ -11,9 +11,9 @@ import type { CustomerEmailStatus } from './customerEmailStatus';
 import type { CustomerStatus } from './customerStatus';
 
 export interface Customer {
-  id?: string;
-  external_id?: string;
-  display_name?: string;
+  id: string;
+  external_id: string;
+  display_name: string;
   email?: string;
   /**
      * CC'd on billing documents and billing-state emails (invoice,
@@ -24,8 +24,8 @@ export interface Customer {
      * @maxItems 10
      */
   additional_emails?: string[];
-  status?: CustomerStatus;
-  created_at?: string;
+  status: CustomerStatus;
+  created_at: string;
   /**
      * Test clock this customer is pinned to (test mode only). When set,
      * the customer — and any invoices/subscriptions created for it —
@@ -44,5 +44,5 @@ export interface Customer {
   /** The Stripe customer. Absent until the first payment-method action. */
   stripe_customer_id?: string;
   livemode?: boolean;
-  updated_at?: string;
+  updated_at: string;
 }

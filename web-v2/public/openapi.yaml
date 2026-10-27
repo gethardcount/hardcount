@@ -207,6 +207,7 @@ components:
 
     Customer:
       type: object
+      required: [id, external_id, display_name, status, created_at, updated_at]
       properties:
         id:
           type: string
@@ -267,6 +268,7 @@ components:
 
     Meter:
       type: object
+      required: [id, event_name, name, unit, aggregation, created_at, updated_at]
       properties:
         id:
           type: string
@@ -304,6 +306,7 @@ components:
 
     Plan:
       type: object
+      required: [id, code, name, currency, billing_interval, status, base_amount_cents, base_bill_timing, prices, created_at, updated_at]
       properties:
         id:
           type: string
@@ -428,11 +431,13 @@ components:
         (`dimension_match`) and its rate. The price takes the plan's
         currency. Its id stays the same when its rate changes; its meter
         and `dimension_match` are its identity and never change.
-      required: [id, plan_id, meter_id, dimension_match, mode, created_at, updated_at]
+      required: [id, plan_id, meter_id, dimension_match, mode, created_at, updated_at, unit_amount_cents, tiers, package_size, package_amount_cents]
       properties:
         id:
           type: string
           example: vlx_prc_1a2b3c4d5e6f7890abcdef12
+        tenant_id:
+          type: string
         plan_id:
           type: string
         meter_id:
@@ -1202,6 +1207,8 @@ components:
         - net_payment_term_days
         - created_at
         - updated_at
+        - paid_out_of_band
+        - is_simulated
       properties:
         id:
           type: string
@@ -1638,7 +1645,7 @@ components:
 
     ProviderCostRate:
       type: object
-      required: [id, provider, model, token_type, unit_cost_cents, currency]
+      required: [id, provider, model, token_type, unit_cost_cents, currency, created_at, updated_at]
       properties:
         id:
           type: string
@@ -2059,6 +2066,7 @@ components:
 
     RecipePrice:
       description: One usage price of a recipe plan. It takes the plan's currency.
+      required: [meter, dimension_match, mode, unit_amount_cents, tiers, package_size, package_amount_cents]
       allOf:
         - type: object
           required: [meter, dimension_match]
@@ -3664,7 +3672,7 @@ components:
         A customer's negotiated rate for one plan price. It keeps applying
         when the price's rate changes, and ends when the price is removed.
         It takes the plan's currency.
-      required: [id, customer_id, price_id, mode, active, created_at, updated_at]
+      required: [id, customer_id, price_id, mode, active, created_at, updated_at, unit_amount_cents, tiers, package_size, package_amount_cents]
       properties:
         id:
           type: string
@@ -6150,12 +6158,14 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [customer_id, tenant_id, livemode, billing_period, subscriptions, usage, totals, projected_total_cents, credits]
                 properties:
                   customer_id: { type: string }
                   tenant_id: { type: string }
                   livemode: { type: boolean }
                   billing_period:
                     type: object
+                    required: [start, end, source]
                     properties:
                       start: { type: string, format: date-time }
                       end: { type: string, format: date-time }
@@ -6173,6 +6183,7 @@ paths:
                     type: array
                     items:
                       type: object
+                      required: [id, plan_name, currency, current_period_start, current_period_end]
                       properties:
                         id: { type: string }
                         plan_name: { type: string }
@@ -6183,6 +6194,7 @@ paths:
                     type: array
                     items:
                       type: object
+                      required: [event_name, meter_name, unit, currency, total_quantity, total_amount_cents, prices]
                       properties:
                         event_name: { type: string }
                         meter_name: { type: string }
@@ -6195,6 +6207,7 @@ paths:
                           description: One row per price that took usage this period.
                           items:
                             type: object
+                            required: [quantity, amount_cents]
                             properties:
                               dimension_match:
                                 type: object
@@ -6217,6 +6230,7 @@ paths:
                     description: One entry per currency present in `usage`.
                     items:
                       type: object
+                      required: [currency, amount_cents]
                       properties:
                         currency: { type: string }
                         amount_cents: { type: integer, format: int64 }
@@ -6248,6 +6262,7 @@ paths:
                       invoices are not subtracted.
                     items:
                       type: object
+                      required: [currency, balance_cents, unbilled_usage_cents, commit_remaining_cents, promotional_remaining_cents, estimated_remaining_cents]
                       properties:
                         currency: { type: string }
                         balance_cents: { type: integer, format: int64 }
@@ -8228,7 +8243,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [subscription, invoices_generated]
+                required: [subscription, invoices_generated, still_due]
                 properties:
                   subscription:
                     $ref: "#/components/schemas/Subscription"
@@ -11225,7 +11240,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [email, tenant_id, tenant_name, needs_new_account, expires_at]
+                required: [email, tenant_id, tenant_name, needs_new_account, expires_at, invited_by_email]
                 properties:
                   email:
                     type: string
@@ -11483,7 +11498,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [tenant_id, livemode, can_email_setup_links, can_send_invites]
+                required: [tenant_id, livemode, can_email_setup_links, can_send_invites, smtp_configured]
                 properties:
                   tenant_id:
                     type: string
@@ -11537,6 +11552,7 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [invoices_generated, errors]
                 properties:
                   invoices_generated:
                     type: integer
@@ -13264,18 +13280,11 @@ paths:
             type: string
       responses:
         "200":
-          description: Override ended
+          description: The override, now with `active` false.
           content:
             application/json:
               schema:
-                type: object
-                required: [id, active]
-                properties:
-                  id:
-                    type: string
-                  active:
-                    type: boolean
-                    enum: [false]
+                $ref: "#/components/schemas/CustomerPriceOverride"
         "404":
           description: "`not_found`: no active override with this id (it may already be ended)."
           content:

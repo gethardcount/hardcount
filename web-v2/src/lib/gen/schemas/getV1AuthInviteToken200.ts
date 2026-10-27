@@ -13,6 +13,6 @@ export type GetV1AuthInviteToken200 = {
   tenant_id: string;
   tenant_name: string;
   needs_new_account: boolean;
-  invited_by_email?: string;
+  invited_by_email: string;
   expires_at: string;
 };

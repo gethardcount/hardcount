@@ -19,6 +19,6 @@ export interface ProviderCostRate {
   unit_cost_cents: string;
   /** Always USD. Cost and margin count every rate in US cents. */
   currency: ProviderCostRateCurrency;
-  created_at?: string;
-  updated_at?: string;
+  created_at: string;
+  updated_at: string;
 }

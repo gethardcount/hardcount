@@ -10,12 +10,12 @@
 import type { GetV1PublicCostDashboardToken200UsageItemPricesItem } from './getV1PublicCostDashboardToken200UsageItemPricesItem';
 
 export type GetV1PublicCostDashboardToken200UsageItem = {
-  event_name?: string;
-  meter_name?: string;
-  unit?: string;
-  currency?: string;
-  total_quantity?: string;
-  total_amount_cents?: number;
+  event_name: string;
+  meter_name: string;
+  unit: string;
+  currency: string;
+  total_quantity: string;
+  total_amount_cents: number;
   /** One row per price that took usage this period. */
-  prices?: GetV1PublicCostDashboardToken200UsageItemPricesItem[];
+  prices: GetV1PublicCostDashboardToken200UsageItemPricesItem[];
 };

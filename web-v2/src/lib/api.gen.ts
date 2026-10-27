@@ -621,80 +621,80 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            customer_id?: string;
-                            tenant_id?: string;
-                            livemode?: boolean;
-                            billing_period?: {
+                            customer_id: string;
+                            tenant_id: string;
+                            livemode: boolean;
+                            billing_period: {
                                 /** Format: date-time */
-                                start?: string;
+                                start: string;
                                 /** Format: date-time */
-                                end?: string;
+                                end: string;
                                 /**
                                  * @description Branch on this before rendering the period. When it is `no_subscription` the customer has no active subscription, every array is empty, and `start`/`end` carry the zero time (`0001-01-01T00:00:00Z`) rather than a real range — display them and the page reads "January 1, year 1".
                                  * @enum {string}
                                  */
-                                source?: "subscription" | "no_subscription";
+                                source: "subscription" | "no_subscription";
                             };
-                            subscriptions?: {
-                                id?: string;
-                                plan_name?: string;
-                                currency?: string;
+                            subscriptions: {
+                                id: string;
+                                plan_name: string;
+                                currency: string;
                                 /** Format: date-time */
-                                current_period_start?: string;
+                                current_period_start: string;
                                 /** Format: date-time */
-                                current_period_end?: string;
+                                current_period_end: string;
                             }[];
-                            usage?: {
-                                event_name?: string;
-                                meter_name?: string;
-                                unit?: string;
-                                currency?: string;
-                                total_quantity?: string;
+                            usage: {
+                                event_name: string;
+                                meter_name: string;
+                                unit: string;
+                                currency: string;
+                                total_quantity: string;
                                 /** Format: int64 */
-                                total_amount_cents?: number;
+                                total_amount_cents: number;
                                 /** @description One row per price that took usage this period. */
-                                prices?: {
+                                prices: {
                                     /** @description The labels the price takes. Absent for a price that takes every event. */
                                     dimension_match?: {
                                         [key: string]: string;
                                     };
-                                    quantity?: string;
+                                    quantity: string;
                                     /** Format: int64 */
-                                    amount_cents?: number;
+                                    amount_cents: number;
                                     /** @description Per-unit price in DECIMAL CENTS (ADR-045, the Stripe unit_amount_decimal model) — NOT dollars. "0.0003" is 0.0003 CENTS per unit ($3.00 per 1M units); multiplying it by `quantity` yields CENTS, matching the sibling `amount_cents`. Reading it as dollars overstates the cost 100x. */
                                     unit_amount_decimal?: string;
                                 }[];
                             }[];
                             /** @description One entry per currency present in `usage`. */
-                            totals?: {
-                                currency?: string;
+                            totals: {
+                                currency: string;
                                 /** Format: int64 */
-                                amount_cents?: number;
+                                amount_cents: number;
                             }[];
                             /**
                              * Format: int64
                              * @description The metered cost of the current billing period so far, in cents, including usage a threshold invoice already billed. Recurring base fees are not included — an in_advance base is already invoiced at period open.
                              */
-                            projected_total_cents?: number;
+                            projected_total_cents: number;
                             /** @description The customer's credit position, one entry per currency, ordered by currency. `balance_cents` is the ledger balance in that currency, less any grant past its expiry date that is not yet written off: credit is drawn down when an invoice is issued, so it does not move with usage. `unbilled_usage_cents` is the usage no invoice has billed yet that will be invoiced in that currency, and `estimated_remaining_cents` is the balance minus that, never below zero. These three are the same figures `GET /v1/credits/balance/{customer_id}/live` returns. `unbilled_usage_cents` differs from `projected_total_cents` after a threshold invoice: it leaves out the usage that invoice billed. It is an estimate: tax, base fees billed at period end and unpaid invoices are not subtracted. */
-                            credits?: {
-                                currency?: string;
+                            credits: {
+                                currency: string;
                                 /** Format: int64 */
-                                balance_cents?: number;
+                                balance_cents: number;
                                 /** Format: int64 */
-                                unbilled_usage_cents?: number;
+                                unbilled_usage_cents: number;
                                 /**
                                  * Format: int64
                                  * @description What is left of the customer's prepaid commit.
                                  */
-                                commit_remaining_cents?: number;
+                                commit_remaining_cents: number;
                                 /**
                                  * Format: int64
                                  * @description What is left of promotional credit.
                                  */
-                                promotional_remaining_cents?: number;
+                                promotional_remaining_cents: number;
                                 /** Format: int64 */
-                                estimated_remaining_cents?: number;
+                                estimated_remaining_cents: number;
                             }[];
                         };
                     };
@@ -2379,7 +2379,7 @@ export interface paths {
                              *     The attempt did not complete and nothing was saved;
                              *     the next billing run attempts the subscription.
                              */
-                            still_due?: boolean;
+                            still_due: boolean;
                         };
                     };
                 };
@@ -4674,7 +4674,7 @@ export interface paths {
                             tenant_id: string;
                             tenant_name: string;
                             needs_new_account: boolean;
-                            invited_by_email?: string;
+                            invited_by_email: string;
                             /** Format: date-time */
                             expires_at: string;
                         };
@@ -4916,7 +4916,7 @@ export interface paths {
                              *     means no email of any kind is sent. Settings → Email
                              *     (`GET /v1/settings/email`) has the details.
                              */
-                            smtp_configured?: boolean;
+                            smtp_configured: boolean;
                             user_id?: string;
                             email?: string;
                             key_id?: string;
@@ -4980,8 +4980,8 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            invoices_generated?: number;
-                            errors?: string[];
+                            invoices_generated: number;
+                            errors: string[];
                         };
                     };
                 };
@@ -6965,9 +6965,9 @@ export interface components {
         };
         Customer: {
             /** @example vlx_cus_42014438d82ddf33 */
-            id?: string;
-            external_id?: string;
-            display_name?: string;
+            id: string;
+            external_id: string;
+            display_name: string;
             email?: string;
             /**
              * @description CC'd on billing documents and billing-state emails (invoice,
@@ -6978,9 +6978,9 @@ export interface components {
              */
             additional_emails?: string[];
             /** @enum {string} */
-            status?: "active" | "archived";
+            status: "active" | "archived";
             /** Format: date-time */
-            created_at?: string;
+            created_at: string;
             /**
              * @description Test clock this customer is pinned to (test mode only). When set,
              *     the customer — and any invoices/subscriptions created for it —
@@ -7004,15 +7004,15 @@ export interface components {
             stripe_customer_id?: string;
             livemode?: boolean;
             /** Format: date-time */
-            updated_at?: string;
+            updated_at: string;
         };
         Meter: {
-            id?: string;
+            id: string;
             tenant_id?: string;
             /** @description The `event_name` usage events send for this meter. */
-            event_name?: string;
-            name?: string;
-            unit?: string;
+            event_name: string;
+            name: string;
+            unit: string;
             /**
              * @description How the meter rolls its events into one quantity per billing
              *     period. Every price of the meter bills under it. `last`
@@ -7020,7 +7020,7 @@ export interface components {
              *     meter has a usage event (see `has_usage`).
              * @enum {string}
              */
-            aggregation?: "sum" | "count" | "max" | "last";
+            aggregation: "sum" | "count" | "max" | "last";
             /**
              * @description Whether the meter has usage events. Once it has, its
              *     `aggregation` cannot change. Held usage for its `event_name`
@@ -7030,22 +7030,22 @@ export interface components {
              */
             has_usage?: boolean;
             /** Format: date-time */
-            created_at?: string;
+            created_at: string;
             /** Format: date-time */
-            updated_at?: string;
+            updated_at: string;
         };
         Plan: {
-            id?: string;
+            id: string;
             tenant_id?: string;
-            code?: string;
-            name?: string;
-            currency?: string;
+            code: string;
+            name: string;
+            currency: string;
             /** @enum {string} */
-            billing_interval?: "monthly" | "yearly";
+            billing_interval: "monthly" | "yearly";
             /** @enum {string} */
-            status?: "active" | "archived";
+            status: "active" | "archived";
             /** Format: int64 */
-            base_amount_cents?: number;
+            base_amount_cents: number;
             /**
              * @description When the recurring base fee is invoiced relative to the period it covers.
              *     in_arrears: base + usage billed at period end.
@@ -7055,19 +7055,19 @@ export interface components {
              *     in_arrears. See ADR-031.
              * @enum {string}
              */
-            base_bill_timing?: "in_advance" | "in_arrears";
+            base_bill_timing: "in_advance" | "in_arrears";
             /**
              * @description The plan's usage prices from now on. A plan's meters are the
              *     meters it has a price for.
              */
-            prices?: components["schemas"]["PlanPrice"][];
+            prices: components["schemas"]["PlanPrice"][];
             description?: string;
             /** @description Stripe tax code for this plan. Absent means the tenant's `default_product_tax_code`. */
             tax_code?: string;
             /** Format: date-time */
-            created_at?: string;
+            created_at: string;
             /** Format: date-time */
-            updated_at?: string;
+            updated_at: string;
         };
         /** @description A plan as Get, Create and Update plan answer it. */
         PlanDetail: components["schemas"]["Plan"] & {
@@ -7118,6 +7118,7 @@ export interface components {
         PlanPrice: {
             /** @example vlx_prc_1a2b3c4d5e6f7890abcdef12 */
             id: string;
+            tenant_id?: string;
             plan_id: string;
             meter_id: string;
             /**
@@ -7135,13 +7136,13 @@ export interface components {
              */
             mode: "per_unit" | "graduated" | "package";
             /** @description Price per unit in cents, as a decimal string. */
-            unit_amount_cents?: string;
+            unit_amount_cents: string;
             /** @description Empty (`[]`) unless `mode` is `graduated`. */
-            tiers?: components["schemas"]["PriceTier"][];
+            tiers: components["schemas"]["PriceTier"][];
             /** Format: int64 */
-            package_size?: number;
+            package_size: number;
             /** @description Price of one package in cents, as a decimal string. */
-            package_amount_cents?: string;
+            package_amount_cents: string;
             /** Format: date-time */
             created_at: string;
             /**
@@ -7866,7 +7867,7 @@ export interface components {
              *     an invoice has no `stripe_payment_intent_id`, so there is no card
              *     to refund.
              */
-            paid_out_of_band?: boolean;
+            paid_out_of_band: boolean;
             last_payment_error?: string;
             auto_charge_pending?: boolean;
             /**
@@ -7932,7 +7933,7 @@ export interface components {
              *     dashboard renders a "simulated" badge from this authoritative flag
              *     instead of inferring it. Always false in live mode.
              */
-            is_simulated?: boolean;
+            is_simulated: boolean;
             /**
              * @description The test clock this invoice's dates follow: the clock its customer
              *     is pinned to, for cycle and one-off invoices alike. Read from the
@@ -8031,9 +8032,9 @@ export interface components {
              */
             currency: "USD";
             /** Format: date-time */
-            created_at?: string;
+            created_at: string;
             /** Format: date-time */
-            updated_at?: string;
+            updated_at: string;
         };
         MarginReport: {
             customer_id: string;
@@ -8252,7 +8253,7 @@ export interface components {
             dimension_match: {
                 [key: string]: string;
             };
-        } & components["schemas"]["PriceShape"];
+        } & WithRequired<components["schemas"]["PriceShape"], "mode" | "unit_amount_cents" | "tiers" | "package_size" | "package_amount_cents">;
         RecipePreviewResult: {
             key: string;
             version: string;
@@ -9371,13 +9372,13 @@ export interface components {
              */
             mode: "per_unit" | "graduated" | "package";
             /** @description Price per unit in cents, as a decimal string. */
-            unit_amount_cents?: string;
+            unit_amount_cents: string;
             /** @description Empty (`[]`) unless `mode` is `graduated`. */
-            tiers?: components["schemas"]["PriceTier"][];
+            tiers: components["schemas"]["PriceTier"][];
             /** Format: int64 */
-            package_size?: number;
+            package_size: number;
             /** @description Price of one package in cents, as a decimal string. */
-            package_amount_cents?: string;
+            package_amount_cents: string;
             reason?: string;
             active: boolean;
             /**
@@ -16202,17 +16203,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Override ended */
+            /** @description The override, now with `active` false. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        id: string;
-                        /** @enum {boolean} */
-                        active: false;
-                    };
+                    "application/json": components["schemas"]["CustomerPriceOverride"];
                 };
             };
             /** @description `not_found`: no active override with this id (it may already be ended). */
@@ -17230,3 +17227,6 @@ export interface operations {
         };
     };
 }
+type WithRequired<T, K extends keyof T> = T & {
+    [P in K]-?: T[P];
+};

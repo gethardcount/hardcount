@@ -27,19 +27,4 @@ export type PlanDetail = Plan & {
      * plan).
      */
   live_subscription_count: number;
-} & Required<Pick<Plan & {
-  /**
-     * Whether a subscription has ever used the plan (canceled ones
-     * and scheduled plan changes included). On a plan no one has
-     * used, a price change applies at once; on a used plan, from
-     * each subscriber's next billing period, and from the join for
-     * a subscriber who first joins the plan in a period after it.
-     */
-  used: boolean;
-  /**
-     * Subscriptions on this plan that are not canceled. While it
-     * is above 0, `base_amount_cents` cannot change (see Update
-     * plan).
-     */
-  live_subscription_count: number;
-}, 'prices'>>;
+};

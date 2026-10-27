@@ -60,7 +60,6 @@ import type {
   CustomerPriceOverride,
   CustomerUsage,
   DeleteDunningPolicy200,
-  DeletePriceOverride200,
   DeleteV1TestClocksId200,
   DeleteV1WebhookEndpointsEndpointsId200,
   DiscardHeldUsage200,
@@ -15635,9 +15634,9 @@ export const getDeletePriceOverrideUrl = (id: string,) => {
  * change, an added item) pays the price's rate from the join.
  * @summary End a customer price override
  */
-export const deletePriceOverride = async (id: string, options?: RequestInit): Promise<DeletePriceOverride200> => {
+export const deletePriceOverride = async (id: string, options?: RequestInit): Promise<CustomerPriceOverride> => {
 
-  return orvalClient<DeletePriceOverride200>(getDeletePriceOverrideUrl(id),
+  return orvalClient<CustomerPriceOverride>(getDeletePriceOverrideUrl(id),
   {
     ...options,
     method: 'DELETE'
