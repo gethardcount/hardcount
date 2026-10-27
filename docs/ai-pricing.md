@@ -219,10 +219,12 @@ count until it is released. Every price of the meter bills under it.
 A subscription has one billing period. On a yearly plan, usage is billed
 once a year, on the invoice at the end of the year.
 
-- **To bill high usage sooner,** set a spend threshold on the subscription
-  (`amount_gte` on `PUT /v1/subscriptions/{id}/billing-thresholds`). When
-  the year's usage reaches it, Velox invoices the usage so far instead of
-  waiting for the end of the year.
+- **To bill some usage sooner,** set a spend threshold on the subscription
+  (`amount_gte` on `PUT /v1/subscriptions/{id}/billing-thresholds`). The
+  first time the year's usage reaches it, Velox invoices the usage so far.
+  A threshold fires at most once a billing period, so once a year here:
+  usage after it waits for the invoice at the end of the year. Usage of a
+  `max` or `last` meter is never billed early.
 - **To bill usage every month beside a yearly fee,** give the customer two
   subscriptions: one on a yearly plan with the fee and no prices, and one
   on a monthly plan with the usage prices. The two plans share no meter, so

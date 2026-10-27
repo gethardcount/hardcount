@@ -32,7 +32,7 @@ original text.
 - A usage event's 201 says what Velox found when the event arrived, in `billing_status`: `no_price` when the plan prices the meter but no price takes the event's dimensions, or `not_on_plan`, `outside_subscription` or `after_close`. No `billing_status` is not a promise that the event is billed.
 - Provider costs are in cents: `unit_cost_cents` on a provider cost, `provider_cost_cents` on a usage event, and `cost_cents` in the margin report.
 - Removed: `/v1/rating-rules`, `/v1/meters/{id}/pricing-rules`, `/v1/meter-pricing-rules`, `Meter.rating_rule_version_id`, `Plan.meter_ids`, `rule_key`, the meter's default price and `meter_in_use`.
-- The base fee stays locked while a live subscription uses the plan, and the billing timing once a subscription has used it. To change either, make a new plan.
+- The base fee stays locked while a subscription that is not canceled uses the plan, in test or live mode, and the billing timing once a subscription has used it. To change either, make a new plan.
 - `base_bill_timing` is required when the base fee is above 0, and must be `in_arrears` when it is 0.
 - Yearly plans bill usage once a year, on the invoice at the end of the year. For monthly usage beside a yearly fee, use two subscriptions ([how](docs/ai-pricing.md#usage-on-a-yearly-plan)).
 - Recipes create meters and plans only. They no longer change your dunning policy or add a webhook endpoint.

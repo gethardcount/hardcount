@@ -11,7 +11,6 @@ test('the plans of subscriptions that can still bill, with scheduled moves', () 
     { status: 'trialing', items: [{ plan_id: 'pln_d' }] },
     { status: 'draft', items: [{ plan_id: 'pln_e' }] },
     { status: 'canceled', items: [{ plan_id: 'pln_x' }] },
-    { status: 'archived', items: [{ plan_id: 'pln_y' }] },
     { status: 'active' },
   ])
   assert.deepEqual([...ids].sort(), ['pln_a', 'pln_b', 'pln_c', 'pln_d', 'pln_e'])

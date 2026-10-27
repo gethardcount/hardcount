@@ -53,8 +53,8 @@ first. Every shipped change, with its date, is in the
   or its period was already invoiced. A batch answer gives each event's status
   ([ADR-130](adr/130-usage-prices-belong-to-the-plan.md) §12).
 - **Not in v0.9.0:** a base fee change that waits for each subscriber's
-  next period. The base fee stays locked while a live subscription uses
-  the plan; to change it, create a new plan and move subscribers to it
+  next period. The base fee stays locked while a subscription that is not
+  canceled uses the plan; to change it, create a new plan and move subscribers to it
   ([ADR-130](adr/130-usage-prices-belong-to-the-plan.md) section 5).
 
 Everything else v0.9.0 changes: [Unreleased](../CHANGELOG.md#unreleased).

@@ -31,7 +31,10 @@ export function revenueBucketLabel(key: string): string {
 // compactAxisTick labels a quantity axis tick short enough for a 40px axis:
 // 180000 reads "180K". The full number cut off at the axis's edge, so 180000
 // and 135000 read "80000" and "35000" on the customer's Daily usage chart.
-const compact = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 })
+// No digit of a tick is rounded away (quantities can be fractions): 0.015
+// reads "0.015" and 1250 reads "1.25K". 15 significant digits drop only
+// floating-point noise, so 0.1 + 0.2 reads "0.3".
+const compact = new Intl.NumberFormat('en-US', { notation: 'compact', maximumSignificantDigits: 15 })
 export function compactAxisTick(value: number): string {
   return compact.format(value)
 }

@@ -675,8 +675,9 @@ jobs:
 
   docker:
     timeout-minutes: 30
-    # Keep this list the same as the required status checks on main: an
-    # image must not be published past a check that would block a merge.
+    # Every check an image must pass before it is published. Not all of
+    # them are required checks on main (migrations and pricing-shapes are
+    # not today), so a merge can pass one this list still waits for.
     needs: [test, unit, test-pgbouncer, pricing-shapes, migrations, golden-path, codegen-drift, frontend, lint]
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
