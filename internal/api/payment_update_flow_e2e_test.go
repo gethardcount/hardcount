@@ -69,9 +69,11 @@ func TestE2E_PaymentUpdateLink(t *testing.T) {
 		t.Errorf("made-up link error code %q, want invalid_token", res.errCode())
 	}
 
-	// Before Stripe is connected the button fails, and the link still works.
-	if res := checkout().want(t, 502, "checkout before Stripe is connected"); res.errCode() != "stripe_error" {
-		t.Errorf("checkout without Stripe: code %q, want stripe_error", res.errCode())
+	// Before Stripe is connected the button is refused with a code the page
+	// can explain (409, not a 502: Stripe was never called), and the link
+	// still works.
+	if res := checkout().want(t, 409, "checkout before Stripe is connected"); res.errCode() != "online_payment_unavailable" {
+		t.Errorf("checkout without Stripe: code %q, want online_payment_unavailable", res.errCode())
 	}
 	page().want(t, 200, "open the link after the failed checkout")
 
