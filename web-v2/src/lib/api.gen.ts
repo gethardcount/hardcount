@@ -6808,9 +6808,9 @@ export interface components {
                 /**
                  * @description The request field the error is about. Sent only when the error
                  *     names one. A request body may hold only the fields its
-                 *     operation lists: a field it does not list, or one the server
-                 *     sets (such as `id`), is refused with 422 and `param` naming
-                 *     it. An operation with no request body lists no fields: send
+                 *     operation lists, spelled and cased as listed: any other
+                 *     field, or one the server sets (such as `id`), is refused
+                 *     with 422 and `param` naming it. An operation with no request body lists no fields: send
                  *     no body, `{}` or `null`. The Stripe and Postmark webhooks and
                  *     the LiteLLM callback take their sender's body as it comes.
                  */
@@ -15499,11 +15499,20 @@ export interface operations {
                     "application/json": components["schemas"]["DunningPolicy"];
                 };
             };
+            /** @description `invalid_request`: the body is not valid JSON. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /**
-             * @description `validation_error`: body is not valid JSON, a replaced field was
-             *     sent (`final_action`, `retry_schedule`, `max_retry_attempts`,
-             *     `grace_period_days`), `retry_days` is missing or out of bounds,
-             *     or an unknown final action.
+             * @description `validation_error`: a replaced field was sent (`final_action`,
+             *     `retry_schedule`, `max_retry_attempts`, `grace_period_days`),
+             *     `retry_days` is missing or out of bounds, or an unknown final
+             *     action.
              */
             422: {
                 headers: {
@@ -15625,6 +15634,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DunningPolicy"];
+                };
+            };
+            /** @description `invalid_request`: the body is not valid JSON. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
             /** @description `not_found`: no policy with this id in this tenant and mode. */

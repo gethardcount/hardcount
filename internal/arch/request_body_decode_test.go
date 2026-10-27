@@ -69,7 +69,7 @@ func requestBodyReads(t *testing.T, root string) map[string]bool {
 }
 
 // readsRequestBody reports whether fd, or a function literal inside it,
-// reads the Body of a *http.Request parameter.
+// reads the Body of a *http.Request parameter or of a copy of one.
 func readsRequestBody(fd *ast.FuncDecl) bool {
 	reqs := map[string]bool{}
 	addParams := func(ft *ast.FuncType) {
@@ -94,13 +94,58 @@ func readsRequestBody(fd *ast.FuncDecl) bool {
 	if len(reqs) == 0 {
 		return false
 	}
+	// isReq reports whether e is one of the requests or a copy of one:
+	// *r, r.WithContext(ctx), r.Clone(ctx), or a name assigned one of these.
+	var isReq func(e ast.Expr) bool
+	isReq = func(e ast.Expr) bool {
+		switch e := e.(type) {
+		case *ast.Ident:
+			return reqs[e.Name]
+		case *ast.ParenExpr:
+			return isReq(e.X)
+		case *ast.StarExpr:
+			return isReq(e.X)
+		case *ast.UnaryExpr:
+			return e.Op == token.AND && isReq(e.X)
+		case *ast.CallExpr:
+			fun, ok := e.Fun.(*ast.SelectorExpr)
+			return ok && (fun.Sel.Name == "WithContext" || fun.Sel.Name == "Clone") && isReq(fun.X)
+		}
+		return false
+	}
+	// A name given a request copy is a request too, wherever it is given
+	// one (req := r, var req = r, req = r.WithContext(ctx)). Repeat until
+	// no new name is found, so a copy of a copy counts.
+	for grew := true; grew; {
+		grew = false
+		mark := func(name *ast.Ident, value ast.Expr) {
+			if name != nil && name.Name != "_" && !reqs[name.Name] && isReq(value) {
+				reqs[name.Name] = true
+				grew = true
+			}
+		}
+		ast.Inspect(fd.Body, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.AssignStmt:
+				if len(n.Lhs) == len(n.Rhs) {
+					for i, l := range n.Lhs {
+						id, _ := l.(*ast.Ident)
+						mark(id, n.Rhs[i])
+					}
+				}
+			case *ast.ValueSpec:
+				if len(n.Names) == len(n.Values) {
+					for i, id := range n.Names {
+						mark(id, n.Values[i])
+					}
+				}
+			}
+			return true
+		})
+	}
 	isBody := func(e ast.Expr) bool {
 		sel, ok := e.(*ast.SelectorExpr)
-		if !ok || sel.Sel.Name != "Body" {
-			return false
-		}
-		id, ok := sel.X.(*ast.Ident)
-		return ok && reqs[id.Name]
+		return ok && sel.Sel.Name == "Body" && isReq(sel.X)
 	}
 	// Uses of the body that do not read it: closing it, comparing it to
 	// nil, and capping it in place (r.Body = http.MaxBytesReader(w, r.Body,

@@ -2,11 +2,15 @@ package respond
 
 import (
 	"bytes"
+	"encoding"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
+	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -17,7 +21,7 @@ import (
 //
 //   - the body is one JSON value; anything else is a 400 "invalid JSON body";
 //   - a key the request type does not declare, at any depth, is a 422 with
-//     param set to the key;
+//     param set to the key; a key matches its field exactly, in its case;
 //   - a key the server sets (ReadOnly) is a 422 with param set to the key;
 //   - a route that takes no body refuses one with any key (NoBody).
 //
@@ -129,6 +133,21 @@ func decodeBody(r *http.Request, v any, rule decodeRule) error {
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
 		return &BodyError{Err: errors.New("data after the JSON value")}
 	}
+	return decodeValue(raw, v, rule)
+}
+
+// DecodeValue is the rule for one JSON value already read from a body, such
+// as one event of the usage batch: a key v does not declare, in any case but
+// its own, is a *BodyError naming it.
+func DecodeValue(raw json.RawMessage, v any, opts ...DecodeOption) error {
+	var rule decodeRule
+	for _, o := range opts {
+		o(&rule)
+	}
+	return decodeValue(raw, v, rule)
+}
+
+func decodeValue(raw json.RawMessage, v any, rule decodeRule) error {
 	if string(raw) == "null" && rule.emptyOK {
 		return nil
 	}
@@ -154,7 +173,114 @@ func decodeBody(r *http.Request, v any, rule decodeRule) error {
 		}
 		return &BodyError{Err: err}
 	}
+	// encoding/json matches a key to a field without regard to case, so
+	// {"Email": ...} set email. The reference lists one spelling.
+	if key := inexactKey(raw, reflect.TypeOf(v)); key != "" {
+		return &BodyError{Field: key}
+	}
 	return nil
+}
+
+var (
+	jsonUnmarshaler = reflect.TypeFor[json.Unmarshaler]()
+	textUnmarshaler = reflect.TypeFor[encoding.TextUnmarshaler]()
+)
+
+// inexactKey returns the first key in raw, at any depth, that names a field
+// of t in another case. raw has already decoded into t, so every key matches
+// a field in some case. A value t decodes its own way (an Unmarshaler, raw
+// JSON, any) holds no field names, and neither do a map's keys.
+func inexactKey(raw json.RawMessage, t reflect.Type) string {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if reflect.PointerTo(t).Implements(jsonUnmarshaler) || reflect.PointerTo(t).Implements(textUnmarshaler) {
+		return ""
+	}
+	switch t.Kind() {
+	case reflect.Struct:
+		var obj map[string]json.RawMessage
+		if json.Unmarshal(raw, &obj) != nil {
+			return "" // null
+		}
+		fields := map[string]reflect.Type{}
+		jsonFields(t, fields)
+		for _, k := range slices.Sorted(maps.Keys(obj)) {
+			ft, ok := fields[k]
+			if !ok {
+				return k
+			}
+			if key := inexactKey(obj[k], ft); key != "" {
+				return key
+			}
+		}
+	case reflect.Slice, reflect.Array:
+		if t.Elem().Kind() == reflect.Uint8 {
+			return "" // []byte is a base64 string
+		}
+		var items []json.RawMessage
+		if json.Unmarshal(raw, &items) != nil {
+			return ""
+		}
+		for _, it := range items {
+			if key := inexactKey(it, t.Elem()); key != "" {
+				return key
+			}
+		}
+	case reflect.Map:
+		var obj map[string]json.RawMessage
+		if json.Unmarshal(raw, &obj) != nil {
+			return ""
+		}
+		for _, k := range slices.Sorted(maps.Keys(obj)) {
+			if key := inexactKey(obj[k], t.Elem()); key != "" {
+				return key
+			}
+		}
+	}
+	return ""
+}
+
+// jsonFields adds the JSON names of t's fields, as encoding/json names
+// them, to out: the tag's name, else the Go name; "-" is skipped; an
+// untagged embedded struct's fields are promoted, and a shallower field of
+// the same name wins.
+func jsonFields(t reflect.Type, out map[string]reflect.Type) {
+	var embedded []reflect.Type
+	for i := range t.NumField() {
+		f := t.Field(i)
+		tag := f.Tag.Get("json")
+		if tag == "-" {
+			continue
+		}
+		name, _, _ := strings.Cut(tag, ",")
+		if f.Anonymous && name == "" {
+			et := f.Type
+			if et.Kind() == reflect.Pointer {
+				et = et.Elem()
+			}
+			if et.Kind() == reflect.Struct {
+				embedded = append(embedded, et)
+				continue
+			}
+		}
+		if !f.IsExported() {
+			continue
+		}
+		if name == "" {
+			name = f.Name
+		}
+		out[name] = f.Type
+	}
+	for _, et := range embedded {
+		promoted := map[string]reflect.Type{}
+		jsonFields(et, promoted)
+		for name, ft := range promoted {
+			if _, ok := out[name]; !ok {
+				out[name] = ft
+			}
+		}
+	}
 }
 
 // unknownField pulls the key out of encoding/json's `json: unknown field "x"`,

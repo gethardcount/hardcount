@@ -577,8 +577,8 @@ func (h *Handler) aggregate(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) batchIngest(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
-	var events []APIEvent
-	if err := respond.DecodeBody(r, &events); err != nil {
+	var raws []json.RawMessage
+	if err := respond.DecodeBody(r, &raws); err != nil {
 		// The router caps request bodies via MaxBytesReader; a too-big
 		// batch must read as "split your batch" (413), not as malformed
 		// JSON (400) — the byte cap fires mid-array on valid JSON.
@@ -588,23 +588,33 @@ func (h *Handler) batchIngest(w http.ResponseWriter, r *http.Request) {
 				fmt.Sprintf("request body exceeds %d bytes — send smaller batches", maxErr.Limit))
 			return
 		}
-		// An unknown key on any event refuses the whole batch, naming it.
-		var bodyErr *respond.BodyError
-		if errors.As(err, &bodyErr) && bodyErr.Field != "" {
-			respond.WriteBodyError(w, r, err)
-			return
-		}
 		respond.BadRequest(w, r, "expected JSON array of events")
 		return
 	}
 
-	if len(events) == 0 {
+	if len(raws) == 0 {
 		respond.BadRequest(w, r, "at least one event is required")
 		return
 	}
-	if len(events) > 1000 {
+	if len(raws) > 1000 {
 		respond.BadRequest(w, r, "maximum 1000 events per batch")
 		return
+	}
+	// Each event follows the one body rule. An unknown key is that event's
+	// failure, named in errors[] with its index like every other; a value
+	// of the wrong JSON type is a 400 for the body, as before.
+	events := make([]APIEvent, len(raws))
+	keyErrs := make([]error, len(raws))
+	for i, raw := range raws {
+		if err := respond.DecodeValue(raw, &events[i]); err != nil {
+			var bodyErr *respond.BodyError
+			if errors.As(err, &bodyErr) && bodyErr.Field != "" {
+				keyErrs[i] = err
+				continue
+			}
+			respond.BadRequest(w, r, "expected JSON array of events")
+			return
+		}
 	}
 
 	// Resolve-stage failures (missing fields, unknown customer/meter,
@@ -618,6 +628,10 @@ func (h *Handler) batchIngest(w http.ResponseWriter, r *http.Request) {
 	// customer and one meter now costs two lookups instead of 2N.
 	cache := newResolveCache()
 	for i, evt := range events {
+		if keyErrs[i] != nil {
+			resolveErrs = append(resolveErrs, fmt.Sprintf("event[%d]: %s", i, keyErrs[i].Error()))
+			continue
+		}
 		input, err := h.resolve(r.Context(), tenantID, evt, cache)
 		if err != nil {
 			// A store that cannot answer is not a verdict on this event, so
