@@ -4590,12 +4590,17 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description Password updated */
-                204: {
+                /** @description Password updated. Every session the user had is signed out. */
+                200: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": {
+                            /** @example password updated — sign in with your new password */
+                            message: string;
+                        };
+                    };
                 };
                 /** @description Token invalid/expired or password does not meet policy */
                 422: {
@@ -4987,9 +4992,17 @@ export interface paths {
                     };
                 };
                 /**
-                 * @description The run finished, but `errors` is not empty: a subscription could
-                 *     not be billed (`subscription <id>: billing failed`), or the run's
-                 *     audit record could not be written. The invoices it made are kept.
+                 * @description `errors` is not empty. The invoices the run made are kept. Each
+                 *     entry is one of:
+                 *     - `subscription <id>: billing failed`: that subscription could
+                 *       not be billed.
+                 *     - `billing run failed`: the run stopped before it reached every
+                 *       due subscription, because the list of due subscriptions could
+                 *       not be read or the request ran out of time (30 seconds). The
+                 *       subscriptions it did not reach are still due, and the next
+                 *       billing run bills them.
+                 *     - `billing run completed but its audit record failed`: the run's
+                 *       audit record could not be written.
                  */
                 206: {
                     headers: {

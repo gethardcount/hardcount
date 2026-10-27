@@ -196,6 +196,7 @@ var inlineNotChecked = map[string]string{
 	"POST /v1/credit-notes/{id}/send 200":                     mapLiteral,
 	"POST /v1/auth/mode 200":                                  mapLiteral,
 	"POST /v1/auth/password-reset/request 200":                mapLiteral,
+	"POST /v1/auth/password-reset/confirm 200":                mapLiteral,
 	"GET /v1/auth/password-reset/check 200":                   mapLiteral,
 	"GET /v1/auth/invite/{token} 200":                         mapLiteral,
 	"POST /v1/auth/accept-invite 200":                         mapLiteral,

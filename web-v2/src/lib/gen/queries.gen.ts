@@ -183,6 +183,7 @@ import type {
   PostV1AuthLoginBody,
   PostV1AuthMode200,
   PostV1AuthModeBody,
+  PostV1AuthPasswordResetConfirm200,
   PostV1AuthPasswordResetConfirmBody,
   PostV1AuthPasswordResetRequest200,
   PostV1AuthPasswordResetRequestBody,
@@ -10668,9 +10669,9 @@ export const getPostV1AuthPasswordResetConfirmUrl = () => {
  * The token is invalidated on use; reuse or expired tokens return 422.
  * @summary Set a new password using a reset token
  */
-export const postV1AuthPasswordResetConfirm = async (postV1AuthPasswordResetConfirmBody: PostV1AuthPasswordResetConfirmBody, options?: RequestInit): Promise<void> => {
+export const postV1AuthPasswordResetConfirm = async (postV1AuthPasswordResetConfirmBody: PostV1AuthPasswordResetConfirmBody, options?: RequestInit): Promise<PostV1AuthPasswordResetConfirm200> => {
 
-  return orvalClient<void>(getPostV1AuthPasswordResetConfirmUrl(),
+  return orvalClient<PostV1AuthPasswordResetConfirm200>(getPostV1AuthPasswordResetConfirmUrl(),
   {
     ...options,
     method: 'POST',
