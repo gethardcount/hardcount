@@ -20,7 +20,7 @@ import { InvoiceAttention } from '@/components/InvoiceAttention'
 import { TestClockBanner } from '@/components/TestClockBanner'
 import { ActivityList, ActivityZone } from '@/components/ActivityList'
 import { Callout } from '@/components/Callout'
-import { finalizeConfirmLines, pickInvoiceNotice, writtenOffCardLine, writtenOffSubscriptionLine } from '@/lib/invoiceNotice'
+import { collectionPausedNow, finalizeConfirmLines, pickInvoiceNotice, writtenOffCardLine, writtenOffSubscriptionLine } from '@/lib/invoiceNotice'
 import { issueDates, sellerBlock, sellerMissing, SELLER_SETTINGS_PATH } from '@/lib/invoiceDocument'
 import { authApi } from '@/lib/auth'
 import { useAuth } from '@/contexts/AuthContext'
@@ -1530,6 +1530,7 @@ export default function InvoiceDetailPage() {
           </AlertDialogHeader>
           <div className="space-y-2 text-sm text-muted-foreground">
             {finalizeConfirmLines({
+              collectionPaused: collectionPausedNow(subscription?.pause_collection, effectiveNow(testClock?.frozen_time)),
               stripeConnected,
               hasCard: paymentMethodsList === undefined ? undefined : hasPaymentMethod,
               hasEmail: !!customer?.email,

@@ -110,7 +110,13 @@ export function stripePaymentUrl(paymentIntentId: string, livemode: boolean): st
 //     can be charged, a setup link is refused (409 stripe_not_connected) and
 //     the update-payment page says adding a card isn't available, so the
 //     confirmation promises none of them.
+//   - collectionPaused: the invoice's subscription has collection paused
+//     now (pause_collection in force, as domain.PauseCollection.InForceAt).
+//     The finalize still queues the invoice, but the auto-charge claim skips
+//     a paused subscription's invoices (notPausedForCollection), so nothing
+//     is collected until collection resumes.
 export function finalizeConfirmLines(o: {
+  collectionPaused: boolean
   stripeConnected: boolean | undefined
   hasCard: boolean | undefined
   hasEmail: boolean
@@ -121,7 +127,9 @@ export function finalizeConfirmLines(o: {
   if (o.taxAtFinalize) lines.push('Tax is worked out now, so the total may change.')
   const collect = "Velox then collects payment right away. It uses the customer's credit balance first."
   const canEmail = o.canEmailSetupLinks === true
-  if (o.stripeConnected === false) {
+  if (o.collectionPaused) {
+    lines.push('Collection is paused on this subscription, so nothing is charged now. Velox collects payment once collection resumes.')
+  } else if (o.stripeConnected === false) {
     lines.push(`${collect} Stripe isn't connected in this mode, so no card can be charged or added online. Connect Stripe under Settings to collect by card.`)
   } else if (o.stripeConnected === undefined) {
     lines.push(`${collect} If anything is left to pay, it charges their card on file if they have one and if Stripe is connected.`)
@@ -141,4 +149,15 @@ export function finalizeConfirmLines(o: {
     lines.push(`${collect} If anything is left to pay, it charges their card on file if they have one.`)
   }
   return lines
+}
+
+// collectionPausedNow says whether a subscription's collection pause holds
+// collection at nowMs (the page's effective now, test clock aware). It is the
+// server's collection rule (notPausedForCollection, InForceAt): a pause with
+// no resumes_at holds, a timed one holds strictly before resumes_at. Unlike
+// collectionPausedFlag it does not look at the subscription's status: the
+// claim skips a paused row's invoices whatever its status.
+export function collectionPausedNow(pause: { resumes_at?: string | null } | null | undefined, nowMs: number): boolean {
+  if (!pause) return false
+  return !pause.resumes_at || new Date(pause.resumes_at).getTime() > nowMs
 }
