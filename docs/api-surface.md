@@ -336,6 +336,17 @@ The 502 codes:
   charge may have gone through, so check before you retry.
 - `email_enqueue_failed`: an email could not be queued.
 
+A request body may hold only the fields its operation lists in the API
+reference. Any other field is refused with 422, and `param` names it: a
+misspelled field, a field the operation does not take, a field the
+server sets, such as `id`, `tenant_id` or `created_at`, or a name in
+another case, such as `Email` for `email`. Nothing is changed. A usage
+batch names each such event in `errors[]` instead. An operation with no
+request body, such as `POST /v1/subscriptions/{id}/cancel`, lists no
+fields: send no body, `{}` or `null`. A body that is not one JSON value is refused with 400. The Stripe
+and Postmark webhooks and the LiteLLM callback are the exceptions: they
+take their sender's body as it comes.
+
 Request bodies are limited to 1 MB, and Stripe webhook bodies to 64 KB. Only
 the two routes in the 413 row return 413. Other routes do not promise a
 specific status for a body that is too large.

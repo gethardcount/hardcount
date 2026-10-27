@@ -2,7 +2,6 @@ package testclock
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"time"
@@ -77,8 +76,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
 	var input CreateInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &input) {
 		return
 	}
 
@@ -179,8 +177,7 @@ func (h *Handler) advance(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
 	var input AdvanceInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &input) {
 		return
 	}
 
@@ -226,6 +223,9 @@ func (h *Handler) advance(w http.ResponseWriter, r *http.Request) {
 // clock isn't in internal_failure (refuses to retry from ready
 // or advancing). ADR-018.
 func (h *Handler) retryAdvance(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
@@ -244,6 +244,9 @@ func (h *Handler) retryAdvance(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 

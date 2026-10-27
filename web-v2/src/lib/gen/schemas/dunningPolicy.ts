@@ -21,7 +21,8 @@ export interface DunningPolicy {
      * True for the "Default retries" policy the account was created
      * with, until you edit it or make it the default. While it is
      * true, the next enabled policy you create becomes the default
-     * instead. Ignored in request bodies.
+     * instead. Set by the server: a request body that sends it is
+     * refused with 422.
      */
   seeded: boolean;
   /** Days to wait before each retry; the number of retries is its length. */

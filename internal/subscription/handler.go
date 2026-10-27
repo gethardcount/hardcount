@@ -594,6 +594,9 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) activate(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
@@ -618,6 +621,9 @@ func (h *Handler) activate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) cancel(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
@@ -724,6 +730,9 @@ func (h *Handler) pauseCollection(w http.ResponseWriter, r *http.Request) {
 // triggered_by="operator" so analytics can distinguish from the
 // scheduled transition. Returns 422 if the row is not in 'trialing'.
 func (h *Handler) endTrial(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
@@ -758,6 +767,9 @@ func (h *Handler) endTrial(w http.ResponseWriter, r *http.Request) {
 // 409 invalid_state for a subscription on a test clock. The audit row is the
 // service's; the handler emits none.
 func (h *Handler) retryBilling(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
@@ -789,8 +801,7 @@ func (h *Handler) extendTrial(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
 	var body ExtendTrialInput
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &body) {
 		return
 	}
 	if body.TrialEnd.IsZero() {
@@ -826,6 +837,9 @@ func (h *Handler) extendTrial(w http.ResponseWriter, r *http.Request) {
 // with its own trigger, and this handler sends nothing. Returns 404 only
 // when the subscription itself doesn't exist.
 func (h *Handler) resumeCollection(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
@@ -945,6 +959,9 @@ func (h *Handler) setBillingThresholds(w http.ResponseWriter, r *http.Request) {
 // 200 with the unchanged subscription. Returns 404 only when the
 // subscription itself doesn't exist.
 func (h *Handler) clearBillingThresholds(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
@@ -969,6 +986,9 @@ func (h *Handler) clearBillingThresholds(w http.ResponseWriter, r *http.Request)
 // and writes no audit entry and sends no event, since nothing changed.
 // Returns 404 only when the subscription itself doesn't exist.
 func (h *Handler) clearScheduledCancel(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
@@ -1480,6 +1500,9 @@ func (h *Handler) updateItem(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) cancelPendingItemChange(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	subID := chi.URLParam(r, "id")
 	itemID := chi.URLParam(r, "itemID")
@@ -1505,6 +1528,9 @@ func (h *Handler) cancelPendingItemChange(w http.ResponseWriter, r *http.Request
 }
 
 func (h *Handler) removeItem(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	subID := chi.URLParam(r, "id")
 	itemID := chi.URLParam(r, "itemID")

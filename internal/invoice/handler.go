@@ -563,6 +563,9 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) finalize(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
@@ -608,6 +611,9 @@ func (h *Handler) finalize(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) void(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
@@ -633,6 +639,9 @@ func (h *Handler) void(w http.ResponseWriter, r *http.Request) {
 // (Checkout in PAYMENT mode) — a different collection path for states where the
 // operator wants the customer to pay directly.
 func (h *Handler) resendSetupLink(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
@@ -733,6 +742,9 @@ func (h *Handler) resendSetupLink(w http.ResponseWriter, r *http.Request) {
 // (NOT invoice_not_collectible, which would loop back into the
 // "also mark invoice uncollectible" branch we just executed).
 func (h *Handler) markUncollectible(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
@@ -791,11 +803,8 @@ func (h *Handler) recordOfflinePayment(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
 	var input RecordPaymentInput
-	if r.ContentLength > 0 {
-		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-			respond.BadRequest(w, r, "invalid JSON body")
-			return
-		}
+	if !respond.DecodeStrict(w, r, &input, respond.EmptyBodyOK) {
+		return
 	}
 
 	inv, err := h.svc.RecordOfflinePayment(r.Context(), tenantID, id, input.Note)
@@ -824,6 +833,9 @@ func (h *Handler) recordOfflinePayment(w http.ResponseWriter, r *http.Request) {
 // archive leak). Only finalized/paid/voided invoices carry tokens — draft
 // invoices return 422, matching the store-level guard in SetPublicToken.
 func (h *Handler) rotatePublicToken(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
@@ -883,8 +895,11 @@ func (h *Handler) sendEmail(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
 	var body SendEmailInput
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Email == "" {
-		respond.BadRequest(w, r, "email is required")
+	if !respond.DecodeStrict(w, r, &body) {
+		return
+	}
+	if body.Email == "" {
+		respond.ValidationField(w, r, "email", "email is required")
 		return
 	}
 	// The To address gets the same check as a customer's stored email.
@@ -1002,6 +1017,9 @@ func resolveSendCC(ctx context.Context, customers CustomerGetter, tenantID, cust
 }
 
 func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
@@ -1313,6 +1331,9 @@ func (h *Handler) refund(w http.ResponseWriter, r *http.Request) {
 // state conflict. The invoice stays a draft with its tax saved, for the
 // operator to finalize, and the retry_tax audit row is still written.
 func (h *Handler) retryTax(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 

@@ -114,6 +114,9 @@ func (h *Handler) listOverrides(w http.ResponseWriter, r *http.Request) {
 // deleteOverride ends a negotiated price from the customer's next billing
 // period; the period in flight keeps it.
 func (h *Handler) deleteOverride(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 	o, err := h.svc.DeleteOverride(r.Context(), tenantID, id)
@@ -439,6 +442,9 @@ func (h *Handler) editPrice(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) removePrice(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	pw, err := h.svc.RemovePrice(r.Context(), tenantID, chi.URLParam(r, "id"), chi.URLParam(r, "price_id"))
 	if err != nil {

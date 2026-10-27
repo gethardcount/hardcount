@@ -1233,7 +1233,7 @@ func (a *hostedInvoiceStripeAdapter) CreateInvoicePaymentSession(
 		return "", fmt.Errorf("read Stripe credentials for livemode=%v: %w", livemode, err)
 	}
 	if sc == nil {
-		return "", fmt.Errorf("stripe not configured for mode livemode=%v", livemode)
+		return "", errs.StripeNotConnected()
 	}
 	if a.ensurer == nil {
 		return "", fmt.Errorf("hosted invoice: Stripe customer ensurer not wired")

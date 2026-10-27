@@ -99,7 +99,7 @@ type StripeReadiness interface {
 
 // PayUnavailableOnline is pay_unavailable_reason when the invoice is owed
 // but the seller has no payment provider connected for its mode.
-const PayUnavailableOnline = "online_payment_unavailable"
+const PayUnavailableOnline = errs.CodeOnlinePaymentUnavailable
 
 // PayUnavailableBelowMinimum is pay_unavailable_reason when Stripe refused to
 // charge the invoice because the amount is below its minimum charge
@@ -382,6 +382,9 @@ func (h *Handler) viewInvoice(w http.ResponseWriter, r *http.Request) {
 // Stripe), so the session uses a pre-totaled price_data line item and
 // does not enable Stripe's automatic_tax.
 func (h *Handler) createCheckoutSession(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	inv, ok := h.resolveInvoice(w, r)
 	if !ok {
 		return
@@ -439,6 +442,13 @@ func (h *Handler) createCheckoutSession(w http.ResponseWriter, r *http.Request) 
 		// click, or a drifted session the customer just completed) —
 		// retrying won't help, and paying again is exactly the double
 		// charge this protocol prevents.
+		if errs.Code(err) == errs.CodeStripeNotConnected {
+			// Disconnected between the readiness check above and here: the
+			// same answer as the check, not the operator's sentence.
+			respond.Error(w, r, http.StatusConflict, "invalid_request_error", PayUnavailableOnline,
+				"online payment is not set up for this invoice")
+			return
+		}
 		if errors.Is(err, errs.ErrInvalidState) {
 			respond.FromError(w, r, err, "invoice")
 			return

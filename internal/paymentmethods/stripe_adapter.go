@@ -51,8 +51,7 @@ func (a *StripeAdapter) client(ctx context.Context) (*stripe.Client, error) {
 	if c == nil {
 		// Typed, so the API answers 409 with a sentence the operator can act
 		// on. As a bare error it reached the caller as a 500 "internal error".
-		return nil, errs.InvalidState("Stripe is not connected for this mode. Connect it under Settings, then try again.").
-			WithCode("stripe_not_connected")
+		return nil, errs.StripeNotConnected()
 	}
 	return c, nil
 }
@@ -89,7 +88,9 @@ func (a *StripeAdapter) EnsureStripeCustomer(ctx context.Context, tenantID, cust
 		return "", fmt.Errorf("read Stripe credentials for tenant=%s livemode=%v: %w", tenantID, livemode, err)
 	}
 	if sc == nil {
-		return "", fmt.Errorf("stripe not configured for tenant=%s livemode=%v", tenantID, livemode)
+		// Typed for the same reason as client(): a customer Velox has not yet
+		// sent to Stripe reached this first, and answered 500.
+		return "", errs.StripeNotConnected()
 	}
 
 	// Pre-populate the Stripe Customer with the Velox-side fields

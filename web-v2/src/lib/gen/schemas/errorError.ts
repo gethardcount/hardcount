@@ -21,6 +21,14 @@ export type ErrorError = {
   code?: string;
   message?: string;
   request_id?: string;
-  /** The request field the error is about. Sent only when the error names one. */
+  /**
+     * The request field the error is about. Sent only when the error
+     * names one. A request body may hold only the fields its
+     * operation lists, spelled and cased as listed: any other
+     * field, or one the server sets (such as `id`), is refused
+     * with 422 and `param` naming it. An operation with no request body lists no fields: send
+     * no body, `{}` or `null`. The Stripe and Postmark webhooks and
+     * the LiteLLM callback take their sender's body as it comes.
+     */
   param?: string;
 };

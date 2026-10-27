@@ -2,7 +2,6 @@ package webhook
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -103,8 +102,7 @@ func (h *Handler) createEndpoint(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
 	var input CreateEndpointInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &input) {
 		return
 	}
 
@@ -141,6 +139,9 @@ func (h *Handler) listEndpoints(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) deleteEndpoint(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
@@ -168,8 +169,7 @@ func (h *Handler) updateEndpoint(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
 	var input UpdateEndpointInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &input) {
 		return
 	}
 
@@ -193,6 +193,9 @@ func (h *Handler) updateEndpoint(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) rotateSecret(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
@@ -236,6 +239,9 @@ func (h *Handler) listEvents(w http.ResponseWriter, r *http.Request) {
 // the dashboard can highlight the new clone in its live tail and toast
 // the audit pivot.
 func (h *Handler) replayEventV2(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	eventID := chi.URLParam(r, "id")
 
@@ -330,6 +336,9 @@ func (h *Handler) listEndpointDeliveries(w http.ResponseWriter, r *http.Request)
 // touches other endpoints, so fixing one broken receiver doesn't spray
 // duplicates at the healthy ones.
 func (h *Handler) replayDelivery(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	endpointID := chi.URLParam(r, "id")
 	deliveryID := chi.URLParam(r, "deliveryID")

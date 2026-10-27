@@ -4319,7 +4319,8 @@ type DunningPolicy struct {
 	// Seeded True for the "Default retries" policy the account was created
 	// with, until you edit it or make it the default. While it is
 	// true, the next enabled policy you create becomes the default
-	// instead. Ignored in request bodies.
+	// instead. Set by the server: a request body that sends it is
+	// refused with 422.
 	Seeded    bool      `json:"seeded"`
 	TenantId  string    `json:"tenant_id,omitempty"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -4394,7 +4395,8 @@ type DunningPolicyListItem struct {
 	// Seeded True for the "Default retries" policy the account was created
 	// with, until you edit it or make it the default. While it is
 	// true, the next enabled policy you create becomes the default
-	// instead. Ignored in request bodies.
+	// instead. Set by the server: a request body that sends it is
+	// refused with 422.
 	Seeded    bool      `json:"seeded"`
 	TenantId  string    `json:"tenant_id,omitempty"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -4548,7 +4550,13 @@ type Error struct {
 		Code    string `json:"code,omitempty"`
 		Message string `json:"message,omitempty"`
 
-		// Param The request field the error is about. Sent only when the error names one.
+		// Param The request field the error is about. Sent only when the error
+		// names one. A request body may hold only the fields its
+		// operation lists, spelled and cased as listed: any other
+		// field, or one the server sets (such as `id`), is refused
+		// with 422 and `param` naming it. An operation with no request body lists no fields: send
+		// no body, `{}` or `null`. The Stripe and Postmark webhooks and
+		// the LiteLLM callback take their sender's body as it comes.
 		Param     string `json:"param,omitempty"`
 		RequestId string `json:"request_id,omitempty"`
 
