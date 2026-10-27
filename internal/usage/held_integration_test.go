@@ -390,12 +390,41 @@ func TestHeld_ReleaseIsAudited(t *testing.T) {
 	}
 }
 
+// resend is one LiteLLM call of one event at the given key, through the
+// live LiteLLM ingest (IngestCall).
+func (f heldFixture) resend(t *testing.T, customerID, meterID, key string, at time.Time) usage.CallResult {
+	t.Helper()
+	res, err := f.svc.IngestCall(f.ctx, f.tenantID, usage.CallInput{
+		CustomerID: customerID, MeterID: meterID,
+		Events: []usage.CallEvent{{Quantity: decimal.NewFromInt(100), IdempotencyKey: key, Timestamp: &at}},
+	})
+	if err != nil {
+		t.Fatalf("resend %s: %v", key, err)
+	}
+	return res
+}
+
+// eventID is the id of the usage_events row with this key.
+func (f heldFixture) eventID(t *testing.T, key string) string {
+	t.Helper()
+	tx, err := f.db.BeginTx(f.ctx, postgres.TxTenant, f.tenantID)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	var id string
+	if err := tx.QueryRowContext(f.ctx, `SELECT id FROM usage_events WHERE idempotency_key = $1`, key).Scan(&id); err != nil {
+		t.Fatalf("event %s: %v", key, err)
+	}
+	return id
+}
+
 // Review finding (#1151): a discarded row stays unbilled when LiteLLM
 // resends it after the customer exists. Before the fix the resend found the
 // customer, skipped the held table and wrote the row to usage_events.
 // Mutation-verify: drop the discarded check in
-// PostgresStore.IngestResolvingHeld → the resend is written and this fails
-// on the usage_events count.
+// PostgresStore.IngestCallResolvingHeld → the resend is written and this
+// fails on the usage_events count.
 func TestHeld_ResendAfterDiscardIsNotBilled(t *testing.T) {
 	f := newHeldFixture(t, "Held Discard Resend")
 	at := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
@@ -408,12 +437,8 @@ func TestHeld_ResendAfterDiscardIsNotBilled(t *testing.T) {
 	customerID := insertTestCustomer(t, f.db, f.tenantID, "cus_gone")
 	meterID := insertTestMeter(t, f.db, f.tenantID, "Tokens", "tokens")
 
-	_, err := f.svc.IngestResolvingHeld(f.ctx, f.tenantID, usage.IngestInput{
-		CustomerID: customerID, MeterID: meterID, Quantity: decimal.NewFromInt(100),
-		IdempotencyKey: "gone-1:input", Timestamp: &at,
-	})
-	if !errors.Is(err, errs.ErrDuplicateKey) {
-		t.Fatalf("resend after discard: err %v, want ErrDuplicateKey", err)
+	if res := f.resend(t, customerID, meterID, "gone-1:input", at); res.Inserted != 0 || res.Deduplicated != 1 {
+		t.Fatalf("resend after discard = %+v, want 0 inserted and 1 deduplicated", res)
 	}
 	if n := f.countEvents(t, "gone-1:input"); n != 0 {
 		t.Fatalf("usage_events rows = %d, want 0: a discarded row was billed", n)
@@ -426,7 +451,12 @@ func TestHeld_ResendAfterDiscardIsNotBilled(t *testing.T) {
 // A LiteLLM resend after the customer exists writes the row and marks its
 // held row released, in one transaction. A later discard then finds nothing
 // to discard, so the held table never says "discarded" for usage that is in
-// usage_events, and a later release writes nothing.
+// usage_events, and a later release writes nothing. A second resend writes
+// nothing new.
+// Mutation-verify: skip marking the held row released in
+// PostgresStore.IngestCallResolvingHeld → the held row stays held and the
+// discard takes it; count a duplicate key as inserted → the second resend
+// reports 1 inserted.
 func TestHeld_ResendWhileHeldResolvesTheHeldRow(t *testing.T) {
 	f := newHeldFixture(t, "Held Resend Resolves")
 	at := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
@@ -436,15 +466,12 @@ func TestHeld_ResendWhileHeldResolvesTheHeldRow(t *testing.T) {
 	customerID := insertTestCustomer(t, f.db, f.tenantID, "cus_back")
 	meterID := insertTestMeter(t, f.db, f.tenantID, "Tokens", "tokens")
 
-	evt, err := f.svc.IngestResolvingHeld(f.ctx, f.tenantID, usage.IngestInput{
-		CustomerID: customerID, MeterID: meterID, Quantity: decimal.NewFromInt(100),
-		IdempotencyKey: "back-1:input", Timestamp: &at,
-	})
-	if err != nil {
-		t.Fatalf("resend: %v", err)
+	if res := f.resend(t, customerID, meterID, "back-1:input", at); res.Inserted != 1 || res.Deduplicated != 0 {
+		t.Fatalf("resend = %+v, want 1 inserted", res)
 	}
-	if status, id := f.heldStatus(t, "back-1:input"); status != "released" || id == nil || *id != evt.ID {
-		t.Fatalf("held row = %s/%v, want released with event id %s", status, id, evt.ID)
+	evtID := f.eventID(t, "back-1:input")
+	if status, id := f.heldStatus(t, "back-1:input"); status != "released" || id == nil || *id != evtID {
+		t.Fatalf("held row = %s/%v, want released with event id %s", status, id, evtID)
 	}
 	if n, err := f.svc.Discard(f.ctx, f.tenantID, "cus_back", ""); err != nil || n != 0 {
 		t.Fatalf("discard after resend = %d (%v), want 0", n, err)
@@ -456,11 +483,11 @@ func TestHeld_ResendWhileHeldResolvesTheHeldRow(t *testing.T) {
 		t.Fatalf("usage_events rows = %d, want 1", n)
 	}
 	// A second resend is a plain duplicate.
-	if _, err := f.svc.IngestResolvingHeld(f.ctx, f.tenantID, usage.IngestInput{
-		CustomerID: customerID, MeterID: meterID, Quantity: decimal.NewFromInt(100),
-		IdempotencyKey: "back-1:input", Timestamp: &at,
-	}); !errors.Is(err, errs.ErrDuplicateKey) {
-		t.Fatalf("second resend: err %v, want ErrDuplicateKey", err)
+	if res := f.resend(t, customerID, meterID, "back-1:input", at); res.Inserted != 0 || res.Deduplicated != 1 {
+		t.Fatalf("second resend = %+v, want 0 inserted and 1 deduplicated", res)
+	}
+	if n := f.countEvents(t, "back-1:input"); n != 1 {
+		t.Fatalf("usage_events rows after the second resend = %d, want 1", n)
 	}
 }
 

@@ -129,9 +129,11 @@ release it once with an honest statement of what it will bill.
    threshold invoice is voided first).
 5. **Discard.** `POST /v1/usage-events/held/discard` marks rows discarded.
    They are kept as a record and never billed. Audited.
-6. **A resend after the customer exists.** The LiteLLM door ingests through
-   `IngestResolvingHeld`: in one transaction it locks the held row with the
-   same key (`SELECT … FOR UPDATE`, the lock release and discard take).
+6. **A resend after the customer exists.** The LiteLLM door writes each
+   call through `IngestCall`, in one transaction per call. It first locks
+   the held rows with the call's keys (`SELECT … FOR UPDATE`, the lock
+   release and discard take). The per-event `IngestResolvingHeld` that did
+   this before was removed in v0.9.0: nothing called it.
    A `discarded` row means nothing is written and the resend counts as
    deduplicated, so discard stays final. A `held` row is written and marked
    released, so a later discard cannot mark usage that is already billed.

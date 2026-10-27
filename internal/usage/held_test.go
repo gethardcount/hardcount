@@ -150,9 +150,6 @@ func (h *heldMemStore) ReleaseHeld(context.Context, string, ReleaseHeldInput, fu
 func (h *heldMemStore) DiscardHeld(context.Context, string, string, string, func(*sql.Tx, int) error) (int, error) {
 	return 0, nil
 }
-func (h *heldMemStore) IngestResolvingHeld(ctx context.Context, tenantID string, ev domain.UsageEvent, after func(*sql.Tx, domain.UsageEvent) error) (domain.UsageEvent, error) {
-	return h.IngestAudited(ctx, tenantID, ev, after)
-}
 func (h *heldMemStore) IngestCallResolvingHeld(_ context.Context, _ string, call StoreCall, after func(*sql.Tx, CallResult) error) (CallResult, error) {
 	evs := call.Events
 	if h.callLegacy {

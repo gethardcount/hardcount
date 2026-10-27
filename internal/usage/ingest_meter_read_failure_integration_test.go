@@ -35,8 +35,8 @@ func (failingMeterReader) MeterBucketsTx(context.Context, *sql.Tx, string) (usag
 // bill would get no after_close flag, counter or WARN.
 //
 // Mutation-verify: in any one store method (IngestAudited, IngestBatch,
-// IngestResolvingHeld, IngestCallResolvingHeld, ReleaseHeld), ignore the
-// hook's error → that door commits its rows and its case fails.
+// IngestCallResolvingHeld, ReleaseHeld), ignore the hook's error → that
+// door commits its rows and its case fails.
 func TestIngest_FailedMeterReadWritesNothing(t *testing.T) {
 	in := func(f ingestAggFixture, key string, at time.Time) usage.IngestInput {
 		return usage.IngestInput{CustomerID: f.customerID, MeterID: f.meter.ID, Quantity: decimal.NewFromInt(5), IdempotencyKey: key, Timestamp: &at}
@@ -65,12 +65,6 @@ func TestIngest_FailedMeterReadWritesNothing(t *testing.T) {
 		{"backfill", false, func(t *testing.T, f ingestAggFixture, at time.Time) ([]string, []string, error) {
 			_, err := f.svc.Backfill(f.ctx, f.tenantID, in(f, "backfill-fail", at))
 			return []string{"backfill-fail"}, nil, err
-		}},
-		{"litellm event, resend of a held key", false, func(t *testing.T, f ingestAggFixture, at time.Time) ([]string, []string, error) {
-			key := "held-fail:input"
-			f.hold(t, key, at)
-			_, err := f.svc.IngestResolvingHeld(f.ctx, f.tenantID, in(f, key, at))
-			return []string{key}, []string{key}, err
 		}},
 		{"litellm call, resend of a held key", false, func(t *testing.T, f ingestAggFixture, at time.Time) ([]string, []string, error) {
 			keys := []string{"call-fail:input", "call-fail:output"}

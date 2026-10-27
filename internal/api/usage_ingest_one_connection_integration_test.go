@@ -37,7 +37,7 @@ func TestIngest_ReadsTheAggregationOnItsOwnConnection(t *testing.T) {
 	const ext, eventName = "ext_ingest_one_conn", "tokens_ingest_one_conn"
 	now := time.Now().UTC()
 	at := now.Add(-time.Hour).Truncate(time.Second)
-	for _, key := range []string{"one-conn-held", "one-conn-call:input"} {
+	for _, key := range []string{"one-conn-call:input"} {
 		if _, err := usageSvc.Hold(ctx, tenantID, usage.HoldInput{
 			Source: domain.HeldUsageSourceLiteLLM, ExternalCustomerID: ext, EventName: eventName,
 			Quantity: decimal.NewFromInt(5), IdempotencyKey: key, EventAt: &at,
@@ -86,10 +86,6 @@ func TestIngest_ReadsTheAggregationOnItsOwnConnection(t *testing.T) {
 		}},
 		{"backfill", func(ctx context.Context) (int, int, error) {
 			ev, err := usageSvc.Backfill(ctx, tenantID, in("one-conn-backfill"))
-			return statusCount(ev), 1, err
-		}},
-		{"litellm event, resend of a held key", func(ctx context.Context) (int, int, error) {
-			ev, err := usageSvc.IngestResolvingHeld(ctx, tenantID, in("one-conn-held"))
 			return statusCount(ev), 1, err
 		}},
 		{"litellm call, resend of a held key", func(ctx context.Context) (int, int, error) {

@@ -633,11 +633,6 @@ func (s *heldOrderStore) IngestBatch(ctx context.Context, tenantID string, event
 	return s.heldMemStore.IngestBatch(ctx, tenantID, events, after)
 }
 
-func (s *heldOrderStore) IngestResolvingHeld(ctx context.Context, tenantID string, ev domain.UsageEvent, after func(*sql.Tx, domain.UsageEvent) error) (domain.UsageEvent, error) {
-	s.log.steps = append(s.log.steps, "write")
-	return s.heldMemStore.IngestResolvingHeld(ctx, tenantID, ev, after)
-}
-
 func (s *heldOrderStore) IngestCallResolvingHeld(ctx context.Context, tenantID string, call StoreCall, after func(*sql.Tx, CallResult) error) (CallResult, error) {
 	s.log.steps = append(s.log.steps, "write")
 	return s.heldMemStore.IngestCallResolvingHeld(ctx, tenantID, call, after)
@@ -690,10 +685,6 @@ func TestIngest_ReadsTheAggregationAfterTheWrite(t *testing.T) {
 			ev, err := svc.Backfill(context.Background(), "t1", in("k-backfill"))
 			return boolInt(ev.BillingStatus == BillingStatusAfterClose), err
 		},
-		"litellm event": func(svc *Service) (int, error) {
-			ev, err := svc.IngestResolvingHeld(context.Background(), "t1", in("k-held"))
-			return boolInt(ev.BillingStatus == BillingStatusAfterClose), err
-		},
 		"litellm call": func(svc *Service) (int, error) {
 			res, err := svc.IngestCall(context.Background(), "t1", CallInput{CustomerID: "cus_1", MeterID: "mtr_1", Events: []CallEvent{
 				{Quantity: dec(1), IdempotencyKey: "c:input", Timestamp: &ts}, {Quantity: dec(1), IdempotencyKey: "c:output", Timestamp: &ts},
@@ -701,7 +692,7 @@ func TestIngest_ReadsTheAggregationAfterTheWrite(t *testing.T) {
 			return res.Unbilled.AfterClose, err
 		},
 	}
-	want := map[string]int{"single": 1, "batch": 2, "backfill": 1, "litellm event": 1, "litellm call": 2}
+	want := map[string]int{"single": 1, "batch": 2, "backfill": 1, "litellm call": 2}
 	for name, run := range doors {
 		t.Run(name, func(t *testing.T) {
 			log := &stepLog{}

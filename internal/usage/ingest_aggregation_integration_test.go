@@ -212,15 +212,6 @@ func ingestDoors() []ingestDoor {
 			}
 			return 1, flag(ev), []string{"backfill-" + f.eventName}
 		}},
-		{"litellm event, resend of a held key", domain.UsageOriginAPI, func(t *testing.T, f ingestAggFixture, at time.Time) (int, int, []string) {
-			key := "held-" + f.eventName + ":input"
-			f.hold(t, key, at)
-			ev, err := f.svc.IngestResolvingHeld(f.ctx, f.tenantID, in(f, key, at))
-			if err != nil {
-				t.Fatalf("ingest resolving held: %v", err)
-			}
-			return 1, flag(ev), []string{key}
-		}},
 		{"litellm call, resend of a held key", domain.UsageOriginAPI, func(t *testing.T, f ingestAggFixture, at time.Time) (int, int, []string) {
 			keys := []string{"call-" + f.eventName + ":input", "call-" + f.eventName + ":output"}
 			f.hold(t, keys[0], at)
