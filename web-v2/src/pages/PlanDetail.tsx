@@ -35,6 +35,7 @@ import {
 import { Loader2, Lock, Pencil } from 'lucide-react'
 import { NoticeRow } from '@/components/NoticeRow'
 import { PLAN_LOCKED_TITLE, planLockedSentence } from '@/lib/pricingCopy'
+import { editPlanBaseFee } from '@/lib/planBaseFee'
 import { PlanPricesCard } from '@/components/PlanPricesCard'
 import { CopyButton } from '@/components/CopyButton'
 import { DetailBreadcrumb } from '@/components/DetailBreadcrumb'
@@ -373,17 +374,21 @@ function EditPlanDialog({ plan, liveSubscriptions, onClose, onSaved }: {
 
   const name = watch('name')
   const baseCents = Math.round(parseFloat(basePrice || '0') * 100)
-  // A plan with no base fee is billed at the end of each period; the timing
-  // is fixed once a subscription has used the plan.
-  const noBase = baseCents === 0
-  const timing = noBase ? 'in_arrears' : billTiming
-  const timingFixed = plan.used
+  const fee = editPlanBaseFee({
+    baseCents,
+    chosenTiming: billTiming,
+    storedTiming: plan.base_bill_timing ?? 'in_arrears',
+    used: plan.used,
+    interval: plan.billing_interval,
+  })
+  const timing = fee.timing
   const hasChanges = name !== plan.name ||
     baseCents !== plan.base_amount_cents ||
     status !== plan.status ||
     timing !== (plan.base_bill_timing ?? 'in_arrears')
 
   const onSubmit = handleSubmit(async (data) => {
+    if (fee.baseError) return
     try {
       await api.updatePlan(plan.id, {
         name: data.name,
@@ -439,13 +444,15 @@ function EditPlanDialog({ plan, liveSubscriptions, onClose, onSaved }: {
               onChange={e => setBasePrice(e.target.value)}
               placeholder="49.00"
               disabled={locked}
+              aria-invalid={fee.baseError ? true : undefined}
             />
-            <p className="text-xs text-muted-foreground">{plan.billing_interval === 'yearly' ? 'Yearly' : 'Monthly'} recurring charge. 0 for no base fee.</p>
+            <p className="text-xs text-muted-foreground">{fee.baseHint}</p>
+            {fee.baseError && <p className="text-xs text-destructive">{fee.baseError}</p>}
           </div>
 
           <div className="space-y-2">
             <Label>Base fee billed</Label>
-            <Select items={BILL_TIMING_OPTIONS} value={timing} disabled={timingFixed || noBase} onValueChange={(v) => setBillTiming((v ?? 'in_arrears') as 'in_arrears' | 'in_advance')}>
+            <Select items={BILL_TIMING_OPTIONS} value={timing} disabled={fee.timingDisabled} onValueChange={(v) => setBillTiming((v ?? 'in_arrears') as 'in_arrears' | 'in_advance')}>
               <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
@@ -455,14 +462,7 @@ function EditPlanDialog({ plan, liveSubscriptions, onClose, onSaved }: {
                 ))}
               </SelectContent>
             </Select>
-            <p className="text-xs text-muted-foreground">
-              {noBase
-                ? 'A plan with no base fee bills its usage at the end of each period.'
-                : timing === 'in_advance'
-                  ? 'Customer charged the base fee on day 1 of each period; usage settles at period end.'
-                  : 'Customer charged the base fee plus any usage at the end of each period.'}
-              {timingFixed && ' Fixed once a subscription has used the plan.'}
-            </p>
+            <p className="text-xs text-muted-foreground">{fee.timingHint}</p>
           </div>
 
           <div className="space-y-2">
@@ -482,7 +482,7 @@ function EditPlanDialog({ plan, liveSubscriptions, onClose, onSaved }: {
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-            <Button type="submit" disabled={isSubmitting || !hasChanges}>
+            <Button type="submit" disabled={isSubmitting || !hasChanges || fee.baseError !== null}>
               {isSubmitting ? (
                 <><Loader2 size={14} className="animate-spin mr-2" />Saving...</>
               ) : hasChanges ? 'Save' : 'No changes'}

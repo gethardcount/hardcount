@@ -16,7 +16,7 @@ import (
 // corrections, so a usage bucket can total below zero over a billing window
 // when the corrections are larger than the usage in that window. A negative
 // quantity has no price (ComputeAmountCents refuses it). Before #1193 the
-// period close and the cancel's final invoice failed on a pricing-rule
+// period close and the cancel's final invoice failed on a price's
 // bucket below zero, so the whole invoice, base fee included, was not made
 // and the close was retried. A single-rule meter below zero was billed 0
 // with no word, because the usage store dropped meter totals at or below

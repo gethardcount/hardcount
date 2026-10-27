@@ -42,7 +42,7 @@ curl -sS "$API/v1/usage-events?customer_id=$CUSTOMER&meter_id=$METER&from=$FROM&
 ```
 
 - The row's metadata has `meters` (`meter_id`, `meter_key`, `quantity`,
-  `from`, `to`), `billing_reason`, `period_start`, `period_end`, and
+  `from`, `to`; `meter_key` holds the meter's `event_name`), `billing_reason`, `period_start`, `period_end`, and
   `invoice_id` and `invoice_number` when an invoice was made.
 - Use the meter's `from` and `to`, not the period. They differ when a
   spend-threshold invoice already billed the start of the period, or when

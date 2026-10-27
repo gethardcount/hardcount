@@ -1634,7 +1634,7 @@ components:
         revenue_cents:
           type: integer
           format: int64
-          description: Total rated usage revenue in the window.
+          description: Total rated usage revenue in the window, an estimate at each subscription's current prices. Only active and trialing subscriptions are counted.
         revenue_currency:
           type: string
           description: Currency of revenue_cents (the customer's price rules). Omitted when the window's revenue spans more than one currency or the customer has no priced meter.
@@ -2175,6 +2175,15 @@ components:
             source:
               type: string
               enum: [current_billing_cycle, explicit]
+              description: |
+                `current_billing_cycle`: no `from` and `to` were sent, and
+                the amounts are what the period's invoices bill.
+                `explicit`: the window you sent. Its amounts are an
+                estimate, so a past window can differ from its invoices.
+                Only active and trialing subscriptions are counted: the
+                usage of a canceled subscription is left out. Each
+                subscription's usage in the window is priced at the
+                prices of its current billing period.
         subscriptions:
           type: array
           description: |
@@ -2217,6 +2226,9 @@ components:
                 format: int64
         warnings:
           type: array
+          description: |
+            Problems found working out this usage, in words, such as usage
+            that no price takes or a meter whose usage went below zero.
           items:
             type: string
         buckets:

@@ -70,7 +70,7 @@ A dunning run is the automatic retries after a failed payment.
 - [ ] With the same proxy, send one completion on a model the customer's plan has no price for → `velox_usage_unbilled_total{reason="no_price"}` on `/metrics` goes up by the call's events, and the customer page shows them in its "not billed" row.
 - [ ] Open [Anthropic's pricing page](https://platform.claude.com/docs/en/about-claude/pricing) and the models overview. Update `anthropicListPrices` and `anthropicPricesChecked` in `internal/recipe/anthropic_prices_test.go`. If a price moved, fix `anthropic_style.yaml`, bump its version, and add a CHANGELOG line telling existing installs to update that price. If a model was added, also:
   - Add its id to `modelFamilies` in `internal/integrations/litellm/mapper.go`. If its price depends on the prompt's length, add it to `promptTiers` too.
-  - Add its rules to `anthropic_style.yaml`, bump the version, and add a CHANGELOG line telling existing installs to add its prices.
+  - Add its prices to the plan in `anthropic_style.yaml`, bump the version, and add a CHANGELOG line telling existing installs to add its prices.
   - In `internal/integrations/litellm/model_families_test.go`, add it to `pricingPageClaudeIDs`, and remove it from `mustStayRaw` if it is there.
   - In `internal/integrations/litellm/testdata/list_claude_model_ids.py`, add it to `FAMILIES` and `PAGE`, and remove it from `PROBES` if it is there. Then regenerate the list (do not edit it by hand):
 

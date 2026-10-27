@@ -190,10 +190,11 @@ func (s *Service) backfillEmission(ctx context.Context) func(tx *sql.Tx, out dom
 }
 
 // MaxDimensionKeys caps the size of the JSONB dimensions map on each
-// usage event. Dimensions feed pricing-rule dispatch via @> subset
-// matches at finalize time; bounding the per-event JSONB size protects
-// the GIN index from pathological tenants and matches the equivalent
-// cap on meter_pricing_rules.dimension_match (16 keys).
+// usage event. Dimensions decide which plan price takes the event (a price
+// takes an event whose dimensions include all of its dimension_match);
+// bounding the per-event JSONB size protects the GIN index from
+// pathological tenants and matches the cap on a price's dimension_match
+// (domain.MaxDimensionKeys, 16 labels).
 const MaxDimensionKeys = 16
 
 // usageFutureSkew is how far ahead of wall-clock a live usage event timestamp
@@ -213,8 +214,9 @@ func checkQuantity(q decimal.Decimal) (decimal.Decimal, error) {
 // validateDimensions enforces the v1 dimension contract: at most
 // MaxDimensionKeys keys, scalar values only (string, number, bool, nil).
 // Object/array values are rejected — Postgres `@>` would still match
-// them but the priority+claim semantics aren't well-defined for nested
-// containers in v1 (revisit if a design partner needs it).
+// them, but a price's dimension_match holds string values only, so a
+// nested value could never be priced (revisit if a design partner needs
+// it).
 func validateDimensions(dims map[string]any) error {
 	if len(dims) > MaxDimensionKeys {
 		return errs.Invalid("dimensions", fmt.Sprintf("at most %d keys (got %d)", MaxDimensionKeys, len(dims)))

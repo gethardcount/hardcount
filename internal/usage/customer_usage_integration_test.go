@@ -390,6 +390,64 @@ func TestCustomerUsage_NoSubscriptionRequiresExplicitWindow(t *testing.T) {
 	}
 }
 
+// TestCustomerUsage_ExplicitWindowLeavesOutACanceledSubscription pins what
+// the API reference says of `period.source: explicit` and what the
+// dashboard's estimate note says: only active and trialing subscriptions are
+// rated, so a canceled subscription's usage in a chosen window is not
+// counted, though its invoices billed it.
+//
+// Mutation: rate canceled subscriptions too (filterActiveSubs), and the
+// canceled subscription's 500 cents stay in the window's totals.
+func TestCustomerUsage_ExplicitWindowLeavesOutACanceledSubscription(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration: skipped in -short mode")
+	}
+	f := newCustomerUsageFixture(t, "Customer Usage Canceled Sub")
+	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 30*time.Second)
+	defer cancel()
+
+	cycleStart := time.Now().UTC().Truncate(time.Hour).Add(-48 * time.Hour)
+	cycleEnd := cycleStart.Add(30 * 24 * time.Hour)
+	meter := f.meter(t, ctx, "calls")
+	custID, _, subID := f.seedCustomerWithSub(t, ctx, "cus_canceled", "pln_canceled", []pricing.PriceInput{price(meter.ID, 1, nil)}, cycleStart, cycleEnd)
+	ts := cycleStart.Add(time.Hour)
+	if _, err := f.usageSvc.Ingest(ctx, f.tenantID, usage.IngestInput{
+		CustomerID: custID, MeterID: meter.ID, Quantity: decimal.NewFromInt(500), Timestamp: &ts,
+	}); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	window := usage.CustomerUsagePeriod{From: cycleStart.Add(-24 * time.Hour), To: time.Now().UTC()}
+
+	res, err := f.custUsage.Get(ctx, f.tenantID, custID, window)
+	if err != nil {
+		t.Fatalf("Get while active: %v", err)
+	}
+	if res.Period.Source != "explicit" || len(res.Totals) != 1 || res.Totals[0].AmountCents != 500 {
+		t.Fatalf("while active: source %q, totals %+v; want explicit and 500 cents", res.Period.Source, res.Totals)
+	}
+
+	tx, err := f.db.BeginTx(ctx, postgres.TxTenant, f.tenantID)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	if _, err := tx.ExecContext(ctx, `UPDATE subscriptions SET status = 'canceled', canceled_at = now() WHERE id = $1`, subID); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit cancel: %v", err)
+	}
+
+	res, err = f.custUsage.Get(ctx, f.tenantID, custID, window)
+	if err != nil {
+		t.Fatalf("Get after the cancel: %v", err)
+	}
+	if res.Period.Source != "explicit" || len(res.Totals) != 0 || len(res.Meters) != 0 || len(res.Subscriptions) != 0 || len(res.Warnings) != 0 {
+		t.Fatalf("after the cancel: source %q, totals %+v, meters %d, subscriptions %d, warnings %v; want explicit and nothing counted",
+			res.Period.Source, res.Totals, len(res.Meters), len(res.Subscriptions), res.Warnings)
+	}
+}
+
 // TestCustomerUsage_TwoSubscriptionsOnTheirOwnPeriods: with no window, each
 // subscription is rated over its own current period (ADR-130 §10), so the
 // response's period spans every one of them, and each meter's daily buckets

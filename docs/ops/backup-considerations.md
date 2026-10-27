@@ -238,7 +238,7 @@ Some tables matter more than others when you decide what a restore must bring ba
 | `tenants` | Every other row belongs to an account |
 | `customers`, `customer_billing_profiles` | Who the customers are, with tax details and personal data |
 | `subscriptions`, `subscription_items` | What each customer is billed for |
-| `plans`, `meters`, `rating_rule_versions` | Prices. Invoice amounts depend on them. |
+| `plans`, `meters`, `plan_prices`, `plan_price_versions`, `customer_price_overrides` | Prices, with each price's past rates and each customer's negotiated rates. Invoice amounts depend on them. |
 | `invoices`, `invoice_line_items` | Issued invoices: a financial record |
 | `credit_notes`, `credit_note_line_items` | Refunds and adjustments: a financial record |
 | `customer_credit_ledger` | Customer credit balances. Every entry is needed to work out a balance. |

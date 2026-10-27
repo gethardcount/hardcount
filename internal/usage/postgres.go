@@ -822,8 +822,8 @@ func buildUsageWhere(f ListFilter) (string, []any) {
 
 // propertiesJSON serializes the event's free-form properties for the JSONB
 // column. This map is also the carrier for multi-dim meter dimensions
-// (model, operation, region, etc.) that pricing_rule.dimension_match runs
-// subset-match against — losing it here would silently drop dimension
+// (model, operation, region, etc.) that a plan price's dimension_match is
+// matched against — losing it here would silently drop dimension
 // information at ingest, so a marshal failure is treated as a hard error.
 func propertiesJSON(props map[string]any) (string, error) {
 	if len(props) == 0 {

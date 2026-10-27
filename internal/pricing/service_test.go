@@ -350,6 +350,30 @@ func TestUpdatePlan_EditRules(t *testing.T) {
 			t.Fatalf("in_advance on a base-0 plan: %v, want a refusal on base_bill_timing", err)
 		}
 	})
+	// A used in_advance plan has a fixed timing, so its base fee cannot go to
+	// 0, even with no live subscription left. The refusal used to say "set
+	// base_bill_timing to in_arrears", which the timing lock then refused.
+	t.Run("used in_advance plan: the refusal of a base of 0 points at a new plan", func(t *testing.T) {
+		svc, p := setup(0, true, 4900, domain.BillInAdvance)
+		want := "This plan bills its base fee in_advance, and a subscription has used it, so the base fee must stay above 0. To charge no base fee, create a new plan that bills in_arrears."
+		_, err := svc.UpdatePlan(ctx, "tenant1", p.ID, UpdatePlanInput{BaseAmountCents: base(0)})
+		if err == nil || err.Error() != want || errs.Field(err) != "base_amount_cents" {
+			t.Fatalf("got %v on %q, want %q on base_amount_cents", err, errs.Field(err), want)
+		}
+		// Asking for in_arrears as well is the timing change the lock refuses.
+		_, err = svc.UpdatePlan(ctx, "tenant1", p.ID, UpdatePlanInput{BaseAmountCents: base(0), BaseBillTiming: domain.BillInArrears})
+		if errs.Field(err) != "base_bill_timing" {
+			t.Fatalf("got %v, want the timing refusal on base_bill_timing", err)
+		}
+		// A plan no subscription has used still gets the timing advice: it works there.
+		svc, p = setup(0, false, 4900, domain.BillInAdvance)
+		if _, err := svc.UpdatePlan(ctx, "tenant1", p.ID, UpdatePlanInput{BaseAmountCents: base(0)}); err == nil || !strings.Contains(err.Error(), "set base_bill_timing to in_arrears") {
+			t.Fatalf("unused plan: got %v, want the advice to set base_bill_timing to in_arrears", err)
+		}
+		if _, err := svc.UpdatePlan(ctx, "tenant1", p.ID, UpdatePlanInput{BaseAmountCents: base(0), BaseBillTiming: domain.BillInArrears}); err != nil {
+			t.Fatalf("unused plan: base 0 with in_arrears: %v", err)
+		}
+	})
 	t.Run("live subscriptions: display fields change at once", func(t *testing.T) {
 		svc, p := setup(3, true, 4900, domain.BillInArrears)
 		desc, tax := "New description", "txcd_10000000"

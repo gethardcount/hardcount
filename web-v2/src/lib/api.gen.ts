@@ -7911,7 +7911,7 @@ export interface components {
             to: string;
             /**
              * Format: int64
-             * @description Total rated usage revenue in the window.
+             * @description Total rated usage revenue in the window, an estimate at each subscription's current prices. Only active and trialing subscriptions are counted.
              */
             revenue_cents: number;
             /** @description Currency of revenue_cents (the customer's price rules). Omitted when the window's revenue spans more than one currency or the customer has no priced meter. */
@@ -8220,7 +8220,17 @@ export interface components {
                 from: string;
                 /** Format: date-time */
                 to: string;
-                /** @enum {string} */
+                /**
+                 * @description `current_billing_cycle`: no `from` and `to` were sent, and
+                 *     the amounts are what the period's invoices bill.
+                 *     `explicit`: the window you sent. Its amounts are an
+                 *     estimate, so a past window can differ from its invoices.
+                 *     Only active and trialing subscriptions are counted: the
+                 *     usage of a canceled subscription is left out. Each
+                 *     subscription's usage in the window is priced at the
+                 *     prices of its current billing period.
+                 * @enum {string}
+                 */
                 source: "current_billing_cycle" | "explicit";
             };
             /**
@@ -8245,6 +8255,10 @@ export interface components {
                 /** Format: int64 */
                 amount_cents: number;
             }[];
+            /**
+             * @description Problems found working out this usage, in words, such as usage
+             *     that no price takes or a meter whose usage went below zero.
+             */
             warnings: string[];
             /** @description One entry per UTC day in the period, including days with no usage. */
             buckets: {

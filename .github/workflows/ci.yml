@@ -124,6 +124,63 @@ jobs:
           # instead of logging a warning.
           VELOX_LIVEMODE_STRICT: "true"
 
+  # The pricing-shapes suite (ADR-130): each common way to price with
+  # Velox, billed end to end and checked to the cent, plus the goldens of
+  # each price shape on every rating path. The test job runs these too;
+  # this job gives them a check of their own, so a branch rule can require
+  # it.
+  pricing-shapes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: velox
+          POSTGRES_USER: velox
+          POSTGRES_PASSWORD: velox
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U velox -d velox"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Create test database and app user
+        run: |
+          PGPASSWORD=velox psql -v ON_ERROR_STOP=1 -h localhost -U velox -d velox -f docker/init.sql
+          PGPASSWORD=velox psql -v ON_ERROR_STOP=1 -h localhost -U velox -d velox \
+            -c "ALTER SYSTEM SET fsync = off" \
+            -c "ALTER SYSTEM SET synchronous_commit = off" \
+            -c "ALTER SYSTEM SET full_page_writes = off" \
+            -c "SELECT pg_reload_conf()"
+
+      - name: Pricing shapes, through the API
+        run: >-
+          go test -p 1 -count=1 -short=false -v ./internal/api
+          -run '^(TestPricingShapes_|TestE2E_PlanPrices_TwoPlansPriceOneMeterDifferently$|TestE2E_PlanPrices_SwapPricesEachWindowByItsPlan$)'
+        env:
+          TEST_ADMIN_DATABASE_URL: postgres://velox:velox@localhost:5432/velox_test?sslmode=disable
+          TEST_DATABASE_URL: postgres://velox_test_app:velox_test_app@localhost:5432/velox_test?sslmode=disable
+          VELOX_LIVEMODE_STRICT: "true"
+
+      - name: Price shape goldens, on every rating path
+        run: >-
+          go test -p 1 -count=1 -short=false -v ./internal/billing
+          -run '^(TestPriceShapes_|TestRateShapes_)'
+        env:
+          TEST_ADMIN_DATABASE_URL: postgres://velox:velox@localhost:5432/velox_test?sslmode=disable
+          TEST_DATABASE_URL: postgres://velox_test_app:velox_test_app@localhost:5432/velox_test?sslmode=disable
+          VELOX_LIVEMODE_STRICT: "true"
+
   # The same integration suite with the APP pool behind PgBouncer in
   # TRANSACTION mode (ADR-114 PR-E). Since the leader-lease cutover every
   # statement Velox issues is meant to be self-contained; this job is what
@@ -618,9 +675,10 @@ jobs:
 
   docker:
     timeout-minutes: 30
-    # Keep this list the same as the required status checks on main: an
-    # image must not be published past a check that would block a merge.
-    needs: [test, unit, test-pgbouncer, migrations, golden-path, codegen-drift, frontend, lint]
+    # Every check an image must pass before it is published. Not all of
+    # them are required checks on main (migrations and pricing-shapes are
+    # not today), so a merge can pass one this list still waits for.
+    needs: [test, unit, test-pgbouncer, pricing-shapes, migrations, golden-path, codegen-drift, frontend, lint]
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     permissions:

@@ -114,7 +114,7 @@ the code's.
 |---|---|
 | tenant | account |
 | catchup, catch-up running | what is happening: "Billing the skipped days…" |
-| `rule_key` or any field name | what it means: "The name your app sends with each usage event, for example `api_calls`" |
+| `event_name` or any field name | what it means: "The name your app sends with each usage event, for example `api_calls`" |
 | Configure … | what the page is for: "Your business details, invoice defaults, tax and payment setup" |
 
 ### Before and after

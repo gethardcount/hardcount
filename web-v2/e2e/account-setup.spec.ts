@@ -236,6 +236,43 @@ async function advanceAPeriod(clock: TestClock) {
 // The price form writes each price shape in the API's words: a graduated
 // price's last tier is open (up_to null), and a package price can be a
 // fraction of a cent. Labels make each price take its own events.
+// The server refuses a base fee of 0 on a plan billed in advance, and fixes
+// the timing once a subscription has used the plan. So a used in_advance
+// plan keeps a fee above 0, even once its subscriptions are canceled. The
+// dialog said "0 for no base fee", showed the timing as "At end of period",
+// and Save failed.
+test('a used plan billed in advance keeps a base fee above 0, and the Edit plan dialog says so before saving', async ({ page }) => {
+  const id = uniq()
+  const plan = await api<PlanDetail>('POST', '/plans', {
+    code: `e2e-adv-zero-${id}`, name: `E2E Advance zero ${id}`, currency: 'USD', billing_interval: 'monthly',
+    base_amount_cents: 500, base_bill_timing: 'in_advance',
+  })
+  const customer = await createCustomer()
+  const subscription = await createSubscription(customer.id, plan.id)
+  await api('POST', `/subscriptions/${subscription.id}/cancel`)
+  const stored = await api<PlanDetail & { live_subscription_count: number }>('GET', `/plans/${plan.id}`)
+  expect([stored.used, stored.live_subscription_count, stored.base_bill_timing]).toEqual([true, 0, 'in_advance'])
+
+  await page.goto(`/plans/${plan.id}`)
+  await page.getByRole('button', { name: 'Edit', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Edit plan' })
+  const timing = field(dialog, 'Base fee billed').getByRole('combobox')
+  await expect(timing).toHaveText(/^At start of period/)
+  await expect(timing).toBeDisabled()
+  await expect(dialog.getByText('Monthly recurring charge, above 0.', { exact: true })).toBeVisible()
+  await field(dialog, /^Base Price/).getByRole('spinbutton').fill('0')
+  await expect(dialog.getByText('This plan bills its base fee at the start of each period, so the fee must be above 0. To charge no base fee, create a new plan.', { exact: true })).toBeVisible()
+  await expect(timing).toHaveText(/^At start of period/)
+  await expect(dialog.getByRole('button', { name: 'Save' })).toBeDisabled()
+  await dialog.getByRole('button', { name: 'Cancel' }).click()
+
+  // The server's refusal points at the same way out, not at a timing change
+  // it would refuse too.
+  const res = await page.request.fetch(`/v1/plans/${plan.id}`, { method: 'PATCH', data: { base_amount_cents: 0 } })
+  expect(res.status()).toBe(422)
+  expect(await res.text()).toContain('This plan bills its base fee in_advance, and a subscription has used it, so the base fee must stay above 0. To charge no base fee, create a new plan that bills in_arrears.')
+})
+
 test('the price form saves a graduated price with an open last tier, and a package price below a cent', async ({ page }) => {
   const id = uniq()
   const meter = await api<Meter>('POST', '/meters', { event_name: `e2e_shapes_${id}`, name: `E2E Shapes ${id}`, unit: 'unit', aggregation: 'sum' })
@@ -306,6 +343,11 @@ test('a price override for one customer: the upcoming invoice bills the negotiat
     code: `e2e-deal-${id}`, name: `E2E Deal plan ${id}`, currency: 'USD', billing_interval: 'monthly', base_amount_cents: 0,
     prices: [{ meter_id: meter.id, mode: 'per_unit', unit_amount_cents: '2' }],
   })
+  // A plan the customer is not on: its price is listed after the customer's.
+  await api<PlanDetail>('POST', '/plans', {
+    code: `e2e-deal-other-${id}`, name: `E2E Deal other plan ${id}`, currency: 'USD', billing_interval: 'monthly', base_amount_cents: 0,
+    prices: [{ meter_id: meter.id, mode: 'per_unit', unit_amount_cents: '5' }],
+  })
   const clock = await createClock()
   const customer = await createCustomer(clock.id)
   const subscription = await createSubscription(customer.id, plan.id)
@@ -330,6 +372,9 @@ test('a price override for one customer: the upcoming invoice bills the negotiat
   const add = page.getByRole('dialog', { name: 'Add price override' })
   await add.getByRole('button', { name: 'Select a plan price...' }).click()
   const priceName = `${plan.name} · ${meter.name}`
+  // The prices of the customer's own plans come first, and the form says so.
+  await expect(page.getByRole('option').first()).toHaveText(new RegExp(`^${escapeRegExp(`${priceName} — list $0.02 / call`)}`))
+  await expect(add.getByText("Prices of this customer's plans are listed first.", { exact: true })).toBeVisible()
   await pick(page, plan.name, new RegExp(`^${escapeRegExp(`${priceName} — list $0.02 / call`)}`))
   await add.getByLabel(/^Price per unit/).fill('0.01')
   await expect(add.getByText('List price: $0.02 / call.', { exact: false })).toBeVisible()
@@ -445,6 +490,7 @@ test('install a recipe: the preview lists what it will create, the install creat
   await expect(installed.getByText('Installed', { exact: true })).toBeVisible()
   await installed.getByRole('button', { name: 'View' }).click()
   await expect(dialog.getByText('Installed with these settings', { exact: true })).toBeVisible()
+  await expect(dialog.getByText("Set at install and fixed here. On the plan's page you can rename the plan and edit its prices. Its currency and plan ID cannot change.", { exact: true })).toBeVisible()
   await expect(dialog.getByLabel('Plan name', { exact: true })).toHaveValue(planName)
   await expect(dialog.getByLabel('Plan name', { exact: true })).toBeDisabled()
   await expect(dialog.getByRole('button', { name: 'Already installed' })).toBeDisabled()

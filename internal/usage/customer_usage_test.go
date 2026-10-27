@@ -346,8 +346,10 @@ func TestCustomerUsage_RowsByPrice(t *testing.T) {
 	}
 }
 
-// An explicit window is an estimate (ADR-130 §10): it reads RateWindow and
-// says so.
+// An explicit window is an estimate (ADR-130 §10): it reads RateWindow, and
+// period.source "explicit" says so. The estimate is not a warning: warnings
+// are problems found working out the usage, and the dashboard shows them as
+// problems.
 func TestCustomerUsage_ExplicitWindowIsAnEstimate(t *testing.T) {
 	svc, rater, _ := usageFixture(domain.RatedSubscription{MeterIDs: []string{"mtr_tokens"}})
 	from := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
@@ -361,12 +363,8 @@ func TestCustomerUsage_ExplicitWindowIsAnEstimate(t *testing.T) {
 	if res.Period.Source != "explicit" {
 		t.Errorf("source = %q, want explicit", res.Period.Source)
 	}
-	found := false
-	for _, w := range res.Warnings {
-		found = found || strings.Contains(w, "Estimate")
-	}
-	if !found {
-		t.Errorf("warnings = %v, want the estimate note", res.Warnings)
+	if len(res.Warnings) != 0 {
+		t.Errorf("warnings = %v, want none: the window has no problem, and source says it is an estimate", res.Warnings)
 	}
 	if len(res.Meters) != 1 || len(res.Meters[0].Prices) != 0 {
 		t.Errorf("a meter with no usage is listed with no rows: %+v", res.Meters)

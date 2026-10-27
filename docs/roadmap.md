@@ -53,8 +53,8 @@ first. Every shipped change, with its date, is in the
   or its period was already invoiced. A batch answer gives each event's status
   ([ADR-130](adr/130-usage-prices-belong-to-the-plan.md) §12).
 - **Not in v0.9.0:** a base fee change that waits for each subscriber's
-  next period. The base fee stays locked while a live subscription uses
-  the plan; to change it, create a new plan and move subscribers to it
+  next period. The base fee stays locked while a subscription that is not
+  canceled uses the plan; to change it, create a new plan and move subscribers to it
   ([ADR-130](adr/130-usage-prices-belong-to-the-plan.md) section 5).
 
 Everything else v0.9.0 changes: [Unreleased](../CHANGELOG.md#unreleased).
@@ -75,6 +75,10 @@ Also now, in v0.9.0 or right after it:
 - **Generated SDKs for Go and TypeScript,** built from
   [`api/openapi.yaml`](../api/openapi.yaml), once the per-plan pricing API
   has settled.
+- **Billed or not, on each usage event.** The Usage page shows whether an
+  invoice billed each event and, if not, why, with a filter. Velox records
+  it when it invoices the period, so it says what the invoice did. Today
+  only the answer to the event says what Velox found when it arrived.
 
 ## Later
 
@@ -90,6 +94,9 @@ Each item waits until someone using Velox needs it:
   expects more than 5 million a day ([scale](scale.md#if-you-need-more)).
 - Quarterly billing, volume tiers, a start date on subscriptions, and
   currencies with no minor unit, such as JPY.
+- Monthly usage on a yearly plan, on one subscription. Today a yearly plan
+  bills its usage at the end of the year; for monthly usage, add a monthly
+  subscription ([how](ai-pricing.md#usage-on-a-yearly-plan)).
 - Billing late usage on the next invoice.
 - Automatic credit top-ups.
 - Importing LLM prices from a public price list.
