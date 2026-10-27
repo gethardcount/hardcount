@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sort"
 	"testing"
 	"time"
 
@@ -362,14 +363,34 @@ func (m *memStore) RetireCommitGrantForInvoiceTx(_ context.Context, _ *sql.Tx, t
 	return 0, nil
 }
 
-func (m *memStore) SumCreditNoteGrantsForInvoice(_ context.Context, _, customerID, invoiceID string) (int64, error) {
-	var sum int64
+func (m *memStore) InvoiceCreditsTx(_ context.Context, _ *sql.Tx, _, customerID, invoiceID string) ([]InvoiceCredits, error) {
+	byCurrency := map[string]*InvoiceCredits{}
+	var out []InvoiceCredits
 	for _, e := range m.entries {
-		if e.CustomerID == customerID && e.InvoiceID == invoiceID && e.EntryType == domain.CreditGrant && e.SourceCreditNoteID != "" {
-			sum += e.AmountCents
+		if e.CustomerID != customerID || e.InvoiceID != invoiceID {
+			continue
+		}
+		usage := e.EntryType == domain.CreditUsage
+		returned := e.EntryType == domain.CreditGrant && e.SourceCreditNoteID != ""
+		if !usage && !returned {
+			continue
+		}
+		c, ok := byCurrency[e.Currency]
+		if !ok {
+			c = &InvoiceCredits{Currency: e.Currency}
+			byCurrency[e.Currency] = c
+		}
+		if usage {
+			c.UsedCents -= e.AmountCents
+		} else {
+			c.ReturnedCents += e.AmountCents
 		}
 	}
-	return sum, nil
+	for _, c := range byCurrency {
+		out = append(out, *c)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Currency < out[j].Currency })
+	return out, nil
 }
 
 func (m *memStore) CountEntries(_ context.Context, filter ListFilter) (int, error) {

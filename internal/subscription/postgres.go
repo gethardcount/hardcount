@@ -1734,7 +1734,7 @@ func (s *PostgresStore) GetDueBilling(ctx context.Context, now, dueBy time.Time,
 // manual run and the concurrent wall-clock scheduler from contending on the same
 // row DURING the fetch; it does NOT by itself prevent double-billing — these
 // locks release when this fetch tx rolls back, before billSubscription runs.
-// Exactly-once is guaranteed downstream by idx_invoices_billing_idempotency (a
+// Exactly-once is guaranteed downstream by idx_invoices_billing_period_dedup (a
 // loser's 23505 → graceful ErrAlreadyExists skip), a mechanism this path reuses
 // unchanged.
 //

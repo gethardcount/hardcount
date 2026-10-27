@@ -21,7 +21,7 @@ import (
 
 // TestBilling_SamePeriodTwice_IdempotentSkip is FLOW B3 item #1, sequential: billing
 // the SAME subscription+period a second time produces NO duplicate invoice — the
-// second run's INSERT collides on idx_invoices_billing_idempotency, which
+// second run's INSERT collides on idx_invoices_billing_period_dedup, which
 // billOnePeriod catches as a graceful idempotent skip ("invoice already exists for
 // billing period"), returning invoiced=false, err=nil. Models a duplicate scheduler
 // trigger / a re-run that didn't advance the cycle. (The concurrent twin is

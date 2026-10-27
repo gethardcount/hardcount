@@ -30,7 +30,7 @@ import (
 // retry), yet exactly ONE cycle invoice is created.
 //
 // There is no application-level pre-SELECT — the only guard is the Postgres unique
-// index idx_invoices_billing_idempotency. The losing goroutines collide on it
+// index idx_invoices_billing_period_dedup. The losing goroutines collide on it
 // (SQLSTATE 23505), which the invoice store maps to errs.ErrAlreadyExists and
 // billOnePeriod catches as a graceful idempotent skip (returns invoiced=false,
 // err=nil). The two assertions that matter:

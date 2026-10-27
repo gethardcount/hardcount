@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"math"
 	"sort"
 	"strings"
 	"time"
@@ -464,9 +463,10 @@ func (s *Service) ApplyToInvoiceAt(ctx context.Context, tenantID, customerID, in
 // back) atomically with the invoice status flip that drives the void. invoice.Service.Void
 // threads its coordinator tx through here — a reversal failure rolls the void
 // back, so the invoice never lands voided with the customer's applied credits
-// still consumed. The reading of usage entries runs on its own conn (those
-// rows were committed when the credit was applied); only the grant INSERT
-// rides the tx.
+// still consumed. The credits are added up on that tx too, in one SQL sum
+// over every usage row of the invoice (no page). The void holds the invoice
+// row lock, and a credit application takes that lock first, so no application
+// can land between the sum and the grant.
 //
 // The 0106 dedup index allows one reversal per invoice. The void refuses an
 // invoice that is already voided, on the locked row, so a second reversal is
@@ -478,41 +478,27 @@ func (s *Service) ApplyToInvoiceAt(ctx context.Context, tenantID, customerID, in
 // clock-pinned.
 func (s *Service) ReverseForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, invoiceID, invoiceNumber string) (int64, error) {
 	ctx = s.bindForCustomer(ctx, tenantID, customerID)
-	entries, err := s.store.ListEntries(ctx, ListFilter{
-		TenantID:   tenantID,
-		CustomerID: customerID,
-		InvoiceID:  invoiceID,
-		EntryType:  string(domain.CreditUsage),
-		Limit:      100,
-	})
+	sums, err := s.store.InvoiceCreditsTx(ctx, tx, tenantID, customerID, invoiceID)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("reverse credits for invoice %s: %w", invoiceID, err)
 	}
 
-	// Sum all usage entries for this invoice (they're negative). The
-	// reversal hands the credit back in the currency it was drawn in
+	// The reversal hands the credit back in the currency it was drawn in
 	// (ADR-129). The drain draws only in the invoice's currency, so every
-	// usage row of one invoice shares it; two currencies mean the ledger is
-	// corrupt, and handing back either would be a guess.
-	var totalUsed int64
-	currency := ""
-	for _, e := range entries {
-		// Usage rows are negative; their sizes add up to what was used.
-		if e.AmountCents == math.MinInt64 {
-			return 0, fmt.Errorf("reverse credits for invoice %s: usage row amount: %w", invoiceID, domain.ErrAmountOverflow)
+	// usage row of one invoice shares it, and so do the credit notes that
+	// returned part of it; two currencies mean the ledger is corrupt, and
+	// handing back either would be a guess.
+	var used *InvoiceCredits
+	for i := range sums {
+		if sums[i].UsedCents == 0 && sums[i].ReturnedCents == 0 {
+			continue
 		}
-		if totalUsed, err = domain.SumCents(totalUsed, -e.AmountCents); err != nil {
-			return 0, fmt.Errorf("reverse credits for invoice %s: credits used: %w", invoiceID, err)
+		if used != nil {
+			return 0, fmt.Errorf("reverse credits for invoice %s: its credit rows are in %s and %s; refusing to guess the currency to return", invoiceID, used.Currency, sums[i].Currency)
 		}
-		switch {
-		case currency == "":
-			currency = e.Currency
-		case e.Currency != currency:
-			return 0, fmt.Errorf("reverse credits for invoice %s: its usage rows are in %s and %s; refusing to guess the currency to return", invoiceID, currency, e.Currency)
-		}
+		used = &sums[i]
 	}
-
-	if totalUsed <= 0 {
+	if used == nil || used.UsedCents <= 0 {
 		return 0, nil // No credits were applied to this invoice
 	}
 
@@ -521,11 +507,7 @@ func (s *Service) ReverseForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID,
 	// ADR-061 amendment 2026-10-12). Hand back only what is still applied.
 	// Every credit-note grant on a voidable invoice is such a return: the other
 	// kind is written for a PAID invoice, which cannot be voided.
-	returned, err := s.store.SumCreditNoteGrantsForInvoice(ctx, tenantID, customerID, invoiceID)
-	if err != nil {
-		return 0, fmt.Errorf("read credits already returned by credit notes: %w", err)
-	}
-	totalUsed -= returned
+	totalUsed := used.UsedCents - used.ReturnedCents
 	if totalUsed <= 0 {
 		return 0, nil // Credit notes already returned everything that was applied
 	}
@@ -538,7 +520,7 @@ func (s *Service) ReverseForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID,
 	if _, err := s.store.AppendEntryTx(ctx, tx, tenantID, domain.CreditLedgerEntry{
 		CustomerID:              customerID,
 		EntryType:               domain.CreditGrant,
-		Currency:                currency,
+		Currency:                used.Currency,
 		AmountCents:             totalUsed,
 		Description:             desc,
 		InvoiceID:               invoiceID,

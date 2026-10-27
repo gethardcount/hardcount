@@ -644,10 +644,11 @@ type InvoiceWriter interface {
 	// threshold invoice FOR KEY SHARE until the tx ends, so a void after the
 	// read lands after the closer's commit; a payment does not wait for it.
 	GetLatestThresholdInvoiceForCycleTx(ctx context.Context, tx *sql.Tx, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error)
-	// GetInvoiceForPeriod returns the newest non-voided invoice keyed exactly
-	// like idx_invoices_billing_idempotency (subscription, period_start,
-	// period_end) — the row billOnePeriod's ErrAlreadyExists re-entry path
-	// heals ($0 MarkPaid crash window, ADR-066).
+	// GetInvoiceForPeriod returns the invoice holding the period slot of
+	// idx_invoices_billing_period_dedup (subscription, period_start,
+	// period_end; manual and proration invoices hold none) — the row
+	// billOnePeriod's ErrAlreadyExists re-entry path heals ($0 MarkPaid
+	// crash window, ADR-066).
 	GetInvoiceForPeriod(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error)
 	ListLineItems(ctx context.Context, tenantID, invoiceID string) ([]domain.InvoiceLineItem, error)
 	MarkPaid(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time) (domain.Invoice, error)
@@ -1329,8 +1330,15 @@ func (e *Engine) hydrateSegmentPlans(ctx context.Context, sub domain.Subscriptio
 // month-end-CLAMPED from a higher anchor reconstructs the clamped
 // day (a ≤3-day denominator error in that one rare combination) —
 // strictly narrower than the up-to-half-cycle error it replaces.
+//
+// A segment's days are its two boundaries rounded to whole days from
+// periodStart, then subtracted. Rounding the boundaries, not each segment's
+// own length, makes a period's segments add up to the period whatever the
+// change instants (#1274): rounded one by one, two mid-day changes billed 29
+// or 31 days of a 30-day period. It is the in-advance proration's rule too,
+// which rounds the change instant (remainingPeriodRatio).
 func emitBaseSegmentLine(seg baseSegment, plan domain.Plan, periodStart time.Time, periodDays int, currency string, loc *time.Location, billingTime domain.SubscriptionBillingTime, lineItems *[]domain.InvoiceLineItem, subtotal *int64) error {
-	segDays := roundDays(seg.end.Sub(seg.start))
+	segDays := roundDays(seg.end.Sub(periodStart)) - roundDays(seg.start.Sub(periodStart))
 	if segDays <= 0 {
 		return nil
 	}
@@ -3315,7 +3323,9 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 			//    re-entry this sub gets still attempts it. ErrNotFound
 			//    (blocking row voided since) skips the heal; other fetch
 			//    errors stay loud.
-			if existing, gErr := e.invoices.GetInvoiceForPeriod(ctx, sub.TenantID, sub.ID, periodStart, periodEnd); gErr == nil {
+			//    The slot is the invoice's own window: for an in-advance
+			//    close that is the period it opens, not the one it closes.
+			if existing, gErr := e.invoices.GetInvoiceForPeriod(ctx, sub.TenantID, sub.ID, invoicePeriodStart, invoicePeriodEnd); gErr == nil {
 				e.healStrandedZeroDue(ctx, sub.TenantID, existing, now)
 			} else if !errors.Is(gErr, errs.ErrNotFound) {
 				return false, fmt.Errorf("fetch existing invoice (heal path): %w", gErr)

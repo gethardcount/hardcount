@@ -8932,7 +8932,7 @@ export interface components {
         };
         InvoiceCreateRequest: {
             customer_id: string;
-            /** @description Optional. Must belong to `customer_id`. Leave out for a one-off invoice. */
+            /** @description Optional. Must belong to `customer_id`. Leave out for a one-off invoice. The subscription's own cycle invoices are still billed, also for the same period. */
             subscription_id?: string;
             /**
              * @description ISO 4217 code. Must be the customer's currency (see 409). Defaults to the billing-profile currency, then the live subscriptions' plan currency, then the tenant default.

@@ -36,7 +36,10 @@ CREATE UNIQUE INDEX idx_invoices_billing_idempotency
 ```
 
 The `WHERE` clause scopes the rule to non-voided, regular billing-cycle
-invoices. So a second live cycle invoice for a period that already has one
+invoices. Since migration 00215 the index is
+`idx_invoices_billing_period_dedup`, and its `WHERE` clause also leaves out
+manual invoices (`billing_reason = 'manual'`). The runs below used the index
+above. So a second live cycle invoice for a period that already has one
 cannot be committed. The rule is "cannot be", not "is unlikely to be", and that
 difference is the whole result.
 
@@ -203,8 +206,8 @@ go test -p 1 ./internal/platform/leader/ -short=false -run TestLeaseFailover -v
 
 The partition figure (9 s) comes from `scripts/partition-drill.sh` (see [section 5](#5-how-fast-a-dead-leader-is-replaced)).
 
-To reproduce the negative control, drop `idx_invoices_billing_idempotency` from
-the test database and re-run the first command. On code after ADR-115,
+To reproduce the negative control, drop `idx_invoices_billing_period_dedup`
+(`idx_invoices_billing_idempotency` before migration 00215) from the test database and re-run the first command. On code after ADR-115,
 dropping the index alone may no longer produce duplicates (see the note at the
 top).
 

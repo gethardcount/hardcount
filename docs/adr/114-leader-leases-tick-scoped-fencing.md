@@ -112,7 +112,7 @@ claim returns zero rows within the claim's own snapshot:
 
 Deliberately **not** fenced: completions already in flight (they land through
 the existing row CAS — `ErrStaleDeliveryMark`, email `markCAS`, the dunning
-CAS, `ClaimAutoCharge`'s lease column, `idx_invoices_billing_idempotency`);
+CAS, `ClaimAutoCharge`'s lease column, `idx_invoices_billing_period_dedup`);
 the eight secondary sweeps and reconcilers (CAS/idempotency-guarded or shared
 with non-leader callers; fencing them would be a second mechanism for a
 closed hazard); operator-path methods (`RunCycleForTenant`, replay). The one
@@ -259,7 +259,7 @@ superseded leader from firing it twice. Enumerated from
 
 | Effect | Site | Guard |
 |---|---|---|
-| `invoice.finalized` webhook (cycle, threshold, cancel-final) | `billing/engine.go` `dispatchInvoiceFinalized` | fires only after the invoice INSERT succeeded; a second creator hits `idx_invoices_billing_idempotency` → `ErrAlreadyExists` → returns before the dispatch (`threshold_scan.go:812-816`) |
+| `invoice.finalized` webhook (cycle, threshold, cancel-final) | `billing/engine.go` `dispatchInvoiceFinalized` | fires only after the invoice INSERT succeeded; a second creator hits `idx_invoices_billing_period_dedup` → `ErrAlreadyExists` → returns before the dispatch (`threshold_scan.go:812-816`) |
 | `subscription.pending_change.applied` webhook + audit | `billing/engine.go` after `ApplyDuePendingItemPlansAtomic` | the store returns ONLY the rows its conditional `UPDATE … RETURNING` transitioned (`subscription/postgres.go`); a stale leader gets an empty slice and fires nothing |
 | `subscription.threshold_crossed` webhook + audit | `billing/threshold_scan.go:915` | after the fire-once probe + invoice idempotency index; `ErrAlreadyExists` returns `(false, nil)` before the dispatch |
 | `subscription.trial_ended` / lifecycle webhooks | `subscription/postgres.go:854,961` `enqueueLifecycle` | enqueued **in the transition's transaction** (`ActivateAfterTrial` CAS on status; `ErrInvalidState` for the loser) |
