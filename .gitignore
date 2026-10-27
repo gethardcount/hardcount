@@ -5,6 +5,8 @@ tmp/
 *.out
 .env
 .env.local
+# Written by deploy/compose/quickstart.sh; holds the install's API keys.
+deploy/compose/quickstart-credentials.json
 .DS_Store
 /velox
 /velox-bench-seed
