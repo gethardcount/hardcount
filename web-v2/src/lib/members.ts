@@ -1,6 +1,6 @@
 import { apiRequest } from './api'
 
-// Mirrors memberView in internal/dashmembers/handler.go.
+// Mirrors MemberView in internal/dashmembers/handler.go.
 export interface MemberView {
   user_id: string
   email: string

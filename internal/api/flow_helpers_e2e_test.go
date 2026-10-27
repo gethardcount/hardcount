@@ -8,11 +8,15 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/stripe/stripe-go/v82/webhook"
+	"gopkg.in/yaml.v3"
 
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
@@ -72,7 +76,99 @@ func flowDo(t *testing.T, ts *httptest.Server, method, path string, req flowReq)
 	raw, _ := io.ReadAll(resp.Body)
 	var body map[string]any
 	_ = json.Unmarshal(raw, &body)
+	if resp.StatusCode/100 == 2 {
+		flowCheckDocumented(t, method, path, resp.StatusCode)
+	}
 	return flowResp{status: resp.StatusCode, body: body, raw: raw}
+}
+
+// flowSpecOp is one operation in api/openapi.yaml and the 2xx statuses it
+// documents.
+type flowSpecOp struct {
+	method string
+	path   string
+	match  *regexp.Regexp
+	params int
+	codes  map[int]bool
+}
+
+var flowSpec struct {
+	once sync.Once
+	ops  []flowSpecOp
+	err  error
+}
+
+// flowCheckDocumented fails the test when a 2xx status the server answered
+// is not one api/openapi.yaml documents for that operation. A client
+// generated from the spec does not expect an undocumented status.
+func flowCheckDocumented(t *testing.T, method, rawPath string, status int) {
+	t.Helper()
+	flowSpec.once.Do(func() {
+		raw, err := os.ReadFile(specPath)
+		if err != nil {
+			flowSpec.err = err
+			return
+		}
+		var doc struct {
+			Paths map[string]map[string]struct {
+				Responses map[string]yaml.Node `yaml:"responses"`
+			} `yaml:"paths"`
+		}
+		if err := yaml.Unmarshal(raw, &doc); err != nil {
+			flowSpec.err = err
+			return
+		}
+		for path, item := range doc.Paths {
+			for m, op := range item {
+				if !openAPIMethods[m] {
+					continue
+				}
+				codes := map[int]bool{}
+				for code := range op.Responses {
+					if n, err := strconv.Atoi(code); err == nil {
+						codes[n] = true
+					}
+				}
+				parts := pathParam.Split(path, -1)
+				for i, part := range parts {
+					parts[i] = regexp.QuoteMeta(part)
+				}
+				flowSpec.ops = append(flowSpec.ops, flowSpecOp{
+					method: strings.ToUpper(m),
+					path:   path,
+					match:  regexp.MustCompile("^" + strings.Join(parts, "[^/]+") + "$"),
+					params: strings.Count(path, "{"),
+					codes:  codes,
+				})
+			}
+		}
+	})
+	if flowSpec.err != nil {
+		t.Fatalf("read %s: %v", specPath, flowSpec.err)
+	}
+	u, err := url.Parse(rawPath)
+	if err != nil {
+		t.Fatalf("parse %s: %v", rawPath, err)
+	}
+	// A literal segment beats a parameter: /v1/customers/search is not
+	// /v1/customers/{id}.
+	var best *flowSpecOp
+	for i := range flowSpec.ops {
+		op := &flowSpec.ops[i]
+		if op.method != method || !op.match.MatchString(u.Path) {
+			continue
+		}
+		if best == nil || op.params < best.params {
+			best = op
+		}
+	}
+	if best == nil {
+		t.Errorf("%s %s answered %d, but api/openapi.yaml has no such operation", method, u.Path, status)
+		return
+	}
+	if !best.codes[status] {
+		t.Errorf("%s %s answered %d, a status api/openapi.yaml does not document for it", method, best.path, status)
+	}
 }
 
 // want stops the test unless the response has the expected status.

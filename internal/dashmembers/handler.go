@@ -81,8 +81,8 @@ func (h *Handler) RegisterPublicRoutes(r chi.Router) {
 	r.Post("/accept-invite", h.acceptInvite)
 }
 
-// memberView mirrors web-v2/src/lib/members.ts MemberView.
-type memberView struct {
+// MemberView mirrors web-v2/src/lib/members.ts MemberView.
+type MemberView struct {
 	UserID   string `json:"user_id"`
 	Email    string `json:"email"`
 	Role     string `json:"role"`
@@ -136,9 +136,9 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := h.svc.clock.Now(ctx)
-	mv := make([]memberView, 0, len(members))
+	mv := make([]MemberView, 0, len(members))
 	for _, m := range members {
-		mv = append(mv, memberView{
+		mv = append(mv, MemberView{
 			UserID: m.UserID, Email: m.Email, Role: m.Role,
 			JoinedAt: m.JoinedAt.Format(rfc3339),
 		})

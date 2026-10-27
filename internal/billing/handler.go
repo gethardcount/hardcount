@@ -1,6 +1,7 @@
 package billing
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -9,6 +10,19 @@ import (
 	"github.com/sagarsuperuser/velox/internal/api/respond"
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/domain"
+)
+
+// The entries POST /v1/billing/run puts in `errors`. api/openapi.yaml names
+// each one in the 206 description.
+const (
+	// RunErrSubscription is a subscription that could not be billed; %s is
+	// its id.
+	RunErrSubscription = "subscription %s: billing failed"
+	// RunErrStopped is a run that stopped before it reached every due
+	// subscription: the due list could not be read, or the request ended.
+	RunErrStopped = "billing run failed"
+	// RunErrAudit is a run whose audit record could not be written.
+	RunErrAudit = "billing run completed but its audit record failed"
 )
 
 type Handler struct {
@@ -51,9 +65,9 @@ func (h *Handler) triggerCycle(w http.ResponseWriter, r *http.Request) {
 			"error", f.Err,
 		)
 		if f.SubscriptionID != "" {
-			errStrings = append(errStrings, "subscription "+f.SubscriptionID+": billing failed")
+			errStrings = append(errStrings, fmt.Sprintf(RunErrSubscription, f.SubscriptionID))
 		} else {
-			errStrings = append(errStrings, "billing run failed")
+			errStrings = append(errStrings, RunErrStopped)
 		}
 	}
 
@@ -80,7 +94,7 @@ func (h *Handler) triggerCycle(w http.ResponseWriter, r *http.Request) {
 			// AuditCoverage detector reports the uncovered mutation.
 			slog.ErrorContext(r.Context(), "billing run: audit trigger row failed",
 				"tenant_id", tenantID, "error", err)
-			errStrings = append(errStrings, "billing run completed but its audit record failed")
+			errStrings = append(errStrings, RunErrAudit)
 		}
 	}
 

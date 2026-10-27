@@ -13,6 +13,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/sagarsuperuser/velox/internal/analytics"
+	"github.com/sagarsuperuser/velox/internal/audit"
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/billing"
 	"github.com/sagarsuperuser/velox/internal/credit"
@@ -123,10 +124,45 @@ var responsesNotChecked = map[string]string{
 	"AuditLogFilters":        mapLiteral,
 	"CustomerOverview":       mapLiteral,
 	"DunningRunDetail":       mapLiteral,
-	"InvoiceDisputeList":     mapLiteral,
 	"InvoicePaymentTimeline": mapLiteral,
 	"InvoiceWithLineItems":   mapLiteral,
 	"ReadinessReport":        mapLiteral,
+}
+
+// literalFieldTypes maps a property of a map-literal response, keyed
+// "<schema or operation>.<property>", to the Go type the handler puts in it.
+// The property is compared with that type like any typed response, so a field
+// added to the type fails the test until the spec has it. Every object
+// property of a map-literal response needs an entry here, or one in
+// literalFieldsNotChecked.
+var literalFieldTypes = map[string]any{
+	"AuditLogFilters.test_clocks":                                audit.SimClock{},
+	"CustomerOverview.active_subscriptions":                      domain.Subscription{},
+	"CustomerOverview.recent_invoices":                           domain.Invoice{},
+	"CustomerOverview.outstanding_balance":                       invoice.OutstandingBalance{},
+	"DunningRunDetail.run":                                       domain.InvoiceDunningRun{},
+	"DunningRunDetail.events":                                    dunning.RunEvent{},
+	"InvoicePaymentTimeline.events":                              invoice.TimelineEvent{},
+	"InvoiceWithLineItems.invoice":                               domain.Invoice{},
+	"InvoiceWithLineItems.line_items":                            domain.InvoiceLineItem{},
+	"GET /v1/analytics/mrr-movement 200.data":                    analytics.MRRMovementPoint{},
+	"GET /v1/analytics/mrr-movement 200.totals":                  analytics.MRRMovementTotals{},
+	"GET /v1/analytics/revenue-chart 200.data":                   analytics.RevenueDataPoint{},
+	"GET /v1/analytics/usage 200.data":                           analytics.UsagePoint{},
+	"GET /v1/analytics/usage 200.top_meters":                     analytics.TopMeter{},
+	"GET /v1/credits/balance/{customer_id} 200.data":             domain.CreditBalance{},
+	"GET /v1/members 200.members":                                dashmembers.MemberView{},
+	"GET /v1/members 200.invitations":                            dashmembers.InvitationView{},
+	"GET /v1/settings/stripe 200.data":                           domain.StripeProviderCredentials{},
+	"GET /v1/subscriptions/{id}/timeline 200.events":             subscription.TimelineEvent{},
+	"GET /v1/usage-events/held 200.data":                         usage.HeldUsageGroup{},
+	"POST /v1/subscriptions/{id}/retry-billing 200.subscription": domain.Subscription{},
+}
+
+// literalFieldsNotChecked lists the object properties of map-literal
+// responses that no Go type is compared against, each with the reason.
+var literalFieldsNotChecked = map[string]string{
+	"GET /v1/analytics/usage 200.totals": mapLiteral,
 }
 
 // inlineResponseTypes maps a 2xx response whose object schema is written
@@ -290,7 +326,7 @@ func TestOpenAPISpec_ResponseRequired(t *testing.T) {
 	components, objects, inline := specResponses(t)
 	c := &respComparer{components: components, checked: map[string]bool{}, done: map[string]bool{}}
 
-	var stale []string
+	var stale, unlisted []string
 	for name, types := range responseTypes {
 		if _, ok := components[name]; !ok {
 			stale = append(stale, name+": responseTypes names it, but the spec has no such schema")
@@ -331,6 +367,55 @@ func TestOpenAPISpec_ResponseRequired(t *testing.T) {
 			stale = append(stale, op+": in both inlineResponseTypes and inlineNotChecked")
 		}
 	}
+	// The object properties of map-literal responses.
+	literal := map[string]map[string]any{}
+	for name := range responsesNotChecked {
+		literal[name], _ = components[name].(map[string]any)
+	}
+	for op := range inlineNotChecked {
+		literal[op] = inline[op]
+	}
+	usedField := map[string]bool{}
+	var walkLiteral func(at string, schema map[string]any)
+	walkLiteral = func(at string, schema map[string]any) {
+		props, _, _, _ := c.resolve(schema)
+		for k, p := range props {
+			key := at + "." + k
+			ps, _ := p.(map[string]any)
+			ps = itemSchema(ps)
+			if _, _, _, isObject := c.resolve(ps); !isObject {
+				continue
+			}
+			if v, ok := literalFieldTypes[key]; ok {
+				usedField[key] = true
+				c.compare(key, []reflect.Type{reflect.TypeOf(v)}, ps)
+				continue
+			}
+			if _, ok := literalFieldsNotChecked[key]; ok {
+				usedField[key] = true
+				walkLiteral(key, ps)
+				continue
+			}
+			unlisted = append(unlisted, key)
+		}
+	}
+	for at, schema := range literal {
+		walkLiteral(at, schema)
+	}
+	for key := range literalFieldTypes {
+		if !usedField[key] {
+			stale = append(stale, key+": literalFieldTypes names it, but no map-literal response has that object property")
+		}
+	}
+	for key, reason := range literalFieldsNotChecked {
+		if strings.TrimSpace(reason) == "" {
+			stale = append(stale, key+": literalFieldsNotChecked gives no reason")
+		}
+		if !usedField[key] {
+			stale = append(stale, key+": literalFieldsNotChecked names it, but no map-literal response has that object property")
+		}
+	}
+
 	var unchecked []string
 	for op, schema := range inline {
 		_, typed := inlineResponseTypes[op]
@@ -338,21 +423,22 @@ func TestOpenAPISpec_ResponseRequired(t *testing.T) {
 		if typed || skipped {
 			continue
 		}
-		props, required, _, _ := c.resolve(schema)
-		if len(props) == 2 && props["data"] != nil && props["total"] != nil {
-			if !required["data"] || !required["total"] {
-				c.diffs = append(c.diffs, op+": a list page always sends data and total, so both are required")
-			}
+		if c.listPage(op, schema) {
 			continue
 		}
 		unchecked = append(unchecked, op)
 	}
 	for name := range objects {
-		if !c.checked[name] {
-			if _, skip := responsesNotChecked[name]; !skip {
-				unchecked = append(unchecked, name)
-			}
+		if c.checked[name] {
+			continue
 		}
+		if _, skip := responsesNotChecked[name]; skip {
+			continue
+		}
+		if c.listPage(name, map[string]any{"$ref": "#/components/schemas/" + name}) {
+			continue
+		}
+		unchecked = append(unchecked, name)
 	}
 
 	if len(unchecked) > 0 {
@@ -364,6 +450,15 @@ func TestOpenAPISpec_ResponseRequired(t *testing.T) {
 Add each to responseTypes (a component) or inlineResponseTypes (an operation)
 with the type its handler encodes. Only a schema with no Go type behind it
 goes in responsesNotChecked or inlineNotChecked, with the reason.`, len(unchecked), strings.Join(unchecked, "\n  "))
+	}
+	if len(unlisted) > 0 {
+		sort.Strings(unlisted)
+		t.Errorf(`%d object propert(ies) of map-literal responses are not compared with any Go type:
+
+  %s
+
+Add each to literalFieldTypes with the type the handler puts there. Only a
+property that is itself a map literal goes in literalFieldsNotChecked.`, len(unlisted), strings.Join(unlisted, "\n  "))
 	}
 	if len(stale) > 0 {
 		sort.Strings(stale)
@@ -380,6 +475,20 @@ goes in responsesNotChecked or inlineNotChecked, with the reason.`, len(unchecke
 take it out of required. "sent, not in spec": describe the key. "never sent":
 remove the property, or fix responseTypes. Then run make gen.`, len(c.diffs), strings.Join(c.diffs, "\n  "))
 	}
+}
+
+// listPage reports whether schema is a list page ({data, total}, written by
+// respond.List). Its data items are checked through their own schema, so a
+// page needs only both keys required.
+func (c *respComparer) listPage(at string, schema map[string]any) bool {
+	props, required, _, _ := c.resolve(schema)
+	if len(props) != 2 || props["data"] == nil || props["total"] == nil {
+		return false
+	}
+	if !required["data"] || !required["total"] {
+		c.diffs = append(c.diffs, at+": a list page always sends data and total, so both are required")
+	}
+	return true
 }
 
 // respComparer walks a Go type and a response schema side by side.
@@ -767,7 +876,8 @@ func TestRespComparer_SharedSchema(t *testing.T) {
 // TestOpenAPISpec_BillingRunPartialIsDocumented: POST /v1/billing/run answers
 // 206 when its errors list is not empty (internal/billing/handler.go). The
 // spec must list that status with the same body as the 200, or a generated
-// client treats a partial run as an unexpected response.
+// client treats a partial run as an unexpected response. Its description must
+// name every entry the handler can put in errors.
 func TestOpenAPISpec_BillingRunPartialIsDocumented(t *testing.T) {
 	_, _, inline := specResponses(t)
 	ok, okFound := inline["POST /v1/billing/run 200"]
@@ -781,4 +891,33 @@ func TestOpenAPISpec_BillingRunPartialIsDocumented(t *testing.T) {
 	if !reflect.DeepEqual(ok, partial) {
 		t.Errorf("POST /v1/billing/run: the 206 body differs from the 200 body; the handler writes the same keys in both")
 	}
+	// Each entry the handler can put in errors is named, so a caller can tell
+	// a run that stopped early (run it again) from one subscription failing.
+	desc := billingRunPartialDescription(t)
+	for _, e := range []string{fmt.Sprintf(billing.RunErrSubscription, "<id>"), billing.RunErrStopped, billing.RunErrAudit} {
+		if !strings.Contains(desc, "`"+e+"`") {
+			t.Errorf("POST /v1/billing/run: the 206 description does not name the error %q the handler can send", e)
+		}
+	}
+}
+
+// billingRunPartialDescription is the description of POST /v1/billing/run's
+// 206 response, with its lines joined by spaces.
+func billingRunPartialDescription(t *testing.T) string {
+	t.Helper()
+	raw, err := os.ReadFile(specPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", specPath, err)
+	}
+	var doc struct {
+		Paths map[string]map[string]struct {
+			Responses map[string]struct {
+				Description string `yaml:"description"`
+			} `yaml:"responses"`
+		} `yaml:"paths"`
+	}
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("parse %s: %v", specPath, err)
+	}
+	return strings.Join(strings.Fields(doc.Paths["/v1/billing/run"]["post"].Responses["206"].Description), " ")
 }
