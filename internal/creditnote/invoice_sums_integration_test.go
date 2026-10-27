@@ -2,10 +2,12 @@ package creditnote_test
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/sagarsuperuser/velox/internal/creditnote"
 	"github.com/sagarsuperuser/velox/internal/domain"
@@ -24,11 +26,12 @@ import (
 // the store's list, which returns 50 notes unless asked for more, so an
 // invoice with more than 50 credit notes was under-counted.
 //
-// Each test puts more than one page of notes on an invoice and checks a sum
-// that the first page alone gets wrong.
+// Each test puts more notes on an invoice than the largest page the store
+// list returns, and checks a sum that one page alone gets wrong.
 
-// moreThanAPage is one note past the store list's default page.
-const moreThanAPage = 51
+// moreThanAPage is one note past the largest page the store list returns
+// (it caps Limit at 100), so a sum read from one page of any size is short.
+const moreThanAPage = 101
 
 // okRefunder reports every refund as succeeded at Stripe. Safe for
 // concurrent use.
@@ -110,10 +113,10 @@ func (r *sumsRig) nonVoidedRefunds(t *testing.T, invoiceID string) (sum int64, n
 	return sum, notes
 }
 
-// Paid invoice of 100.00 by card. First 51 drafts of 0.02 that are voided
-// before they issue, then 51 issued notes that each refund 0.01. The voided
-// drafts are the oldest notes, so the first page of 50 holds none of them,
-// and only 50 of the 51 issued notes.
+// Paid invoice of 100.00 by card. First 101 drafts of 0.02 that are voided
+// before they issue, then 101 issued notes that each refund 0.01. The voided
+// drafts are the oldest notes, so a page of 100 holds none of them, and only
+// 100 of the 101 issued notes.
 func TestInvoiceSums_CountEveryNote(t *testing.T) {
 	r := newSumsRig(t, "CN Sums Every Note")
 	_, inv := seedInvoiceForCN(t, r.db, r.tenantID, "sums", domain.InvoicePaid, domain.PaymentSucceeded, "pi_sums")
@@ -151,7 +154,7 @@ func TestInvoiceSums_CountEveryNote(t *testing.T) {
 	}
 
 	// A direct refund with no amount refunds what is left: 100.00 paid less
-	// the 0.51 already refunded.
+	// the 1.01 already refunded.
 	cn, err := r.svc.CreateRefund(r.ctx, r.tenantID, creditnote.RefundInput{InvoiceID: inv.ID, Reason: "requested_by_customer"})
 	if err != nil {
 		t.Fatalf("CreateRefund with no amount: %v", err)
@@ -164,25 +167,86 @@ func TestInvoiceSums_CountEveryNote(t *testing.T) {
 	}
 }
 
-// sumsMeetStore holds each refund's sum read until both refunds have read
-// it, so both size their refund from the same notes before either writes:
-// the race the credit-note lock has to settle.
-type sumsMeetStore struct {
+// raceStore holds two refunds at two points so they race the way the
+// credit-note lock has to settle:
+//
+//   - The default-amount read (InvoiceSums, outside the lock): each refund
+//     waits there until both have read, so both size their refund from the
+//     same notes.
+//   - The cap read (inside the lock, between listing the invoice's notes and
+//     inserting the new one): the first refund to get there waits until the
+//     second either gets there too or is seen waiting on this invoice's lock.
+//     With the lock, the second waits on it, the first writes and commits, and
+//     the second's cap read sees the first's note. Without the lock, both
+//     check the cap against the same notes and both insert.
+type raceStore struct {
 	creditnote.Store
-	read sync.WaitGroup
+	db         *postgres.DB
+	lockKey    string // tenant:invoice, as the store keys the lock
+	read       sync.WaitGroup
+	atCap      atomic.Int32
+	secondCap  chan struct{}
+	secondOnce sync.Once
+	holdErr    atomic.Value // error
 }
 
-func (s *sumsMeetStore) InvoiceSums(ctx context.Context, tenantID, invoiceID string) (creditnote.InvoiceSums, error) {
+func (s *raceStore) InvoiceSums(ctx context.Context, tenantID, invoiceID string) (creditnote.InvoiceSums, error) {
 	sums, err := s.Store.InvoiceSums(ctx, tenantID, invoiceID)
 	s.read.Done()
 	s.read.Wait()
 	return sums, err
 }
 
-// Two direct refunds with no amount on an invoice that already has 51 refund
-// notes. Both read what is left (99.49) before either writes. The credit-note
-// lock lets one through and refuses the other, so the invoice is refunded
-// exactly what was paid.
+func (s *raceStore) CreateUnderInvoiceLockAudited(ctx context.Context, tenantID, invoiceID string, lines []domain.CreditNoteLineItem, build func(tx *sql.Tx, existing []domain.CreditNote) (domain.CreditNote, error), emit func(tx *sql.Tx, created domain.CreditNote) error) (domain.CreditNote, error) {
+	held := func(tx *sql.Tx, existing []domain.CreditNote) (domain.CreditNote, error) {
+		if s.atCap.Add(1) == 1 {
+			s.holdAtCap(ctx)
+		} else {
+			s.secondOnce.Do(func() { close(s.secondCap) })
+		}
+		return build(tx, existing)
+	}
+	return s.Store.CreateUnderInvoiceLockAudited(ctx, tenantID, invoiceID, lines, held, emit)
+}
+
+// holdAtCap returns once the second refund reaches its cap read or waits on
+// this invoice's credit-note lock (an advisory lock keyed by
+// hashtextextended(tenant:invoice, 0), split by pg_locks into classid, the
+// high 32 bits, and objid, the low 32).
+func (s *raceStore) holdAtCap(ctx context.Context) {
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		select {
+		case <-s.secondCap:
+			return
+		default:
+		}
+		var waiting int
+		if err := s.db.Pool.QueryRowContext(ctx, `
+			SELECT count(*) FROM pg_locks l, (SELECT hashtextextended($1, 0) AS k) h
+			WHERE l.locktype = 'advisory' AND NOT l.granted AND l.objsubid = 1
+			  AND l.classid = ((h.k >> 32) & 4294967295)::oid
+			  AND l.objid = (h.k & 4294967295)::oid`, s.lockKey).Scan(&waiting); err != nil {
+			s.holdErr.Store(fmt.Errorf("read pg_locks: %w", err))
+			return
+		}
+		if waiting > 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			s.holdErr.Store(fmt.Errorf("the second refund neither reached its cap read nor waited on the invoice lock within 15s"))
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// Two direct refunds with no amount on an invoice that already has refund
+// notes past a page. Both read what is left before either writes, and the
+// first holds inside the lock until the second is queued on it (or, with no
+// lock, has checked the cap against the same notes). The credit-note lock lets
+// one through and refuses the other, so the invoice is refunded exactly what
+// was paid.
 func TestCreateRefund_RacingFullRefunds_RefundOnce(t *testing.T) {
 	r := newSumsRig(t, "CN Sums Refund Race")
 	_, inv := seedInvoiceForCN(t, r.db, r.tenantID, "sumsrace", domain.InvoicePaid, domain.PaymentSucceeded, "pi_sums_race")
@@ -190,9 +254,14 @@ func TestCreateRefund_RacingFullRefunds_RefundOnce(t *testing.T) {
 		r.note(t, inv.ID, 1, true, true)
 	}
 
-	meet := &sumsMeetStore{Store: creditnote.NewPostgresStore(r.db)}
-	meet.read.Add(2)
-	svc := creditnote.NewService(meet, r.invoices, &okRefunder{})
+	race := &raceStore{
+		Store:     creditnote.NewPostgresStore(r.db),
+		db:        r.db,
+		lockKey:   r.tenantID + ":" + inv.ID,
+		secondCap: make(chan struct{}),
+	}
+	race.read.Add(2)
+	svc := creditnote.NewService(race, r.invoices, &okRefunder{})
 	svc.SetNumberGenerator(tenant.NewSettingsStore(r.db))
 
 	var wg sync.WaitGroup
@@ -205,6 +274,9 @@ func TestCreateRefund_RacingFullRefunds_RefundOnce(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+	if err, _ := race.holdErr.Load().(error); err != nil {
+		t.Fatalf("hold at the cap read: %v", err)
+	}
 
 	ok := 0
 	for _, err := range results {
@@ -230,7 +302,7 @@ func (f *reversalRecorder) ReverseTax(_ context.Context, _ string, req tax.Rever
 }
 
 // Voiding an unpaid invoice reverses the tax of the part no issued credit
-// note reversed. With 51 issued notes of 0.01 on 100.00, that is 99.49.
+// note reversed. With 101 issued notes of 0.01 on 100.00, that is 98.99.
 func TestVoid_ReversesTaxNoIssuedNoteCovered(t *testing.T) {
 	r := newSumsRig(t, "CN Sums Void Tax")
 	_, inv := seedInvoiceForCN(t, r.db, r.tenantID, "sumsvoid", domain.InvoiceFinalized, domain.PaymentPending, "")
@@ -261,5 +333,42 @@ func TestVoid_ReversesTaxNoIssuedNoteCovered(t *testing.T) {
 	got := rec.reqs[0]
 	if want := inv.TotalAmountCents - moreThanAPage; got.Mode != tax.ReversalModePartial || got.GrossAmountCents != want {
 		t.Errorf("void reversed %s %d, want partial %d: the issued notes reversed the rest", got.Mode, got.GrossAmountCents, want)
+	}
+}
+
+// A refund with no amount refunds what was paid and not yet refunded, but no
+// more than the invoice can still be credited. Paid invoice of 100.00 by
+// card, with one issued note of 10.00 settled outside Stripe: 90.00 is left to
+// credit, and all of it can go back to the card.
+func TestCreateRefund_NoAmount_StopsAtWhatIsLeftToCredit(t *testing.T) {
+	r := newSumsRig(t, "CN Sums Refund After Credit")
+	_, inv := seedInvoiceForCN(t, r.db, r.tenantID, "sumsoob", domain.InvoicePaid, domain.PaymentSucceeded, "pi_sums_oob")
+	cn, err := r.svc.Create(r.ctx, r.tenantID, creditnote.CreateInput{
+		InvoiceID:            inv.ID,
+		Reason:               "adjustment",
+		OutOfBandAmountCents: 1000,
+		Lines:                []creditnote.CreditLineInput{{Description: "adjustment", Quantity: 1, UnitAmountCents: 1000}},
+	})
+	if err != nil {
+		t.Fatalf("create out-of-band note: %v", err)
+	}
+	if _, err := r.svc.Issue(r.ctx, r.tenantID, cn.ID); err != nil {
+		t.Fatalf("issue out-of-band note: %v", err)
+	}
+
+	refund, err := r.svc.CreateRefund(r.ctx, r.tenantID, creditnote.RefundInput{InvoiceID: inv.ID, Reason: "requested_by_customer"})
+	if err != nil {
+		t.Fatalf("CreateRefund with no amount: %v", err)
+	}
+	if refund.RefundAmountCents != 9000 || refund.TotalCents != 9000 {
+		t.Errorf("refund note total %d refund %d, want 9000 each: 100.00 less the 10.00 already credited", refund.TotalCents, refund.RefundAmountCents)
+	}
+
+	// Nothing is left to credit, though 10.00 paid by card is not refunded.
+	if _, err := r.svc.CreateRefund(r.ctx, r.tenantID, creditnote.RefundInput{InvoiceID: inv.ID, Reason: "requested_by_customer"}); err == nil || err.Error() != "invoice has already been fully credited" {
+		t.Errorf("second refund with no amount: err %v, want the invoice is fully credited", err)
+	}
+	if sum, notes := r.nonVoidedRefunds(t, inv.ID); sum != 9000 || notes != 2 {
+		t.Errorf("refunded %d over %d notes, want 9000 over 2", sum, notes)
 	}
 }

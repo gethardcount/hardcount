@@ -27,9 +27,10 @@ import (
 // credit note then went over the invoice total, its cap refused it, and the
 // cancel failed on every retry.
 //
-// Paid prebill of 49.00. Its oldest note credits 40.00, then 50 notes of
-// 0.01: 40.50 credited, 8.50 left. The cancel owes 24.50 of unused time;
-// 8.50 fits and the rest is not owed.
+// Paid prebill of 49.00. Its oldest note credits 40.00, then 100 notes of
+// 0.01: 41.00 credited, 8.00 left. A page of 100 notes holds only the small
+// ones. The cancel owes 24.50 of unused time; 8.00 fits and the rest is not
+// owed.
 func TestCancelCredit_HeadroomCountsEveryCreditNote(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
@@ -96,11 +97,11 @@ func TestCancelCredit_HeadroomCountsEveryCreditNote(t *testing.T) {
 		}
 	}
 	note(4000)
-	for range 50 {
+	for range 100 {
 		note(1)
 	}
 
-	const room = 4900 - 4000 - 50
+	const room = 4900 - 4000 - 100
 	const owed = 2450 // 15 of 30 days unused
 
 	cancelAt := time.Date(2026, 6, 16, 0, 0, 0, 0, time.UTC)

@@ -17,8 +17,8 @@ import (
 // Two routes read what an invoice's credit notes add up to: a refund with
 // no amount refunds what is left, and a written-off invoice owed a credit
 // that was never applied carries a warning. Both counted only the first page
-// of 50 notes. Each case puts 51 notes on one invoice, over the real router
-// and database.
+// of 50 notes. Each case puts 101 notes on one invoice, one past the largest
+// page the store list returns (100), over the real router and database.
 func TestCreditNoteSums_Routes_CountEveryNote(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ts := httptest.NewServer(NewServer(db, clock.Real(), nil,
@@ -68,17 +68,17 @@ func TestCreditNoteSums_Routes_CountEveryNote(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		// 51 notes, each refunding 0.01 to the card. No Stripe account is
+		// 101 notes, each refunding 0.01 to the card. No Stripe account is
 		// connected, so each refund fails at Stripe, and each note still
 		// holds its refund amount against the cap.
-		for range 51 {
+		for range 101 {
 			creditNote(inv.ID, 1, map[string]any{"auto_issue": true, "refund_amount_cents": 1})
 		}
 
 		resp := call("POST", "/v1/invoices/"+inv.ID+"/refund", flowReq{body: map[string]any{"reason": "requested_by_customer"}}).
 			want(t, 200, "refund with no amount")
-		if got := flowInt(resp.body, "refund_amount_cents"); got != 10000-51 {
-			t.Errorf("refund_amount_cents = %d, want %d: 100.00 paid less the 0.51 already on refund notes", got, 10000-51)
+		if got := flowInt(resp.body, "refund_amount_cents"); got != 10000-101 {
+			t.Errorf("refund_amount_cents = %d, want %d: 100.00 paid less the 1.01 already on refund notes", got, 10000-101)
 		}
 	})
 
@@ -90,10 +90,10 @@ func TestCreditNoteSums_Routes_CountEveryNote(t *testing.T) {
 		call("POST", "/v1/invoices/"+invoiceID+"/finalize", flowReq{}).want(t, 200, "finalize")
 
 		// The oldest note is a draft voided before it issued: 1.00 the
-		// invoice was owed and never got. Then 50 issued notes of 0.01.
+		// invoice was owed and never got. Then 100 issued notes of 0.01.
 		draft := flowStr(creditNote(invoiceID, 100, map[string]any{}).body, "id")
 		call("POST", "/v1/credit-notes/"+draft+"/void", flowReq{}).want(t, 200, "void the draft")
-		for range 50 {
+		for range 100 {
 			creditNote(invoiceID, 1, map[string]any{"auto_issue": true})
 		}
 		call("POST", "/v1/invoices/"+invoiceID+"/mark-uncollectible", flowReq{}).want(t, 200, "write off")

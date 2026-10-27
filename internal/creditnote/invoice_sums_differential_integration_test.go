@@ -12,6 +12,10 @@ import (
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
+// defaultPage is how many notes the store list returns when asked for no
+// limit, the page the old sums read.
+const defaultPage = 50
+
 // Under one page, the sums equal what the old page-and-add code returned.
 // Notes are written straight to the table with every status, refund amount
 // and issue stamp, on several invoices, so the filters are checked against
@@ -47,7 +51,7 @@ func TestInvoiceSums_MatchThePagedSumsUnderAPage(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		notes := rng.Intn(moreThanAPage - 1) // 0..49
+		notes := rng.Intn(defaultPage) // 0..49
 		if i == 0 {
 			notes = 0
 		}
@@ -82,7 +86,7 @@ func TestInvoiceSums_MatchThePagedSumsUnderAPage(t *testing.T) {
 		if err != nil {
 			t.Fatalf("list: %v", err)
 		}
-		if len(notes) >= 50 {
+		if len(notes) >= defaultPage {
 			t.Fatalf("invoice %s has %d notes; the old sums are only right under one page", id, len(notes))
 		}
 		// The old code, verbatim in its filters.
