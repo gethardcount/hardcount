@@ -499,15 +499,17 @@ func (h *ProviderCostHandler) Routes() chi.Router {
 
 func (h *ProviderCostHandler) list(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
+	page, ok := respond.ParsePage(w, r)
+	if !ok {
+		return
+	}
+	// The rate table is read whole (ingest reads it too) and paged here.
 	rates, err := h.store.ListProviderCostRates(r.Context(), tenantID)
 	if err != nil {
 		respond.FromError(w, r, err, "provider_cost_rate")
 		return
 	}
-	if rates == nil {
-		rates = []domain.ProviderCostRate{}
-	}
-	respond.JSON(w, r, http.StatusOK, map[string]any{"data": rates})
+	respond.List(w, r, respond.Window(rates, page), len(rates))
 }
 
 // ProviderCostRequest is the PUT /v1/provider-costs body, decoded strictly:

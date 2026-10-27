@@ -266,6 +266,11 @@ func (s *Service) ListMeters(ctx context.Context, tenantID string) ([]domain.Met
 	return s.store.ListMeters(ctx, tenantID)
 }
 
+// ListMetersPage is one page of the meters, and how many there are.
+func (s *Service) ListMetersPage(ctx context.Context, tenantID string, limit, offset int) ([]domain.Meter, int, error) {
+	return s.store.ListMetersPage(ctx, tenantID, limit, offset)
+}
+
 // ---------------------------------------------------------------------------
 // Plans
 // ---------------------------------------------------------------------------
@@ -432,6 +437,11 @@ func (s *Service) PlanUsed(ctx context.Context, tenantID, planID string) (bool, 
 
 func (s *Service) ListPlans(ctx context.Context, tenantID string) ([]domain.Plan, error) {
 	return s.store.ListPlans(ctx, tenantID)
+}
+
+// ListPlansPage is one page of the plans, and how many there are.
+func (s *Service) ListPlansPage(ctx context.Context, tenantID string, limit, offset int) ([]domain.Plan, int, error) {
+	return s.store.ListPlansPage(ctx, tenantID, limit, offset)
 }
 
 // UpdatePlanInput is the PATCH /v1/plans/{id} body. A field left out keeps

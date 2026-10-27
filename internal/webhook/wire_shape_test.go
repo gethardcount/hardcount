@@ -16,10 +16,11 @@ import (
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
-// TestWireShape_EndpointDeliveries pins the endpoint drill-down response:
-// {endpoint: {...}, data: [{snake_case delivery rows}]}. The drill-down
-// page reads every one of these keys; a dropped tag renders as a blank
-// column, not a compile error.
+// TestWireShape_EndpointDeliveries pins the endpoint drill-down: GET
+// /endpoints/{id} answers the endpoint, and GET /endpoints/{id}/deliveries
+// answers {data: [{snake_case delivery rows}], total}. The drill-down page
+// reads every one of these keys; a dropped tag renders as a blank column,
+// not a compile error.
 func TestWireShape_EndpointDeliveries(t *testing.T) {
 	store := newMemStore()
 	svc := NewTestService(store, &mockHTTPClient{statusCode: 200})
@@ -47,20 +48,27 @@ func TestWireShape_EndpointDeliveries(t *testing.T) {
 		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
 	}
 	var resp struct {
-		Endpoint map[string]any   `json:"endpoint"`
-		Data     []map[string]any `json:"data"`
+		Data  []map[string]any `json:"data"`
+		Total int              `json:"total"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("parse response: %v", err)
 	}
-	if resp.Endpoint["id"] != ep.Endpoint.ID {
-		t.Errorf("endpoint.id = %v, want %s", resp.Endpoint["id"], ep.Endpoint.ID)
+	if len(resp.Data) != 1 || resp.Total != 1 {
+		t.Fatalf("data rows = %d, total %d, want 1 and 1", len(resp.Data), resp.Total)
 	}
-	if _, leaked := resp.Endpoint["secret"]; leaked {
+
+	epRec := httptest.NewRecorder()
+	r.ServeHTTP(epRec, httptest.NewRequest("GET", "/v1/webhook-endpoints/endpoints/"+ep.Endpoint.ID, nil).WithContext(ctx))
+	var endpoint map[string]any
+	if err := json.Unmarshal(epRec.Body.Bytes(), &endpoint); err != nil || epRec.Code != http.StatusOK {
+		t.Fatalf("GET endpoint = %d %s", epRec.Code, epRec.Body.String())
+	}
+	if endpoint["id"] != ep.Endpoint.ID {
+		t.Errorf("endpoint.id = %v, want %s", endpoint["id"], ep.Endpoint.ID)
+	}
+	if _, leaked := endpoint["secret"]; leaked {
 		t.Error("endpoint payload carries a 'secret' key — signing material on a read surface")
-	}
-	if len(resp.Data) != 1 {
-		t.Fatalf("data rows = %d, want 1", len(resp.Data))
 	}
 	row := resp.Data[0]
 	for _, k := range []string{
@@ -82,6 +90,11 @@ func TestWireShape_EndpointDeliveries(t *testing.T) {
 	r.ServeHTTP(rec404, req404)
 	if rec404.Code != http.StatusNotFound {
 		t.Errorf("unknown endpoint: status = %d, want 404", rec404.Code)
+	}
+	rec404 = httptest.NewRecorder()
+	r.ServeHTTP(rec404, httptest.NewRequest("GET", "/v1/webhook-endpoints/endpoints/vlx_whe_nope", nil).WithContext(ctx))
+	if rec404.Code != http.StatusNotFound {
+		t.Errorf("GET unknown endpoint: status = %d, want 404", rec404.Code)
 	}
 }
 

@@ -11,6 +11,8 @@ import type { GetV1SubscriptionsBilling } from './getV1SubscriptionsBilling';
 import type { GetV1SubscriptionsCollection } from './getV1SubscriptionsCollection';
 import type { GetV1SubscriptionsDir } from './getV1SubscriptionsDir';
 import type { GetV1SubscriptionsStatus } from './getV1SubscriptionsStatus';
+import type { LimitParameter } from './limitParameter';
+import type { OffsetParameter } from './offsetParameter';
 
 export type GetV1SubscriptionsParams = {
 customer_id?: string;
@@ -46,6 +48,17 @@ search?: string;
  */
 sort?: string;
 dir?: GetV1SubscriptionsDir;
-limit?: number;
-offset?: number;
+/**
+ * Rows per page, from 1 to 100. Default 50. Any other value, or one
+ * that is not a whole number, is a 422 with `param: limit`.
+ * @minimum 1
+ * @maximum 100
+ */
+limit?: LimitParameter;
+/**
+ * Rows to skip, 0 or more. Default 0. A negative value, or one that is
+ * not a whole number, is a 422 with `param: offset`.
+ * @minimum 0
+ */
+offset?: OffsetParameter;
 };

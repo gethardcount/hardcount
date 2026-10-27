@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/sagarsuperuser/velox/internal/api/respond"
 	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
@@ -108,28 +109,28 @@ func (h *PostmarkHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) 
 	// halves; unconfigured credentials compare equal to nothing.
 	if !h.authorized(r) {
 		w.Header().Set("WWW-Authenticate", `Basic realm="velox-webhooks"`)
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		respond.Unauthorized(w, r, "unauthorized")
 		return
 	}
 
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxPostmarkBodySize+1))
 	if err != nil {
 		// A torn read is transport-transient — let Postmark redeliver.
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "read failed"})
+		respond.InternalError(w, r)
 		return
 	}
 	if len(body) > maxPostmarkBodySize {
 		// Deterministic: redelivery re-sends the same oversize payload,
 		// so a non-2xx buys nothing (Delivery retries only ~3x/21min).
 		slog.Warn("postmark webhook: body exceeds size cap — acked and dropped", "cap_bytes", maxPostmarkBodySize)
-		writeJSON(w, http.StatusOK, map[string]string{"status": "skipped", "reason": "payload too large"})
+		respond.JSON(w, r, http.StatusOK, map[string]string{"status": "skipped", "reason": "payload too large"})
 		return
 	}
 
 	var evt postmarkEvent
 	if err := json.Unmarshal(body, &evt); err != nil {
 		slog.Warn("postmark webhook: unparseable JSON — acked and dropped", "error", err.Error())
-		writeJSON(w, http.StatusOK, map[string]string{"status": "skipped", "reason": "invalid json"})
+		respond.JSON(w, r, http.StatusOK, map[string]string{"status": "skipped", "reason": "invalid json"})
 		return
 	}
 
@@ -137,7 +138,7 @@ func (h *PostmarkHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) 
 	case "Delivery", "Bounce", "SpamComplaint":
 	default:
 		// Open / Click / SubscriptionChange / future types — not ours.
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ignored", "reason": "record type not ingested"})
+		respond.JSON(w, r, http.StatusOK, map[string]string{"status": "ignored", "reason": "record type not ingested"})
 		return
 	}
 
@@ -151,7 +152,7 @@ func (h *PostmarkHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) 
 	if evt.RecordType == "Bounce" && !postmarkBouncePermanent(evt) {
 		slog.Info("postmark webhook: transient bounce — not recorded",
 			"bounce_type", evt.Type, "type_code", evt.TypeCode)
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ignored", "reason": "transient bounce"})
+		respond.JSON(w, r, http.StatusOK, map[string]string{"status": "ignored", "reason": "transient bounce"})
 		return
 	}
 
@@ -163,19 +164,19 @@ func (h *PostmarkHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) 
 	if outboxID == "" {
 		slog.Warn("postmark webhook: no correlation metadata — acked and dropped",
 			"record_type", evt.RecordType, "message_id", evt.MessageID)
-		writeJSON(w, http.StatusOK, map[string]string{"status": "skipped", "reason": "no correlation metadata"})
+		respond.JSON(w, r, http.StatusOK, map[string]string{"status": "skipped", "reason": "no correlation metadata"})
 		return
 	}
 	row, err := h.store.GetByID(r.Context(), outboxID)
 	if errors.Is(err, sql.ErrNoRows) {
 		slog.Warn("postmark webhook: unknown outbox id — acked and dropped",
 			"outbox_id", outboxID, "record_type", evt.RecordType)
-		writeJSON(w, http.StatusOK, map[string]string{"status": "skipped", "reason": "unknown outbox id"})
+		respond.JSON(w, r, http.StatusOK, map[string]string{"status": "skipped", "reason": "unknown outbox id"})
 		return
 	}
 	if err != nil {
 		slog.Error("postmark webhook: outbox lookup failed", "outbox_id", outboxID, "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "lookup failed"})
+		respond.InternalError(w, r)
 		return
 	}
 
@@ -204,7 +205,7 @@ func (h *PostmarkHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) 
 		if _, err := h.store.MarkDeliveryState(ctx, row.TenantID, row.ID, state); err != nil {
 			slog.Error("postmark webhook: delivery-state write failed",
 				"outbox_id", row.ID, "state", state, "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "write failed"})
+			respond.InternalError(w, r)
 			return
 		}
 	}
@@ -225,7 +226,7 @@ func (h *PostmarkHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) 
 			if supErr != nil {
 				slog.Error("postmark webhook: suppression write failed",
 					"outbox_id", row.ID, "record_type", evt.RecordType, "error", supErr)
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "write failed"})
+				respond.InternalError(w, r)
 				return
 			}
 		}
@@ -235,7 +236,7 @@ func (h *PostmarkHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) 
 			"state", state, "primary_recipient", strings.EqualFold(recipient, primary))
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"status": "processed"})
+	respond.JSON(w, r, http.StatusOK, map[string]string{"status": "processed"})
 }
 
 func (h *PostmarkHandler) authorized(r *http.Request) bool {
@@ -272,10 +273,4 @@ func scrubbedCause(prefix, description string) string {
 		return prefix
 	}
 	return prefix + ": " + errs.Scrub(d)
-}
-
-func writeJSON(w http.ResponseWriter, status int, body map[string]string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
 }

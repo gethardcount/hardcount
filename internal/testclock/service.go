@@ -299,8 +299,8 @@ func (s *Service) Get(ctx context.Context, tenantID, id string) (domain.TestCloc
 	return s.store.Get(ctx, tenantID, id)
 }
 
-func (s *Service) List(ctx context.Context, tenantID string) ([]domain.TestClock, error) {
-	return s.store.List(ctx, tenantID)
+func (s *Service) List(ctx context.Context, tenantID string, limit, offset int) ([]domain.TestClock, int, error) {
+	return s.store.List(ctx, tenantID, limit, offset)
 }
 
 func (s *Service) Delete(ctx context.Context, tenantID, id string) error {

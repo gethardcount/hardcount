@@ -238,40 +238,46 @@ func (s *PostgresStore) GetOverrideAt(ctx context.Context, tenantID, customerID,
 		ORDER BY o.created_at DESC LIMIT 1`, customerID, priceID, at))
 }
 
-// ListOverrides returns active overrides, of one customer and of one price
-// when those are given.
-func (s *PostgresStore) ListOverrides(ctx context.Context, tenantID, customerID, priceID string) ([]domain.CustomerPriceOverride, error) {
+// ListOverrides returns one page of the active overrides, of one customer
+// and of one price when those are given, newest first, and how many match.
+func (s *PostgresStore) ListOverrides(ctx context.Context, tenantID, customerID, priceID string, limit, offset int) ([]domain.CustomerPriceOverride, int, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer postgres.Rollback(tx)
 
-	query := `SELECT ` + overrideColumns + ` FROM customer_price_overrides o WHERE o.active`
+	where := ` WHERE o.active`
 	var args []any
 	if customerID != "" {
 		args = append(args, customerID)
-		query += fmt.Sprintf(" AND o.customer_id = $%d", len(args))
+		where += fmt.Sprintf(" AND o.customer_id = $%d", len(args))
 	}
 	if priceID != "" {
 		args = append(args, priceID)
-		query += fmt.Sprintf(" AND o.price_id = $%d", len(args))
+		where += fmt.Sprintf(" AND o.price_id = $%d", len(args))
 	}
-	query += " ORDER BY o.created_at DESC LIMIT 500"
+	var total int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM customer_price_overrides o`+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	args = append(args, limit, offset)
+	query := `SELECT ` + overrideColumns + ` FROM customer_price_overrides o` + where +
+		fmt.Sprintf(" ORDER BY o.created_at DESC, o.id DESC LIMIT $%d OFFSET $%d", len(args)-1, len(args))
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer func() { _ = rows.Close() }()
 	var out []domain.CustomerPriceOverride
 	for rows.Next() {
 		o, err := scanOverride(rows)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		out = append(out, o)
 	}
-	return out, rows.Err()
+	return out, total, rows.Err()
 }
 
 // CreateOverrideInput is POST /v1/price-overrides.
@@ -333,7 +339,7 @@ func (s *Service) GetOverrideAt(ctx context.Context, tenantID, customerID, price
 	return s.store.GetOverrideAt(ctx, tenantID, customerID, priceID, at)
 }
 
-// ListOverrides lists active overrides.
-func (s *Service) ListOverrides(ctx context.Context, tenantID, customerID, priceID string) ([]domain.CustomerPriceOverride, error) {
-	return s.store.ListOverrides(ctx, tenantID, customerID, priceID)
+// ListOverrides lists one page of the active overrides and counts them all.
+func (s *Service) ListOverrides(ctx context.Context, tenantID, customerID, priceID string, limit, offset int) ([]domain.CustomerPriceOverride, int, error) {
+	return s.store.ListOverrides(ctx, tenantID, customerID, priceID, limit, offset)
 }

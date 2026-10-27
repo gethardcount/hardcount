@@ -8,7 +8,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 import type { CreditNote } from './creditNote';
+import type { ListTotal } from './listTotal';
 
 export type ListCreditNotes200 = {
   data: CreditNote[];
+  total: ListTotal;
 };

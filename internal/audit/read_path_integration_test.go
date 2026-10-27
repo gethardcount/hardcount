@@ -14,15 +14,14 @@ import (
 )
 
 // Read-path integration coverage (audit e2e 2026-07-13 — the read path had
-// ZERO tests). Pins: tenant+livemode isolation, the cursor limit+1
-// over-fetch and page continuation, FilterOptions mode scoping (with a
+// ZERO tests). Pins: tenant+livemode isolation, page continuation, FilterOptions mode scoping (with a
 // mode-distinct action so leakage is visible), the 0147 index columns, the
-// negative-offset clamp at the handler, and — the core of PR2 — an EXPLAIN
+// negative-offset 422 at the handler, and — the core of PR2 — an EXPLAIN
 // assertion that the explicit predicates actually drive the read index
 // (results alone cannot pin that: RLS returns identical rows either way,
 // only the plan differs; see TestBuildListWhere_PinsPredicates for the
 // code-level twin).
-func TestAuditReadPath_PredicatesCursorAndIndex(t *testing.T) {
+func TestAuditReadPath_PredicatesPagingAndIndex(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	tenant1 := testutil.CreateTestTenant(t, db, "Read Path T1")
 	tenant2 := testutil.CreateTestTenant(t, db, "Read Path T2")
@@ -43,7 +42,7 @@ func TestAuditReadPath_PredicatesCursorAndIndex(t *testing.T) {
 		if err := logger.Log(ctxLive, tenant1, action, "invoice", "vlx_inv_t1", "", nil); err != nil {
 			t.Fatalf("seed t1 live: %v", err)
 		}
-		// Distinct created_at per row so cursor ordering is deterministic.
+		// Distinct created_at per row so the order is deterministic.
 		time.Sleep(5 * time.Millisecond)
 	}
 	if err := logger.Log(ctxTest, tenant1, "testmode.probe", "probe", "vlx_prb_1", "", nil); err != nil {
@@ -79,38 +78,29 @@ func TestAuditReadPath_PredicatesCursorAndIndex(t *testing.T) {
 		}
 	})
 
-	t.Run("cursor over-fetches limit+1 and page 2 continues without overlap", func(t *testing.T) {
-		page1, _, err := logger.Query(ctxLive, tenant1, audit.QueryFilter{Limit: 1})
+	t.Run("offset page 2 continues page 1 without overlap", func(t *testing.T) {
+		page1, total1, err := logger.Query(ctxLive, tenant1, audit.QueryFilter{Limit: 1})
 		if err != nil {
 			t.Fatalf("page 1: %v", err)
 		}
 		if len(page1) != 1 {
-			t.Fatalf("page 1 rows: got %d, want 1 (offset path returns exactly limit)", len(page1))
+			t.Fatalf("page 1 rows: got %d, want 1", len(page1))
 		}
-
-		// Cursor path over-fetches limit+1 so the handler can derive
-		// has_more without a COUNT: 2 rows remain past the cursor, so a
-		// Limit-1 ask must return exactly 2. If this returns 1, the
-		// over-fetch was dropped and has_more silently breaks.
-		page2, _, err := logger.Query(ctxLive, tenant1, audit.QueryFilter{
-			Limit:          1,
-			AfterCreatedAt: page1[0].CreatedAt,
-			AfterID:        page1[0].ID,
-		})
+		page2, total2, err := logger.Query(ctxLive, tenant1, audit.QueryFilter{Limit: 2, Offset: 1})
 		if err != nil {
 			t.Fatalf("page 2: %v", err)
 		}
-		if len(page2) != 2 {
-			t.Fatalf("cursor over-fetch: got %d rows for Limit=1, want 2 (limit+1)", len(page2))
+		if len(page2) != 2 || total1 != 3 || total2 != 3 {
+			t.Fatalf("page 2: %d rows, totals %d and %d; want 2 rows and total 3", len(page2), total1, total2)
 		}
 		for _, e := range page2 {
 			if e.ID == page1[0].ID {
-				t.Errorf("cursor page 2 re-served the page-1 row %s", e.ID)
+				t.Errorf("page 2 re-served the page-1 row %s", e.ID)
 			}
 		}
-		// DESC ordering must hold across the seek boundary.
-		if page2[0].CreatedAt.Before(page2[1].CreatedAt) {
-			t.Errorf("cursor page ordering not DESC: %v then %v", page2[0].CreatedAt, page2[1].CreatedAt)
+		// DESC ordering must hold across the page boundary.
+		if page1[0].CreatedAt.Before(page2[0].CreatedAt) || page2[0].CreatedAt.Before(page2[1].CreatedAt) {
+			t.Errorf("pages not newest first: %v, %v, %v", page1[0].CreatedAt, page2[0].CreatedAt, page2[1].CreatedAt)
 		}
 	})
 
@@ -210,14 +200,14 @@ func TestAuditReadPath_PredicatesCursorAndIndex(t *testing.T) {
 		}
 	})
 
-	t.Run("handler clamps negative offset", func(t *testing.T) {
+	t.Run("handler refuses a negative offset", func(t *testing.T) {
 		h := audit.NewHandler(logger)
 		req := httptest.NewRequest("GET", "/?offset=-5", nil)
 		reqCtx := context.WithValue(postgres.WithLivemode(base, true), auth.TestTenantIDKey(), tenant1)
 		rec := httptest.NewRecorder()
 		h.Routes().ServeHTTP(rec, req.WithContext(reqCtx))
-		if rec.Code != 200 {
-			t.Fatalf("negative offset must clamp to 0, not error: got %d body=%s", rec.Code, rec.Body.String())
+		if rec.Code != 422 || !strings.Contains(rec.Body.String(), `"param":"offset"`) {
+			t.Fatalf("a negative offset must be a 422 naming offset, not clamped: got %d body=%s", rec.Code, rec.Body.String())
 		}
 	})
 }

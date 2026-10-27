@@ -54,6 +54,7 @@ var notListRoutes = map[string]string{
 	"/v1/dunning/policies/{id}":              "one resource",
 	"/v1/dunning/runs/{id}":                  "one resource",
 	"/v1/test-clocks/{id}":                   "one resource",
+	"/v1/webhook-endpoints/endpoints/{id}":   "one resource",
 	"/v1/recipes/{key}":                      "one resource",
 	"/v1/credit-notes/stats":                 "counts",
 	"/v1/dunning/stats":                      "counts",

@@ -364,6 +364,6 @@ func (s *Service) RotateKey(ctx context.Context, tenantID, id string, input Rota
 	}, nil
 }
 
-func (s *Service) ListKeys(ctx context.Context, filter ListFilter) ([]domain.APIKey, error) {
+func (s *Service) ListKeys(ctx context.Context, filter ListFilter) ([]domain.APIKey, int, error) {
 	return s.store.List(ctx, filter)
 }

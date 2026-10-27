@@ -89,16 +89,16 @@ func TestPostgresStore_List(t *testing.T) {
 	_, _ = store.Create(ctx, domain.Tenant{Name: "Tenant A"})
 	_, _ = store.Create(ctx, domain.Tenant{Name: "Tenant B"})
 
-	all, err := store.List(ctx, tenant.ListFilter{})
+	all, total, err := store.List(ctx, tenant.ListFilter{})
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if len(all) != 2 {
-		t.Errorf("list count: got %d, want 2", len(all))
+	if len(all) != 2 || total != 2 {
+		t.Errorf("list count: got %d rows, total %d, want 2", len(all), total)
 	}
 
 	// Filter by status
-	active, err := store.List(ctx, tenant.ListFilter{Status: "active"})
+	active, _, err := store.List(ctx, tenant.ListFilter{Status: "active"})
 	if err != nil {
 		t.Fatalf("list active: %v", err)
 	}

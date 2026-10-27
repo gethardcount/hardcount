@@ -110,16 +110,17 @@ func (h *Handler) auditCtx(ctx context.Context, clk domain.TestClock) context.Co
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
-	clocks, err := h.svc.List(r.Context(), tenantID)
+	page, ok := respond.ParsePage(w, r)
+	if !ok {
+		return
+	}
+	clocks, total, err := h.svc.List(r.Context(), tenantID, page.Limit, page.Offset)
 	if err != nil {
 		respond.InternalError(w, r)
 		slog.ErrorContext(r.Context(), "list test clocks", "error", err)
 		return
 	}
-	if clocks == nil {
-		clocks = []domain.TestClock{}
-	}
-	respond.JSON(w, r, http.StatusOK, map[string]any{"data": clocks})
+	respond.List(w, r, clocks, total)
 }
 
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
@@ -141,16 +142,19 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) listSubscriptions(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
+	page, ok := respond.ParsePage(w, r)
+	if !ok {
+		return
+	}
 
+	// One clock's subscriptions are read whole (catchup reads the same
+	// list) and paged here.
 	subs, err := h.svc.ListSubscriptions(r.Context(), tenantID, id)
 	if err != nil {
 		respond.FromError(w, r, err, "test_clock")
 		return
 	}
-	if subs == nil {
-		subs = []domain.Subscription{}
-	}
-	respond.JSON(w, r, http.StatusOK, map[string]any{"data": subs})
+	respond.List(w, r, respond.Window(subs, page), len(subs))
 }
 
 // listAttachedCustomers returns customers attached to this clock —
@@ -160,16 +164,18 @@ func (h *Handler) listSubscriptions(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) listAttachedCustomers(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
+	page, ok := respond.ParsePage(w, r)
+	if !ok {
+		return
+	}
 
+	// One clock's customers are read whole and paged here.
 	customers, err := h.svc.ListAttachedCustomers(r.Context(), tenantID, id)
 	if err != nil {
 		respond.FromError(w, r, err, "test_clock")
 		return
 	}
-	if customers == nil {
-		customers = []domain.Customer{}
-	}
-	respond.JSON(w, r, http.StatusOK, map[string]any{"data": customers})
+	respond.List(w, r, respond.Window(customers, page), len(customers))
 }
 
 func (h *Handler) advance(w http.ResponseWriter, r *http.Request) {

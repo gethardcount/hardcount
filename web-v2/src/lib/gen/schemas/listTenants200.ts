@@ -7,8 +7,10 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
+import type { ListTotal } from './listTotal';
 import type { Tenant } from './tenant';
 
 export type ListTenants200 = {
   data: Tenant[];
+  total: ListTotal;
 };

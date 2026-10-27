@@ -7,10 +7,9 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
+import type { Error } from './error';
 
-export type CheckPasswordResetToken422Reason = typeof CheckPasswordResetToken422Reason[keyof typeof CheckPasswordResetToken422Reason];
-
-
-export const CheckPasswordResetToken422Reason = {
-  invalid_or_expired: 'invalid_or_expired',
-} as const;
+/**
+ * `limit` or `offset` is out of range or not a whole number (`param` names it)
+ */
+export type InvalidPageResponse = Error;

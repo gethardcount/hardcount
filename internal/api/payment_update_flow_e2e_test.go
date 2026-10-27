@@ -41,7 +41,7 @@ func TestE2E_PaymentUpdateLink(t *testing.T) {
 	}
 
 	// The customer's sent emails show the setup-link email for this invoice.
-	sent := flowList(flowDo(t, ts, "GET", "/v1/customers/"+customerID+"/sent-emails", flowReq{bearer: key}).want(t, 200, "sent emails").body, "sent_emails")
+	sent := flowList(flowDo(t, ts, "GET", "/v1/customers/"+customerID+"/sent-emails", flowReq{bearer: key}).want(t, 200, "sent emails").body, "data")
 	if len(sent) != 1 || flowStr(sent[0], "email_type") != "payment_setup_request" ||
 		flowStr(sent[0], "recipient") != customerEmail || flowStr(sent[0], "invoice_number") != flowStr(inv, "invoice_number") {
 		t.Errorf("sent emails = %v, want one payment_setup_request to %s for %s", sent, customerEmail, flowStr(inv, "invoice_number"))

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -15,7 +14,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/shopspring/decimal"
 
-	"github.com/sagarsuperuser/velox/internal/api/middleware"
 	"github.com/sagarsuperuser/velox/internal/api/respond"
 	"github.com/sagarsuperuser/velox/internal/api/timefilter"
 	"github.com/sagarsuperuser/velox/internal/audit"
@@ -413,34 +411,19 @@ func (h *Handler) backfill(w http.ResponseWriter, r *http.Request) {
 
 // parseListFilter pulls the shared list/aggregate query params off the
 // request URL. Both handlers honour customer_id / meter_id / from / to;
-// the list handler additionally reads limit + offset, which Aggregate
-// ignores (the whole point of the aggregate endpoint is the unbounded
-// total). Empty values are treated as absent so the frontend can build
+// the list handler additionally reads limit + offset (respond.ParsePage),
+// which Aggregate does not take (the whole point of the aggregate endpoint
+// is the unbounded total). Empty values are treated as absent so the frontend can build
 // URLs unconditionally. from / to go through timefilter.ParseRange, the
 // parser the CSV export uses: RFC 3339 or YYYY-MM-DD, anything else is an
 // error the caller answers with 422. Dropping a value it could not read
 // returned all-time totals as if they were filtered.
 func parseListFilter(r *http.Request) (ListFilter, error) {
 	q := r.URL.Query()
-	limit, _ := strconv.Atoi(q.Get("limit"))
-	offset, _ := strconv.Atoi(q.Get("offset"))
-
 	filter := ListFilter{
 		TenantID:   auth.TenantID(r.Context()),
 		CustomerID: q.Get("customer_id"),
 		MeterID:    q.Get("meter_id"),
-		Limit:      limit,
-		Offset:     offset,
-	}
-	// Cursor takes precedence over offset when both are present —
-	// industry standard (Stripe ignores ?starting_after if ?ending_before
-	// is set rather than mixing them). Malformed cursors silently fall
-	// back to offset (no 400) because cursor is an opt-in upgrade path.
-	if c := q.Get("after"); c != "" {
-		if cur, err := middleware.DecodeCursor(c); err == nil {
-			filter.AfterTimestamp = cur.CreatedAt
-			filter.AfterID = cur.ID
-		}
 	}
 	from, to, err := timefilter.ParseRange(r, "from", "to")
 	if err != nil {
@@ -456,11 +439,16 @@ func parseListFilter(r *http.Request) (ListFilter, error) {
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
+	page, ok := respond.ParsePage(w, r)
+	if !ok {
+		return
+	}
 	filter, err := parseListFilter(r)
 	if err != nil {
 		respond.FromError(w, r, err, "usage_event")
 		return
 	}
+	filter.Limit, filter.Offset = page.Limit, page.Offset
 	dims, err := parseDimensionsParam(r.URL.Query().Get("dimensions"))
 	if err != nil {
 		// Unlike the other list params, a malformed dimension filter is a
@@ -479,28 +467,6 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	}
 	if events == nil {
 		events = []domain.UsageEvent{}
-	}
-
-	// Cursor path: store fetched limit+1, signaled by len(events) > limit.
-	// Trim the over-fetch + mint the next cursor from the last row.
-	if !filter.AfterTimestamp.IsZero() && filter.AfterID != "" {
-		limit := filter.Limit
-		if limit <= 0 {
-			limit = 100
-		} else if limit > 1000 {
-			limit = 1000
-		}
-		hasMore := len(events) > limit
-		if hasMore {
-			events = events[:limit]
-		}
-		resp := middleware.PageResponse{Data: events, HasMore: hasMore}
-		if hasMore && len(events) > 0 {
-			last := events[len(events)-1]
-			resp.NextCursor = middleware.EncodeCursor(last.ID, last.Timestamp)
-		}
-		respond.JSON(w, r, http.StatusOK, resp)
-		return
 	}
 
 	respond.List(w, r, events, total)
@@ -525,11 +491,6 @@ func (h *Handler) aggregate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	filter.Dimensions = dims
-	// Limit/offset only matter for paginated reads. Zero them out so
-	// it's obvious from a debug log that the aggregate scanned the full
-	// filtered set, not a 100-row page.
-	filter.Limit = 0
-	filter.Offset = 0
 	// tz buckets the per-meter daily series by calendar day (the tenant's
 	// timezone on the dashboard). Unknown names are refused, not ignored,
 	// so a typo never silently re-buckets the chart to UTC.
@@ -699,16 +660,9 @@ type batchResponse struct {
 // with no errors[], the exact undebuggable-batch failure the ingest
 // stage's accumulation exists to prevent.
 func respondBatchRejected(w http.ResponseWriter, r *http.Request, errStrings []string, total int) {
-	respond.JSON(w, r, http.StatusUnprocessableEntity, map[string]any{
-		"error": map[string]any{
-			"type":    "invalid_request_error",
-			"code":    "batch_rejected",
-			"message": "batch rejected — nothing was ingested; fix the listed events and retry the whole batch",
-		},
-		"errors":   errStrings,
-		"ingested": 0,
-		"total":    total,
-	})
+	respond.ErrorWith(w, r, http.StatusUnprocessableEntity, "invalid_request_error", "batch_rejected",
+		"batch rejected — nothing was ingested; fix the listed events and retry the whole batch",
+		map[string]any{"errors": errStrings, "ingested": 0, "total": total})
 }
 
 // ParseDimensionsParam parses the `dimensions` query value ("k=v,k2=v2")

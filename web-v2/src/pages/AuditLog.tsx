@@ -41,22 +41,9 @@ import { FeedSkeleton } from '@/components/ui/TableSkeleton'
 import { Download, ChevronRight, History } from 'lucide-react'
 
 const PAGE_SIZE = 50
-
-// encodeCursor builds the seek-pagination token for ?after= — the same wire
-// format the backend emits (base64url of {id, created_at}) — so the client can
-// transition from the page-1 offset response onto the cursor path.
-//
-// There is ONE sort axis (created_at) and therefore one anchor. This used to
-// carry a sim_effective_at anchor for an "order by simulated time" seek; that
-// control does not exist (ADR-090 §5 — within a clock it is the same order, and
-// across clocks it interleaves unrelated simulations), and the backend cursor no
-// longer has the field at all.
-function encodeCursor(e: AuditEntry): string {
-  const cur: Record<string, string> = { id: e.id, created_at: e.created_at }
-  return btoa(JSON.stringify(cur))
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-}
+// AUDIT_COUNT_CAP is where the server's count stops: a total above it means
+// "more than 10,000" (audit.CountCap).
+const AUDIT_COUNT_CAP = 10000
 
 // Velox ids are time-sortable, so two keys minted in the same window share a
 // long LEADING prefix and differ only at the end — `slice(0, 16)` throws away
@@ -255,18 +242,13 @@ export default function AuditLogPage() {
     test_clock: testClockFilter,
   } = urlState
 
-  // Cursor (seek) pagination — Stripe-style Previous/Next. The stack holds
-  // one cursor per page beyond the first; depth = current page - 1. Page 1
-  // uses the offset path (which also returns the total once); deeper pages
-  // ride ?after=, which skips the expensive COUNT entirely (the RLS OR-branch
-  // makes that COUNT a full seq scan, so numbered offset pages paid it on
-  // every click). Stack resets whenever a filter changes.
-  const [cursors, setCursors] = useState<string[]>([])
-  const [lastTotal, setLastTotal] = useState(0)
-  const after = cursors.length > 0 ? cursors[cursors.length - 1] : ''
-  const page = cursors.length + 1
+  // Offset pagination — Previous/Next, like every list. The server's count
+  // stops at 10,001 (it never walks the whole append-only log), so past
+  // 10,000 rows "Next" follows full pages instead of the total. The page
+  // resets whenever a filter changes.
+  const [page, setPage] = useState(1)
   const filterKey = [resourceType, action, actorFilter, resourceIdFilter, dateFrom, dateTo, testClockFilter].join('|')
-  useEffect(() => { setCursors([]) }, [filterKey])
+  useEffect(() => { setPage(1) }, [filterKey])
 
   // Audit log entries query — keyed by every filter dimension so the
   // cache is sharded per-filter-set. Changing any filter triggers a
@@ -276,8 +258,7 @@ export default function AuditLogPage() {
   const qs = (() => {
     const params = new URLSearchParams()
     params.set('limit', String(PAGE_SIZE))
-    if (after) params.set('after', after)
-    else params.set('offset', '0')
+    params.set('offset', String((page - 1) * PAGE_SIZE))
     if (resourceType) params.set('resource_type', resourceType)
     if (action) params.set('action', action)
     if (resourceIdFilter) params.set('resource_id', resourceIdFilter)
@@ -292,12 +273,7 @@ export default function AuditLogPage() {
     queryFn: () => api.listAuditLog(qs),
   })
   const entries = entriesQuery.data?.data ?? []
-  // total only arrives on the page-1 (offset) response; keep the last-seen
-  // value so the header count survives while paging through cursor pages.
-  useEffect(() => {
-    if (typeof entriesQuery.data?.total === 'number') setLastTotal(entriesQuery.data.total)
-  }, [entriesQuery.data])
-  const total = lastTotal
+  const total = entriesQuery.data?.total ?? 0
   const loading = entriesQuery.isLoading
   const error = entriesQuery.error instanceof Error ? entriesQuery.error.message : (entriesQuery.error ? 'Failed to load audit log' : null)
   const loadEntries = () => { void entriesQuery.refetch() }
@@ -318,16 +294,11 @@ export default function AuditLogPage() {
     testClocks: filterOptionsQuery.data?.test_clocks ?? [],
   }
 
-  // Page 1 (offset response) derives has-more from the total; cursor pages
-  // carry has_more/next_cursor. For page 1 the next cursor is built client-
-  // side from the last row — same wire format the backend emits
-  // (base64url of {id, created_at}).
-  const hasNext = after
-    ? Boolean(entriesQuery.data?.has_more)
-    : total > PAGE_SIZE
-  const nextCursor = after
-    ? (entriesQuery.data?.next_cursor ?? '')
-    : (entries.length > 0 ? encodeCursor(entries[entries.length - 1]) : '')
+  // Below the count's cap the total decides; at the cap (more than 10,000
+  // rows) a full page means there may be another.
+  const hasNext = total > AUDIT_COUNT_CAP
+    ? entries.length === PAGE_SIZE
+    : page * PAGE_SIZE < total
   const groups = groupByDate(entries)
 
   // Export streams from the SERVER (GET /v1/exports/audit-log.csv), applying the
@@ -606,9 +577,7 @@ export default function AuditLogPage() {
                 ))}
               </div>
 
-              {/* Pagination — cursor-based Previous/Next (no numbered jumps:
-                  the seek query is O(log N) per page at any depth, where the
-                  numbered-offset COUNT was a full scan per click). */}
+              {/* Pagination — Previous/Next by offset. */}
               {(page > 1 || hasNext) && (
                 <div className="border-t border-border px-4 py-3 flex items-center justify-between">
                   <p className="text-xs text-muted-foreground">
@@ -618,13 +587,13 @@ export default function AuditLogPage() {
                     <PaginationContent>
                       <PaginationItem>
                         <PaginationPrevious
-                          onClick={() => setCursors(c => c.slice(0, -1))}
+                          onClick={() => setPage(p => Math.max(1, p - 1))}
                           className={cn(page <= 1 && 'pointer-events-none opacity-50')}
                         />
                       </PaginationItem>
                       <PaginationItem>
                         <PaginationNext
-                          onClick={() => nextCursor && setCursors(c => [...c, nextCursor])}
+                          onClick={() => hasNext && setPage(p => p + 1)}
                           className={cn(!hasNext && 'pointer-events-none opacity-50')}
                         />
                       </PaginationItem>

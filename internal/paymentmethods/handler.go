@@ -159,6 +159,11 @@ func (h *Handler) operatorList(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	page, ok := respond.ParsePage(w, r)
+	if !ok {
+		return
+	}
+	// One customer's payment methods are read whole and paged here.
 	pms, err := h.svc.List(r.Context(), tenantID, customerID)
 	if err != nil {
 		respond.InternalError(w, r)
@@ -168,7 +173,7 @@ func (h *Handler) operatorList(w http.ResponseWriter, r *http.Request) {
 	for _, pm := range pms {
 		out = append(out, toResp(pm))
 	}
-	respond.List(w, r, out, len(out))
+	respond.List(w, r, respond.Window(out, page), len(out))
 }
 
 func (h *Handler) operatorSetDefault(w http.ResponseWriter, r *http.Request) {

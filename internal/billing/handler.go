@@ -1,7 +1,6 @@
 package billing
 
 import (
-	"encoding/json"
 	"log/slog"
 	"net/http"
 
@@ -85,17 +84,14 @@ func (h *Handler) triggerCycle(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
 	// Status keys off the surfaced error list, not the failure slice: an
 	// unrecorded trigger is a partial outcome too, and a 200 alongside a
 	// non-empty `errors` array would be a lie.
+	status := http.StatusOK
 	if len(errStrings) > 0 {
-		w.WriteHeader(http.StatusPartialContent)
-	} else {
-		w.WriteHeader(http.StatusOK)
+		status = http.StatusPartialContent
 	}
-
-	_ = json.NewEncoder(w).Encode(map[string]any{
+	respond.JSON(w, r, status, map[string]any{
 		"invoices_generated": generated,
 		"errors":             errStrings,
 	})

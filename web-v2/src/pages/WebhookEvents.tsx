@@ -64,7 +64,7 @@ export default function WebhookEventsPage() {
   )
   const { data: customersData } = useQuery({
     queryKey: ['we-customers', frameCustomerIds],
-    queryFn: () => api.listCustomers(`ids=${frameCustomerIds.join(',')}&limit=${frameCustomerIds.length}`),
+    queryFn: () => api.listCustomersByIds(frameCustomerIds),
     enabled: frameCustomerIds.length > 0,
     staleTime: 60_000,
   })

@@ -7,8 +7,10 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
+import type { ListTotal } from './listTotal';
 import type { RecipeListItem } from './recipeListItem';
 
 export type ListRecipes200 = {
   data: RecipeListItem[];
+  total: ListTotal;
 };

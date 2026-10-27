@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http/httptest"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -21,7 +20,7 @@ import (
 //
 // Each case calls the removed operation with ids that exist, so a handler
 // that is still mounted would answer it, and checks that the router answers
-// 404 itself: the plain-text "404 page not found", not a handler's JSON 404.
+// 404 itself: code route_not_found, not a handler's not_found.
 // Each case also calls the kept replacement with the same ids and expects it
 // to answer, so a router that refuses everything cannot pass.
 func TestRemovedRoutes_AnswerNotFound(t *testing.T) {
@@ -143,14 +142,14 @@ func TestRemovedRoutes_AnswerNotFound(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got := call(tc.method, tc.path, tc.body)
-			if got.status != 404 || !strings.Contains(string(got.raw), "404 page not found") {
+			if got.status != 404 || got.errCode() != "route_not_found" {
 				t.Errorf("%s %s = %d %q, want the router's 404: the operation was removed", tc.method, tc.path, got.status, got.raw)
 			}
 			kept := call(tc.keptMethod, tc.kept, tc.keptBody)
 			switch {
 			case tc.keptNeedsStripe:
-				// A handler answered with the JSON error envelope, which the
-				// router's plain-text 404 and empty 405 never carry.
+				// A handler answered with its own error, not the router's
+				// 404 route_not_found or 405 method_not_allowed.
 				if kept.status == 404 || kept.status == 405 || kept.errCode() == "" {
 					t.Errorf("kept %s %s = %d %s, want its handler's error", tc.keptMethod, tc.kept, kept.status, kept.raw)
 				}

@@ -98,17 +98,18 @@ func (h *Handler) createOverride(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) listOverrides(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
+	page, ok := respond.ParsePage(w, r)
+	if !ok {
+		return
+	}
 	q := r.URL.Query()
-	overrides, err := h.svc.ListOverrides(r.Context(), tenantID, q.Get("customer_id"), q.Get("price_id"))
+	overrides, total, err := h.svc.ListOverrides(r.Context(), tenantID, q.Get("customer_id"), q.Get("price_id"), page.Limit, page.Offset)
 	if err != nil {
 		respond.InternalError(w, r)
 		slog.ErrorContext(r.Context(), "list overrides", "error", err)
 		return
 	}
-	if overrides == nil {
-		overrides = []domain.CustomerPriceOverride{}
-	}
-	respond.JSON(w, r, http.StatusOK, map[string]any{"data": overrides})
+	respond.List(w, r, overrides, total)
 }
 
 // deleteOverride ends a negotiated price from the customer's next billing
@@ -188,16 +189,17 @@ func (h *Handler) respondMeter(w http.ResponseWriter, r *http.Request, status in
 
 func (h *Handler) listMeters(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
-	meters, err := h.svc.ListMeters(r.Context(), tenantID)
+	page, ok := respond.ParsePage(w, r)
+	if !ok {
+		return
+	}
+	meters, total, err := h.svc.ListMetersPage(r.Context(), tenantID, page.Limit, page.Offset)
 	if err != nil {
 		respond.InternalError(w, r)
 		slog.ErrorContext(r.Context(), "list meters", "error", err)
 		return
 	}
-	if meters == nil {
-		meters = []domain.Meter{}
-	}
-	respond.JSON(w, r, http.StatusOK, map[string]any{"data": meters})
+	respond.List(w, r, meters, total)
 }
 
 func (h *Handler) getMeter(w http.ResponseWriter, r *http.Request) {
@@ -286,7 +288,11 @@ func (h *Handler) createPlan(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) listPlans(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
-	plans, err := h.svc.ListPlans(r.Context(), tenantID)
+	page, ok := respond.ParsePage(w, r)
+	if !ok {
+		return
+	}
+	plans, total, err := h.svc.ListPlansPage(r.Context(), tenantID, page.Limit, page.Offset)
 	if err != nil {
 		respond.InternalError(w, r)
 		slog.ErrorContext(r.Context(), "list plans", "error", err)
@@ -306,7 +312,7 @@ func (h *Handler) listPlans(w http.ResponseWriter, r *http.Request) {
 	for _, p := range plans {
 		out = append(out, planResponse{Plan: p, Prices: pricesOrEmpty(prices[p.ID])})
 	}
-	respond.JSON(w, r, http.StatusOK, map[string]any{"data": out})
+	respond.List(w, r, out, total)
 }
 
 func (h *Handler) getPlan(w http.ResponseWriter, r *http.Request) {
@@ -394,12 +400,18 @@ func writeResponse(pw PriceWrite) priceWriteResponse {
 
 func (h *Handler) listPrices(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
+	page, ok := respond.ParsePage(w, r)
+	if !ok {
+		return
+	}
 	prices, err := h.svc.ListPlanPrices(r.Context(), tenantID, chi.URLParam(r, "id"))
 	if err != nil {
 		respond.FromError(w, r, err, "plan")
 		return
 	}
-	respond.JSON(w, r, http.StatusOK, map[string]any{"data": pricesOrEmpty(prices)})
+	// A plan's prices are read whole (the plan's GET answers them too) and
+	// paged here.
+	respond.List(w, r, respond.Window(pricesOrEmpty(prices), page), len(prices))
 }
 
 func (h *Handler) addPrice(w http.ResponseWriter, r *http.Request) {

@@ -7,6 +7,8 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
+import type { LimitParameter } from './limitParameter';
+import type { OffsetParameter } from './offsetParameter';
 
 export type GetV1UsageEventsParams = {
 customer_id?: string;
@@ -28,10 +30,17 @@ from?: string;
  * Only events before this time, exclusive. RFC 3339, or a date (YYYY-MM-DD) meaning 23:59:59.999999 UTC that day, so the day is included.
  */
 to?: string;
-limit?: number;
-offset?: number;
 /**
- * Opaque cursor from `next_cursor`. Takes precedence over `offset`.
+ * Rows per page, from 1 to 100. Default 50. Any other value, or one
+ * that is not a whole number, is a 422 with `param: limit`.
+ * @minimum 1
+ * @maximum 100
  */
-after?: string;
+limit?: LimitParameter;
+/**
+ * Rows to skip, 0 or more. Default 0. A negative value, or one that is
+ * not a whole number, is a 422 with `param: offset`.
+ * @minimum 0
+ */
+offset?: OffsetParameter;
 };

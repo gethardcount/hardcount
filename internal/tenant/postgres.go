@@ -83,35 +83,35 @@ func (s *PostgresStore) Get(ctx context.Context, id string) (domain.Tenant, erro
 	return t, nil
 }
 
-func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.Tenant, error) {
+// List returns one page of the tenants, newest first, and how many match.
+func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.Tenant, int, error) {
 	ctx, cancel := context.WithTimeout(ctx, s.db.QueryTimeout)
 	defer cancel()
 
-	// Default 50, clamp to 100 — no-silent-fallbacks principle.
+	// The handler sends a limit of 1 to 100 (respond.ParsePage).
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 50
-	} else if limit > 100 {
-		limit = 100
 	}
 
-	query := `SELECT id, name, status, created_at, updated_at FROM tenants`
+	where := ""
 	args := []any{}
-	argIdx := 1
-
 	if filter.Status != "" {
-		query += ` WHERE status = $1`
+		where = ` WHERE status = $1`
 		args = append(args, filter.Status)
-		argIdx++
+	}
+	var total int
+	if err := s.db.Pool.QueryRowContext(ctx, `SELECT COUNT(*) FROM tenants`+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
 	}
 
-	query += ` ORDER BY created_at DESC`
-	query += fmt.Sprintf(` LIMIT $%d OFFSET $%d`, argIdx, argIdx+1)
 	args = append(args, limit, filter.Offset)
+	query := `SELECT id, name, status, created_at, updated_at FROM tenants` + where +
+		fmt.Sprintf(` ORDER BY created_at DESC, id DESC LIMIT $%d OFFSET $%d`, len(args)-1, len(args))
 
 	rows, err := s.db.Pool.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -119,11 +119,11 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.T
 	for rows.Next() {
 		var t domain.Tenant
 		if err := rows.Scan(&t.ID, &t.Name, &t.Status, &t.CreatedAt, &t.UpdatedAt); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		tenants = append(tenants, t)
 	}
-	return tenants, rows.Err()
+	return tenants, total, rows.Err()
 }
 
 func (s *PostgresStore) UpdateStatus(ctx context.Context, id string, status domain.TenantStatus) (domain.Tenant, error) {

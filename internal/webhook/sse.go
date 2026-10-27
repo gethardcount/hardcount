@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/sagarsuperuser/velox/internal/api/respond"
 	"github.com/sagarsuperuser/velox/internal/auth"
 )
 
@@ -53,13 +54,14 @@ const (
 func (h *Handler) streamEvents(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	if tenantID == "" {
-		http.Error(w, "tenant required", http.StatusUnauthorized)
+		respond.Unauthorized(w, r, "tenant required")
 		return
 	}
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		slog.ErrorContext(r.Context(), "webhook event stream: the response writer cannot flush")
+		respond.InternalError(w, r)
 		return
 	}
 
@@ -84,7 +86,7 @@ func (h *Handler) streamEvents(w http.ResponseWriter, r *http.Request) {
 	// waiting for the next live event. Newest-first is the SSE
 	// convention; the frontend prepends new live frames on top so the
 	// ordering is consistent.
-	snapshot, err := h.svc.ListEvents(r.Context(), tenantID, sseSnapshotLimit)
+	snapshot, _, err := h.svc.ListEvents(r.Context(), tenantID, sseSnapshotLimit, 0)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "sse snapshot failed", "error", err)
 	}

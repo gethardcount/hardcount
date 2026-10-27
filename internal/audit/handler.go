@@ -1,13 +1,8 @@
 package audit
 
 import (
-	"encoding/base64"
-	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
-	"strconv"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -70,13 +65,9 @@ func (h *Handler) filters(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	// Clamp, matching the limit convention below (Query clamps limit to
-	// [50 default, 100 max]) — a negative offset previously reached
-	// Postgres verbatim and surfaced as a 500.
-	if offset < 0 {
-		offset = 0
+	page, ok := respond.ParsePage(w, r)
+	if !ok {
+		return
 	}
 
 	dateFrom, dateTo, err := timefilter.ParseRange(r, "date_from", "date_to")
@@ -116,35 +107,9 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		TestClockID:  r.URL.Query().Get("test_clock_id"),
 		SimFrom:      simFrom,
 		SimTo:        simTo,
-		Limit:        limit,
-		Offset:       offset,
+		Limit:        page.Limit,
+		Offset:       page.Offset,
 	}
-	// Cursor pagination (2026-05-29). ?after= takes precedence over
-	// ?offset=. A malformed cursor is a 400, not a silent fallback — the
-	// old fallback-to-offset restarted a paginating client at page 1,
-	// which a CSV page-walk read as "export complete" (silent truncation
-	// / duplication with zero error signal).
-	// Cursor encode/decode inlined here rather than imported from
-	// internal/api/middleware, because middleware imports THIS package — a
-	// circular dep otherwise. (The importer used to be middleware/audit.go, the
-	// catch-all row-writer; that file is gone, but the cycle is not: the
-	// pure-observer detector and the idempotency middleware both still import
-	// internal/audit.) The wire format is identical to middleware's
-	// Cursor (base64(json{id, created_at})) so SPA clients can pass
-	// audit cursors interchangeably with cursors from other endpoints.
-	if c := r.URL.Query().Get("after"); c != "" {
-		cur, err := decodeAuditCursor(c)
-		// A structurally-valid cursor with a zero id/timestamp would fall
-		// through Query's useCursor check onto the offset path — the same
-		// silent page-1 restart through the back door — so reject it too.
-		if err != nil || cur.ID == "" || cur.CreatedAt.IsZero() {
-			respond.BadRequest(w, r, "invalid `after` cursor — pass the next_cursor value from a previous page verbatim")
-			return
-		}
-		filter.AfterCreatedAt = cur.CreatedAt
-		filter.AfterID = cur.ID
-	}
-
 	entries, total, err := h.logger.Query(r.Context(), tenantID, filter)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "list audit log", "error", err)
@@ -155,66 +120,5 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		entries = []domain.AuditEntry{}
 	}
 
-	if usedCursor := !filter.AfterCreatedAt.IsZero(); usedCursor && filter.AfterID != "" {
-		l := filter.Limit
-		if l <= 0 {
-			l = 50
-		} else if l > 100 {
-			l = 100
-		}
-		hasMore := len(entries) > l
-		if hasMore {
-			entries = entries[:l]
-		}
-		resp := pageResponse{Data: entries, HasMore: hasMore}
-		if hasMore && len(entries) > 0 {
-			resp.NextCursor = encodeAuditCursor(entries[len(entries)-1])
-		}
-		respond.JSON(w, r, http.StatusOK, resp)
-		return
-	}
-
 	respond.List(w, r, entries, total)
-}
-
-// Cursor pagination — mirrors the shape in
-// internal/api/middleware/pagination.go (base64-encoded JSON of
-// {id, created_at}). Duplicated here rather than imported to avoid the
-// audit ↔ middleware import cycle. Wire-compatible with the
-// middleware cursor shape so SPA clients can pass cursors from any
-// list endpoint interchangeably.
-// There is ONE sort axis (created_at, id), so there is ONE anchor. A second
-// anchor existed here for an "order by simulated time" that is deliberately not
-// shipped — see QueryFilter for why (within a clock it is the same order;
-// across clocks it interleaves unrelated simulations).
-type auditCursor struct {
-	ID        string    `json:"id"`
-	CreatedAt time.Time `json:"created_at"`
-}
-
-func encodeAuditCursor(e domain.AuditEntry) string {
-	c := auditCursor{ID: e.ID, CreatedAt: e.CreatedAt}
-	b, _ := json.Marshal(c)
-	return base64.URLEncoding.EncodeToString(b)
-}
-
-func decodeAuditCursor(token string) (auditCursor, error) {
-	if token == "" {
-		return auditCursor{}, fmt.Errorf("empty cursor")
-	}
-	b, err := base64.URLEncoding.DecodeString(token)
-	if err != nil {
-		return auditCursor{}, fmt.Errorf("invalid cursor")
-	}
-	var c auditCursor
-	if err := json.Unmarshal(b, &c); err != nil {
-		return auditCursor{}, fmt.Errorf("invalid cursor")
-	}
-	return c, nil
-}
-
-type pageResponse struct {
-	Data       any    `json:"data"`
-	HasMore    bool   `json:"has_more"`
-	NextCursor string `json:"next_cursor,omitempty"`
 }

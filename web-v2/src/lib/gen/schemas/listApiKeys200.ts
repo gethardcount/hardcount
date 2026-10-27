@@ -8,7 +8,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 import type { APIKey } from './aPIKey';
+import type { ListTotal } from './listTotal';
 
 export type ListApiKeys200 = {
   data: APIKey[];
+  total: ListTotal;
 };

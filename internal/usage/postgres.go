@@ -242,20 +242,8 @@ func ingestOneTx(ctx context.Context, tx *sql.Tx, tenantID string, event domain.
 	return event, nil
 }
 
-// List paginates usage events ordered by (timestamp DESC, id DESC).
-// Returns events + total (for the legacy offset path; 0 when cursor
-// path used). Supports two mutually-exclusive paging shapes:
-//
-//   - Cursor (preferred, 2026-05-29): filter.AfterTimestamp +
-//     filter.AfterID set → seek-method query
-//     `WHERE (timestamp, id) < (after_ts, after_id)`. Skips the
-//     COUNT query, fetches limit+1 to detect hasMore via the next
-//     handler call. Stable across concurrent inserts at the table's
-//     head — usage_events is the highest-write table in Velox, so
-//     offset-based pagination page-skewed reliably whenever a cycle
-//     close fired between operator pages.
-//   - Offset (legacy): COUNT + LIMIT/OFFSET. Kept for the dashboard
-//     paths that still use offset+total for "Page 1 of N" UX.
+// List pages usage events ordered by (timestamp DESC, id DESC) with
+// LIMIT/OFFSET, and counts every event the filter matches.
 //
 // id as the tiebreaker keeps ordering deterministic when many events
 // share a microsecond — common for batched ingestion.
@@ -266,53 +254,26 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.U
 	}
 	defer postgres.Rollback(tx)
 
-	// Default 100, clamp to 1000 — usage list intentionally allows a
-	// higher cap than other stores (usage volume is naturally higher;
-	// clients page through it). No-silent-fallbacks principle.
+	// The handler sends a limit of 1 to 100 (respond.ParsePage); 50 is the
+	// default for a caller that sends none.
 	limit := filter.Limit
 	if limit <= 0 {
-		limit = 100
-	} else if limit > 1000 {
-		limit = 1000
+		limit = 50
 	}
 
 	where, args := buildUsageWhere(filter)
-	useCursor := !filter.AfterTimestamp.IsZero() && filter.AfterID != ""
 
-	if useCursor {
-		args = append(args, filter.AfterTimestamp, filter.AfterID)
-		clause := fmt.Sprintf(`(timestamp, id) < ($%d, $%d)`, len(args)-1, len(args))
-		if where == "" {
-			where = " WHERE " + clause
-		} else {
-			where += " AND " + clause
-		}
-	}
-
-	// Cursor path: fetch limit+1, skip the COUNT — the handler
-	// derives hasMore from the over-fetch. Offset path: COUNT first
-	// so callers get a "Page X of N" total.
 	var total int
-	if !useCursor {
-		countQuery := `SELECT COUNT(*) FROM usage_events` + where
-		if err := tx.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
-			return nil, 0, err
-		}
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM usage_events`+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
 	}
 
-	queryLimit := limit
-	if useCursor {
-		queryLimit = limit + 1
-	}
-	args = append(args, queryLimit)
+	args = append(args, limit, filter.Offset)
 	query := `SELECT id, tenant_id, customer_id, meter_id,
 		quantity, properties, COALESCE(idempotency_key,''), timestamp,
 		provider_cost_micros, COALESCE(provider_cost_source,'')
-		FROM usage_events` + where + ` ORDER BY timestamp DESC, id DESC LIMIT $` + fmt.Sprintf("%d", len(args))
-	if !useCursor {
-		args = append(args, filter.Offset)
-		query += ` OFFSET $` + fmt.Sprintf("%d", len(args))
-	}
+		FROM usage_events` + where +
+		fmt.Sprintf(` ORDER BY timestamp DESC, id DESC LIMIT $%d OFFSET $%d`, len(args)-1, len(args))
 
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {

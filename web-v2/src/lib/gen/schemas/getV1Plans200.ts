@@ -7,8 +7,10 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
+import type { ListTotal } from './listTotal';
 import type { Plan } from './plan';
 
 export type GetV1Plans200 = {
   data: Plan[];
+  total: ListTotal;
 };

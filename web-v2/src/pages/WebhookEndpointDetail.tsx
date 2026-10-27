@@ -29,6 +29,14 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Card, CardContent } from '@/components/ui/card'
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationNext,
+  PaginationPrevious,
+} from '@/components/ui/pagination'
+import { cn } from '@/lib/utils'
 import { EmptyState } from '@/components/EmptyState'
 import { ScrollPane } from '@/components/ui/scroll-pane'
 import { TableSkeleton } from '@/components/ui/TableSkeleton'
@@ -46,6 +54,9 @@ import {
 // fact X propagate?"; this page answers the other operator question,
 // "is MY receiver healthy, what's failing, and can I resend it?" —
 // which is why replay here is scoped to this endpoint only.
+// One page of deliveries.
+const DELIVERIES_PAGE_SIZE = 50
+
 export default function WebhookEndpointDetailPage() {
   usePageTitle('Webhook endpoint')
   const navigate = useNavigate()
@@ -60,29 +71,39 @@ export default function WebhookEndpointDetailPage() {
   // the tick. Firing twice matters: each fire is a real outbound webhook.
   const replayInFlight = useRef(false)
 
-  const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['webhook-endpoint-deliveries', id],
-    queryFn: () => api.listWebhookEndpointDeliveries(id!),
+  // The endpoint and one page of its deliveries. An unknown id 404s on
+  // both instead of rendering an empty-but-healthy-looking history.
+  const endpointQuery = useQuery({
+    queryKey: ['webhook-endpoint', id],
+    queryFn: () => api.getWebhookEndpoint(id!),
+    enabled: !!id,
+  })
+  const [offset, setOffset] = useState(0)
+  const { data, isLoading, error: deliveriesError, refetch } = useQuery({
+    queryKey: ['webhook-endpoint-deliveries', id, offset],
+    queryFn: () => api.listWebhookEndpointDeliveries(id!, { limit: DELIVERIES_PAGE_SIZE, offset }),
     enabled: !!id,
     // A pending row's ladder resolves on the retry worker's cadence;
     // refetch keeps the page honest without an SSE dependency.
     refetchInterval: 10_000,
   })
+  const error = endpointQuery.error ?? deliveriesError
   // Header numbers come from the SAME stats roll-up as the endpoints
   // table's band — all-time, completed-only denominator — so the page an
   // operator lands on can never contradict the band they clicked. The
-  // delivery LIST below is the latest 50; deriving the header from that
-  // window would show green over a red band the moment the recent tail
-  // is healthy.
+  // delivery LIST below is one page; deriving the header from that window
+  // would show green over a red band the moment the recent tail is
+  // healthy.
   const { data: statsData } = useQuery({
     queryKey: ['webhook-endpoint-stats'],
     queryFn: () => api.getWebhookEndpointStats(),
     refetchInterval: 10_000,
   })
 
-  const endpoint = data?.endpoint
+  const endpoint = endpointQuery.data
   const pausedNotice = pausedEndpointNotice(endpoint?.active)
   const deliveries = data?.data ?? []
+  const totalDeliveries = data?.total ?? 0
   const stats = statsData?.data.find(s => s.endpoint_id === id)
   const completed = stats ? stats.succeeded + stats.failed : 0
   const pendingCount = stats ? stats.total_deliveries - completed : 0
@@ -151,7 +172,7 @@ export default function WebhookEndpointDetailPage() {
       {error ? (
         <Card className="mt-3">
           <CardContent className="p-0">
-            <LoadError what="this endpoint" error={error} onRetry={() => refetch()} />
+            <LoadError what="this endpoint" error={error} onRetry={() => { void endpointQuery.refetch(); void refetch() }} />
           </CardContent>
         </Card>
       ) : (
@@ -236,10 +257,28 @@ export default function WebhookEndpointDetailPage() {
               )}
             </CardContent>
           </Card>
-          {deliveries.length === 50 && (
-            <p className="text-xs text-muted-foreground mt-2">
-              Showing the latest 50 deliveries. The success rate above covers this endpoint's full history.
-            </p>
+          {totalDeliveries > DELIVERIES_PAGE_SIZE && (
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs text-muted-foreground">
+                Showing {offset + 1}{'\u2013'}{offset + deliveries.length} of {totalDeliveries} deliveries, newest first. The success rate above covers this endpoint's full history.
+              </p>
+              <Pagination className="mx-0 w-auto">
+                <PaginationContent>
+                  <PaginationItem>
+                    <PaginationPrevious
+                      onClick={() => setOffset(o => Math.max(0, o - DELIVERIES_PAGE_SIZE))}
+                      className={cn(offset === 0 && 'pointer-events-none opacity-50')}
+                    />
+                  </PaginationItem>
+                  <PaginationItem>
+                    <PaginationNext
+                      onClick={() => setOffset(o => o + DELIVERIES_PAGE_SIZE)}
+                      className={cn(offset + DELIVERIES_PAGE_SIZE >= totalDeliveries && 'pointer-events-none opacity-50')}
+                    />
+                  </PaginationItem>
+                </PaginationContent>
+              </Pagination>
+            </div>
           )}
         </>
       )}

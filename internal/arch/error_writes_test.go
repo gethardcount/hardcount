@@ -42,6 +42,7 @@ var responseWriteExceptions = map[string]string{
 	"internal/pricing/handler.go Handler.respondMeter":    "success: 200 or 201",
 	"internal/pricing/handler.go Handler.respondPlan":     "success: 200 or 201",
 	"internal/subscription/handler.go Handler.respondSub": "success: 200 or 201",
+	"internal/billing/handler.go Handler.triggerCycle":    "success: 200, or 206 with the per-subscription errors",
 
 	// The readiness probe: a load balancer reads the status, and the body
 	// names the failing check.

@@ -52,7 +52,7 @@ func TestPostgresStore_Delete_HardDeletes_TearsDownPinnedSubs(t *testing.T) {
 	if _, err := store.Get(ctx, tenantID, clk.ID); err != errs.ErrNotFound {
 		t.Errorf("Get after delete: expected ErrNotFound, got %v", err)
 	}
-	clocks, err := store.List(ctx, tenantID)
+	clocks, _, err := store.List(ctx, tenantID, 100, 0)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}

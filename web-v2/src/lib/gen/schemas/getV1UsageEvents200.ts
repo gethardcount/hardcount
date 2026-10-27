@@ -7,14 +7,10 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
+import type { ListTotal } from './listTotal';
 import type { UsageEvent } from './usageEvent';
 
 export type GetV1UsageEvents200 = {
   data: UsageEvent[];
-  /** Number of matching events. Left out when the page was read with an `after` cursor. */
-  total?: number;
-  /** Sent only when the page was read with an `after` cursor. True when another page follows. */
-  has_more?: boolean;
-  /** Pass it as `after` to read the next page. Sent only when `has_more` is true. */
-  next_cursor?: string;
+  total: ListTotal;
 };

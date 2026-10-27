@@ -7,8 +7,10 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
+import type { ListTotal } from './listTotal';
 import type { WebhookEndpointStats } from './webhookEndpointStats';
 
 export type GetWebhookEndpointStats200 = {
   data: WebhookEndpointStats[];
+  total: ListTotal;
 };

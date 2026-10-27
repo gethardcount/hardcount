@@ -7,8 +7,10 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
+import type { ListTotal } from './listTotal';
 import type { ProviderCostRate } from './providerCostRate';
 
 export type GetV1ProviderCosts200 = {
-  data?: ProviderCostRate[];
+  data: ProviderCostRate[];
+  total: ListTotal;
 };

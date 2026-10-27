@@ -2159,36 +2159,6 @@ func (e CheckPasswordResetToken200JSONResponseBodyValid) Valid() bool {
 	}
 }
 
-// Defines values for CheckPasswordResetToken422JSONResponseBodyReason.
-const (
-	InvalidOrExpired CheckPasswordResetToken422JSONResponseBodyReason = "invalid_or_expired"
-)
-
-// Valid indicates whether the value is a known member of the CheckPasswordResetToken422JSONResponseBodyReason enum.
-func (e CheckPasswordResetToken422JSONResponseBodyReason) Valid() bool {
-	switch e {
-	case InvalidOrExpired:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for CheckPasswordResetToken422JSONResponseBodyValid.
-const (
-	CheckPasswordResetToken422JSONResponseBodyValidFalse CheckPasswordResetToken422JSONResponseBodyValid = false
-)
-
-// Valid indicates whether the value is a known member of the CheckPasswordResetToken422JSONResponseBodyValid enum.
-func (e CheckPasswordResetToken422JSONResponseBodyValid) Valid() bool {
-	switch e {
-	case CheckPasswordResetToken422JSONResponseBodyValidFalse:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for PostV1AuthPasswordResetRequest200JSONResponseBodyEmailDelivery.
 const (
 	NotConfigured PostV1AuthPasswordResetRequest200JSONResponseBodyEmailDelivery = "not_configured"
@@ -2704,13 +2674,13 @@ func (e CreatePriceOverrideJSONBodyMode) Valid() bool {
 
 // Defines values for DeletePriceOverride200JSONResponseBodyActive.
 const (
-	DeletePriceOverride200JSONResponseBodyActiveFalse DeletePriceOverride200JSONResponseBodyActive = false
+	False DeletePriceOverride200JSONResponseBodyActive = false
 )
 
 // Valid indicates whether the value is a known member of the DeletePriceOverride200JSONResponseBodyActive enum.
 func (e DeletePriceOverride200JSONResponseBodyActive) Valid() bool {
 	switch e {
-	case DeletePriceOverride200JSONResponseBodyActiveFalse:
+	case False:
 		return true
 	default:
 		return false
@@ -4561,11 +4531,11 @@ type Error struct {
 		RequestId string `json:"request_id,omitempty"`
 
 		// Type One of `invalid_request_error`, `authentication_error`,
-		// `rate_limit_error` or `api_error`, except when the
-		// `Idempotency-Key` header is the problem: then it is
-		// `idempotency_error`, `conflict_idempotency`,
-		// `conflict_idempotency_unresolved` or `bad_request`. Idempotency errors
-		// have only `type` and `message`. See docs/api-surface.md.
+		// `rate_limit_error` or `api_error`. Every error the API
+		// answers has this shape, including an unknown path (404,
+		// code `route_not_found`) and a method the path does not take
+		// (405, code `method_not_allowed`, with an `Allow` header).
+		// The few exceptions are listed in docs/api-surface.md.
 		Type string `json:"type,omitempty"`
 	} `json:"error,omitempty"`
 }
@@ -5085,6 +5055,9 @@ type InvoiceDisputeStatus string
 // InvoiceDisputeList defines model for InvoiceDisputeList.
 type InvoiceDisputeList struct {
 	Data []InvoiceDispute `json:"data"`
+
+	// Total How many rows match the request's filters, on every page, not only this one.
+	Total ListTotal `json:"total"`
 }
 
 // InvoiceLineItem A single line on an invoice.
@@ -5334,6 +5307,9 @@ type InvoiceWithLineItems struct {
 // distinguish a plan-change and a quantity-change that happen to
 // share the same `(subscription, item, timestamp)`.
 type ItemChangeType string
+
+// ListTotal How many rows match the request's filters, on every page, not only this one.
+type ListTotal = int
 
 // LitellmSpendLog The fields of a LiteLLM `StandardLoggingPayload` that Velox reads.
 // Other fields are accepted and ignored.
@@ -7056,6 +7032,15 @@ type WebhookStreamFrame struct {
 // IdempotencyKey defines model for IdempotencyKey.
 type IdempotencyKey = string
 
+// Limit defines model for Limit.
+type Limit = int
+
+// Offset defines model for Offset.
+type Offset = int
+
+// InvalidPage defines model for InvalidPage.
+type InvalidPage = Error
+
 // bearerAuthContextKey is the context key for BearerAuth security scheme
 type bearerAuthContextKey string
 
@@ -7093,6 +7078,17 @@ type GetAnalyticsRevenueChartParams struct {
 type GetAnalyticsUsageParams struct {
 	// Period The window. Any other value is treated as `30d`. `12m` is 365 days.
 	Period AnalyticsPeriod `form:"period,omitempty" json:"period,omitempty"`
+}
+
+// ListApiKeysParams defines parameters for ListApiKeys.
+type ListApiKeysParams struct {
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
+	// that is not a whole number, is a 422 with `param: limit`.
+	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
+	// not a whole number, is a 422 with `param: offset`.
+	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // CreateApiKeyJSONBody defines parameters for CreateApiKey.
@@ -7165,13 +7161,14 @@ type ListAuditLogParams struct {
 
 	// Order The only supported order. Any other value is a 400.
 	Order ListAuditLogParamsOrder `form:"order,omitempty" json:"order,omitempty"`
-	Limit int                     `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Ignored when `after` is set.
-	Offset int `form:"offset,omitempty" json:"offset,omitempty"`
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
+	// that is not a whole number, is a 422 with `param: limit`.
+	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// After Cursor from a previous page's `next_cursor`. Takes precedence over `offset`.
-	After string `form:"after,omitempty" json:"after,omitempty"`
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
+	// not a whole number, is a 422 with `param: offset`.
+	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // ListAuditLogParamsOrder defines parameters for ListAuditLog.
@@ -7203,12 +7200,6 @@ type CheckPasswordResetTokenParams struct {
 
 // CheckPasswordResetToken200JSONResponseBodyValid defines parameters for CheckPasswordResetToken.
 type CheckPasswordResetToken200JSONResponseBodyValid bool
-
-// CheckPasswordResetToken422JSONResponseBodyReason defines parameters for CheckPasswordResetToken.
-type CheckPasswordResetToken422JSONResponseBodyReason string
-
-// CheckPasswordResetToken422JSONResponseBodyValid defines parameters for CheckPasswordResetToken.
-type CheckPasswordResetToken422JSONResponseBodyValid bool
 
 // PostV1AuthPasswordResetConfirmJSONBody defines parameters for PostV1AuthPasswordResetConfirm.
 type PostV1AuthPasswordResetConfirmJSONBody struct {
@@ -7264,11 +7255,13 @@ type ListCreditNotesParams struct {
 	Sort string                   `form:"sort,omitempty" json:"sort,omitempty"`
 	Dir  ListCreditNotesParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
 
-	// Limit Page size. Default 25, maximum 100.
-	Limit int `form:"limit,omitempty" json:"limit,omitempty"`
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
+	// that is not a whole number, is a 422 with `param: limit`.
+	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Maximum 10000.
-	Offset int `form:"offset,omitempty" json:"offset,omitempty"`
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
+	// not a whole number, is a 422 with `param: offset`.
+	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // ListCreditNotesParamsStatus defines parameters for ListCreditNotes.
@@ -7419,6 +7412,17 @@ type AdjustCreditsParams struct {
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
+// ListCreditBalancesParams defines parameters for ListCreditBalances.
+type ListCreditBalancesParams struct {
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
+	// that is not a whole number, is a 422 with `param: limit`.
+	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
+	// not a whole number, is a 422 with `param: offset`.
+	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
 // PostV1CreditsGrantJSONBody defines parameters for PostV1CreditsGrant.
 type PostV1CreditsGrantJSONBody struct {
 	AmountCents int64 `json:"amount_cents"`
@@ -7474,9 +7478,13 @@ type ListCreditLedgerEntriesParams struct {
 	// Dir Default desc.
 	Dir ListCreditLedgerEntriesParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
 
-	// Limit Default 50, at most 100.
-	Limit  int `form:"limit,omitempty" json:"limit,omitempty"`
-	Offset int `form:"offset,omitempty" json:"offset,omitempty"`
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
+	// that is not a whole number, is a 422 with `param: limit`.
+	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
+	// not a whole number, is a 422 with `param: offset`.
+	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // ListCreditLedgerEntriesParamsEntryType defines parameters for ListCreditLedgerEntries.
@@ -7502,10 +7510,16 @@ type GetV1CustomersParams struct {
 	Search string `form:"search,omitempty" json:"search,omitempty"`
 
 	// Sort One of display_name, email, external_id, status, created_at (default).
-	Sort   string                  `form:"sort,omitempty" json:"sort,omitempty"`
-	Dir    GetV1CustomersParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
-	Limit  int                     `form:"limit,omitempty" json:"limit,omitempty"`
-	Offset int                     `form:"offset,omitempty" json:"offset,omitempty"`
+	Sort string                  `form:"sort,omitempty" json:"sort,omitempty"`
+	Dir  GetV1CustomersParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
+
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
+	// that is not a whole number, is a 422 with `param: limit`.
+	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
+	// not a whole number, is a 422 with `param: offset`.
+	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // GetV1CustomersParamsDir defines parameters for GetV1Customers.
@@ -7531,6 +7545,17 @@ type PostV1CustomersParams struct {
 	// error cases are in docs/api-surface.md. The usage routes do not take
 	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
+// ListCustomerPaymentMethodsParams defines parameters for ListCustomerPaymentMethods.
+type ListCustomerPaymentMethodsParams struct {
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
+	// that is not a whole number, is a 422 with `param: limit`.
+	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
+	// not a whole number, is a 422 with `param: offset`.
+	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // SendCustomerPaymentSetupEmailJSONBody defines parameters for SendCustomerPaymentSetupEmail.
@@ -7636,6 +7661,17 @@ type PostV1CustomersIdRotateCostDashboardTokenParams struct {
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
+// ListCustomerSentEmailsParams defines parameters for ListCustomerSentEmails.
+type ListCustomerSentEmailsParams struct {
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
+	// that is not a whole number, is a 422 with `param: limit`.
+	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
+	// not a whole number, is a 422 with `param: offset`.
+	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
 // GetCustomerUsageParams defines parameters for GetCustomerUsage.
 type GetCustomerUsageParams struct {
 	// From Start of the window. RFC 3339 instant or `YYYY-MM-DD` (start of that day, UTC).
@@ -7643,6 +7679,17 @@ type GetCustomerUsageParams struct {
 
 	// To End of the window, exclusive. RFC 3339 instant or `YYYY-MM-DD` (23:59:59.999999 UTC that day, so the day is included).
 	To string `form:"to,omitempty" json:"to,omitempty"`
+}
+
+// ListDunningPoliciesParams defines parameters for ListDunningPolicies.
+type ListDunningPoliciesParams struct {
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
+	// that is not a whole number, is a 422 with `param: limit`.
+	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
+	// not a whole number, is a 422 with `param: offset`.
+	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // CreateDunningPolicyParams defines parameters for CreateDunningPolicy.
@@ -7689,9 +7736,13 @@ type ListDunningRunsParams struct {
 	InvoiceId string                     `form:"invoice_id,omitempty" json:"invoice_id,omitempty"`
 	State     ListDunningRunsParamsState `form:"state,omitempty" json:"state,omitempty"`
 
-	// Limit Page size. Default 50, maximum 100.
-	Limit  int `form:"limit,omitempty" json:"limit,omitempty"`
-	Offset int `form:"offset,omitempty" json:"offset,omitempty"`
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
+	// that is not a whole number, is a 422 with `param: limit`.
+	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
+	// not a whole number, is a 422 with `param: offset`.
+	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // ListDunningRunsParamsState defines parameters for ListDunningRuns.
@@ -7824,13 +7875,16 @@ type GetV1InvoicesParams struct {
 	Ids string `form:"ids,omitempty" json:"ids,omitempty"`
 
 	// Sort One of invoice_number, amount_due_cents, billing_period_start, due_at, issued_at, status, payment_status, created_at (default). amount_due_cents sorts a paid invoice by what paid it (`amount_paid_cents` plus `credits_applied_cents`, since paying zeroes `amount_due_cents`) and every other invoice by `amount_due_cents`, which a voided or written-off invoice keeps.
-	Sort   string                 `form:"sort,omitempty" json:"sort,omitempty"`
-	Dir    GetV1InvoicesParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
-	Limit  int                    `form:"limit,omitempty" json:"limit,omitempty"`
-	Offset int                    `form:"offset,omitempty" json:"offset,omitempty"`
+	Sort string                 `form:"sort,omitempty" json:"sort,omitempty"`
+	Dir  GetV1InvoicesParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
 
-	// After Opaque cursor (default created_at sort only); takes precedence over offset.
-	After string `form:"after,omitempty" json:"after,omitempty"`
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
+	// that is not a whole number, is a 422 with `param: limit`.
+	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
+	// not a whole number, is a 422 with `param: offset`.
+	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // GetV1InvoicesParamsDir defines parameters for GetV1Invoices.
@@ -7886,6 +7940,17 @@ type CollectInvoicePaymentParams struct {
 	// error cases are in docs/api-surface.md. The usage routes do not take
 	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
+// ListInvoiceDisputesParams defines parameters for ListInvoiceDisputes.
+type ListInvoiceDisputesParams struct {
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
+	// that is not a whole number, is a 422 with `param: limit`.
+	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
+	// not a whole number, is a 422 with `param: offset`.
+	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // PostV1InvoicesIdFinalizeParams defines parameters for PostV1InvoicesIdFinalize.
@@ -8045,6 +8110,17 @@ type InviteMemberParams struct {
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
+// GetV1MetersParams defines parameters for GetV1Meters.
+type GetV1MetersParams struct {
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
+	// that is not a whole number, is a 422 with `param: limit`.
+	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
+	// not a whole number, is a 422 with `param: offset`.
+	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
 // PostV1MetersJSONBody defines parameters for PostV1Meters.
 type PostV1MetersJSONBody struct {
 	// Aggregation How the meter rolls its events into one quantity per billing period. Fixed once the meter has a usage event.
@@ -8090,6 +8166,17 @@ type PatchV1MetersIdParams struct {
 
 // PatchV1MetersIdJSONBodyAggregation defines parameters for PatchV1MetersId.
 type PatchV1MetersIdJSONBodyAggregation string
+
+// GetV1PlansParams defines parameters for GetV1Plans.
+type GetV1PlansParams struct {
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
+	// that is not a whole number, is a 422 with `param: limit`.
+	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
+	// not a whole number, is a 422 with `param: offset`.
+	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
+}
 
 // PostV1PlansJSONBody defines parameters for PostV1Plans.
 type PostV1PlansJSONBody struct {
@@ -8173,6 +8260,17 @@ type UpdatePlanJSONBodyBaseBillTiming string
 // UpdatePlanJSONBodyStatus defines parameters for UpdatePlan.
 type UpdatePlanJSONBodyStatus string
 
+// ListPlanPricesParams defines parameters for ListPlanPrices.
+type ListPlanPricesParams struct {
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
+	// that is not a whole number, is a 422 with `param: limit`.
+	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
+	// not a whole number, is a 422 with `param: offset`.
+	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
 // AddPlanPriceParams defines parameters for AddPlanPrice.
 type AddPlanPriceParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
@@ -8202,6 +8300,14 @@ type ListPriceOverridesParams struct {
 
 	// PriceId Only this price's overrides.
 	PriceId string `form:"price_id,omitempty" json:"price_id,omitempty"`
+
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
+	// that is not a whole number, is a 422 with `param: limit`.
+	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
+	// not a whole number, is a 422 with `param: offset`.
+	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // CreatePriceOverrideJSONBody defines parameters for CreatePriceOverride.
@@ -8249,6 +8355,17 @@ type CreatePriceOverrideJSONBodyMode string
 // DeletePriceOverride200JSONResponseBodyActive defines parameters for DeletePriceOverride.
 type DeletePriceOverride200JSONResponseBodyActive bool
 
+// GetV1ProviderCostsParams defines parameters for GetV1ProviderCosts.
+type GetV1ProviderCostsParams struct {
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
+	// that is not a whole number, is a 422 with `param: limit`.
+	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
+	// not a whole number, is a 422 with `param: offset`.
+	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
 // PutV1ProviderCostsJSONBody defines parameters for PutV1ProviderCosts.
 type PutV1ProviderCostsJSONBody struct {
 	// Currency Rates are in USD only, the currency LiteLLM reports cost
@@ -8282,6 +8399,28 @@ type PutV1ProviderCostsJSONBodyCurrency string
 
 // GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSource defines parameters for GetV1PublicCostDashboardToken.
 type GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSource string
+
+// ListRecipesParams defines parameters for ListRecipes.
+type ListRecipesParams struct {
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
+	// that is not a whole number, is a 422 with `param: limit`.
+	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
+	// not a whole number, is a 422 with `param: offset`.
+	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
+// ListRecipeInstancesParams defines parameters for ListRecipeInstances.
+type ListRecipeInstancesParams struct {
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
+	// that is not a whole number, is a 422 with `param: limit`.
+	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
+	// not a whole number, is a 422 with `param: offset`.
+	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
+}
 
 // InstantiateRecipeJSONBody defines parameters for InstantiateRecipe.
 type InstantiateRecipeJSONBody struct {
@@ -8419,10 +8558,16 @@ type GetV1SubscriptionsParams struct {
 	Search string `form:"search,omitempty" json:"search,omitempty"`
 
 	// Sort One of display_name, status, next_billing_at, trial_end_at, created_at (default).
-	Sort   string                      `form:"sort,omitempty" json:"sort,omitempty"`
-	Dir    GetV1SubscriptionsParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
-	Limit  int                         `form:"limit,omitempty" json:"limit,omitempty"`
-	Offset int                         `form:"offset,omitempty" json:"offset,omitempty"`
+	Sort string                      `form:"sort,omitempty" json:"sort,omitempty"`
+	Dir  GetV1SubscriptionsParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
+
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
+	// that is not a whole number, is a 422 with `param: limit`.
+	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
+	// not a whole number, is a 422 with `param: offset`.
+	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // GetV1SubscriptionsParamsStatus defines parameters for GetV1Subscriptions.
@@ -8655,6 +8800,14 @@ type ScheduleSubscriptionCancelParams struct {
 // ListTenantsParams defines parameters for ListTenants.
 type ListTenantsParams struct {
 	Status ListTenantsParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
+	// that is not a whole number, is a 422 with `param: limit`.
+	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
+	// not a whole number, is a 422 with `param: offset`.
+	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // ListTenantsParamsStatus defines parameters for ListTenants.
@@ -8664,6 +8817,17 @@ type ListTenantsParamsStatus string
 type CreateTenantJSONBody struct {
 	// Name Must not be blank.
 	Name string `json:"name"`
+}
+
+// GetV1TestClocksParams defines parameters for GetV1TestClocks.
+type GetV1TestClocksParams struct {
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
+	// that is not a whole number, is a 422 with `param: limit`.
+	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
+	// not a whole number, is a 422 with `param: offset`.
+	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // PostV1TestClocksJSONBody defines parameters for PostV1TestClocks.
@@ -8702,6 +8866,17 @@ type PostV1TestClocksIdAdvanceParams struct {
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
+// ListTestClockCustomersParams defines parameters for ListTestClockCustomers.
+type ListTestClockCustomersParams struct {
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
+	// that is not a whole number, is a 422 with `param: limit`.
+	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
+	// not a whole number, is a 422 with `param: offset`.
+	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
 // PostV1TestClocksIdRetryAdvanceParams defines parameters for PostV1TestClocksIdRetryAdvance.
 type PostV1TestClocksIdRetryAdvanceParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
@@ -8711,6 +8886,17 @@ type PostV1TestClocksIdRetryAdvanceParams struct {
 	// error cases are in docs/api-surface.md. The usage routes do not take
 	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
+// GetV1TestClocksIdSubscriptionsParams defines parameters for GetV1TestClocksIdSubscriptions.
+type GetV1TestClocksIdSubscriptionsParams struct {
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
+	// that is not a whole number, is a 422 with `param: limit`.
+	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
+	// not a whole number, is a 422 with `param: offset`.
+	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // GetV1UsageEventsParams defines parameters for GetV1UsageEvents.
@@ -8730,12 +8916,15 @@ type GetV1UsageEventsParams struct {
 	From string `form:"from,omitempty" json:"from,omitempty"`
 
 	// To Only events before this time, exclusive. RFC 3339, or a date (YYYY-MM-DD) meaning 23:59:59.999999 UTC that day, so the day is included.
-	To     string `form:"to,omitempty" json:"to,omitempty"`
-	Limit  int    `form:"limit,omitempty" json:"limit,omitempty"`
-	Offset int    `form:"offset,omitempty" json:"offset,omitempty"`
+	To string `form:"to,omitempty" json:"to,omitempty"`
 
-	// After Opaque cursor from `next_cursor`. Takes precedence over `offset`.
-	After string `form:"after,omitempty" json:"after,omitempty"`
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
+	// that is not a whole number, is a 422 with `param: limit`.
+	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
+	// not a whole number, is a 422 with `param: offset`.
+	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // PostV1UsageEventsJSONBody defines parameters for PostV1UsageEvents.
@@ -8913,6 +9102,17 @@ type ReleaseHeldUsageJSONBody struct {
 	ExternalCustomerId string `json:"external_customer_id"`
 }
 
+// GetV1WebhookEndpointsEndpointsParams defines parameters for GetV1WebhookEndpointsEndpoints.
+type GetV1WebhookEndpointsEndpointsParams struct {
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
+	// that is not a whole number, is a 422 with `param: limit`.
+	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
+	// not a whole number, is a 422 with `param: offset`.
+	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
 // PostV1WebhookEndpointsEndpointsJSONBody defines parameters for PostV1WebhookEndpointsEndpoints.
 type PostV1WebhookEndpointsEndpointsJSONBody struct {
 	Description string   `json:"description,omitempty"`
@@ -8929,6 +9129,17 @@ type PostV1WebhookEndpointsEndpointsParams struct {
 	// error cases are in docs/api-surface.md. The usage routes do not take
 	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
+// GetWebhookEndpointStatsParams defines parameters for GetWebhookEndpointStats.
+type GetWebhookEndpointStatsParams struct {
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
+	// that is not a whole number, is a 422 with `param: limit`.
+	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
+	// not a whole number, is a 422 with `param: offset`.
+	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // DeleteV1WebhookEndpointsEndpointsId200JSONResponseBodyStatus defines parameters for DeleteV1WebhookEndpointsEndpointsId.
@@ -8953,6 +9164,17 @@ type PatchV1WebhookEndpointsEndpointsIdParams struct {
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
+// ListWebhookEndpointDeliveriesParams defines parameters for ListWebhookEndpointDeliveries.
+type ListWebhookEndpointDeliveriesParams struct {
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
+	// that is not a whole number, is a 422 with `param: limit`.
+	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
+	// not a whole number, is a 422 with `param: offset`.
+	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
 // ReplayWebhookDeliveryParams defines parameters for ReplayWebhookDelivery.
 type ReplayWebhookDeliveryParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
@@ -8973,6 +9195,17 @@ type PostV1WebhookEndpointsEndpointsIdRotateSecretParams struct {
 	// error cases are in docs/api-surface.md. The usage routes do not take
 	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
+// GetV1WebhookEndpointsEventsParams defines parameters for GetV1WebhookEndpointsEvents.
+type GetV1WebhookEndpointsEventsParams struct {
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
+	// that is not a whole number, is a 422 with `param: limit`.
+	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
+	// not a whole number, is a 422 with `param: offset`.
+	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // ReplayWebhookEventParams defines parameters for ReplayWebhookEvent.
@@ -9485,7 +9718,7 @@ type ServerInterface interface {
 	GetAnalyticsUsage(w http.ResponseWriter, r *http.Request, params GetAnalyticsUsageParams)
 	// List API keys
 	// (GET /v1/api-keys)
-	ListApiKeys(w http.ResponseWriter, r *http.Request)
+	ListApiKeys(w http.ResponseWriter, r *http.Request, params ListApiKeysParams)
 	// Create an API key
 	// (POST /v1/api-keys)
 	CreateApiKey(w http.ResponseWriter, r *http.Request, params CreateApiKeyParams)
@@ -9569,7 +9802,7 @@ type ServerInterface interface {
 	GetV1CreditsBalanceCustomerIdLive(w http.ResponseWriter, r *http.Request, customerId string)
 	// List credit balances for all customers
 	// (GET /v1/credits/balances)
-	ListCreditBalances(w http.ResponseWriter, r *http.Request)
+	ListCreditBalances(w http.ResponseWriter, r *http.Request, params ListCreditBalancesParams)
 	// Grant credits to customer
 	// (POST /v1/credits/grant)
 	PostV1CreditsGrant(w http.ResponseWriter, r *http.Request, params PostV1CreditsGrantParams)
@@ -9590,7 +9823,7 @@ type ServerInterface interface {
 	GetCustomerOverview(w http.ResponseWriter, r *http.Request, customerId string)
 	// List the customer's payment methods
 	// (GET /v1/customers/{customer_id}/payment-methods)
-	ListCustomerPaymentMethods(w http.ResponseWriter, r *http.Request, customerId string)
+	ListCustomerPaymentMethods(w http.ResponseWriter, r *http.Request, customerId string, params ListCustomerPaymentMethodsParams)
 	// Email the customer a link to add a payment method
 	// (POST /v1/customers/{customer_id}/payment-methods/send-setup-email)
 	SendCustomerPaymentSetupEmail(w http.ResponseWriter, r *http.Request, customerId string, params SendCustomerPaymentSetupEmailParams)
@@ -9623,13 +9856,13 @@ type ServerInterface interface {
 	PostV1CustomersIdRotateCostDashboardToken(w http.ResponseWriter, r *http.Request, id string, params PostV1CustomersIdRotateCostDashboardTokenParams)
 	// List emails sent to the customer
 	// (GET /v1/customers/{id}/sent-emails)
-	ListCustomerSentEmails(w http.ResponseWriter, r *http.Request, id string)
+	ListCustomerSentEmails(w http.ResponseWriter, r *http.Request, id string, params ListCustomerSentEmailsParams)
 	// Get the customer's usage and cost for a period
 	// (GET /v1/customers/{id}/usage)
 	GetCustomerUsage(w http.ResponseWriter, r *http.Request, id string, params GetCustomerUsageParams)
 	// List dunning policies
 	// (GET /v1/dunning/policies)
-	ListDunningPolicies(w http.ResponseWriter, r *http.Request)
+	ListDunningPolicies(w http.ResponseWriter, r *http.Request, params ListDunningPoliciesParams)
 	// Create dunning policy
 	// (POST /v1/dunning/policies)
 	CreateDunningPolicy(w http.ResponseWriter, r *http.Request, params CreateDunningPolicyParams)
@@ -9692,7 +9925,7 @@ type ServerInterface interface {
 	CollectInvoicePayment(w http.ResponseWriter, r *http.Request, id string, params CollectInvoicePaymentParams)
 	// List the card disputes on an invoice
 	// (GET /v1/invoices/{id}/disputes)
-	ListInvoiceDisputes(w http.ResponseWriter, r *http.Request, id string)
+	ListInvoiceDisputes(w http.ResponseWriter, r *http.Request, id string, params ListInvoiceDisputesParams)
 	// Finalize draft invoice
 	// (POST /v1/invoices/{id}/finalize)
 	PostV1InvoicesIdFinalize(w http.ResponseWriter, r *http.Request, id string, params PostV1InvoicesIdFinalizeParams)
@@ -9743,7 +9976,7 @@ type ServerInterface interface {
 	RemoveMember(w http.ResponseWriter, r *http.Request, userID string)
 	// List meters
 	// (GET /v1/meters)
-	GetV1Meters(w http.ResponseWriter, r *http.Request)
+	GetV1Meters(w http.ResponseWriter, r *http.Request, params GetV1MetersParams)
 	// Create meter
 	// (POST /v1/meters)
 	PostV1Meters(w http.ResponseWriter, r *http.Request, params PostV1MetersParams)
@@ -9755,7 +9988,7 @@ type ServerInterface interface {
 	PatchV1MetersId(w http.ResponseWriter, r *http.Request, id string, params PatchV1MetersIdParams)
 	// List plans
 	// (GET /v1/plans)
-	GetV1Plans(w http.ResponseWriter, r *http.Request)
+	GetV1Plans(w http.ResponseWriter, r *http.Request, params GetV1PlansParams)
 	// Create plan
 	// (POST /v1/plans)
 	PostV1Plans(w http.ResponseWriter, r *http.Request, params PostV1PlansParams)
@@ -9767,7 +10000,7 @@ type ServerInterface interface {
 	UpdatePlan(w http.ResponseWriter, r *http.Request, id string, params UpdatePlanParams)
 	// List a plan's prices
 	// (GET /v1/plans/{id}/prices)
-	ListPlanPrices(w http.ResponseWriter, r *http.Request, id string)
+	ListPlanPrices(w http.ResponseWriter, r *http.Request, id string, params ListPlanPricesParams)
 	// Add a price to a plan
 	// (POST /v1/plans/{id}/prices)
 	AddPlanPrice(w http.ResponseWriter, r *http.Request, id string, params AddPlanPriceParams)
@@ -9788,7 +10021,7 @@ type ServerInterface interface {
 	DeletePriceOverride(w http.ResponseWriter, r *http.Request, id string)
 	// List provider cost rates
 	// (GET /v1/provider-costs)
-	GetV1ProviderCosts(w http.ResponseWriter, r *http.Request)
+	GetV1ProviderCosts(w http.ResponseWriter, r *http.Request, params GetV1ProviderCostsParams)
 	// Create or update a provider cost rate
 	// (PUT /v1/provider-costs)
 	PutV1ProviderCosts(w http.ResponseWriter, r *http.Request, params PutV1ProviderCostsParams)
@@ -9815,10 +10048,10 @@ type ServerInterface interface {
 	CreatePublicPaymentUpdateCheckout(w http.ResponseWriter, r *http.Request, token string)
 	// List recipes
 	// (GET /v1/recipes)
-	ListRecipes(w http.ResponseWriter, r *http.Request)
+	ListRecipes(w http.ResponseWriter, r *http.Request, params ListRecipesParams)
 	// List installed recipe instances
 	// (GET /v1/recipes/instances)
-	ListRecipeInstances(w http.ResponseWriter, r *http.Request)
+	ListRecipeInstances(w http.ResponseWriter, r *http.Request, params ListRecipeInstancesParams)
 	// Get recipe
 	// (GET /v1/recipes/{key})
 	GetRecipe(w http.ResponseWriter, r *http.Request, key string)
@@ -9920,7 +10153,7 @@ type ServerInterface interface {
 	GetTenant(w http.ResponseWriter, r *http.Request, id string)
 	// List test clocks for the active tenant
 	// (GET /v1/test-clocks)
-	GetV1TestClocks(w http.ResponseWriter, r *http.Request)
+	GetV1TestClocks(w http.ResponseWriter, r *http.Request, params GetV1TestClocksParams)
 	// Create a test clock
 	// (POST /v1/test-clocks)
 	PostV1TestClocks(w http.ResponseWriter, r *http.Request, params PostV1TestClocksParams)
@@ -9935,13 +10168,13 @@ type ServerInterface interface {
 	PostV1TestClocksIdAdvance(w http.ResponseWriter, r *http.Request, id string, params PostV1TestClocksIdAdvanceParams)
 	// List customers attached to a test clock
 	// (GET /v1/test-clocks/{id}/customers)
-	ListTestClockCustomers(w http.ResponseWriter, r *http.Request, id string)
+	ListTestClockCustomers(w http.ResponseWriter, r *http.Request, id string, params ListTestClockCustomersParams)
 	// Retry catchup on a clock parked in internal_failure
 	// (POST /v1/test-clocks/{id}/retry-advance)
 	PostV1TestClocksIdRetryAdvance(w http.ResponseWriter, r *http.Request, id string, params PostV1TestClocksIdRetryAdvanceParams)
 	// List subscriptions pinned to this clock
 	// (GET /v1/test-clocks/{id}/subscriptions)
-	GetV1TestClocksIdSubscriptions(w http.ResponseWriter, r *http.Request, id string)
+	GetV1TestClocksIdSubscriptions(w http.ResponseWriter, r *http.Request, id string, params GetV1TestClocksIdSubscriptionsParams)
 	// List usage events
 	// (GET /v1/usage-events)
 	GetV1UsageEvents(w http.ResponseWriter, r *http.Request, params GetV1UsageEventsParams)
@@ -9968,31 +10201,34 @@ type ServerInterface interface {
 	ReleaseHeldUsage(w http.ResponseWriter, r *http.Request)
 	// List webhook endpoints
 	// (GET /v1/webhook-endpoints/endpoints)
-	GetV1WebhookEndpointsEndpoints(w http.ResponseWriter, r *http.Request)
+	GetV1WebhookEndpointsEndpoints(w http.ResponseWriter, r *http.Request, params GetV1WebhookEndpointsEndpointsParams)
 	// Create webhook endpoint
 	// (POST /v1/webhook-endpoints/endpoints)
 	PostV1WebhookEndpointsEndpoints(w http.ResponseWriter, r *http.Request, params PostV1WebhookEndpointsEndpointsParams)
 	// Delivery counts per webhook endpoint
 	// (GET /v1/webhook-endpoints/endpoints/stats)
-	GetWebhookEndpointStats(w http.ResponseWriter, r *http.Request)
+	GetWebhookEndpointStats(w http.ResponseWriter, r *http.Request, params GetWebhookEndpointStatsParams)
 	// Delete (disable) webhook endpoint
 	// (DELETE /v1/webhook-endpoints/endpoints/{id})
 	DeleteV1WebhookEndpointsEndpointsId(w http.ResponseWriter, r *http.Request, id string)
+	// Get a webhook endpoint
+	// (GET /v1/webhook-endpoints/endpoints/{id})
+	GetWebhookEndpoint(w http.ResponseWriter, r *http.Request, id string)
 	// Update webhook endpoint (no secret rotation)
 	// (PATCH /v1/webhook-endpoints/endpoints/{id})
 	PatchV1WebhookEndpointsEndpointsId(w http.ResponseWriter, r *http.Request, id string, params PatchV1WebhookEndpointsEndpointsIdParams)
 	// List an endpoint's recent deliveries
 	// (GET /v1/webhook-endpoints/endpoints/{id}/deliveries)
-	ListWebhookEndpointDeliveries(w http.ResponseWriter, r *http.Request, id string)
+	ListWebhookEndpointDeliveries(w http.ResponseWriter, r *http.Request, id string, params ListWebhookEndpointDeliveriesParams)
 	// Resend one delivery to its endpoint
 	// (POST /v1/webhook-endpoints/endpoints/{id}/deliveries/{deliveryID}/replay)
 	ReplayWebhookDelivery(w http.ResponseWriter, r *http.Request, id string, deliveryID string, params ReplayWebhookDeliveryParams)
 	// Rotate signing secret (72h dual-signing grace)
 	// (POST /v1/webhook-endpoints/endpoints/{id}/rotate-secret)
 	PostV1WebhookEndpointsEndpointsIdRotateSecret(w http.ResponseWriter, r *http.Request, id string, params PostV1WebhookEndpointsEndpointsIdRotateSecretParams)
-	// List recent outbound events (newest 50)
+	// List outbound events, newest first
 	// (GET /v1/webhook-endpoints/events)
-	GetV1WebhookEndpointsEvents(w http.ResponseWriter, r *http.Request)
+	GetV1WebhookEndpointsEvents(w http.ResponseWriter, r *http.Request, params GetV1WebhookEndpointsEventsParams)
 	// Stream webhook events live (Server-Sent Events)
 	// (GET /v1/webhook_events/stream)
 	StreamWebhookEvents(w http.ResponseWriter, r *http.Request)
@@ -10061,7 +10297,7 @@ func (_ Unimplemented) GetAnalyticsUsage(w http.ResponseWriter, r *http.Request,
 
 // List API keys
 // (GET /v1/api-keys)
-func (_ Unimplemented) ListApiKeys(w http.ResponseWriter, r *http.Request) {
+func (_ Unimplemented) ListApiKeys(w http.ResponseWriter, r *http.Request, params ListApiKeysParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10229,7 +10465,7 @@ func (_ Unimplemented) GetV1CreditsBalanceCustomerIdLive(w http.ResponseWriter, 
 
 // List credit balances for all customers
 // (GET /v1/credits/balances)
-func (_ Unimplemented) ListCreditBalances(w http.ResponseWriter, r *http.Request) {
+func (_ Unimplemented) ListCreditBalances(w http.ResponseWriter, r *http.Request, params ListCreditBalancesParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10271,7 +10507,7 @@ func (_ Unimplemented) GetCustomerOverview(w http.ResponseWriter, r *http.Reques
 
 // List the customer's payment methods
 // (GET /v1/customers/{customer_id}/payment-methods)
-func (_ Unimplemented) ListCustomerPaymentMethods(w http.ResponseWriter, r *http.Request, customerId string) {
+func (_ Unimplemented) ListCustomerPaymentMethods(w http.ResponseWriter, r *http.Request, customerId string, params ListCustomerPaymentMethodsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10337,7 +10573,7 @@ func (_ Unimplemented) PostV1CustomersIdRotateCostDashboardToken(w http.Response
 
 // List emails sent to the customer
 // (GET /v1/customers/{id}/sent-emails)
-func (_ Unimplemented) ListCustomerSentEmails(w http.ResponseWriter, r *http.Request, id string) {
+func (_ Unimplemented) ListCustomerSentEmails(w http.ResponseWriter, r *http.Request, id string, params ListCustomerSentEmailsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10349,7 +10585,7 @@ func (_ Unimplemented) GetCustomerUsage(w http.ResponseWriter, r *http.Request, 
 
 // List dunning policies
 // (GET /v1/dunning/policies)
-func (_ Unimplemented) ListDunningPolicies(w http.ResponseWriter, r *http.Request) {
+func (_ Unimplemented) ListDunningPolicies(w http.ResponseWriter, r *http.Request, params ListDunningPoliciesParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10475,7 +10711,7 @@ func (_ Unimplemented) CollectInvoicePayment(w http.ResponseWriter, r *http.Requ
 
 // List the card disputes on an invoice
 // (GET /v1/invoices/{id}/disputes)
-func (_ Unimplemented) ListInvoiceDisputes(w http.ResponseWriter, r *http.Request, id string) {
+func (_ Unimplemented) ListInvoiceDisputes(w http.ResponseWriter, r *http.Request, id string, params ListInvoiceDisputesParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10577,7 +10813,7 @@ func (_ Unimplemented) RemoveMember(w http.ResponseWriter, r *http.Request, user
 
 // List meters
 // (GET /v1/meters)
-func (_ Unimplemented) GetV1Meters(w http.ResponseWriter, r *http.Request) {
+func (_ Unimplemented) GetV1Meters(w http.ResponseWriter, r *http.Request, params GetV1MetersParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10601,7 +10837,7 @@ func (_ Unimplemented) PatchV1MetersId(w http.ResponseWriter, r *http.Request, i
 
 // List plans
 // (GET /v1/plans)
-func (_ Unimplemented) GetV1Plans(w http.ResponseWriter, r *http.Request) {
+func (_ Unimplemented) GetV1Plans(w http.ResponseWriter, r *http.Request, params GetV1PlansParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10625,7 +10861,7 @@ func (_ Unimplemented) UpdatePlan(w http.ResponseWriter, r *http.Request, id str
 
 // List a plan's prices
 // (GET /v1/plans/{id}/prices)
-func (_ Unimplemented) ListPlanPrices(w http.ResponseWriter, r *http.Request, id string) {
+func (_ Unimplemented) ListPlanPrices(w http.ResponseWriter, r *http.Request, id string, params ListPlanPricesParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10667,7 +10903,7 @@ func (_ Unimplemented) DeletePriceOverride(w http.ResponseWriter, r *http.Reques
 
 // List provider cost rates
 // (GET /v1/provider-costs)
-func (_ Unimplemented) GetV1ProviderCosts(w http.ResponseWriter, r *http.Request) {
+func (_ Unimplemented) GetV1ProviderCosts(w http.ResponseWriter, r *http.Request, params GetV1ProviderCostsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10721,13 +10957,13 @@ func (_ Unimplemented) CreatePublicPaymentUpdateCheckout(w http.ResponseWriter, 
 
 // List recipes
 // (GET /v1/recipes)
-func (_ Unimplemented) ListRecipes(w http.ResponseWriter, r *http.Request) {
+func (_ Unimplemented) ListRecipes(w http.ResponseWriter, r *http.Request, params ListRecipesParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // List installed recipe instances
 // (GET /v1/recipes/instances)
-func (_ Unimplemented) ListRecipeInstances(w http.ResponseWriter, r *http.Request) {
+func (_ Unimplemented) ListRecipeInstances(w http.ResponseWriter, r *http.Request, params ListRecipeInstancesParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10931,7 +11167,7 @@ func (_ Unimplemented) GetTenant(w http.ResponseWriter, r *http.Request, id stri
 
 // List test clocks for the active tenant
 // (GET /v1/test-clocks)
-func (_ Unimplemented) GetV1TestClocks(w http.ResponseWriter, r *http.Request) {
+func (_ Unimplemented) GetV1TestClocks(w http.ResponseWriter, r *http.Request, params GetV1TestClocksParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10961,7 +11197,7 @@ func (_ Unimplemented) PostV1TestClocksIdAdvance(w http.ResponseWriter, r *http.
 
 // List customers attached to a test clock
 // (GET /v1/test-clocks/{id}/customers)
-func (_ Unimplemented) ListTestClockCustomers(w http.ResponseWriter, r *http.Request, id string) {
+func (_ Unimplemented) ListTestClockCustomers(w http.ResponseWriter, r *http.Request, id string, params ListTestClockCustomersParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10973,7 +11209,7 @@ func (_ Unimplemented) PostV1TestClocksIdRetryAdvance(w http.ResponseWriter, r *
 
 // List subscriptions pinned to this clock
 // (GET /v1/test-clocks/{id}/subscriptions)
-func (_ Unimplemented) GetV1TestClocksIdSubscriptions(w http.ResponseWriter, r *http.Request, id string) {
+func (_ Unimplemented) GetV1TestClocksIdSubscriptions(w http.ResponseWriter, r *http.Request, id string, params GetV1TestClocksIdSubscriptionsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11027,7 +11263,7 @@ func (_ Unimplemented) ReleaseHeldUsage(w http.ResponseWriter, r *http.Request) 
 
 // List webhook endpoints
 // (GET /v1/webhook-endpoints/endpoints)
-func (_ Unimplemented) GetV1WebhookEndpointsEndpoints(w http.ResponseWriter, r *http.Request) {
+func (_ Unimplemented) GetV1WebhookEndpointsEndpoints(w http.ResponseWriter, r *http.Request, params GetV1WebhookEndpointsEndpointsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11039,13 +11275,19 @@ func (_ Unimplemented) PostV1WebhookEndpointsEndpoints(w http.ResponseWriter, r 
 
 // Delivery counts per webhook endpoint
 // (GET /v1/webhook-endpoints/endpoints/stats)
-func (_ Unimplemented) GetWebhookEndpointStats(w http.ResponseWriter, r *http.Request) {
+func (_ Unimplemented) GetWebhookEndpointStats(w http.ResponseWriter, r *http.Request, params GetWebhookEndpointStatsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // Delete (disable) webhook endpoint
 // (DELETE /v1/webhook-endpoints/endpoints/{id})
 func (_ Unimplemented) DeleteV1WebhookEndpointsEndpointsId(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Get a webhook endpoint
+// (GET /v1/webhook-endpoints/endpoints/{id})
+func (_ Unimplemented) GetWebhookEndpoint(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11057,7 +11299,7 @@ func (_ Unimplemented) PatchV1WebhookEndpointsEndpointsId(w http.ResponseWriter,
 
 // List an endpoint's recent deliveries
 // (GET /v1/webhook-endpoints/endpoints/{id}/deliveries)
-func (_ Unimplemented) ListWebhookEndpointDeliveries(w http.ResponseWriter, r *http.Request, id string) {
+func (_ Unimplemented) ListWebhookEndpointDeliveries(w http.ResponseWriter, r *http.Request, id string, params ListWebhookEndpointDeliveriesParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11073,9 +11315,9 @@ func (_ Unimplemented) PostV1WebhookEndpointsEndpointsIdRotateSecret(w http.Resp
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// List recent outbound events (newest 50)
+// List outbound events, newest first
 // (GET /v1/webhook-endpoints/events)
-func (_ Unimplemented) GetV1WebhookEndpointsEvents(w http.ResponseWriter, r *http.Request) {
+func (_ Unimplemented) GetV1WebhookEndpointsEvents(w http.ResponseWriter, r *http.Request, params GetV1WebhookEndpointsEventsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11331,14 +11573,46 @@ func (siw *ServerInterfaceWrapper) GetAnalyticsUsage(w http.ResponseWriter, r *h
 // ListApiKeys operation middleware
 func (siw *ServerInterfaceWrapper) ListApiKeys(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
 	ctx := r.Context()
 
 	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
 
 	r = r.WithContext(ctx)
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListApiKeysParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListApiKeys(w, r)
+		siw.Handler.ListApiKeys(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -11650,19 +11924,6 @@ func (siw *ServerInterfaceWrapper) ListAuditLog(w http.ResponseWriter, r *http.R
 			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
 		} else {
 			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
-		}
-		return
-	}
-
-	// ------------- Optional query parameter "after" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "after", r.URL.Query(), &params.After, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "after"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "after", Err: err})
 		}
 		return
 	}
@@ -12513,14 +12774,46 @@ func (siw *ServerInterfaceWrapper) GetV1CreditsBalanceCustomerIdLive(w http.Resp
 // ListCreditBalances operation middleware
 func (siw *ServerInterfaceWrapper) ListCreditBalances(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
 	ctx := r.Context()
 
 	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
 
 	r = r.WithContext(ctx)
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListCreditBalancesParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListCreditBalances(w, r)
+		siw.Handler.ListCreditBalances(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -12955,8 +13248,37 @@ func (siw *ServerInterfaceWrapper) ListCustomerPaymentMethods(w http.ResponseWri
 
 	r = r.WithContext(ctx)
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListCustomerPaymentMethodsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListCustomerPaymentMethods(w, r, customerId)
+		siw.Handler.ListCustomerPaymentMethods(w, r, customerId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -13498,8 +13820,37 @@ func (siw *ServerInterfaceWrapper) ListCustomerSentEmails(w http.ResponseWriter,
 
 	r = r.WithContext(ctx)
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListCustomerSentEmailsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListCustomerSentEmails(w, r, id)
+		siw.Handler.ListCustomerSentEmails(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -13573,14 +13924,46 @@ func (siw *ServerInterfaceWrapper) GetCustomerUsage(w http.ResponseWriter, r *ht
 // ListDunningPolicies operation middleware
 func (siw *ServerInterfaceWrapper) ListDunningPolicies(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
 	ctx := r.Context()
 
 	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
 
 	r = r.WithContext(ctx)
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListDunningPoliciesParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListDunningPolicies(w, r)
+		siw.Handler.ListDunningPolicies(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -14593,19 +14976,6 @@ func (siw *ServerInterfaceWrapper) GetV1Invoices(w http.ResponseWriter, r *http.
 		return
 	}
 
-	// ------------- Optional query parameter "after" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "after", r.URL.Query(), &params.After, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "after"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "after", Err: err})
-		}
-		return
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetV1Invoices(w, r, params)
 	}))
@@ -14820,8 +15190,37 @@ func (siw *ServerInterfaceWrapper) ListInvoiceDisputes(w http.ResponseWriter, r 
 
 	r = r.WithContext(ctx)
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListInvoiceDisputesParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListInvoiceDisputes(w, r, id)
+		siw.Handler.ListInvoiceDisputes(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -15589,14 +15988,46 @@ func (siw *ServerInterfaceWrapper) RemoveMember(w http.ResponseWriter, r *http.R
 // GetV1Meters operation middleware
 func (siw *ServerInterfaceWrapper) GetV1Meters(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
 	ctx := r.Context()
 
 	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
 
 	r = r.WithContext(ctx)
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetV1MetersParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1Meters(w, r)
+		siw.Handler.GetV1Meters(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -15744,14 +16175,46 @@ func (siw *ServerInterfaceWrapper) PatchV1MetersId(w http.ResponseWriter, r *htt
 // GetV1Plans operation middleware
 func (siw *ServerInterfaceWrapper) GetV1Plans(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
 	ctx := r.Context()
 
 	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
 
 	r = r.WithContext(ctx)
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetV1PlansParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1Plans(w, r)
+		siw.Handler.GetV1Plans(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -15917,8 +16380,37 @@ func (siw *ServerInterfaceWrapper) ListPlanPrices(w http.ResponseWriter, r *http
 
 	r = r.WithContext(ctx)
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListPlanPricesParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListPlanPrices(w, r, id)
+		siw.Handler.ListPlanPrices(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -16131,6 +16623,32 @@ func (siw *ServerInterfaceWrapper) ListPriceOverrides(w http.ResponseWriter, r *
 		return
 	}
 
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListPriceOverrides(w, r, params)
 	}))
@@ -16224,14 +16742,46 @@ func (siw *ServerInterfaceWrapper) DeletePriceOverride(w http.ResponseWriter, r 
 // GetV1ProviderCosts operation middleware
 func (siw *ServerInterfaceWrapper) GetV1ProviderCosts(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
 	ctx := r.Context()
 
 	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
 
 	r = r.WithContext(ctx)
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetV1ProviderCostsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1ProviderCosts(w, r)
+		siw.Handler.GetV1ProviderCosts(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -16479,14 +17029,46 @@ func (siw *ServerInterfaceWrapper) CreatePublicPaymentUpdateCheckout(w http.Resp
 // ListRecipes operation middleware
 func (siw *ServerInterfaceWrapper) ListRecipes(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
 	ctx := r.Context()
 
 	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
 
 	r = r.WithContext(ctx)
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListRecipesParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListRecipes(w, r)
+		siw.Handler.ListRecipes(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -16499,14 +17081,46 @@ func (siw *ServerInterfaceWrapper) ListRecipes(w http.ResponseWriter, r *http.Re
 // ListRecipeInstances operation middleware
 func (siw *ServerInterfaceWrapper) ListRecipeInstances(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
 	ctx := r.Context()
 
 	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
 
 	r = r.WithContext(ctx)
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListRecipeInstancesParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListRecipeInstances(w, r)
+		siw.Handler.ListRecipeInstances(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -17991,6 +18605,32 @@ func (siw *ServerInterfaceWrapper) ListTenants(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListTenants(w, r, params)
 	}))
@@ -18057,14 +18697,46 @@ func (siw *ServerInterfaceWrapper) GetTenant(w http.ResponseWriter, r *http.Requ
 // GetV1TestClocks operation middleware
 func (siw *ServerInterfaceWrapper) GetV1TestClocks(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
 	ctx := r.Context()
 
 	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
 
 	r = r.WithContext(ctx)
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetV1TestClocksParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1TestClocks(w, r)
+		siw.Handler.GetV1TestClocks(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -18262,8 +18934,37 @@ func (siw *ServerInterfaceWrapper) ListTestClockCustomers(w http.ResponseWriter,
 
 	r = r.WithContext(ctx)
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListTestClockCustomersParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListTestClockCustomers(w, r, id)
+		siw.Handler.ListTestClockCustomers(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -18350,8 +19051,37 @@ func (siw *ServerInterfaceWrapper) GetV1TestClocksIdSubscriptions(w http.Respons
 
 	r = r.WithContext(ctx)
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetV1TestClocksIdSubscriptionsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1TestClocksIdSubscriptions(w, r, id)
+		siw.Handler.GetV1TestClocksIdSubscriptions(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -18463,19 +19193,6 @@ func (siw *ServerInterfaceWrapper) GetV1UsageEvents(w http.ResponseWriter, r *ht
 			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
 		} else {
 			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
-		}
-		return
-	}
-
-	// ------------- Optional query parameter "after" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "after", r.URL.Query(), &params.After, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "after"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "after", Err: err})
 		}
 		return
 	}
@@ -18718,14 +19435,46 @@ func (siw *ServerInterfaceWrapper) ReleaseHeldUsage(w http.ResponseWriter, r *ht
 // GetV1WebhookEndpointsEndpoints operation middleware
 func (siw *ServerInterfaceWrapper) GetV1WebhookEndpointsEndpoints(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
 	ctx := r.Context()
 
 	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
 
 	r = r.WithContext(ctx)
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetV1WebhookEndpointsEndpointsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1WebhookEndpointsEndpoints(w, r)
+		siw.Handler.GetV1WebhookEndpointsEndpoints(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -18785,14 +19534,46 @@ func (siw *ServerInterfaceWrapper) PostV1WebhookEndpointsEndpoints(w http.Respon
 // GetWebhookEndpointStats operation middleware
 func (siw *ServerInterfaceWrapper) GetWebhookEndpointStats(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
 	ctx := r.Context()
 
 	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
 
 	r = r.WithContext(ctx)
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetWebhookEndpointStatsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetWebhookEndpointStats(w, r)
+		siw.Handler.GetWebhookEndpointStats(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -18825,6 +19606,38 @@ func (siw *ServerInterfaceWrapper) DeleteV1WebhookEndpointsEndpointsId(w http.Re
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.DeleteV1WebhookEndpointsEndpointsId(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetWebhookEndpoint operation middleware
+func (siw *ServerInterfaceWrapper) GetWebhookEndpoint(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetWebhookEndpoint(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -18911,8 +19724,37 @@ func (siw *ServerInterfaceWrapper) ListWebhookEndpointDeliveries(w http.Response
 
 	r = r.WithContext(ctx)
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListWebhookEndpointDeliveriesParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListWebhookEndpointDeliveries(w, r, id)
+		siw.Handler.ListWebhookEndpointDeliveries(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -19046,14 +19888,46 @@ func (siw *ServerInterfaceWrapper) PostV1WebhookEndpointsEndpointsIdRotateSecret
 // GetV1WebhookEndpointsEvents operation middleware
 func (siw *ServerInterfaceWrapper) GetV1WebhookEndpointsEvents(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
 	ctx := r.Context()
 
 	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
 
 	r = r.WithContext(ctx)
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetV1WebhookEndpointsEventsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1WebhookEndpointsEvents(w, r)
+		siw.Handler.GetV1WebhookEndpointsEvents(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -19893,6 +20767,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Delete(options.BaseURL+"/v1/webhook-endpoints/endpoints/{id}", wrapper.DeleteV1WebhookEndpointsEndpointsId)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/webhook-endpoints/endpoints/{id}", wrapper.GetWebhookEndpoint)
 	})
 	r.Group(func(r chi.Router) {
 		r.Patch(options.BaseURL+"/v1/webhook-endpoints/endpoints/{id}", wrapper.PatchV1WebhookEndpointsEndpointsId)

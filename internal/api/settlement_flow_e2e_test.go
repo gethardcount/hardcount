@@ -269,7 +269,7 @@ func TestE2E_InvoiceSettlement_OfflineAndStripeWebhook(t *testing.T) {
 	// for C, both to the customer.
 	sent := call("GET", "/v1/customers/"+customerID+"/sent-emails", flowReq{}).want(t, 200, "sent emails")
 	emails := map[string]int{}
-	for _, e := range flowList(sent.body, "sent_emails") {
+	for _, e := range flowList(sent.body, "data") {
 		if r := flowStr(e, "recipient"); r != customerEmail {
 			t.Errorf("sent email %s went to %q, want %q", flowStr(e, "email_type"), r, customerEmail)
 		}

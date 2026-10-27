@@ -165,7 +165,7 @@ func (m *memStore) CreateDeliveriesForEvent(ctx context.Context, tenantID, event
 	return out, nil
 }
 
-func (m *memStore) ListEvents(_ context.Context, tenantID string, limit int) ([]domain.WebhookEvent, error) {
+func (m *memStore) ListEvents(_ context.Context, tenantID string, limit, offset int) ([]domain.WebhookEvent, int, error) {
 	// Mirror the postgres store: newest-first (created_at DESC), default 50,
 	// HARD-clamped to 100 regardless of the requested limit. The real store
 	// caps the result set, so an older event ages out of the window — the
@@ -183,13 +183,13 @@ func (m *memStore) ListEvents(_ context.Context, tenantID string, limit int) ([]
 	}
 	// Events are appended in creation order, so reverse for newest-first.
 	var result []domain.WebhookEvent
-	for i := len(all) - 1; i >= 0; i-- {
+	for i := len(all) - 1 - offset; i >= 0; i-- {
 		result = append(result, all[i])
 		if len(result) >= limit {
 			break
 		}
 	}
-	return result, nil
+	return result, len(all), nil
 }
 
 func (m *memStore) GetEvent(_ context.Context, tenantID, id string) (domain.WebhookEvent, error) {
@@ -312,10 +312,10 @@ func (m *memStore) GetDelivery(_ context.Context, tenantID, id string) (domain.W
 // and replay pivot (the postgres store does this via JOIN — a fake that
 // skipped hydration would let the handler's is_replay mapping go
 // untested).
-func (m *memStore) ListDeliveriesByEndpoint(_ context.Context, tenantID, endpointID string, limit int) ([]domain.WebhookDelivery, error) {
+func (m *memStore) ListDeliveriesByEndpoint(_ context.Context, tenantID, endpointID string, limit, offset int) ([]domain.WebhookDelivery, int, error) {
 	m.dmu.Lock()
 	defer m.dmu.Unlock()
-	if limit <= 0 || limit > 200 {
+	if limit <= 0 {
 		limit = 50
 	}
 	evByID := make(map[string]domain.WebhookEvent, len(m.events))
@@ -324,7 +324,7 @@ func (m *memStore) ListDeliveriesByEndpoint(_ context.Context, tenantID, endpoin
 	}
 	var result []domain.WebhookDelivery
 	// m.deliveries appends in creation order; walk backwards for DESC.
-	for i := len(m.deliveries) - 1; i >= 0 && len(result) < limit; i-- {
+	for i := len(m.deliveries) - 1; i >= 0; i-- {
 		d := m.deliveries[i]
 		if d.WebhookEndpointID != endpointID || d.TenantID != tenantID {
 			continue
@@ -337,7 +337,11 @@ func (m *memStore) ListDeliveriesByEndpoint(_ context.Context, tenantID, endpoin
 		}
 		result = append(result, d)
 	}
-	return result, nil
+	total := len(result)
+	if offset >= total {
+		return nil, total, nil
+	}
+	return result[offset:min(offset+limit, total)], total, nil
 }
 
 // EventDeliveryStatuses mirrors the real store's roll-up (any pending →
@@ -1419,7 +1423,7 @@ func TestRetryPendingDeliveries_OldEventResolvable(t *testing.T) {
 
 	// Sanity: even requesting the max, the old event is NOT in the newest
 	// window — this is exactly the condition that stranded the delivery.
-	recent, err := store.ListEvents(ctx, "t1", 1000)
+	recent, _, err := store.ListEvents(ctx, "t1", 1000, 0)
 	if err != nil {
 		t.Fatalf("list events: %v", err)
 	}

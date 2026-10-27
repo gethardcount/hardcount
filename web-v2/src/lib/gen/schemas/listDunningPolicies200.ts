@@ -8,7 +8,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 import type { DunningPolicyListItem } from './dunningPolicyListItem';
+import type { ListTotal } from './listTotal';
 
 export type ListDunningPolicies200 = {
   data: DunningPolicyListItem[];
+  total: ListTotal;
 };

@@ -43,7 +43,9 @@ type Store interface {
 	// CreateDeliveriesForEvent batch-creates born-leased delivery rows
 	// for an EXISTING event (the replay path — the clone commits first).
 	CreateDeliveriesForEvent(ctx context.Context, tenantID, eventID string, endpointIDs []string, birthLease time.Duration) ([]domain.WebhookDelivery, error)
-	ListEvents(ctx context.Context, tenantID string, limit int) ([]domain.WebhookEvent, error)
+	// ListEvents returns one page of the events, newest first, and how many
+	// there are.
+	ListEvents(ctx context.Context, tenantID string, limit, offset int) ([]domain.WebhookEvent, int, error)
 	// EventDeliveryStatuses rolls each event's deliveries up to one status:
 	// any pending → "pending", else any failed → "failed", else "delivered".
 	// Events with no deliveries are absent from the map (no endpoint matched).
@@ -71,7 +73,7 @@ type Store interface {
 	// delivery sent to ONE receiver, newest first, each row hydrated with
 	// its event's type + replay pivot (the surface lists deliveries across
 	// events, so rows must be self-describing).
-	ListDeliveriesByEndpoint(ctx context.Context, tenantID, endpointID string, limit int) ([]domain.WebhookDelivery, error)
+	ListDeliveriesByEndpoint(ctx context.Context, tenantID, endpointID string, limit, offset int) ([]domain.WebhookDelivery, int, error)
 
 	// Stats
 	GetEndpointStats(ctx context.Context, tenantID string) ([]EndpointStats, error)

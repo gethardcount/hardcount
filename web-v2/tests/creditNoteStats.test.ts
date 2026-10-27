@@ -68,7 +68,6 @@ const counts = { all: 250, draft: 10, issued: 200, voided: 40 }
 test('under the refund filter the tabs show no counts and the empty list names the filter', () => {
   const v = creditNotesListView(counts, '', 'needs_attention')
   assert.equal(v.tabCounts, null)
-  assert.equal(v.tabTotal, null)
   assert.deepEqual(v.empty, {
     title: 'No refunds need attention',
     description: 'No refund has failed, is unconfirmed, or has been pending for more than 72 hours.',
@@ -79,7 +78,6 @@ test('under the refund filter the tabs show no counts and the empty list names t
 test('under a status tab the counts stay and the empty list names the status', () => {
   const v = creditNotesListView(counts, 'draft', '')
   assert.deepEqual(v.tabCounts, counts)
-  assert.equal(v.tabTotal, 10)
   assert.deepEqual(v.empty, {
     title: 'No draft credit notes',
     description: 'Try a different filter to see more results.',
@@ -89,6 +87,6 @@ test('under a status tab the counts stay and the empty list names the status', (
 
 test('with no filter an empty list is the first-use state', () => {
   const v = creditNotesListView(counts, '', '')
-  assert.equal(v.tabTotal, 250)
+  assert.deepEqual(v.tabCounts, counts)
   assert.equal(v.empty, null)
 })

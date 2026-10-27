@@ -361,10 +361,10 @@ export default function CustomerDetailPage() {
   // page still renders.
   const { data: sentEmailsData } = useQuery({
     queryKey: ['customer-sent-emails', id],
-    queryFn: () => api.listCustomerSentEmails(id!).catch(() => ({ sent_emails: [] })),
+    queryFn: () => api.listCustomerSentEmails(id!).catch(() => ({ data: [], total: 0 })),
     enabled: !!id,
   })
-  const sentEmails = sentEmailsData?.sent_emails ?? []
+  const sentEmails = sentEmailsData?.data ?? []
 
   // Dunning policies for this tenant (ADR-036 campaigns model). The
   // list drives the assignment dropdown on the customer detail page;
@@ -372,7 +372,7 @@ export default function CustomerDetailPage() {
   // to when dunning_policy_id is empty.
   const { data: dunningPoliciesData } = useQuery({
     queryKey: ['dunning-policies'],
-    queryFn: () => api.listDunningPolicies().catch(() => ({ data: [] })),
+    queryFn: () => api.listDunningPolicies().catch(() => ({ data: [], total: 0 })),
   })
   const dunningPolicies = dunningPoliciesData?.data ?? []
   const defaultDunningPolicy = dunningPolicies.find(p => p.is_default)

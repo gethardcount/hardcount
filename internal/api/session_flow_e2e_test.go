@@ -116,8 +116,8 @@ func TestE2E_DashboardSession_ModeAndPasswordReset(t *testing.T) {
 	}
 	// Checking does not use the link up; the page checks on every load.
 	check(token).want(t, 200, "check the link a second time")
-	if res := check("not-a-reset-token").want(t, 422, "check a made-up link"); res.body["valid"] != false || res.body["reason"] != "invalid_or_expired" {
-		t.Errorf("check of a made-up link = %s, want valid false, reason invalid_or_expired", res.raw)
+	if res := check("not-a-reset-token").want(t, 422, "check a made-up link"); res.errCode() != "invalid_or_expired" || flowStr(res.body, "error", "param") != "token" {
+		t.Errorf("check of a made-up link = %s, want the error envelope with code invalid_or_expired and param token", res.raw)
 	}
 	flowDo(t, ts, "GET", "/v1/auth/password-reset/check", flowReq{}).want(t, 422, "check with no token")
 

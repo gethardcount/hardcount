@@ -8,14 +8,12 @@ import (
 	"log/slog"
 	"net/http"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/sagarsuperuser/velox/internal/api/generated"
-	"github.com/sagarsuperuser/velox/internal/api/middleware"
 	"github.com/sagarsuperuser/velox/internal/api/respond"
 	"github.com/sagarsuperuser/velox/internal/api/timefilter"
 	"github.com/sagarsuperuser/velox/internal/auth"
@@ -437,8 +435,10 @@ func (h *Handler) addLineItem(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	page, ok := respond.ParsePage(w, r)
+	if !ok {
+		return
+	}
 
 	// `ids` filter (comma-separated) lets CreditNotes-and-similar
 	// pages fetch the exact invoices their primary rows reference,
@@ -473,25 +473,14 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		CreatedTo:      createdTo,
 		Overdue:        r.URL.Query().Get("overdue") == "true",
 		IDs:            ids,
-		Limit:          limit,
-		Offset:         offset,
+		Limit:          page.Limit,
+		Offset:         page.Offset,
 		// Sort + direction are validated against a closed set in
 		// the store (invoiceOrderBy). Unknown sort keys silently
 		// default to created_at; unknown dir defaults to desc.
 		Sort:    r.URL.Query().Get("sort"),
 		SortDir: r.URL.Query().Get("dir"),
 	}
-	// Cursor pagination (2026-05-29). Takes precedence over offset.
-	// Only supported on the default sort (created_at DESC) — a custom
-	// sort + cursor combination would yield inconsistent seek-vs-
-	// order pairings.
-	if c := r.URL.Query().Get("after"); c != "" && filter.Sort == "" {
-		if cur, err := middleware.DecodeCursor(c); err == nil {
-			filter.AfterCreatedAt = cur.CreatedAt
-			filter.AfterID = cur.ID
-		}
-	}
-
 	invoices, total, err := h.svc.List(r.Context(), filter)
 	if err != nil {
 		respond.InternalError(w, r)
@@ -500,26 +489,6 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	}
 	if invoices == nil {
 		invoices = []domain.Invoice{}
-	}
-
-	if !filter.AfterCreatedAt.IsZero() && filter.AfterID != "" {
-		l := filter.Limit
-		if l <= 0 {
-			l = 50
-		} else if l > 100 {
-			l = 100
-		}
-		hasMore := len(invoices) > l
-		if hasMore {
-			invoices = invoices[:l]
-		}
-		resp := middleware.PageResponse{Data: invoices, HasMore: hasMore}
-		if hasMore && len(invoices) > 0 {
-			last := invoices[len(invoices)-1]
-			resp.NextCursor = middleware.EncodeCursor(last.ID, last.CreatedAt)
-		}
-		respond.JSON(w, r, http.StatusOK, resp)
-		return
 	}
 
 	respond.List(w, r, invoices, total)
@@ -2245,7 +2214,12 @@ func disputeTimelineEvents(disputes []domain.InvoiceDispute) []timelineEvent {
 func (h *Handler) listDisputes(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
+	page, ok := respond.ParsePage(w, r)
+	if !ok {
+		return
+	}
 
+	// One invoice's disputes are read whole and paged here.
 	disputes, err := h.svc.ListInvoiceDisputes(r.Context(), tenantID, id)
 	if errors.Is(err, errs.ErrNotFound) {
 		respond.NotFound(w, r, "invoice")
@@ -2256,7 +2230,7 @@ func (h *Handler) listDisputes(w http.ResponseWriter, r *http.Request) {
 		respond.InternalError(w, r)
 		return
 	}
-	respond.JSON(w, r, http.StatusOK, map[string]any{"data": disputes})
+	respond.List(w, r, respond.Window(disputes, page), len(disputes))
 }
 
 func (h *Handler) downloadPDF(w http.ResponseWriter, r *http.Request) {

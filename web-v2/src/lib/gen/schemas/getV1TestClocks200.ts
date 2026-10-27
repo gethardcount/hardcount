@@ -7,8 +7,10 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
+import type { ListTotal } from './listTotal';
 import type { TestClock } from './testClock';
 
 export type GetV1TestClocks200 = {
-  data?: TestClock[];
+  data: TestClock[];
+  total: ListTotal;
 };

@@ -15,7 +15,7 @@ type Store interface {
 	// FORCE-RLS'd audit_log and dunning_policies accept the rows.
 	CreateAudited(ctx context.Context, t domain.Tenant, emit func(tx *sql.Tx, out domain.Tenant) error) (domain.Tenant, error)
 	Get(ctx context.Context, id string) (domain.Tenant, error)
-	List(ctx context.Context, filter ListFilter) ([]domain.Tenant, error)
+	List(ctx context.Context, filter ListFilter) ([]domain.Tenant, int, error)
 	UpdateStatus(ctx context.Context, id string, status domain.TenantStatus) (domain.Tenant, error)
 }
 

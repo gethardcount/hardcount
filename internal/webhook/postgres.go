@@ -646,10 +646,12 @@ func (s *PostgresStore) EventDeliveryStatuses(ctx context.Context, tenantID stri
 	return out, rows.Err()
 }
 
-func (s *PostgresStore) ListEvents(ctx context.Context, tenantID string, limit int) ([]domain.WebhookEvent, error) {
+// ListEvents returns one page of the tenant's webhook events, newest first,
+// and how many events there are.
+func (s *PostgresStore) ListEvents(ctx context.Context, tenantID string, limit, offset int) ([]domain.WebhookEvent, int, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer postgres.Rollback(tx)
 
@@ -660,12 +662,16 @@ func (s *PostgresStore) ListEvents(ctx context.Context, tenantID string, limit i
 		limit = 100
 	}
 
+	var total int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM webhook_events`).Scan(&total); err != nil {
+		return nil, 0, err
+	}
 	rows, err := tx.QueryContext(ctx, `
 		SELECT id, tenant_id, livemode, event_type, payload, created_at, replay_of_event_id
-		FROM webhook_events ORDER BY created_at DESC LIMIT $1
-	`, limit)
+		FROM webhook_events ORDER BY created_at DESC, id DESC LIMIT $1 OFFSET $2
+	`, limit, offset)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -675,7 +681,7 @@ func (s *PostgresStore) ListEvents(ctx context.Context, tenantID string, limit i
 		var payloadJSON []byte
 		var replayOf sql.NullString
 		if err := rows.Scan(&e.ID, &e.TenantID, &e.Livemode, &e.EventType, &payloadJSON, &e.CreatedAt, &replayOf); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		_ = json.Unmarshal(payloadJSON, &e.Payload)
 		if replayOf.Valid {
@@ -684,7 +690,7 @@ func (s *PostgresStore) ListEvents(ctx context.Context, tenantID string, limit i
 		}
 		events = append(events, e)
 	}
-	return events, rows.Err()
+	return events, total, rows.Err()
 }
 
 func (s *PostgresStore) CreateDelivery(ctx context.Context, tenantID string, d domain.WebhookDelivery) (domain.WebhookDelivery, error) {
@@ -947,15 +953,22 @@ func (s *PostgresStore) GetDelivery(ctx context.Context, tenantID, id string) (d
 // without a second fetch. INNER JOIN is safe here: a delivery row is
 // created in the same tx as its event (or referencing an event that
 // already committed, on the replay path), so the FK target always exists.
-func (s *PostgresStore) ListDeliveriesByEndpoint(ctx context.Context, tenantID, endpointID string, limit int) ([]domain.WebhookDelivery, error) {
-	if limit <= 0 || limit > 200 {
+// ListDeliveriesByEndpoint returns one page of one endpoint's deliveries,
+// newest first, and how many it has.
+func (s *PostgresStore) ListDeliveriesByEndpoint(ctx context.Context, tenantID, endpointID string, limit, offset int) ([]domain.WebhookDelivery, int, error) {
+	if limit <= 0 {
 		limit = 50
 	}
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer postgres.Rollback(tx)
+
+	var total int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM webhook_deliveries WHERE webhook_endpoint_id = $1`, endpointID).Scan(&total); err != nil {
+		return nil, 0, err
+	}
 
 	rows, err := tx.QueryContext(ctx, `
 		SELECT d.id, d.tenant_id, d.livemode, d.webhook_endpoint_id, d.webhook_event_id, d.status,
@@ -965,11 +978,11 @@ func (s *PostgresStore) ListDeliveriesByEndpoint(ctx context.Context, tenantID, 
 		FROM webhook_deliveries d
 		JOIN webhook_events e ON e.id = d.webhook_event_id
 		WHERE d.webhook_endpoint_id = $1
-		ORDER BY d.created_at DESC
-		LIMIT $2
-	`, endpointID, limit)
+		ORDER BY d.created_at DESC, d.id DESC
+		LIMIT $2 OFFSET $3
+	`, endpointID, limit, offset)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -980,9 +993,9 @@ func (s *PostgresStore) ListDeliveriesByEndpoint(ctx context.Context, tenantID, 
 			&d.Status, &d.HTTPStatusCode, &d.ResponseBody, &d.ErrorMessage,
 			&d.AttemptCount, &d.NextRetryAt, &d.CreatedAt, &d.CompletedAt,
 			&d.EventType, &d.EventReplayOfID); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		deliveries = append(deliveries, d)
 	}
-	return deliveries, rows.Err()
+	return deliveries, total, rows.Err()
 }

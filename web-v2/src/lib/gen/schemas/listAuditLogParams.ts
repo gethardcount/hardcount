@@ -7,7 +7,9 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
+import type { LimitParameter } from './limitParameter';
 import type { ListAuditLogOrder } from './listAuditLogOrder';
+import type { OffsetParameter } from './offsetParameter';
 
 export type ListAuditLogParams = {
 /**
@@ -48,16 +50,16 @@ sim_to?: string;
  */
 order?: ListAuditLogOrder;
 /**
+ * Rows per page, from 1 to 100. Default 50. Any other value, or one
+ * that is not a whole number, is a 422 with `param: limit`.
+ * @minimum 1
  * @maximum 100
  */
-limit?: number;
+limit?: LimitParameter;
 /**
- * Ignored when `after` is set.
+ * Rows to skip, 0 or more. Default 0. A negative value, or one that is
+ * not a whole number, is a 422 with `param: offset`.
  * @minimum 0
  */
-offset?: number;
-/**
- * Cursor from a previous page's `next_cursor`. Takes precedence over `offset`.
- */
-after?: string;
+offset?: OffsetParameter;
 };

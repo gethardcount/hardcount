@@ -15,6 +15,18 @@ export async function api<T>(method: string, path: string, body?: unknown): Prom
   return (text ? JSON.parse(text) : undefined) as T
 }
 
+// apiListAll reads every page of a list route (limit 100, the API's largest
+// page) and returns all its rows.
+export async function apiListAll<T>(path: string): Promise<T[]> {
+  const out: T[] = []
+  const sep = path.includes('?') ? '&' : '?'
+  for (let offset = 0; ; offset += 100) {
+    const page = await api<{ data: T[]; total: number }>('GET', `${path}${sep}limit=100&offset=${offset}`)
+    out.push(...page.data)
+    if (page.data.length < 100 || out.length >= page.total) return out
+  }
+}
+
 // The money format the dashboard uses for USD: "$1,234.50".
 export function usd(cents: number): string {
   const sign = cents < 0 ? '-' : ''

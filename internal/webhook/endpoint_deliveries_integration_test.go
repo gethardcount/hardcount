@@ -83,7 +83,7 @@ func TestListDeliveriesByEndpoint_ScopedAndHydrated(t *testing.T) {
 		t.Fatalf("create replay delivery: %v", err)
 	}
 
-	got, err := store.ListDeliveriesByEndpoint(ctx, tenantID, epB.ID, 50)
+	got, _, err := store.ListDeliveriesByEndpoint(ctx, tenantID, epB.ID, 50, 0)
 	if err != nil {
 		t.Fatalf("ListDeliveriesByEndpoint: %v", err)
 	}

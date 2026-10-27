@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
@@ -474,7 +475,34 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.C
 		limit = 100
 	}
 
-	query := `SELECT ` + cnReadCols + ` FROM credit_notes`
+	where, args := creditNoteWhere(filter)
+	idx := len(args) + 1
+	query := `SELECT ` + cnReadCols + ` FROM credit_notes` + where
+	query += fmt.Sprintf(" ORDER BY %s LIMIT $%d OFFSET $%d", creditNoteOrderBy(filter.Sort, filter.SortDir), idx, idx+1)
+	args = append(args, limit, filter.Offset)
+
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var notes []domain.CreditNote
+	for rows.Next() {
+		var cn domain.CreditNote
+		var metaJSON []byte
+		if err := rows.Scan(s.cnScanDest(&cn, &metaJSON)...); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal(metaJSON, &cn.Metadata)
+		notes = append(notes, cn)
+	}
+	return notes, rows.Err()
+}
+
+// creditNoteWhere is the WHERE clause of the list and its count, from the
+// filter, with its arguments ($1 onward).
+func creditNoteWhere(filter ListFilter) (string, []any) {
 	args := []any{}
 	idx := 1
 	clauses := []string{}
@@ -506,37 +534,25 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.C
 	} else if filter.RefundStatus != "" {
 		clauses = append(clauses, fmt.Sprintf("refund_status = $%d", idx))
 		args = append(args, filter.RefundStatus)
-		idx++
 	}
-	if len(clauses) > 0 {
-		query += " WHERE "
-		for i, c := range clauses {
-			if i > 0 {
-				query += " AND "
-			}
-			query += c
-		}
+	if len(clauses) == 0 {
+		return "", args
 	}
-	query += fmt.Sprintf(" ORDER BY %s LIMIT $%d OFFSET $%d", creditNoteOrderBy(filter.Sort, filter.SortDir), idx, idx+1)
-	args = append(args, limit, filter.Offset)
+	return " WHERE " + strings.Join(clauses, " AND "), args
+}
 
-	rows, err := tx.QueryContext(ctx, query, args...)
+// Count counts the credit notes the filter matches, ignoring its limit and
+// offset: the list's total.
+func (s *PostgresStore) Count(ctx context.Context, filter ListFilter) (int, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, filter.TenantID)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
-	defer func() { _ = rows.Close() }()
-
-	var notes []domain.CreditNote
-	for rows.Next() {
-		var cn domain.CreditNote
-		var metaJSON []byte
-		if err := rows.Scan(s.cnScanDest(&cn, &metaJSON)...); err != nil {
-			return nil, err
-		}
-		_ = json.Unmarshal(metaJSON, &cn.Metadata)
-		notes = append(notes, cn)
-	}
-	return notes, rows.Err()
+	defer postgres.Rollback(tx)
+	where, args := creditNoteWhere(filter)
+	var n int
+	err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM credit_notes`+where, args...).Scan(&n)
+	return n, err
 }
 
 // Stats counts every credit note by status and sums the issued notes' money

@@ -181,7 +181,7 @@ func TestPriceAndOverrideCreate_RefuseUnknownField(t *testing.T) {
 	if listed, err := svc.ListPlanPrices(ctx, tenantID, plan.ID); err != nil || len(listed) != 1 {
 		t.Fatalf("refused creates left %d prices (%v), want the 1 the plan was made with", len(listed), err)
 	}
-	overrideList, err := svc.ListOverrides(ctx, tenantID, "", "")
+	overrideList, _, err := svc.ListOverrides(ctx, tenantID, "", "", 100, 0)
 	if err != nil {
 		t.Fatalf("list overrides: %v", err)
 	}

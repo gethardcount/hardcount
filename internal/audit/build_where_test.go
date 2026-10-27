@@ -15,7 +15,7 @@ import (
 // read_path_integration_test.go) proves the predicate shape actually drives
 // idx_audit_log_tenant_read.
 func TestBuildListWhere_PinsPredicates(t *testing.T) {
-	where, args, nextIdx, useCursor := buildListWhere("t-123", false, QueryFilter{})
+	where, args, nextIdx := buildListWhere("t-123", false, QueryFilter{})
 
 	if !strings.HasPrefix(where, " WHERE al.tenant_id = $1 AND al.livemode = $2") {
 		t.Fatalf("WHERE must lead with explicit tenant+livemode predicates; got %q", where)
@@ -26,17 +26,13 @@ func TestBuildListWhere_PinsPredicates(t *testing.T) {
 	if nextIdx != 3 {
 		t.Errorf("next placeholder: got %d, want 3", nextIdx)
 	}
-	if useCursor {
-		t.Error("useCursor: got true for a cursorless filter")
-	}
 }
 
-// Placeholder alignment across every optional filter + the cursor tuple —
-// the class of bug the $n renumbering could introduce.
+// Placeholder alignment across every optional filter — the class of bug the
+// $n renumbering could introduce.
 func TestBuildListWhere_AllFiltersAlignPlaceholders(t *testing.T) {
 	from := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
 	to := time.Date(2026, 7, 13, 0, 0, 0, 0, time.UTC)
-	after := time.Date(2026, 7, 10, 0, 0, 0, 0, time.UTC)
 
 	simFrom := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
 	simTo := time.Date(2027, 3, 31, 0, 0, 0, 0, time.UTC)
@@ -46,18 +42,16 @@ func TestBuildListWhere_AllFiltersAlignPlaceholders(t *testing.T) {
 	// arg and returns the wrong rows — so the whole set has to be pinned
 	// together. The three sim filters are the ones this axis added; they were
 	// the ones not covered here.
-	where, args, nextIdx, useCursor := buildListWhere("t-1", true, QueryFilter{
-		ResourceType:   "invoice",
-		ResourceID:     "vlx_inv_1",
-		Action:         "invoice.finalize",
-		ActorID:        "vlx_usr_1",
-		TestClockID:    "vlx_tclk_1",
-		SimFrom:        simFrom,
-		SimTo:          simTo,
-		DateFrom:       from,
-		DateTo:         to,
-		AfterCreatedAt: after,
-		AfterID:        "vlx_aud_9",
+	where, args, nextIdx := buildListWhere("t-1", true, QueryFilter{
+		ResourceType: "invoice",
+		ResourceID:   "vlx_inv_1",
+		Action:       "invoice.finalize",
+		ActorID:      "vlx_usr_1",
+		TestClockID:  "vlx_tclk_1",
+		SimFrom:      simFrom,
+		SimTo:        simTo,
+		DateFrom:     from,
+		DateTo:       to,
 	})
 
 	// Clause order is NOT arbitrary: the sim predicates sit immediately after
@@ -68,26 +62,22 @@ func TestBuildListWhere_AllFiltersAlignPlaceholders(t *testing.T) {
 		" AND al.sim_effective_at >= $4 AND al.sim_effective_at <= $5" +
 		" AND al.resource_type = $6 AND al.resource_id = $7" +
 		" AND al.action = $8 AND al.actor_id = $9" +
-		" AND al.created_at >= $10 AND al.created_at <= $11" +
-		" AND (al.created_at, al.id) < ($12, $13)"
+		" AND al.created_at >= $10 AND al.created_at <= $11"
 	if where != want {
 		t.Fatalf("WHERE mismatch:\n got %q\nwant %q", where, want)
 	}
-	if len(args) != 13 {
-		t.Fatalf("args: got %d, want 13 (%v)", len(args), args)
+	if len(args) != 11 {
+		t.Fatalf("args: got %d, want 11 (%v)", len(args), args)
 	}
-	if !useCursor {
-		t.Error("useCursor: got false with a full cursor supplied")
-	}
-	if nextIdx != 14 {
-		t.Errorf("next placeholder: got %d, want 14 (LIMIT binds here)", nextIdx)
+	if nextIdx != 12 {
+		t.Errorf("next placeholder: got %d, want 12 (LIMIT binds here)", nextIdx)
 	}
 	// Arg ordering must match placeholder order, position by position — this is
 	// what catches a filter inserted in the SQL but appended in the wrong place.
 	for i, want := range []any{
 		"t-1", true, "vlx_tclk_1", simFrom, simTo,
 		"invoice", "vlx_inv_1", "invoice.finalize", "vlx_usr_1",
-		from, to, after, "vlx_aud_9",
+		from, to,
 	} {
 		if args[i] != want {
 			t.Errorf("arg $%d: got %v, want %v", i+1, args[i], want)

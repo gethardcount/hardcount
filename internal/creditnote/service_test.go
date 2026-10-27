@@ -170,6 +170,13 @@ func (m *memStore) Get(ctx context.Context, tenantID, id string) (domain.CreditN
 
 // Stats is not used by the service tests; the real query is tested against
 // Postgres (stats_integration_test.go).
+func (m *memStore) Count(ctx context.Context, filter ListFilter) (int, error) {
+	f := filter
+	f.Limit, f.Offset = 0, 0
+	cns, err := m.List(ctx, f)
+	return len(cns), err
+}
+
 func (m *memStore) Stats(_ context.Context, _ string) (Stats, error) {
 	return Stats{}, nil
 }

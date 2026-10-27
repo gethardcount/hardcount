@@ -8,7 +8,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 import type { CreditBalance } from './creditBalance';
+import type { ListTotal } from './listTotal';
 
 export type ListCreditBalances200 = {
   data: CreditBalance[];
+  total: ListTotal;
 };

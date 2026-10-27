@@ -8,7 +8,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 import type { Customer } from './customer';
+import type { ListTotal } from './listTotal';
 
 export type ListTestClockCustomers200 = {
   data: Customer[];
+  total: ListTotal;
 };

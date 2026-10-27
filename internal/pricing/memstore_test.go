@@ -82,6 +82,19 @@ func (m *memStore) GetMeterByEventNameTx(_ context.Context, _ *sql.Tx, eventName
 	return domain.Meter{}, errs.ErrNotFound
 }
 
+// window is one page of a fake's rows, as LIMIT/OFFSET would cut it.
+func window[T any](all []T, limit, offset int) []T {
+	if offset >= len(all) {
+		return nil
+	}
+	return all[offset:min(offset+limit, len(all))]
+}
+
+func (m *memStore) ListMetersPage(ctx context.Context, tenantID string, limit, offset int) ([]domain.Meter, int, error) {
+	all, err := m.ListMeters(ctx, tenantID)
+	return window(all, limit, offset), len(all), err
+}
+
 func (m *memStore) ListMeters(_ context.Context, tenantID string) ([]domain.Meter, error) {
 	var out []domain.Meter
 	for _, meter := range m.meters {
@@ -165,6 +178,11 @@ func (m *memStore) GetPlan(_ context.Context, tenantID, id string) (domain.Plan,
 		return domain.Plan{}, errs.ErrNotFound
 	}
 	return p, nil
+}
+
+func (m *memStore) ListPlansPage(ctx context.Context, tenantID string, limit, offset int) ([]domain.Plan, int, error) {
+	all, err := m.ListPlans(ctx, tenantID)
+	return window(all, limit, offset), len(all), err
 }
 
 func (m *memStore) ListPlans(_ context.Context, tenantID string) ([]domain.Plan, error) {
@@ -329,7 +347,7 @@ func (m *memStore) GetOverrideAt(_ context.Context, tenantID, customerID, priceI
 	return domain.CustomerPriceOverride{}, errs.ErrNotFound
 }
 
-func (m *memStore) ListOverrides(_ context.Context, tenantID, customerID, priceID string) ([]domain.CustomerPriceOverride, error) {
+func (m *memStore) ListOverrides(_ context.Context, tenantID, customerID, priceID string, limit, offset int) ([]domain.CustomerPriceOverride, int, error) {
 	var out []domain.CustomerPriceOverride
 	for _, o := range m.overrides {
 		if o.TenantID != tenantID || !o.Active {
@@ -340,7 +358,7 @@ func (m *memStore) ListOverrides(_ context.Context, tenantID, customerID, priceI
 		}
 		out = append(out, o)
 	}
-	return out, nil
+	return window(out, limit, offset), len(out), nil
 }
 
 // seedPlanWithPrice is a plan and one per_unit price on a fresh meter of the

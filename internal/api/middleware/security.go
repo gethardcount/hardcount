@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
+
+	"github.com/sagarsuperuser/velox/internal/api/respond"
 )
 
 // SecurityHeaders adds standard security headers to all responses.
@@ -51,9 +53,9 @@ func MetricsAuth(appEnv string, next http.Handler) http.Handler {
 		slog.Warn("METRICS_TOKEN not set — /metrics answers 401 in production. Set METRICS_TOKEN and have Prometheus send it as a bearer token")
 	}
 
-	unauthorized := func(w http.ResponseWriter) {
+	unauthorized := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("WWW-Authenticate", "Bearer")
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		respond.Unauthorized(w, r, "metrics need the METRICS_TOKEN bearer token")
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -61,7 +63,7 @@ func MetricsAuth(appEnv string, next http.Handler) http.Handler {
 		// empty bearer equals an empty token.
 		if token == "" {
 			if prod {
-				unauthorized(w)
+				unauthorized(w, r)
 				return
 			}
 			next.ServeHTTP(w, r)
@@ -72,7 +74,7 @@ func MetricsAuth(appEnv string, next http.Handler) http.Handler {
 		// response time does not depend on how much of the token matched.
 		got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 		if !ok || subtle.ConstantTimeCompare([]byte(got), []byte(token)) != 1 {
-			unauthorized(w)
+			unauthorized(w, r)
 			return
 		}
 

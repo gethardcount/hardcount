@@ -21,7 +21,8 @@ import (
 type Store interface {
 	Create(ctx context.Context, tenantID string, clk domain.TestClock) (domain.TestClock, error)
 	Get(ctx context.Context, tenantID, id string) (domain.TestClock, error)
-	List(ctx context.Context, tenantID string) ([]domain.TestClock, error)
+	// List returns one page of the clocks, newest first, and how many there are.
+	List(ctx context.Context, tenantID string, limit, offset int) ([]domain.TestClock, int, error)
 	Delete(ctx context.Context, tenantID, id string) error
 
 	// MarkAdvancing flips status ready → advancing and simultaneously sets

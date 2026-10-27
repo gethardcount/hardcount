@@ -81,7 +81,7 @@ func (m *memStore) Revoke(_ context.Context, tenantID, id string) (domain.APIKey
 	return target, nil
 }
 
-func (m *memStore) List(_ context.Context, filter ListFilter) ([]domain.APIKey, error) {
+func (m *memStore) List(_ context.Context, filter ListFilter) ([]domain.APIKey, int, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	var result []domain.APIKey
@@ -90,7 +90,7 @@ func (m *memStore) List(_ context.Context, filter ListFilter) ([]domain.APIKey, 
 			result = append(result, k)
 		}
 	}
-	return result, nil
+	return result, len(result), nil
 }
 
 func (m *memStore) TouchLastUsed(_ context.Context, id string, usedAt time.Time) error {

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -170,8 +169,10 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	page, ok := respond.ParsePage(w, r)
+	if !ok {
+		return
+	}
 
 	// `ids` filter (comma-separated) lets other list pages
 	// (Invoices, Subscriptions, etc.) fetch exactly the customers
@@ -194,8 +195,8 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		ExternalID: r.URL.Query().Get("external_id"),
 		Search:     strings.TrimSpace(r.URL.Query().Get("search")),
 		IDs:        ids,
-		Limit:      limit,
-		Offset:     offset,
+		Limit:      page.Limit,
+		Offset:     page.Offset,
 		Sort:       r.URL.Query().Get("sort"),
 		SortDir:    r.URL.Query().Get("dir"),
 	}
@@ -412,6 +413,12 @@ func (h *Handler) listSentEmails(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	page, ok := respond.ParsePage(w, r)
+	if !ok {
+		return
+	}
+	// The last 30 days of one customer's emails are read whole and paged
+	// here.
 	rows, err := h.sentEmails.ListByCustomer(r.Context(), tenantID, id)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "list sent emails", "customer_id", id, "error", err)
@@ -445,7 +452,7 @@ func (h *Handler) listSentEmails(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, view)
 	}
-	respond.JSON(w, r, http.StatusOK, map[string]any{"sent_emails": out})
+	respond.List(w, r, respond.Window(out, page), len(out))
 }
 
 // sentEmailLine is a Sent emails row's activity line (ADR-128): the email

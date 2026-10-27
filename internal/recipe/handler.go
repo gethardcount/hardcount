@@ -10,7 +10,6 @@ import (
 	"github.com/sagarsuperuser/velox/internal/api/respond"
 	"github.com/sagarsuperuser/velox/internal/audit"
 	"github.com/sagarsuperuser/velox/internal/auth"
-	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
 )
 
@@ -52,13 +51,18 @@ func (h *Handler) Routes() chi.Router {
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
+	page, ok := respond.ParsePage(w, r)
+	if !ok {
+		return
+	}
+	// The catalog is built into the binary, read whole and paged here.
 	items, err := h.svc.ListRecipes(r.Context(), tenantID)
 	if err != nil {
 		respond.InternalError(w, r)
 		slog.ErrorContext(r.Context(), "list recipes", "error", err)
 		return
 	}
-	respond.JSON(w, r, http.StatusOK, map[string]any{"data": items})
+	respond.List(w, r, respond.Window(items, page), len(items))
 }
 
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
@@ -138,14 +142,16 @@ func (h *Handler) instantiate(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) listInstances(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
+	page, ok := respond.ParsePage(w, r)
+	if !ok {
+		return
+	}
+	// At most one instance per catalog recipe, read whole and paged here.
 	instances, err := h.svc.ListInstances(r.Context(), tenantID)
 	if err != nil {
 		respond.InternalError(w, r)
 		slog.ErrorContext(r.Context(), "list recipe instances", "error", err)
 		return
 	}
-	if instances == nil {
-		instances = []domain.RecipeInstance{}
-	}
-	respond.JSON(w, r, http.StatusOK, map[string]any{"data": instances})
+	respond.List(w, r, respond.Window(instances, page), len(instances))
 }

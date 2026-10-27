@@ -11,11 +11,11 @@
 export type ErrorError = {
   /**
      * One of `invalid_request_error`, `authentication_error`,
-     * `rate_limit_error` or `api_error`, except when the
-     * `Idempotency-Key` header is the problem: then it is
-     * `idempotency_error`, `conflict_idempotency`,
-     * `conflict_idempotency_unresolved` or `bad_request`. Idempotency errors
-     * have only `type` and `message`. See docs/api-surface.md.
+     * `rate_limit_error` or `api_error`. Every error the API
+     * answers has this shape, including an unknown path (404,
+     * code `route_not_found`) and a method the path does not take
+     * (405, code `method_not_allowed`, with an `Allow` header).
+     * The few exceptions are listed in docs/api-surface.md.
      */
   type?: string;
   code?: string;

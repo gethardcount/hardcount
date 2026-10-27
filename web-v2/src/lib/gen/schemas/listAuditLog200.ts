@@ -8,13 +8,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 import type { AuditLogEntry } from './auditLogEntry';
+import type { ListTotal } from './listTotal';
 
 export type ListAuditLog200 = {
   data: AuditLogEntry[];
-  /** Offset paging only. Capped at 10,001. */
-  total?: number;
-  /** Cursor paging only. */
-  has_more?: boolean;
-  /** Cursor paging only, present when `has_more` is true. */
-  next_cursor?: string;
+  total: ListTotal;
 };

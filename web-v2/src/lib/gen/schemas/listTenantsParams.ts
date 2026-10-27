@@ -7,8 +7,23 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
+import type { LimitParameter } from './limitParameter';
 import type { ListTenantsStatus } from './listTenantsStatus';
+import type { OffsetParameter } from './offsetParameter';
 
 export type ListTenantsParams = {
 status?: ListTenantsStatus;
+/**
+ * Rows per page, from 1 to 100. Default 50. Any other value, or one
+ * that is not a whole number, is a 422 with `param: limit`.
+ * @minimum 1
+ * @maximum 100
+ */
+limit?: LimitParameter;
+/**
+ * Rows to skip, 0 or more. Default 0. A negative value, or one that is
+ * not a whole number, is a 422 with `param: offset`.
+ * @minimum 0
+ */
+offset?: OffsetParameter;
 };

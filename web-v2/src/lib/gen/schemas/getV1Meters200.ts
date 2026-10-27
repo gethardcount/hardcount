@@ -7,8 +7,10 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
+import type { ListTotal } from './listTotal';
 import type { Meter } from './meter';
 
 export type GetV1Meters200 = {
   data: Meter[];
+  total: ListTotal;
 };

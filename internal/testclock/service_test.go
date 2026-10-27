@@ -545,12 +545,12 @@ func (m *mockStore) Get(_ context.Context, _, id string) (domain.TestClock, erro
 	return c, nil
 }
 
-func (m *mockStore) List(_ context.Context, _ string) ([]domain.TestClock, error) {
+func (m *mockStore) List(_ context.Context, _ string, _, _ int) ([]domain.TestClock, int, error) {
 	out := make([]domain.TestClock, 0, len(m.clocks))
 	for _, c := range m.clocks {
 		out = append(out, c)
 	}
-	return out, nil
+	return out, len(out), nil
 }
 
 func (m *mockStore) Delete(_ context.Context, _, id string) error {

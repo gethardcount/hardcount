@@ -3,6 +3,8 @@ package respond
 import (
 	"encoding/json"
 	"net/http"
+	"reflect"
+	"strings"
 
 	chimw "github.com/go-chi/chi/v5/middleware"
 
@@ -28,8 +30,13 @@ func JSON(w http.ResponseWriter, r *http.Request, status int, data any) {
 	_ = enc.Encode(data)
 }
 
-// List writes a paginated list response.
+// List writes one page of a list: {"data": [...], "total": n}. total counts
+// every row that matches the request's filters, not only this page. A nil
+// slice is written as [], never null. Read the page with ParsePage.
 func List(w http.ResponseWriter, r *http.Request, data any, total int) {
+	if v := reflect.ValueOf(data); data == nil || (v.Kind() == reflect.Slice && v.IsNil()) {
+		data = []any{}
+	}
 	JSON(w, r, http.StatusOK, map[string]any{
 		"data":  data,
 		"total": total,
@@ -58,6 +65,22 @@ func errorField(w http.ResponseWriter, r *http.Request, status int, errType, cod
 			RequestID: requestID(r),
 		},
 	})
+}
+
+// ErrorWith writes the error envelope plus top-level fields beside "error".
+// Use it only when the error carries data a caller needs, such as the usage
+// batch's per-event errors. extra must not hold the key "error".
+func ErrorWith(w http.ResponseWriter, r *http.Request, status int, errType, code, message string, extra map[string]any) {
+	body := make(map[string]any, len(extra)+1)
+	for k, v := range extra {
+		body[k] = v
+	}
+	body["error"] = ErrorDetail{Type: errType, Code: code, Message: message, RequestID: requestID(r)}
+	setHeaders(w, r)
+	w.WriteHeader(status)
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(body)
 }
 
 // Common error shortcuts
@@ -120,6 +143,28 @@ func NotFoundCoded(w http.ResponseWriter, r *http.Request, code, message string)
 // resource, re-apply its edits against the fresh copy, and retry.
 func PreconditionFailed(w http.ResponseWriter, r *http.Request, message string) {
 	Error(w, r, http.StatusPreconditionFailed, "invalid_request_error", "precondition_failed", message)
+}
+
+// RouteNotFound is the router's answer to a path it does not serve.
+func RouteNotFound(w http.ResponseWriter, r *http.Request) {
+	Error(w, r, http.StatusNotFound, "invalid_request_error", "route_not_found",
+		"unrecognized request URL ("+r.Method+" "+r.URL.Path+")")
+}
+
+// MethodNotAllowed is the router's answer to a method the path does not
+// take. allow lists the methods it does take, for the Allow header.
+func MethodNotAllowed(w http.ResponseWriter, r *http.Request, allow []string) {
+	if len(allow) > 0 {
+		w.Header().Set("Allow", strings.Join(allow, ", "))
+	}
+	Error(w, r, http.StatusMethodNotAllowed, "invalid_request_error", "method_not_allowed",
+		r.Method+" is not allowed on "+r.URL.Path)
+}
+
+// Timeout is the answer when a request runs past its time limit before
+// anything was written.
+func Timeout(w http.ResponseWriter, r *http.Request) {
+	Error(w, r, http.StatusGatewayTimeout, "api_error", "timeout", "the request ran past its time limit")
 }
 
 func InternalError(w http.ResponseWriter, r *http.Request) {

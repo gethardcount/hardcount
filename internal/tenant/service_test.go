@@ -50,12 +50,12 @@ func (m *memoryStore) Get(_ context.Context, id string) (domain.Tenant, error) {
 	return t, nil
 }
 
-func (m *memoryStore) List(_ context.Context, _ ListFilter) ([]domain.Tenant, error) {
+func (m *memoryStore) List(_ context.Context, _ ListFilter) ([]domain.Tenant, int, error) {
 	var result []domain.Tenant
 	for _, t := range m.tenants {
 		result = append(result, t)
 	}
-	return result, nil
+	return result, len(result), nil
 }
 
 func (m *memoryStore) UpdateStatus(_ context.Context, id string, status domain.TenantStatus) (domain.Tenant, error) {

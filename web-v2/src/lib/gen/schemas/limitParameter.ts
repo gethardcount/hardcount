@@ -7,9 +7,9 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
-import type { CheckPasswordResetToken422Reason } from './checkPasswordResetToken422Reason';
 
-export type CheckPasswordResetToken422 = {
-  valid: false;
-  reason: CheckPasswordResetToken422Reason;
-};
+/**
+ * Rows per page, from 1 to 100. Default 50. Any other value, or one
+ * that is not a whole number, is a 422 with `param: limit`.
+ */
+export type LimitParameter = number;

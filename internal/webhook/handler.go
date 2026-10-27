@@ -42,6 +42,7 @@ func (h *Handler) Routes() chi.Router {
 	r.Post("/endpoints", h.createEndpoint)
 	r.Get("/endpoints", h.listEndpoints)
 	r.Get("/endpoints/stats", h.getEndpointStats)
+	r.Get("/endpoints/{id}", h.getEndpoint)
 	r.Patch("/endpoints/{id}", h.updateEndpoint)
 	r.Delete("/endpoints/{id}", h.deleteEndpoint)
 	r.Post("/endpoints/{id}/rotate-secret", h.rotateSecret)
@@ -84,18 +85,35 @@ func (h *Handler) StreamHandler() http.HandlerFunc {
 
 func (h *Handler) getEndpointStats(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
+	page, ok := respond.ParsePage(w, r)
+	if !ok {
+		return
+	}
 
+	// One row per endpoint, read whole and paged here like the endpoint
+	// list it sits beside.
 	stats, err := h.svc.GetEndpointStats(r.Context(), tenantID)
 	if err != nil {
 		respond.InternalError(w, r)
 		slog.ErrorContext(r.Context(), "get webhook endpoint stats", "error", err)
 		return
 	}
-	if stats == nil {
-		stats = []EndpointStats{}
-	}
+	respond.List(w, r, respond.Window(stats, page), len(stats))
+}
 
-	respond.JSON(w, r, http.StatusOK, map[string]any{"data": stats})
+// getEndpoint serves GET /endpoints/{id}: one endpoint, for its detail page.
+func (h *Handler) getEndpoint(w http.ResponseWriter, r *http.Request) {
+	ep, err := h.svc.GetEndpoint(r.Context(), auth.TenantID(r.Context()), chi.URLParam(r, "id"))
+	if errors.Is(err, errs.ErrNotFound) {
+		respond.NotFound(w, r, "webhook endpoint")
+		return
+	}
+	if err != nil {
+		respond.InternalError(w, r)
+		slog.ErrorContext(r.Context(), "get webhook endpoint", "error", err)
+		return
+	}
+	respond.JSON(w, r, http.StatusOK, ep)
 }
 
 func (h *Handler) createEndpoint(w http.ResponseWriter, r *http.Request) {
@@ -124,18 +142,20 @@ func (h *Handler) createEndpoint(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) listEndpoints(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
+	page, ok := respond.ParsePage(w, r)
+	if !ok {
+		return
+	}
 
+	// A tenant's endpoints are read whole (every dispatch reads the same
+	// list) and paged here.
 	endpoints, err := h.svc.ListEndpoints(r.Context(), tenantID)
 	if err != nil {
 		respond.InternalError(w, r)
 		slog.ErrorContext(r.Context(), "list webhook endpoints", "error", err)
 		return
 	}
-	if endpoints == nil {
-		endpoints = []domain.WebhookEndpoint{}
-	}
-
-	respond.JSON(w, r, http.StatusOK, map[string]any{"data": endpoints})
+	respond.List(w, r, respond.Window(endpoints, page), len(endpoints))
 }
 
 func (h *Handler) deleteEndpoint(w http.ResponseWriter, r *http.Request) {
@@ -220,18 +240,18 @@ func (h *Handler) rotateSecret(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) listEvents(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
+	page, ok := respond.ParsePage(w, r)
+	if !ok {
+		return
+	}
 
-	events, err := h.svc.ListEvents(r.Context(), tenantID, 50)
+	events, total, err := h.svc.ListEvents(r.Context(), tenantID, page.Limit, page.Offset)
 	if err != nil {
 		respond.InternalError(w, r)
 		slog.ErrorContext(r.Context(), "list webhook events", "error", err)
 		return
 	}
-	if events == nil {
-		events = []domain.WebhookEvent{}
-	}
-
-	respond.JSON(w, r, http.StatusOK, map[string]any{"data": events})
+	respond.List(w, r, events, total)
 }
 
 // replayEventV2 is the Week 6 dashboard-facing replay handler. Returns
@@ -288,14 +308,18 @@ type EndpointDeliveryView struct {
 }
 
 // listEndpointDeliveries serves GET /endpoints/{id}/deliveries — the
-// endpoint drill-down. The endpoint itself rides along so a direct URL
-// load of the detail page needs one request, and a deleted endpoint 404s
-// instead of rendering an empty-but-healthy-looking history.
+// endpoint drill-down, one page of its deliveries. A deleted endpoint 404s
+// instead of rendering an empty-but-healthy-looking history; the endpoint
+// itself is GET /endpoints/{id}.
 func (h *Handler) listEndpointDeliveries(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	endpointID := chi.URLParam(r, "id")
+	page, ok := respond.ParsePage(w, r)
+	if !ok {
+		return
+	}
 
-	ep, deliveries, err := h.svc.ListEndpointDeliveries(r.Context(), tenantID, endpointID, 50)
+	deliveries, total, err := h.svc.ListEndpointDeliveries(r.Context(), tenantID, endpointID, page.Limit, page.Offset)
 	if errors.Is(err, errs.ErrNotFound) {
 		respond.NotFound(w, r, "webhook endpoint")
 		return
@@ -325,10 +349,7 @@ func (h *Handler) listEndpointDeliveries(w http.ResponseWriter, r *http.Request)
 		})
 	}
 
-	respond.JSON(w, r, http.StatusOK, map[string]any{
-		"endpoint": ep,
-		"data":     out,
-	})
+	respond.List(w, r, out, total)
 }
 
 // replayDelivery serves POST /endpoints/{id}/deliveries/{deliveryID}/replay

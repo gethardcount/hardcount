@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { test, expect, type Locator, type Page } from '@playwright/test'
-import { api, uniq } from './fixtures/api'
+import { api, apiListAll, uniq } from './fixtures/api'
 import { createCustomer, invoicesFor, waitForClockReady, type Customer, type Plan, type Subscription, type TestClock } from './fixtures/seed'
 
 // Screenshots of the activity cards, for a person to compare before and after
@@ -105,8 +105,8 @@ function subscribe(customerId: string, planId: string, extra: Record<string, unk
 // so the shots show what happened to each one.
 async function waitForEmailsSent(customerId: string) {
   await expect.poll(async () => {
-    const res = await api<{ sent_emails: { status: string }[] }>('GET', `/customers/${customerId}/sent-emails`)
-    return res.sent_emails.filter(e => e.status === 'pending').length
+    const emails = await apiListAll<{ status: string }>(`/customers/${customerId}/sent-emails`)
+    return emails.filter(e => e.status === 'pending').length
   }, { message: 'no email is still queued', timeout: 60_000 }).toBe(0)
 }
 
