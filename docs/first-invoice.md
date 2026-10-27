@@ -275,7 +275,7 @@ variable into the JSON for you.
    curl -s "$VELOX/v1/invoices/$INVOICE_ID" \
      -H "Authorization: Bearer $VELOX_KEY" \
      | jq '{number: .invoice.invoice_number, status: .invoice.status,
-            total_cents: .invoice.total_cents,
+            total_cents: .invoice.total_amount_cents,
             lines: [.line_items[] | {description, amount_cents}]}'
    ```
 
