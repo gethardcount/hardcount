@@ -447,6 +447,7 @@ export * from './subscriptionItemProration';
 export * from './subscriptionItemProrationType';
 export * from './subscriptionItemThreshold';
 export * from './subscriptionNewPeriodInvoice';
+export * from './subscriptionNewPeriodInvoiceStatus';
 export * from './subscriptionPauseCollection';
 export * from './subscriptionPauseCollectionBehavior';
 export * from './subscriptionPauseCollectionSetBy';

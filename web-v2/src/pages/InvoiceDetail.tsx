@@ -1519,6 +1519,7 @@ export default function InvoiceDetailPage() {
             {finalizeConfirmLines({
               hasCard: paymentMethodsList === undefined ? undefined : hasPaymentMethod,
               hasEmail: !!customer?.email,
+              canEmailSetupLinks: whoami?.can_email_setup_links,
               taxAtFinalize: !invoice.billing_reason || invoice.billing_reason === 'manual',
             }).map(line => <p key={line}>{line}</p>)}
           </div>

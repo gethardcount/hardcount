@@ -1109,11 +1109,14 @@ type ItemChangeResult struct {
 
 // NewPeriodInvoice names the invoice a cross-interval swap created for the
 // new period, and its total, so the caller can say what was billed.
+// Status is draft when the swap wrote it as one (collection paused, or tax
+// not calculated yet): its total may still change before it is finalized.
 type NewPeriodInvoice struct {
-	ID               string `json:"id"`
-	InvoiceNumber    string `json:"invoice_number"`
-	TotalAmountCents int64  `json:"total_amount_cents"`
-	Currency         string `json:"currency"`
+	ID               string               `json:"id"`
+	InvoiceNumber    string               `json:"invoice_number"`
+	Status           domain.InvoiceStatus `json:"status"`
+	TotalAmountCents int64                `json:"total_amount_cents"`
+	Currency         string               `json:"currency"`
 }
 
 // itemChangeBase is a subscription and one of its items, read together under
@@ -1132,17 +1135,22 @@ type ProrationDetail struct {
 	// or the whole credit for unused time ("credit" and "adjustment"). The
 	// pre-tax net delta is derivable from the invoice itself
 	// (subtotal_cents).
-	AmountCents int64  `json:"amount_cents"`
-	Type        string `json:"type"` // "invoice", "credit" (some of it reached the balance), or "adjustment" (all of it reduced open invoices, ADR-050)
-	InvoiceID   string `json:"invoice_id,omitempty"`
-	// CreditedToBalanceCents and ReducedOpenInvoicesCents split a credit
-	// for unused time by where each share went (#1280): to the customer's
-	// balance (a paid invoice, or one whose charge is in flight, which
-	// Issue credits once the charge settles), or off what an open invoice
-	// still asks for. They add up to AmountCents for "credit" and
-	// "adjustment", and are 0 for "invoice". Reporting only.
+	AmountCents int64 `json:"amount_cents"`
+	// Type is "invoice"; "credit" when some of the credit went to the
+	// balance, or when no invoice had room for any of it (AmountCents 0); or
+	// "adjustment" when none of it went to the balance (ADR-050).
+	Type      string `json:"type"`
+	InvoiceID string `json:"invoice_id,omitempty"`
+	// CreditedToBalanceCents, ReducedOpenInvoicesCents and
+	// HeldOnDraftInvoicesCents split a credit for unused time by where its
+	// money goes (#1280), summed from the shares' parts (domain.CreditShare):
+	// to the customer's balance, off what open invoices still ask for, or
+	// held on draft invoices until they are finalized. They add up to
+	// AmountCents for "credit" and "adjustment", and are 0 for "invoice".
+	// Reporting only.
 	CreditedToBalanceCents   int64 `json:"credited_to_balance_cents"`
 	ReducedOpenInvoicesCents int64 `json:"reduced_open_invoices_cents"`
+	HeldOnDraftInvoicesCents int64 `json:"held_on_draft_invoices_cents"`
 	// TaxProvider / TaxCalculationID are internal (not API surface) — they
 	// route the post-commit Stripe Tax transaction creation up to the atomic
 	// caller, which can only commit after its tx is durable. Empty for
@@ -1962,6 +1970,7 @@ func (s *Service) applyCrossIntervalPlanSwapTx(
 			res.NewPeriodInvoice = &NewPeriodInvoice{
 				ID:               inv.ID,
 				InvoiceNumber:    inv.InvoiceNumber,
+				Status:           inv.Status,
 				TotalAmountCents: inv.TotalAmountCents,
 				Currency:         inv.Currency,
 			}

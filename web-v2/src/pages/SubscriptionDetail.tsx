@@ -1378,7 +1378,7 @@ export default function SubscriptionDetailPage() {
               const t = planChangeToast(
                 res.item,
                 res.item?.pending_plan_effective_at ? formatDate(res.item.pending_plan_effective_at) : undefined,
-                np ? { invoiceNumber: np.invoice_number, amountLabel: formatCents(np.total_amount_cents, np.currency) } : undefined,
+                np ? { invoiceNumber: np.invoice_number, amountLabel: formatCents(np.total_amount_cents, np.currency), draft: np.status === 'draft' } : undefined,
               )
               toast.success(t.title, t.description ? { description: t.description } : undefined)
             }

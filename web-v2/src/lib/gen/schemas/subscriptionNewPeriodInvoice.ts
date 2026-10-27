@@ -7,6 +7,7 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
+import type { SubscriptionNewPeriodInvoiceStatus } from './subscriptionNewPeriodInvoiceStatus';
 
 /**
  * The invoice an immediate change to a plan with another billing
@@ -15,7 +16,16 @@
 export interface SubscriptionNewPeriodInvoice {
   id: string;
   invoice_number: string;
-  /** The invoice total when the change created it, tax included. */
+  /**
+     * `draft` when the invoice was not issued yet: collection is
+     * paused, or its tax could not be calculated yet. Its total may
+     * then change before it is finalized.
+     */
+  status: SubscriptionNewPeriodInvoiceStatus;
+  /**
+     * The invoice total when the change created it. On a `draft`
+     * whose tax could not be calculated yet, it has no tax in it.
+     */
   total_amount_cents: number;
   currency: string;
 }

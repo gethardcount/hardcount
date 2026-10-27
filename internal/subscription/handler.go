@@ -2718,9 +2718,11 @@ func unpaidSourceBlocksCharge(ctx context.Context, sub domain.Subscription, spec
 // crediting rule (domain.AllocateUnusedCredit, ADR-118): the invoices that
 // charged this item, newest first, each capped at its room. A paid invoice's
 // share goes to the customer's balance; an unpaid one's reduces what it still
-// asks for (ADR-050: never a refundable credit for money not paid); an
+// asks for (ADR-050: never a refundable credit for money not paid), and any
+// part above that hands back the customer credits applied to it; an
 // in-flight one's is held by Issue until the charge settles (ADR-059) and
-// counts as a balance credit, the usual outcome. Each
+// counts as a balance credit, the usual outcome; a draft's is held until the
+// draft is finalized. Each
 // share is a tax-reversing adjustment credit note on its own invoice (ADR-048).
 //
 // Read-only: it records the shares on the detail. The atomic caller writes
@@ -2768,31 +2770,28 @@ func (h *Handler) creditUnusedTime(ctx context.Context, tenantID string, sub dom
 			WithCode("funding_invoice_tax_pending")
 	}
 
-	// "credit" when any share goes to the balance (paid, or a charge in
-	// flight), "adjustment" when every share only reduces what an open invoice
-	// asks for.
-	detail.Type = "adjustment"
-	var gross, toBalance, offOpen int64
+	// Each share says where its money goes (domain.CreditShare): to the
+	// balance, off what an open invoice asks for, or held on a draft. "credit"
+	// when any of it goes to the balance, "adjustment" when none does.
+	var gross, toBalance, offOpen, held int64
 	for _, sh := range shares {
 		var ok bool
 		if gross, ok = money.Add(gross, sh.GrossCents); !ok {
 			return nil, fmt.Errorf("credit for unused time: sum of credit shares: %w", domain.ErrAmountOverflow)
 		}
-		part := &offOpen
-		if sh.ToBalance {
-			detail.Type = "credit"
-			part = &toBalance
-		}
-		if *part, ok = money.Add(*part, sh.GrossCents); !ok {
-			return nil, fmt.Errorf("credit for unused time: sum of credit shares: %w", domain.ErrAmountOverflow)
-		}
+		// A share's parts add up to its gross, so these sums stay within it.
+		toBalance += sh.BalanceCents
+		offOpen += sh.DueCents
+		held += sh.HeldCents
 	}
-	if len(shares) == 0 {
-		detail.Type = "credit" // nothing placed: the invoices had no room left
+	detail.Type = "adjustment"
+	if toBalance > 0 || len(shares) == 0 {
+		detail.Type = "credit" // len 0: nothing placed, the invoices had no room left
 	}
 	detail.AmountCents = gross
 	detail.CreditedToBalanceCents = toBalance
 	detail.ReducedOpenInvoicesCents = offOpen
+	detail.HeldOnDraftInvoicesCents = held
 	detail.UncreditedCents = unplaced
 	detail.ClawbackPieces = shares
 	detail.ClawbackReason = clawbackReason(spec.changeType)
@@ -3042,15 +3041,20 @@ func addProrationMeta(payload map[string]any, detail *ProrationDetail, currency 
 	if detail.InvoiceID != "" {
 		payload["proration_invoice_id"] = detail.InvoiceID
 	}
-	// The part that reduced open invoices rather than reaching the balance.
-	// The activity line links the invoice when there is one (ADR-128 rule 8),
-	// and a credit that went both ways shows both parts.
-	var adjustedCents int64
-	var adjusted []string
+	// The parts that did not reach the balance: what came off open invoices,
+	// and what is held on drafts until they are finalized. The activity line
+	// links the invoice when there is one (ADR-128 rule 8), and shows each
+	// part of a credit that went more than one way.
+	var adjustedCents, heldCents int64
+	var adjusted, heldOn []string
 	for _, p := range detail.ClawbackPieces {
-		if !p.ToBalance {
-			adjustedCents += p.GrossCents
+		if p.DueCents > 0 {
+			adjustedCents += p.DueCents
 			adjusted = append(adjusted, p.InvoiceID)
+		}
+		if p.HeldCents > 0 {
+			heldCents += p.HeldCents
+			heldOn = append(heldOn, p.InvoiceID)
 		}
 	}
 	switch {
@@ -3059,8 +3063,17 @@ func addProrationMeta(payload map[string]any, detail *ProrationDetail, currency 
 	case len(adjusted) > 1:
 		payload["adjusted_invoice_count"] = len(adjusted)
 	}
-	if detail.Type == "credit" && adjustedCents > 0 {
+	if adjustedCents > 0 {
 		payload["adjusted_cents"] = adjustedCents
+	}
+	switch {
+	case len(heldOn) == 1:
+		payload["held_invoice_id"] = heldOn[0]
+	case len(heldOn) > 1:
+		payload["held_invoice_count"] = len(heldOn)
+	}
+	if heldCents > 0 {
+		payload["held_cents"] = heldCents
 	}
 	// Unused time the invoices had no room left for: not owed, recorded so the
 	// line can say the credit was limited (ADR-118 amendment 2026-10-22).
@@ -3115,7 +3128,7 @@ func (h *Handler) invoiceNumbers(ctx context.Context, tenantID string, entries [
 	}
 	tried := map[string]bool{}
 	for _, e := range entries {
-		for _, key := range []string{"proration_invoice_id", "adjusted_invoice_id", "invoice_id"} {
+		for _, key := range []string{"proration_invoice_id", "adjusted_invoice_id", "held_invoice_id", "invoice_id"} {
 			id := metaString(e.Metadata, key)
 			if id == "" || tried[id] {
 				continue

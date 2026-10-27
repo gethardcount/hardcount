@@ -36,7 +36,7 @@ func TestAddProrationMeta_StampsOutcome(t *testing.T) {
 	})
 	t.Run("adjustment names the open invoice it reduced", func(t *testing.T) {
 		p := map[string]any{}
-		addProrationMeta(p, &ProrationDetail{Type: "adjustment", AmountCents: 5444, ClawbackPieces: []domain.CreditShare{{InvoiceID: "inv_src", GrossCents: 5444}}}, "USD")
+		addProrationMeta(p, &ProrationDetail{Type: "adjustment", AmountCents: 5444, ClawbackPieces: []domain.CreditShare{{InvoiceID: "inv_src", GrossCents: 5444, DueCents: 5444}}}, "USD")
 		if p["adjusted_invoice_id"] != "inv_src" {
 			t.Errorf("adjustment must stamp adjusted_invoice_id: %+v", p)
 		}
@@ -47,7 +47,7 @@ func TestAddProrationMeta_StampsOutcome(t *testing.T) {
 	t.Run("a mixed credit records the open-invoice part", func(t *testing.T) {
 		p := map[string]any{}
 		addProrationMeta(p, &ProrationDetail{Type: "credit", AmountCents: 1667, ClawbackPieces: []domain.CreditShare{
-			{InvoiceID: "inv_up", GrossCents: 1500}, {InvoiceID: "inv_base", GrossCents: 167, ToBalance: true}}}, "USD")
+			{InvoiceID: "inv_up", GrossCents: 1500, DueCents: 1500}, {InvoiceID: "inv_base", GrossCents: 167, ToBalance: true, BalanceCents: 167}}}, "USD")
 		if p["adjusted_invoice_id"] != "inv_up" || p["adjusted_cents"] != int64(1500) {
 			t.Errorf("mixed credit must stamp the unpaid invoice and its 1500c: %+v", p)
 		}
@@ -55,7 +55,7 @@ func TestAddProrationMeta_StampsOutcome(t *testing.T) {
 	t.Run("a credit wholly to the balance records no adjustment", func(t *testing.T) {
 		p := map[string]any{}
 		addProrationMeta(p, &ProrationDetail{Type: "credit", AmountCents: 1667, ClawbackPieces: []domain.CreditShare{
-			{InvoiceID: "inv_up", GrossCents: 1500, ToBalance: true}, {InvoiceID: "inv_base", GrossCents: 167, ToBalance: true}}}, "USD")
+			{InvoiceID: "inv_up", GrossCents: 1500, ToBalance: true, BalanceCents: 1500}, {InvoiceID: "inv_base", GrossCents: 167, ToBalance: true, BalanceCents: 167}}}, "USD")
 		if _, has := p["adjusted_cents"]; has {
 			t.Errorf("all-balance credit must not stamp adjusted_cents: %+v", p)
 		}
@@ -63,10 +63,34 @@ func TestAddProrationMeta_StampsOutcome(t *testing.T) {
 			t.Errorf("all-balance credit must not stamp adjusted_invoice_id: %+v", p)
 		}
 	})
+	// An open invoice mostly paid by customer credits: only what was due
+	// came off it; the rest went back to the balance.
+	t.Run("an open invoice records only what came off its amount due", func(t *testing.T) {
+		p := map[string]any{}
+		addProrationMeta(p, &ProrationDetail{Type: "credit", AmountCents: 1333, ClawbackPieces: []domain.CreditShare{
+			{InvoiceID: "inv_base", GrossCents: 1333, BalanceCents: 833, DueCents: 500}}}, "USD")
+		if p["adjusted_invoice_id"] != "inv_base" || p["adjusted_cents"] != int64(500) {
+			t.Errorf("must stamp the 500c that came off the invoice: %+v", p)
+		}
+	})
+	t.Run("a share held on a draft records the draft", func(t *testing.T) {
+		p := map[string]any{}
+		addProrationMeta(p, &ProrationDetail{Type: "adjustment", AmountCents: 1419, ClawbackPieces: []domain.CreditShare{
+			{InvoiceID: "inv_draft", GrossCents: 1419, HeldCents: 1419}}}, "USD")
+		if p["held_invoice_id"] != "inv_draft" || p["held_cents"] != int64(1419) {
+			t.Errorf("must stamp the draft and its 1419c: %+v", p)
+		}
+		if _, has := p["adjusted_cents"]; has {
+			t.Errorf("a held share reduced no open invoice: %+v", p)
+		}
+		if _, has := p["adjusted_invoice_id"]; has {
+			t.Errorf("a held share reduced no open invoice: %+v", p)
+		}
+	})
 	t.Run("two open invoices: no single invoice is named", func(t *testing.T) {
 		p := map[string]any{}
 		addProrationMeta(p, &ProrationDetail{Type: "adjustment", AmountCents: 2000, ClawbackPieces: []domain.CreditShare{
-			{InvoiceID: "inv_u2", GrossCents: 1500}, {InvoiceID: "inv_u1", GrossCents: 500}}}, "USD")
+			{InvoiceID: "inv_u2", GrossCents: 1500, DueCents: 1500}, {InvoiceID: "inv_u1", GrossCents: 500, DueCents: 500}}}, "USD")
 		if _, has := p["adjusted_invoice_id"]; has || p["adjusted_invoice_count"] != 2 {
 			t.Errorf("two open invoices must stamp a count, not one id: %+v", p)
 		}

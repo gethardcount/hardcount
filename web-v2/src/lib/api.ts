@@ -706,16 +706,17 @@ export interface ProrationDetail {
   new_plan_id: string
   proration_factor: number
   amount_cents: number
-  // 'invoice' = a proration charge invoice; 'credit' = a balance credit;
-  // 'adjustment' = reduced an unpaid open invoice's amount due (ADR-050
-  // unpaid-source path — NOT a refundable balance credit).
+  // 'invoice' = a proration charge invoice; 'credit' = some of the credit
+  // went to the balance, or none could be placed (amount 0); 'adjustment' =
+  // none of it went to the balance (ADR-050: NOT a refundable credit).
   type: 'invoice' | 'credit' | 'adjustment'
   invoice_id?: string
-  // Where a credit for unused time went: to the customer's balance, or off
-  // what open invoices ask for. They add up to amount_cents for 'credit'
-  // and 'adjustment'; 0 for 'invoice'.
+  // Where a credit for unused time went: to the customer's balance, off what
+  // open invoices ask for, or held on drafts until they are finalized. They
+  // add up to amount_cents for 'credit' and 'adjustment'; 0 for 'invoice'.
   credited_to_balance_cents: number
   reduced_open_invoices_cents: number
+  held_on_draft_invoices_cents: number
 }
 
 // The invoice a change to a plan with another billing interval created for
@@ -723,6 +724,9 @@ export interface ProrationDetail {
 export interface NewPeriodInvoice {
   id: string
   invoice_number: string
+  // 'draft' when not issued yet (collection paused, or tax not calculated):
+  // its total may still change.
+  status: 'draft' | 'finalized'
   total_amount_cents: number
   currency: string
 }

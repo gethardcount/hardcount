@@ -20,21 +20,24 @@ export interface SubscriptionItemProration {
   /**
      * Gross amount, tax included: the invoice total (`invoice`), or
      * the whole credit for unused time (`credit` and `adjustment`).
-     * `credited_to_balance_cents` and `reduced_open_invoices_cents`
-     * say where the credit went.
+     * `credited_to_balance_cents`, `reduced_open_invoices_cents` and
+     * `held_on_draft_invoices_cents` say where the credit went.
      */
   amount_cents: number;
   /**
-     * `invoice`: a proration invoice was created. `credit`: some or
-     * all of the credit went to the customer's balance. `adjustment`:
-     * all of it reduced the amount due on open invoices.
+     * `invoice`: a proration invoice was created. `credit`: some of
+     * the credit went to the customer's balance, or no invoice had
+     * room for any of it (`amount_cents` is then 0). `adjustment`:
+     * none of it went to the balance.
      */
   type: SubscriptionItemProrationType;
   /** The proration invoice. Present when `type` is `invoice`. */
   invoice_id?: string;
   /**
      * The part of the credit added to the customer's balance, tax
-     * included: shares on paid invoices. A share on an invoice whose
+     * included. On a paid invoice, all of its part. On an open invoice
+     * paid partly with credits, the part above what it still asks for:
+     * those credits go back to the balance. A part on an invoice whose
      * payment is still processing counts here; if that payment fails,
      * it reduces the invoice instead. 0 when `type` is `invoice`.
      */
@@ -44,4 +47,12 @@ export interface SubscriptionItemProration {
      * invoices, tax included. 0 when `type` is `invoice`.
      */
   reduced_open_invoices_cents: number;
+  /**
+     * The part of the credit on draft invoices, tax included. It is
+     * held until the draft is finalized, then applied by how the
+     * invoice stands: if paid, to the customer's balance; if still
+     * open, off what it asks for first, as above. 0 when `type` is
+     * `invoice`.
+     */
+  held_on_draft_invoices_cents: number;
 }

@@ -100,19 +100,34 @@ export function stripePaymentUrl(paymentIntentId: string, livemode: boolean): st
 //   - hasCard: whether the customer has a default card; undefined while the
 //     page has not loaded it.
 //   - hasEmail: whether the customer has an email address.
+//   - canEmailSetupLinks: whoami.can_email_setup_links. The no-card email
+//     needs SMTP and PAYMENT_UPDATE_URL; without them nothing is sent, so
+//     only true promises one.
 //   - taxAtFinalize: a manual invoice, whose tax is worked out at finalize.
-export function finalizeConfirmLines(o: { hasCard: boolean | undefined; hasEmail: boolean; taxAtFinalize: boolean }): string[] {
+export function finalizeConfirmLines(o: {
+  hasCard: boolean | undefined
+  hasEmail: boolean
+  canEmailSetupLinks: boolean | undefined
+  taxAtFinalize: boolean
+}): string[] {
   const lines = ["The invoice is issued. You can't edit it afterwards, and the only way to cancel it is to void it."]
   if (o.taxAtFinalize) lines.push('Tax is worked out now, so the total may change.')
   const collect = "Velox then collects payment right away. It uses the customer's credit balance first."
+  const canEmail = o.canEmailSetupLinks === true
   if (o.hasCard === true) {
     lines.push(`${collect} If anything is left to pay, it charges their card on file.`)
   } else if (o.hasCard === false) {
-    lines.push(o.hasEmail
-      ? `${collect} The customer has no card on file, so if anything is left to pay, Velox emails them a link to add one.`
-      : `${collect} The customer has no card on file and no email address, so nothing is charged.`)
-  } else {
+    if (!o.hasEmail) {
+      lines.push(`${collect} The customer has no card on file and no email address, so nothing is charged.`)
+    } else if (canEmail) {
+      lines.push(`${collect} The customer has no card on file, so if anything is left to pay, Velox emails them a link to add one.`)
+    } else {
+      lines.push(`${collect} The customer has no card on file and this server can't email setup links, so if anything is left to pay, copy a setup link from the customer page and send it to them.`)
+    }
+  } else if (canEmail) {
     lines.push(`${collect} If anything is left to pay, it charges their card on file, or emails them a link to add one.`)
+  } else {
+    lines.push(`${collect} If anything is left to pay, it charges their card on file if they have one.`)
   }
   return lines
 }

@@ -58,12 +58,16 @@ export function cancelImmediatelyText(status: string): string {
 // change (pending_plan_id set) waits for the next period. A change now to a
 // plan with another billing interval starts a new period and invoices it at
 // once; newPeriod names that invoice and its total, as the server returned
-// them (new_period_invoice, #1280).
+// them (new_period_invoice, #1280). A draft (collection paused, or tax not
+// calculated yet) may still change, so its total is not given.
 export function planChangeToast(
   item: { pending_plan_id?: string | null },
   effectiveLabel: string | undefined,
-  newPeriod?: { invoiceNumber: string; amountLabel: string },
+  newPeriod?: { invoiceNumber: string; amountLabel: string; draft?: boolean },
 ): ToastCopy {
+  if (newPeriod?.draft) {
+    return { title: 'Plan changed', description: `A new billing period started. Invoice ${newPeriod.invoiceNumber} was created for it as a draft; its total may change before it is finalized.` }
+  }
   if (newPeriod) {
     return { title: 'Plan changed', description: `A new billing period started. Invoice ${newPeriod.invoiceNumber} for ${newPeriod.amountLabel} was created for it.` }
   }

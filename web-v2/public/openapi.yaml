@@ -2591,7 +2591,7 @@ components:
 
     SubscriptionItemProration:
       type: object
-      required: [old_plan_id, new_plan_id, proration_factor, amount_cents, type, credited_to_balance_cents, reduced_open_invoices_cents]
+      required: [old_plan_id, new_plan_id, proration_factor, amount_cents, type, credited_to_balance_cents, reduced_open_invoices_cents, held_on_draft_invoices_cents]
       description: What Velox did to settle the rest of the period for an item change.
       properties:
         old_plan_id:
@@ -2608,15 +2608,16 @@ components:
           description: |
             Gross amount, tax included: the invoice total (`invoice`), or
             the whole credit for unused time (`credit` and `adjustment`).
-            `credited_to_balance_cents` and `reduced_open_invoices_cents`
-            say where the credit went.
+            `credited_to_balance_cents`, `reduced_open_invoices_cents` and
+            `held_on_draft_invoices_cents` say where the credit went.
         type:
           type: string
           enum: [invoice, credit, adjustment]
           description: |
-            `invoice`: a proration invoice was created. `credit`: some or
-            all of the credit went to the customer's balance. `adjustment`:
-            all of it reduced the amount due on open invoices.
+            `invoice`: a proration invoice was created. `credit`: some of
+            the credit went to the customer's balance, or no invoice had
+            room for any of it (`amount_cents` is then 0). `adjustment`:
+            none of it went to the balance.
         invoice_id:
           type: string
           description: The proration invoice. Present when `type` is `invoice`.
@@ -2625,7 +2626,9 @@ components:
           format: int64
           description: |
             The part of the credit added to the customer's balance, tax
-            included: shares on paid invoices. A share on an invoice whose
+            included. On a paid invoice, all of its part. On an open invoice
+            paid partly with credits, the part above what it still asks for:
+            those credits go back to the balance. A part on an invoice whose
             payment is still processing counts here; if that payment fails,
             it reduces the invoice instead. 0 when `type` is `invoice`.
         reduced_open_invoices_cents:
@@ -2634,10 +2637,19 @@ components:
           description: |
             The part of the credit taken off the amount due on open
             invoices, tax included. 0 when `type` is `invoice`.
+        held_on_draft_invoices_cents:
+          type: integer
+          format: int64
+          description: |
+            The part of the credit on draft invoices, tax included. It is
+            held until the draft is finalized, then applied by how the
+            invoice stands: if paid, to the customer's balance; if still
+            open, off what it asks for first, as above. 0 when `type` is
+            `invoice`.
 
     SubscriptionNewPeriodInvoice:
       type: object
-      required: [id, invoice_number, total_amount_cents, currency]
+      required: [id, invoice_number, status, total_amount_cents, currency]
       description: |
         The invoice an immediate change to a plan with another billing
         interval created for the new period it starts.
@@ -2646,10 +2658,19 @@ components:
           type: string
         invoice_number:
           type: string
+        status:
+          type: string
+          enum: [draft, finalized]
+          description: |
+            `draft` when the invoice was not issued yet: collection is
+            paused, or its tax could not be calculated yet. Its total may
+            then change before it is finalized.
         total_amount_cents:
           type: integer
           format: int64
-          description: The invoice total when the change created it, tax included.
+          description: |
+            The invoice total when the change created it. On a `draft`
+            whose tax could not be calculated yet, it has no tax in it.
         currency:
           type: string
 
