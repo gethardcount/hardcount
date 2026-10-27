@@ -124,7 +124,10 @@ rounded to whole days from the period start, then subtracted
 (`emitBaseSegmentLine` in `internal/billing/engine.go`). So a period's
 segments always add up to the period. Rounding each segment on its own
 could bill 29 or 31 days of a 30-day period (#1274, fixed 2026-10-28). An
-immediate cancel's final invoice uses the same rule.
+immediate cancel's final invoice uses the same rule. The two rules round
+from different ends of the period, so for the same change instant they can
+count one day apart: at an exact half day, or in a period that crosses a
+daylight-saving change in the tenant's timezone.
 
 ### Tests
 

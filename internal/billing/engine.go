@@ -1335,8 +1335,10 @@ func (e *Engine) hydrateSegmentPlans(ctx context.Context, sub domain.Subscriptio
 // periodStart, then subtracted. Rounding the boundaries, not each segment's
 // own length, makes a period's segments add up to the period whatever the
 // change instants (#1274): rounded one by one, two mid-day changes billed 29
-// or 31 days of a 30-day period. It is the in-advance proration's rule too,
-// which rounds the change instant (remainingPeriodRatio).
+// or 31 days of a 30-day period, and so did one change at an exact half day
+// or in a period that crosses a DST change. The in-advance proration
+// (remainingPeriodRatio) rounds from the period end instead, so the two can
+// count a day apart for the same change instant in those same cases.
 func emitBaseSegmentLine(seg baseSegment, plan domain.Plan, periodStart time.Time, periodDays int, currency string, loc *time.Location, billingTime domain.SubscriptionBillingTime, lineItems *[]domain.InvoiceLineItem, subtotal *int64) error {
 	segDays := roundDays(seg.end.Sub(periodStart)) - roundDays(seg.start.Sub(periodStart))
 	if segDays <= 0 {

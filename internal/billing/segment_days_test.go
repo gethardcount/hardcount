@@ -78,3 +78,79 @@ func TestEmitBaseSegmentLine_DaysAddUpToThePeriod(t *testing.T) {
 
 // proratedDays reads the days from a base line's "prorated N/M days" note.
 var proratedDays = regexp.MustCompile(`prorated (\d+)/\d+ days`)
+
+// TestEmitBaseSegmentLine_OneChangeAddsUpToThePeriod (#1274): one change was
+// enough for the per-segment rounding to miss the period by a day, when the
+// change falls at an exact half day or the period crosses a daylight-saving
+// change in the tenant's timezone (its length is then not a whole number of
+// 24-hour days). The two segments now add up to the period.
+//
+// Mutation seam: round each segment's own length again and every case fails.
+func TestEmitBaseSegmentLine_OneChangeAddsUpToThePeriod(t *testing.T) {
+	ny, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatalf("load location: %v", err)
+	}
+	plan := domain.Plan{Name: "Seats", BaseAmountCents: 3000, BillingInterval: domain.BillingMonthly, BaseBillTiming: domain.BillInArrears}
+
+	cases := []struct {
+		name       string
+		loc        *time.Location
+		start, end time.Time
+		change     time.Time
+		wantDays   []int // per segment; they add up to the period's days
+		wantCents  int64 // 3000c x 1 seat, then x 2, each prorated to the nearest cent
+	}{
+		// Rounded alone: 11 + 20 = 31 days of 30.
+		{"exact half day, UTC", time.UTC,
+			time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC),
+			time.Date(2026, 4, 11, 12, 0, 0, 0, time.UTC), []int{11, 19}, 1100 + 3800},
+		// Spring forward on Mar 8. Rounded alone: 2 + 28 = 30 days of 31.
+		{"before the spring-forward change", ny,
+			time.Date(2026, 3, 1, 0, 0, 0, 0, ny), time.Date(2026, 4, 1, 0, 0, 0, 0, ny),
+			time.Date(2026, 3, 3, 11, 30, 0, 0, ny), []int{2, 29}, 194 + 5613},
+		// Rounded alone: 19 + 11 = 30 days of 31.
+		{"after the spring-forward change", ny,
+			time.Date(2026, 3, 1, 0, 0, 0, 0, ny), time.Date(2026, 4, 1, 0, 0, 0, 0, ny),
+			time.Date(2026, 3, 20, 12, 30, 0, 0, ny), []int{19, 12}, 1839 + 2323},
+		// Fall back on Nov 1. Rounded alone: 10 + 21 = 31 days of 30.
+		{"after the fall-back change", ny,
+			time.Date(2026, 11, 1, 0, 0, 0, 0, ny), time.Date(2026, 12, 1, 0, 0, 0, 0, ny),
+			time.Date(2026, 11, 10, 11, 30, 0, 0, ny), []int{10, 20}, 1000 + 4000},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			periodDays := roundDays(tc.end.Sub(tc.start))
+			if tc.wantDays[0]+tc.wantDays[1] != periodDays {
+				t.Fatalf("test case days add up to %d, want %d", tc.wantDays[0]+tc.wantDays[1], periodDays)
+			}
+			var lines []domain.InvoiceLineItem
+			var subtotal int64
+			segs := []baseSegment{
+				{start: tc.start, end: tc.change, quantity: 1},
+				{start: tc.change, end: tc.end, quantity: 2},
+			}
+			for i, seg := range segs {
+				if err := emitBaseSegmentLine(seg, plan, tc.start, periodDays, "USD", tc.loc, domain.BillingTimeCalendar, &lines, &subtotal); err != nil {
+					t.Fatalf("segment %d: %v", i, err)
+				}
+			}
+			if len(lines) != 2 {
+				t.Fatalf("got %d lines, want 2", len(lines))
+			}
+			for i, li := range lines {
+				m := proratedDays.FindStringSubmatch(li.Description)
+				if m == nil {
+					t.Fatalf("segment %d: no prorated days in %q", i, li.Description)
+				}
+				d, _ := strconv.Atoi(m[1])
+				if d != tc.wantDays[i] {
+					t.Errorf("segment %d: %d days (%q), want %d", i, d, li.Description, tc.wantDays[i])
+				}
+			}
+			if subtotal != tc.wantCents {
+				t.Errorf("subtotal %dc, want %dc", subtotal, tc.wantCents)
+			}
+		})
+	}
+}
