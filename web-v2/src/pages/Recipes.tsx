@@ -137,7 +137,7 @@ function RecipeCard({ recipe, onConfigure }: { recipe: RecipeListItem; onConfigu
 
         <div className="mt-5 flex items-center justify-between">
           <span className="text-xs text-muted-foreground">
-            {recipe.overridable.length} setting{recipe.overridable.length !== 1 ? 's' : ''} you can adjust
+            {recipe.overridable.length} setting{recipe.overridable.length !== 1 ? 's' : ''} {installed ? 'set at install' : 'you can adjust'}
           </span>
           <Button size="sm" variant={installed ? 'outline' : 'default'} onClick={onConfigure}>
             {installed ? 'View' : 'Configure'}

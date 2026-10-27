@@ -143,6 +143,7 @@ original text.
 
 ### Changed
 
+- **The audit row `subscription.net_negative_usage` names each meter by `event_name` (2026-10-27).** Its `meters` entries had `meter_key`, the old name of the meter's `event_name`.
 - **API callers: customer usage over a window you choose (`from` and `to`) no longer adds an "Estimate" line to `warnings` (2026-10-27).** `period.source: "explicit"` says the amounts are an estimate at each subscription's current prices, and count only active and trialing subscriptions; `warnings` holds only problems. On the customer page, the Activity card's 7, 30 and 90-day views and the Margin card say they are an estimate that leaves out canceled subscriptions, and the Activity card no longer shows "Usage may be incomplete" for them.
 - **The price override form lists the prices of the customer's own plans first (2026-10-27).**
 - **Breaking for webhook receivers: each event carries the resource it is about (2026-10-24, [#1377](https://github.com/getvelox/velox/pull/1377)).** `data` holds the invoice, subscription, customer, payment method, dunning run or credit balance as the API returns it, plus the few facts the resource lacks. Every event of a family carries the same resource. The API's payment-method rows now carry `customer_id`. A Stripe event that arrives after a card was removed in Velox no longer sends `payment_method.attached` or `payment_method.updated`. Resuming collection that is not paused, or clearing a cancel that is not scheduled, changes nothing and now sends no event; the clear also writes no audit log entry. See **Before upgrading** for each moved key.
@@ -229,6 +230,7 @@ original text.
 
 ### Fixed
 
+- **An installed recipe's card says its settings were set at install (2026-10-27).** It said "you can adjust", while they are fixed once installed.
 - **The Recipes page now says to edit an installed recipe's plan and prices on the plan's page (2026-10-27).** It sent you to the Pricing page, which no longer lists prices.
 - **The customer's Daily usage chart shows each axis label whole, and large numbers in short form, such as 180K (2026-10-27).** Long labels were cut off: 180,000 read "80000" and 0.00008 read "00008".
 - **The Edit plan dialog shows a used plan's own billing timing, and says before you save that a used plan billed in advance needs a base fee above 0 (2026-10-27).** It showed "At end of period" and "0 for no base fee", and Save failed. The API's refusal no longer tells you to change the timing, which is fixed.

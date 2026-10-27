@@ -488,6 +488,9 @@ test('install a recipe: the preview lists what it will create, the install creat
   await page.goto('/recipes')
   const installed = card(page, KEY)
   await expect(installed.getByText('Installed', { exact: true })).toBeVisible()
+  // The settings are fixed once installed, so the card no longer offers them.
+  const n = recipe.overridable.length
+  await expect(installed.getByText(`${n} setting${n !== 1 ? 's' : ''} set at install`, { exact: true })).toBeVisible()
   await installed.getByRole('button', { name: 'View' }).click()
   await expect(dialog.getByText('Installed with these settings', { exact: true })).toBeVisible()
   await expect(dialog.getByText("Set at install and fixed here. On the plan's page you can rename the plan and edit its prices. Its currency and plan ID cannot change.", { exact: true })).toBeVisible()

@@ -453,8 +453,8 @@ func quantityArrow(meta map[string]any, oldKey, newKey string) string {
 }
 
 // belowZeroMeters names each meter of a net-negative usage row with its
-// amount below zero: by the meter's name, which rows written before it was
-// recorded lack, so those show the key they have.
+// amount below zero: by the meter's name, or by its event_name when the row
+// has no name.
 func belowZeroMeters(meta map[string]any) []string {
 	var out []string
 	ms, _ := meta["meters"].([]any)
@@ -462,7 +462,7 @@ func belowZeroMeters(meta map[string]any) []string {
 		mm, _ := m.(map[string]any)
 		name := metaString(mm, "meter_name")
 		if name == "" {
-			name = metaString(mm, "meter_key")
+			name = metaString(mm, "event_name")
 		}
 		if qty := metaString(mm, "quantity"); name != "" && qty != "" {
 			out = append(out, name+" "+qty)

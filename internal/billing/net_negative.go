@@ -97,11 +97,11 @@ func (e *Engine) noteNetNegativeTx(ctx context.Context, tx *sql.Tx, sub domain.S
 	meters := make([]map[string]any, 0, len(ids))
 	for _, id := range ids {
 		m := map[string]any{
-			"meter_id":  id,
-			"meter_key": n[id].key,
-			"quantity":  n[id].qty.String(),
-			"from":      n[id].from.UTC().Format(time.RFC3339Nano),
-			"to":        n[id].to.UTC().Format(time.RFC3339Nano),
+			"meter_id":   id,
+			"event_name": n[id].key,
+			"quantity":   n[id].qty.String(),
+			"from":       n[id].from.UTC().Format(time.RFC3339Nano),
+			"to":         n[id].to.UTC().Format(time.RFC3339Nano),
 		}
 		if n[id].name != "" {
 			// The activity line names the meter by its name (ADR-128 rule 5:
