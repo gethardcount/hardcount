@@ -2,9 +2,14 @@ package main
 
 import (
 	"os"
+	"reflect"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
+
+	"github.com/sagarsuperuser/velox/internal/integrations/litellm"
+	"github.com/sagarsuperuser/velox/internal/usage"
 )
 
 // The page CI runs parses, and every block in it is a command or an output.
@@ -31,6 +36,7 @@ func TestFirstInvoicePageParses(t *testing.T) {
 	if len(passes) != 2 {
 		t.Fatalf("want the two passes of the golden-path job in ci.yml, found %d", len(passes))
 	}
+	ran := map[int]bool{} // command blocks that run in some pass
 	for _, args := range passes {
 		var skips, replaces []string
 		for k := 0; k+1 < len(args); k += 2 {
@@ -43,9 +49,88 @@ func TestFirstInvoicePageParses(t *testing.T) {
 				t.Fatalf("ci.yml: unexpected argument %q", args[k])
 			}
 		}
-		if _, err := makePlan(string(src), skips, replaces); err != nil {
+		p, err := makePlan(string(src), skips, replaces)
+		if err != nil {
 			t.Fatalf("ci.yml pass %v:\n%v", args, err)
 		}
+		for k, b := range p.blocks {
+			if b.kind == kindCommand && !p.skipped[b.name] {
+				ran[k] = true
+			}
+		}
+	}
+	// A pass may leave a command out, but some pass must run it: a step the
+	// page shows is checked somewhere.
+	for k, b := range blocks {
+		if b.kind == kindCommand && !ran[k] {
+			t.Errorf("docs/first-invoice.md:%d: the command (%s) runs in no pass of ci.yml", b.line, b.label)
+		}
+	}
+}
+
+// The troubleshooting table names the counts and errors the API really
+// answers with.
+func TestFirstInvoiceTroubleshootingMatchesTheAPI(t *testing.T) {
+	src, err := os.ReadFile("../../docs/first-invoice.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, table, ok := strings.Cut(string(src), "## If something goes wrong")
+	if !ok {
+		t.Fatal("docs/first-invoice.md: no troubleshooting section")
+	}
+	ticked := regexp.MustCompile("`([^`]+)`")
+	var rows [][2]string // what you see, what to do
+	for _, ln := range strings.Split(table, "\n") {
+		cells := strings.Split(strings.Trim(strings.TrimSpace(ln), "|"), "|")
+		if len(cells) == 2 && strings.HasPrefix(strings.TrimSpace(ln), "|") {
+			rows = append(rows, [2]string{cells[0], cells[1]})
+		}
+	}
+
+	// The counts of rows Velox stores and does not bill are the
+	// usage.UnbilledCounts fields: not held (kept apart until released) and
+	// not skipped (calls that bill nothing, not stored).
+	var unbilled []string
+	ty := reflect.TypeOf(usage.UnbilledCounts{})
+	for k := 0; k < ty.NumField(); k++ {
+		unbilled = append(unbilled, strings.Split(ty.Field(k).Tag.Get("json"), ",")[0])
+	}
+	sort.Strings(unbilled)
+	found := false
+	for _, r := range rows {
+		if !strings.Contains(r[1], "will not bill") {
+			continue
+		}
+		found = true
+		var named []string
+		for _, m := range ticked.FindAllStringSubmatch(r[0], -1) {
+			named = append(named, m[1])
+		}
+		sort.Strings(named)
+		if !reflect.DeepEqual(named, unbilled) {
+			t.Errorf("the row %q names the counts %v; the counts Velox stores and does not bill are %v", strings.TrimSpace(r[0]), named, unbilled)
+		}
+	}
+	if !found {
+		t.Error("no row says which counts Velox stores and will not bill")
+	}
+
+	// Step 5b with CUSTOMER_REF unset answers 200 with litellm's
+	// missing-user error in errors[]; the CUSTOMER_REF row must name it.
+	found = false
+	for _, r := range rows {
+		if !strings.Contains(r[1], "`CUSTOMER_REF` is not set") {
+			continue
+		}
+		for _, m := range ticked.FindAllStringSubmatch(r[0], -1) {
+			if strings.Contains(m[1], "payload.user") && strings.Contains(litellm.ErrMissingUser.Error(), m[1]) {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Errorf("the CUSTOMER_REF row does not quote step 5b's error (%q)", litellm.ErrMissingUser)
 	}
 }
 
@@ -220,6 +305,31 @@ func TestParseRefusesCodeTheRunnerCannotSee(t *testing.T) {
 			}
 		})
 	}
+	// The other way round: the runner reads each of these as a marked
+	// fence, and GitHub does not show it as a code block of its own. A
+	// reader would not run it, so CI must not either.
+	hidden := map[string]string{
+		"fence inside <details>":  "<details>\n<!-- docs-run: command -->\n```bash\nexport SETUP=1\n```\n<!-- docs-run: output -->\n```text\n```\n</details>\n",
+		"fence inside <div>":      "<div>\n<!-- docs-run: command -->\n```bash\nexport SETUP=1\n```\n<!-- docs-run: output -->\n```text\n```\n</div>\n",
+		"fence indented 4 spaces": "Run:\n\n<!-- docs-run: command -->\n    ```bash\n    export SETUP=1\n    ```\n",
+		// The runner closes the first block at the indented fence; GitHub
+		// does not, so the second command shows as text of the first block.
+		"closing fence indented too far": "1. **Do it.**\n\n   <!-- docs-run: command -->\n   ```bash\n   true\n       ```\n   <!-- docs-run: command -->\n   ```bash\n   export SETUP=1\n   ```\n",
+	}
+	for name, page := range hidden {
+		t.Run(name, func(t *testing.T) {
+			_, err := parse(page)
+			if err == nil || !strings.Contains(err.Error(), "not a code block of its own") {
+				t.Fatalf("want an error naming the fenced block, got %v", err)
+			}
+		})
+	}
+	// A marked fence inside <details>, with blank lines around it, is a
+	// code block GitHub shows (once the reader opens it). That is allowed.
+	open := "<details>\n\n<!-- docs-run: command -->\n```bash\necho a\n```\n\n<!-- docs-run: output -->\n```text\na\n```\n\n</details>\n"
+	if _, err := parse(open); err != nil {
+		t.Fatalf("details with blank lines: want no error, got %v", err)
+	}
 	// Prose indented under a list item, and a nested list, are not code.
 	ok := "1. **Do it.**\n   More about it.\n\n   - a point\n     that wraps\n"
 	if _, err := parse(ok); err != nil {
@@ -235,13 +345,18 @@ func TestParseRefusesASubstitutionThatHidesAFailure(t *testing.T) {
 		"f() {\n  local x=\"$(false)\"\n}",
 		"readonly Y=`false`",
 		"declare -x Z=$(false)",
+		"export X=\"key: $(jq -r .k f.json)\"",
+		"export X='a b' Y=\"c $(false)\"",
+		"cd /tmp && export X=$(false)",
+		"true; export X=`false`",
+		"if true; then export X=$(false); fi",
 	} {
 		_, err := parse("<!-- docs-run: command -->\n```bash\n" + script + "\n```\n")
 		if err == nil || !strings.Contains(err.Error(), "hides a failure") {
 			t.Errorf("%q: want an error, got %v", script, err)
 		}
 	}
-	for _, script := range []string{"X=$(false)\nexport X", "export X=plain", "export VELOX=http://localhost:8080"} {
+	for _, script := range []string{"X=$(false)\nexport X", "export X=plain", "export VELOX=http://localhost:8080", "export X=\"a b\""} {
 		if _, err := parse("<!-- docs-run: command -->\n```bash\n" + script + "\n```\n"); err != nil {
 			t.Errorf("%q: want no error, got %v", script, err)
 		}
