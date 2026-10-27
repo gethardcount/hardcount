@@ -179,7 +179,7 @@ func TestP5_HandlerOwnsOutboxMark(t *testing.T) {
 
 	// A replayed ProcessBatch tick finds nothing to re-dispatch — the
 	// crash window that minted duplicate events is structurally gone.
-	events, err := store.ListEvents(ctx, tenantID, 50)
+	events, _, err := store.ListEvents(ctx, tenantID, 50, 0)
 	if err != nil {
 		t.Fatalf("list events: %v", err)
 	}

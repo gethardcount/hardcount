@@ -52,7 +52,7 @@ func (s *PostgresStore) List(ctx context.Context, tenantID string) ([]domain.Rec
 		SELECT `+recipeInstanceColumns+`
 		FROM recipe_instances
 		WHERE tenant_id = $1
-		ORDER BY created_at DESC
+		ORDER BY created_at DESC, id DESC
 	`, tenantID)
 	if err != nil {
 		return nil, err

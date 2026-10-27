@@ -198,9 +198,8 @@ func TestSimAxis_FilterAndWindow(t *testing.T) {
 	})
 
 	t.Run("a clock-scoped slice pages without skipping or repeating", func(t *testing.T) {
-		// Page size 2 over clock A's 3 rows. The seek is on (created_at, id) — the
-		// SAME tuple the sort uses (there is one axis, deliberately), so the pages
-		// partition the slice exactly.
+		// Page size 2 over clock A's 3 rows. The order is (created_at, id) — one
+		// axis, deliberately — so the offset pages partition the slice exactly.
 		first, _, err := logger.Query(ctx, tenantID, audit.QueryFilter{
 			TestClockID: clockA, Limit: 2,
 		})
@@ -210,10 +209,8 @@ func TestSimAxis_FilterAndWindow(t *testing.T) {
 		if len(first) != 2 {
 			t.Fatalf("page 1 size: got %d, want 2", len(first))
 		}
-		last := first[len(first)-1]
 		second, _, err := logger.Query(ctx, tenantID, audit.QueryFilter{
-			TestClockID: clockA, Limit: 2,
-			AfterCreatedAt: last.CreatedAt, AfterID: last.ID,
+			TestClockID: clockA, Limit: 2, Offset: 2,
 		})
 		if err != nil {
 			t.Fatalf("page 2: %v", err)

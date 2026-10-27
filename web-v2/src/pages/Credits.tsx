@@ -183,11 +183,7 @@ export default function CreditsPage() {
   const customersQuery = useQuery({
     queryKey: ['credits', 'customers', balanceCustomerIds],
     queryFn: () =>
-      api.listCustomers(
-        balanceCustomerIds.length > 0
-          ? `ids=${balanceCustomerIds.join(',')}&limit=${balanceCustomerIds.length}`
-          : '',
-      ),
+      api.listCustomersByIds(balanceCustomerIds),
     enabled: !balancesQuery.isLoading,
   })
   const balances = balancesQuery.data?.data ?? []

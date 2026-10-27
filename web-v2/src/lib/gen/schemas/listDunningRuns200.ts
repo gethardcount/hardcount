@@ -8,8 +8,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 import type { DunningRun } from './dunningRun';
+import type { ListTotal } from './listTotal';
 
 export type ListDunningRuns200 = {
   data: DunningRun[];
-  total: number;
+  total: ListTotal;
 };

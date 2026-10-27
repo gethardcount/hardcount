@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Loader2, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -16,9 +16,9 @@ import {
 import {
   getGetV1ProviderCostsQueryKey,
   useDeleteV1ProviderCostsId,
-  useGetV1ProviderCosts,
   usePutV1ProviderCosts,
 } from '@/lib/gen/queries.gen'
+import { api } from '@/lib/api'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { money, shiftDecimal } from '@/lib/priceDisplay'
 import { dollarsToRateCents } from '@/lib/priceInput'
@@ -36,7 +36,11 @@ export default function ProviderCostsPage() {
   usePageTitle('Provider costs')
   const queryClient = useQueryClient()
 
-  const { data, isLoading, error: loadError, refetch } = useGetV1ProviderCosts()
+  // The whole rate table, every page.
+  const { data, isLoading, error: loadError, refetch } = useQuery({
+    queryKey: getGetV1ProviderCostsQueryKey(),
+    queryFn: () => api.listProviderCosts(),
+  })
   const rates = data?.data ?? []
 
   const [provider, setProvider] = useState('')

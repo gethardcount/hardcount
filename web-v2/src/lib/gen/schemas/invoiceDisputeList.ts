@@ -8,7 +8,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 import type { InvoiceDispute } from './invoiceDispute';
+import type { ListTotal } from './listTotal';
 
 export interface InvoiceDisputeList {
   data: InvoiceDispute[];
+  total: ListTotal;
 }

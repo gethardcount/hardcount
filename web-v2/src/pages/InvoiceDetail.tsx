@@ -261,7 +261,8 @@ export default function InvoiceDetailPage() {
   const { data: creditNotesData } = useQuery({
     queryKey: ['invoice-credit-notes', id],
     queryFn: async () => {
-      const cn = await api.listCreditNotes(`invoice_id=${id}`)
+      // Every note of the invoice, all pages.
+      const cn = await api.listInvoiceCreditNotes(id!)
       // Fetch unfiltered: the money SUMMARY wants issued-only (a draft has
       // reduced nothing yet), but the allocation CAPS must count every
       // non-voided note, because that is what the server counts. Filtering

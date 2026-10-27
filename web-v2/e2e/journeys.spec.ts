@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { test, expect, type Locator } from '@playwright/test'
 import { env, seedFile } from './fixtures/env'
-import { api, usd, usdBalance, uniq } from './fixtures/api'
+import { api, apiListAll, usd, usdBalance, uniq } from './fixtures/api'
 import {
   billedCustomer, createClock, createCustomer, createPlan, createSubscription, subscribedCustomer, invoicesFor,
   type Customer, type Invoice, type Plan, type Seed, type Subscription,
@@ -74,7 +74,8 @@ test.describe('signed out', () => {
     const checking = answer(/^\/v1\/auth\/password-reset\/check$/)
     await page.goto('/reset-password?token=vlx_prt_does_not_exist')
     const check = await checking
-    expect([check.status(), await check.json()]).toEqual([422, { valid: false, reason: 'invalid_or_expired' }])
+    expect(check.status()).toBe(422)
+    expect((await check.json()).error).toMatchObject({ type: 'invalid_request_error', code: 'invalid_or_expired', param: 'token' })
     await expect(page.getByText('This reset link is no longer valid. It may have been used already or expired.')).toBeVisible()
     await expect(page.getByLabel('New password')).toHaveCount(0)
     await page.getByRole('link', { name: 'Request a new reset link' }).click()
@@ -932,13 +933,13 @@ test('list pages say what each one is for', async ({ page }) => {
 test('held LiteLLM usage is shown on the Usage page and released once', async ({ page }) => {
   // The LiteLLM mapper writes to the `tokens` meter. Create it if this
   // database has none; a parallel creator winning the race is fine.
-  const meters = await api<{ data: { event_name: string }[] }>('GET', '/meters')
-  if (!meters.data.some(m => m.event_name === 'tokens')) {
+  const meters = await apiListAll<{ event_name: string }>('/meters')
+  if (!meters.some(m => m.event_name === 'tokens')) {
     try {
       await api('POST', '/meters', { event_name: 'tokens', name: 'Tokens', unit: 'token', aggregation: 'sum' })
     } catch (e) {
-      const again = await api<{ data: { event_name: string }[] }>('GET', '/meters')
-      if (!again.data.some(m => m.event_name === 'tokens')) throw e
+      const again = await apiListAll<{ event_name: string }>('/meters')
+      if (!again.some(m => m.event_name === 'tokens')) throw e
     }
   }
 
@@ -993,14 +994,14 @@ test('held LiteLLM usage is shown on the Usage page and released once', async ({
 // that takes them are never called invoiced. The release toast says no
 // price matches them, and the API answer counts them as no_price.
 test('held usage released into a plan with no matching price says so', async ({ page }) => {
-  const meters = await api<{ data: { id: string; event_name: string }[] }>('GET', '/meters')
-  let tokens = meters.data.find(m => m.event_name === 'tokens')
+  const meters = await apiListAll<{ id: string; event_name: string }>('/meters')
+  let tokens = meters.find(m => m.event_name === 'tokens')
   if (!tokens) {
     try {
       tokens = await api<{ id: string; event_name: string }>('POST', '/meters', { event_name: 'tokens', name: 'Tokens', unit: 'token', aggregation: 'sum' })
     } catch (e) {
-      const again = await api<{ data: { id: string; event_name: string }[] }>('GET', '/meters')
-      tokens = again.data.find(m => m.event_name === 'tokens')
+      const again = await apiListAll<{ id: string; event_name: string }>('/meters')
+      tokens = again.find(m => m.event_name === 'tokens')
       if (!tokens) throw e
     }
   }
@@ -1040,4 +1041,29 @@ test('held usage released into a plan with no matching price says so', async ({ 
   await expect(page.getByText('Released 2 usage rows')).toBeVisible()
   await expect(page.getByText("2 fall in a billing period not invoiced yet, but no price on the subscription's plan matches them.")).toBeVisible()
   await expect(page.getByText('will be invoiced')).toHaveCount(0)
+})
+
+// The endpoint page reads the endpoint on its own, apart from its deliveries.
+// Resume must refresh that read: the badge, the notice and Replay change at
+// once, not after a reload.
+test('resuming a paused endpoint on its page shows it active', async ({ page }) => {
+  const created = await api<{ endpoint: { id: string } }>('POST', '/webhook-endpoints/endpoints', {
+    url: `https://example.com/e2e-resume-${uniq()}`,
+  })
+  const id = created.endpoint.id
+  await api('PATCH', `/webhook-endpoints/endpoints/${id}`, { active: false })
+
+  await page.goto(`/webhooks/endpoints/${id}`)
+  const main = page.getByRole('main')
+  await expect(main.getByText('paused', { exact: true })).toBeVisible()
+  await expect(main.getByText('Endpoint paused', { exact: true })).toBeVisible()
+
+  await main.getByRole('button', { name: 'Resume', exact: true }).click()
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Resume', exact: true }).click()
+
+  await expect(main.getByText('active', { exact: true })).toBeVisible()
+  await expect(main.getByText('Endpoint paused', { exact: true })).toHaveCount(0)
+  await expect(main.getByRole('button', { name: 'Resume', exact: true })).toHaveCount(0)
+  const endpoint = await api<{ active: boolean }>('GET', `/webhook-endpoints/endpoints/${id}`)
+  expect(endpoint.active).toBe(true)
 })

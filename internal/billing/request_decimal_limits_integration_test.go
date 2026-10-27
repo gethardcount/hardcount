@@ -127,7 +127,7 @@ func TestRequestRates_ValidEdgesBillAsBefore(t *testing.T) {
 					t.Fatalf("decode override: %v", err)
 				}
 				bypassExec(t, lf, `UPDATE customer_price_overrides SET created_at = $1 WHERE id = $2`, lf.cycleStart.Add(-time.Hour), o.ID)
-				os, err := lf.pricingSvc.ListOverrides(ctx, lf.tenantID, lf.customerID, "")
+				os, _, err := lf.pricingSvc.ListOverrides(ctx, lf.tenantID, lf.customerID, "", 100, 0)
 				if err != nil || len(os) != 1 {
 					t.Fatalf("read override: %v (%d rows)", err, len(os))
 				}

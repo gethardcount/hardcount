@@ -8,6 +8,8 @@
  * OpenAPI spec version: 2026-04-07
  */
 import type { GetV1CustomersDir } from './getV1CustomersDir';
+import type { LimitParameter } from './limitParameter';
+import type { OffsetParameter } from './offsetParameter';
 
 export type GetV1CustomersParams = {
 status?: string;
@@ -23,14 +25,28 @@ ids?: string;
  * Case-insensitive substring match on display name, email,
  * external ID, or ID. Matching runs post-decryption (PII
  * columns are encrypted at rest), bounded to the first 5000
- * rows of the tenant's filtered set.
+ * rows of the tenant's filtered set; the rows and `total` stop
+ * there.
  */
 search?: string;
 /**
- * One of display_name, email, external_id, status, created_at (default).
+ * One of display_name, email, external_id, status, created_at
+ * (default). A sort by display_name or email looks at 5,000
+ * customers at most; the rows and `total` stop there.
  */
 sort?: string;
 dir?: GetV1CustomersDir;
-limit?: number;
-offset?: number;
+/**
+ * Rows per page, from 1 to 100. Default 50. Any other value, or one
+ * that is not a whole number, is a 422 with `param: limit`.
+ * @minimum 1
+ * @maximum 100
+ */
+limit?: LimitParameter;
+/**
+ * Rows to skip, 0 or more. Default 0. A negative value, or one that is
+ * not a whole number, is a 422 with `param: offset`.
+ * @minimum 0
+ */
+offset?: OffsetParameter;
 };

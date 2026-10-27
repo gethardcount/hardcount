@@ -8,13 +8,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 import type { Invoice } from './invoice';
+import type { ListTotal } from './listTotal';
 
 export type GetV1Invoices200 = {
   data: Invoice[];
-  /** Number of matching invoices. Left out when the page was read with an `after` cursor. */
-  total?: number;
-  /** Sent only when the page was read with an `after` cursor. True when another page follows. */
-  has_more?: boolean;
-  /** Pass it as `after` to read the next page. Sent only when `has_more` is true. */
-  next_cursor?: string;
+  total: ListTotal;
 };

@@ -65,21 +65,18 @@ func TestCreditHandler_ListEntries_PaginationContract(t *testing.T) {
 		}
 	})
 
-	t.Run("clamps limit to 1..100 and offset to >=0", func(t *testing.T) {
-		for _, c := range []struct {
-			query               string
-			wantLimit, wantOffs int
-		}{
-			{"limit=500&offset=-3", 100, 0},
-			{"limit=0", 50, 0},
-			{"", 50, 0},
-			{"limit=junk&offset=junk", 50, 0},
-		} {
+	t.Run("a missing limit is 50; a bad limit or offset is a 422, never clamped", func(t *testing.T) {
+		spy, h := newSpyHandler()
+		if rr := ledgerReq(t, h, ""); rr.Code != http.StatusOK || spy.listFilter.Limit != 50 || spy.listFilter.Offset != 0 {
+			t.Errorf("no params: status %d, limit %d, offset %d; want 200, 50, 0", rr.Code, spy.listFilter.Limit, spy.listFilter.Offset)
+		}
+		for _, q := range []string{"limit=500", "offset=-3", "limit=0", "limit=junk", "offset=junk"} {
 			spy, h := newSpyHandler()
-			ledgerReq(t, h, c.query)
-			if spy.listFilter.Limit != c.wantLimit || spy.listFilter.Offset != c.wantOffs {
-				t.Errorf("query %q: got limit=%d offset=%d, want %d/%d",
-					c.query, spy.listFilter.Limit, spy.listFilter.Offset, c.wantLimit, c.wantOffs)
+			if rr := ledgerReq(t, h, q); rr.Code != http.StatusUnprocessableEntity {
+				t.Errorf("query %q: status %d, want 422; body=%s", q, rr.Code, rr.Body.String())
+			}
+			if spy.listFilter != (ListFilter{}) {
+				t.Errorf("query %q reached the store: %+v", q, spy.listFilter)
 			}
 		}
 	})

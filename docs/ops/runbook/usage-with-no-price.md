@@ -43,8 +43,9 @@ meter whose plan has prices for the older models only.
 ## Check
 
 ```bash
-# The plan's prices, and the customer's usage no price took this period:
-curl -sS "$API/v1/plans/$PLAN/prices" -H "Authorization: Bearer $KEY" | jq '.data[] | {meter_id, dimension_match}'
+# The plan's prices, 100 a page (with more, add &offset=100, 200, ...),
+# and the customer's usage no price took this period:
+curl -sS "$API/v1/plans/$PLAN/prices?limit=100" -H "Authorization: Bearer $KEY" | jq '.data[] | {meter_id, dimension_match}'
 curl -sS "$API/v1/customers/$CUSTOMER/usage" -H "Authorization: Bearer $KEY" \
   | jq '.meters[] | {event_name, no_price: [.prices[] | select(.no_price == true) | {plan_id, quantity}]}'
 # Which label values have no price (e.g. the model name):

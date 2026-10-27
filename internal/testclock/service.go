@@ -85,7 +85,7 @@ type BillingRunner interface {
 // Per-domain rule (CLAUDE.md): zero cross-domain imports between peer
 // packages; coordination via narrow interfaces only.
 type CustomerReader interface {
-	ListByTestClockID(ctx context.Context, tenantID, clockID string) ([]domain.Customer, error)
+	ListByTestClockID(ctx context.Context, tenantID, clockID string, limit, offset int) ([]domain.Customer, int, error)
 }
 
 // SubscriptionLister returns the subscriptions pinned to a clock in the same
@@ -93,7 +93,7 @@ type CustomerReader interface {
 // rest). Implemented by the subscription store; the clock's own narrow scan
 // left most fields empty.
 type SubscriptionLister interface {
-	ListByTestClock(ctx context.Context, tenantID, clockID string) ([]domain.Subscription, error)
+	ListByTestClock(ctx context.Context, tenantID, clockID string, limit, offset int) ([]domain.Subscription, int, error)
 }
 
 // TrialExpirer is the narrow hook the catchup orchestrator uses to
@@ -299,40 +299,41 @@ func (s *Service) Get(ctx context.Context, tenantID, id string) (domain.TestCloc
 	return s.store.Get(ctx, tenantID, id)
 }
 
-func (s *Service) List(ctx context.Context, tenantID string) ([]domain.TestClock, error) {
-	return s.store.List(ctx, tenantID)
+func (s *Service) List(ctx context.Context, tenantID string, limit, offset int) ([]domain.TestClock, int, error) {
+	return s.store.List(ctx, tenantID, limit, offset)
 }
 
 func (s *Service) Delete(ctx context.Context, tenantID, id string) error {
 	return s.store.Delete(ctx, tenantID, id)
 }
 
-// ListSubscriptions returns the subscriptions pinned to the given clock.
-// Verifies the clock exists first so a missing-clock id surfaces as 404
-// rather than an empty list (which would look like an empty clock).
-func (s *Service) ListSubscriptions(ctx context.Context, tenantID, clockID string) ([]domain.Subscription, error) {
+// ListSubscriptions returns one page of the subscriptions pinned to the
+// given clock, and their total. Verifies the clock exists first so a
+// missing-clock id surfaces as 404 rather than an empty list (which would
+// look like an empty clock).
+func (s *Service) ListSubscriptions(ctx context.Context, tenantID, clockID string, limit, offset int) ([]domain.Subscription, int, error) {
 	if _, err := s.store.Get(ctx, tenantID, clockID); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if s.subs == nil {
-		return nil, fmt.Errorf("testclock: subscription lister not wired")
+		return nil, 0, fmt.Errorf("testclock: subscription lister not wired")
 	}
-	return s.subs.ListByTestClock(ctx, tenantID, clockID)
+	return s.subs.ListByTestClock(ctx, tenantID, clockID, limit, offset)
 }
 
-// ListAttachedCustomers returns customers pinned to this clock —
-// the Stripe-parity "attached customers" surface (ADR-027 Tier 3).
-// 404s if the clock doesn't exist. Reads through the customer
-// domain's CustomerReader so display_name / email arrive decrypted;
-// see CustomerReader doc.
-func (s *Service) ListAttachedCustomers(ctx context.Context, tenantID, clockID string) ([]domain.Customer, error) {
+// ListAttachedCustomers returns one page of the customers pinned to this
+// clock, and their total — the Stripe-parity "attached customers" surface
+// (ADR-027 Tier 3). 404s if the clock doesn't exist. Reads through the
+// customer domain's CustomerReader so display_name / email arrive
+// decrypted; see CustomerReader doc.
+func (s *Service) ListAttachedCustomers(ctx context.Context, tenantID, clockID string, limit, offset int) ([]domain.Customer, int, error) {
 	if _, err := s.store.Get(ctx, tenantID, clockID); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if s.customers == nil {
-		return nil, fmt.Errorf("testclock: customer reader not wired")
+		return nil, 0, fmt.Errorf("testclock: customer reader not wired")
 	}
-	return s.customers.ListByTestClockID(ctx, tenantID, clockID)
+	return s.customers.ListByTestClockID(ctx, tenantID, clockID, limit, offset)
 }
 
 type AdvanceInput struct {

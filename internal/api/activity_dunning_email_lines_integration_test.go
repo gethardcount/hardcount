@@ -91,7 +91,7 @@ func TestActivityLines_DunningRunAndSentEmails(t *testing.T) {
 			invoiceID: invoiceID,
 			invoice:   flowList(timeline, "events"),
 			dunning:   flowList(detail, "events"),
-			emails:    flowList(sent, "sent_emails"),
+			emails:    flowList(sent, "data"),
 		}
 	}
 
@@ -267,7 +267,7 @@ func TestActivityLines_SkippedEmailSaysWhy(t *testing.T) {
 	if !strings.HasPrefix(got, want) {
 		t.Errorf("invoice Activity card: %q, want it to start %q", got, want)
 	}
-	sent := flowList(call("GET", "/v1/customers/"+customerID+"/sent-emails", flowReq{}).want(t, 200, "sent emails").body, "sent_emails")
+	sent := flowList(call("GET", "/v1/customers/"+customerID+"/sent-emails", flowReq{}).want(t, 200, "sent emails").body, "data")
 	if got := setupLine(sent); !strings.HasPrefix(got, want) {
 		t.Errorf("Sent emails card: %q, want it to start %q", got, want)
 	}

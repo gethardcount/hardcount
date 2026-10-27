@@ -87,7 +87,7 @@ func TestGrantSummary_SplitsDeductedFromUsed(t *testing.T) {
 	}
 
 	// The tenant-wide list carries the same totals.
-	all, err := svc.ListBalances(ctx, tenantID)
+	all, _, err := svc.ListBalances(ctx, tenantID, 100, 0)
 	if err != nil {
 		t.Fatalf("list balances: %v", err)
 	}

@@ -857,19 +857,24 @@ func (s *PostgresStore) listSortedByEncryptedColumn(ctx context.Context, filter 
 	return customers[start:end], total, nil
 }
 
-// ListByTestClockID returns customers pinned to the given test clock,
-// fully decrypted. The testclock domain calls this through the
-// CustomerReader interface so it never reaches into the customers
-// table directly — keeping decryption centralised on this read path
-// (encrypt-at-rest is otherwise transparently bypassed when another
-// package SELECTs display_name / email straight from the table).
-func (s *PostgresStore) ListByTestClockID(ctx context.Context, tenantID, clockID string) ([]domain.Customer, error) {
+// ListByTestClockID returns one page of the customers pinned to the given
+// test clock, oldest first, fully decrypted, and how many there are in all.
+// The testclock domain calls this through the CustomerReader interface so it
+// never reaches into the customers table directly — keeping decryption
+// centralised on this read path (encrypt-at-rest is otherwise transparently
+// bypassed when another package SELECTs display_name / email straight from
+// the table).
+func (s *PostgresStore) ListByTestClockID(ctx context.Context, tenantID, clockID string, limit, offset int) ([]domain.Customer, int, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer postgres.Rollback(tx)
 
+	var total int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM customers WHERE test_clock_id = $1`, clockID).Scan(&total); err != nil {
+		return nil, 0, err
+	}
 	rows, err := tx.QueryContext(ctx, `
 		SELECT id, tenant_id, external_id, display_name, COALESCE(email, ''), status,
 			COALESCE(test_clock_id, ''),
@@ -877,11 +882,11 @@ func (s *PostgresStore) ListByTestClockID(ctx context.Context, tenantID, clockID
 			created_at, updated_at
 		FROM customers
 		WHERE test_clock_id = $1
-		ORDER BY created_at ASC
-		LIMIT 1000
-	`, clockID)
+		ORDER BY created_at ASC, id ASC
+		LIMIT $2 OFFSET $3
+	`, clockID, limit, offset)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -890,15 +895,15 @@ func (s *PostgresStore) ListByTestClockID(ctx context.Context, tenantID, clockID
 		var c domain.Customer
 		if err := rows.Scan(&c.ID, &c.TenantID, &c.ExternalID, &c.DisplayName, &c.Email, &c.Status,
 			&c.TestClockID, &c.DunningPolicyID, &c.CreatedAt, &c.UpdatedAt); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		c, err = s.decryptCustomer(c)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		customers = append(customers, c)
 	}
-	return customers, rows.Err()
+	return customers, total, rows.Err()
 }
 
 func (s *PostgresStore) Update(ctx context.Context, tenantID string, c domain.Customer) (domain.Customer, error) {

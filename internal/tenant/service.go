@@ -85,7 +85,7 @@ func (s *Service) Get(ctx context.Context, id string) (domain.Tenant, error) {
 	return s.store.Get(ctx, id)
 }
 
-func (s *Service) List(ctx context.Context, filter ListFilter) ([]domain.Tenant, error) {
+func (s *Service) List(ctx context.Context, filter ListFilter) ([]domain.Tenant, int, error) {
 	return s.store.List(ctx, filter)
 }
 

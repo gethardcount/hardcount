@@ -39,7 +39,6 @@ import type {
   BootstrapBody,
   BootstrapResult,
   CheckPasswordResetToken200,
-  CheckPasswordResetToken422,
   CheckPasswordResetTokenParams,
   ConnectStripeBody,
   CreateApiKeyBody,
@@ -98,23 +97,32 @@ import type {
   GetV1Invoices200,
   GetV1InvoicesParams,
   GetV1Meters200,
+  GetV1MetersParams,
   GetV1Plans200,
+  GetV1PlansParams,
   GetV1ProviderCosts200,
+  GetV1ProviderCostsParams,
   GetV1PublicCostDashboardToken200,
   GetV1Subscriptions200,
   GetV1SubscriptionsParams,
   GetV1TestClocks200,
   GetV1TestClocksIdSubscriptions200,
+  GetV1TestClocksIdSubscriptionsParams,
+  GetV1TestClocksParams,
   GetV1UsageEvents200,
   GetV1UsageEventsParams,
   GetV1WebhookEndpointsEndpoints200,
+  GetV1WebhookEndpointsEndpointsParams,
   GetV1WebhookEndpointsEvents200,
+  GetV1WebhookEndpointsEventsParams,
   GetV1Whoami200,
   GetWebhookEndpointStats200,
+  GetWebhookEndpointStatsParams,
   HeldUsageReleaseResult,
   HostedInvoice,
   IngestLitellmSpendBody,
   InstantiateRecipeBody,
+  InvalidPageResponse,
   InviteMemberBody,
   Invoice,
   InvoiceCreateRequest,
@@ -125,30 +133,41 @@ import type {
   InvoicePreview,
   InvoiceWithLineItems,
   ListApiKeys200,
+  ListApiKeysParams,
   ListAuditLog200,
   ListAuditLogParams,
   ListCreditBalances200,
+  ListCreditBalancesParams,
   ListCreditLedgerEntries200,
   ListCreditLedgerEntriesParams,
   ListCreditNotes200,
   ListCreditNotesParams,
   ListCustomerPaymentMethods200,
+  ListCustomerPaymentMethodsParams,
   ListCustomerSentEmails200,
+  ListCustomerSentEmailsParams,
   ListDunningPolicies200,
+  ListDunningPoliciesParams,
   ListDunningRuns200,
   ListDunningRunsParams,
   ListHeldUsage200,
+  ListInvoiceDisputesParams,
   ListMembers200,
   ListPlanPrices200,
+  ListPlanPricesParams,
   ListPriceOverrides200,
   ListPriceOverridesParams,
   ListRecipeInstances200,
+  ListRecipeInstancesParams,
   ListRecipes200,
+  ListRecipesParams,
   ListStripeConnections200,
   ListTenants200,
   ListTenantsParams,
   ListTestClockCustomers200,
+  ListTestClockCustomersParams,
   ListWebhookEndpointDeliveries200,
+  ListWebhookEndpointDeliveriesParams,
   ListWebhookEventDeliveries200,
   LitellmSpendResult,
   MarginReport,
@@ -682,7 +701,7 @@ export const getGetV1CustomersQueryKey = (params?: GetV1CustomersParams,) => {
     }
 
 
-export const getGetV1CustomersQueryOptions = <TData = Awaited<ReturnType<typeof getV1Customers>>, TError = unknown>(params?: GetV1CustomersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Customers>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetV1CustomersQueryOptions = <TData = Awaited<ReturnType<typeof getV1Customers>>, TError = InvalidPageResponse>(params?: GetV1CustomersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Customers>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -701,10 +720,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetV1CustomersQueryResult = NonNullable<Awaited<ReturnType<typeof getV1Customers>>>
-export type GetV1CustomersQueryError = unknown
+export type GetV1CustomersQueryError = InvalidPageResponse
 
 
-export function useGetV1Customers<TData = Awaited<ReturnType<typeof getV1Customers>>, TError = unknown>(
+export function useGetV1Customers<TData = Awaited<ReturnType<typeof getV1Customers>>, TError = InvalidPageResponse>(
  params: undefined |  GetV1CustomersParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Customers>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getV1Customers>>,
@@ -714,7 +733,7 @@ export function useGetV1Customers<TData = Awaited<ReturnType<typeof getV1Custome
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetV1Customers<TData = Awaited<ReturnType<typeof getV1Customers>>, TError = unknown>(
+export function useGetV1Customers<TData = Awaited<ReturnType<typeof getV1Customers>>, TError = InvalidPageResponse>(
  params?: GetV1CustomersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Customers>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getV1Customers>>,
@@ -724,7 +743,7 @@ export function useGetV1Customers<TData = Awaited<ReturnType<typeof getV1Custome
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetV1Customers<TData = Awaited<ReturnType<typeof getV1Customers>>, TError = unknown>(
+export function useGetV1Customers<TData = Awaited<ReturnType<typeof getV1Customers>>, TError = InvalidPageResponse>(
  params?: GetV1CustomersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Customers>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -732,7 +751,7 @@ export function useGetV1Customers<TData = Awaited<ReturnType<typeof getV1Custome
  * @summary List customers
  */
 
-export function useGetV1Customers<TData = Awaited<ReturnType<typeof getV1Customers>>, TError = unknown>(
+export function useGetV1Customers<TData = Awaited<ReturnType<typeof getV1Customers>>, TError = InvalidPageResponse>(
  params?: GetV1CustomersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Customers>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -1217,12 +1236,20 @@ export function useGetCustomerBillingProfile<TData = Awaited<ReturnType<typeof g
 
 
 
-export const getListCustomerSentEmailsUrl = (id: string,) => {
+export const getListCustomerSentEmailsUrl = (id: string,
+    params?: ListCustomerSentEmailsParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/v1/customers/${id}/sent-emails`
+  return stringifiedParams.length > 0 ? `/v1/customers/${id}/sent-emails?${stringifiedParams}` : `/v1/customers/${id}/sent-emails`
 }
 
 /**
@@ -1230,12 +1257,13 @@ export const getListCustomerSentEmailsUrl = (id: string,) => {
  * days, newest first: invoice, payment receipt, payment failed,
  * payment setup request, dunning, and credit note emails. Emails
  * not tied to an invoice (such as a setup link sent from the
- * payment-methods page) are not listed. No paging.
+ * payment-methods page) are not listed.
  * @summary List emails sent to the customer
  */
-export const listCustomerSentEmails = async (id: string, options?: RequestInit): Promise<ListCustomerSentEmails200> => {
+export const listCustomerSentEmails = async (id: string,
+    params?: ListCustomerSentEmailsParams, options?: RequestInit): Promise<ListCustomerSentEmails200> => {
 
-  return orvalClient<ListCustomerSentEmails200>(getListCustomerSentEmailsUrl(id),
+  return orvalClient<ListCustomerSentEmails200>(getListCustomerSentEmailsUrl(id,params),
   {
     ...options,
     method: 'GET'
@@ -1248,23 +1276,25 @@ export const listCustomerSentEmails = async (id: string, options?: RequestInit):
 
 
 
-export const getListCustomerSentEmailsQueryKey = (id: string,) => {
+export const getListCustomerSentEmailsQueryKey = (id: string,
+    params?: ListCustomerSentEmailsParams,) => {
     return [
-    `/v1/customers/${id}/sent-emails`
+    `/v1/customers/${id}/sent-emails`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getListCustomerSentEmailsQueryOptions = <TData = Awaited<ReturnType<typeof listCustomerSentEmails>>, TError = Error>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomerSentEmails>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListCustomerSentEmailsQueryOptions = <TData = Awaited<ReturnType<typeof listCustomerSentEmails>>, TError = Error | InvalidPageResponse>(id: string,
+    params?: ListCustomerSentEmailsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomerSentEmails>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getListCustomerSentEmailsQueryKey(id);
+  const queryKey =  queryOptions?.queryKey ?? getListCustomerSentEmailsQueryKey(id,params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listCustomerSentEmails>>> = () => listCustomerSentEmails(id, requestOptions);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listCustomerSentEmails>>> = () => listCustomerSentEmails(id,params, requestOptions);
 
 
 
@@ -1274,11 +1304,12 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListCustomerSentEmailsQueryResult = NonNullable<Awaited<ReturnType<typeof listCustomerSentEmails>>>
-export type ListCustomerSentEmailsQueryError = Error
+export type ListCustomerSentEmailsQueryError = Error | InvalidPageResponse
 
 
-export function useListCustomerSentEmails<TData = Awaited<ReturnType<typeof listCustomerSentEmails>>, TError = Error>(
- id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomerSentEmails>>, TError, TData>> & Pick<
+export function useListCustomerSentEmails<TData = Awaited<ReturnType<typeof listCustomerSentEmails>>, TError = Error | InvalidPageResponse>(
+ id: string,
+    params: undefined |  ListCustomerSentEmailsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomerSentEmails>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listCustomerSentEmails>>,
           TError,
@@ -1287,8 +1318,9 @@ export function useListCustomerSentEmails<TData = Awaited<ReturnType<typeof list
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListCustomerSentEmails<TData = Awaited<ReturnType<typeof listCustomerSentEmails>>, TError = Error>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomerSentEmails>>, TError, TData>> & Pick<
+export function useListCustomerSentEmails<TData = Awaited<ReturnType<typeof listCustomerSentEmails>>, TError = Error | InvalidPageResponse>(
+ id: string,
+    params?: ListCustomerSentEmailsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomerSentEmails>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listCustomerSentEmails>>,
           TError,
@@ -1297,20 +1329,22 @@ export function useListCustomerSentEmails<TData = Awaited<ReturnType<typeof list
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListCustomerSentEmails<TData = Awaited<ReturnType<typeof listCustomerSentEmails>>, TError = Error>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomerSentEmails>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export function useListCustomerSentEmails<TData = Awaited<ReturnType<typeof listCustomerSentEmails>>, TError = Error | InvalidPageResponse>(
+ id: string,
+    params?: ListCustomerSentEmailsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomerSentEmails>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
  * @summary List emails sent to the customer
  */
 
-export function useListCustomerSentEmails<TData = Awaited<ReturnType<typeof listCustomerSentEmails>>, TError = Error>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomerSentEmails>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export function useListCustomerSentEmails<TData = Awaited<ReturnType<typeof listCustomerSentEmails>>, TError = Error | InvalidPageResponse>(
+ id: string,
+    params?: ListCustomerSentEmailsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomerSentEmails>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getListCustomerSentEmailsQueryOptions(id,options)
+  const queryOptions = getListCustomerSentEmailsQueryOptions(id,params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -1561,12 +1595,20 @@ export function useGetCustomerOverview<TData = Awaited<ReturnType<typeof getCust
 
 
 
-export const getListCustomerPaymentMethodsUrl = (customerId: string,) => {
+export const getListCustomerPaymentMethodsUrl = (customerId: string,
+    params?: ListCustomerPaymentMethodsParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/v1/customers/${customerId}/payment-methods`
+  return stringifiedParams.length > 0 ? `/v1/customers/${customerId}/payment-methods?${stringifiedParams}` : `/v1/customers/${customerId}/payment-methods`
 }
 
 /**
@@ -1574,9 +1616,10 @@ export const getListCustomerPaymentMethodsUrl = (customerId: string,) => {
  * newest. At most 100. `total` is the number returned.
  * @summary List the customer's payment methods
  */
-export const listCustomerPaymentMethods = async (customerId: string, options?: RequestInit): Promise<ListCustomerPaymentMethods200> => {
+export const listCustomerPaymentMethods = async (customerId: string,
+    params?: ListCustomerPaymentMethodsParams, options?: RequestInit): Promise<ListCustomerPaymentMethods200> => {
 
-  return orvalClient<ListCustomerPaymentMethods200>(getListCustomerPaymentMethodsUrl(customerId),
+  return orvalClient<ListCustomerPaymentMethods200>(getListCustomerPaymentMethodsUrl(customerId,params),
   {
     ...options,
     method: 'GET'
@@ -1589,23 +1632,25 @@ export const listCustomerPaymentMethods = async (customerId: string, options?: R
 
 
 
-export const getListCustomerPaymentMethodsQueryKey = (customerId: string,) => {
+export const getListCustomerPaymentMethodsQueryKey = (customerId: string,
+    params?: ListCustomerPaymentMethodsParams,) => {
     return [
-    `/v1/customers/${customerId}/payment-methods`
+    `/v1/customers/${customerId}/payment-methods`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getListCustomerPaymentMethodsQueryOptions = <TData = Awaited<ReturnType<typeof listCustomerPaymentMethods>>, TError = Error>(customerId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomerPaymentMethods>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListCustomerPaymentMethodsQueryOptions = <TData = Awaited<ReturnType<typeof listCustomerPaymentMethods>>, TError = Error | InvalidPageResponse>(customerId: string,
+    params?: ListCustomerPaymentMethodsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomerPaymentMethods>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getListCustomerPaymentMethodsQueryKey(customerId);
+  const queryKey =  queryOptions?.queryKey ?? getListCustomerPaymentMethodsQueryKey(customerId,params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listCustomerPaymentMethods>>> = () => listCustomerPaymentMethods(customerId, requestOptions);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listCustomerPaymentMethods>>> = () => listCustomerPaymentMethods(customerId,params, requestOptions);
 
 
 
@@ -1615,11 +1660,12 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListCustomerPaymentMethodsQueryResult = NonNullable<Awaited<ReturnType<typeof listCustomerPaymentMethods>>>
-export type ListCustomerPaymentMethodsQueryError = Error
+export type ListCustomerPaymentMethodsQueryError = Error | InvalidPageResponse
 
 
-export function useListCustomerPaymentMethods<TData = Awaited<ReturnType<typeof listCustomerPaymentMethods>>, TError = Error>(
- customerId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomerPaymentMethods>>, TError, TData>> & Pick<
+export function useListCustomerPaymentMethods<TData = Awaited<ReturnType<typeof listCustomerPaymentMethods>>, TError = Error | InvalidPageResponse>(
+ customerId: string,
+    params: undefined |  ListCustomerPaymentMethodsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomerPaymentMethods>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listCustomerPaymentMethods>>,
           TError,
@@ -1628,8 +1674,9 @@ export function useListCustomerPaymentMethods<TData = Awaited<ReturnType<typeof 
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListCustomerPaymentMethods<TData = Awaited<ReturnType<typeof listCustomerPaymentMethods>>, TError = Error>(
- customerId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomerPaymentMethods>>, TError, TData>> & Pick<
+export function useListCustomerPaymentMethods<TData = Awaited<ReturnType<typeof listCustomerPaymentMethods>>, TError = Error | InvalidPageResponse>(
+ customerId: string,
+    params?: ListCustomerPaymentMethodsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomerPaymentMethods>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listCustomerPaymentMethods>>,
           TError,
@@ -1638,20 +1685,22 @@ export function useListCustomerPaymentMethods<TData = Awaited<ReturnType<typeof 
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListCustomerPaymentMethods<TData = Awaited<ReturnType<typeof listCustomerPaymentMethods>>, TError = Error>(
- customerId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomerPaymentMethods>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export function useListCustomerPaymentMethods<TData = Awaited<ReturnType<typeof listCustomerPaymentMethods>>, TError = Error | InvalidPageResponse>(
+ customerId: string,
+    params?: ListCustomerPaymentMethodsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomerPaymentMethods>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
  * @summary List the customer's payment methods
  */
 
-export function useListCustomerPaymentMethods<TData = Awaited<ReturnType<typeof listCustomerPaymentMethods>>, TError = Error>(
- customerId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomerPaymentMethods>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export function useListCustomerPaymentMethods<TData = Awaited<ReturnType<typeof listCustomerPaymentMethods>>, TError = Error | InvalidPageResponse>(
+ customerId: string,
+    params?: ListCustomerPaymentMethodsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomerPaymentMethods>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getListCustomerPaymentMethodsQueryOptions(customerId,options)
+  const queryOptions = getListCustomerPaymentMethodsQueryOptions(customerId,params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -2630,20 +2679,27 @@ export const usePostV1Meters = <TError = unknown,
       return useMutation(getPostV1MetersMutationOptions(options), queryClient);
     }
 
-export const getGetV1MetersUrl = () => {
+export const getGetV1MetersUrl = (params?: GetV1MetersParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/v1/meters`
+  return stringifiedParams.length > 0 ? `/v1/meters?${stringifiedParams}` : `/v1/meters`
 }
 
 /**
  * @summary List meters
  */
-export const getV1Meters = async ( options?: RequestInit): Promise<GetV1Meters200> => {
+export const getV1Meters = async (params?: GetV1MetersParams, options?: RequestInit): Promise<GetV1Meters200> => {
 
-  return orvalClient<GetV1Meters200>(getGetV1MetersUrl(),
+  return orvalClient<GetV1Meters200>(getGetV1MetersUrl(params),
   {
     ...options,
     method: 'GET'
@@ -2656,23 +2712,23 @@ export const getV1Meters = async ( options?: RequestInit): Promise<GetV1Meters20
 
 
 
-export const getGetV1MetersQueryKey = () => {
+export const getGetV1MetersQueryKey = (params?: GetV1MetersParams,) => {
     return [
-    `/v1/meters`
+    `/v1/meters`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getGetV1MetersQueryOptions = <TData = Awaited<ReturnType<typeof getV1Meters>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Meters>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetV1MetersQueryOptions = <TData = Awaited<ReturnType<typeof getV1Meters>>, TError = InvalidPageResponse>(params?: GetV1MetersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Meters>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getGetV1MetersQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getGetV1MetersQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1Meters>>> = () => getV1Meters(requestOptions);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1Meters>>> = () => getV1Meters(params, requestOptions);
 
 
 
@@ -2682,11 +2738,11 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetV1MetersQueryResult = NonNullable<Awaited<ReturnType<typeof getV1Meters>>>
-export type GetV1MetersQueryError = unknown
+export type GetV1MetersQueryError = InvalidPageResponse
 
 
-export function useGetV1Meters<TData = Awaited<ReturnType<typeof getV1Meters>>, TError = unknown>(
-  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Meters>>, TError, TData>> & Pick<
+export function useGetV1Meters<TData = Awaited<ReturnType<typeof getV1Meters>>, TError = InvalidPageResponse>(
+ params: undefined |  GetV1MetersParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Meters>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getV1Meters>>,
           TError,
@@ -2695,8 +2751,8 @@ export function useGetV1Meters<TData = Awaited<ReturnType<typeof getV1Meters>>, 
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetV1Meters<TData = Awaited<ReturnType<typeof getV1Meters>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Meters>>, TError, TData>> & Pick<
+export function useGetV1Meters<TData = Awaited<ReturnType<typeof getV1Meters>>, TError = InvalidPageResponse>(
+ params?: GetV1MetersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Meters>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getV1Meters>>,
           TError,
@@ -2705,20 +2761,20 @@ export function useGetV1Meters<TData = Awaited<ReturnType<typeof getV1Meters>>, 
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetV1Meters<TData = Awaited<ReturnType<typeof getV1Meters>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Meters>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export function useGetV1Meters<TData = Awaited<ReturnType<typeof getV1Meters>>, TError = InvalidPageResponse>(
+ params?: GetV1MetersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Meters>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
  * @summary List meters
  */
 
-export function useGetV1Meters<TData = Awaited<ReturnType<typeof getV1Meters>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Meters>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export function useGetV1Meters<TData = Awaited<ReturnType<typeof getV1Meters>>, TError = InvalidPageResponse>(
+ params?: GetV1MetersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Meters>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getGetV1MetersQueryOptions(options)
+  const queryOptions = getGetV1MetersQueryOptions(params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -3038,7 +3094,7 @@ export const getListCreditNotesQueryKey = (params?: ListCreditNotesParams,) => {
     }
 
 
-export const getListCreditNotesQueryOptions = <TData = Awaited<ReturnType<typeof listCreditNotes>>, TError = unknown>(params?: ListCreditNotesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditNotes>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListCreditNotesQueryOptions = <TData = Awaited<ReturnType<typeof listCreditNotes>>, TError = InvalidPageResponse>(params?: ListCreditNotesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditNotes>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -3057,10 +3113,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListCreditNotesQueryResult = NonNullable<Awaited<ReturnType<typeof listCreditNotes>>>
-export type ListCreditNotesQueryError = unknown
+export type ListCreditNotesQueryError = InvalidPageResponse
 
 
-export function useListCreditNotes<TData = Awaited<ReturnType<typeof listCreditNotes>>, TError = unknown>(
+export function useListCreditNotes<TData = Awaited<ReturnType<typeof listCreditNotes>>, TError = InvalidPageResponse>(
  params: undefined |  ListCreditNotesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditNotes>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listCreditNotes>>,
@@ -3070,7 +3126,7 @@ export function useListCreditNotes<TData = Awaited<ReturnType<typeof listCreditN
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListCreditNotes<TData = Awaited<ReturnType<typeof listCreditNotes>>, TError = unknown>(
+export function useListCreditNotes<TData = Awaited<ReturnType<typeof listCreditNotes>>, TError = InvalidPageResponse>(
  params?: ListCreditNotesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditNotes>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listCreditNotes>>,
@@ -3080,7 +3136,7 @@ export function useListCreditNotes<TData = Awaited<ReturnType<typeof listCreditN
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListCreditNotes<TData = Awaited<ReturnType<typeof listCreditNotes>>, TError = unknown>(
+export function useListCreditNotes<TData = Awaited<ReturnType<typeof listCreditNotes>>, TError = InvalidPageResponse>(
  params?: ListCreditNotesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditNotes>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -3088,7 +3144,7 @@ export function useListCreditNotes<TData = Awaited<ReturnType<typeof listCreditN
  * @summary List credit notes
  */
 
-export function useListCreditNotes<TData = Awaited<ReturnType<typeof listCreditNotes>>, TError = unknown>(
+export function useListCreditNotes<TData = Awaited<ReturnType<typeof listCreditNotes>>, TError = InvalidPageResponse>(
  params?: ListCreditNotesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditNotes>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -3315,24 +3371,31 @@ export const useAdjustCredits = <TError = Error,
       return useMutation(getAdjustCreditsMutationOptions(options), queryClient);
     }
 
-export const getListCreditBalancesUrl = () => {
+export const getListCreditBalancesUrl = (params?: ListCreditBalancesParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/v1/credits/balances`
+  return stringifiedParams.length > 0 ? `/v1/credits/balances?${stringifiedParams}` : `/v1/credits/balances`
 }
 
 /**
  * One row per customer and currency that has any credit ledger
- * entry, highest balance first. No paging and no `total`.
+ * entry, highest balance first.
  * `total_granted` is the sum of every credit added in that currency
  * (grants, positive adjustments and reversals).
  * @summary List credit balances for all customers
  */
-export const listCreditBalances = async ( options?: RequestInit): Promise<ListCreditBalances200> => {
+export const listCreditBalances = async (params?: ListCreditBalancesParams, options?: RequestInit): Promise<ListCreditBalances200> => {
 
-  return orvalClient<ListCreditBalances200>(getListCreditBalancesUrl(),
+  return orvalClient<ListCreditBalances200>(getListCreditBalancesUrl(params),
   {
     ...options,
     method: 'GET'
@@ -3345,23 +3408,23 @@ export const listCreditBalances = async ( options?: RequestInit): Promise<ListCr
 
 
 
-export const getListCreditBalancesQueryKey = () => {
+export const getListCreditBalancesQueryKey = (params?: ListCreditBalancesParams,) => {
     return [
-    `/v1/credits/balances`
+    `/v1/credits/balances`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getListCreditBalancesQueryOptions = <TData = Awaited<ReturnType<typeof listCreditBalances>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditBalances>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListCreditBalancesQueryOptions = <TData = Awaited<ReturnType<typeof listCreditBalances>>, TError = InvalidPageResponse>(params?: ListCreditBalancesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditBalances>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getListCreditBalancesQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getListCreditBalancesQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listCreditBalances>>> = () => listCreditBalances(requestOptions);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listCreditBalances>>> = () => listCreditBalances(params, requestOptions);
 
 
 
@@ -3371,11 +3434,11 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListCreditBalancesQueryResult = NonNullable<Awaited<ReturnType<typeof listCreditBalances>>>
-export type ListCreditBalancesQueryError = unknown
+export type ListCreditBalancesQueryError = InvalidPageResponse
 
 
-export function useListCreditBalances<TData = Awaited<ReturnType<typeof listCreditBalances>>, TError = unknown>(
-  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditBalances>>, TError, TData>> & Pick<
+export function useListCreditBalances<TData = Awaited<ReturnType<typeof listCreditBalances>>, TError = InvalidPageResponse>(
+ params: undefined |  ListCreditBalancesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditBalances>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listCreditBalances>>,
           TError,
@@ -3384,8 +3447,8 @@ export function useListCreditBalances<TData = Awaited<ReturnType<typeof listCred
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListCreditBalances<TData = Awaited<ReturnType<typeof listCreditBalances>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditBalances>>, TError, TData>> & Pick<
+export function useListCreditBalances<TData = Awaited<ReturnType<typeof listCreditBalances>>, TError = InvalidPageResponse>(
+ params?: ListCreditBalancesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditBalances>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listCreditBalances>>,
           TError,
@@ -3394,20 +3457,20 @@ export function useListCreditBalances<TData = Awaited<ReturnType<typeof listCred
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListCreditBalances<TData = Awaited<ReturnType<typeof listCreditBalances>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditBalances>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export function useListCreditBalances<TData = Awaited<ReturnType<typeof listCreditBalances>>, TError = InvalidPageResponse>(
+ params?: ListCreditBalancesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditBalances>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
  * @summary List credit balances for all customers
  */
 
-export function useListCreditBalances<TData = Awaited<ReturnType<typeof listCreditBalances>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditBalances>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export function useListCreditBalances<TData = Awaited<ReturnType<typeof listCreditBalances>>, TError = InvalidPageResponse>(
+ params?: ListCreditBalancesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditBalances>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getListCreditBalancesQueryOptions(options)
+  const queryOptions = getListCreditBalancesQueryOptions(params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -3466,7 +3529,7 @@ export const getListCreditLedgerEntriesQueryKey = (customerId: string,
     }
 
 
-export const getListCreditLedgerEntriesQueryOptions = <TData = Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError = Error>(customerId: string,
+export const getListCreditLedgerEntriesQueryOptions = <TData = Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError = Error | InvalidPageResponse>(customerId: string,
     params?: ListCreditLedgerEntriesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
@@ -3486,10 +3549,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListCreditLedgerEntriesQueryResult = NonNullable<Awaited<ReturnType<typeof listCreditLedgerEntries>>>
-export type ListCreditLedgerEntriesQueryError = Error
+export type ListCreditLedgerEntriesQueryError = Error | InvalidPageResponse
 
 
-export function useListCreditLedgerEntries<TData = Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError = Error>(
+export function useListCreditLedgerEntries<TData = Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError = Error | InvalidPageResponse>(
  customerId: string,
     params: undefined |  ListCreditLedgerEntriesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -3500,7 +3563,7 @@ export function useListCreditLedgerEntries<TData = Awaited<ReturnType<typeof lis
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListCreditLedgerEntries<TData = Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError = Error>(
+export function useListCreditLedgerEntries<TData = Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError = Error | InvalidPageResponse>(
  customerId: string,
     params?: ListCreditLedgerEntriesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -3511,7 +3574,7 @@ export function useListCreditLedgerEntries<TData = Awaited<ReturnType<typeof lis
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListCreditLedgerEntries<TData = Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError = Error>(
+export function useListCreditLedgerEntries<TData = Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError = Error | InvalidPageResponse>(
  customerId: string,
     params?: ListCreditLedgerEntriesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
@@ -3520,7 +3583,7 @@ export function useListCreditLedgerEntries<TData = Awaited<ReturnType<typeof lis
  * @summary List a customer's credit ledger
  */
 
-export function useListCreditLedgerEntries<TData = Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError = Error>(
+export function useListCreditLedgerEntries<TData = Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError = Error | InvalidPageResponse>(
  customerId: string,
     params?: ListCreditLedgerEntriesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
@@ -3615,20 +3678,27 @@ export const usePostV1WebhookEndpointsEndpoints = <TError = void,
       return useMutation(getPostV1WebhookEndpointsEndpointsMutationOptions(options), queryClient);
     }
 
-export const getGetV1WebhookEndpointsEndpointsUrl = () => {
+export const getGetV1WebhookEndpointsEndpointsUrl = (params?: GetV1WebhookEndpointsEndpointsParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/v1/webhook-endpoints/endpoints`
+  return stringifiedParams.length > 0 ? `/v1/webhook-endpoints/endpoints?${stringifiedParams}` : `/v1/webhook-endpoints/endpoints`
 }
 
 /**
  * @summary List webhook endpoints
  */
-export const getV1WebhookEndpointsEndpoints = async ( options?: RequestInit): Promise<GetV1WebhookEndpointsEndpoints200> => {
+export const getV1WebhookEndpointsEndpoints = async (params?: GetV1WebhookEndpointsEndpointsParams, options?: RequestInit): Promise<GetV1WebhookEndpointsEndpoints200> => {
 
-  return orvalClient<GetV1WebhookEndpointsEndpoints200>(getGetV1WebhookEndpointsEndpointsUrl(),
+  return orvalClient<GetV1WebhookEndpointsEndpoints200>(getGetV1WebhookEndpointsEndpointsUrl(params),
   {
     ...options,
     method: 'GET'
@@ -3641,23 +3711,23 @@ export const getV1WebhookEndpointsEndpoints = async ( options?: RequestInit): Pr
 
 
 
-export const getGetV1WebhookEndpointsEndpointsQueryKey = () => {
+export const getGetV1WebhookEndpointsEndpointsQueryKey = (params?: GetV1WebhookEndpointsEndpointsParams,) => {
     return [
-    `/v1/webhook-endpoints/endpoints`
+    `/v1/webhook-endpoints/endpoints`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getGetV1WebhookEndpointsEndpointsQueryOptions = <TData = Awaited<ReturnType<typeof getV1WebhookEndpointsEndpoints>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1WebhookEndpointsEndpoints>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetV1WebhookEndpointsEndpointsQueryOptions = <TData = Awaited<ReturnType<typeof getV1WebhookEndpointsEndpoints>>, TError = InvalidPageResponse>(params?: GetV1WebhookEndpointsEndpointsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1WebhookEndpointsEndpoints>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getGetV1WebhookEndpointsEndpointsQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getGetV1WebhookEndpointsEndpointsQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1WebhookEndpointsEndpoints>>> = () => getV1WebhookEndpointsEndpoints(requestOptions);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1WebhookEndpointsEndpoints>>> = () => getV1WebhookEndpointsEndpoints(params, requestOptions);
 
 
 
@@ -3667,11 +3737,11 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetV1WebhookEndpointsEndpointsQueryResult = NonNullable<Awaited<ReturnType<typeof getV1WebhookEndpointsEndpoints>>>
-export type GetV1WebhookEndpointsEndpointsQueryError = unknown
+export type GetV1WebhookEndpointsEndpointsQueryError = InvalidPageResponse
 
 
-export function useGetV1WebhookEndpointsEndpoints<TData = Awaited<ReturnType<typeof getV1WebhookEndpointsEndpoints>>, TError = unknown>(
-  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1WebhookEndpointsEndpoints>>, TError, TData>> & Pick<
+export function useGetV1WebhookEndpointsEndpoints<TData = Awaited<ReturnType<typeof getV1WebhookEndpointsEndpoints>>, TError = InvalidPageResponse>(
+ params: undefined |  GetV1WebhookEndpointsEndpointsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1WebhookEndpointsEndpoints>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getV1WebhookEndpointsEndpoints>>,
           TError,
@@ -3680,8 +3750,8 @@ export function useGetV1WebhookEndpointsEndpoints<TData = Awaited<ReturnType<typ
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetV1WebhookEndpointsEndpoints<TData = Awaited<ReturnType<typeof getV1WebhookEndpointsEndpoints>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1WebhookEndpointsEndpoints>>, TError, TData>> & Pick<
+export function useGetV1WebhookEndpointsEndpoints<TData = Awaited<ReturnType<typeof getV1WebhookEndpointsEndpoints>>, TError = InvalidPageResponse>(
+ params?: GetV1WebhookEndpointsEndpointsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1WebhookEndpointsEndpoints>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getV1WebhookEndpointsEndpoints>>,
           TError,
@@ -3690,20 +3760,122 @@ export function useGetV1WebhookEndpointsEndpoints<TData = Awaited<ReturnType<typ
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetV1WebhookEndpointsEndpoints<TData = Awaited<ReturnType<typeof getV1WebhookEndpointsEndpoints>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1WebhookEndpointsEndpoints>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export function useGetV1WebhookEndpointsEndpoints<TData = Awaited<ReturnType<typeof getV1WebhookEndpointsEndpoints>>, TError = InvalidPageResponse>(
+ params?: GetV1WebhookEndpointsEndpointsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1WebhookEndpointsEndpoints>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
  * @summary List webhook endpoints
  */
 
-export function useGetV1WebhookEndpointsEndpoints<TData = Awaited<ReturnType<typeof getV1WebhookEndpointsEndpoints>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1WebhookEndpointsEndpoints>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export function useGetV1WebhookEndpointsEndpoints<TData = Awaited<ReturnType<typeof getV1WebhookEndpointsEndpoints>>, TError = InvalidPageResponse>(
+ params?: GetV1WebhookEndpointsEndpointsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1WebhookEndpointsEndpoints>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getGetV1WebhookEndpointsEndpointsQueryOptions(options)
+  const queryOptions = getGetV1WebhookEndpointsEndpointsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetWebhookEndpointUrl = (id: string,) => {
+
+
+
+
+  return `/v1/webhook-endpoints/endpoints/${id}`
+}
+
+/**
+ * One endpoint, without its signing secret.
+ * @summary Get a webhook endpoint
+ */
+export const getWebhookEndpoint = async (id: string, options?: RequestInit): Promise<WebhookEndpoint> => {
+
+  return orvalClient<WebhookEndpoint>(getGetWebhookEndpointUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetWebhookEndpointQueryKey = (id: string,) => {
+    return [
+    `/v1/webhook-endpoints/endpoints/${id}`
+    ] as const;
+    }
+
+
+export const getGetWebhookEndpointQueryOptions = <TData = Awaited<ReturnType<typeof getWebhookEndpoint>>, TError = Error>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWebhookEndpoint>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetWebhookEndpointQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getWebhookEndpoint>>> = () => getWebhookEndpoint(id, requestOptions);
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getWebhookEndpoint>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetWebhookEndpointQueryResult = NonNullable<Awaited<ReturnType<typeof getWebhookEndpoint>>>
+export type GetWebhookEndpointQueryError = Error
+
+
+export function useGetWebhookEndpoint<TData = Awaited<ReturnType<typeof getWebhookEndpoint>>, TError = Error>(
+ id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWebhookEndpoint>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getWebhookEndpoint>>,
+          TError,
+          Awaited<ReturnType<typeof getWebhookEndpoint>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetWebhookEndpoint<TData = Awaited<ReturnType<typeof getWebhookEndpoint>>, TError = Error>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWebhookEndpoint>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getWebhookEndpoint>>,
+          TError,
+          Awaited<ReturnType<typeof getWebhookEndpoint>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetWebhookEndpoint<TData = Awaited<ReturnType<typeof getWebhookEndpoint>>, TError = Error>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWebhookEndpoint>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Get a webhook endpoint
+ */
+
+export function useGetWebhookEndpoint<TData = Awaited<ReturnType<typeof getWebhookEndpoint>>, TError = Error>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWebhookEndpoint>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetWebhookEndpointQueryOptions(id,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -3934,23 +4106,32 @@ export const usePostV1WebhookEndpointsEndpointsIdRotateSecret = <TError = unknow
       return useMutation(getPostV1WebhookEndpointsEndpointsIdRotateSecretMutationOptions(options), queryClient);
     }
 
-export const getListWebhookEndpointDeliveriesUrl = (id: string,) => {
+export const getListWebhookEndpointDeliveriesUrl = (id: string,
+    params?: ListWebhookEndpointDeliveriesParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/v1/webhook-endpoints/endpoints/${id}/deliveries`
+  return stringifiedParams.length > 0 ? `/v1/webhook-endpoints/endpoints/${id}/deliveries?${stringifiedParams}` : `/v1/webhook-endpoints/endpoints/${id}/deliveries`
 }
 
 /**
- * Returns the endpoint and its 50 newest deliveries, newest first.
- * Each row names the event it carried. A deleted or unknown endpoint
- * returns 404.
+ * The endpoint's deliveries, newest first. Each row names the event
+ * it carried. A deleted or unknown endpoint returns 404. The endpoint
+ * itself is `GET /v1/webhook-endpoints/endpoints/{id}`.
  * @summary List an endpoint's recent deliveries
  */
-export const listWebhookEndpointDeliveries = async (id: string, options?: RequestInit): Promise<ListWebhookEndpointDeliveries200> => {
+export const listWebhookEndpointDeliveries = async (id: string,
+    params?: ListWebhookEndpointDeliveriesParams, options?: RequestInit): Promise<ListWebhookEndpointDeliveries200> => {
 
-  return orvalClient<ListWebhookEndpointDeliveries200>(getListWebhookEndpointDeliveriesUrl(id),
+  return orvalClient<ListWebhookEndpointDeliveries200>(getListWebhookEndpointDeliveriesUrl(id,params),
   {
     ...options,
     method: 'GET'
@@ -3963,23 +4144,25 @@ export const listWebhookEndpointDeliveries = async (id: string, options?: Reques
 
 
 
-export const getListWebhookEndpointDeliveriesQueryKey = (id: string,) => {
+export const getListWebhookEndpointDeliveriesQueryKey = (id: string,
+    params?: ListWebhookEndpointDeliveriesParams,) => {
     return [
-    `/v1/webhook-endpoints/endpoints/${id}/deliveries`
+    `/v1/webhook-endpoints/endpoints/${id}/deliveries`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getListWebhookEndpointDeliveriesQueryOptions = <TData = Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>, TError = Error>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListWebhookEndpointDeliveriesQueryOptions = <TData = Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>, TError = Error | InvalidPageResponse>(id: string,
+    params?: ListWebhookEndpointDeliveriesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getListWebhookEndpointDeliveriesQueryKey(id);
+  const queryKey =  queryOptions?.queryKey ?? getListWebhookEndpointDeliveriesQueryKey(id,params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>> = () => listWebhookEndpointDeliveries(id, requestOptions);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>> = () => listWebhookEndpointDeliveries(id,params, requestOptions);
 
 
 
@@ -3989,11 +4172,12 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListWebhookEndpointDeliveriesQueryResult = NonNullable<Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>>
-export type ListWebhookEndpointDeliveriesQueryError = Error
+export type ListWebhookEndpointDeliveriesQueryError = Error | InvalidPageResponse
 
 
-export function useListWebhookEndpointDeliveries<TData = Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>, TError = Error>(
- id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>, TError, TData>> & Pick<
+export function useListWebhookEndpointDeliveries<TData = Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>, TError = Error | InvalidPageResponse>(
+ id: string,
+    params: undefined |  ListWebhookEndpointDeliveriesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>,
           TError,
@@ -4002,8 +4186,9 @@ export function useListWebhookEndpointDeliveries<TData = Awaited<ReturnType<type
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListWebhookEndpointDeliveries<TData = Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>, TError = Error>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>, TError, TData>> & Pick<
+export function useListWebhookEndpointDeliveries<TData = Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>, TError = Error | InvalidPageResponse>(
+ id: string,
+    params?: ListWebhookEndpointDeliveriesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>,
           TError,
@@ -4012,20 +4197,22 @@ export function useListWebhookEndpointDeliveries<TData = Awaited<ReturnType<type
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListWebhookEndpointDeliveries<TData = Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>, TError = Error>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export function useListWebhookEndpointDeliveries<TData = Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>, TError = Error | InvalidPageResponse>(
+ id: string,
+    params?: ListWebhookEndpointDeliveriesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
  * @summary List an endpoint's recent deliveries
  */
 
-export function useListWebhookEndpointDeliveries<TData = Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>, TError = Error>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export function useListWebhookEndpointDeliveries<TData = Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>, TError = Error | InvalidPageResponse>(
+ id: string,
+    params?: ListWebhookEndpointDeliveriesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getListWebhookEndpointDeliveriesQueryOptions(id,options)
+  const queryOptions = getListWebhookEndpointDeliveriesQueryOptions(id,params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -4118,12 +4305,19 @@ export const useReplayWebhookDelivery = <TError = Error,
       return useMutation(getReplayWebhookDeliveryMutationOptions(options), queryClient);
     }
 
-export const getGetWebhookEndpointStatsUrl = () => {
+export const getGetWebhookEndpointStatsUrl = (params?: GetWebhookEndpointStatsParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/v1/webhook-endpoints/endpoints/stats`
+  return stringifiedParams.length > 0 ? `/v1/webhook-endpoints/endpoints/stats?${stringifiedParams}` : `/v1/webhook-endpoints/endpoints/stats`
 }
 
 /**
@@ -4132,9 +4326,9 @@ export const getGetWebhookEndpointStatsUrl = () => {
  * Deleted endpoints can appear.
  * @summary Delivery counts per webhook endpoint
  */
-export const getWebhookEndpointStats = async ( options?: RequestInit): Promise<GetWebhookEndpointStats200> => {
+export const getWebhookEndpointStats = async (params?: GetWebhookEndpointStatsParams, options?: RequestInit): Promise<GetWebhookEndpointStats200> => {
 
-  return orvalClient<GetWebhookEndpointStats200>(getGetWebhookEndpointStatsUrl(),
+  return orvalClient<GetWebhookEndpointStats200>(getGetWebhookEndpointStatsUrl(params),
   {
     ...options,
     method: 'GET'
@@ -4147,23 +4341,23 @@ export const getWebhookEndpointStats = async ( options?: RequestInit): Promise<G
 
 
 
-export const getGetWebhookEndpointStatsQueryKey = () => {
+export const getGetWebhookEndpointStatsQueryKey = (params?: GetWebhookEndpointStatsParams,) => {
     return [
-    `/v1/webhook-endpoints/endpoints/stats`
+    `/v1/webhook-endpoints/endpoints/stats`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getGetWebhookEndpointStatsQueryOptions = <TData = Awaited<ReturnType<typeof getWebhookEndpointStats>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWebhookEndpointStats>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetWebhookEndpointStatsQueryOptions = <TData = Awaited<ReturnType<typeof getWebhookEndpointStats>>, TError = InvalidPageResponse>(params?: GetWebhookEndpointStatsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWebhookEndpointStats>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getGetWebhookEndpointStatsQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getGetWebhookEndpointStatsQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getWebhookEndpointStats>>> = () => getWebhookEndpointStats(requestOptions);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getWebhookEndpointStats>>> = () => getWebhookEndpointStats(params, requestOptions);
 
 
 
@@ -4173,11 +4367,11 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetWebhookEndpointStatsQueryResult = NonNullable<Awaited<ReturnType<typeof getWebhookEndpointStats>>>
-export type GetWebhookEndpointStatsQueryError = unknown
+export type GetWebhookEndpointStatsQueryError = InvalidPageResponse
 
 
-export function useGetWebhookEndpointStats<TData = Awaited<ReturnType<typeof getWebhookEndpointStats>>, TError = unknown>(
-  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWebhookEndpointStats>>, TError, TData>> & Pick<
+export function useGetWebhookEndpointStats<TData = Awaited<ReturnType<typeof getWebhookEndpointStats>>, TError = InvalidPageResponse>(
+ params: undefined |  GetWebhookEndpointStatsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWebhookEndpointStats>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getWebhookEndpointStats>>,
           TError,
@@ -4186,8 +4380,8 @@ export function useGetWebhookEndpointStats<TData = Awaited<ReturnType<typeof get
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetWebhookEndpointStats<TData = Awaited<ReturnType<typeof getWebhookEndpointStats>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWebhookEndpointStats>>, TError, TData>> & Pick<
+export function useGetWebhookEndpointStats<TData = Awaited<ReturnType<typeof getWebhookEndpointStats>>, TError = InvalidPageResponse>(
+ params?: GetWebhookEndpointStatsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWebhookEndpointStats>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getWebhookEndpointStats>>,
           TError,
@@ -4196,20 +4390,20 @@ export function useGetWebhookEndpointStats<TData = Awaited<ReturnType<typeof get
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetWebhookEndpointStats<TData = Awaited<ReturnType<typeof getWebhookEndpointStats>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWebhookEndpointStats>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export function useGetWebhookEndpointStats<TData = Awaited<ReturnType<typeof getWebhookEndpointStats>>, TError = InvalidPageResponse>(
+ params?: GetWebhookEndpointStatsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWebhookEndpointStats>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
  * @summary Delivery counts per webhook endpoint
  */
 
-export function useGetWebhookEndpointStats<TData = Awaited<ReturnType<typeof getWebhookEndpointStats>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWebhookEndpointStats>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export function useGetWebhookEndpointStats<TData = Awaited<ReturnType<typeof getWebhookEndpointStats>>, TError = InvalidPageResponse>(
+ params?: GetWebhookEndpointStatsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWebhookEndpointStats>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getGetWebhookEndpointStatsQueryOptions(options)
+  const queryOptions = getGetWebhookEndpointStatsQueryOptions(params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -4222,20 +4416,27 @@ export function useGetWebhookEndpointStats<TData = Awaited<ReturnType<typeof get
 
 
 
-export const getGetV1WebhookEndpointsEventsUrl = () => {
+export const getGetV1WebhookEndpointsEventsUrl = (params?: GetV1WebhookEndpointsEventsParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/v1/webhook-endpoints/events`
+  return stringifiedParams.length > 0 ? `/v1/webhook-endpoints/events?${stringifiedParams}` : `/v1/webhook-endpoints/events`
 }
 
 /**
- * @summary List recent outbound events (newest 50)
+ * @summary List outbound events, newest first
  */
-export const getV1WebhookEndpointsEvents = async ( options?: RequestInit): Promise<GetV1WebhookEndpointsEvents200> => {
+export const getV1WebhookEndpointsEvents = async (params?: GetV1WebhookEndpointsEventsParams, options?: RequestInit): Promise<GetV1WebhookEndpointsEvents200> => {
 
-  return orvalClient<GetV1WebhookEndpointsEvents200>(getGetV1WebhookEndpointsEventsUrl(),
+  return orvalClient<GetV1WebhookEndpointsEvents200>(getGetV1WebhookEndpointsEventsUrl(params),
   {
     ...options,
     method: 'GET'
@@ -4248,23 +4449,23 @@ export const getV1WebhookEndpointsEvents = async ( options?: RequestInit): Promi
 
 
 
-export const getGetV1WebhookEndpointsEventsQueryKey = () => {
+export const getGetV1WebhookEndpointsEventsQueryKey = (params?: GetV1WebhookEndpointsEventsParams,) => {
     return [
-    `/v1/webhook-endpoints/events`
+    `/v1/webhook-endpoints/events`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getGetV1WebhookEndpointsEventsQueryOptions = <TData = Awaited<ReturnType<typeof getV1WebhookEndpointsEvents>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1WebhookEndpointsEvents>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetV1WebhookEndpointsEventsQueryOptions = <TData = Awaited<ReturnType<typeof getV1WebhookEndpointsEvents>>, TError = InvalidPageResponse>(params?: GetV1WebhookEndpointsEventsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1WebhookEndpointsEvents>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getGetV1WebhookEndpointsEventsQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getGetV1WebhookEndpointsEventsQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1WebhookEndpointsEvents>>> = () => getV1WebhookEndpointsEvents(requestOptions);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1WebhookEndpointsEvents>>> = () => getV1WebhookEndpointsEvents(params, requestOptions);
 
 
 
@@ -4274,11 +4475,11 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetV1WebhookEndpointsEventsQueryResult = NonNullable<Awaited<ReturnType<typeof getV1WebhookEndpointsEvents>>>
-export type GetV1WebhookEndpointsEventsQueryError = unknown
+export type GetV1WebhookEndpointsEventsQueryError = InvalidPageResponse
 
 
-export function useGetV1WebhookEndpointsEvents<TData = Awaited<ReturnType<typeof getV1WebhookEndpointsEvents>>, TError = unknown>(
-  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1WebhookEndpointsEvents>>, TError, TData>> & Pick<
+export function useGetV1WebhookEndpointsEvents<TData = Awaited<ReturnType<typeof getV1WebhookEndpointsEvents>>, TError = InvalidPageResponse>(
+ params: undefined |  GetV1WebhookEndpointsEventsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1WebhookEndpointsEvents>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getV1WebhookEndpointsEvents>>,
           TError,
@@ -4287,8 +4488,8 @@ export function useGetV1WebhookEndpointsEvents<TData = Awaited<ReturnType<typeof
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetV1WebhookEndpointsEvents<TData = Awaited<ReturnType<typeof getV1WebhookEndpointsEvents>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1WebhookEndpointsEvents>>, TError, TData>> & Pick<
+export function useGetV1WebhookEndpointsEvents<TData = Awaited<ReturnType<typeof getV1WebhookEndpointsEvents>>, TError = InvalidPageResponse>(
+ params?: GetV1WebhookEndpointsEventsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1WebhookEndpointsEvents>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getV1WebhookEndpointsEvents>>,
           TError,
@@ -4297,20 +4498,20 @@ export function useGetV1WebhookEndpointsEvents<TData = Awaited<ReturnType<typeof
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetV1WebhookEndpointsEvents<TData = Awaited<ReturnType<typeof getV1WebhookEndpointsEvents>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1WebhookEndpointsEvents>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export function useGetV1WebhookEndpointsEvents<TData = Awaited<ReturnType<typeof getV1WebhookEndpointsEvents>>, TError = InvalidPageResponse>(
+ params?: GetV1WebhookEndpointsEventsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1WebhookEndpointsEvents>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary List recent outbound events (newest 50)
+ * @summary List outbound events, newest first
  */
 
-export function useGetV1WebhookEndpointsEvents<TData = Awaited<ReturnType<typeof getV1WebhookEndpointsEvents>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1WebhookEndpointsEvents>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export function useGetV1WebhookEndpointsEvents<TData = Awaited<ReturnType<typeof getV1WebhookEndpointsEvents>>, TError = InvalidPageResponse>(
+ params?: GetV1WebhookEndpointsEventsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1WebhookEndpointsEvents>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getGetV1WebhookEndpointsEventsQueryOptions(options)
+  const queryOptions = getGetV1WebhookEndpointsEventsQueryOptions(params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -4859,20 +5060,27 @@ export const usePostV1Plans = <TError = Error,
       return useMutation(getPostV1PlansMutationOptions(options), queryClient);
     }
 
-export const getGetV1PlansUrl = () => {
+export const getGetV1PlansUrl = (params?: GetV1PlansParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/v1/plans`
+  return stringifiedParams.length > 0 ? `/v1/plans?${stringifiedParams}` : `/v1/plans`
 }
 
 /**
  * @summary List plans
  */
-export const getV1Plans = async ( options?: RequestInit): Promise<GetV1Plans200> => {
+export const getV1Plans = async (params?: GetV1PlansParams, options?: RequestInit): Promise<GetV1Plans200> => {
 
-  return orvalClient<GetV1Plans200>(getGetV1PlansUrl(),
+  return orvalClient<GetV1Plans200>(getGetV1PlansUrl(params),
   {
     ...options,
     method: 'GET'
@@ -4885,23 +5093,23 @@ export const getV1Plans = async ( options?: RequestInit): Promise<GetV1Plans200>
 
 
 
-export const getGetV1PlansQueryKey = () => {
+export const getGetV1PlansQueryKey = (params?: GetV1PlansParams,) => {
     return [
-    `/v1/plans`
+    `/v1/plans`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getGetV1PlansQueryOptions = <TData = Awaited<ReturnType<typeof getV1Plans>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Plans>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetV1PlansQueryOptions = <TData = Awaited<ReturnType<typeof getV1Plans>>, TError = InvalidPageResponse>(params?: GetV1PlansParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Plans>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getGetV1PlansQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getGetV1PlansQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1Plans>>> = () => getV1Plans(requestOptions);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1Plans>>> = () => getV1Plans(params, requestOptions);
 
 
 
@@ -4911,11 +5119,11 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetV1PlansQueryResult = NonNullable<Awaited<ReturnType<typeof getV1Plans>>>
-export type GetV1PlansQueryError = unknown
+export type GetV1PlansQueryError = InvalidPageResponse
 
 
-export function useGetV1Plans<TData = Awaited<ReturnType<typeof getV1Plans>>, TError = unknown>(
-  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Plans>>, TError, TData>> & Pick<
+export function useGetV1Plans<TData = Awaited<ReturnType<typeof getV1Plans>>, TError = InvalidPageResponse>(
+ params: undefined |  GetV1PlansParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Plans>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getV1Plans>>,
           TError,
@@ -4924,8 +5132,8 @@ export function useGetV1Plans<TData = Awaited<ReturnType<typeof getV1Plans>>, TE
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetV1Plans<TData = Awaited<ReturnType<typeof getV1Plans>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Plans>>, TError, TData>> & Pick<
+export function useGetV1Plans<TData = Awaited<ReturnType<typeof getV1Plans>>, TError = InvalidPageResponse>(
+ params?: GetV1PlansParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Plans>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getV1Plans>>,
           TError,
@@ -4934,20 +5142,20 @@ export function useGetV1Plans<TData = Awaited<ReturnType<typeof getV1Plans>>, TE
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetV1Plans<TData = Awaited<ReturnType<typeof getV1Plans>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Plans>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export function useGetV1Plans<TData = Awaited<ReturnType<typeof getV1Plans>>, TError = InvalidPageResponse>(
+ params?: GetV1PlansParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Plans>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
  * @summary List plans
  */
 
-export function useGetV1Plans<TData = Awaited<ReturnType<typeof getV1Plans>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Plans>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export function useGetV1Plans<TData = Awaited<ReturnType<typeof getV1Plans>>, TError = InvalidPageResponse>(
+ params?: GetV1PlansParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Plans>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getGetV1PlansQueryOptions(options)
+  const queryOptions = getGetV1PlansQueryOptions(params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -5145,21 +5353,30 @@ export const useUpdatePlan = <TError = Error,
       return useMutation(getUpdatePlanMutationOptions(options), queryClient);
     }
 
-export const getListPlanPricesUrl = (id: string,) => {
+export const getListPlanPricesUrl = (id: string,
+    params?: ListPlanPricesParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/v1/plans/${id}/prices`
+  return stringifiedParams.length > 0 ? `/v1/plans/${id}/prices?${stringifiedParams}` : `/v1/plans/${id}/prices`
 }
 
 /**
  * The plan's usage prices from now on, in the order they were added.
  * @summary List a plan's prices
  */
-export const listPlanPrices = async (id: string, options?: RequestInit): Promise<ListPlanPrices200> => {
+export const listPlanPrices = async (id: string,
+    params?: ListPlanPricesParams, options?: RequestInit): Promise<ListPlanPrices200> => {
 
-  return orvalClient<ListPlanPrices200>(getListPlanPricesUrl(id),
+  return orvalClient<ListPlanPrices200>(getListPlanPricesUrl(id,params),
   {
     ...options,
     method: 'GET'
@@ -5172,23 +5389,25 @@ export const listPlanPrices = async (id: string, options?: RequestInit): Promise
 
 
 
-export const getListPlanPricesQueryKey = (id: string,) => {
+export const getListPlanPricesQueryKey = (id: string,
+    params?: ListPlanPricesParams,) => {
     return [
-    `/v1/plans/${id}/prices`
+    `/v1/plans/${id}/prices`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getListPlanPricesQueryOptions = <TData = Awaited<ReturnType<typeof listPlanPrices>>, TError = Error>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPlanPrices>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListPlanPricesQueryOptions = <TData = Awaited<ReturnType<typeof listPlanPrices>>, TError = Error | InvalidPageResponse>(id: string,
+    params?: ListPlanPricesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPlanPrices>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getListPlanPricesQueryKey(id);
+  const queryKey =  queryOptions?.queryKey ?? getListPlanPricesQueryKey(id,params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listPlanPrices>>> = () => listPlanPrices(id, requestOptions);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listPlanPrices>>> = () => listPlanPrices(id,params, requestOptions);
 
 
 
@@ -5198,11 +5417,12 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListPlanPricesQueryResult = NonNullable<Awaited<ReturnType<typeof listPlanPrices>>>
-export type ListPlanPricesQueryError = Error
+export type ListPlanPricesQueryError = Error | InvalidPageResponse
 
 
-export function useListPlanPrices<TData = Awaited<ReturnType<typeof listPlanPrices>>, TError = Error>(
- id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPlanPrices>>, TError, TData>> & Pick<
+export function useListPlanPrices<TData = Awaited<ReturnType<typeof listPlanPrices>>, TError = Error | InvalidPageResponse>(
+ id: string,
+    params: undefined |  ListPlanPricesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPlanPrices>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listPlanPrices>>,
           TError,
@@ -5211,8 +5431,9 @@ export function useListPlanPrices<TData = Awaited<ReturnType<typeof listPlanPric
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListPlanPrices<TData = Awaited<ReturnType<typeof listPlanPrices>>, TError = Error>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPlanPrices>>, TError, TData>> & Pick<
+export function useListPlanPrices<TData = Awaited<ReturnType<typeof listPlanPrices>>, TError = Error | InvalidPageResponse>(
+ id: string,
+    params?: ListPlanPricesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPlanPrices>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listPlanPrices>>,
           TError,
@@ -5221,20 +5442,22 @@ export function useListPlanPrices<TData = Awaited<ReturnType<typeof listPlanPric
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListPlanPrices<TData = Awaited<ReturnType<typeof listPlanPrices>>, TError = Error>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPlanPrices>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export function useListPlanPrices<TData = Awaited<ReturnType<typeof listPlanPrices>>, TError = Error | InvalidPageResponse>(
+ id: string,
+    params?: ListPlanPricesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPlanPrices>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
  * @summary List a plan's prices
  */
 
-export function useListPlanPrices<TData = Awaited<ReturnType<typeof listPlanPrices>>, TError = Error>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPlanPrices>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export function useListPlanPrices<TData = Awaited<ReturnType<typeof listPlanPrices>>, TError = Error | InvalidPageResponse>(
+ id: string,
+    params?: ListPlanPricesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPlanPrices>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getListPlanPricesQueryOptions(id,options)
+  const queryOptions = getListPlanPricesQueryOptions(id,params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -5603,7 +5826,7 @@ export const getGetV1SubscriptionsQueryKey = (params?: GetV1SubscriptionsParams,
     }
 
 
-export const getGetV1SubscriptionsQueryOptions = <TData = Awaited<ReturnType<typeof getV1Subscriptions>>, TError = Error>(params?: GetV1SubscriptionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Subscriptions>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetV1SubscriptionsQueryOptions = <TData = Awaited<ReturnType<typeof getV1Subscriptions>>, TError = Error | InvalidPageResponse>(params?: GetV1SubscriptionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Subscriptions>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -5622,10 +5845,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetV1SubscriptionsQueryResult = NonNullable<Awaited<ReturnType<typeof getV1Subscriptions>>>
-export type GetV1SubscriptionsQueryError = Error
+export type GetV1SubscriptionsQueryError = Error | InvalidPageResponse
 
 
-export function useGetV1Subscriptions<TData = Awaited<ReturnType<typeof getV1Subscriptions>>, TError = Error>(
+export function useGetV1Subscriptions<TData = Awaited<ReturnType<typeof getV1Subscriptions>>, TError = Error | InvalidPageResponse>(
  params: undefined |  GetV1SubscriptionsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Subscriptions>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getV1Subscriptions>>,
@@ -5635,7 +5858,7 @@ export function useGetV1Subscriptions<TData = Awaited<ReturnType<typeof getV1Sub
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetV1Subscriptions<TData = Awaited<ReturnType<typeof getV1Subscriptions>>, TError = Error>(
+export function useGetV1Subscriptions<TData = Awaited<ReturnType<typeof getV1Subscriptions>>, TError = Error | InvalidPageResponse>(
  params?: GetV1SubscriptionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Subscriptions>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getV1Subscriptions>>,
@@ -5645,7 +5868,7 @@ export function useGetV1Subscriptions<TData = Awaited<ReturnType<typeof getV1Sub
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetV1Subscriptions<TData = Awaited<ReturnType<typeof getV1Subscriptions>>, TError = Error>(
+export function useGetV1Subscriptions<TData = Awaited<ReturnType<typeof getV1Subscriptions>>, TError = Error | InvalidPageResponse>(
  params?: GetV1SubscriptionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Subscriptions>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -5653,7 +5876,7 @@ export function useGetV1Subscriptions<TData = Awaited<ReturnType<typeof getV1Sub
  * @summary List subscriptions
  */
 
-export function useGetV1Subscriptions<TData = Awaited<ReturnType<typeof getV1Subscriptions>>, TError = Error>(
+export function useGetV1Subscriptions<TData = Awaited<ReturnType<typeof getV1Subscriptions>>, TError = Error | InvalidPageResponse>(
  params?: GetV1SubscriptionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Subscriptions>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -7899,7 +8122,7 @@ export const getGetV1InvoicesQueryKey = (params?: GetV1InvoicesParams,) => {
     }
 
 
-export const getGetV1InvoicesQueryOptions = <TData = Awaited<ReturnType<typeof getV1Invoices>>, TError = unknown>(params?: GetV1InvoicesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Invoices>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetV1InvoicesQueryOptions = <TData = Awaited<ReturnType<typeof getV1Invoices>>, TError = InvalidPageResponse>(params?: GetV1InvoicesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Invoices>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -7918,10 +8141,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetV1InvoicesQueryResult = NonNullable<Awaited<ReturnType<typeof getV1Invoices>>>
-export type GetV1InvoicesQueryError = unknown
+export type GetV1InvoicesQueryError = InvalidPageResponse
 
 
-export function useGetV1Invoices<TData = Awaited<ReturnType<typeof getV1Invoices>>, TError = unknown>(
+export function useGetV1Invoices<TData = Awaited<ReturnType<typeof getV1Invoices>>, TError = InvalidPageResponse>(
  params: undefined |  GetV1InvoicesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Invoices>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getV1Invoices>>,
@@ -7931,7 +8154,7 @@ export function useGetV1Invoices<TData = Awaited<ReturnType<typeof getV1Invoices
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetV1Invoices<TData = Awaited<ReturnType<typeof getV1Invoices>>, TError = unknown>(
+export function useGetV1Invoices<TData = Awaited<ReturnType<typeof getV1Invoices>>, TError = InvalidPageResponse>(
  params?: GetV1InvoicesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Invoices>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getV1Invoices>>,
@@ -7941,7 +8164,7 @@ export function useGetV1Invoices<TData = Awaited<ReturnType<typeof getV1Invoices
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetV1Invoices<TData = Awaited<ReturnType<typeof getV1Invoices>>, TError = unknown>(
+export function useGetV1Invoices<TData = Awaited<ReturnType<typeof getV1Invoices>>, TError = InvalidPageResponse>(
  params?: GetV1InvoicesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Invoices>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -7949,7 +8172,7 @@ export function useGetV1Invoices<TData = Awaited<ReturnType<typeof getV1Invoices
  * @summary List invoices
  */
 
-export function useGetV1Invoices<TData = Awaited<ReturnType<typeof getV1Invoices>>, TError = unknown>(
+export function useGetV1Invoices<TData = Awaited<ReturnType<typeof getV1Invoices>>, TError = InvalidPageResponse>(
  params?: GetV1InvoicesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Invoices>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -9206,12 +9429,20 @@ export function useGetInvoicePaymentTimeline<TData = Awaited<ReturnType<typeof g
 
 
 
-export const getListInvoiceDisputesUrl = (id: string,) => {
+export const getListInvoiceDisputesUrl = (id: string,
+    params?: ListInvoiceDisputesParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/v1/invoices/${id}/disputes`
+  return stringifiedParams.length > 0 ? `/v1/invoices/${id}/disputes?${stringifiedParams}` : `/v1/invoices/${id}/disputes`
 }
 
 /**
@@ -9224,9 +9455,10 @@ export const getListInvoiceDisputesUrl = (id: string,) => {
  * credit note or a write-off in your books.
  * @summary List the card disputes on an invoice
  */
-export const listInvoiceDisputes = async (id: string, options?: RequestInit): Promise<InvoiceDisputeList> => {
+export const listInvoiceDisputes = async (id: string,
+    params?: ListInvoiceDisputesParams, options?: RequestInit): Promise<InvoiceDisputeList> => {
 
-  return orvalClient<InvoiceDisputeList>(getListInvoiceDisputesUrl(id),
+  return orvalClient<InvoiceDisputeList>(getListInvoiceDisputesUrl(id,params),
   {
     ...options,
     method: 'GET'
@@ -9239,23 +9471,25 @@ export const listInvoiceDisputes = async (id: string, options?: RequestInit): Pr
 
 
 
-export const getListInvoiceDisputesQueryKey = (id: string,) => {
+export const getListInvoiceDisputesQueryKey = (id: string,
+    params?: ListInvoiceDisputesParams,) => {
     return [
-    `/v1/invoices/${id}/disputes`
+    `/v1/invoices/${id}/disputes`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getListInvoiceDisputesQueryOptions = <TData = Awaited<ReturnType<typeof listInvoiceDisputes>>, TError = Error>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoiceDisputes>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListInvoiceDisputesQueryOptions = <TData = Awaited<ReturnType<typeof listInvoiceDisputes>>, TError = Error | InvalidPageResponse>(id: string,
+    params?: ListInvoiceDisputesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoiceDisputes>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getListInvoiceDisputesQueryKey(id);
+  const queryKey =  queryOptions?.queryKey ?? getListInvoiceDisputesQueryKey(id,params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listInvoiceDisputes>>> = () => listInvoiceDisputes(id, requestOptions);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listInvoiceDisputes>>> = () => listInvoiceDisputes(id,params, requestOptions);
 
 
 
@@ -9265,11 +9499,12 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListInvoiceDisputesQueryResult = NonNullable<Awaited<ReturnType<typeof listInvoiceDisputes>>>
-export type ListInvoiceDisputesQueryError = Error
+export type ListInvoiceDisputesQueryError = Error | InvalidPageResponse
 
 
-export function useListInvoiceDisputes<TData = Awaited<ReturnType<typeof listInvoiceDisputes>>, TError = Error>(
- id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoiceDisputes>>, TError, TData>> & Pick<
+export function useListInvoiceDisputes<TData = Awaited<ReturnType<typeof listInvoiceDisputes>>, TError = Error | InvalidPageResponse>(
+ id: string,
+    params: undefined |  ListInvoiceDisputesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoiceDisputes>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listInvoiceDisputes>>,
           TError,
@@ -9278,8 +9513,9 @@ export function useListInvoiceDisputes<TData = Awaited<ReturnType<typeof listInv
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListInvoiceDisputes<TData = Awaited<ReturnType<typeof listInvoiceDisputes>>, TError = Error>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoiceDisputes>>, TError, TData>> & Pick<
+export function useListInvoiceDisputes<TData = Awaited<ReturnType<typeof listInvoiceDisputes>>, TError = Error | InvalidPageResponse>(
+ id: string,
+    params?: ListInvoiceDisputesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoiceDisputes>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listInvoiceDisputes>>,
           TError,
@@ -9288,20 +9524,22 @@ export function useListInvoiceDisputes<TData = Awaited<ReturnType<typeof listInv
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListInvoiceDisputes<TData = Awaited<ReturnType<typeof listInvoiceDisputes>>, TError = Error>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoiceDisputes>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export function useListInvoiceDisputes<TData = Awaited<ReturnType<typeof listInvoiceDisputes>>, TError = Error | InvalidPageResponse>(
+ id: string,
+    params?: ListInvoiceDisputesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoiceDisputes>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
  * @summary List the card disputes on an invoice
  */
 
-export function useListInvoiceDisputes<TData = Awaited<ReturnType<typeof listInvoiceDisputes>>, TError = Error>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoiceDisputes>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export function useListInvoiceDisputes<TData = Awaited<ReturnType<typeof listInvoiceDisputes>>, TError = Error | InvalidPageResponse>(
+ id: string,
+    params?: ListInvoiceDisputesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoiceDisputes>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getListInvoiceDisputesQueryOptions(id,options)
+  const queryOptions = getListInvoiceDisputesQueryOptions(id,params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -10508,8 +10746,8 @@ export const getCheckPasswordResetTokenUrl = (params: CheckPasswordResetTokenPar
  * Tells whether a reset token can still be used, without using it up.
  * The reset-password page calls it on load, so it can show "this link
  * is no longer valid" before the user types a new password. An
- * unknown, expired or already-used token returns 422 with
- * `valid: false`.
+ * unknown, expired or already-used token returns 422 with code
+ * `invalid_or_expired`.
  * @summary Check a password reset token
  */
 export const checkPasswordResetToken = async (params: CheckPasswordResetTokenParams, options?: RequestInit): Promise<CheckPasswordResetToken200> => {
@@ -10534,7 +10772,7 @@ export const getCheckPasswordResetTokenQueryKey = (params?: CheckPasswordResetTo
     }
 
 
-export const getCheckPasswordResetTokenQueryOptions = <TData = Awaited<ReturnType<typeof checkPasswordResetToken>>, TError = CheckPasswordResetToken422 | Error>(params: CheckPasswordResetTokenParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof checkPasswordResetToken>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getCheckPasswordResetTokenQueryOptions = <TData = Awaited<ReturnType<typeof checkPasswordResetToken>>, TError = Error>(params: CheckPasswordResetTokenParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof checkPasswordResetToken>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -10553,10 +10791,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type CheckPasswordResetTokenQueryResult = NonNullable<Awaited<ReturnType<typeof checkPasswordResetToken>>>
-export type CheckPasswordResetTokenQueryError = CheckPasswordResetToken422 | Error
+export type CheckPasswordResetTokenQueryError = Error
 
 
-export function useCheckPasswordResetToken<TData = Awaited<ReturnType<typeof checkPasswordResetToken>>, TError = CheckPasswordResetToken422 | Error>(
+export function useCheckPasswordResetToken<TData = Awaited<ReturnType<typeof checkPasswordResetToken>>, TError = Error>(
  params: CheckPasswordResetTokenParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof checkPasswordResetToken>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof checkPasswordResetToken>>,
@@ -10566,7 +10804,7 @@ export function useCheckPasswordResetToken<TData = Awaited<ReturnType<typeof che
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useCheckPasswordResetToken<TData = Awaited<ReturnType<typeof checkPasswordResetToken>>, TError = CheckPasswordResetToken422 | Error>(
+export function useCheckPasswordResetToken<TData = Awaited<ReturnType<typeof checkPasswordResetToken>>, TError = Error>(
  params: CheckPasswordResetTokenParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof checkPasswordResetToken>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof checkPasswordResetToken>>,
@@ -10576,7 +10814,7 @@ export function useCheckPasswordResetToken<TData = Awaited<ReturnType<typeof che
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useCheckPasswordResetToken<TData = Awaited<ReturnType<typeof checkPasswordResetToken>>, TError = CheckPasswordResetToken422 | Error>(
+export function useCheckPasswordResetToken<TData = Awaited<ReturnType<typeof checkPasswordResetToken>>, TError = Error>(
  params: CheckPasswordResetTokenParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof checkPasswordResetToken>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -10584,7 +10822,7 @@ export function useCheckPasswordResetToken<TData = Awaited<ReturnType<typeof che
  * @summary Check a password reset token
  */
 
-export function useCheckPasswordResetToken<TData = Awaited<ReturnType<typeof checkPasswordResetToken>>, TError = CheckPasswordResetToken422 | Error>(
+export function useCheckPasswordResetToken<TData = Awaited<ReturnType<typeof checkPasswordResetToken>>, TError = Error>(
  params: CheckPasswordResetTokenParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof checkPasswordResetToken>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -11297,12 +11535,19 @@ export const usePostV1BillingRun = <TError = unknown,
       return useMutation(getPostV1BillingRunMutationOptions(options), queryClient);
     }
 
-export const getGetV1ProviderCostsUrl = () => {
+export const getGetV1ProviderCostsUrl = (params?: GetV1ProviderCostsParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/v1/provider-costs`
+  return stringifiedParams.length > 0 ? `/v1/provider-costs?${stringifiedParams}` : `/v1/provider-costs`
 }
 
 /**
@@ -11311,9 +11556,9 @@ export const getGetV1ProviderCostsUrl = () => {
  * one row per key, edited in place; per-event stamps are the history.
  * @summary List provider cost rates
  */
-export const getV1ProviderCosts = async ( options?: RequestInit): Promise<GetV1ProviderCosts200> => {
+export const getV1ProviderCosts = async (params?: GetV1ProviderCostsParams, options?: RequestInit): Promise<GetV1ProviderCosts200> => {
 
-  return orvalClient<GetV1ProviderCosts200>(getGetV1ProviderCostsUrl(),
+  return orvalClient<GetV1ProviderCosts200>(getGetV1ProviderCostsUrl(params),
   {
     ...options,
     method: 'GET'
@@ -11326,23 +11571,23 @@ export const getV1ProviderCosts = async ( options?: RequestInit): Promise<GetV1P
 
 
 
-export const getGetV1ProviderCostsQueryKey = () => {
+export const getGetV1ProviderCostsQueryKey = (params?: GetV1ProviderCostsParams,) => {
     return [
-    `/v1/provider-costs`
+    `/v1/provider-costs`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getGetV1ProviderCostsQueryOptions = <TData = Awaited<ReturnType<typeof getV1ProviderCosts>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1ProviderCosts>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetV1ProviderCostsQueryOptions = <TData = Awaited<ReturnType<typeof getV1ProviderCosts>>, TError = InvalidPageResponse>(params?: GetV1ProviderCostsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1ProviderCosts>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getGetV1ProviderCostsQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getGetV1ProviderCostsQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1ProviderCosts>>> = () => getV1ProviderCosts(requestOptions);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1ProviderCosts>>> = () => getV1ProviderCosts(params, requestOptions);
 
 
 
@@ -11352,11 +11597,11 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetV1ProviderCostsQueryResult = NonNullable<Awaited<ReturnType<typeof getV1ProviderCosts>>>
-export type GetV1ProviderCostsQueryError = unknown
+export type GetV1ProviderCostsQueryError = InvalidPageResponse
 
 
-export function useGetV1ProviderCosts<TData = Awaited<ReturnType<typeof getV1ProviderCosts>>, TError = unknown>(
-  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1ProviderCosts>>, TError, TData>> & Pick<
+export function useGetV1ProviderCosts<TData = Awaited<ReturnType<typeof getV1ProviderCosts>>, TError = InvalidPageResponse>(
+ params: undefined |  GetV1ProviderCostsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1ProviderCosts>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getV1ProviderCosts>>,
           TError,
@@ -11365,8 +11610,8 @@ export function useGetV1ProviderCosts<TData = Awaited<ReturnType<typeof getV1Pro
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetV1ProviderCosts<TData = Awaited<ReturnType<typeof getV1ProviderCosts>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1ProviderCosts>>, TError, TData>> & Pick<
+export function useGetV1ProviderCosts<TData = Awaited<ReturnType<typeof getV1ProviderCosts>>, TError = InvalidPageResponse>(
+ params?: GetV1ProviderCostsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1ProviderCosts>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getV1ProviderCosts>>,
           TError,
@@ -11375,20 +11620,20 @@ export function useGetV1ProviderCosts<TData = Awaited<ReturnType<typeof getV1Pro
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetV1ProviderCosts<TData = Awaited<ReturnType<typeof getV1ProviderCosts>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1ProviderCosts>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export function useGetV1ProviderCosts<TData = Awaited<ReturnType<typeof getV1ProviderCosts>>, TError = InvalidPageResponse>(
+ params?: GetV1ProviderCostsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1ProviderCosts>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
  * @summary List provider cost rates
  */
 
-export function useGetV1ProviderCosts<TData = Awaited<ReturnType<typeof getV1ProviderCosts>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1ProviderCosts>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export function useGetV1ProviderCosts<TData = Awaited<ReturnType<typeof getV1ProviderCosts>>, TError = InvalidPageResponse>(
+ params?: GetV1ProviderCostsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1ProviderCosts>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getGetV1ProviderCostsQueryOptions(options)
+  const queryOptions = getGetV1ProviderCostsQueryOptions(params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -11965,12 +12210,19 @@ export function useGetV1CreditsBalanceCustomerIdLive<TData = Awaited<ReturnType<
 
 
 
-export const getGetV1TestClocksUrl = () => {
+export const getGetV1TestClocksUrl = (params?: GetV1TestClocksParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/v1/test-clocks`
+  return stringifiedParams.length > 0 ? `/v1/test-clocks?${stringifiedParams}` : `/v1/test-clocks`
 }
 
 /**
@@ -11979,9 +12231,9 @@ export const getGetV1TestClocksUrl = () => {
  * wall-clock advances. See ADR / docs for the simulator semantics.
  * @summary List test clocks for the active tenant
  */
-export const getV1TestClocks = async ( options?: RequestInit): Promise<GetV1TestClocks200> => {
+export const getV1TestClocks = async (params?: GetV1TestClocksParams, options?: RequestInit): Promise<GetV1TestClocks200> => {
 
-  return orvalClient<GetV1TestClocks200>(getGetV1TestClocksUrl(),
+  return orvalClient<GetV1TestClocks200>(getGetV1TestClocksUrl(params),
   {
     ...options,
     method: 'GET'
@@ -11994,23 +12246,23 @@ export const getV1TestClocks = async ( options?: RequestInit): Promise<GetV1Test
 
 
 
-export const getGetV1TestClocksQueryKey = () => {
+export const getGetV1TestClocksQueryKey = (params?: GetV1TestClocksParams,) => {
     return [
-    `/v1/test-clocks`
+    `/v1/test-clocks`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getGetV1TestClocksQueryOptions = <TData = Awaited<ReturnType<typeof getV1TestClocks>>, TError = Error>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1TestClocks>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetV1TestClocksQueryOptions = <TData = Awaited<ReturnType<typeof getV1TestClocks>>, TError = Error | InvalidPageResponse>(params?: GetV1TestClocksParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1TestClocks>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getGetV1TestClocksQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getGetV1TestClocksQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1TestClocks>>> = () => getV1TestClocks(requestOptions);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1TestClocks>>> = () => getV1TestClocks(params, requestOptions);
 
 
 
@@ -12020,11 +12272,11 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetV1TestClocksQueryResult = NonNullable<Awaited<ReturnType<typeof getV1TestClocks>>>
-export type GetV1TestClocksQueryError = Error
+export type GetV1TestClocksQueryError = Error | InvalidPageResponse
 
 
-export function useGetV1TestClocks<TData = Awaited<ReturnType<typeof getV1TestClocks>>, TError = Error>(
-  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1TestClocks>>, TError, TData>> & Pick<
+export function useGetV1TestClocks<TData = Awaited<ReturnType<typeof getV1TestClocks>>, TError = Error | InvalidPageResponse>(
+ params: undefined |  GetV1TestClocksParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1TestClocks>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getV1TestClocks>>,
           TError,
@@ -12033,8 +12285,8 @@ export function useGetV1TestClocks<TData = Awaited<ReturnType<typeof getV1TestCl
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetV1TestClocks<TData = Awaited<ReturnType<typeof getV1TestClocks>>, TError = Error>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1TestClocks>>, TError, TData>> & Pick<
+export function useGetV1TestClocks<TData = Awaited<ReturnType<typeof getV1TestClocks>>, TError = Error | InvalidPageResponse>(
+ params?: GetV1TestClocksParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1TestClocks>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getV1TestClocks>>,
           TError,
@@ -12043,20 +12295,20 @@ export function useGetV1TestClocks<TData = Awaited<ReturnType<typeof getV1TestCl
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetV1TestClocks<TData = Awaited<ReturnType<typeof getV1TestClocks>>, TError = Error>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1TestClocks>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export function useGetV1TestClocks<TData = Awaited<ReturnType<typeof getV1TestClocks>>, TError = Error | InvalidPageResponse>(
+ params?: GetV1TestClocksParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1TestClocks>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
  * @summary List test clocks for the active tenant
  */
 
-export function useGetV1TestClocks<TData = Awaited<ReturnType<typeof getV1TestClocks>>, TError = Error>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1TestClocks>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export function useGetV1TestClocks<TData = Awaited<ReturnType<typeof getV1TestClocks>>, TError = Error | InvalidPageResponse>(
+ params?: GetV1TestClocksParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1TestClocks>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getGetV1TestClocksQueryOptions(options)
+  const queryOptions = getGetV1TestClocksQueryOptions(params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -12314,20 +12566,29 @@ export const useDeleteV1TestClocksId = <TError = unknown,
       return useMutation(getDeleteV1TestClocksIdMutationOptions(options), queryClient);
     }
 
-export const getGetV1TestClocksIdSubscriptionsUrl = (id: string,) => {
+export const getGetV1TestClocksIdSubscriptionsUrl = (id: string,
+    params?: GetV1TestClocksIdSubscriptionsParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/v1/test-clocks/${id}/subscriptions`
+  return stringifiedParams.length > 0 ? `/v1/test-clocks/${id}/subscriptions?${stringifiedParams}` : `/v1/test-clocks/${id}/subscriptions`
 }
 
 /**
  * @summary List subscriptions pinned to this clock
  */
-export const getV1TestClocksIdSubscriptions = async (id: string, options?: RequestInit): Promise<GetV1TestClocksIdSubscriptions200> => {
+export const getV1TestClocksIdSubscriptions = async (id: string,
+    params?: GetV1TestClocksIdSubscriptionsParams, options?: RequestInit): Promise<GetV1TestClocksIdSubscriptions200> => {
 
-  return orvalClient<GetV1TestClocksIdSubscriptions200>(getGetV1TestClocksIdSubscriptionsUrl(id),
+  return orvalClient<GetV1TestClocksIdSubscriptions200>(getGetV1TestClocksIdSubscriptionsUrl(id,params),
   {
     ...options,
     method: 'GET'
@@ -12340,23 +12601,25 @@ export const getV1TestClocksIdSubscriptions = async (id: string, options?: Reque
 
 
 
-export const getGetV1TestClocksIdSubscriptionsQueryKey = (id: string,) => {
+export const getGetV1TestClocksIdSubscriptionsQueryKey = (id: string,
+    params?: GetV1TestClocksIdSubscriptionsParams,) => {
     return [
-    `/v1/test-clocks/${id}/subscriptions`
+    `/v1/test-clocks/${id}/subscriptions`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getGetV1TestClocksIdSubscriptionsQueryOptions = <TData = Awaited<ReturnType<typeof getV1TestClocksIdSubscriptions>>, TError = void>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1TestClocksIdSubscriptions>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetV1TestClocksIdSubscriptionsQueryOptions = <TData = Awaited<ReturnType<typeof getV1TestClocksIdSubscriptions>>, TError = void | InvalidPageResponse>(id: string,
+    params?: GetV1TestClocksIdSubscriptionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1TestClocksIdSubscriptions>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getGetV1TestClocksIdSubscriptionsQueryKey(id);
+  const queryKey =  queryOptions?.queryKey ?? getGetV1TestClocksIdSubscriptionsQueryKey(id,params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1TestClocksIdSubscriptions>>> = () => getV1TestClocksIdSubscriptions(id, requestOptions);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1TestClocksIdSubscriptions>>> = () => getV1TestClocksIdSubscriptions(id,params, requestOptions);
 
 
 
@@ -12366,11 +12629,12 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetV1TestClocksIdSubscriptionsQueryResult = NonNullable<Awaited<ReturnType<typeof getV1TestClocksIdSubscriptions>>>
-export type GetV1TestClocksIdSubscriptionsQueryError = void
+export type GetV1TestClocksIdSubscriptionsQueryError = void | InvalidPageResponse
 
 
-export function useGetV1TestClocksIdSubscriptions<TData = Awaited<ReturnType<typeof getV1TestClocksIdSubscriptions>>, TError = void>(
- id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1TestClocksIdSubscriptions>>, TError, TData>> & Pick<
+export function useGetV1TestClocksIdSubscriptions<TData = Awaited<ReturnType<typeof getV1TestClocksIdSubscriptions>>, TError = void | InvalidPageResponse>(
+ id: string,
+    params: undefined |  GetV1TestClocksIdSubscriptionsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1TestClocksIdSubscriptions>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getV1TestClocksIdSubscriptions>>,
           TError,
@@ -12379,8 +12643,9 @@ export function useGetV1TestClocksIdSubscriptions<TData = Awaited<ReturnType<typ
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetV1TestClocksIdSubscriptions<TData = Awaited<ReturnType<typeof getV1TestClocksIdSubscriptions>>, TError = void>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1TestClocksIdSubscriptions>>, TError, TData>> & Pick<
+export function useGetV1TestClocksIdSubscriptions<TData = Awaited<ReturnType<typeof getV1TestClocksIdSubscriptions>>, TError = void | InvalidPageResponse>(
+ id: string,
+    params?: GetV1TestClocksIdSubscriptionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1TestClocksIdSubscriptions>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getV1TestClocksIdSubscriptions>>,
           TError,
@@ -12389,20 +12654,22 @@ export function useGetV1TestClocksIdSubscriptions<TData = Awaited<ReturnType<typ
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetV1TestClocksIdSubscriptions<TData = Awaited<ReturnType<typeof getV1TestClocksIdSubscriptions>>, TError = void>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1TestClocksIdSubscriptions>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export function useGetV1TestClocksIdSubscriptions<TData = Awaited<ReturnType<typeof getV1TestClocksIdSubscriptions>>, TError = void | InvalidPageResponse>(
+ id: string,
+    params?: GetV1TestClocksIdSubscriptionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1TestClocksIdSubscriptions>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
  * @summary List subscriptions pinned to this clock
  */
 
-export function useGetV1TestClocksIdSubscriptions<TData = Awaited<ReturnType<typeof getV1TestClocksIdSubscriptions>>, TError = void>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1TestClocksIdSubscriptions>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export function useGetV1TestClocksIdSubscriptions<TData = Awaited<ReturnType<typeof getV1TestClocksIdSubscriptions>>, TError = void | InvalidPageResponse>(
+ id: string,
+    params?: GetV1TestClocksIdSubscriptionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1TestClocksIdSubscriptions>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getGetV1TestClocksIdSubscriptionsQueryOptions(id,options)
+  const queryOptions = getGetV1TestClocksIdSubscriptionsQueryOptions(id,params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -12579,12 +12846,20 @@ export const usePostV1TestClocksIdRetryAdvance = <TError = void,
       return useMutation(getPostV1TestClocksIdRetryAdvanceMutationOptions(options), queryClient);
     }
 
-export const getListTestClockCustomersUrl = (id: string,) => {
+export const getListTestClockCustomersUrl = (id: string,
+    params?: ListTestClockCustomersParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/v1/test-clocks/${id}/customers`
+  return stringifiedParams.length > 0 ? `/v1/test-clocks/${id}/customers?${stringifiedParams}` : `/v1/test-clocks/${id}/customers`
 }
 
 /**
@@ -12592,9 +12867,10 @@ export const getListTestClockCustomersUrl = (id: string,) => {
  * attached to the clock. The list is not paginated.
  * @summary List customers attached to a test clock
  */
-export const listTestClockCustomers = async (id: string, options?: RequestInit): Promise<ListTestClockCustomers200> => {
+export const listTestClockCustomers = async (id: string,
+    params?: ListTestClockCustomersParams, options?: RequestInit): Promise<ListTestClockCustomers200> => {
 
-  return orvalClient<ListTestClockCustomers200>(getListTestClockCustomersUrl(id),
+  return orvalClient<ListTestClockCustomers200>(getListTestClockCustomersUrl(id,params),
   {
     ...options,
     method: 'GET'
@@ -12607,23 +12883,25 @@ export const listTestClockCustomers = async (id: string, options?: RequestInit):
 
 
 
-export const getListTestClockCustomersQueryKey = (id: string,) => {
+export const getListTestClockCustomersQueryKey = (id: string,
+    params?: ListTestClockCustomersParams,) => {
     return [
-    `/v1/test-clocks/${id}/customers`
+    `/v1/test-clocks/${id}/customers`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getListTestClockCustomersQueryOptions = <TData = Awaited<ReturnType<typeof listTestClockCustomers>>, TError = Error>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTestClockCustomers>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListTestClockCustomersQueryOptions = <TData = Awaited<ReturnType<typeof listTestClockCustomers>>, TError = Error | InvalidPageResponse>(id: string,
+    params?: ListTestClockCustomersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTestClockCustomers>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getListTestClockCustomersQueryKey(id);
+  const queryKey =  queryOptions?.queryKey ?? getListTestClockCustomersQueryKey(id,params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listTestClockCustomers>>> = () => listTestClockCustomers(id, requestOptions);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listTestClockCustomers>>> = () => listTestClockCustomers(id,params, requestOptions);
 
 
 
@@ -12633,11 +12911,12 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListTestClockCustomersQueryResult = NonNullable<Awaited<ReturnType<typeof listTestClockCustomers>>>
-export type ListTestClockCustomersQueryError = Error
+export type ListTestClockCustomersQueryError = Error | InvalidPageResponse
 
 
-export function useListTestClockCustomers<TData = Awaited<ReturnType<typeof listTestClockCustomers>>, TError = Error>(
- id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTestClockCustomers>>, TError, TData>> & Pick<
+export function useListTestClockCustomers<TData = Awaited<ReturnType<typeof listTestClockCustomers>>, TError = Error | InvalidPageResponse>(
+ id: string,
+    params: undefined |  ListTestClockCustomersParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTestClockCustomers>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listTestClockCustomers>>,
           TError,
@@ -12646,8 +12925,9 @@ export function useListTestClockCustomers<TData = Awaited<ReturnType<typeof list
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListTestClockCustomers<TData = Awaited<ReturnType<typeof listTestClockCustomers>>, TError = Error>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTestClockCustomers>>, TError, TData>> & Pick<
+export function useListTestClockCustomers<TData = Awaited<ReturnType<typeof listTestClockCustomers>>, TError = Error | InvalidPageResponse>(
+ id: string,
+    params?: ListTestClockCustomersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTestClockCustomers>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listTestClockCustomers>>,
           TError,
@@ -12656,20 +12936,22 @@ export function useListTestClockCustomers<TData = Awaited<ReturnType<typeof list
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListTestClockCustomers<TData = Awaited<ReturnType<typeof listTestClockCustomers>>, TError = Error>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTestClockCustomers>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export function useListTestClockCustomers<TData = Awaited<ReturnType<typeof listTestClockCustomers>>, TError = Error | InvalidPageResponse>(
+ id: string,
+    params?: ListTestClockCustomersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTestClockCustomers>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
  * @summary List customers attached to a test clock
  */
 
-export function useListTestClockCustomers<TData = Awaited<ReturnType<typeof listTestClockCustomers>>, TError = Error>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTestClockCustomers>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export function useListTestClockCustomers<TData = Awaited<ReturnType<typeof listTestClockCustomers>>, TError = Error | InvalidPageResponse>(
+ id: string,
+    params?: ListTestClockCustomersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTestClockCustomers>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getListTestClockCustomersQueryOptions(id,options)
+  const queryOptions = getListTestClockCustomersQueryOptions(id,params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -12682,12 +12964,19 @@ export function useListTestClockCustomers<TData = Awaited<ReturnType<typeof list
 
 
 
-export const getListRecipesUrl = () => {
+export const getListRecipesUrl = (params?: ListRecipesParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/v1/recipes`
+  return stringifiedParams.length > 0 ? `/v1/recipes?${stringifiedParams}` : `/v1/recipes`
 }
 
 /**
@@ -12698,9 +12987,9 @@ export const getListRecipesUrl = () => {
  * uninstall (ADR-085).
  * @summary List recipes
  */
-export const listRecipes = async ( options?: RequestInit): Promise<ListRecipes200> => {
+export const listRecipes = async (params?: ListRecipesParams, options?: RequestInit): Promise<ListRecipes200> => {
 
-  return orvalClient<ListRecipes200>(getListRecipesUrl(),
+  return orvalClient<ListRecipes200>(getListRecipesUrl(params),
   {
     ...options,
     method: 'GET'
@@ -12713,23 +13002,23 @@ export const listRecipes = async ( options?: RequestInit): Promise<ListRecipes20
 
 
 
-export const getListRecipesQueryKey = () => {
+export const getListRecipesQueryKey = (params?: ListRecipesParams,) => {
     return [
-    `/v1/recipes`
+    `/v1/recipes`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getListRecipesQueryOptions = <TData = Awaited<ReturnType<typeof listRecipes>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRecipes>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListRecipesQueryOptions = <TData = Awaited<ReturnType<typeof listRecipes>>, TError = InvalidPageResponse>(params?: ListRecipesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRecipes>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getListRecipesQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getListRecipesQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listRecipes>>> = () => listRecipes(requestOptions);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listRecipes>>> = () => listRecipes(params, requestOptions);
 
 
 
@@ -12739,11 +13028,11 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListRecipesQueryResult = NonNullable<Awaited<ReturnType<typeof listRecipes>>>
-export type ListRecipesQueryError = unknown
+export type ListRecipesQueryError = InvalidPageResponse
 
 
-export function useListRecipes<TData = Awaited<ReturnType<typeof listRecipes>>, TError = unknown>(
-  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRecipes>>, TError, TData>> & Pick<
+export function useListRecipes<TData = Awaited<ReturnType<typeof listRecipes>>, TError = InvalidPageResponse>(
+ params: undefined |  ListRecipesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRecipes>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listRecipes>>,
           TError,
@@ -12752,8 +13041,8 @@ export function useListRecipes<TData = Awaited<ReturnType<typeof listRecipes>>, 
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListRecipes<TData = Awaited<ReturnType<typeof listRecipes>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRecipes>>, TError, TData>> & Pick<
+export function useListRecipes<TData = Awaited<ReturnType<typeof listRecipes>>, TError = InvalidPageResponse>(
+ params?: ListRecipesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRecipes>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listRecipes>>,
           TError,
@@ -12762,20 +13051,20 @@ export function useListRecipes<TData = Awaited<ReturnType<typeof listRecipes>>, 
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListRecipes<TData = Awaited<ReturnType<typeof listRecipes>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRecipes>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export function useListRecipes<TData = Awaited<ReturnType<typeof listRecipes>>, TError = InvalidPageResponse>(
+ params?: ListRecipesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRecipes>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
  * @summary List recipes
  */
 
-export function useListRecipes<TData = Awaited<ReturnType<typeof listRecipes>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRecipes>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export function useListRecipes<TData = Awaited<ReturnType<typeof listRecipes>>, TError = InvalidPageResponse>(
+ params?: ListRecipesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRecipes>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getListRecipesQueryOptions(options)
+  const queryOptions = getListRecipesQueryOptions(params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -12788,20 +13077,27 @@ export function useListRecipes<TData = Awaited<ReturnType<typeof listRecipes>>, 
 
 
 
-export const getListRecipeInstancesUrl = () => {
+export const getListRecipeInstancesUrl = (params?: ListRecipeInstancesParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/v1/recipes/instances`
+  return stringifiedParams.length > 0 ? `/v1/recipes/instances?${stringifiedParams}` : `/v1/recipes/instances`
 }
 
 /**
  * @summary List installed recipe instances
  */
-export const listRecipeInstances = async ( options?: RequestInit): Promise<ListRecipeInstances200> => {
+export const listRecipeInstances = async (params?: ListRecipeInstancesParams, options?: RequestInit): Promise<ListRecipeInstances200> => {
 
-  return orvalClient<ListRecipeInstances200>(getListRecipeInstancesUrl(),
+  return orvalClient<ListRecipeInstances200>(getListRecipeInstancesUrl(params),
   {
     ...options,
     method: 'GET'
@@ -12814,23 +13110,23 @@ export const listRecipeInstances = async ( options?: RequestInit): Promise<ListR
 
 
 
-export const getListRecipeInstancesQueryKey = () => {
+export const getListRecipeInstancesQueryKey = (params?: ListRecipeInstancesParams,) => {
     return [
-    `/v1/recipes/instances`
+    `/v1/recipes/instances`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getListRecipeInstancesQueryOptions = <TData = Awaited<ReturnType<typeof listRecipeInstances>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRecipeInstances>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListRecipeInstancesQueryOptions = <TData = Awaited<ReturnType<typeof listRecipeInstances>>, TError = InvalidPageResponse>(params?: ListRecipeInstancesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRecipeInstances>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getListRecipeInstancesQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getListRecipeInstancesQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listRecipeInstances>>> = () => listRecipeInstances(requestOptions);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listRecipeInstances>>> = () => listRecipeInstances(params, requestOptions);
 
 
 
@@ -12840,11 +13136,11 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListRecipeInstancesQueryResult = NonNullable<Awaited<ReturnType<typeof listRecipeInstances>>>
-export type ListRecipeInstancesQueryError = unknown
+export type ListRecipeInstancesQueryError = InvalidPageResponse
 
 
-export function useListRecipeInstances<TData = Awaited<ReturnType<typeof listRecipeInstances>>, TError = unknown>(
-  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRecipeInstances>>, TError, TData>> & Pick<
+export function useListRecipeInstances<TData = Awaited<ReturnType<typeof listRecipeInstances>>, TError = InvalidPageResponse>(
+ params: undefined |  ListRecipeInstancesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRecipeInstances>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listRecipeInstances>>,
           TError,
@@ -12853,8 +13149,8 @@ export function useListRecipeInstances<TData = Awaited<ReturnType<typeof listRec
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListRecipeInstances<TData = Awaited<ReturnType<typeof listRecipeInstances>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRecipeInstances>>, TError, TData>> & Pick<
+export function useListRecipeInstances<TData = Awaited<ReturnType<typeof listRecipeInstances>>, TError = InvalidPageResponse>(
+ params?: ListRecipeInstancesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRecipeInstances>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listRecipeInstances>>,
           TError,
@@ -12863,20 +13159,20 @@ export function useListRecipeInstances<TData = Awaited<ReturnType<typeof listRec
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListRecipeInstances<TData = Awaited<ReturnType<typeof listRecipeInstances>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRecipeInstances>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export function useListRecipeInstances<TData = Awaited<ReturnType<typeof listRecipeInstances>>, TError = InvalidPageResponse>(
+ params?: ListRecipeInstancesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRecipeInstances>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
  * @summary List installed recipe instances
  */
 
-export function useListRecipeInstances<TData = Awaited<ReturnType<typeof listRecipeInstances>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRecipeInstances>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export function useListRecipeInstances<TData = Awaited<ReturnType<typeof listRecipeInstances>>, TError = InvalidPageResponse>(
+ params?: ListRecipeInstancesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRecipeInstances>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getListRecipeInstancesQueryOptions(options)
+  const queryOptions = getListRecipeInstancesQueryOptions(params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -14252,7 +14548,7 @@ export const getListDunningRunsQueryKey = (params?: ListDunningRunsParams,) => {
     }
 
 
-export const getListDunningRunsQueryOptions = <TData = Awaited<ReturnType<typeof listDunningRuns>>, TError = unknown>(params?: ListDunningRunsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningRuns>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListDunningRunsQueryOptions = <TData = Awaited<ReturnType<typeof listDunningRuns>>, TError = InvalidPageResponse>(params?: ListDunningRunsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningRuns>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -14271,10 +14567,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListDunningRunsQueryResult = NonNullable<Awaited<ReturnType<typeof listDunningRuns>>>
-export type ListDunningRunsQueryError = unknown
+export type ListDunningRunsQueryError = InvalidPageResponse
 
 
-export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunningRuns>>, TError = unknown>(
+export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunningRuns>>, TError = InvalidPageResponse>(
  params: undefined |  ListDunningRunsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningRuns>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listDunningRuns>>,
@@ -14284,7 +14580,7 @@ export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunning
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunningRuns>>, TError = unknown>(
+export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunningRuns>>, TError = InvalidPageResponse>(
  params?: ListDunningRunsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningRuns>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listDunningRuns>>,
@@ -14294,7 +14590,7 @@ export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunning
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunningRuns>>, TError = unknown>(
+export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunningRuns>>, TError = InvalidPageResponse>(
  params?: ListDunningRunsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningRuns>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -14302,7 +14598,7 @@ export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunning
  * @summary List dunning runs
  */
 
-export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunningRuns>>, TError = unknown>(
+export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunningRuns>>, TError = InvalidPageResponse>(
  params?: ListDunningRunsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningRuns>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -14609,12 +14905,19 @@ export function useGetDunningStats<TData = Awaited<ReturnType<typeof getDunningS
 
 
 
-export const getListDunningPoliciesUrl = () => {
+export const getListDunningPoliciesUrl = (params?: ListDunningPoliciesParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/v1/dunning/policies`
+  return stringifiedParams.length > 0 ? `/v1/dunning/policies?${stringifiedParams}` : `/v1/dunning/policies`
 }
 
 /**
@@ -14622,9 +14925,9 @@ export const getListDunningPoliciesUrl = () => {
  * oldest first. Each one carries how many customers are assigned to it.
  * @summary List dunning policies
  */
-export const listDunningPolicies = async ( options?: RequestInit): Promise<ListDunningPolicies200> => {
+export const listDunningPolicies = async (params?: ListDunningPoliciesParams, options?: RequestInit): Promise<ListDunningPolicies200> => {
 
-  return orvalClient<ListDunningPolicies200>(getListDunningPoliciesUrl(),
+  return orvalClient<ListDunningPolicies200>(getListDunningPoliciesUrl(params),
   {
     ...options,
     method: 'GET'
@@ -14637,23 +14940,23 @@ export const listDunningPolicies = async ( options?: RequestInit): Promise<ListD
 
 
 
-export const getListDunningPoliciesQueryKey = () => {
+export const getListDunningPoliciesQueryKey = (params?: ListDunningPoliciesParams,) => {
     return [
-    `/v1/dunning/policies`
+    `/v1/dunning/policies`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getListDunningPoliciesQueryOptions = <TData = Awaited<ReturnType<typeof listDunningPolicies>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningPolicies>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListDunningPoliciesQueryOptions = <TData = Awaited<ReturnType<typeof listDunningPolicies>>, TError = InvalidPageResponse>(params?: ListDunningPoliciesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningPolicies>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getListDunningPoliciesQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getListDunningPoliciesQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listDunningPolicies>>> = () => listDunningPolicies(requestOptions);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listDunningPolicies>>> = () => listDunningPolicies(params, requestOptions);
 
 
 
@@ -14663,11 +14966,11 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListDunningPoliciesQueryResult = NonNullable<Awaited<ReturnType<typeof listDunningPolicies>>>
-export type ListDunningPoliciesQueryError = unknown
+export type ListDunningPoliciesQueryError = InvalidPageResponse
 
 
-export function useListDunningPolicies<TData = Awaited<ReturnType<typeof listDunningPolicies>>, TError = unknown>(
-  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningPolicies>>, TError, TData>> & Pick<
+export function useListDunningPolicies<TData = Awaited<ReturnType<typeof listDunningPolicies>>, TError = InvalidPageResponse>(
+ params: undefined |  ListDunningPoliciesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningPolicies>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listDunningPolicies>>,
           TError,
@@ -14676,8 +14979,8 @@ export function useListDunningPolicies<TData = Awaited<ReturnType<typeof listDun
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListDunningPolicies<TData = Awaited<ReturnType<typeof listDunningPolicies>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningPolicies>>, TError, TData>> & Pick<
+export function useListDunningPolicies<TData = Awaited<ReturnType<typeof listDunningPolicies>>, TError = InvalidPageResponse>(
+ params?: ListDunningPoliciesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningPolicies>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listDunningPolicies>>,
           TError,
@@ -14686,20 +14989,20 @@ export function useListDunningPolicies<TData = Awaited<ReturnType<typeof listDun
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListDunningPolicies<TData = Awaited<ReturnType<typeof listDunningPolicies>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningPolicies>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export function useListDunningPolicies<TData = Awaited<ReturnType<typeof listDunningPolicies>>, TError = InvalidPageResponse>(
+ params?: ListDunningPoliciesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningPolicies>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
  * @summary List dunning policies
  */
 
-export function useListDunningPolicies<TData = Awaited<ReturnType<typeof listDunningPolicies>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningPolicies>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export function useListDunningPolicies<TData = Awaited<ReturnType<typeof listDunningPolicies>>, TError = InvalidPageResponse>(
+ params?: ListDunningPoliciesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningPolicies>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getListDunningPoliciesQueryOptions(options)
+  const queryOptions = getListDunningPoliciesQueryOptions(params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -15221,7 +15524,7 @@ export const getListPriceOverridesUrl = (params?: ListPriceOverridesParams,) => 
 }
 
 /**
- * Active overrides only, newest first, at most 500. Closed or deleted
+ * Active overrides only, newest first. Closed or deleted
  * overrides are not listed. Requires pricing write permission.
  * @summary List active price overrides
  */
@@ -15247,7 +15550,7 @@ export const getListPriceOverridesQueryKey = (params?: ListPriceOverridesParams,
     }
 
 
-export const getListPriceOverridesQueryOptions = <TData = Awaited<ReturnType<typeof listPriceOverrides>>, TError = unknown>(params?: ListPriceOverridesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPriceOverrides>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListPriceOverridesQueryOptions = <TData = Awaited<ReturnType<typeof listPriceOverrides>>, TError = InvalidPageResponse>(params?: ListPriceOverridesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPriceOverrides>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -15266,10 +15569,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListPriceOverridesQueryResult = NonNullable<Awaited<ReturnType<typeof listPriceOverrides>>>
-export type ListPriceOverridesQueryError = unknown
+export type ListPriceOverridesQueryError = InvalidPageResponse
 
 
-export function useListPriceOverrides<TData = Awaited<ReturnType<typeof listPriceOverrides>>, TError = unknown>(
+export function useListPriceOverrides<TData = Awaited<ReturnType<typeof listPriceOverrides>>, TError = InvalidPageResponse>(
  params: undefined |  ListPriceOverridesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPriceOverrides>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listPriceOverrides>>,
@@ -15279,7 +15582,7 @@ export function useListPriceOverrides<TData = Awaited<ReturnType<typeof listPric
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListPriceOverrides<TData = Awaited<ReturnType<typeof listPriceOverrides>>, TError = unknown>(
+export function useListPriceOverrides<TData = Awaited<ReturnType<typeof listPriceOverrides>>, TError = InvalidPageResponse>(
  params?: ListPriceOverridesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPriceOverrides>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listPriceOverrides>>,
@@ -15289,7 +15592,7 @@ export function useListPriceOverrides<TData = Awaited<ReturnType<typeof listPric
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListPriceOverrides<TData = Awaited<ReturnType<typeof listPriceOverrides>>, TError = unknown>(
+export function useListPriceOverrides<TData = Awaited<ReturnType<typeof listPriceOverrides>>, TError = InvalidPageResponse>(
  params?: ListPriceOverridesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPriceOverrides>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -15297,7 +15600,7 @@ export function useListPriceOverrides<TData = Awaited<ReturnType<typeof listPric
  * @summary List active price overrides
  */
 
-export function useListPriceOverrides<TData = Awaited<ReturnType<typeof listPriceOverrides>>, TError = unknown>(
+export function useListPriceOverrides<TData = Awaited<ReturnType<typeof listPriceOverrides>>, TError = InvalidPageResponse>(
  params?: ListPriceOverridesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPriceOverrides>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -15570,12 +15873,19 @@ export const useCreateApiKey = <TError = Error,
       return useMutation(getCreateApiKeyMutationOptions(options), queryClient);
     }
 
-export const getListApiKeysUrl = () => {
+export const getListApiKeysUrl = (params?: ListApiKeysParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/v1/api-keys`
+  return stringifiedParams.length > 0 ? `/v1/api-keys?${stringifiedParams}` : `/v1/api-keys`
 }
 
 /**
@@ -15585,9 +15895,9 @@ export const getListApiKeysUrl = () => {
  * There are no paging parameters and no `total`.
  * @summary List API keys
  */
-export const listApiKeys = async ( options?: RequestInit): Promise<ListApiKeys200> => {
+export const listApiKeys = async (params?: ListApiKeysParams, options?: RequestInit): Promise<ListApiKeys200> => {
 
-  return orvalClient<ListApiKeys200>(getListApiKeysUrl(),
+  return orvalClient<ListApiKeys200>(getListApiKeysUrl(params),
   {
     ...options,
     method: 'GET'
@@ -15600,23 +15910,23 @@ export const listApiKeys = async ( options?: RequestInit): Promise<ListApiKeys20
 
 
 
-export const getListApiKeysQueryKey = () => {
+export const getListApiKeysQueryKey = (params?: ListApiKeysParams,) => {
     return [
-    `/v1/api-keys`
+    `/v1/api-keys`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getListApiKeysQueryOptions = <TData = Awaited<ReturnType<typeof listApiKeys>>, TError = Error>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listApiKeys>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListApiKeysQueryOptions = <TData = Awaited<ReturnType<typeof listApiKeys>>, TError = Error | InvalidPageResponse>(params?: ListApiKeysParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listApiKeys>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getListApiKeysQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getListApiKeysQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listApiKeys>>> = () => listApiKeys(requestOptions);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listApiKeys>>> = () => listApiKeys(params, requestOptions);
 
 
 
@@ -15626,11 +15936,11 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListApiKeysQueryResult = NonNullable<Awaited<ReturnType<typeof listApiKeys>>>
-export type ListApiKeysQueryError = Error
+export type ListApiKeysQueryError = Error | InvalidPageResponse
 
 
-export function useListApiKeys<TData = Awaited<ReturnType<typeof listApiKeys>>, TError = Error>(
-  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listApiKeys>>, TError, TData>> & Pick<
+export function useListApiKeys<TData = Awaited<ReturnType<typeof listApiKeys>>, TError = Error | InvalidPageResponse>(
+ params: undefined |  ListApiKeysParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listApiKeys>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listApiKeys>>,
           TError,
@@ -15639,8 +15949,8 @@ export function useListApiKeys<TData = Awaited<ReturnType<typeof listApiKeys>>, 
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListApiKeys<TData = Awaited<ReturnType<typeof listApiKeys>>, TError = Error>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listApiKeys>>, TError, TData>> & Pick<
+export function useListApiKeys<TData = Awaited<ReturnType<typeof listApiKeys>>, TError = Error | InvalidPageResponse>(
+ params?: ListApiKeysParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listApiKeys>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listApiKeys>>,
           TError,
@@ -15649,20 +15959,20 @@ export function useListApiKeys<TData = Awaited<ReturnType<typeof listApiKeys>>, 
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListApiKeys<TData = Awaited<ReturnType<typeof listApiKeys>>, TError = Error>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listApiKeys>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export function useListApiKeys<TData = Awaited<ReturnType<typeof listApiKeys>>, TError = Error | InvalidPageResponse>(
+ params?: ListApiKeysParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listApiKeys>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
  * @summary List API keys
  */
 
-export function useListApiKeys<TData = Awaited<ReturnType<typeof listApiKeys>>, TError = Error>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listApiKeys>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export function useListApiKeys<TData = Awaited<ReturnType<typeof listApiKeys>>, TError = Error | InvalidPageResponse>(
+ params?: ListApiKeysParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listApiKeys>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getListApiKeysQueryOptions(options)
+  const queryOptions = getListApiKeysQueryOptions(params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -16659,7 +16969,7 @@ export const getListTenantsQueryKey = (params?: ListTenantsParams,) => {
     }
 
 
-export const getListTenantsQueryOptions = <TData = Awaited<ReturnType<typeof listTenants>>, TError = Error>(params?: ListTenantsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTenants>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListTenantsQueryOptions = <TData = Awaited<ReturnType<typeof listTenants>>, TError = Error | InvalidPageResponse>(params?: ListTenantsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTenants>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -16678,10 +16988,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListTenantsQueryResult = NonNullable<Awaited<ReturnType<typeof listTenants>>>
-export type ListTenantsQueryError = Error
+export type ListTenantsQueryError = Error | InvalidPageResponse
 
 
-export function useListTenants<TData = Awaited<ReturnType<typeof listTenants>>, TError = Error>(
+export function useListTenants<TData = Awaited<ReturnType<typeof listTenants>>, TError = Error | InvalidPageResponse>(
  params: undefined |  ListTenantsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTenants>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listTenants>>,
@@ -16691,7 +17001,7 @@ export function useListTenants<TData = Awaited<ReturnType<typeof listTenants>>, 
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListTenants<TData = Awaited<ReturnType<typeof listTenants>>, TError = Error>(
+export function useListTenants<TData = Awaited<ReturnType<typeof listTenants>>, TError = Error | InvalidPageResponse>(
  params?: ListTenantsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTenants>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listTenants>>,
@@ -16701,7 +17011,7 @@ export function useListTenants<TData = Awaited<ReturnType<typeof listTenants>>, 
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListTenants<TData = Awaited<ReturnType<typeof listTenants>>, TError = Error>(
+export function useListTenants<TData = Awaited<ReturnType<typeof listTenants>>, TError = Error | InvalidPageResponse>(
  params?: ListTenantsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTenants>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -16709,7 +17019,7 @@ export function useListTenants<TData = Awaited<ReturnType<typeof listTenants>>, 
  * @summary List tenants
  */
 
-export function useListTenants<TData = Awaited<ReturnType<typeof listTenants>>, TError = Error>(
+export function useListTenants<TData = Awaited<ReturnType<typeof listTenants>>, TError = Error | InvalidPageResponse>(
  params?: ListTenantsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTenants>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -16934,13 +17244,9 @@ export const getListAuditLogUrl = (params?: ListAuditLogParams,) => {
  * first (by `created_at`, then `id`). All filters are exact matches
  * and can be combined.
  *
- * Two ways to page:
- * - Offset: `limit` and `offset`. The response is `{data, total}`.
- *   `total` stops counting at 10,001, so a value above 10,000 means
- *   "more than 10,000".
- * - Cursor: pass `after`. The response is `{data, has_more,
- *   next_cursor}` and has no `total`. Pass `next_cursor` as the next
- *   `after`.
+ * Paged with `limit` and `offset`, like every list. Here `total`
+ * stops counting at 10,001, so a value above 10,000 means "more than
+ * 10,000".
  *
  * Settings changes are always recorded in test mode, so they do not
  * appear when you read the log in live mode.

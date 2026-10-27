@@ -7,9 +7,10 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
-import type { CheckPasswordResetToken422Reason } from './checkPasswordResetToken422Reason';
 
-export type CheckPasswordResetToken422 = {
-  valid: false;
-  reason: CheckPasswordResetToken422Reason;
-};
+/**
+ * How many rows match the request's filters, on every page, not only
+ * this one. The audit log and the customer list's search and name or
+ * email sort say where they stop counting.
+ */
+export type ListTotal = number;

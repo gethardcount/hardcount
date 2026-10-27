@@ -254,7 +254,7 @@ func serve() {
 		// ReadHeaderTimeout bounds header parsing (slowloris guard); ReadTimeout
 		// gives the body a generous window so batch ingest (up to 1000 events)
 		// over a slow link isn't truncated. WriteTimeout MUST exceed the 30s
-		// request middleware.Timeout so the handler writes its clean 504 before
+		// request Timeout middleware so the server writes its JSON 504 before
 		// the server closes the socket (equal values race → connection reset).
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,

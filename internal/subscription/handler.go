@@ -10,7 +10,6 @@ import (
 	"math"
 	"net/http"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -513,8 +512,10 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	page, ok := respond.ParsePage(w, r)
+	if !ok {
+		return
+	}
 
 	// ?billing=failing lists the subscriptions whose billing is failing
 	// (ADR-119). It is a closed set: an unknown value is a 400, never an
@@ -555,8 +556,8 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		Billing:    billing,
 		Collection: collection,
 		Search:     strings.TrimSpace(r.URL.Query().Get("search")),
-		Limit:      limit,
-		Offset:     offset,
+		Limit:      page.Limit,
+		Offset:     page.Offset,
 		Sort:       r.URL.Query().Get("sort"),
 		SortDir:    r.URL.Query().Get("dir"),
 	})

@@ -1327,14 +1327,23 @@ func (s *PostgresStore) GetSpendableBalance(ctx context.Context, tenantID, custo
 	return out, rows.Err()
 }
 
-// ListBalances returns one row per (customer, currency) the tenant's ledger
-// holds (ADR-129), largest balance first.
-func (s *PostgresStore) ListBalances(ctx context.Context, tenantID string) ([]domain.CreditBalance, error) {
+// ListBalances returns one page of the rows, one per (customer, currency)
+// the tenant's ledger holds (ADR-129), largest balance first, and how many
+// rows there are.
+func (s *PostgresStore) ListBalances(ctx context.Context, tenantID string, limit, offset int) ([]domain.CreditBalance, int, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer postgres.Rollback(tx)
+
+	var total int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM (
+			SELECT 1 FROM customer_credit_ledger WHERE tenant_id = $1 GROUP BY customer_id, currency
+		) pairs`, tenantID).Scan(&total); err != nil {
+		return nil, 0, err
+	}
 
 	rows, err := tx.QueryContext(ctx, `
 		SELECT
@@ -1348,9 +1357,10 @@ func (s *PostgresStore) ListBalances(ctx context.Context, tenantID string) ([]do
 		WHERE tenant_id = $1
 		GROUP BY customer_id, currency
 		ORDER BY balance_cents DESC, customer_id, currency
-	`, tenantID)
+		LIMIT $2 OFFSET $3
+	`, tenantID, limit, offset)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -1358,11 +1368,11 @@ func (s *PostgresStore) ListBalances(ctx context.Context, tenantID string) ([]do
 	for rows.Next() {
 		var b domain.CreditBalance
 		if err := rows.Scan(&b.CustomerID, &b.Currency, &b.BalanceCents, &b.TotalGranted, &b.TotalUsed, &b.TotalExpired, &b.TotalRetired, &b.TotalDeducted); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		balances = append(balances, b)
 	}
-	return balances, rows.Err()
+	return balances, total, rows.Err()
 }
 
 // ListExpiredGrants — CRON path. ADR-029 Phase 4: clock-pinned

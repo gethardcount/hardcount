@@ -103,7 +103,7 @@ func (s *PostgresStore) ListPolicies(ctx context.Context, tenantID string) ([]do
 	}
 	defer postgres.Rollback(tx)
 
-	rows, err := tx.QueryContext(ctx, `SELECT `+policyColumns+` FROM dunning_policies ORDER BY is_default DESC, created_at ASC`)
+	rows, err := tx.QueryContext(ctx, `SELECT `+policyColumns+` FROM dunning_policies ORDER BY is_default DESC, created_at ASC, id ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -642,7 +642,7 @@ func (s *PostgresStore) ListRuns(ctx context.Context, filter RunListFilter) ([]d
 		LEFT JOIN invoices i ON i.id = r.invoice_id
 		LEFT JOIN customers cu ON cu.id = i.customer_id
 		LEFT JOIN test_clocks tc ON tc.id = cu.test_clock_id
-		LEFT JOIN dunning_policies p ON p.id = r.policy_id` + whereClause + ` ORDER BY r.created_at DESC`
+		LEFT JOIN dunning_policies p ON p.id = r.policy_id` + whereClause + ` ORDER BY r.created_at DESC, r.id DESC`
 	// Default 50, clamp to 100 — no-silent-fallbacks principle.
 	limit := filter.Limit
 	if limit <= 0 {

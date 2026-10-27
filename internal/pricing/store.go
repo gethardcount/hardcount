@@ -19,7 +19,10 @@ type Store interface {
 	// UPDATE) waits for tx. The recipe install reads the meters it adopts
 	// this way (ADR-130 §15).
 	GetMeterByEventNameTx(ctx context.Context, tx *sql.Tx, eventName string) (domain.Meter, error)
+	// ListMeters returns every meter; ListMetersPage one page of them and
+	// the count.
 	ListMeters(ctx context.Context, tenantID string) ([]domain.Meter, error)
+	ListMetersPage(ctx context.Context, tenantID string, limit, offset int) ([]domain.Meter, int, error)
 	// UpdateMeterAudited runs guard, then the UPDATE, then emit, on one
 	// transaction (ADR-090 in-tx emission): the patched row and its audit
 	// row commit or roll back together. emit receives the UPDATE's
@@ -43,7 +46,10 @@ type Store interface {
 	CreatePlanWithPrices(ctx context.Context, tenantID string, p domain.Plan, prices []PriceChange) (domain.Plan, []domain.PlanPrice, error)
 	CreatePlanTx(ctx context.Context, tx *sql.Tx, tenantID string, p domain.Plan) (domain.Plan, error)
 	GetPlan(ctx context.Context, tenantID, id string) (domain.Plan, error)
+	// ListPlans returns every plan; ListPlansPage one page of them and the
+	// count.
 	ListPlans(ctx context.Context, tenantID string) ([]domain.Plan, error)
+	ListPlansPage(ctx context.Context, tenantID string, limit, offset int) ([]domain.Plan, int, error)
 	// UpdatePlan locks the plan FOR UPDATE, hands guard the plan as locked
 	// and whether a subscription ever used it, and writes what guard
 	// returns, all on one transaction.
@@ -94,9 +100,9 @@ type OverrideStore interface {
 	// GetOverrideAt returns the customer's override of the price in force at
 	// `at` (created_at <= at < deactivated_at), or errs.ErrNotFound.
 	GetOverrideAt(ctx context.Context, tenantID, customerID, priceID string, at time.Time) (domain.CustomerPriceOverride, error)
-	// ListOverrides returns the active overrides, optionally of one customer
-	// and of one price.
-	ListOverrides(ctx context.Context, tenantID, customerID, priceID string) ([]domain.CustomerPriceOverride, error)
+	// ListOverrides returns one page of the active overrides, optionally of
+	// one customer and of one price, and how many match.
+	ListOverrides(ctx context.Context, tenantID, customerID, priceID string, limit, offset int) ([]domain.CustomerPriceOverride, int, error)
 }
 
 // PriceOp is the kind of a price change.

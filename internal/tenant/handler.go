@@ -8,7 +8,6 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/sagarsuperuser/velox/internal/api/respond"
-	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
 )
 
@@ -44,24 +43,23 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
+	page, ok := respond.ParsePage(w, r)
+	if !ok {
+		return
+	}
 	filter := ListFilter{
 		Status: r.URL.Query().Get("status"),
+		Limit:  page.Limit,
+		Offset: page.Offset,
 	}
 
-	tenants, err := h.svc.List(r.Context(), filter)
+	tenants, total, err := h.svc.List(r.Context(), filter)
 	if err != nil {
 		respond.InternalError(w, r)
 		slog.ErrorContext(r.Context(), "list tenants", "error", err)
 		return
 	}
-
-	if tenants == nil {
-		tenants = []domain.Tenant{}
-	}
-
-	respond.JSON(w, r, http.StatusOK, map[string]any{
-		"data": tenants,
-	})
+	respond.List(w, r, tenants, total)
 }
 
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {

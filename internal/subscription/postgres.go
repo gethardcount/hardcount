@@ -367,24 +367,29 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.S
 	return subs, total, nil
 }
 
-// ListByTestClock returns the subscriptions pinned to a test clock, oldest
-// first, in the same shape List returns (items and thresholds hydrated).
-// It backs GET /v1/test-clocks/{id}/subscriptions. Capped at 1000 rows,
-// far above the handful of subscriptions a simulation holds.
-func (s *PostgresStore) ListByTestClock(ctx context.Context, tenantID, clockID string) ([]domain.Subscription, error) {
+// ListByTestClock returns one page of the subscriptions pinned to a test
+// clock, oldest first, in the same shape List returns (items and thresholds
+// hydrated), and how many there are in all. It backs
+// GET /v1/test-clocks/{id}/subscriptions.
+func (s *PostgresStore) ListByTestClock(ctx context.Context, tenantID, clockID string, limit, offset int) ([]domain.Subscription, int, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer postgres.Rollback(tx)
 
+	var total int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM subscriptions WHERE test_clock_id = $1`, clockID).Scan(&total); err != nil {
+		return nil, 0, err
+	}
 	rows, err := tx.QueryContext(ctx, `
 		SELECT `+qualifiedSubCols("s")+` FROM subscriptions s
 		WHERE s.test_clock_id = $1
-		ORDER BY s.created_at ASC, s.id ASC LIMIT 1000
-	`, clockID)
+		ORDER BY s.created_at ASC, s.id ASC
+		LIMIT $2 OFFSET $3
+	`, clockID, limit, offset)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -392,19 +397,19 @@ func (s *PostgresStore) ListByTestClock(ctx context.Context, tenantID, clockID s
 	for rows.Next() {
 		var sub domain.Subscription
 		if err := scanSubRow(rows, &sub); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		subs = append(subs, sub)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	for i := range subs {
 		if err := hydrateSubChildrenTx(ctx, tx, &subs[i]); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 	}
-	return subs, nil
+	return subs, total, nil
 }
 
 // ListLiveByCustomer returns every active and trialing subscription of the

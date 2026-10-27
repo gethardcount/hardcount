@@ -110,16 +110,17 @@ func (h *Handler) auditCtx(ctx context.Context, clk domain.TestClock) context.Co
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
-	clocks, err := h.svc.List(r.Context(), tenantID)
+	page, ok := respond.ParsePage(w, r)
+	if !ok {
+		return
+	}
+	clocks, total, err := h.svc.List(r.Context(), tenantID, page.Limit, page.Offset)
 	if err != nil {
 		respond.InternalError(w, r)
 		slog.ErrorContext(r.Context(), "list test clocks", "error", err)
 		return
 	}
-	if clocks == nil {
-		clocks = []domain.TestClock{}
-	}
-	respond.JSON(w, r, http.StatusOK, map[string]any{"data": clocks})
+	respond.List(w, r, clocks, total)
 }
 
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
@@ -134,23 +135,24 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, r, http.StatusOK, clk)
 }
 
-// listSubscriptions returns every subscription pinned to the clock,
+// listSubscriptions returns a page of the subscriptions pinned to the clock,
 // including their customer for one-shot rendering on the clock detail
 // page. The dashboard uses the embedded customer_id to compose the
 // "customers in this simulation" view without a second round-trip.
 func (h *Handler) listSubscriptions(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
+	page, ok := respond.ParsePage(w, r)
+	if !ok {
+		return
+	}
 
-	subs, err := h.svc.ListSubscriptions(r.Context(), tenantID, id)
+	subs, total, err := h.svc.ListSubscriptions(r.Context(), tenantID, id, page.Limit, page.Offset)
 	if err != nil {
 		respond.FromError(w, r, err, "test_clock")
 		return
 	}
-	if subs == nil {
-		subs = []domain.Subscription{}
-	}
-	respond.JSON(w, r, http.StatusOK, map[string]any{"data": subs})
+	respond.List(w, r, subs, total)
 }
 
 // listAttachedCustomers returns customers attached to this clock —
@@ -160,16 +162,17 @@ func (h *Handler) listSubscriptions(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) listAttachedCustomers(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
+	page, ok := respond.ParsePage(w, r)
+	if !ok {
+		return
+	}
 
-	customers, err := h.svc.ListAttachedCustomers(r.Context(), tenantID, id)
+	customers, total, err := h.svc.ListAttachedCustomers(r.Context(), tenantID, id, page.Limit, page.Offset)
 	if err != nil {
 		respond.FromError(w, r, err, "test_clock")
 		return
 	}
-	if customers == nil {
-		customers = []domain.Customer{}
-	}
-	respond.JSON(w, r, http.StatusOK, map[string]any{"data": customers})
+	respond.List(w, r, customers, total)
 }
 
 func (h *Handler) advance(w http.ResponseWriter, r *http.Request) {

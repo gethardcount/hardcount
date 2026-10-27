@@ -514,17 +514,14 @@ type ConfirmResetReq struct {
 
 // checkPasswordResetToken probes a reset token's validity without
 // consuming it. 200 with {"valid": true} when the token is currently
-// usable; 422 with the same shape (valid: false) when it's expired,
+// usable; a 422 error with code invalid_or_expired when it's expired,
 // already used, or unknown. The reset-password page hits this on
 // mount so it can render "this link is no longer valid" instead of
 // a form the user fills in only to be rejected at submit.
 func (h *Handler) checkPasswordResetToken(w http.ResponseWriter, r *http.Request) {
 	token := r.URL.Query().Get("token")
 	if err := h.users.CheckResetToken(r.Context(), token); err != nil {
-		respond.JSON(w, r, http.StatusUnprocessableEntity, map[string]any{
-			"valid":  false,
-			"reason": "invalid_or_expired",
-		})
+		respond.ValidationCoded(w, r, "token", "invalid_or_expired", "the reset link is unknown, expired or already used")
 		return
 	}
 	respond.JSON(w, r, http.StatusOK, map[string]any{"valid": true})

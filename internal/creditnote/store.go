@@ -54,6 +54,9 @@ type Store interface {
 	BeginTx(ctx context.Context, tenantID string) (*sql.Tx, error)
 	Get(ctx context.Context, tenantID, id string) (domain.CreditNote, error)
 	List(ctx context.Context, filter ListFilter) ([]domain.CreditNote, error)
+	// Count counts the credit notes the filter matches, ignoring its limit
+	// and offset (the list's total).
+	Count(ctx context.Context, filter ListFilter) (int, error)
 	// Stats counts every credit note in the tenant and mode by status, and
 	// sums the issued notes' money per currency (GET /v1/credit-notes/stats).
 	Stats(ctx context.Context, tenantID string) (Stats, error)

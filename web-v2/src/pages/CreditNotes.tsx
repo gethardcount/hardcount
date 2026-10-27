@@ -247,11 +247,14 @@ export default function CreditNotesPage() {
   )
   const sorted = filtered
 
-  const truncated = notes.length >= 100
+  // The list is the 100 newest notes that match the server-side filters;
+  // total counts them all.
+  const listTotal = notesData?.total ?? 0
+  const truncated = listTotal > notes.length
   // Tab counts, the open tab's total and the empty list's words for the open
   // filters. The server counts by status only, so under the refund filter the
   // tabs show no counts.
-  const { tabCounts, tabTotal, empty } = creditNotesListView(counts, filterStatus, refundStatusFilter)
+  const { tabCounts, empty } = creditNotesListView(counts, filterStatus, refundStatusFilter)
   const totalPages = Math.ceil(sorted.length / PAGE_SIZE)
   const currentPage = Math.min(page, totalPages || 1)
   const paginated = sorted.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
@@ -534,9 +537,7 @@ export default function CreditNotesPage() {
 
               {truncated && (
                 <div className="border-t border-border px-4 py-2 text-xs text-muted-foreground">
-                  {tabTotal !== null && tabTotal > notes.length
-                    ? `Showing the 100 most recent of ${tabTotal} credit notes. Use the status filter to narrow older ones.`
-                    : 'Showing the 100 most recent credit notes. Use the status filter to narrow older ones.'}
+                  {`Showing the ${notes.length} most recent of ${listTotal} credit notes. Use the status filter to narrow older ones.`}
                 </div>
               )}
 
@@ -843,7 +844,7 @@ function IssueCreditForInvoice({ invoice, onClose, onCreated }: {
 }) {
   const { data: existing, error } = useQuery({
     queryKey: ['credit-notes', 'for-invoice', invoice.id],
-    queryFn: async () => (await api.listCreditNotes(`invoice_id=${invoice.id}&limit=100`)).data ?? [],
+    queryFn: async () => (await api.listInvoiceCreditNotes(invoice.id)).data,
   })
   useEffect(() => {
     if (error) {

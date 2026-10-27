@@ -7,11 +7,10 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
-import type { WebhookEndpoint } from './webhookEndpoint';
+import type { ListTotal } from './listTotal';
 import type { WebhookEndpointDelivery } from './webhookEndpointDelivery';
 
 export type ListWebhookEndpointDeliveries200 = {
-  endpoint: WebhookEndpoint;
-  /** @maxItems 50 */
   data: WebhookEndpointDelivery[];
+  total: ListTotal;
 };

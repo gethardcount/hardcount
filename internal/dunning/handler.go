@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -135,6 +134,11 @@ func (h *Handler) getStats(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) listPolicies(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
+	page, ok := respond.ParsePage(w, r)
+	if !ok {
+		return
+	}
+	// A tenant's policies are read whole and paged here.
 	policies, err := h.svc.ListPolicies(r.Context(), tenantID)
 	if err != nil {
 		respond.InternalError(w, r)
@@ -150,12 +154,13 @@ func (h *Handler) listPolicies(w http.ResponseWriter, r *http.Request) {
 		domain.DunningPolicy
 		AssignedCustomers int `json:"assigned_customers"`
 	}
-	out := make([]policyWithCount, 0, len(policies))
-	for _, p := range policies {
+	window := respond.Window(policies, page)
+	out := make([]policyWithCount, 0, len(window))
+	for _, p := range window {
 		count, _ := h.svc.CountCustomersOnPolicy(r.Context(), tenantID, p.ID)
 		out = append(out, policyWithCount{DunningPolicy: p, AssignedCustomers: count})
 	}
-	respond.JSON(w, r, http.StatusOK, map[string]any{"data": out})
+	respond.List(w, r, out, len(policies))
 }
 
 func (h *Handler) getPolicy(w http.ResponseWriter, r *http.Request) {
@@ -320,8 +325,10 @@ func (h *Handler) setDefaultPolicy(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) listRuns(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	page, ok := respond.ParsePage(w, r)
+	if !ok {
+		return
+	}
 	// ?state= is a closed set: an unknown value matched no row and read as
 	// "none of those".
 	state := r.URL.Query().Get("state")
@@ -336,8 +343,8 @@ func (h *Handler) listRuns(w http.ResponseWriter, r *http.Request) {
 		TenantID:  tenantID,
 		InvoiceID: r.URL.Query().Get("invoice_id"),
 		State:     state,
-		Limit:     limit,
-		Offset:    offset,
+		Limit:     page.Limit,
+		Offset:    page.Offset,
 	})
 	if err != nil {
 		respond.InternalError(w, r)

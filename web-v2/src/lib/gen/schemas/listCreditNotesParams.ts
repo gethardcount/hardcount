@@ -7,9 +7,11 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
+import type { LimitParameter } from './limitParameter';
 import type { ListCreditNotesDir } from './listCreditNotesDir';
 import type { ListCreditNotesRefundStatus } from './listCreditNotesRefundStatus';
 import type { ListCreditNotesStatus } from './listCreditNotesStatus';
+import type { OffsetParameter } from './offsetParameter';
 
 export type ListCreditNotesParams = {
 invoice_id?: string;
@@ -28,11 +30,16 @@ refund_status?: ListCreditNotesRefundStatus;
 sort?: string;
 dir?: ListCreditNotesDir;
 /**
- * Page size. Default 25, maximum 100.
+ * Rows per page, from 1 to 100. Default 50. Any other value, or one
+ * that is not a whole number, is a 422 with `param: limit`.
+ * @minimum 1
+ * @maximum 100
  */
-limit?: number;
+limit?: LimitParameter;
 /**
- * Maximum 10000.
+ * Rows to skip, 0 or more. Default 0. A negative value, or one that is
+ * not a whole number, is a 422 with `param: offset`.
+ * @minimum 0
  */
-offset?: number;
+offset?: OffsetParameter;
 };

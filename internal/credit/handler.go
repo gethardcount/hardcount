@@ -4,7 +4,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -98,17 +97,17 @@ func (h *Handler) adjust(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) listBalances(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
-	balances, err := h.svc.ListBalances(r.Context(), tenantID)
+	page, ok := respond.ParsePage(w, r)
+	if !ok {
+		return
+	}
+	balances, total, err := h.svc.ListBalances(r.Context(), tenantID, page.Limit, page.Offset)
 	if err != nil {
 		respond.InternalError(w, r)
 		slog.ErrorContext(r.Context(), "list credit balances", "error", err)
 		return
 	}
-	if balances == nil {
-		balances = []domain.CreditBalance{}
-	}
-
-	respond.JSON(w, r, http.StatusOK, map[string]any{"data": balances})
+	respond.List(w, r, balances, total)
 }
 
 func (h *Handler) getBalance(w http.ResponseWriter, r *http.Request) {
@@ -176,19 +175,9 @@ func (h *Handler) listEntries(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	customerID := chi.URLParam(r, "customer_id")
 
-	// limit/offset were silently unparsed pre-fix: the store's default-50
-	// cap made every consumer (pagination, type filter, CSV export)
-	// operate on a truncated slice presented as complete. Clamp mirrors
-	// the store (1..100, default 50); offset >= 0.
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	if limit <= 0 {
-		limit = 50
-	} else if limit > 100 {
-		limit = 100
-	}
-	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	if offset < 0 {
-		offset = 0
+	page, ok := respond.ParsePage(w, r)
+	if !ok {
+		return
 	}
 	filter := ListFilter{
 		TenantID:   tenantID,
@@ -196,8 +185,8 @@ func (h *Handler) listEntries(w http.ResponseWriter, r *http.Request) {
 		EntryType:  r.URL.Query().Get("entry_type"),
 		Sort:       r.URL.Query().Get("sort"),
 		SortDir:    r.URL.Query().Get("dir"),
-		Limit:      limit,
-		Offset:     offset,
+		Limit:      page.Limit,
+		Offset:     page.Offset,
 	}
 	entries, err := h.svc.ListEntries(r.Context(), filter)
 	if errors.Is(err, errs.ErrNotFound) {
@@ -219,5 +208,5 @@ func (h *Handler) listEntries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respond.JSON(w, r, http.StatusOK, map[string]any{"data": entries, "total": total})
+	respond.List(w, r, entries, total)
 }

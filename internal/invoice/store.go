@@ -301,14 +301,6 @@ type ListFilter struct {
 	IDs    []string
 	Limit  int
 	Offset int
-	// Cursor-based pagination (2026-05-29). Seek-method query:
-	// WHERE (created_at, id) < (AfterCreatedAt, AfterID). Mutually
-	// exclusive with Offset — the handler routes by query param
-	// (?after= takes precedence over ?offset=). Stable across the
-	// cycle-close write burst that otherwise page-skews operator
-	// pagination through "all invoices for last month."
-	AfterCreatedAt time.Time
-	AfterID        string
 	// Sort: column name from a closed set (validated by the store).
 	// Empty string means default (created_at).
 	Sort string

@@ -87,70 +87,6 @@ func TestIdempotency_GET_NotCached(t *testing.T) {
 	}
 }
 
-func TestCursorEncoding(t *testing.T) {
-	cursor := EncodeCursor("vlx_cus_123", mustParseTime("2026-04-01T00:00:00Z"))
-	if cursor == "" {
-		t.Fatal("cursor should not be empty")
-	}
-
-	decoded, err := DecodeCursor(cursor)
-	if err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if decoded.ID != "vlx_cus_123" {
-		t.Errorf("id: got %q", decoded.ID)
-	}
-}
-
-func TestDecodeCursor_Invalid(t *testing.T) {
-	_, err := DecodeCursor("")
-	if err == nil {
-		t.Error("expected error for empty cursor")
-	}
-
-	_, err = DecodeCursor("not-valid-base64!!!")
-	if err == nil {
-		t.Error("expected error for invalid base64")
-	}
-}
-
-func TestParsePageParams(t *testing.T) {
-	req := httptest.NewRequest("GET", "/v1/customers?limit=10&after=abc123&offset=5", nil)
-	params := ParsePageParams(req)
-
-	if params.Limit != 10 {
-		t.Errorf("limit: got %d, want 10", params.Limit)
-	}
-	if params.Cursor != "abc123" {
-		t.Errorf("cursor: got %q, want abc123", params.Cursor)
-	}
-	if params.Offset != 5 {
-		t.Errorf("offset: got %d, want 5", params.Offset)
-	}
-}
-
-func TestParsePageParams_Defaults(t *testing.T) {
-	req := httptest.NewRequest("GET", "/v1/customers", nil)
-	params := ParsePageParams(req)
-
-	if params.Limit != 25 {
-		t.Errorf("default limit: got %d, want 25", params.Limit)
-	}
-}
-
-func TestParsePageParams_MaxLimit(t *testing.T) {
-	// Over-cap asks clamp to the max (100), not fall back to the default
-	// (25). Pre-2026-05-28 this returned 25 — a silent truncation that
-	// hid the true page-size ceiling from clients. Per no-silent-
-	// fallbacks principle: honor the intent, just cap it.
-	req := httptest.NewRequest("GET", "/v1/customers?limit=500", nil)
-	params := ParsePageParams(req)
-
-	if params.Limit != 100 {
-		t.Errorf("over-max limit should clamp to MAX: got %d, want 100", params.Limit)
-	}
-}
-
 func TestRateLimiter_NilDB_FailsOpen(t *testing.T) {
 	// With nil db the rate limiter should fail open — every request is allowed.
 	rl := NewRateLimiter(nil, "test", 1, time.Minute)
@@ -211,30 +147,4 @@ func TestRateLimiter_HealthSkipped(t *testing.T) {
 	if rec.Header().Get("X-RateLimit-Limit") != "" {
 		t.Error("health check should not have rate limit headers")
 	}
-}
-
-func TestNewPageResponse(t *testing.T) {
-	data := []string{"a", "b", "c"}
-
-	t.Run("has_more", func(t *testing.T) {
-		resp := NewPageResponse(data, 10, 3, "id_c", mustParseTime("2026-04-01T00:00:00Z"))
-		if !resp.HasMore {
-			t.Error("has_more should be true when count > limit")
-		}
-		if resp.NextCursor == "" {
-			t.Error("next_cursor should be set")
-		}
-	})
-
-	t.Run("no_more", func(t *testing.T) {
-		resp := NewPageResponse(data, 3, 25, "", mustParseTime("2026-04-01T00:00:00Z"))
-		if resp.HasMore {
-			t.Error("has_more should be false")
-		}
-	})
-}
-
-func mustParseTime(s string) (t time.Time) {
-	t, _ = time.Parse(time.RFC3339, s)
-	return
 }

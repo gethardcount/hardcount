@@ -111,14 +111,27 @@ export interface paths {
                      * @description Case-insensitive substring match on display name, email,
                      *     external ID, or ID. Matching runs post-decryption (PII
                      *     columns are encrypted at rest), bounded to the first 5000
-                     *     rows of the tenant's filtered set.
+                     *     rows of the tenant's filtered set; the rows and `total` stop
+                     *     there.
                      */
                     search?: string;
-                    /** @description One of display_name, email, external_id, status, created_at (default). */
+                    /**
+                     * @description One of display_name, email, external_id, status, created_at
+                     *     (default). A sort by display_name or email looks at 5,000
+                     *     customers at most; the rows and `total` stop there.
+                     */
                     sort?: string;
                     dir?: "asc" | "desc";
-                    limit?: number;
-                    offset?: number;
+                    /**
+                     * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                     *     that is not a whole number, is a 422 with `param: limit`.
+                     */
+                    limit?: components["parameters"]["Limit"];
+                    /**
+                     * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                     *     not a whole number, is a 422 with `param: offset`.
+                     */
+                    offset?: components["parameters"]["Offset"];
                 };
                 header?: never;
                 path?: never;
@@ -134,10 +147,11 @@ export interface paths {
                     content: {
                         "application/json": {
                             data: components["schemas"]["Customer"][];
-                            total: number;
+                            total: components["schemas"]["ListTotal"];
                         };
                     };
                 };
+                422: components["responses"]["InvalidPage"];
             };
         };
         put?: never;
@@ -374,7 +388,7 @@ export interface paths {
          *     days, newest first: invoice, payment receipt, payment failed,
          *     payment setup request, dunning, and credit note emails. Emails
          *     not tied to an invoice (such as a setup link sent from the
-         *     payment-methods page) are not listed. No paging.
+         *     payment-methods page) are not listed.
          */
         get: operations["listCustomerSentEmails"];
         put?: never;
@@ -835,7 +849,18 @@ export interface paths {
         /** List meters */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    /**
+                     * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                     *     that is not a whole number, is a 422 with `param: limit`.
+                     */
+                    limit?: components["parameters"]["Limit"];
+                    /**
+                     * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                     *     not a whole number, is a 422 with `param: offset`.
+                     */
+                    offset?: components["parameters"]["Offset"];
+                };
                 header?: never;
                 path?: never;
                 cookie?: never;
@@ -850,9 +875,11 @@ export interface paths {
                     content: {
                         "application/json": {
                             data: components["schemas"]["Meter"][];
+                            total: components["schemas"]["ListTotal"];
                         };
                     };
                 };
+                422: components["responses"]["InvalidPage"];
             };
         };
         put?: never;
@@ -1233,7 +1260,7 @@ export interface paths {
         /**
          * List credit balances for all customers
          * @description One row per customer and currency that has any credit ledger
-         *     entry, highest balance first. No paging and no `total`.
+         *     entry, highest balance first.
          *     `total_granted` is the sum of every credit added in that currency
          *     (grants, positive adjustments and reversals).
          */
@@ -1278,7 +1305,18 @@ export interface paths {
         /** List webhook endpoints */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    /**
+                     * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                     *     that is not a whole number, is a 422 with `param: limit`.
+                     */
+                    limit?: components["parameters"]["Limit"];
+                    /**
+                     * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                     *     not a whole number, is a 422 with `param: offset`.
+                     */
+                    offset?: components["parameters"]["Offset"];
+                };
                 header?: never;
                 path?: never;
                 cookie?: never;
@@ -1293,9 +1331,11 @@ export interface paths {
                     content: {
                         "application/json": {
                             data: components["schemas"]["WebhookEndpoint"][];
+                            total: components["schemas"]["ListTotal"];
                         };
                     };
                 };
+                422: components["responses"]["InvalidPage"];
             };
         };
         put?: never;
@@ -1365,7 +1405,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Get a webhook endpoint
+         * @description One endpoint, without its signing secret.
+         */
+        get: operations["getWebhookEndpoint"];
         put?: never;
         post?: never;
         /** Delete (disable) webhook endpoint */
@@ -1517,9 +1561,9 @@ export interface paths {
         };
         /**
          * List an endpoint's recent deliveries
-         * @description Returns the endpoint and its 50 newest deliveries, newest first.
-         *     Each row names the event it carried. A deleted or unknown endpoint
-         *     returns 404.
+         * @description The endpoint's deliveries, newest first. Each row names the event
+         *     it carried. A deleted or unknown endpoint returns 404. The endpoint
+         *     itself is `GET /v1/webhook-endpoints/endpoints/{id}`.
          */
         get: operations["listWebhookEndpointDeliveries"];
         put?: never;
@@ -1585,10 +1629,21 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List recent outbound events (newest 50) */
+        /** List outbound events, newest first */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    /**
+                     * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                     *     that is not a whole number, is a 422 with `param: limit`.
+                     */
+                    limit?: components["parameters"]["Limit"];
+                    /**
+                     * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                     *     not a whole number, is a 422 with `param: offset`.
+                     */
+                    offset?: components["parameters"]["Offset"];
+                };
                 header?: never;
                 path?: never;
                 cookie?: never;
@@ -1603,9 +1658,11 @@ export interface paths {
                     content: {
                         "application/json": {
                             data: components["schemas"]["WebhookEvent"][];
+                            total: components["schemas"]["ListTotal"];
                         };
                     };
                 };
+                422: components["responses"]["InvalidPage"];
             };
         };
         put?: never;
@@ -1770,7 +1827,18 @@ export interface paths {
         /** List plans */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    /**
+                     * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                     *     that is not a whole number, is a 422 with `param: limit`.
+                     */
+                    limit?: components["parameters"]["Limit"];
+                    /**
+                     * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                     *     not a whole number, is a 422 with `param: offset`.
+                     */
+                    offset?: components["parameters"]["Offset"];
+                };
                 header?: never;
                 path?: never;
                 cookie?: never;
@@ -1785,9 +1853,11 @@ export interface paths {
                     content: {
                         "application/json": {
                             data: components["schemas"]["Plan"][];
+                            total: components["schemas"]["ListTotal"];
                         };
                     };
                 };
+                422: components["responses"]["InvalidPage"];
             };
         };
         put?: never;
@@ -2038,8 +2108,16 @@ export interface paths {
                     /** @description One of display_name, status, next_billing_at, trial_end_at, created_at (default). */
                     sort?: string;
                     dir?: "asc" | "desc";
-                    limit?: number;
-                    offset?: number;
+                    /**
+                     * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                     *     that is not a whole number, is a 422 with `param: limit`.
+                     */
+                    limit?: components["parameters"]["Limit"];
+                    /**
+                     * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                     *     not a whole number, is a 422 with `param: offset`.
+                     */
+                    offset?: components["parameters"]["Offset"];
                 };
                 header?: never;
                 path?: never;
@@ -2055,7 +2133,7 @@ export interface paths {
                     content: {
                         "application/json": {
                             data: components["schemas"]["Subscription"][];
-                            total: number;
+                            total: components["schemas"]["ListTotal"];
                         };
                     };
                 };
@@ -2068,6 +2146,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
+                422: components["responses"]["InvalidPage"];
             };
         };
         put?: never;
@@ -2743,10 +2822,16 @@ export interface paths {
                     from?: string;
                     /** @description Only events before this time, exclusive. RFC 3339, or a date (YYYY-MM-DD) meaning 23:59:59.999999 UTC that day, so the day is included. */
                     to?: string;
-                    limit?: number;
-                    offset?: number;
-                    /** @description Opaque cursor from `next_cursor`. Takes precedence over `offset`. */
-                    after?: string;
+                    /**
+                     * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                     *     that is not a whole number, is a 422 with `param: limit`.
+                     */
+                    limit?: components["parameters"]["Limit"];
+                    /**
+                     * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                     *     not a whole number, is a 422 with `param: offset`.
+                     */
+                    offset?: components["parameters"]["Offset"];
                 };
                 header?: never;
                 path?: never;
@@ -2762,16 +2847,11 @@ export interface paths {
                     content: {
                         "application/json": {
                             data: components["schemas"]["UsageEvent"][];
-                            /** @description Number of matching events. Left out when the page was read with an `after` cursor. */
-                            total?: number;
-                            /** @description Sent only when the page was read with an `after` cursor. True when another page follows. */
-                            has_more?: boolean;
-                            /** @description Pass it as `after` to read the next page. Sent only when `has_more` is true. */
-                            next_cursor?: string;
+                            total: components["schemas"]["ListTotal"];
                         };
                     };
                 };
-                /** @description `validation_error`: a malformed `dimensions` pair, or a `from` or `to` that cannot be parsed, or `to` before `from` (param names the field). */
+                /** @description `validation_error`: a malformed `dimensions` pair, a `from` or `to` that cannot be parsed, `to` before `from`, or a `limit` or `offset` out of range (param names the field). */
                 422: {
                     headers: {
                         [name: string]: unknown;
@@ -2979,8 +3059,10 @@ export interface paths {
                 };
                 /**
                  * @description Batch rejected — one or more events failed validation and
-                 *     NOTHING was ingested. `errors[]` names every failing index
-                 *     (`event[i]: reason`); fix them and retry the whole batch.
+                 *     NOTHING was ingested. The body is the error envelope (code
+                 *     `batch_rejected`) plus `errors[]`, which names every failing
+                 *     index (`event[i]: reason`), `ingested: 0` and `total`. Fix them
+                 *     and retry the whole batch.
                  */
                 422: {
                     headers: {
@@ -3195,10 +3277,16 @@ export interface paths {
                     /** @description One of invoice_number, amount_due_cents, billing_period_start, due_at, issued_at, status, payment_status, created_at (default). amount_due_cents sorts a paid invoice by what paid it (`amount_paid_cents` plus `credits_applied_cents`, since paying zeroes `amount_due_cents`) and every other invoice by `amount_due_cents`, which a voided or written-off invoice keeps. */
                     sort?: string;
                     dir?: "asc" | "desc";
-                    limit?: number;
-                    offset?: number;
-                    /** @description Opaque cursor (default created_at sort only); takes precedence over offset. */
-                    after?: string;
+                    /**
+                     * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                     *     that is not a whole number, is a 422 with `param: limit`.
+                     */
+                    limit?: components["parameters"]["Limit"];
+                    /**
+                     * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                     *     not a whole number, is a 422 with `param: offset`.
+                     */
+                    offset?: components["parameters"]["Offset"];
                 };
                 header?: never;
                 path?: never;
@@ -3214,15 +3302,11 @@ export interface paths {
                     content: {
                         "application/json": {
                             data: components["schemas"]["Invoice"][];
-                            /** @description Number of matching invoices. Left out when the page was read with an `after` cursor. */
-                            total?: number;
-                            /** @description Sent only when the page was read with an `after` cursor. True when another page follows. */
-                            has_more?: boolean;
-                            /** @description Pass it as `after` to read the next page. Sent only when `has_more` is true. */
-                            next_cursor?: string;
+                            total: components["schemas"]["ListTotal"];
                         };
                     };
                 };
+                422: components["responses"]["InvalidPage"];
             };
         };
         put?: never;
@@ -4541,8 +4625,8 @@ export interface paths {
          * @description Tells whether a reset token can still be used, without using it up.
          *     The reset-password page calls it on load, so it can show "this link
          *     is no longer valid" before the user types a new password. An
-         *     unknown, expired or already-used token returns 422 with
-         *     `valid: false`.
+         *     unknown, expired or already-used token returns 422 with code
+         *     `invalid_or_expired`.
          */
         get: operations["checkPasswordResetToken"];
         put?: never;
@@ -4924,7 +5008,18 @@ export interface paths {
          */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    /**
+                     * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                     *     that is not a whole number, is a 422 with `param: limit`.
+                     */
+                    limit?: components["parameters"]["Limit"];
+                    /**
+                     * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                     *     not a whole number, is a 422 with `param: offset`.
+                     */
+                    offset?: components["parameters"]["Offset"];
+                };
                 header?: never;
                 path?: never;
                 cookie?: never;
@@ -4938,10 +5033,12 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            data?: components["schemas"]["ProviderCostRate"][];
+                            data: components["schemas"]["ProviderCostRate"][];
+                            total: components["schemas"]["ListTotal"];
                         };
                     };
                 };
+                422: components["responses"]["InvalidPage"];
             };
         };
         /** Create or update a provider cost rate */
@@ -5357,7 +5454,18 @@ export interface paths {
          */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    /**
+                     * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                     *     that is not a whole number, is a 422 with `param: limit`.
+                     */
+                    limit?: components["parameters"]["Limit"];
+                    /**
+                     * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                     *     not a whole number, is a 422 with `param: offset`.
+                     */
+                    offset?: components["parameters"]["Offset"];
+                };
                 header?: never;
                 path?: never;
                 cookie?: never;
@@ -5371,7 +5479,8 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            data?: components["schemas"]["TestClock"][];
+                            data: components["schemas"]["TestClock"][];
+                            total: components["schemas"]["ListTotal"];
                         };
                     };
                 };
@@ -5384,6 +5493,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
+                422: components["responses"]["InvalidPage"];
             };
         };
         put?: never;
@@ -5516,7 +5626,18 @@ export interface paths {
         /** List subscriptions pinned to this clock */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    /**
+                     * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                     *     that is not a whole number, is a 422 with `param: limit`.
+                     */
+                    limit?: components["parameters"]["Limit"];
+                    /**
+                     * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                     *     not a whole number, is a 422 with `param: offset`.
+                     */
+                    offset?: components["parameters"]["Offset"];
+                };
                 header?: never;
                 path: {
                     id: string;
@@ -5532,7 +5653,8 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            data?: components["schemas"]["Subscription"][];
+                            data: components["schemas"]["Subscription"][];
+                            total: components["schemas"]["ListTotal"];
                         };
                     };
                 };
@@ -5543,6 +5665,7 @@ export interface paths {
                     };
                     content?: never;
                 };
+                422: components["responses"]["InvalidPage"];
             };
         };
         put?: never;
@@ -6290,7 +6413,7 @@ export interface paths {
         };
         /**
          * List active price overrides
-         * @description Active overrides only, newest first, at most 500. Closed or deleted
+         * @description Active overrides only, newest first. Closed or deleted
          *     overrides are not listed. Requires pricing write permission.
          */
         get: operations["listPriceOverrides"];
@@ -6743,13 +6866,9 @@ export interface paths {
          *     first (by `created_at`, then `id`). All filters are exact matches
          *     and can be combined.
          *
-         *     Two ways to page:
-         *     - Offset: `limit` and `offset`. The response is `{data, total}`.
-         *       `total` stops counting at 10,001, so a value above 10,000 means
-         *       "more than 10,000".
-         *     - Cursor: pass `after`. The response is `{data, has_more,
-         *       next_cursor}` and has no `total`. Pass `next_cursor` as the next
-         *       `after`.
+         *     Paged with `limit` and `offset`, like every list. Here `total`
+         *     stops counting at 10,001, so a value above 10,000 means "more than
+         *     10,000".
          *
          *     Settings changes are always recorded in test mode, so they do not
          *     appear when you read the log in live mode.
@@ -6790,15 +6909,21 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * @description How many rows match the request's filters, on every page, not only
+         *     this one. The audit log and the customer list's search and name or
+         *     email sort say where they stop counting.
+         */
+        ListTotal: number;
         Error: {
             error?: {
                 /**
                  * @description One of `invalid_request_error`, `authentication_error`,
-                 *     `rate_limit_error` or `api_error`, except when the
-                 *     `Idempotency-Key` header is the problem: then it is
-                 *     `idempotency_error`, `conflict_idempotency`,
-                 *     `conflict_idempotency_unresolved` or `bad_request`. Idempotency errors
-                 *     have only `type` and `message`. See docs/api-surface.md.
+                 *     `rate_limit_error` or `api_error`. Every error the API
+                 *     answers has this shape, including an unknown path (404,
+                 *     code `route_not_found`) and a method the path does not take
+                 *     (405, code `method_not_allowed`, with an `Allow` header).
+                 *     The few exceptions are listed in docs/api-surface.md.
                  * @example invalid_request_error
                  */
                 type?: string;
@@ -9075,6 +9200,7 @@ export interface components {
         };
         InvoiceDisputeList: {
             data: components["schemas"]["InvoiceDispute"][];
+            total: components["schemas"]["ListTotal"];
         };
         /**
          * @description The `data` of the outbound webhook events `payment.dispute_opened`
@@ -10381,7 +10507,17 @@ export interface components {
             amount_cents: number;
         };
     };
-    responses: never;
+    responses: {
+        /** @description `limit` or `offset` is out of range or not a whole number, or the request sends the removed `after` cursor (`param` names it) */
+        InvalidPage: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+    };
     parameters: {
         /**
          * @description Makes the call safe to retry. Send a unique value (a UUID works) and
@@ -10392,6 +10528,16 @@ export interface components {
          *     it: each usage event carries its own `idempotency_key`.
          */
         IdempotencyKey: string;
+        /**
+         * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+         *     that is not a whole number, is a 422 with `param: limit`.
+         */
+        Limit: number;
+        /**
+         * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+         *     not a whole number, is a 422 with `param: offset`.
+         */
+        Offset: number;
     };
     requestBodies: never;
     headers: never;
@@ -10681,7 +10827,18 @@ export interface operations {
     };
     listCustomerSentEmails: {
         parameters: {
-            query?: never;
+            query?: {
+                /**
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                 *     that is not a whole number, is a 422 with `param: limit`.
+                 */
+                limit?: components["parameters"]["Limit"];
+                /**
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                 *     not a whole number, is a 422 with `param: offset`.
+                 */
+                offset?: components["parameters"]["Offset"];
+            };
             header?: never;
             path: {
                 id: string;
@@ -10697,7 +10854,8 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        sent_emails: components["schemas"]["SentEmail"][];
+                        data: components["schemas"]["SentEmail"][];
+                        total: components["schemas"]["ListTotal"];
                     };
                 };
             };
@@ -10710,6 +10868,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            422: components["responses"]["InvalidPage"];
         };
     };
     getCustomerUsage: {
@@ -10790,7 +10949,18 @@ export interface operations {
     };
     listCustomerPaymentMethods: {
         parameters: {
-            query?: never;
+            query?: {
+                /**
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                 *     that is not a whole number, is a 422 with `param: limit`.
+                 */
+                limit?: components["parameters"]["Limit"];
+                /**
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                 *     not a whole number, is a 422 with `param: offset`.
+                 */
+                offset?: components["parameters"]["Offset"];
+            };
             header?: never;
             path: {
                 customer_id: string;
@@ -10807,7 +10977,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         data: components["schemas"]["PaymentMethod"][];
-                        total: number;
+                        total: components["schemas"]["ListTotal"];
                     };
                 };
             };
@@ -10820,6 +10990,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            422: components["responses"]["InvalidPage"];
         };
     };
     sendCustomerPaymentSetupEmail: {
@@ -11411,10 +11582,16 @@ export interface operations {
                 /** @description One of credit_note_number, total_cents (alias amount), status, issued_at, created_at (default). */
                 sort?: string;
                 dir?: "asc" | "desc";
-                /** @description Page size. Default 25, maximum 100. */
-                limit?: number;
-                /** @description Maximum 10000. */
-                offset?: number;
+                /**
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                 *     that is not a whole number, is a 422 with `param: limit`.
+                 */
+                limit?: components["parameters"]["Limit"];
+                /**
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                 *     not a whole number, is a 422 with `param: offset`.
+                 */
+                offset?: components["parameters"]["Offset"];
             };
             header?: never;
             path?: never;
@@ -11430,9 +11607,11 @@ export interface operations {
                 content: {
                     "application/json": {
                         data: components["schemas"]["CreditNote"][];
+                        total: components["schemas"]["ListTotal"];
                     };
                 };
             };
+            422: components["responses"]["InvalidPage"];
         };
     };
     adjustCredits: {
@@ -11511,7 +11690,18 @@ export interface operations {
     };
     listCreditBalances: {
         parameters: {
-            query?: never;
+            query?: {
+                /**
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                 *     that is not a whole number, is a 422 with `param: limit`.
+                 */
+                limit?: components["parameters"]["Limit"];
+                /**
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                 *     not a whole number, is a 422 with `param: offset`.
+                 */
+                offset?: components["parameters"]["Offset"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11526,9 +11716,11 @@ export interface operations {
                 content: {
                     "application/json": {
                         data: components["schemas"]["CreditBalance"][];
+                        total: components["schemas"]["ListTotal"];
                     };
                 };
             };
+            422: components["responses"]["InvalidPage"];
         };
     };
     listCreditLedgerEntries: {
@@ -11539,9 +11731,16 @@ export interface operations {
                 sort?: string;
                 /** @description Default desc. */
                 dir?: "asc" | "desc";
-                /** @description Default 50, at most 100. */
-                limit?: number;
-                offset?: number;
+                /**
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                 *     that is not a whole number, is a 422 with `param: limit`.
+                 */
+                limit?: components["parameters"]["Limit"];
+                /**
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                 *     not a whole number, is a 422 with `param: offset`.
+                 */
+                offset?: components["parameters"]["Offset"];
             };
             header?: never;
             path: {
@@ -11559,7 +11758,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         data: components["schemas"]["CreditLedgerEntry"][];
-                        total: number;
+                        total: components["schemas"]["ListTotal"];
                     };
                 };
             };
@@ -11572,11 +11771,54 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            422: components["responses"]["InvalidPage"];
+        };
+    };
+    getWebhookEndpoint: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The endpoint */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookEndpoint"];
+                };
+            };
+            /** @description No such endpoint in the caller's mode */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     listWebhookEndpointDeliveries: {
         parameters: {
-            query?: never;
+            query?: {
+                /**
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                 *     that is not a whole number, is a 422 with `param: limit`.
+                 */
+                limit?: components["parameters"]["Limit"];
+                /**
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                 *     not a whole number, is a 422 with `param: offset`.
+                 */
+                offset?: components["parameters"]["Offset"];
+            };
             header?: never;
             path: {
                 id: string;
@@ -11592,8 +11834,8 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        endpoint: components["schemas"]["WebhookEndpoint"];
                         data: components["schemas"]["WebhookEndpointDelivery"][];
+                        total: components["schemas"]["ListTotal"];
                     };
                 };
             };
@@ -11606,6 +11848,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            422: components["responses"]["InvalidPage"];
         };
     };
     replayWebhookDelivery: {
@@ -11663,7 +11906,18 @@ export interface operations {
     };
     getWebhookEndpointStats: {
         parameters: {
-            query?: never;
+            query?: {
+                /**
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                 *     that is not a whole number, is a 422 with `param: limit`.
+                 */
+                limit?: components["parameters"]["Limit"];
+                /**
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                 *     not a whole number, is a 422 with `param: offset`.
+                 */
+                offset?: components["parameters"]["Offset"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11678,9 +11932,11 @@ export interface operations {
                 content: {
                     "application/json": {
                         data: components["schemas"]["WebhookEndpointStats"][];
+                        total: components["schemas"]["ListTotal"];
                     };
                 };
             };
+            422: components["responses"]["InvalidPage"];
         };
     };
     listWebhookEventDeliveries: {
@@ -12082,7 +12338,18 @@ export interface operations {
     };
     listPlanPrices: {
         parameters: {
-            query?: never;
+            query?: {
+                /**
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                 *     that is not a whole number, is a 422 with `param: limit`.
+                 */
+                limit?: components["parameters"]["Limit"];
+                /**
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                 *     not a whole number, is a 422 with `param: offset`.
+                 */
+                offset?: components["parameters"]["Offset"];
+            };
             header?: never;
             path: {
                 id: string;
@@ -12099,6 +12366,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         data: components["schemas"]["PlanPrice"][];
+                        total: components["schemas"]["ListTotal"];
                     };
                 };
             };
@@ -12111,6 +12379,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            422: components["responses"]["InvalidPage"];
         };
     };
     addPlanPrice: {
@@ -14202,7 +14471,18 @@ export interface operations {
     };
     listInvoiceDisputes: {
         parameters: {
-            query?: never;
+            query?: {
+                /**
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                 *     that is not a whole number, is a 422 with `param: limit`.
+                 */
+                limit?: components["parameters"]["Limit"];
+                /**
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                 *     not a whole number, is a 422 with `param: offset`.
+                 */
+                offset?: components["parameters"]["Offset"];
+            };
             header?: never;
             path: {
                 id: string;
@@ -14229,6 +14509,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            422: components["responses"]["InvalidPage"];
         };
     };
     getCreditNoteStats: {
@@ -14510,18 +14791,13 @@ export interface operations {
                     };
                 };
             };
-            /** @description Token is unknown, expired or already used */
+            /** @description `invalid_or_expired` (param `token`): the token is unknown, expired or already used */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        /** @enum {boolean} */
-                        valid: false;
-                        /** @enum {string} */
-                        reason: "invalid_or_expired";
-                    };
+                    "application/json": components["schemas"]["Error"];
                 };
             };
             /** @description Rate limited (shared per-IP limit on `/v1/auth`) */
@@ -14703,7 +14979,18 @@ export interface operations {
     };
     listTestClockCustomers: {
         parameters: {
-            query?: never;
+            query?: {
+                /**
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                 *     that is not a whole number, is a 422 with `param: limit`.
+                 */
+                limit?: components["parameters"]["Limit"];
+                /**
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                 *     not a whole number, is a 422 with `param: offset`.
+                 */
+                offset?: components["parameters"]["Offset"];
+            };
             header?: never;
             path: {
                 id: string;
@@ -14720,6 +15007,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         data: components["schemas"]["Customer"][];
+                        total: components["schemas"]["ListTotal"];
                     };
                 };
             };
@@ -14741,11 +15029,23 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            422: components["responses"]["InvalidPage"];
         };
     };
     listRecipes: {
         parameters: {
-            query?: never;
+            query?: {
+                /**
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                 *     that is not a whole number, is a 422 with `param: limit`.
+                 */
+                limit?: components["parameters"]["Limit"];
+                /**
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                 *     not a whole number, is a 422 with `param: offset`.
+                 */
+                offset?: components["parameters"]["Offset"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14760,14 +15060,27 @@ export interface operations {
                 content: {
                     "application/json": {
                         data: components["schemas"]["RecipeListItem"][];
+                        total: components["schemas"]["ListTotal"];
                     };
                 };
             };
+            422: components["responses"]["InvalidPage"];
         };
     };
     listRecipeInstances: {
         parameters: {
-            query?: never;
+            query?: {
+                /**
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                 *     that is not a whole number, is a 422 with `param: limit`.
+                 */
+                limit?: components["parameters"]["Limit"];
+                /**
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                 *     not a whole number, is a 422 with `param: offset`.
+                 */
+                offset?: components["parameters"]["Offset"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14782,9 +15095,11 @@ export interface operations {
                 content: {
                     "application/json": {
                         data: components["schemas"]["RecipeInstance"][];
+                        total: components["schemas"]["ListTotal"];
                     };
                 };
             };
+            422: components["responses"]["InvalidPage"];
         };
     };
     getRecipe: {
@@ -15285,9 +15600,16 @@ export interface operations {
             query?: {
                 invoice_id?: string;
                 state?: "active" | "escalated" | "resolved";
-                /** @description Page size. Default 50, maximum 100. */
-                limit?: number;
-                offset?: number;
+                /**
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                 *     that is not a whole number, is a 422 with `param: limit`.
+                 */
+                limit?: components["parameters"]["Limit"];
+                /**
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                 *     not a whole number, is a 422 with `param: offset`.
+                 */
+                offset?: components["parameters"]["Offset"];
             };
             header?: never;
             path?: never;
@@ -15303,10 +15625,11 @@ export interface operations {
                 content: {
                     "application/json": {
                         data: components["schemas"]["DunningRun"][];
-                        total: number;
+                        total: components["schemas"]["ListTotal"];
                     };
                 };
             };
+            422: components["responses"]["InvalidPage"];
         };
     };
     getDunningRun: {
@@ -15447,7 +15770,18 @@ export interface operations {
     };
     listDunningPolicies: {
         parameters: {
-            query?: never;
+            query?: {
+                /**
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                 *     that is not a whole number, is a 422 with `param: limit`.
+                 */
+                limit?: components["parameters"]["Limit"];
+                /**
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                 *     not a whole number, is a 422 with `param: offset`.
+                 */
+                offset?: components["parameters"]["Offset"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -15462,9 +15796,11 @@ export interface operations {
                 content: {
                     "application/json": {
                         data: components["schemas"]["DunningPolicyListItem"][];
+                        total: components["schemas"]["ListTotal"];
                     };
                 };
             };
+            422: components["responses"]["InvalidPage"];
         };
     };
     createDunningPolicy: {
@@ -15716,6 +16052,16 @@ export interface operations {
                 customer_id?: string;
                 /** @description Only this price's overrides. */
                 price_id?: string;
+                /**
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                 *     that is not a whole number, is a 422 with `param: limit`.
+                 */
+                limit?: components["parameters"]["Limit"];
+                /**
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                 *     not a whole number, is a 422 with `param: offset`.
+                 */
+                offset?: components["parameters"]["Offset"];
             };
             header?: never;
             path?: never;
@@ -15731,9 +16077,11 @@ export interface operations {
                 content: {
                     "application/json": {
                         data: components["schemas"]["CustomerPriceOverride"][];
+                        total: components["schemas"]["ListTotal"];
                     };
                 };
             };
+            422: components["responses"]["InvalidPage"];
         };
     };
     createPriceOverride: {
@@ -15928,7 +16276,18 @@ export interface operations {
     };
     listApiKeys: {
         parameters: {
-            query?: never;
+            query?: {
+                /**
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                 *     that is not a whole number, is a 422 with `param: limit`.
+                 */
+                limit?: components["parameters"]["Limit"];
+                /**
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                 *     not a whole number, is a 422 with `param: offset`.
+                 */
+                offset?: components["parameters"]["Offset"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -15943,6 +16302,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         data: components["schemas"]["APIKey"][];
+                        total: components["schemas"]["ListTotal"];
                     };
                 };
             };
@@ -15955,6 +16315,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            422: components["responses"]["InvalidPage"];
         };
     };
     createApiKey: {
@@ -16521,6 +16882,16 @@ export interface operations {
         parameters: {
             query?: {
                 status?: "active" | "suspended" | "deleted";
+                /**
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                 *     that is not a whole number, is a 422 with `param: limit`.
+                 */
+                limit?: components["parameters"]["Limit"];
+                /**
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                 *     not a whole number, is a 422 with `param: offset`.
+                 */
+                offset?: components["parameters"]["Offset"];
             };
             header?: never;
             path?: never;
@@ -16536,6 +16907,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         data: components["schemas"]["Tenant"][];
+                        total: components["schemas"]["ListTotal"];
                     };
                 };
             };
@@ -16557,6 +16929,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            422: components["responses"]["InvalidPage"];
         };
     };
     createTenant: {
@@ -16769,11 +17142,16 @@ export interface operations {
                 sim_to?: string;
                 /** @description The only supported order. Any other value is a 400. */
                 order?: "created_at";
-                limit?: number;
-                /** @description Ignored when `after` is set. */
-                offset?: number;
-                /** @description Cursor from a previous page's `next_cursor`. Takes precedence over `offset`. */
-                after?: string;
+                /**
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                 *     that is not a whole number, is a 422 with `param: limit`.
+                 */
+                limit?: components["parameters"]["Limit"];
+                /**
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                 *     not a whole number, is a 422 with `param: offset`.
+                 */
+                offset?: components["parameters"]["Offset"];
             };
             header?: never;
             path?: never;
@@ -16781,10 +17159,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /**
-             * @description Audit entries. Offset paging returns `{data, total}`; cursor
-             *     paging returns `{data, has_more, next_cursor}`.
-             */
+            /** @description Audit entries */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -16792,16 +17167,11 @@ export interface operations {
                 content: {
                     "application/json": {
                         data: components["schemas"]["AuditLogEntry"][];
-                        /** @description Offset paging only. Capped at 10,001. */
-                        total?: number;
-                        /** @description Cursor paging only. */
-                        has_more?: boolean;
-                        /** @description Cursor paging only, present when `has_more` is true. */
-                        next_cursor?: string;
+                        total: components["schemas"]["ListTotal"];
                     };
                 };
             };
-            /** @description Unsupported `order`, or a malformed `after` cursor */
+            /** @description Unsupported `order` */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -16819,7 +17189,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description A date is not RFC3339 or YYYY-MM-DD, or a range ends before it starts */
+            /** @description A date is not RFC3339 or YYYY-MM-DD, a range ends before it starts, or `limit` or `offset` is out of range */
             422: {
                 headers: {
                     [name: string]: unknown;

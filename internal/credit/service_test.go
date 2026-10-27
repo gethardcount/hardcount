@@ -204,7 +204,7 @@ func (m *memStore) GetBalance(_ context.Context, _, customerID string) ([]domain
 	return out, nil
 }
 
-func (m *memStore) ListBalances(_ context.Context, _ string) ([]domain.CreditBalance, error) {
+func (m *memStore) ListBalances(_ context.Context, _ string, limit, offset int) ([]domain.CreditBalance, int, error) {
 	byCustomer := map[string]*domain.CreditBalance{}
 	for _, e := range m.entries {
 		key := e.CustomerID + "/" + e.Currency
@@ -225,7 +225,11 @@ func (m *memStore) ListBalances(_ context.Context, _ string) ([]domain.CreditBal
 	for _, b := range byCustomer {
 		result = append(result, *b)
 	}
-	return result, nil
+	total := len(result)
+	if offset >= total {
+		return nil, total, nil
+	}
+	return result[offset:min(offset+limit, total)], total, nil
 }
 
 // ExpireGrantAtomic mirrors the real store's semantics: re-read the

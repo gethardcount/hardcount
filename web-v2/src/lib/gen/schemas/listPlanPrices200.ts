@@ -7,8 +7,10 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
+import type { ListTotal } from './listTotal';
 import type { PlanPrice } from './planPrice';
 
 export type ListPlanPrices200 = {
   data: PlanPrice[];
+  total: ListTotal;
 };

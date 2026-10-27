@@ -93,19 +93,25 @@ func (s *PostgresStore) Get(ctx context.Context, tenantID, id string) (domain.Te
 	return clk, err
 }
 
-func (s *PostgresStore) List(ctx context.Context, tenantID string) ([]domain.TestClock, error) {
+// List returns one page of the tenant's test clocks, newest first, and how
+// many clocks the tenant has.
+func (s *PostgresStore) List(ctx context.Context, tenantID string, limit, offset int) ([]domain.TestClock, int, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer postgres.Rollback(tx)
 
+	var total int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM test_clocks`).Scan(&total); err != nil {
+		return nil, 0, err
+	}
 	rows, err := tx.QueryContext(ctx, `
 		SELECT `+clockCols+` FROM test_clocks
-		ORDER BY created_at DESC LIMIT 500
-	`)
+		ORDER BY created_at DESC, id DESC LIMIT $1 OFFSET $2
+	`, limit, offset)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -113,11 +119,11 @@ func (s *PostgresStore) List(ctx context.Context, tenantID string) ([]domain.Tes
 	for rows.Next() {
 		var clk domain.TestClock
 		if err := rows.Scan(scanDest(&clk)...); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		clocks = append(clocks, clk)
 	}
-	return clocks, rows.Err()
+	return clocks, total, rows.Err()
 }
 
 // clockTeardownStatements are the ordered DELETEs that tear down a test

@@ -8,9 +8,8 @@
  * OpenAPI spec version: 2026-04-07
  */
 
-export type CheckPasswordResetToken422Reason = typeof CheckPasswordResetToken422Reason[keyof typeof CheckPasswordResetToken422Reason];
-
-
-export const CheckPasswordResetToken422Reason = {
-  invalid_or_expired: 'invalid_or_expired',
-} as const;
+/**
+ * Rows per page, from 1 to 100. Default 50. Any other value, or one
+ * that is not a whole number, is a 422 with `param: limit`.
+ */
+export type LimitParameter = number;

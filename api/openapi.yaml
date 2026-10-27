@@ -101,8 +101,46 @@ components:
         it: each usage event carries its own `idempotency_key`.
       schema:
         type: string
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: |
+        Rows per page, from 1 to 100. Default 50. Any other value, or one
+        that is not a whole number, is a 422 with `param: limit`.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+    Offset:
+      name: offset
+      in: query
+      required: false
+      description: |
+        Rows to skip, 0 or more. Default 0. A negative value, or one that is
+        not a whole number, is a 422 with `param: offset`.
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+
+  responses:
+    InvalidPage:
+      description: "`limit` or `offset` is out of range or not a whole number, or the request sends the removed `after` cursor (`param` names it)"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
 
   schemas:
+    ListTotal:
+      type: integer
+      description: |
+        How many rows match the request's filters, on every page, not only
+        this one. The audit log and the customer list's search and name or
+        email sort say where they stop counting.
+
     Error:
       type: object
       properties:
@@ -113,11 +151,11 @@ components:
               type: string
               description: |
                 One of `invalid_request_error`, `authentication_error`,
-                `rate_limit_error` or `api_error`, except when the
-                `Idempotency-Key` header is the problem: then it is
-                `idempotency_error`, `conflict_idempotency`,
-                `conflict_idempotency_unresolved` or `bad_request`. Idempotency errors
-                have only `type` and `message`. See docs/api-surface.md.
+                `rate_limit_error` or `api_error`. Every error the API
+                answers has this shape, including an unknown path (404,
+                code `route_not_found`) and a method the path does not take
+                (405, code `method_not_allowed`, with an `Allow` header).
+                The few exceptions are listed in docs/api-surface.md.
               example: invalid_request_error
             code:
               type: string
@@ -3381,12 +3419,14 @@ components:
 
     InvoiceDisputeList:
       type: object
-      required: [data]
+      required: [data, total]
       properties:
         data:
           type: array
           items:
             $ref: "#/components/schemas/InvoiceDispute"
+        total:
+          $ref: "#/components/schemas/ListTotal"
 
     DisputeWebhookEventData:
       type: object
@@ -5366,12 +5406,16 @@ paths:
             Case-insensitive substring match on display name, email,
             external ID, or ID. Matching runs post-decryption (PII
             columns are encrypted at rest), bounded to the first 5000
-            rows of the tenant's filtered set.
+            rows of the tenant's filtered set; the rows and `total` stop
+            there.
           schema:
             type: string
         - name: sort
           in: query
-          description: One of display_name, email, external_id, status, created_at (default).
+          description: |
+            One of display_name, email, external_id, status, created_at
+            (default). A sort by display_name or email looks at 5,000
+            customers at most; the rows and `total` stop there.
           schema:
             type: string
         - name: dir
@@ -5379,14 +5423,8 @@ paths:
           schema:
             type: string
             enum: [asc, desc]
-        - name: limit
-          in: query
-          schema:
-            type: integer
-        - name: offset
-          in: query
-          schema:
-            type: integer
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
           description: Customer list
@@ -5401,7 +5439,9 @@ paths:
                     items:
                       $ref: "#/components/schemas/Customer"
                   total:
-                    type: integer
+                    $ref: "#/components/schemas/ListTotal"
+        "422":
+          $ref: "#/components/responses/InvalidPage"
 
   /v1/customers/{id}/rotate-cost-dashboard-token:
     post:
@@ -5662,7 +5702,7 @@ paths:
         days, newest first: invoice, payment receipt, payment failed,
         payment setup request, dunning, and credit note emails. Emails
         not tied to an invoice (such as a setup link sent from the
-        payment-methods page) are not listed. No paging.
+        payment-methods page) are not listed.
       operationId: listCustomerSentEmails
       parameters:
         - name: id
@@ -5670,6 +5710,8 @@ paths:
           required: true
           schema:
             type: string
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
           description: Sent emails.
@@ -5677,18 +5719,22 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [sent_emails]
+                required: [data, total]
                 properties:
-                  sent_emails:
+                  data:
                     type: array
                     items:
                       $ref: "#/components/schemas/SentEmail"
+                  total:
+                    $ref: "#/components/schemas/ListTotal"
         "404":
           description: No customer with this ID in this tenant and mode.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/InvalidPage"
 
   /v1/customers/{id}/usage:
     get:
@@ -5793,6 +5839,8 @@ paths:
           required: true
           schema:
             type: string
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
           description: Payment methods.
@@ -5807,13 +5855,15 @@ paths:
                     items:
                       $ref: "#/components/schemas/PaymentMethod"
                   total:
-                    type: integer
+                    $ref: "#/components/schemas/ListTotal"
         "404":
           description: Customer not found.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/InvalidPage"
 
   /v1/customers/{customer_id}/payment-methods/send-setup-email:
     post:
@@ -6474,6 +6524,9 @@ paths:
     get:
       tags: [Pricing]
       summary: List meters
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
           description: Meter list
@@ -6481,12 +6534,16 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [data]
+                required: [data, total]
                 properties:
                   data:
                     type: array
                     items:
                       $ref: "#/components/schemas/Meter"
+                  total:
+                    $ref: "#/components/schemas/ListTotal"
+        "422":
+          $ref: "#/components/responses/InvalidPage"
 
   /v1/meters/{id}:
     patch:
@@ -6709,16 +6766,8 @@ paths:
           schema:
             type: string
             enum: [asc, desc]
-        - name: limit
-          in: query
-          description: Page size. Default 25, maximum 100.
-          schema:
-            type: integer
-        - name: offset
-          in: query
-          description: Maximum 10000.
-          schema:
-            type: integer
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
           description: Credit note list.
@@ -6726,12 +6775,16 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [data]
+                required: [data, total]
                 properties:
                   data:
                     type: array
                     items:
                       $ref: "#/components/schemas/CreditNote"
+                  total:
+                    $ref: "#/components/schemas/ListTotal"
+        "422":
+          $ref: "#/components/responses/InvalidPage"
 
   /v1/credits/grants/{customer_id}:
     get:
@@ -6844,10 +6897,13 @@ paths:
       summary: List credit balances for all customers
       description: |
         One row per customer and currency that has any credit ledger
-        entry, highest balance first. No paging and no `total`.
+        entry, highest balance first.
         `total_granted` is the sum of every credit added in that currency
         (grants, positive adjustments and reversals).
       operationId: listCreditBalances
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
           description: Balances.
@@ -6855,12 +6911,16 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [data]
+                required: [data, total]
                 properties:
                   data:
                     type: array
                     items:
                       $ref: "#/components/schemas/CreditBalance"
+                  total:
+                    $ref: "#/components/schemas/ListTotal"
+        "422":
+          $ref: "#/components/responses/InvalidPage"
 
   /v1/credits/ledger/{customer_id}:
     get:
@@ -6893,15 +6953,8 @@ paths:
           schema:
             type: string
             enum: [asc, desc]
-        - name: limit
-          in: query
-          description: Default 50, at most 100.
-          schema:
-            type: integer
-        - name: offset
-          in: query
-          schema:
-            type: integer
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
           description: Ledger entries. `total` counts entries matching the filter.
@@ -6916,13 +6969,15 @@ paths:
                     items:
                       $ref: "#/components/schemas/CreditLedgerEntry"
                   total:
-                    type: integer
+                    $ref: "#/components/schemas/ListTotal"
         "404":
           description: No customer with this ID in this tenant and mode.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/InvalidPage"
 
   /v1/webhook-endpoints/endpoints:
     post:
@@ -6964,6 +7019,9 @@ paths:
     get:
       tags: [Webhooks]
       summary: List webhook endpoints
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
           description: Endpoint list
@@ -6971,14 +7029,42 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [data]
+                required: [data, total]
                 properties:
                   data:
                     type: array
                     items:
                       $ref: "#/components/schemas/WebhookEndpoint"
+                  total:
+                    $ref: "#/components/schemas/ListTotal"
+        "422":
+          $ref: "#/components/responses/InvalidPage"
 
   /v1/webhook-endpoints/endpoints/{id}:
+    get:
+      tags: [Webhooks]
+      summary: Get a webhook endpoint
+      operationId: getWebhookEndpoint
+      description: One endpoint, without its signing secret.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The endpoint
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookEndpoint"
+        "404":
+          description: No such endpoint in the caller's mode
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
     patch:
       tags: [Webhooks]
       summary: Update webhook endpoint (no secret rotation)
@@ -7069,15 +7155,17 @@ paths:
       summary: List an endpoint's recent deliveries
       operationId: listWebhookEndpointDeliveries
       description: |
-        Returns the endpoint and its 50 newest deliveries, newest first.
-        Each row names the event it carried. A deleted or unknown endpoint
-        returns 404.
+        The endpoint's deliveries, newest first. Each row names the event
+        it carried. A deleted or unknown endpoint returns 404. The endpoint
+        itself is `GET /v1/webhook-endpoints/endpoints/{id}`.
       parameters:
         - name: id
           in: path
           required: true
           schema:
             type: string
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
           description: Endpoint and its deliveries
@@ -7085,21 +7173,22 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [endpoint, data]
+                required: [data, total]
                 properties:
-                  endpoint:
-                    $ref: "#/components/schemas/WebhookEndpoint"
                   data:
                     type: array
-                    maxItems: 50
                     items:
                       $ref: "#/components/schemas/WebhookEndpointDelivery"
+                  total:
+                    $ref: "#/components/schemas/ListTotal"
         "404":
           description: No such endpoint, or it was deleted
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/InvalidPage"
 
   /v1/webhook-endpoints/endpoints/{id}/deliveries/{deliveryID}/replay:
     post:
@@ -7157,6 +7246,9 @@ paths:
         All-time delivery counts for each endpoint that has deliveries, in
         the caller's mode. Endpoints with no deliveries are not listed.
         Deleted endpoints can appear.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
           description: One row per endpoint
@@ -7164,17 +7256,24 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [data]
+                required: [data, total]
                 properties:
                   data:
                     type: array
                     items:
                       $ref: "#/components/schemas/WebhookEndpointStats"
+                  total:
+                    $ref: "#/components/schemas/ListTotal"
+        "422":
+          $ref: "#/components/responses/InvalidPage"
 
   /v1/webhook-endpoints/events:
     get:
       tags: [Webhooks]
-      summary: List recent outbound events (newest 50)
+      summary: List outbound events, newest first
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
           description: Event list
@@ -7182,12 +7281,16 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [data]
+                required: [data, total]
                 properties:
                   data:
                     type: array
                     items:
                       $ref: "#/components/schemas/WebhookEvent"
+                  total:
+                    $ref: "#/components/schemas/ListTotal"
+        "422":
+          $ref: "#/components/responses/InvalidPage"
 
   /v1/webhook_events/{id}/deliveries:
     get:
@@ -7546,6 +7649,9 @@ paths:
     get:
       tags: [Pricing]
       summary: List plans
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
           description: Plan list
@@ -7553,12 +7659,16 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [data]
+                required: [data, total]
                 properties:
                   data:
                     type: array
                     items:
                       $ref: "#/components/schemas/Plan"
+                  total:
+                    $ref: "#/components/schemas/ListTotal"
+        "422":
+          $ref: "#/components/responses/InvalidPage"
 
   /v1/plans/{id}:
     get:
@@ -7693,6 +7803,8 @@ paths:
           required: true
           schema:
             type: string
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
           description: Prices
@@ -7700,18 +7812,22 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [data]
+                required: [data, total]
                 properties:
                   data:
                     type: array
                     items:
                       $ref: "#/components/schemas/PlanPrice"
+                  total:
+                    $ref: "#/components/schemas/ListTotal"
         "404":
           description: "`not_found`: no plan with this id in this tenant and mode."
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/InvalidPage"
     post:
       tags: [Pricing]
       summary: Add a price to a plan
@@ -8016,14 +8132,8 @@ paths:
           schema:
             type: string
             enum: [asc, desc]
-        - name: limit
-          in: query
-          schema:
-            type: integer
-        - name: offset
-          in: query
-          schema:
-            type: integer
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
           description: Subscription list
@@ -8038,13 +8148,15 @@ paths:
                     items:
                       $ref: "#/components/schemas/Subscription"
                   total:
-                    type: integer
+                    $ref: "#/components/schemas/ListTotal"
         "400":
           description: A `status`, `billing` or `collection` value the API does not know.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/InvalidPage"
 
   /v1/subscriptions/{id}/activate:
     post:
@@ -9146,19 +9258,8 @@ paths:
           description: Only events before this time, exclusive. RFC 3339, or a date (YYYY-MM-DD) meaning 23:59:59.999999 UTC that day, so the day is included.
           schema:
             type: string
-        - name: limit
-          in: query
-          schema:
-            type: integer
-        - name: offset
-          in: query
-          schema:
-            type: integer
-        - name: after
-          in: query
-          description: Opaque cursor from `next_cursor`. Takes precedence over `offset`.
-          schema:
-            type: string
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
           description: Event list
@@ -9166,23 +9267,16 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [data]
+                required: [data, total]
                 properties:
                   data:
                     type: array
                     items:
                       $ref: "#/components/schemas/UsageEvent"
                   total:
-                    type: integer
-                    description: Number of matching events. Left out when the page was read with an `after` cursor.
-                  has_more:
-                    type: boolean
-                    description: Sent only when the page was read with an `after` cursor. True when another page follows.
-                  next_cursor:
-                    type: string
-                    description: Pass it as `after` to read the next page. Sent only when `has_more` is true.
+                    $ref: "#/components/schemas/ListTotal"
         "422":
-          description: "`validation_error`: a malformed `dimensions` pair, or a `from` or `to` that cannot be parsed, or `to` before `from` (param names the field)."
+          description: "`validation_error`: a malformed `dimensions` pair, a `from` or `to` that cannot be parsed, `to` before `from`, or a `limit` or `offset` out of range (param names the field)."
           content:
             application/json:
               schema:
@@ -9261,8 +9355,10 @@ paths:
         "422":
           description: |
             Batch rejected — one or more events failed validation and
-            NOTHING was ingested. `errors[]` names every failing index
-            (`event[i]: reason`); fix them and retry the whole batch.
+            NOTHING was ingested. The body is the error envelope (code
+            `batch_rejected`) plus `errors[]`, which names every failing
+            index (`event[i]: reason`), `ingested: 0` and `total`. Fix them
+            and retry the whole batch.
         "413":
           description: Request body over the 1MB cap — send smaller batches.
         "503":
@@ -9652,19 +9748,8 @@ paths:
           schema:
             type: string
             enum: [asc, desc]
-        - name: limit
-          in: query
-          schema:
-            type: integer
-        - name: offset
-          in: query
-          schema:
-            type: integer
-        - name: after
-          in: query
-          description: Opaque cursor (default created_at sort only); takes precedence over offset.
-          schema:
-            type: string
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
           description: Invoice list
@@ -9672,21 +9757,16 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [data]
+                required: [data, total]
                 properties:
                   data:
                     type: array
                     items:
                       $ref: "#/components/schemas/Invoice"
                   total:
-                    type: integer
-                    description: Number of matching invoices. Left out when the page was read with an `after` cursor.
-                  has_more:
-                    type: boolean
-                    description: Sent only when the page was read with an `after` cursor. True when another page follows.
-                  next_cursor:
-                    type: string
-                    description: Pass it as `after` to read the next page. Sent only when `has_more` is true.
+                    $ref: "#/components/schemas/ListTotal"
+        "422":
+          $ref: "#/components/responses/InvalidPage"
 
     post:
       tags: [Invoices]
@@ -10498,6 +10578,8 @@ paths:
           required: true
           schema:
             type: string
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
           description: The invoice's disputes.
@@ -10511,6 +10593,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/InvalidPage"
 
   /v1/credit-notes/stats:
     get:
@@ -11082,8 +11166,8 @@ paths:
         Tells whether a reset token can still be used, without using it up.
         The reset-password page calls it on load, so it can show "this link
         is no longer valid" before the user types a new password. An
-        unknown, expired or already-used token returns 422 with
-        `valid: false`.
+        unknown, expired or already-used token returns 422 with code
+        `invalid_or_expired`.
       security: []
       parameters:
         - name: token
@@ -11105,19 +11189,11 @@ paths:
                     type: boolean
                     enum: [true]
         "422":
-          description: Token is unknown, expired or already used
+          description: "`invalid_or_expired` (param `token`): the token is unknown, expired or already used"
           content:
             application/json:
               schema:
-                type: object
-                required: [valid, reason]
-                properties:
-                  valid:
-                    type: boolean
-                    enum: [false]
-                  reason:
-                    type: string
-                    enum: [invalid_or_expired]
+                $ref: "#/components/schemas/Error"
         "429":
           description: Rate limited (shared per-IP limit on `/v1/auth`)
           content:
@@ -11477,6 +11553,9 @@ paths:
         The operator's COGS table (ADR-079): what THEY pay LLM providers per
         token, keyed by provider/model/token_type. Current-rate semantics —
         one row per key, edited in place; per-event stamps are the history.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
           description: Rates
@@ -11484,11 +11563,16 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [data, total]
                 properties:
                   data:
                     type: array
                     items:
                       $ref: "#/components/schemas/ProviderCostRate"
+                  total:
+                    $ref: "#/components/schemas/ListTotal"
+        "422":
+          $ref: "#/components/responses/InvalidPage"
     put:
       tags: [ProviderCosts]
       summary: Create or update a provider cost rate
@@ -11756,6 +11840,9 @@ paths:
         Test mode only — returns 403 in live mode. Test clocks let
         operators simulate time-bound billing flows without waiting for
         wall-clock advances. See ADR / docs for the simulator semantics.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
           description: Test clocks
@@ -11763,17 +11850,22 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [data, total]
                 properties:
                   data:
                     type: array
                     items:
                       $ref: "#/components/schemas/TestClock"
+                  total:
+                    $ref: "#/components/schemas/ListTotal"
         "403":
           description: Caller is in live mode
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/InvalidPage"
     post:
       tags: [TestClocks]
       summary: Create a test clock
@@ -11852,6 +11944,8 @@ paths:
           name: id
           required: true
           schema: { type: string }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
           description: Subscriptions
@@ -11859,13 +11953,18 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [data, total]
                 properties:
                   data:
                     type: array
                     items:
                       $ref: "#/components/schemas/Subscription"
+                  total:
+                    $ref: "#/components/schemas/ListTotal"
         "404":
           description: Clock not found
+        "422":
+          $ref: "#/components/responses/InvalidPage"
 
   /v1/test-clocks/{id}/advance:
     post:
@@ -11959,6 +12058,8 @@ paths:
           name: id
           required: true
           schema: { type: string }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
           description: Customers
@@ -11966,12 +12067,14 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [data]
+                required: [data, total]
                 properties:
                   data:
                     type: array
                     items:
                       $ref: "#/components/schemas/Customer"
+                  total:
+                    $ref: "#/components/schemas/ListTotal"
         "403":
           description: Caller is in live mode, or the key lacks the `testclock:write` permission (needed even to read test clocks).
           content:
@@ -11984,6 +12087,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/InvalidPage"
 
   /v1/recipes:
     get:
@@ -11996,6 +12101,9 @@ paths:
         of the Install CTA); re-apply is an idempotent no-op and there is no
         uninstall (ADR-085).
       operationId: listRecipes
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
           description: Recipe catalog with per-tenant install state
@@ -12003,18 +12111,25 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [data]
+                required: [data, total]
                 properties:
                   data:
                     type: array
                     items:
                       $ref: "#/components/schemas/RecipeListItem"
+                  total:
+                    $ref: "#/components/schemas/ListTotal"
+        "422":
+          $ref: "#/components/responses/InvalidPage"
 
   /v1/recipes/instances:
     get:
       tags: [Recipes]
       summary: List installed recipe instances
       operationId: listRecipeInstances
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
           description: Install badges for this tenant (session's livemode)
@@ -12022,12 +12137,16 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [data]
+                required: [data, total]
                 properties:
                   data:
                     type: array
                     items:
                       $ref: "#/components/schemas/RecipeInstance"
+                  total:
+                    $ref: "#/components/schemas/ListTotal"
+        "422":
+          $ref: "#/components/responses/InvalidPage"
 
   /v1/recipes/{key}:
     get:
@@ -12603,15 +12722,8 @@ paths:
           schema:
             type: string
             enum: [active, escalated, resolved]
-        - name: limit
-          in: query
-          description: Page size. Default 50, maximum 100.
-          schema:
-            type: integer
-        - name: offset
-          in: query
-          schema:
-            type: integer
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
           description: Dunning run list.
@@ -12626,7 +12738,9 @@ paths:
                     items:
                       $ref: "#/components/schemas/DunningRun"
                   total:
-                    type: integer
+                    $ref: "#/components/schemas/ListTotal"
+        "422":
+          $ref: "#/components/responses/InvalidPage"
 
   /v1/dunning/runs/{id}:
     get:
@@ -12753,6 +12867,9 @@ paths:
         Every dunning policy in this tenant and mode, the default first, then
         oldest first. Each one carries how many customers are assigned to it.
       operationId: listDunningPolicies
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
           description: Policies
@@ -12760,12 +12877,16 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [data]
+                required: [data, total]
                 properties:
                   data:
                     type: array
                     items:
                       $ref: "#/components/schemas/DunningPolicyListItem"
+                  total:
+                    $ref: "#/components/schemas/ListTotal"
+        "422":
+          $ref: "#/components/responses/InvalidPage"
     post:
       tags: [Dunning]
       summary: Create dunning policy
@@ -13089,7 +13210,7 @@ paths:
       tags: [Pricing]
       summary: List active price overrides
       description: |
-        Active overrides only, newest first, at most 500. Closed or deleted
+        Active overrides only, newest first. Closed or deleted
         overrides are not listed. Requires pricing write permission.
       operationId: listPriceOverrides
       parameters:
@@ -13103,6 +13224,8 @@ paths:
           schema:
             type: string
           description: Only this price's overrides.
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
           description: Overrides
@@ -13110,12 +13233,16 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [data]
+                required: [data, total]
                 properties:
                   data:
                     type: array
                     items:
                       $ref: "#/components/schemas/CustomerPriceOverride"
+                  total:
+                    $ref: "#/components/schemas/ListTotal"
+        "422":
+          $ref: "#/components/responses/InvalidPage"
 
   /v1/price-overrides/{id}:
     delete:
@@ -13299,6 +13426,9 @@ paths:
         newest first. Revoked and expired keys are included; check
         `revoked_at` and `expires_at`. Key values are never returned.
         There are no paging parameters and no `total`.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
           description: Key list
@@ -13306,18 +13436,22 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [data]
+                required: [data, total]
                 properties:
                   data:
                     type: array
                     items:
                       $ref: "#/components/schemas/APIKey"
+                  total:
+                    $ref: "#/components/schemas/ListTotal"
         "403":
           description: Caller lacks the `apikey:write` permission
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/InvalidPage"
 
   /v1/api-keys/{id}:
     delete:
@@ -13824,6 +13958,8 @@ paths:
           schema:
             type: string
             enum: [active, suspended, deleted]
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
           description: Tenant list
@@ -13831,12 +13967,14 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [data]
+                required: [data, total]
                 properties:
                   data:
                     type: array
                     items:
                       $ref: "#/components/schemas/Tenant"
+                  total:
+                    $ref: "#/components/schemas/ListTotal"
         "401":
           description: Missing or invalid API key
           content:
@@ -13849,6 +13987,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/InvalidPage"
 
   /v1/tenants/{id}:
     get:
@@ -13975,13 +14115,9 @@ paths:
         first (by `created_at`, then `id`). All filters are exact matches
         and can be combined.
 
-        Two ways to page:
-        - Offset: `limit` and `offset`. The response is `{data, total}`.
-          `total` stops counting at 10,001, so a value above 10,000 means
-          "more than 10,000".
-        - Cursor: pass `after`. The response is `{data, has_more,
-          next_cursor}` and has no `total`. Pass `next_cursor` as the next
-          `after`.
+        Paged with `limit` and `offset`, like every list. Here `total`
+        stops counting at 10,001, so a value above 10,000 means "more than
+        10,000".
 
         Settings changes are always recorded in test mode, so they do not
         appear when you read the log in live mode.
@@ -14036,49 +14172,25 @@ paths:
             type: string
             enum: [created_at]
           description: The only supported order. Any other value is a 400.
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            default: 50
-            maximum: 100
-        - name: offset
-          in: query
-          schema:
-            type: integer
-            minimum: 0
-          description: Ignored when `after` is set.
-        - name: after
-          in: query
-          schema:
-            type: string
-          description: Cursor from a previous page's `next_cursor`. Takes precedence over `offset`.
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
-          description: |
-            Audit entries. Offset paging returns `{data, total}`; cursor
-            paging returns `{data, has_more, next_cursor}`.
+          description: Audit entries
           content:
             application/json:
               schema:
                 type: object
-                required: [data]
+                required: [data, total]
                 properties:
                   data:
                     type: array
                     items:
                       $ref: "#/components/schemas/AuditLogEntry"
                   total:
-                    type: integer
-                    description: Offset paging only. Capped at 10,001.
-                  has_more:
-                    type: boolean
-                    description: Cursor paging only.
-                  next_cursor:
-                    type: string
-                    description: Cursor paging only, present when `has_more` is true.
+                    $ref: "#/components/schemas/ListTotal"
         "400":
-          description: Unsupported `order`, or a malformed `after` cursor
+          description: Unsupported `order`
           content:
             application/json:
               schema:
@@ -14090,7 +14202,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "422":
-          description: A date is not RFC3339 or YYYY-MM-DD, or a range ends before it starts
+          description: A date is not RFC3339 or YYYY-MM-DD, a range ends before it starts, or `limit` or `offset` is out of range
           content:
             application/json:
               schema:

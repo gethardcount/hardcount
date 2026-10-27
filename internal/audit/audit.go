@@ -499,7 +499,7 @@ func nullIfEmpty(s string) any {
 // backstop. Removing them keeps results identical (RLS masks it) and only
 // destroys the query plan — which is why TestBuildListWhere_PinsPredicates
 // exists.
-func buildListWhere(tenantID string, livemode bool, filter QueryFilter) (whereClause string, args []any, nextIdx int, useCursor bool) {
+func buildListWhere(tenantID string, livemode bool, filter QueryFilter) (whereClause string, args []any, nextIdx int) {
 	args = []any{tenantID, livemode}
 	idx := 3
 	where := " AND al.tenant_id = $1 AND al.livemode = $2"
@@ -554,19 +554,7 @@ func buildListWhere(tenantID string, livemode bool, filter QueryFilter) (whereCl
 		idx++
 	}
 
-	// The seek predicate is on the SAME axis as the ORDER BY (created_at, id) —
-	// see auditListOrder. There is exactly ONE sort axis, deliberately: see the
-	// note on the sim filters in QueryFilter.
-	{
-		useCursor = !filter.AfterCreatedAt.IsZero() && filter.AfterID != ""
-		if useCursor {
-			where += fmt.Sprintf(" AND (al.created_at, al.id) < ($%d, $%d)", idx, idx+1)
-			args = append(args, filter.AfterCreatedAt, filter.AfterID)
-			idx += 2
-		}
-	}
-
-	return " WHERE " + where[5:], args, idx, useCursor // strip leading " AND "
+	return " WHERE " + where[5:], args, idx // strip leading " AND "
 }
 
 // Query reads audit entries for a tenant.
@@ -581,54 +569,35 @@ func (l *Logger) Query(ctx context.Context, tenantID string, filter QueryFilter)
 	}
 	defer postgres.Rollback(tx)
 
-	// Default 50, clamp to 100 — was silently falling back to 50 on
-	// >100 asks (no-silent-fallbacks principle, 2026-05-28).
+	// The handler sends a limit of 1 to 100 (respond.ParsePage). 50 is the
+	// same default for an internal caller that sends none.
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 50
-	} else if limit > 100 {
-		limit = 100
 	}
 
-	whereClause, args, idx, useCursor := buildListWhere(tenantID, live, filter)
+	whereClause, args, idx := buildListWhere(tenantID, live, filter)
 
-	// Cursor path skips COUNT — the handler derives hasMore from a limit+1
-	// over-fetch. The offset path (page 1, and every filter change) keeps a count
-	// for the dashboard's "Page N · M total".
-	//
-	// It is BOUNDED. An unbounded COUNT(*) has to visit every matching row, and
-	// audit_log is append-only — 0150 revoked DELETE from the runtime role, so the
-	// set it walks grows forever and can never be reclaimed. The page that renders
-	// 50 rows was paying an O(history) scan to print a number nobody acts on.
+	// The count is BOUNDED. An unbounded COUNT(*) has to visit every matching
+	// row, and audit_log is append-only — 0150 revoked DELETE from the runtime
+	// role, so the set it walks grows forever and can never be reclaimed. The
+	// page that renders 50 rows was paying an O(history) scan to print a number
+	// nobody acts on.
 	//
 	// Stop at CountCap+1 rows: below the cap the total is exact; at or above it the
 	// caller is told "at least this many" and the UI says "10,000+".
 	var total int
-	if !useCursor {
-		countQuery := `SELECT COUNT(*) FROM (SELECT 1 FROM audit_log al` + whereClause +
-			fmt.Sprintf(" LIMIT %d) capped", CountCap+1)
-		if err := tx.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
-			return nil, 0, err
-		}
+	countQuery := `SELECT COUNT(*) FROM (SELECT 1 FROM audit_log al` + whereClause +
+		fmt.Sprintf(" LIMIT %d) capped", CountCap+1)
+	if err := tx.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, err
 	}
 
-	query := auditListSelect + whereClause
-
-	// Order by (created_at, id) DESC — id tiebreaker aligns with the
-	// cursor predicate's tuple ordering so seek + ORDER BY stay in
-	// lockstep regardless of microsecond-level ties.
-	query += auditListOrder
-	queryLimit := limit
-	if useCursor {
-		queryLimit = limit + 1
-	}
-	args = append(args, queryLimit)
-	query += fmt.Sprintf(" LIMIT $%d", idx)
-	idx++
-	if !useCursor {
-		args = append(args, filter.Offset)
-		query += fmt.Sprintf(" OFFSET $%d", idx)
-	}
+	// Order by (created_at, id) DESC — the id tiebreaker keeps the order
+	// stable across pages when two rows share a microsecond.
+	query := auditListSelect + whereClause + auditListOrder +
+		fmt.Sprintf(" LIMIT $%d OFFSET $%d", idx, idx+1)
+	args = append(args, limit, filter.Offset)
 
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -705,8 +674,8 @@ const auditListSelect = `SELECT al.id, al.tenant_id, al.actor_type, al.actor_id,
 		LEFT JOIN member_invitations ri ON ri.id = al.resource_id AND al.resource_type = 'user'
 		LEFT JOIN test_clocks tc ON tc.id = al.test_clock_id`
 
-// auditListOrder is newest-first, with the id tiebreaker the cursor predicate
-// keys on.
+// auditListOrder is newest-first, with an id tiebreaker so rows that share a
+// created_at keep one order across pages.
 const auditListOrder = " ORDER BY al.created_at DESC, al.id DESC"
 
 // distinctByLooseIndexScan returns the distinct values of one indexed column for a
@@ -806,9 +775,8 @@ func (l *Logger) Stream(ctx context.Context, tenantID string, filter QueryFilter
 
 	// Zero the paging fields: see the doc above. An export is the whole selection.
 	filter.Limit, filter.Offset = 0, 0
-	filter.AfterCreatedAt, filter.AfterID = time.Time{}, ""
 
-	whereClause, args, _, _ := buildListWhere(tenantID, live, filter)
+	whereClause, args, _ := buildListWhere(tenantID, live, filter)
 
 	rows, err := tx.QueryContext(ctx, auditListSelect+whereClause+auditListOrder, args...)
 	if err != nil {
@@ -954,14 +922,14 @@ type QueryFilter struct {
 	// construction.
 	//
 	// There is deliberately NO "order by simulated time". Across clocks it
-	// interleaves unrelated simulations into a timeline that never happened,
-	// and a second sort means a second cursor axis to keep correct. Within
+	// interleaves unrelated simulations into a timeline that never happened.
+	// Within
 	// one clock the two orders USED to coincide (one advance = one instant);
 	// since the contracted-instant arc (#520/#523) rows inside an advance
 	// carry distinct per-boundary instants, so for a multi-subscription
 	// advance sim order and wall order can genuinely differ — the original
 	// "changes nothing" premise no longer holds. The deletion stands on the
-	// cross-clock and cursor grounds alone; re-litigate if an operator needs
+	// cross-clock ground; re-litigate if an operator needs
 	// intra-advance ordering across subscriptions (that is now a real
 	// ordering, not a no-op). Ordering stays on created_at (see
 	// auditListOrder).
@@ -970,15 +938,6 @@ type QueryFilter struct {
 	SimTo       time.Time
 	Limit       int
 	Offset      int
-	// Cursor-based pagination (2026-05-29). Seek-method query:
-	// WHERE (al.created_at, al.id) < (AfterCreatedAt, AfterID).
-	// Mutually exclusive with Offset — handler routes by ?after=
-	// query param taking precedence. Audit_log is high-write, and
-	// operators paginate deep for forensics, so OFFSET 50000 got
-	// slow fast. Cursor-method is O(log N) per page regardless of
-	// depth.
-	AfterCreatedAt time.Time
-	AfterID        string
 }
 
 func andClause(idx *int, col string, args *[]any, val string) string {

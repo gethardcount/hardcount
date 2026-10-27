@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1457,6 +1459,14 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	paymentMethodsH.SetCooldown(setupLinkCooldown)
 
 	r := chi.NewRouter()
+	// An unknown path and a method the path does not take answer the JSON
+	// error envelope, not chi's plain text. chi hands both handlers down to
+	// every router mounted below. The 405 lists the path's methods in Allow.
+	var allow *allowIndex // built once every route is registered, below
+	r.NotFound(respond.RouteNotFound)
+	r.MethodNotAllowed(func(w http.ResponseWriter, req *http.Request) {
+		respond.MethodNotAllowed(w, req, allow.methods(req.URL))
+	})
 	useRequestEdge(r, os.Getenv("TRUST_PROXY"))
 	corsEnv := os.Getenv("CORS_ALLOWED_ORIGINS")
 	if corsEnv == "" {
@@ -1472,7 +1482,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	r.Use(mw.CORS(allowedOrigins))
 	r.Use(mw.Metrics())
 	r.Use(requestLogger)
-	r.Use(middleware.Recoverer)
+	r.Use(mw.Recoverer)
 
 	// Limit request body to 1 MB to prevent DoS via oversized payloads.
 	r.Use(func(next http.Handler) http.Handler {
@@ -1532,7 +1542,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	bootstrapH := tenant.NewBootstrapHandler(db, bootstrapDeps)
 	r.Group(func(r chi.Router) {
 		r.Use(rateLimiter.Middleware())
-		r.Use(middleware.Timeout(30 * time.Second))
+		r.Use(mw.Timeout(30 * time.Second))
 		r.Mount("/v1/bootstrap", bootstrapH.Routes())
 	})
 
@@ -1546,7 +1556,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		// path exists here, so every unsafe request is origin-checked.
 		r.Use(mw.CSRFGuard(allowedOrigins))
 		r.Use(authLimiter.Middleware())
-		r.Use(middleware.Timeout(30 * time.Second))
+		r.Use(mw.Timeout(30 * time.Second))
 		// Invite accept flow — public like login/reset (the token IS the
 		// credential) and sharing the same limiter, so invite-token
 		// guessing is throttled like credential stuffing. Explicit routes
@@ -1557,7 +1567,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 
 	// Stripe webhooks — no API key auth (verified by signature)
 	r.Group(func(r chi.Router) {
-		r.Use(middleware.Timeout(30 * time.Second))
+		r.Use(mw.Timeout(30 * time.Second))
 		r.Mount("/v1/webhooks", webhookH.Routes())
 		// Postmark email webhooks — no API key auth (Basic-Auth gated;
 		// Postmark signs nothing). Static route wins over the Mount
@@ -1573,7 +1583,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	if publicPaymentH != nil {
 		r.Group(func(r chi.Router) {
 			r.Use(hostedInvoiceRL.Middleware())
-			r.Use(middleware.Timeout(30 * time.Second))
+			r.Use(mw.Timeout(30 * time.Second))
 			r.Mount("/v1/public/payment-updates", publicPaymentH.Routes())
 		})
 	}
@@ -1585,7 +1595,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// API — see hostedInvoiceRL above.
 	r.Route("/v1/public/invoices", func(r chi.Router) {
 		r.Use(hostedInvoiceRL.Middleware())
-		r.Use(middleware.Timeout(30 * time.Second))
+		r.Use(mw.Timeout(30 * time.Second))
 		r.Mount("/", hostedInvoiceH.Routes())
 	})
 
@@ -1597,7 +1607,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// rationale + same limit shape as the hosted invoice surface.
 	r.Route("/v1/public/cost-dashboard", func(r chi.Router) {
 		r.Use(hostedInvoiceRL.Middleware())
-		r.Use(middleware.Timeout(30 * time.Second))
+		r.Use(mw.Timeout(30 * time.Second))
 		r.Mount("/", customerH.PublicCostDashboardRoutes())
 	})
 
@@ -1605,7 +1615,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	r.Route("/v1/tenants", func(r chi.Router) {
 		r.Use(auth.Middleware(authSvc))
 		r.Use(auth.Require(auth.PermTenantWrite))
-		r.Use(middleware.Timeout(30 * time.Second))
+		r.Use(mw.Timeout(30 * time.Second))
 		r.Mount("/", tenantH.Routes())
 	})
 
@@ -1651,7 +1661,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	r.Route("/v1/exports", func(r chi.Router) {
 		r.Use(session.MiddlewareOrAPIKey(sessionSvc, authSvc))
 		r.Use(rateLimiter.Middleware())
-		r.Use(middleware.Timeout(5 * time.Minute))
+		r.Use(mw.Timeout(5 * time.Minute))
 		exportsH := newExportsHandler(customerStore, invoiceStore, subStore, usageStore, auditLogger, auditLogger)
 		r.Mount("/", exportsH.Routes(
 			auth.Require(auth.PermCustomerRead),
@@ -1692,7 +1702,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		// /v1/webhook_events/stream route) so it doesn't inherit the
 		// 30s cap — long-lived EventSource connections need to run
 		// indefinitely.
-		r.Use(middleware.Timeout(30 * time.Second))
+		r.Use(mw.Timeout(30 * time.Second))
 
 		// /v1/whoami — resolves the active credential to its tenant
 		// context without requiring a specific permission. Cookie path
@@ -1831,6 +1841,8 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		// The customer's comes from the payment-update email link:
 		// POST /v1/public/payment-updates/{token}/checkout.
 	})
+
+	allow = newAllowIndex(r)
 
 	s.router = r
 	return s
@@ -2037,4 +2049,60 @@ func loggablePath(r *http.Request) string {
 func isIngestPath(r *http.Request) bool {
 	return strings.HasPrefix(r.URL.Path, "/v1/usage-events") ||
 		strings.HasPrefix(r.URL.Path, "/v1/integrations/litellm")
+}
+
+// routeMethods are the methods the Allow header can list, in its order.
+var routeMethods = []string{
+	http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut,
+	http.MethodPatch, http.MethodDelete, http.MethodOptions,
+}
+
+// allowIndex answers which methods a path takes, for the Allow header of a
+// 405. chi's own Find cannot answer it through a mount, because a mount
+// point matches every method; so every route the router serves, as
+// chi.Walk lists it, is registered on one flat router with no mounts.
+type allowIndex struct {
+	flat *chi.Mux
+}
+
+var pathParamName = regexp.MustCompile(`\{[^}]*\}`)
+
+func newAllowIndex(router chi.Routes) *allowIndex {
+	flat := chi.NewMux()
+	noop := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
+	// Walk returns only the walk function's error, and this one has none.
+	_ = chi.Walk(router, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		// Parameters are renamed by position: two routers may name the
+		// same segment differently ({id}, {customer_id}), which one chi
+		// tree refuses.
+		n := 0
+		pattern := pathParamName.ReplaceAllStringFunc(canonicalRoute(route), func(string) string {
+			n++
+			return fmt.Sprintf("{p%d}", n)
+		})
+		flat.Method(method, pattern, noop)
+		if pattern != "/" && !strings.HasSuffix(pattern, "*") {
+			flat.Method(method, pattern+"/", noop)
+		}
+		return nil
+	})
+	return &allowIndex{flat: flat}
+}
+
+// methods lists the methods the router serves at u's path.
+func (a *allowIndex) methods(u *url.URL) []string {
+	if a == nil {
+		return nil
+	}
+	path := u.RawPath
+	if path == "" {
+		path = u.Path
+	}
+	var out []string
+	for _, m := range routeMethods {
+		if a.flat.Match(chi.NewRouteContext(), m, path) {
+			out = append(out, m)
+		}
+	}
+	return out
 }

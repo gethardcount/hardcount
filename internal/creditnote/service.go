@@ -146,7 +146,7 @@ const refundOutcomeWriteTimeout = 10 * time.Second
 // afterRefundCall is the context for recording what a Stripe refund call
 // did. It keeps ctx's values (tenant, livemode, test clock, actor) and drops
 // its cancellation. A refund asked for through the API runs on the request
-// context, which chi's middleware.Timeout ends after 30 seconds
+// context, which the route's Timeout middleware ends after 30 seconds
 // (internal/api/router.go). The Stripe client also allows 30 seconds, but its
 // clock starts later, so when Stripe hangs, the request context ends during
 // the call. Stripe may have made the refund by then, and a write on the
@@ -1513,6 +1513,12 @@ func (s *Service) GetWithLineItems(ctx context.Context, tenantID, id string) (do
 
 func (s *Service) List(ctx context.Context, filter ListFilter) ([]domain.CreditNote, error) {
 	return s.store.List(ctx, filter)
+}
+
+// Count counts the credit notes the filter matches, ignoring its limit and
+// offset.
+func (s *Service) Count(ctx context.Context, filter ListFilter) (int, error) {
+	return s.store.Count(ctx, filter)
 }
 
 // Stats counts every credit note by status and sums the issued ones per

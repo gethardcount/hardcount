@@ -47,7 +47,7 @@ func fetchSentEmails(t *testing.T, rows []SentEmailOutboxRow) []map[string]any {
 		t.Fatalf("status %d: %s", rr.Code, rr.Body.String())
 	}
 	var body struct {
-		SentEmails []map[string]any `json:"sent_emails"`
+		SentEmails []map[string]any `json:"data"`
 	}
 	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)

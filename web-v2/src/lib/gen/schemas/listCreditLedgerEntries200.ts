@@ -8,8 +8,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 import type { CreditLedgerEntry } from './creditLedgerEntry';
+import type { ListTotal } from './listTotal';
 
 export type ListCreditLedgerEntries200 = {
   data: CreditLedgerEntry[];
-  total: number;
+  total: ListTotal;
 };

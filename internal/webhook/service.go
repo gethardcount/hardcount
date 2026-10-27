@@ -720,12 +720,13 @@ func (s *Service) GetEndpointStats(ctx context.Context, tenantID string) ([]Endp
 	return s.store.GetEndpointStats(ctx, tenantID)
 }
 
-// ListEvents returns recent webhook events for a tenant.
-func (s *Service) ListEvents(ctx context.Context, tenantID string, limit int) ([]domain.WebhookEvent, error) {
+// ListEvents returns one page of a tenant's webhook events, newest first,
+// and how many there are.
+func (s *Service) ListEvents(ctx context.Context, tenantID string, limit, offset int) ([]domain.WebhookEvent, int, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	return s.store.ListEvents(ctx, tenantID, limit)
+	return s.store.ListEvents(ctx, tenantID, limit, offset)
 }
 
 // EventDeliveryStatuses rolls each event's deliveries up to one dashboard
@@ -850,16 +851,18 @@ func (s *Service) Replay(ctx context.Context, tenantID, eventID string) (ReplayR
 // (newest first). The endpoint lookup runs first so a bad id 404s rather
 // than returning an empty list that reads as "healthy receiver, no
 // traffic".
-func (s *Service) ListEndpointDeliveries(ctx context.Context, tenantID, endpointID string, limit int) (domain.WebhookEndpoint, []domain.WebhookDelivery, error) {
-	ep, err := s.store.GetEndpoint(ctx, tenantID, endpointID)
-	if err != nil {
-		return domain.WebhookEndpoint{}, nil, err
+func (s *Service) ListEndpointDeliveries(ctx context.Context, tenantID, endpointID string, limit, offset int) ([]domain.WebhookDelivery, int, error) {
+	// The endpoint is read first so an unknown id is a 404, not an empty
+	// history that looks healthy.
+	if _, err := s.store.GetEndpoint(ctx, tenantID, endpointID); err != nil {
+		return nil, 0, err
 	}
-	deliveries, err := s.store.ListDeliveriesByEndpoint(ctx, tenantID, endpointID, limit)
-	if err != nil {
-		return domain.WebhookEndpoint{}, nil, err
-	}
-	return ep, deliveries, nil
+	return s.store.ListDeliveriesByEndpoint(ctx, tenantID, endpointID, limit, offset)
+}
+
+// GetEndpoint returns one webhook endpoint.
+func (s *Service) GetEndpoint(ctx context.Context, tenantID, id string) (domain.WebhookEndpoint, error) {
+	return s.store.GetEndpoint(ctx, tenantID, id)
 }
 
 // ReplayDeliveryResult is the response for a single-receiver replay.

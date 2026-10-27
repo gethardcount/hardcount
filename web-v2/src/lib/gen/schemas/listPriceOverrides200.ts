@@ -8,7 +8,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 import type { CustomerPriceOverride } from './customerPriceOverride';
+import type { ListTotal } from './listTotal';
 
 export type ListPriceOverrides200 = {
   data: CustomerPriceOverride[];
+  total: ListTotal;
 };

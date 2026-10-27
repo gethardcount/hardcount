@@ -538,53 +538,24 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.I
 	}
 
 	where, args := buildInvWhere(filter)
-	useCursor := !filter.AfterCreatedAt.IsZero() && filter.AfterID != ""
 
-	if useCursor {
-		// Cursor predicate honors the primary sort direction. Only
-		// the default `created_at DESC` cursor is supported today —
-		// callers asking for a custom Sort+After combination would
-		// hit an inconsistent seek-vs-order pairing; the handler
-		// rejects those upstream. The (created_at, id) tuple matches
-		// invoiceOrderBy's tie-break, so seek + ORDER BY are aligned.
-		args = append(args, filter.AfterCreatedAt, filter.AfterID)
-		clause := fmt.Sprintf(`(created_at, id) < ($%d, $%d)`, len(args)-1, len(args))
-		if where == "" {
-			where = " WHERE " + clause
-		} else {
-			where += " AND " + clause
-		}
-	}
-
-	// Cursor path skips COUNT — handler derives hasMore from the
-	// limit+1 over-fetch. Offset path still needs total for "Page
-	// X of N" UX in the legacy dashboard.
 	var total int
-	if !useCursor {
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM invoices`+where, args...).Scan(&total); err != nil {
-			return nil, 0, err
-		}
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM invoices`+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
 	}
 
 	// Sort with deterministic tie-break on id. Without the tie-break,
 	// catchup-generated invoices share microsecond-level created_at
 	// values and Postgres returns ties in arbitrary order — looks
-	// "random" to operators. Tie-break direction matches the primary
-	// sort direction so consecutive ties read as a single ordered
-	// group rather than zig-zagging.
+	// "random" to operators, and an offset page could repeat or skip a
+	// row. Tie-break direction matches the primary sort direction so
+	// consecutive ties read as a single ordered group rather than
+	// zig-zagging.
 	orderBy := invoiceOrderBy(filter.Sort, filter.SortDir)
-	queryLimit := limit
-	if useCursor {
-		queryLimit = limit + 1
-	}
-	args = append(args, queryLimit)
+	args = append(args, limit, filter.Offset)
 	query := `SELECT ` + invCols + `, ` + invClockCol + ` FROM invoices` + where +
 		` ORDER BY ` + orderBy +
-		` LIMIT $` + fmt.Sprintf("%d", len(args))
-	if !useCursor {
-		args = append(args, filter.Offset)
-		query += ` OFFSET $` + fmt.Sprintf("%d", len(args))
-	}
+		fmt.Sprintf(` LIMIT $%d OFFSET $%d`, len(args)-1, len(args))
 
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {

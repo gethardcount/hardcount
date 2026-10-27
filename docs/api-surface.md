@@ -47,6 +47,46 @@ description):
 There is no official SDK (client library) yet. Call the API with any HTTP
 client, or generate a client from the OpenAPI file.
 
+## Lists
+
+Every list route pages the same way:
+
+- Send `limit` (how many rows, 1 to 100, default 50) and `offset` (how
+  many rows to skip, default 0).
+- You get `{"data": [...], "total": n}`. `total` counts every row that
+  matches your filters, not only this page.
+- A `limit` outside 1 to 100, a negative `offset`, or a value that is not a
+  whole number is a 422 with `param` naming it. It is never rounded to a
+  valid value.
+- There is no cursor. A request that sends `after` gets a 422 with
+  `param: after`.
+
+To read everything, add 100 to `offset` until `offset` reaches `total`:
+
+```bash
+curl -s "$VELOX/v1/plans?limit=100&offset=100" -H "Authorization: Bearer $VELOX_KEY"
+```
+
+Two lists stop counting:
+
+- The audit log's `total` stops at 10,001, so a value above 10,000 means
+  "more than 10,000".
+- The customer list with `search`, or sorted by name or email, looks at
+  5,000 customers at most. Its rows and its `total` stop there.
+
+A few routes answer a set of rows in one response and do not page. They
+have no `total`, and `limit`, `offset` and `after` change nothing:
+
+- `GET /v1/usage-events/held` lists the 200 external customers whose held
+  usage arrived last. `total_customers` and `total_rows` count all of it.
+  Release or discard held usage to see the rest.
+- `GET /v1/subscriptions/{id}/timeline` and
+  `GET /v1/invoices/{id}/payment-timeline` can leave rows out, and then
+  answer `truncated: true`.
+- `GET /v1/webhook_events/{id}/deliveries`, `GET /v1/members`,
+  `GET /v1/credits/balance/{customer_id}` and
+  `GET /v1/credits/grants/{customer_id}` answer every row.
+
 ## Core routes
 
 ### Usage
@@ -291,9 +331,10 @@ event missed an invoice.
 
 ## Errors
 
-Most errors return the same JSON body. Every response that reaches Velox
-also has a `Velox-Request-Id` header. Send that ID to support when you
-report a problem.
+Errors return the same JSON body, including an unknown path and a method
+the path does not take. Every response that reaches Velox also has a
+`Velox-Request-Id` header. Send that ID to support when you report a
+problem.
 
 ```json
 {
@@ -318,15 +359,16 @@ place of the default code shown below.
 | 400 | `invalid_request_error` | The request is malformed: the body is not valid JSON, or a required path or query parameter is missing or invalid (`invalid_request`). |
 | 401 | `authentication_error` | The API key, session or public token is missing, invalid or expired. |
 | 403 | `authentication_error` | You are signed in but not allowed to do this, or the request was blocked as cross-site. |
-| 404 | `invalid_request_error` | The resource does not exist (`not_found`, or a specific code such as `invoice_not_found`). |
-| 405 | (empty body) | The path exists but does not accept this method. The `Allow` header lists the methods it does accept. |
+| 404 | `invalid_request_error` | The resource does not exist (`not_found`, or a specific code such as `invoice_not_found`), or the path does not exist (`route_not_found`). |
+| 405 | `invalid_request_error` | The path exists but does not accept this method (`method_not_allowed`). The `Allow` header lists the methods it does accept. |
 | 409 | `invalid_request_error` | The value already exists (`already_exists`), or the resource is in the wrong state for this action (`invalid_state` or a more specific code). |
 | 413 | `invalid_request_error` | The usage batch (`batch_too_large`) or the Stripe webhook body (`payload_too_large`) is too large. |
 | 422 | `invalid_request_error` | A field or business rule failed (`validation_error`, or a specific code). |
 | 429 | `rate_limit_error` | Too many requests (`rate_limited`, or `cooldown_active` for a repeated setup-link email). Wait for the number of seconds in `Retry-After`. |
 | 500 | `api_error` | Unexpected server error (`internal_error`). The details are logged on the server, not returned. A few operations return a specific code with instructions instead, for example `proration_failed`. |
 | 502 | `api_error` | An upstream call failed. See the 502 codes below. |
-| 503 | `api_error` | A dependency is down for a short time (`authentication_unavailable`, `ingest_unavailable`), so you can retry. `stripe_unavailable` and `email_unavailable` mean the feature is not set up on this server, and retrying will not help. |
+| 503 | `api_error` | A dependency is down for a short time (`authentication_unavailable`, `ingest_unavailable`, `idempotency_unavailable`), so you can retry. `stripe_unavailable` and `email_unavailable` mean the feature is not set up on this server, and retrying will not help. |
+| 504 | `api_error` | The request ran past its time limit before the server wrote any answer (`timeout`). |
 
 The 502 codes:
 
@@ -354,25 +396,19 @@ specific status for a body that is too large.
 <details>
 <summary><strong>Less common error shapes</strong></summary>
 
-- **Idempotency-Key errors** return a smaller body, `{"error": {"type", "message"}}`. It has no `code` and no `request_id` in the body; the header still has the ID. Here `type` is the reason:
+- **Idempotency-Key errors** have `type` `invalid_request_error` and one of these codes:
   - `idempotency_error` (422): the key was used before with a different method, path or body. This is checked only after the first request has finished. While the first request is still running, a mismatched request gets `conflict_idempotency`.
   - `conflict_idempotency` (409): another request with this key is still running, or did not finish. Retry later.
   - `conflict_idempotency_unresolved` (409): an earlier request with this key started more than 5 minutes ago and never recorded an outcome. Check whether the resource exists before you retry with a new key.
-  - `bad_request` (400): the body could not be read. This includes any body over 1 MB.
+  - `invalid_request` (400): the body could not be read. This includes any body over 1 MB.
 - **A replayed key** (POST, PUT or PATCH under `/v1` with the same key, method, path and body) returns the first response's status and body, plus `Idempotent-Replayed: true`. The body's `request_id` is the first request's; the `Velox-Request-Id` header is the new request's. The response's other headers are not sent again. A first response of 409 or 422 is not stored: the key is freed, and a retry with the same key runs the request again. The usage routes (`/v1/usage-events…`, `/v1/integrations/litellm/spend`) ignore the header. If a database error stops the server from freeing the key or storing the first response, the key stays reserved: a retry gets `conflict_idempotency`, then `conflict_idempotency_unresolved` once 5 minutes have passed. The request does not run twice.
-- **Plain-text or empty bodies (not JSON)** come from these cases:
-  - an unknown path (`404 page not found`);
-  - a method the path does not accept (405, empty body);
-  - a server panic (500, empty body);
-  - a request that hits its time limit before the server has written any response (504, empty body);
-  - `GET /v1/webhook_events/stream` when it returns 500;
-  - `/metrics` when it returns 401;
-  - a request too malformed for the server to parse, such as bad syntax or headers that are too large (400 or 431 from the HTTP server itself, with no `Velox-Request-Id` header).
+- **A plain-text error** comes from two places:
+  - The HTTP server itself, before Velox sees the request. A request too malformed to parse, such as bad syntax or headers that are too large, gets 400 or 431 with no `Velox-Request-Id` header.
+  - `/metrics`, the Prometheus scrape route. If it cannot read the metrics, it answers a plain-text 500.
 - **Other JSON shapes:**
   - `GET /health/ready` returns 503 with `{"status", "checks"}`.
-  - A rejected usage batch returns 422 with code `batch_rejected`. Its `error` object has no `request_id`, and the body also has `errors` (one entry per failing event), `ingested: 0` and `total`.
-  - `GET /v1/auth/password-reset/check` returns 422 with `{"valid": false, "reason": "invalid_or_expired"}`.
-  - The Postmark webhook returns `{"error": "<reason>"}` with 401 or 500. A payload that is too large or is not valid JSON is accepted with 200 and `{"status": "skipped", "reason": "<reason>"}`.
+  - A rejected usage batch returns 422 with code `batch_rejected`. Next to `error`, the body also has `errors` (one entry per failing event), `ingested: 0` and `total`.
+  - The Postmark webhook accepts a payload that is too large or is not valid JSON with 200 and `{"status": "skipped", "reason": "<reason>"}`.
 
 </details>
 

@@ -10,7 +10,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/sagarsuperuser/velox/internal/api/middleware"
 	"github.com/sagarsuperuser/velox/internal/api/respond"
 	"github.com/sagarsuperuser/velox/internal/audit"
 	"github.com/sagarsuperuser/velox/internal/auth"
@@ -199,9 +198,11 @@ func (h *Handler) stats(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
-	page := middleware.ParsePageParams(r)
-
-	cns, err := h.svc.List(r.Context(), ListFilter{
+	page, ok := respond.ParsePage(w, r)
+	if !ok {
+		return
+	}
+	filter := ListFilter{
 		TenantID:     tenantID,
 		InvoiceID:    r.URL.Query().Get("invoice_id"),
 		CustomerID:   r.URL.Query().Get("customer_id"),
@@ -211,17 +212,20 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		Offset:       page.Offset,
 		Sort:         r.URL.Query().Get("sort"),
 		SortDir:      r.URL.Query().Get("dir"),
-	})
+	}
+	cns, err := h.svc.List(r.Context(), filter)
 	if err != nil {
 		respond.InternalError(w, r)
 		slog.ErrorContext(r.Context(), "list credit notes", "error", err)
 		return
 	}
-	if cns == nil {
-		cns = []domain.CreditNote{}
+	total, err := h.svc.Count(r.Context(), filter)
+	if err != nil {
+		respond.InternalError(w, r)
+		slog.ErrorContext(r.Context(), "count credit notes", "error", err)
+		return
 	}
-
-	respond.JSON(w, r, http.StatusOK, map[string]any{"data": cns})
+	respond.List(w, r, cns, total)
 }
 
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {

@@ -7,8 +7,10 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
+import type { ListTotal } from './listTotal';
 import type { SentEmail } from './sentEmail';
 
 export type ListCustomerSentEmails200 = {
-  sent_emails: SentEmail[];
+  data: SentEmail[];
+  total: ListTotal;
 };

@@ -103,16 +103,41 @@ func (s *PostgresStore) GetMeterByEventNameTx(ctx context.Context, tx *sql.Tx, e
 	return scanMeter(tx.QueryRowContext(ctx, `SELECT `+meterColumns+` FROM meters WHERE event_name = $1 FOR KEY SHARE`, eventName))
 }
 
+// ListMeters returns every meter of the tenant, newest first, for internal
+// callers that need them all. The API pages with ListMetersPage.
 func (s *PostgresStore) ListMeters(ctx context.Context, tenantID string) ([]domain.Meter, error) {
+	meters, _, err := s.listMeters(ctx, tenantID, 0, 0)
+	return meters, err
+}
+
+// ListMetersPage returns one page of the tenant's meters, newest first, and
+// how many meters the tenant has.
+func (s *PostgresStore) ListMetersPage(ctx context.Context, tenantID string, limit, offset int) ([]domain.Meter, int, error) {
+	return s.listMeters(ctx, tenantID, limit, offset)
+}
+
+// listMeters reads meters newest first; limit 0 reads them all and skips the
+// count.
+func (s *PostgresStore) listMeters(ctx context.Context, tenantID string, limit, offset int) ([]domain.Meter, int, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer postgres.Rollback(tx)
 
-	rows, err := tx.QueryContext(ctx, `SELECT `+meterColumns+` FROM meters ORDER BY created_at DESC LIMIT 500`)
+	query := `SELECT ` + meterColumns + ` FROM meters ORDER BY created_at DESC, id DESC`
+	var args []any
+	total := 0
+	if limit > 0 {
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM meters`).Scan(&total); err != nil {
+			return nil, 0, err
+		}
+		query += ` LIMIT $1 OFFSET $2`
+		args = append(args, limit, offset)
+	}
+	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -120,11 +145,11 @@ func (s *PostgresStore) ListMeters(ctx context.Context, tenantID string) ([]doma
 	for rows.Next() {
 		m, err := scanMeter(rows)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		meters = append(meters, m)
 	}
-	return meters, rows.Err()
+	return meters, total, rows.Err()
 }
 
 // UpdateMeterAudited patches the meter and runs the caller-supplied audit
@@ -293,16 +318,41 @@ func (s *PostgresStore) GetPlan(ctx context.Context, tenantID, id string) (domai
 	return scanPlan(tx.QueryRowContext(ctx, `SELECT `+planColumns+` FROM plans WHERE id = $1`, id))
 }
 
+// ListPlans returns every plan of the tenant, newest first, for internal
+// callers that need them all. The API pages with ListPlansPage.
 func (s *PostgresStore) ListPlans(ctx context.Context, tenantID string) ([]domain.Plan, error) {
+	plans, _, err := s.listPlans(ctx, tenantID, 0, 0)
+	return plans, err
+}
+
+// ListPlansPage returns one page of the tenant's plans, newest first, and how
+// many plans the tenant has.
+func (s *PostgresStore) ListPlansPage(ctx context.Context, tenantID string, limit, offset int) ([]domain.Plan, int, error) {
+	return s.listPlans(ctx, tenantID, limit, offset)
+}
+
+// listPlans reads plans newest first; limit 0 reads them all and skips the
+// count.
+func (s *PostgresStore) listPlans(ctx context.Context, tenantID string, limit, offset int) ([]domain.Plan, int, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer postgres.Rollback(tx)
 
-	rows, err := tx.QueryContext(ctx, `SELECT `+planColumns+` FROM plans ORDER BY created_at DESC LIMIT 500`)
+	query := `SELECT ` + planColumns + ` FROM plans ORDER BY created_at DESC, id DESC`
+	var args []any
+	total := 0
+	if limit > 0 {
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM plans`).Scan(&total); err != nil {
+			return nil, 0, err
+		}
+		query += ` LIMIT $1 OFFSET $2`
+		args = append(args, limit, offset)
+	}
+	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -310,11 +360,11 @@ func (s *PostgresStore) ListPlans(ctx context.Context, tenantID string) ([]domai
 	for rows.Next() {
 		p, err := scanPlan(rows)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		plans = append(plans, p)
 	}
-	return plans, rows.Err()
+	return plans, total, rows.Err()
 }
 
 // UpdatePlan locks the plan FOR UPDATE, as a writer of plan content (ADR-130

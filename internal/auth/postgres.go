@@ -149,37 +149,38 @@ func (s *PostgresStore) ScheduleExpiry(ctx context.Context, tenantID, id string,
 	return k, nil
 }
 
-func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.APIKey, error) {
+// List returns one page of the tenant's API keys, newest first, and how many
+// keys match.
+func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.APIKey, int, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, filter.TenantID)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer postgres.Rollback(tx)
 
-	// Default 50, clamp to 100 — no-silent-fallbacks principle.
+	// The handler sends a limit of 1 to 100 (respond.ParsePage).
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 50
-	} else if limit > 100 {
-		limit = 100
 	}
 
-	query := `SELECT ` + keyCols + ` FROM api_keys`
+	where := ""
 	args := []any{}
-	idx := 1
-
 	if filter.Role != "" {
-		query += fmt.Sprintf(" WHERE key_type = $%d", idx)
+		where = " WHERE key_type = $1"
 		args = append(args, filter.Role)
-		idx++
 	}
-
-	query += fmt.Sprintf(" ORDER BY created_at DESC LIMIT $%d OFFSET $%d", idx, idx+1)
+	var total int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM api_keys`+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
 	args = append(args, limit, filter.Offset)
+	query := `SELECT ` + keyCols + ` FROM api_keys` + where +
+		fmt.Sprintf(" ORDER BY created_at DESC, id DESC LIMIT $%d OFFSET $%d", len(args)-1, len(args))
 
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -187,11 +188,11 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.A
 	for rows.Next() {
 		k, err := scanKey(rows)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		keys = append(keys, k)
 	}
-	return keys, rows.Err()
+	return keys, total, rows.Err()
 }
 
 func (s *PostgresStore) TouchLastUsed(ctx context.Context, id string, usedAt time.Time) error {

@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -114,7 +113,7 @@ func Idempotency(db *postgres.DB, ignore func(*http.Request) bool) func(http.Han
 			// (b) hand a fresh reader to the downstream handler.
 			bodyBytes, err := io.ReadAll(io.LimitReader(r.Body, maxIdempotentBodyBytes+1))
 			if err != nil {
-				ErrorJSON(w, http.StatusBadRequest, "bad_request", "failed to read body")
+				respond.BadRequest(w, r, "failed to read body")
 				return
 			}
 			_ = r.Body.Close()
@@ -151,7 +150,7 @@ func Idempotency(db *postgres.DB, ignore func(*http.Request) bool) func(http.Han
 				slog.ErrorContext(r.Context(), "idempotency reserve failed; refusing the request (503) rather than running it unprotected",
 					"tenant_id", tenantID, "path", r.URL.Path, "error", err)
 				w.Header().Set("Retry-After", "1")
-				ErrorJSON(w, http.StatusServiceUnavailable, "api_error", "could not record the idempotency key — retry the request with the same key")
+				respond.Error(w, r, http.StatusServiceUnavailable, "api_error", "idempotency_unavailable", "could not record the idempotency key — retry the request with the same key")
 				return
 			}
 			if !claimed {
@@ -159,7 +158,7 @@ func Idempotency(db *postgres.DB, ignore func(*http.Request) bool) func(http.Han
 				// in flight from a concurrent request). Resolve it the same way
 				// a serial retry would: replay the stored response, 422 on a
 				// fingerprint mismatch, or 409 if it never resolves.
-				replayExistingKey(w, r.Context(), db, tenantID, key, fingerprint)
+				replayExistingKey(w, r, db, tenantID, key, fingerprint)
 				return
 			}
 
@@ -377,7 +376,8 @@ func readKey(ctx context.Context, db *postgres.DB, tenantID, key string) (c cach
 // in flight. If the owner never finalizes within the poll window — it died, or
 // the operation is too slow to block on — it returns 409 conflict_idempotency,
 // signaling the client to retry.
-func replayExistingKey(w http.ResponseWriter, ctx context.Context, db *postgres.DB, tenantID, key string, fingerprint []byte) {
+func replayExistingKey(w http.ResponseWriter, r *http.Request, db *postgres.DB, tenantID, key string, fingerprint []byte) {
+	ctx := r.Context()
 	deadline := time.Now().Add(idempotencyPollTimeout)
 	for {
 		c, found, pending, err := readKey(ctx, db, tenantID, key)
@@ -385,7 +385,7 @@ func replayExistingKey(w http.ResponseWriter, ctx context.Context, db *postgres.
 			// DB error resolving the conflict — fail open is unsafe here
 			// (the side effect may already be running), so surface a 409 the
 			// client retries rather than re-executing the operation.
-			ErrorJSON(w, http.StatusConflict, "conflict_idempotency",
+			idempotencyError(w, r, http.StatusConflict, "conflict_idempotency",
 				"A request with this idempotency key is being processed. Please retry.")
 			return
 		}
@@ -394,7 +394,7 @@ func replayExistingKey(w http.ResponseWriter, ctx context.Context, db *postgres.
 			// Stripe returns 422 idempotency_error here.
 			if len(c.Fingerprint) > 0 &&
 				subtle.ConstantTimeCompare(c.Fingerprint, fingerprint) != 1 {
-				ErrorJSON(w, http.StatusUnprocessableEntity, "idempotency_error",
+				idempotencyError(w, r, http.StatusUnprocessableEntity, "idempotency_error",
 					"Keys for idempotent requests can only be used with the same parameters they were first used with.")
 				return
 			}
@@ -422,7 +422,7 @@ func replayExistingKey(w http.ResponseWriter, ctx context.Context, db *postgres.
 		// as a conflict so the client retries into a clean slot rather than
 		// re-running concurrently.
 		if !found {
-			ErrorJSON(w, http.StatusConflict, "conflict_idempotency",
+			idempotencyError(w, r, http.StatusConflict, "conflict_idempotency",
 				"A concurrent request with this idempotency key did not complete. Please retry.")
 			return
 		}
@@ -430,20 +430,20 @@ func replayExistingKey(w http.ResponseWriter, ctx context.Context, db *postgres.
 		// any route budget was orphaned by a dead or panicked owner. Say so
 		// at once: the outcome is unknown and polling cannot resolve it.
 		if age := time.Since(c.CreatedAt); age > idempotencyOrphanAfter {
-			ErrorJSON(w, http.StatusConflict, "conflict_idempotency_unresolved",
+			idempotencyError(w, r, http.StatusConflict, "conflict_idempotency_unresolved",
 				fmt.Sprintf("A request with this idempotency key started %s ago and never recorded an outcome — the replica handling it may have died mid-request. Whether its side effect committed is unknown: fetch the resource to check, then retry with a NEW idempotency key only if it does not exist.", age.Round(time.Minute)))
 			return
 		}
 		// Still pending. Wait for the owner to finalize, bounded by the poll
 		// timeout and the request context.
 		if time.Now().After(deadline) {
-			ErrorJSON(w, http.StatusConflict, "conflict_idempotency",
+			idempotencyError(w, r, http.StatusConflict, "conflict_idempotency",
 				"A request with this idempotency key is still being processed. Please retry.")
 			return
 		}
 		select {
 		case <-ctx.Done():
-			ErrorJSON(w, http.StatusConflict, "conflict_idempotency",
+			idempotencyError(w, r, http.StatusConflict, "conflict_idempotency",
 				"A request with this idempotency key is being processed. Please retry.")
 			return
 		case <-time.After(idempotencyPollInterval):
@@ -506,15 +506,9 @@ func (c *IdempotencyCleaner) Cleanup(ctx context.Context) (int, error) {
 	return CleanExpired(ctx, c.db)
 }
 
-// ErrorJSON is a helper that returns a Stripe-style error response for
-// idempotency key misuse.
-func ErrorJSON(w http.ResponseWriter, status int, errType, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"error": map[string]string{
-			"type":    errType,
-			"message": message,
-		},
-	})
+// idempotencyError answers an Idempotency-Key problem in the one error
+// envelope: type invalid_request_error, and code naming the problem
+// (idempotency_error, conflict_idempotency or conflict_idempotency_unresolved).
+func idempotencyError(w http.ResponseWriter, r *http.Request, status int, code, message string) {
+	respond.Error(w, r, status, "invalid_request_error", code, message)
 }

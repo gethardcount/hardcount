@@ -7,9 +7,10 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
+import type { ListTotal } from './listTotal';
 import type { PaymentMethod } from './paymentMethod';
 
 export type ListCustomerPaymentMethods200 = {
   data: PaymentMethod[];
-  total: number;
+  total: ListTotal;
 };

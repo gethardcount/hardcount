@@ -86,17 +86,17 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	keys, err := h.svc.ListKeys(r.Context(), ListFilter{TenantID: tenantID})
+	page, ok := respond.ParsePage(w, r)
+	if !ok {
+		return
+	}
+	keys, total, err := h.svc.ListKeys(r.Context(), ListFilter{TenantID: tenantID, Limit: page.Limit, Offset: page.Offset})
 	if err != nil {
 		respond.InternalError(w, r)
 		slog.ErrorContext(r.Context(), "list api keys", "error", err)
 		return
 	}
-	if keys == nil {
-		keys = []domain.APIKey{}
-	}
-
-	respond.JSON(w, r, http.StatusOK, map[string]any{"data": keys})
+	respond.List(w, r, keys, total)
 }
 
 func (h *Handler) revoke(w http.ResponseWriter, r *http.Request) {

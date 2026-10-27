@@ -13,6 +13,7 @@ import type { RecipePreviewResult } from './gen/schemas/recipePreviewResult'
 import type { RecipeInstance } from './gen/schemas/recipeInstance'
 import type { ActivityLine } from './gen/schemas/activityLine'
 import type { CreditNoteStats } from './gen/schemas/creditNoteStats'
+import type { ProviderCostRate } from './gen/schemas/providerCostRate'
 
 const API_BASE = '/v1'
 
@@ -154,10 +155,46 @@ export async function apiRequest<T>(method: string, path: string, body?: unknown
   return res.json()
 }
 
+// Every list route pages one way: limit (1-100, default 50) and offset in,
+// { data, total } out (docs/api-surface.md, "Lists").
+export type ListPage<T> = { data: T[]; total: number }
+
+// LIST_PAGE_MAX is the largest page the API serves.
+const LIST_PAGE_MAX = 100
+
+// listAll reads every page of a list route. A picker, a lookup map or a
+// table that shows the whole set needs every row: one page would silently
+// drop the rest.
+async function listAll<T>(path: string, query?: Record<string, string>): Promise<ListPage<T>> {
+  const data: T[] = []
+  for (let offset = 0; ; offset += LIST_PAGE_MAX) {
+    const qs = new URLSearchParams(query)
+    qs.set('limit', String(LIST_PAGE_MAX))
+    qs.set('offset', String(offset))
+    const page = await apiRequest<ListPage<T>>('GET', `${path}?${qs}`)
+    data.push(...page.data)
+    if (page.data.length < LIST_PAGE_MAX || data.length >= page.total) return { data, total: page.total }
+  }
+}
+
+// listByIds reads the rows with these ids through a list route's `ids`
+// filter, at most LIST_PAGE_MAX ids per request.
+async function listByIds<T>(path: string, ids: string[]): Promise<ListPage<T>> {
+  const data: T[] = []
+  for (let i = 0; i < ids.length; i += LIST_PAGE_MAX) {
+    const chunk = ids.slice(i, i + LIST_PAGE_MAX)
+    const page = await apiRequest<ListPage<T>>('GET', `${path}?ids=${chunk.join(',')}&limit=${chunk.length}`)
+    data.push(...page.data)
+  }
+  return { data, total: data.length }
+}
+
 export const api = {
   // Customers
   listCustomers: (params?: string) =>
     apiRequest<{ data: Customer[]; total: number }>('GET', `/customers${params ? '?' + params : ''}`),
+  // Any number of customers by id (the list's ids filter, 100 per request).
+  listCustomersByIds: (ids: string[]) => listByIds<Customer>('/customers', ids),
   getCustomer: (id: string) =>
     apiRequest<Customer>('GET', `/customers/${id}`),
   createCustomer: (data: { external_id: string; display_name: string; email?: string; additional_emails?: string[]; test_clock_id?: string }) =>
@@ -165,7 +202,7 @@ export const api = {
   rotateCostDashboardToken: (customerId: string) =>
     apiRequest<{ token: string; public_url: string }>('POST', `/customers/${customerId}/rotate-cost-dashboard-token`),
   listCustomerSentEmails: (customerId: string) =>
-    apiRequest<{ sent_emails: SentEmail[] }>('GET', `/customers/${customerId}/sent-emails`),
+    listAll<SentEmail>(`/customers/${customerId}/sent-emails`),
 
   // Subscriptions
   listSubscriptions: (params?: string) =>
@@ -174,8 +211,7 @@ export const api = {
     apiRequest<Subscription>('POST', '/subscriptions', data),
 
   // Pricing
-  listMeters: () =>
-    apiRequest<{ data: Meter[] }>('GET', '/meters'),
+  listMeters: () => listAll<Meter>('/meters'),
   getMeter: (id: string) =>
     apiRequest<Meter>('GET', `/meters/${id}`),
   createMeter: (data: { event_name: string; name: string; unit?: string; aggregation?: string }) =>
@@ -190,8 +226,7 @@ export const api = {
     const q = qs.toString()
     return apiRequest<CustomerUsage>('GET', `/customers/${customerId}/usage${q ? '?' + q : ''}`)
   },
-  listPlans: () =>
-    apiRequest<{ data: Plan[] }>('GET', '/plans'),
+  listPlans: () => listAll<Plan>('/plans'),
   // used and live_subscription_count are only on this endpoint, not the list.
   getPlan: (id: string) =>
     apiRequest<PlanDetail>('GET', `/plans/${id}`),
@@ -215,11 +250,10 @@ export const api = {
   // applies from the customer's next billing period, or from the join when a
   // subscription first joins the plan in a period after it (ADR-130 §4).
   listPriceOverrides: (filter?: { customerId?: string; priceId?: string }) => {
-    const qs = new URLSearchParams()
-    if (filter?.customerId) qs.set('customer_id', filter.customerId)
-    if (filter?.priceId) qs.set('price_id', filter.priceId)
-    const q = qs.toString()
-    return apiRequest<{ data: PriceOverride[] }>('GET', `/price-overrides${q ? '?' + q : ''}`)
+    const query: Record<string, string> = {}
+    if (filter?.customerId) query.customer_id = filter.customerId
+    if (filter?.priceId) query.price_id = filter.priceId
+    return listAll<PriceOverride>('/price-overrides', query)
   },
   createPriceOverride: (data: { customer_id: string; price_id: string; reason?: string } & PriceShape) =>
     apiRequest<PriceOverride>('POST', '/price-overrides', data),
@@ -300,7 +334,7 @@ export const api = {
   // stays in Stripe-hosted iframe via setup-session, never on operator's
   // dashboard). Industry parity: Chargebee, Lago, Orb.
   listCustomerPaymentMethods: (customerId: string) =>
-    apiRequest<{ data: CustomerPaymentMethod[]; total: number }>('GET', `/customers/${customerId}/payment-methods`),
+    listAll<CustomerPaymentMethod>(`/customers/${customerId}/payment-methods`),
   setDefaultCustomerPaymentMethod: (customerId: string, pmId: string) =>
     apiRequest<CustomerPaymentMethod>('POST', `/customers/${customerId}/payment-methods/${pmId}/default`),
   detachCustomerPaymentMethod: (customerId: string, pmId: string) =>
@@ -316,8 +350,7 @@ export const api = {
     apiRequest<{ to: string; subject: string }>('POST', `/customers/${customerId}/payment-methods/send-setup-email`, note ? { note } : {}),
 
   // Credits
-  listBalances: () =>
-    apiRequest<{ data: CreditBalance[] }>('GET', '/credits/balances'),
+  listBalances: () => listAll<CreditBalance>('/credits/balances'),
   // One balance per currency the customer holds credit in (ADR-129).
   getBalance: (customerId: string) =>
     apiRequest<{ data: CreditBalance[] }>('GET', `/credits/balance/${customerId}`),
@@ -446,7 +479,7 @@ export const api = {
   // tenant with exactly one is_default. Customer assignment flows
   // through the customer Update endpoint (PATCH /customers/{id} body
   // carries dunning_policy_id).
-  listDunningPolicies: () => apiRequest<{ data: DunningPolicyWithCount[] }>('GET', '/dunning/policies'),
+  listDunningPolicies: () => listAll<DunningPolicyWithCount>('/dunning/policies'),
   getDunningPolicy: (id: string) => apiRequest<DunningPolicy>('GET', `/dunning/policies/${id}`),
   createDunningPolicy: (data: Partial<DunningPolicy>) => apiRequest<DunningPolicy>('POST', '/dunning/policies', data),
   updateDunningPolicy: (id: string, data: Partial<DunningPolicy>) => apiRequest<DunningPolicy>('PATCH', `/dunning/policies/${id}`, data),
@@ -462,7 +495,9 @@ export const api = {
   resolveDunningRun: (id: string, resolution: string) => apiRequest<DunningRun>('POST', `/dunning/runs/${id}/resolve`, { resolution }),
 
   // Credit Notes
-  listCreditNotes: (params?: string) => apiRequest<{ data: CreditNote[] }>('GET', `/credit-notes${params ? '?' + params : ''}`),
+  listCreditNotes: (params?: string) => apiRequest<ListPage<CreditNote>>('GET', `/credit-notes${params ? '?' + params : ''}`),
+  // Every credit note of one invoice.
+  listInvoiceCreditNotes: (invoiceId: string) => listAll<CreditNote>('/credit-notes', { invoice_id: invoiceId }),
   // Every note's count and the issued notes' money per currency, from the
   // server: the list is a page of at most 100 rows and cannot be the source.
   getCreditNoteStats: () => apiRequest<CreditNoteStats>('GET', '/credit-notes/stats'),
@@ -484,7 +519,7 @@ export const api = {
   retryCreditNoteRefund: (id: string) => apiRequest<CreditNote>('POST', `/credit-notes/${id}/retry-refund`),
 
   // Recipes (pricing templates) — see docs/dev/design/recipes.md
-  listRecipes: () => apiRequest<ListRecipes200>('GET', '/recipes'),
+  listRecipes: () => listAll<ListRecipes200['data'][number]>('/recipes'),
   getRecipe: (key: string) => apiRequest<RecipeDetail>('GET', `/recipes/${key}`),
   previewRecipe: (key: string, overrides: Record<string, string | number>) =>
     apiRequest<RecipePreviewResult>('POST', `/recipes/${key}/preview`, { overrides }),
@@ -493,15 +528,14 @@ export const api = {
     overrides?: Record<string, string | number>
   }) => apiRequest<RecipeInstance>('POST', `/recipes/${data.key}/instantiate`, { overrides: data.overrides }),
 
-  // Audit Log
-  // Response shape depends on pagination mode: offset (?offset=) returns
-  // { data, total }; cursor (?after=) returns { data, has_more, next_cursor }
-  // and skips the expensive COUNT. The declared type is the union of both.
-  listAuditLog: (params?: string) => apiRequest<{ data: AuditEntry[]; total?: number; has_more?: boolean; next_cursor?: string }>('GET', `/audit-log${params ? '?' + params : ''}`),
+  // Audit Log. total stops counting at 10,001: above 10,000 it means "more
+  // than 10,000".
+  listAuditLog: (params?: string) => apiRequest<ListPage<AuditEntry>>('GET', `/audit-log${params ? '?' + params : ''}`),
   getAuditFilters: () => apiRequest<AuditFilterOptions>('GET', '/audit-log/filters'),
 
   // Webhooks
-  listWebhookEndpoints: () => apiRequest<{ data: WebhookEndpoint[] }>('GET', '/webhook-endpoints/endpoints'),
+  listWebhookEndpoints: () => listAll<WebhookEndpoint>('/webhook-endpoints/endpoints'),
+  getWebhookEndpoint: (id: string) => apiRequest<WebhookEndpoint>('GET', `/webhook-endpoints/endpoints/${id}`),
   createWebhookEndpoint: (data: { url: string; description?: string; events?: string[] }) => apiRequest<{ endpoint: WebhookEndpoint; secret: string }>('POST', '/webhook-endpoints/endpoints', data),
   // PATCH mutates url/description/events/active WITHOUT rotating the
   // signing secret (delete+recreate was the only mutation path before,
@@ -510,14 +544,13 @@ export const api = {
     apiRequest<WebhookEndpoint>('PATCH', `/webhook-endpoints/endpoints/${id}`, data),
   deleteWebhookEndpoint: (id: string) => apiRequest<{ status: string }>('DELETE', `/webhook-endpoints/endpoints/${id}`),
   rotateWebhookSecret: (id: string) => apiRequest<{ secret: string; secondary_valid_until?: string }>('POST', `/webhook-endpoints/endpoints/${id}/rotate-secret`),
-  getWebhookEndpointStats: () => apiRequest<{ data: { endpoint_id: string; total_deliveries: number; succeeded: number; failed: number; success_rate: number }[] }>('GET', '/webhook-endpoints/endpoints/stats'),
-  // Endpoint drill-down: ONE receiver's delivery history (newest first),
-  // each row naming the business fact it carried (event_type). The
-  // endpoint rides along so a direct URL load of the detail page is one
-  // request, and an unknown id 404s instead of rendering an empty-but-
+  getWebhookEndpointStats: () => listAll<{ endpoint_id: string; total_deliveries: number; succeeded: number; failed: number; success_rate: number }>('/webhook-endpoints/endpoints/stats'),
+  // Endpoint drill-down: one page of ONE receiver's delivery history
+  // (newest first), each row naming the business fact it carried
+  // (event_type). An unknown id 404s instead of rendering an empty-but-
   // healthy-looking history.
-  listWebhookEndpointDeliveries: (id: string) =>
-    apiRequest<{ endpoint: WebhookEndpoint; data: EndpointDelivery[] }>('GET', `/webhook-endpoints/endpoints/${id}/deliveries`),
+  listWebhookEndpointDeliveries: (id: string, page: { limit: number; offset: number }) =>
+    apiRequest<ListPage<EndpointDelivery>>('GET', `/webhook-endpoints/endpoints/${id}/deliveries?limit=${page.limit}&offset=${page.offset}`),
   // Single-receiver replay (Stripe "Resend" / GitHub "Redeliver" unit):
   // re-sends one delivery's event to THAT endpoint only. The event-wide
   // replay fans out to every subscriber — wrong tool after fixing one
@@ -559,11 +592,14 @@ export const api = {
     apiRequest<{ period: string; data: RevenueDataPoint[] }>('GET', `/analytics/revenue-chart?period=${period}`),
   getMRRMovement: (period: string) =>
     apiRequest<MRRMovementResponse>('GET', `/analytics/mrr-movement?period=${period}`),
+  // Provider cost rates: the whole table.
+  listProviderCosts: () => listAll<ProviderCostRate>('/provider-costs'),
+
   getUsageAnalytics: (period: string) =>
     apiRequest<UsageAnalyticsResponse>('GET', `/analytics/usage?period=${period}`),
 
   // Test clocks (test mode only — server returns 403 in live mode)
-  listTestClocks: () => apiRequest<{ data: TestClock[] }>('GET', '/test-clocks'),
+  listTestClocks: () => listAll<TestClock>('/test-clocks'),
   getTestClock: (id: string) => apiRequest<TestClock>('GET', `/test-clocks/${id}`),
   createTestClock: (data: { name: string; frozen_time: string }) =>
     apiRequest<TestClock>('POST', '/test-clocks', data),
@@ -573,13 +609,11 @@ export const api = {
     apiRequest<TestClock>('POST', `/test-clocks/${id}/retry-advance`),
   deleteTestClock: (id: string) =>
     apiRequest<{ status: string }>('DELETE', `/test-clocks/${id}`),
-  listAttachedCustomers: (id: string) =>
-    apiRequest<{ data: Customer[] }>('GET', `/test-clocks/${id}/customers`),
-  listSubscriptionsOnClock: (id: string) =>
-    apiRequest<{ data: Subscription[] }>('GET', `/test-clocks/${id}/subscriptions`),
+  listAttachedCustomers: (id: string) => listAll<Customer>(`/test-clocks/${id}/customers`),
+  listSubscriptionsOnClock: (id: string) => listAll<Subscription>(`/test-clocks/${id}/subscriptions`),
 
   // API Keys
-  listApiKeys: () => apiRequest<{ data: ApiKeyInfo[] }>('GET', '/api-keys'),
+  listApiKeys: () => listAll<ApiKeyInfo>('/api-keys'),
   createApiKey: (data: { name: string; key_type: string; expires_at?: string }) => apiRequest<{ key: ApiKeyInfo; raw_key: string }>('POST', '/api-keys', data),
   revokeApiKey: (id: string) => apiRequest<ApiKeyInfo>('DELETE', `/api-keys/${id}`),
   rotateApiKey: (id: string, expires_in_seconds?: number) =>
