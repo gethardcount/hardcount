@@ -1574,20 +1574,37 @@ func (s *PostgresStore) ListEntries(ctx context.Context, filter ListFilter) ([]d
 	return entries, rows.Err()
 }
 
-func (s *PostgresStore) SumCreditNoteGrantsForInvoice(ctx context.Context, tenantID, customerID, invoiceID string) (int64, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return 0, err
-	}
-	defer postgres.Rollback(tx)
-
-	var sum int64
-	err = tx.QueryRowContext(ctx, `
-		SELECT COALESCE(SUM(amount_cents), 0) FROM customer_credit_ledger
+// InvoiceCreditsTx adds up the invoice's usage rows and credit-note grants
+// per currency in one query on the caller's tx. No LIMIT: a sum over one page
+// of the ledger hands back too little (#1404 fixed the same shape for credit
+// notes). A sum past int64 fails the cast instead of wrapping.
+func (s *PostgresStore) InvoiceCreditsTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, invoiceID string) ([]InvoiceCredits, error) {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT currency,
+		    COALESCE(-SUM(amount_cents) FILTER (WHERE entry_type = $4), 0)::bigint,
+		    COALESCE(SUM(amount_cents) FILTER (WHERE entry_type = $5), 0)::bigint
+		FROM customer_credit_ledger
 		WHERE tenant_id = $1 AND customer_id = $2 AND invoice_id = $3
-		  AND entry_type = $4 AND source_credit_note_id IS NOT NULL
-	`, tenantID, customerID, invoiceID, domain.CreditGrant).Scan(&sum)
-	return sum, err
+		  AND (entry_type = $4 OR (entry_type = $5 AND source_credit_note_id IS NOT NULL))
+		GROUP BY currency
+		ORDER BY currency
+	`, tenantID, customerID, invoiceID, domain.CreditUsage, domain.CreditGrant)
+	if err != nil {
+		return nil, fmt.Errorf("sum the credits on invoice %s: %w", invoiceID, err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []InvoiceCredits
+	for rows.Next() {
+		var c InvoiceCredits
+		if err := rows.Scan(&c.Currency, &c.UsedCents, &c.ReturnedCents); err != nil {
+			return nil, fmt.Errorf("sum the credits on invoice %s: %w", invoiceID, err)
+		}
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("sum the credits on invoice %s: %w", invoiceID, err)
+	}
+	return out, nil
 }
 
 // CountEntries is ListEntries' total-row twin: same filter arms, no

@@ -181,19 +181,19 @@ WHERE g.entry_type = 'grant' AND g.consumed_cents < g.amount_cents;`,
 	{
 		Name:   "cycle_invoice_unique_per_subscription_period",
 		Domain: "invoices",
-		Why:    "each closed billing period bills exactly once per subscription; a second live cycle invoice for the same period is a double charge",
-		// This duplicates what idx_invoices_billing_idempotency already
+		Why:    "each closed billing period bills exactly once per subscription; a second live cycle invoice for the same period is a double charge (a manual invoice for the period is not a cycle invoice, #1331)",
+		// This duplicates what idx_invoices_billing_period_dedup already
 		// enforces, and that is the point: the two fail independently. An
 		// index can be absent after a restore, dropped by a migration, left
 		// INVALID by a failed CREATE INDEX CONCURRENTLY (which enforces
 		// nothing while still appearing in pg_indexes), or quietly narrowed
 		// by a predicate change — migration 0101 narrowed this exact
-		// predicate once already. In every one of those cases the write path
+		// predicate once already, and 00215 left manual invoices out of it. In every one of those cases the write path
 		// keeps succeeding and nothing raises an error, so the only way to
 		// learn about it is to look for the duplicate rows themselves.
 		// Measured: with the index removed, four concurrent billing leaders
 		// produced 129 invoices across 40 periods and reported no failures.
-		SQL: `SELECT i.id, i.tenant_id, i.subscription_id, i.billing_period_start, i.billing_period_end, i.status, i.total_amount_cents FROM invoices i WHERE i.subscription_id IS NOT NULL AND i.status <> 'voided' AND i.source_plan_changed_at IS NULL AND EXISTS (SELECT 1 FROM invoices d WHERE d.tenant_id = i.tenant_id AND d.subscription_id = i.subscription_id AND d.billing_period_start = i.billing_period_start AND d.billing_period_end = i.billing_period_end AND d.status <> 'voided' AND d.source_plan_changed_at IS NULL AND d.id <> i.id);`,
+		SQL: `SELECT i.id, i.tenant_id, i.subscription_id, i.billing_period_start, i.billing_period_end, i.status, i.total_amount_cents FROM invoices i WHERE i.subscription_id IS NOT NULL AND i.status <> 'voided' AND i.source_plan_changed_at IS NULL AND i.billing_reason IS DISTINCT FROM 'manual' AND EXISTS (SELECT 1 FROM invoices d WHERE d.tenant_id = i.tenant_id AND d.subscription_id = i.subscription_id AND d.billing_period_start = i.billing_period_start AND d.billing_period_end = i.billing_period_end AND d.status <> 'voided' AND d.source_plan_changed_at IS NULL AND d.billing_reason IS DISTINCT FROM 'manual' AND d.id <> i.id);`,
 	},
 	{
 		Name:   "usage_billed_once_per_customer_meter_window",
@@ -217,7 +217,7 @@ WHERE g.entry_type = 'grant' AND g.consumed_cents < g.amount_cents;`,
 		// own prices).
 		// Lines on one invoice are excluded (i.id < j.id). Live means not
 		// voided: a written-off invoice still billed its window (ADR-066
-		// amendment 2026-10-23, as idx_invoices_billing_idempotency already
+		// amendment 2026-10-23, as the period slot index already
 		// counts it), so a second invoice billing that window is the double
 		// charge, paid later or not. Before 2026-10-23 the threshold
 		// watermark re-billed exactly that shape and this check skipped it.

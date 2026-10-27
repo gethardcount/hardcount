@@ -1188,13 +1188,14 @@ func (m *mockInvoices) latestThresholdInvoice(subscriptionID string, periodStart
 	return latest, nil
 }
 
-// GetInvoiceForPeriod mirrors the postgres semantics: newest non-voided
-// invoice keyed on (subscription, period_start, period_end) — the
-// billing-idempotency tuple.
+// GetInvoiceForPeriod mirrors the postgres semantics: the invoice holding
+// the period slot (not voided, not proration, not manual), keyed on
+// (subscription, period_start, period_end).
 func (m *mockInvoices) GetInvoiceForPeriod(_ context.Context, _, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error) {
 	for i := len(m.invoices) - 1; i >= 0; i-- {
 		inv := m.invoices[i]
-		if inv.SubscriptionID != subscriptionID || inv.Status == domain.InvoiceVoided {
+		if inv.SubscriptionID != subscriptionID || inv.Status == domain.InvoiceVoided ||
+			inv.SourcePlanChangedAt != nil || inv.BillingReason == domain.BillingReasonManual {
 			continue
 		}
 		if !inv.BillingPeriodStart.Equal(periodStart) || !inv.BillingPeriodEnd.Equal(periodEnd) {

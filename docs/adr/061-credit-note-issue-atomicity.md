@@ -281,7 +281,7 @@ The alternative was to store the returned amount as the note's `credit_amount_ce
 
 ### What else had to change
 
-- **Voiding the invoice afterwards.** The void hand-back summed every credit-usage entry for the invoice, so it would have returned the same credits a second time. It now subtracts what credit notes already returned (`SumCreditNoteGrantsForInvoice`). This relies on one fact: a credit-note grant on an invoice that can still be voided is always such a return, because the other kind is written for a paid invoice and a paid invoice cannot be voided.
+- **Voiding the invoice afterwards.** The void hand-back summed every credit-usage entry for the invoice, so it would have returned the same credits a second time. It now subtracts what credit notes already returned. Since #1407 one store method, `InvoiceCreditsTx`, sums both the usage entries and those returns on the void's transaction. This relies on one fact: a credit-note grant on an invoice that can still be voided is always such a return, because the other kind is written for a paid invoice and a paid invoice cannot be voided.
 - **The doctor.** `invoice_due_conservation` no longer skips invoices that have credit notes. It counts the part of issued notes that reduced the invoice: a note's total minus its three channels. It also flags any invoice whose paid amount, applied credits and credit notes exceed its total. That second condition is needed: on a row the old clamp damaged, amount due is 0 and equals the clamped formula.
 
 ### What did not change

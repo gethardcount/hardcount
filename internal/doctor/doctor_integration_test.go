@@ -176,6 +176,12 @@ func TestDoctor_CleanSchemaIsQuiet_AndSeededViolationsAreCaught(t *testing.T) {
 	seedUsageLine("vlx_inv_doc_vd_t", "mtr_doc_vd", "prc_doc_a", p0, t1)
 	seedUsageLine("vlx_inv_doc_vd_c", "mtr_doc_vd", "prc_doc_a", p0, p1)
 	mustExec(`UPDATE invoices SET status = 'voided', voided_at = now() WHERE id = 'vlx_inv_doc_vd_t'`)
+	// A manual invoice that names the subscription and its period is not the
+	// cycle invoice (#1331): the pair is legal, so
+	// cycle_invoice_unique_per_subscription_period stays quiet (doc_man).
+	seedSub("vlx_sub_doc_man")
+	seedInvoice("vlx_inv_doc_man_c", "vlx_sub_doc_man", "subscription_cycle", p0, p1)
+	seedInvoice("vlx_inv_doc_man_m", "vlx_sub_doc_man", "manual", p0, p1)
 
 	// SB-1: an active run with no next action is invisible to both due-run
 	// pickers forever — flagged. Control: an escalated run with no next action
@@ -242,6 +248,9 @@ func TestDoctor_CleanSchemaIsQuiet_AndSeededViolationsAreCaught(t *testing.T) {
 	}
 	crossSub, crossSubOtherBucket, writtenOff := false, false, false
 	for _, v := range res.Violations {
+		if v.Check.Name == "cycle_invoice_unique_per_subscription_period" && strings.Contains(v.RowID+v.Detail, "doc_man") {
+			t.Errorf("false positive: a manual invoice beside the cycle invoice of the same period is flagged: %s %s", v.RowID, v.Detail)
+		}
 		if _, ok := want[v.Check.Name]; ok && strings.Contains(v.RowID+v.Detail, "doc1") {
 			want[v.Check.Name] = true
 		}

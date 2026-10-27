@@ -17,7 +17,7 @@ import (
 
 // TestProrationInvoiceIndexes is FLOW B3 item #2: two proration invoices from item
 // changes in the SAME billing period must BOTH persist — the billing-idempotency
-// index (idx_invoices_billing_idempotency) EXEMPTS proration via its
+// index (idx_invoices_billing_period_dedup) EXEMPTS proration via its
 // `source_plan_changed_at IS NULL` predicate, so two prorations sharing a period
 // don't falsely collide. They're distinguished by source_subscription_item_id.
 // A duplicate of the SAME (item, change-type, change-instant) tuple IS rejected
