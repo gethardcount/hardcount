@@ -1,6 +1,7 @@
 package respond
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -38,6 +39,8 @@ func TestDecodeStrict(t *testing.T) {
 		{name: "empty body", body: ``, wantStatus: http.StatusBadRequest, wantMsg: "invalid JSON body"},
 		{name: "two values", body: `{"code":"a"} {"code":"b"}`, wantStatus: http.StatusBadRequest, wantMsg: "invalid JSON body"},
 		{name: "trailing brace", body: `{"code":"a"}}`, wantStatus: http.StatusBadRequest, wantMsg: "invalid JSON body"},
+		{name: "key in another case", body: `{"Code":"a"}`, wantStatus: http.StatusUnprocessableEntity, wantParam: "Code", wantMsg: `unknown field "Code"`},
+		{name: "nested key in another case", body: `{"code":"a","items":[{"PLAN_ID":"p"}]}`, wantStatus: http.StatusUnprocessableEntity, wantParam: "PLAN_ID", wantMsg: `unknown field "PLAN_ID"`},
 		{name: "trailing whitespace", body: "{\"code\":\"a\"}\n  ", wantOK: true, wantCode: "a"},
 
 		{name: "optional: empty body", body: ``, opts: []DecodeOption{EmptyBodyOK}, wantOK: true, wantCode: "keep"},
@@ -78,6 +81,60 @@ func TestDecodeStrict(t *testing.T) {
 			}
 			if body.Message != tc.wantMsg {
 				t.Errorf("message: got %q, want %q", body.Message, tc.wantMsg)
+			}
+		})
+	}
+}
+
+type exactInner struct {
+	Name string `json:"name"`
+}
+
+type exactEmbedded struct {
+	Region string `json:"region"`
+}
+
+type exactBody struct {
+	exactEmbedded
+	Plain   string                `json:"plain"`
+	Untag   string                // encoding/json names it Untag
+	Skipped string                `json:"-"`
+	Ptr     *exactInner           `json:"ptr"`
+	ByKey   map[string]exactInner `json:"by_key"`
+	Raw     json.RawMessage       `json:"raw"`
+	Any     any                   `json:"any"`
+	Dims    map[string]any        `json:"dims"`
+}
+
+// A key matches its field exactly. encoding/json alone matches without
+// regard to case, so {"Email": ...} set email although the reference lists
+// only email. Keys inside a value the type decodes as it likes (raw JSON,
+// any, a map's keys) are not field names and are not checked.
+func TestDecodeBody_KeysMatchExactly(t *testing.T) {
+	cases := []struct {
+		name, body, wantField string
+	}{
+		{"every name exact", `{"region":"eu","plain":"p","Untag":"u","ptr":{"name":"n"},"by_key":{"K":{"name":"n"}},"raw":{"Any":1},"any":{"Any":1},"dims":{"Model":"x"}}`, ""},
+		{"promoted field in another case", `{"Region":"eu"}`, "Region"},
+		{"untagged field in another case", `{"untag":"u"}`, "untag"},
+		{"through a pointer", `{"ptr":{"NAME":"n"}}`, "NAME"},
+		{"in a map value", `{"by_key":{"k":{"Name":"n"}}}`, "Name"},
+		{"skipped field", `{"Skipped":"s"}`, "Skipped"},
+		{"null nested value", `{"ptr":null,"by_key":null}`, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var v exactBody
+			err := DecodeBody(httptest.NewRequest("POST", "/", strings.NewReader(tc.body)), &v)
+			if tc.wantField == "" {
+				if err != nil {
+					t.Fatalf("err = %v, want nil", err)
+				}
+				return
+			}
+			var be *BodyError
+			if !errors.As(err, &be) || be.Field != tc.wantField {
+				t.Fatalf("err = %v, want a BodyError naming %q", err, tc.wantField)
 			}
 		})
 	}

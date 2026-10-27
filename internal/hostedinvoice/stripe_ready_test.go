@@ -3,11 +3,13 @@ package hostedinvoice
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/errs"
 )
 
 type fakeReady struct {
@@ -137,5 +139,34 @@ func TestHostedInvoice_BelowMinimum_NoPay(t *testing.T) {
 	}
 	if stripe.lastTenant != "" {
 		t.Error("Stripe was asked for a session it would refuse")
+	}
+}
+
+// Stripe was disconnected after the readiness check: the session create
+// answers stripe_not_connected. The customer gets the same 409 as the check
+// gives, not the operator's code or its "Connect it under Settings" sentence.
+func TestCheckout_DisconnectedDuringCreate_Conflict(t *testing.T) {
+	h, stripe, _ := readyHandler(t, "vlx_pinv_race_nokeys", true, nil)
+	stripe.err = fmt.Errorf("ensure stripe customer: %w", errs.StripeNotConnected())
+	w := httptest.NewRecorder()
+	mountRouter(h).ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/vlx_pinv_race_nokeys/checkout", nil))
+	if w.Code != http.StatusConflict {
+		t.Fatalf("got %d, want 409, body=%s", w.Code, w.Body.String())
+	}
+	var body struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
+	if body.Error.Code != PayUnavailableOnline {
+		t.Errorf("code = %q, want %q", body.Error.Code, PayUnavailableOnline)
+	}
+	if body.Error.Message != "online payment is not set up for this invoice" {
+		t.Errorf("message = %q, want the readiness check's sentence", body.Error.Message)
+	}
+	if stripe.lastTenant == "" {
+		t.Error("the session create was not reached")
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -161,14 +162,26 @@ func TestStrictBodies_EveryJSONRouteRefusesAnUnknownKey(t *testing.T) {
 			t.Errorf("%s: the spec gives it a JSON body, but requestBodies does not name its Go type", op)
 			continue
 		}
-		var body any = map[string]any{probeKey: 1}
-		if reflect.TypeOf(rb.body).Kind() == reflect.Slice {
-			body = []any{body}
-		}
 		probed++
-		res := r.call(k.Method, probePath(k.Pattern), body)
-		if res.status != http.StatusUnprocessableEntity || flowStr(res.body, "error", "param") != probeKey {
-			t.Errorf("%s %s with an unknown key: %d %s, want 422 with param %q", k.Method, k.Pattern, res.status, res.raw, probeKey)
+		if reflect.TypeOf(rb.body).Kind() == reflect.Slice {
+			// The usage batch: the unknown key is named with its event's
+			// index in the batch 422's errors[], like every failing event.
+			res := r.call(k.Method, probePath(k.Pattern), []any{map[string]any{probeKey: 1}})
+			want := `event[0]: unknown field "` + probeKey + `"`
+			if res.status != http.StatusUnprocessableEntity || res.errCode() != "batch_rejected" || !slices.Contains(flowStrings(res.body, "errors"), want) {
+				t.Errorf("%s %s with an unknown key on an event: %d %s, want 422 batch_rejected with errors[] holding %q", k.Method, k.Pattern, res.status, res.raw, want)
+			}
+		} else {
+			res := r.call(k.Method, probePath(k.Pattern), map[string]any{probeKey: 1})
+			if res.status != http.StatusUnprocessableEntity || flowStr(res.body, "error", "param") != probeKey {
+				t.Errorf("%s %s with an unknown key: %d %s, want 422 with param %q", k.Method, k.Pattern, res.status, res.raw, probeKey)
+			}
+		}
+		// A body that is not valid JSON is a 400, as docs/api-surface.md says
+		// (TestOpenAPISpec_MalformedBodyIsDocumentedAs400 holds the reference
+		// to it).
+		if res := r.call(k.Method, probePath(k.Pattern), []byte(`{"`+probeKey+`":`)); res.status != http.StatusBadRequest {
+			t.Errorf("%s %s with a body that is not valid JSON: %d %s, want 400", k.Method, k.Pattern, res.status, res.raw)
 		}
 		// A field the server sets is refused by name too. null decodes into
 		// any type, so without the refusal the body would be accepted.
@@ -296,6 +309,9 @@ func TestStrictBodies_PatchRefusesFieldsItCannotChange(t *testing.T) {
 	}{
 		{"/v1/customers/" + cus, "external_id", "strict-cus-renamed", "/v1/customers/" + cus},
 		{"/v1/customers/" + cus, "display_nam", "typo", "/v1/customers/" + cus},
+		// encoding/json alone matches a key without regard to case.
+		{"/v1/customers/" + cus, "DISPLAY_NAME", "Renamed", "/v1/customers/" + cus},
+		{"/v1/customers/" + cus, "Email", "x@strict-bodies.test", "/v1/customers/" + cus},
 		{"/v1/dunning/policies/" + policy, "is_default", true, "/v1/dunning/policies/" + policy},
 		{"/v1/dunning/policies/" + policy, "id", "vlx_dpol_other", "/v1/dunning/policies/" + policy},
 		{"/v1/meters/" + meter, "event_name", "strict_renamed", "/v1/meters/" + meter},
@@ -347,4 +363,16 @@ func TestSetupSession_StripeNotConnected(t *testing.T) {
 			t.Errorf("POST %s without Stripe: message %q, want it to say Stripe is not connected and where to connect it", path, msg)
 		}
 	}
+}
+
+// flowStrings is the string array at key.
+func flowStrings(m map[string]any, key string) []string {
+	items, _ := m[key].([]any)
+	out := make([]string, 0, len(items))
+	for _, it := range items {
+		if s, ok := it.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
 }
