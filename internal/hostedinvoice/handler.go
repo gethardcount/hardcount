@@ -75,9 +75,10 @@ type SettingsGetter interface {
 
 // CreditNoteLister is needed by the PDF render path: the PDF stamps
 // applied credit notes onto the invoice so the customer can reconcile
-// partial credits against the original amount.
+// partial credits against the original amount. It returns every issued
+// note on the invoice, with no page limit (invoice.IssuedCreditNoteLister).
 type CreditNoteLister interface {
-	List(ctx context.Context, tenantID, invoiceID string) ([]domain.CreditNote, error)
+	ListIssued(ctx context.Context, tenantID, invoiceID string) ([]domain.CreditNote, error)
 }
 
 // CheckoutSessionCreator is the adapter the Pay button calls. The concrete

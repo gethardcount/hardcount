@@ -55,8 +55,18 @@ export function cancelImmediatelyText(status: string): string {
 }
 
 // After an item's plan change with no proration to report: a scheduled
-// change (pending_plan_id set) waits for the next period.
-export function planChangeToast(item: { pending_plan_id?: string | null }, effectiveLabel: string | undefined): ToastCopy {
+// change (pending_plan_id set) waits for the next period. A change now to a
+// plan with another billing interval starts a new period and invoices it at
+// once; newPeriod names that invoice and its total, as the server returned
+// them (new_period_invoice, #1280).
+export function planChangeToast(
+  item: { pending_plan_id?: string | null },
+  effectiveLabel: string | undefined,
+  newPeriod?: { invoiceNumber: string; amountLabel: string },
+): ToastCopy {
+  if (newPeriod) {
+    return { title: 'Plan changed', description: `A new billing period started. Invoice ${newPeriod.invoiceNumber} for ${newPeriod.amountLabel} was created for it.` }
+  }
   if (item.pending_plan_id) {
     return {
       title: 'Plan change scheduled',
@@ -77,7 +87,22 @@ export function planChangeToast(item: { pending_plan_id?: string | null }, effec
 // plan isn't loaded, which gets a sentence true for both.
 export type BillTiming = 'in_advance' | 'in_arrears' | string | undefined
 
-export function changePlanNowHelper(timing: BillTiming): string {
+//
+// A change now to a plan with another billing interval (monthly ↔ yearly)
+// is not a price difference (subscription.Service
+// applyCrossIntervalPlanSwapTx): the current period ends now and a new one
+// on the new interval starts. In advance, the new period is invoiced at once
+// with the old period's usage so far, and the unused part of the old period
+// is credited. In arrears, the ended period is billed as usual and the new
+// one at its end. newInterval is the new plan's interval when it differs
+// from the current one, else undefined.
+export function changePlanNowHelper(timing: BillTiming, newInterval?: string): string {
+  if (newInterval) {
+    const period = newInterval // 'monthly' or 'yearly', the plan's own word
+    if (timing === 'in_advance') return `A new ${period} billing period starts now and is invoiced now on the new plan, with any usage so far. The unused part of the current period is credited.`
+    if (timing === 'in_arrears') return `The current period ends now and is billed as usual. A new ${period} billing period starts now and is billed at its end.`
+    return `The current period ends now, and a new ${period} billing period starts.`
+  }
   if (timing === 'in_advance') return 'The price difference for the rest of the period is charged or credited now.'
   if (timing === 'in_arrears') return 'The new price applies from now. The period is billed at its end, each part at the plan in effect then.'
   return 'The new price applies from now.'

@@ -520,12 +520,13 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// invoices stuck on provider_not_configured / provider_auth.
 	tenantStripeSvc.SetStuckRetrier(invoiceSvc)
 	invoiceH := invoice.NewHandler(invoiceSvc, customerStore, settingsStore, invoice.HandlerDeps{
-		CreditNotes:     &creditNoteListerAdapter{svc: creditNoteSvc},
-		Charger:         stripeAdapter,
-		PaymentSetups:   paymentSetupStore,
-		Dunning:         dunningSvc,
-		DunningTimeline: &dunningTimelineAdapter{store: dunningStore},
-		RefundIssuer:    &refundIssuerAdapter{svc: creditNoteSvc},
+		CreditNotes:       &creditNoteListerAdapter{svc: creditNoteSvc},
+		IssuedCreditNotes: &creditNoteListerAdapter{svc: creditNoteSvc},
+		Charger:           stripeAdapter,
+		PaymentSetups:     paymentSetupStore,
+		Dunning:           dunningSvc,
+		DunningTimeline:   &dunningTimelineAdapter{store: dunningStore},
+		RefundIssuer:      &refundIssuerAdapter{svc: creditNoteSvc},
 	})
 	// Token service for public payment update links. Used by the
 	// no-PM-at-finalize email (noPaymentMethodNotifierAdapter) and

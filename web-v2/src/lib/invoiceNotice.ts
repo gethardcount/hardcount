@@ -91,3 +91,28 @@ export function messageLines(message: string | undefined | null): string[] {
 export function stripePaymentUrl(paymentIntentId: string, livemode: boolean): string {
   return `https://dashboard.stripe.com/${livemode ? '' : 'test/'}payments/${encodeURIComponent(paymentIntentId)}`
 }
+
+// What finalizing a draft does, for the confirmation before it (#1109). It
+// follows the server: invoice.Service.Finalize issues the invoice (a manual
+// one gets its tax worked out first), and the finalize route then collects it
+// at once through billing.CollectInvoice: the customer's credit balance first,
+// then the card on file, or with no card an email asking for one.
+//   - hasCard: whether the customer has a default card; undefined while the
+//     page has not loaded it.
+//   - hasEmail: whether the customer has an email address.
+//   - taxAtFinalize: a manual invoice, whose tax is worked out at finalize.
+export function finalizeConfirmLines(o: { hasCard: boolean | undefined; hasEmail: boolean; taxAtFinalize: boolean }): string[] {
+  const lines = ["The invoice is issued. You can't edit it afterwards, and the only way to cancel it is to void it."]
+  if (o.taxAtFinalize) lines.push('Tax is worked out now, so the total may change.')
+  const collect = "Velox then collects payment right away. It uses the customer's credit balance first."
+  if (o.hasCard === true) {
+    lines.push(`${collect} If anything is left to pay, it charges their card on file.`)
+  } else if (o.hasCard === false) {
+    lines.push(o.hasEmail
+      ? `${collect} The customer has no card on file, so if anything is left to pay, Velox emails them a link to add one.`
+      : `${collect} The customer has no card on file and no email address, so nothing is charged.`)
+  } else {
+    lines.push(`${collect} If anything is left to pay, it charges their card on file, or emails them a link to add one.`)
+  }
+  return lines
+}

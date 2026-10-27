@@ -277,6 +277,12 @@ func (a *creditNoteListerAdapter) List(ctx context.Context, tenantID, invoiceID 
 	})
 }
 
+// ListIssued is every issued credit note on the invoice, unpaged, for the
+// invoice PDF (dashboard download, email and hosted page).
+func (a *creditNoteListerAdapter) ListIssued(ctx context.Context, tenantID, invoiceID string) ([]domain.CreditNote, error) {
+	return a.svc.ListIssuedForInvoice(ctx, tenantID, invoiceID)
+}
+
 // refundIssuerAdapter bridges creditnote.Service → invoice.RefundIssuer.
 // Translates the handler-facing invoice.RefundInput to the creditnote form;
 // both types are near-identical by design so the handler doesn't have to

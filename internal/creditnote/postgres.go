@@ -500,6 +500,38 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.C
 	return notes, rows.Err()
 }
 
+// ListIssuedByInvoice reads every issued credit note on the invoice in one
+// RLS-scoped query, newest first as List orders them. No LIMIT: the invoice
+// PDF is a customer document, and a row it leaves out makes its rows stop
+// adding up to Amount Due. List stays capped for the screens that page.
+func (s *PostgresStore) ListIssuedByInvoice(ctx context.Context, tenantID, invoiceID string) ([]domain.CreditNote, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer postgres.Rollback(tx)
+
+	rows, err := tx.QueryContext(ctx, `SELECT `+cnReadCols+` FROM credit_notes
+		WHERE invoice_id = $1 AND status = $2
+		ORDER BY `+creditNoteOrderBy("", ""), invoiceID, domain.CreditNoteIssued)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var notes []domain.CreditNote
+	for rows.Next() {
+		var cn domain.CreditNote
+		var metaJSON []byte
+		if err := rows.Scan(s.cnScanDest(&cn, &metaJSON)...); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal(metaJSON, &cn.Metadata)
+		notes = append(notes, cn)
+	}
+	return notes, rows.Err()
+}
+
 // InvoiceSums adds up every credit note on the invoice in one RLS-scoped
 // query (tenant and mode). No LIMIT: a sum over a page of notes is short.
 // A sum past int64 fails the cast instead of wrapping.

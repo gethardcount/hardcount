@@ -34,7 +34,14 @@ interface Sub extends Subscription {
 }
 interface ItemChange {
   item: Item
-  proration?: { type: 'invoice' | 'credit' | 'adjustment'; amount_cents: number; invoice_id?: string }
+  proration?: {
+    type: 'invoice' | 'credit' | 'adjustment'
+    amount_cents: number
+    invoice_id?: string
+    credited_to_balance_cents: number
+    reduced_open_invoices_cents: number
+  }
+  new_period_invoice?: { id: string; invoice_number: string; total_amount_cents: number; currency: string }
 }
 interface Preview {
   lines: { description: string; amount_cents: number }[]
@@ -51,13 +58,13 @@ async function subscriptionInvoices(id: string): Promise<Invoice[]> {
 
 // A monthly USD plan whose base fee is billed at the start of each period, so
 // a change in the middle of one is charged or credited at once.
-function planBilledInAdvance(baseCents: number): Promise<Plan> {
+function planBilledInAdvance(baseCents: number, interval: 'monthly' | 'yearly' = 'monthly'): Promise<Plan> {
   const id = uniq()
   return api<Plan>('POST', '/plans', {
     code: `e2e-adv-${id}`,
     name: `E2E Advance ${id}`,
     currency: 'USD',
-    billing_interval: 'monthly',
+    billing_interval: interval,
     base_amount_cents: baseCents,
     base_bill_timing: 'in_advance',
   })
@@ -203,6 +210,88 @@ test('change plan now: the toast and the proration invoice match the API; a chan
   expect(cleared.map(i => [i.plan_id, i.pending_plan_id ?? null, i.pending_plan_effective_at ?? null])).toEqual([[bigger.id, null, null]])
   await expect(row).not.toContainText(small.name)
   await expect(row.getByRole('button', { name: 'Cancel', exact: true })).toHaveCount(0)
+})
+
+// #1280: a change now to a plan with another billing interval is not a price
+// difference for the rest of the period. A new period starts and is invoiced
+// at once, so the dialog says that, and the toast names that invoice and its
+// total as the API returned them.
+test('change plan now to a yearly plan: the dialog says a new period starts, and the toast names its invoice', async ({ page }) => {
+  const monthly = await planBilledInAdvance(4900)
+  const yearly = await planBilledInAdvance(49000, 'yearly')
+  const clock = await createClock()
+  const customer = await createCustomer(clock.id)
+  const subscription = await createSubscription(customer.id, monthly.id)
+  const [first] = await invoicesFor(customer.id)
+  await api('POST', `/invoices/${first.id}/record-payment`, { note: 'E2E paid outside Stripe' })
+  await advanceDays(clock, 10)
+
+  await page.goto(`/subscriptions/${subscription.id}`)
+  const items = itemsCard(page)
+  const dialog = page.getByRole('dialog', { name: 'Change plan' })
+  await items.getByRole('button', { name: 'Change plan', exact: true }).click()
+  await dialog.getByRole('button', { name: 'Select a plan...' }).click()
+  await page.getByRole('option', { name: new RegExp(yearly.code) }).click()
+  await dialog.getByRole('checkbox', { name: /^Change now/ }).check()
+  await expect(dialog).toContainText('A new yearly billing period starts now and is invoiced now on the new plan, with any usage so far. The unused part of the current period is credited.')
+  await expect(dialog).not.toContainText('price difference')
+
+  const changing = apiCall(page, 'PATCH', /\/items\/[^/]+$/)
+  await dialog.getByRole('button', { name: 'Change plan', exact: true }).click()
+  const res = await changing
+  expect(res.ok()).toBe(true)
+  const change = (await res.json()) as ItemChange
+  expect(change.proration).toBeUndefined()
+  const np = change.new_period_invoice!
+  expect(np, 'the swap names the invoice it created').toBeTruthy()
+  const { invoice } = await api<{ invoice: Invoice }>('GET', `/invoices/${np.id}`)
+  expect([invoice.invoice_number, invoice.total_amount_cents]).toEqual([np.invoice_number, np.total_amount_cents])
+  await expect(toasts(page).getByText(`A new billing period started. Invoice ${np.invoice_number} for ${usd(np.total_amount_cents)} was created for it.`, { exact: true })).toBeVisible()
+  await expect(dialog).toBeHidden()
+  expect((await getSub(subscription.id)).items.map(i => i.plan_id)).toEqual([yearly.id])
+})
+
+// #1280: a decrease whose credit went partly to the balance (the paid first
+// invoice) and partly off the open upgrade invoice names each part. It used
+// to say the whole credit went to the balance.
+test('a seat decrease that credits a paid and an open invoice says where each part went', async ({ page }) => {
+  const seat = await planBilledInAdvance(1000)
+  const clock = await createClock()
+  const customer = await createCustomer(clock.id)
+  const id = uniq()
+  const subscription = await api<Sub>('POST', '/subscriptions', {
+    code: `e2e-seats-${id}`, display_name: `E2E Seats ${id}`, customer_id: customer.id,
+    items: [{ plan_id: seat.id, quantity: 5 }], billing_time: 'anniversary',
+  })
+  const [first] = await invoicesFor(customer.id)
+  await api('POST', `/invoices/${first.id}/record-payment`, { note: 'E2E paid outside Stripe' })
+  await advanceDays(clock, 10)
+  // 5 → 8 seats: an upgrade invoice, left open (the customer has no card).
+  const itemId = (await getSub(subscription.id)).items[0].id
+  const up = await api<ItemChange>('PATCH', `/subscriptions/${subscription.id}/items/${itemId}`, { quantity: 8 })
+  expect(up.proration?.type).toBe('invoice')
+  await advanceDays(await api<TestClock>('GET', `/test-clocks/${clock.id}`), 5)
+
+  await page.goto(`/subscriptions/${subscription.id}`)
+  await itemsCard(page).getByRole('button', { name: 'Change quantity' }).click()
+  const quantity = page.getByRole('dialog', { name: 'Change quantity' })
+  await quantity.getByLabel('Quantity').fill('3')
+  const changing = apiCall(page, 'PATCH', /\/items\/[^/]+$/)
+  await quantity.getByRole('button', { name: 'Save' }).click()
+  const res = await changing
+  expect(res.ok()).toBe(true)
+  const p = ((await res.json()) as ItemChange).proration!
+  expect(p.type).toBe('credit')
+  expect(p.credited_to_balance_cents).toBeGreaterThan(0)
+  expect(p.reduced_open_invoices_cents).toBeGreaterThan(0)
+  expect(p.credited_to_balance_cents + p.reduced_open_invoices_cents).toBe(p.amount_cents)
+  await expect(toasts(page).getByText(
+    `${usd(p.credited_to_balance_cents)} credited to customer balance, and ${usd(p.reduced_open_invoices_cents)} taken off open invoices`,
+    { exact: true },
+  )).toBeVisible()
+  // The parts are what happened: the open upgrade invoice owes less by its part.
+  const { invoice: upgrade } = await api<{ invoice: Invoice }>('GET', `/invoices/${up.proration!.invoice_id}`)
+  expect(upgrade.amount_due_cents).toBe(up.proration!.amount_cents - p.reduced_open_invoices_cents)
 })
 
 test('cancel at period end shows its date and can be undone; cancel now needs CANCEL typed, reads "Ended" and bills the days used', async ({ page }) => {

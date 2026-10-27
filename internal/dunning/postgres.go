@@ -121,11 +121,20 @@ func (s *PostgresStore) ListPolicies(ctx context.Context, tenantID string) ([]do
 }
 
 // DeletePolicy removes a policy. Refuses to delete the default policy
-// (operator must promote another policy first); also refuses when any
+// (operator must promote another policy first); refuses when any
 // customer has an explicit dunning_policy_id pointing at it (operator
-// reassigns those customers first). The application-layer guards are
-// the primary defense; the FK on customers.dunning_policy_id ON DELETE
-// SET NULL is belt-and-suspenders only.
+// reassigns those customers first); and refuses once the policy has run
+// on an invoice, because each run keeps pointing at the policy it ran
+// under (invoice_dunning_runs.policy_id, ON DELETE RESTRICT). Without that
+// last check the database refused the delete and the API answered 500
+// (#1215). The application-layer guards are the primary defense; the FK
+// on customers.dunning_policy_id ON DELETE SET NULL is belt-and-suspenders
+// only.
+//
+// The policy row is locked first. A run being created on it holds a key
+// share lock on the row until it commits, so the run count below either
+// sees that run or the run waits for this delete and then fails its own
+// foreign-key check.
 func (s *PostgresStore) DeletePolicy(ctx context.Context, tenantID, id string) error {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -134,7 +143,7 @@ func (s *PostgresStore) DeletePolicy(ctx context.Context, tenantID, id string) e
 	defer postgres.Rollback(tx)
 
 	var isDefault bool
-	if err := tx.QueryRowContext(ctx, `SELECT is_default FROM dunning_policies WHERE id = $1`, id).Scan(&isDefault); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT is_default FROM dunning_policies WHERE id = $1 FOR UPDATE`, id).Scan(&isDefault); err != nil {
 		if err == sql.ErrNoRows {
 			return errs.ErrNotFound
 		}
@@ -149,6 +158,13 @@ func (s *PostgresStore) DeletePolicy(ctx context.Context, tenantID, id string) e
 	}
 	if assigned > 0 {
 		return errs.InvalidState(fmt.Sprintf("cannot delete policy — %d customer(s) still assigned; reassign them first", assigned))
+	}
+	var ran int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM invoice_dunning_runs WHERE policy_id = $1`, id).Scan(&ran); err != nil {
+		return err
+	}
+	if ran > 0 {
+		return errs.InvalidState(fmt.Sprintf("cannot delete policy — it has run payment retries on %d invoice(s), and their history refers to it", ran))
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM dunning_policies WHERE id = $1`, id); err != nil {
 		return err

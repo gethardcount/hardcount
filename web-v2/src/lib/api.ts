@@ -711,12 +711,27 @@ export interface ProrationDetail {
   // unpaid-source path — NOT a refundable balance credit).
   type: 'invoice' | 'credit' | 'adjustment'
   invoice_id?: string
+  // Where a credit for unused time went: to the customer's balance, or off
+  // what open invoices ask for. They add up to amount_cents for 'credit'
+  // and 'adjustment'; 0 for 'invoice'.
+  credited_to_balance_cents: number
+  reduced_open_invoices_cents: number
+}
+
+// The invoice a change to a plan with another billing interval created for
+// the new period it starts.
+export interface NewPeriodInvoice {
+  id: string
+  invoice_number: string
+  total_amount_cents: number
+  currency: string
 }
 
 export interface ItemChangeResult {
   item: SubscriptionItem
   effective_at: string
   proration?: ProrationDetail
+  new_period_invoice?: NewPeriodInvoice
 }
 
 // SubscriptionItemThreshold is one per-item usage cap on a subscription.

@@ -1374,7 +1374,12 @@ export default function SubscriptionDetailPage() {
             if (res.proration) {
               toast.success(prorationText(res.proration, planById(res.proration.new_plan_id)?.currency))
             } else {
-              const t = planChangeToast(res.item, res.item?.pending_plan_effective_at ? formatDate(res.item.pending_plan_effective_at) : undefined)
+              const np = res.new_period_invoice
+              const t = planChangeToast(
+                res.item,
+                res.item?.pending_plan_effective_at ? formatDate(res.item.pending_plan_effective_at) : undefined,
+                np ? { invoiceNumber: np.invoice_number, amountLabel: formatCents(np.total_amount_cents, np.currency) } : undefined,
+              )
               toast.success(t.title, t.description ? { description: t.description } : undefined)
             }
           }}
@@ -1654,7 +1659,10 @@ function ChangeItemPlanDialog({ subscriptionID, item, plans, existingPlanIDs, on
               <span className="font-medium text-foreground">Change now</span>
               {immediate ? (
                 <p className="text-xs text-muted-foreground mt-1">
-                  {changePlanNowHelper((plans.find(p => p.id === selectedPlan) ?? currentPlan)?.base_bill_timing)}
+                  {changePlanNowHelper(
+                    (plans.find(p => p.id === selectedPlan) ?? currentPlan)?.base_bill_timing,
+                    newIntervalOf(currentPlan, plans.find(p => p.id === selectedPlan)),
+                  )}
                 </p>
               ) : (
                 <p className="text-xs text-muted-foreground mt-1">
@@ -1676,6 +1684,13 @@ function ChangeItemPlanDialog({ subscriptionID, item, plans, existingPlanIDs, on
       </DialogContent>
     </Dialog>
   )
+}
+
+// newIntervalOf is the selected plan's billing interval when it differs from
+// the current plan's (a monthly ↔ yearly swap), else undefined.
+function newIntervalOf(current: Plan | undefined, selected: Plan | undefined): string | undefined {
+  if (!current || !selected || current.billing_interval === selected.billing_interval) return undefined
+  return selected.billing_interval
 }
 
 // ChangeItemQuantityDialog updates a single item's quantity. The backend

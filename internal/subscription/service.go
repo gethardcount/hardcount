@@ -1071,6 +1071,11 @@ type ItemChangeResult struct {
 	Item        domain.SubscriptionItem `json:"item"`
 	EffectiveAt time.Time               `json:"effective_at"`
 	Proration   *ProrationDetail        `json:"proration,omitempty"`
+	// NewPeriodInvoice is the invoice an immediate swap to a plan with
+	// another billing interval wrote for the new period it starts (#1280),
+	// as the swap wrote it. nil for every other change, and for a swap to a
+	// plan billed in arrears, which bills the new period at its end.
+	NewPeriodInvoice *NewPeriodInvoice `json:"new_period_invoice,omitempty"`
 	// OrchestratedCrossAxis is true when UpdateItem went through the
 	// cross-axis (cross-interval or cross-cadence) orchestrator path.
 	// The handler MUST NOT run its legacy handleItemProration when
@@ -1102,6 +1107,15 @@ type ItemChangeResult struct {
 	pricedFrom itemChangeBase
 }
 
+// NewPeriodInvoice names the invoice a cross-interval swap created for the
+// new period, and its total, so the caller can say what was billed.
+type NewPeriodInvoice struct {
+	ID               string `json:"id"`
+	InvoiceNumber    string `json:"invoice_number"`
+	TotalAmountCents int64  `json:"total_amount_cents"`
+	Currency         string `json:"currency"`
+}
+
 // itemChangeBase is a subscription and one of its items, read together under
 // the subscription row lock.
 type itemChangeBase struct {
@@ -1115,12 +1129,20 @@ type ProrationDetail struct {
 	ProrationFactor float64 `json:"proration_factor"`
 	// AmountCents is the money amount of the proration OUTCOME artifact,
 	// gross in every type: the invoice's total including tax ("invoice"),
-	// the gross credited to the balance ("credit"), or the amount_due
-	// relieved on the unpaid source ("adjustment"). The pre-tax net delta
-	// is derivable from the invoice itself (subtotal_cents).
+	// or the whole credit for unused time ("credit" and "adjustment"). The
+	// pre-tax net delta is derivable from the invoice itself
+	// (subtotal_cents).
 	AmountCents int64  `json:"amount_cents"`
-	Type        string `json:"type"` // "invoice", "credit", or "adjustment" (unpaid-source amount_due reduction, ADR-050)
+	Type        string `json:"type"` // "invoice", "credit" (some of it reached the balance), or "adjustment" (all of it reduced open invoices, ADR-050)
 	InvoiceID   string `json:"invoice_id,omitempty"`
+	// CreditedToBalanceCents and ReducedOpenInvoicesCents split a credit
+	// for unused time by where each share went (#1280): to the customer's
+	// balance (a paid invoice, or one whose charge is in flight, which
+	// Issue credits once the charge settles), or off what an open invoice
+	// still asks for. They add up to AmountCents for "credit" and
+	// "adjustment", and are 0 for "invoice". Reporting only.
+	CreditedToBalanceCents   int64 `json:"credited_to_balance_cents"`
+	ReducedOpenInvoicesCents int64 `json:"reduced_open_invoices_cents"`
 	// TaxProvider / TaxCalculationID are internal (not API surface) — they
 	// route the post-commit Stripe Tax transaction creation up to the atomic
 	// caller, which can only commit after its tx is durable. Empty for
@@ -1937,6 +1959,12 @@ func (s *Service) applyCrossIntervalPlanSwapTx(
 		if ok {
 			invCopy := inv
 			res.crossAxisNewInvoice = &invCopy
+			res.NewPeriodInvoice = &NewPeriodInvoice{
+				ID:               inv.ID,
+				InvoiceNumber:    inv.InvoiceNumber,
+				TotalAmountCents: inv.TotalAmountCents,
+				Currency:         inv.Currency,
+			}
 		}
 	}
 	return res, nil

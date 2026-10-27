@@ -8648,15 +8648,49 @@ export interface components {
             proration_factor: number;
             /**
              * Format: int64
-             * @description Gross amount, tax included: the invoice total (`invoice`), the
-             *     amount credited to the balance (`credit`), or the amount due
-             *     removed from the unpaid invoice (`adjustment`).
+             * @description Gross amount, tax included: the invoice total (`invoice`), or
+             *     the whole credit for unused time (`credit` and `adjustment`).
+             *     `credited_to_balance_cents` and `reduced_open_invoices_cents`
+             *     say where the credit went.
              */
             amount_cents: number;
-            /** @enum {string} */
+            /**
+             * @description `invoice`: a proration invoice was created. `credit`: some or
+             *     all of the credit went to the customer's balance. `adjustment`:
+             *     all of it reduced the amount due on open invoices.
+             * @enum {string}
+             */
             type: "invoice" | "credit" | "adjustment";
             /** @description The proration invoice. Present when `type` is `invoice`. */
             invoice_id?: string;
+            /**
+             * Format: int64
+             * @description The part of the credit added to the customer's balance, tax
+             *     included: shares on paid invoices. A share on an invoice whose
+             *     payment is still processing counts here; if that payment fails,
+             *     it reduces the invoice instead. 0 when `type` is `invoice`.
+             */
+            credited_to_balance_cents: number;
+            /**
+             * Format: int64
+             * @description The part of the credit taken off the amount due on open
+             *     invoices, tax included. 0 when `type` is `invoice`.
+             */
+            reduced_open_invoices_cents: number;
+        };
+        /**
+         * @description The invoice an immediate change to a plan with another billing
+         *     interval created for the new period it starts.
+         */
+        SubscriptionNewPeriodInvoice: {
+            id: string;
+            invoice_number: string;
+            /**
+             * Format: int64
+             * @description The invoice total when the change created it, tax included.
+             */
+            total_amount_cents: number;
+            currency: string;
         };
         SubscriptionItemChangeResult: {
             item: components["schemas"]["SubscriptionItem"];
@@ -8666,6 +8700,7 @@ export interface components {
              */
             effective_at: string;
             proration?: components["schemas"]["SubscriptionItemProration"];
+            new_period_invoice?: components["schemas"]["SubscriptionNewPeriodInvoice"];
         };
         SubscriptionTimelineEvent: {
             /**

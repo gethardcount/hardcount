@@ -221,6 +221,10 @@ test('advance a test clock to the renewal and see the invoice', async ({ page })
   await page.goto(`/test-clocks/${clock.id}`)
   await page.getByRole('button', { name: 'Advance', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'Advance clock' })
+  // Until #1276 is fixed, a move bills every due period before it runs
+  // payment retries, so the dialog says how to test a retry policy that
+  // pauses or cancels.
+  await expect(dialog).toContainText('Testing payment retries that pause or cancel a subscription? Move the clock to the last retry first, then on to the next billing date.')
   await dialog.getByRole('button', { name: '+1mo' }).click()
   await dialog.getByRole('button', { name: 'Advance clock' }).click()
   await expect(dialog).toBeHidden()

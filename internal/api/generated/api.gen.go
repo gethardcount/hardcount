@@ -6233,16 +6233,27 @@ type SubscriptionItemChangeResult struct {
 	// Item One priced line of a subscription. It pairs a plan with a quantity.
 	Item SubscriptionItem `json:"item"`
 
+	// NewPeriodInvoice The invoice an immediate change to a plan with another billing
+	// interval created for the new period it starts.
+	NewPeriodInvoice SubscriptionNewPeriodInvoice `json:"new_period_invoice,omitempty"`
+
 	// Proration What Velox did to settle the rest of the period for an item change.
 	Proration SubscriptionItemProration `json:"proration,omitempty"`
 }
 
 // SubscriptionItemProration What Velox did to settle the rest of the period for an item change.
 type SubscriptionItemProration struct {
-	// AmountCents Gross amount, tax included: the invoice total (`invoice`), the
-	// amount credited to the balance (`credit`), or the amount due
-	// removed from the unpaid invoice (`adjustment`).
+	// AmountCents Gross amount, tax included: the invoice total (`invoice`), or
+	// the whole credit for unused time (`credit` and `adjustment`).
+	// `credited_to_balance_cents` and `reduced_open_invoices_cents`
+	// say where the credit went.
 	AmountCents int64 `json:"amount_cents"`
+
+	// CreditedToBalanceCents The part of the credit added to the customer's balance, tax
+	// included: shares on paid invoices. A share on an invoice whose
+	// payment is still processing counts here; if that payment fails,
+	// it reduces the invoice instead. 0 when `type` is `invoice`.
+	CreditedToBalanceCents int64 `json:"credited_to_balance_cents"`
 
 	// InvoiceId The proration invoice. Present when `type` is `invoice`.
 	InvoiceId string `json:"invoice_id,omitempty"`
@@ -6250,11 +6261,21 @@ type SubscriptionItemProration struct {
 	OldPlanId string `json:"old_plan_id"`
 
 	// ProrationFactor Share of the full billing cycle that was left, from 0 to 1.
-	ProrationFactor float64                       `json:"proration_factor"`
-	Type            SubscriptionItemProrationType `json:"type"`
+	ProrationFactor float64 `json:"proration_factor"`
+
+	// ReducedOpenInvoicesCents The part of the credit taken off the amount due on open
+	// invoices, tax included. 0 when `type` is `invoice`.
+	ReducedOpenInvoicesCents int64 `json:"reduced_open_invoices_cents"`
+
+	// Type `invoice`: a proration invoice was created. `credit`: some or
+	// all of the credit went to the customer's balance. `adjustment`:
+	// all of it reduced the amount due on open invoices.
+	Type SubscriptionItemProrationType `json:"type"`
 }
 
-// SubscriptionItemProrationType defines model for SubscriptionItemProration.Type.
+// SubscriptionItemProrationType `invoice`: a proration invoice was created. `credit`: some or
+// all of the credit went to the customer's balance. `adjustment`:
+// all of it reduced the amount due on open invoices.
 type SubscriptionItemProrationType string
 
 // SubscriptionItemThreshold defines model for SubscriptionItemThreshold.
@@ -6263,6 +6284,17 @@ type SubscriptionItemThreshold struct {
 
 	// UsageGte Usage quantity threshold, as a decimal string.
 	UsageGte string `json:"usage_gte"`
+}
+
+// SubscriptionNewPeriodInvoice The invoice an immediate change to a plan with another billing
+// interval created for the new period it starts.
+type SubscriptionNewPeriodInvoice struct {
+	Currency      string `json:"currency"`
+	Id            string `json:"id"`
+	InvoiceNumber string `json:"invoice_number"`
+
+	// TotalAmountCents The invoice total when the change created it, tax included.
+	TotalAmountCents int64 `json:"total_amount_cents"`
 }
 
 // SubscriptionPauseCollection Present on a subscription while collection is paused. New invoices

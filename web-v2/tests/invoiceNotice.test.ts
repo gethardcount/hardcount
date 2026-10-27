@@ -4,6 +4,7 @@
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import {
+  finalizeConfirmLines,
   messageLines,
   pickInvoiceNotice,
   stripePaymentUrl,
@@ -100,4 +101,32 @@ test('written off, no card: the email button needs an address AND a server that 
 test('messageLines keeps all three lines of a no-card commit invoice', () => {
   const msg = 'Card line.\nEmail line.\nUnpaid prepaid credit: amount line.'
   assert.deepEqual(messageLines(msg), ['Card line.', 'Email line.', 'Unpaid prepaid credit: amount line.'])
+})
+
+// #1109: Finalize asks first, and says what it will do for this customer.
+test('the finalize confirmation says what finalizing does', () => {
+  const card = finalizeConfirmLines({ hasCard: true, hasEmail: true, taxAtFinalize: false })
+  assert.match(card[0], /can't edit it afterwards/)
+  assert.match(card[0], /void/)
+  assert.equal(card.length, 2)
+  assert.match(card[1], /credit balance first/)
+  assert.match(card[1], /charges their card on file/)
+  assert.doesNotMatch(card[1], /emails/)
+
+  const noCard = finalizeConfirmLines({ hasCard: false, hasEmail: true, taxAtFinalize: false })
+  assert.match(noCard[1], /no card on file/)
+  assert.match(noCard[1], /emails them a link/)
+  assert.doesNotMatch(noCard[1], /charges/)
+
+  const nowhere = finalizeConfirmLines({ hasCard: false, hasEmail: false, taxAtFinalize: false })
+  assert.match(nowhere[1], /nothing is charged/)
+  assert.doesNotMatch(nowhere[1], /emails/)
+
+  const unknown = finalizeConfirmLines({ hasCard: undefined, hasEmail: true, taxAtFinalize: false })
+  assert.match(unknown[1], /charges their card on file, or emails them a link/)
+
+  // A manual invoice gets its tax at finalize.
+  const manual = finalizeConfirmLines({ hasCard: true, hasEmail: true, taxAtFinalize: true })
+  assert.equal(manual.length, 3)
+  assert.match(manual[1], /Tax is worked out now/)
 })

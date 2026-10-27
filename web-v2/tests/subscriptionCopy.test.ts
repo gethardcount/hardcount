@@ -85,6 +85,26 @@ test('plan change toast: scheduled vs changed now', () => {
   })
   assert.equal(planChangeToast({ pending_plan_id: 'p2' }, undefined).description, 'The new plan starts at the next billing period.')
   assert.deepEqual(planChangeToast({ pending_plan_id: null }, 'ignored'), { title: 'Plan changed' })
+  // #1280: a swap to another interval says which invoice it created and for how much.
+  assert.deepEqual(planChangeToast({ pending_plan_id: null }, undefined, { invoiceNumber: 'VLX-000042', amountLabel: '$300.00' }), {
+    title: 'Plan changed',
+    description: 'A new billing period started. Invoice VLX-000042 for $300.00 was created for it.',
+  })
+})
+
+// #1280: a change now to another billing interval is not a price difference
+// for the rest of the period. A new period starts and is invoiced at once.
+test('a change to another billing interval says a new period starts', () => {
+  const advance = changePlanNowHelper('in_advance', 'yearly')
+  assert.doesNotMatch(advance, /price difference|charged or credited now/)
+  assert.match(advance, /A new yearly billing period starts now and is invoiced now/)
+  assert.match(advance, /unused part of the current period is credited/)
+  assert.match(changePlanNowHelper('in_advance', 'monthly'), /A new monthly billing period/)
+  const arrears = changePlanNowHelper('in_arrears', 'yearly')
+  assert.match(arrears, /current period ends now/)
+  assert.doesNotMatch(arrears, /invoiced now|credited/)
+  // Same interval: unchanged.
+  assert.match(changePlanNowHelper('in_advance', undefined), /charged or credited now/)
 })
 
 test('remove card: only card, default with others left, non-default', () => {

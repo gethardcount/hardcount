@@ -169,9 +169,25 @@ test('a one-off invoice: save a draft from the customer page, add a line, finali
   await expect(page.getByRole('row').filter({ hasText: `E2E support hours ${id}` })).toContainText(usd(added!.amount_cents))
   await expect(figure(page, 'Subtotal')).toContainText(usd(twoLines.invoice.subtotal_cents))
 
+  // Finalize asks first (#1109) and says what will happen: the invoice is
+  // issued for good, its tax is worked out now (a manual invoice), and this
+  // customer, who has no card, is emailed a link to add one. Cancel changes
+  // nothing.
+  await page.getByRole('button', { name: 'Finalize', exact: true }).click()
+  const confirm = page.getByRole('alertdialog', { name: `Finalize invoice ${number}?` })
+  await expect(confirm).toContainText(`${usd(twoLines.invoice.total_amount_cents)} to ${customer.display_name}.`)
+  await expect(confirm).toContainText("You can't edit it afterwards, and the only way to cancel it is to void it.")
+  await expect(confirm).toContainText('Tax is worked out now, so the total may change.')
+  await expect(confirm).toContainText('The customer has no card on file, so if anything is left to pay, Velox emails them a link to add one.')
+  await confirm.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(confirm).toBeHidden()
+  expect((await getInvoice(draft.invoice.id)).invoice.status).toBe('draft')
+
   // Finalize: the API issues it; the page drops the draft mark, reads Open,
   // and shows the issue and due dates the API set.
   await page.getByRole('button', { name: 'Finalize', exact: true }).click()
+  await confirm.getByRole('button', { name: 'Finalize', exact: true }).click()
+  await expect(confirm).toBeHidden()
   await expect(page.getByText(`Invoice ${number} finalized`)).toBeVisible()
   const issued = (await getInvoice(draft.invoice.id)).invoice
   expect(issued.status).toBe('finalized')

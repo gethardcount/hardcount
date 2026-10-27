@@ -8,6 +8,11 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * `invoice`: a proration invoice was created. `credit`: some or
+ * all of the credit went to the customer's balance. `adjustment`:
+ * all of it reduced the amount due on open invoices.
+ */
 export type SubscriptionItemProrationType = typeof SubscriptionItemProrationType[keyof typeof SubscriptionItemProrationType];
 
 

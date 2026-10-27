@@ -2772,20 +2772,27 @@ func (h *Handler) creditUnusedTime(ctx context.Context, tenantID string, sub dom
 	// flight), "adjustment" when every share only reduces what an open invoice
 	// asks for.
 	detail.Type = "adjustment"
-	var gross int64
+	var gross, toBalance, offOpen int64
 	for _, sh := range shares {
 		var ok bool
 		if gross, ok = money.Add(gross, sh.GrossCents); !ok {
 			return nil, fmt.Errorf("credit for unused time: sum of credit shares: %w", domain.ErrAmountOverflow)
 		}
+		part := &offOpen
 		if sh.ToBalance {
 			detail.Type = "credit"
+			part = &toBalance
+		}
+		if *part, ok = money.Add(*part, sh.GrossCents); !ok {
+			return nil, fmt.Errorf("credit for unused time: sum of credit shares: %w", domain.ErrAmountOverflow)
 		}
 	}
 	if len(shares) == 0 {
 		detail.Type = "credit" // nothing placed: the invoices had no room left
 	}
 	detail.AmountCents = gross
+	detail.CreditedToBalanceCents = toBalance
+	detail.ReducedOpenInvoicesCents = offOpen
 	detail.UncreditedCents = unplaced
 	detail.ClawbackPieces = shares
 	detail.ClawbackReason = clawbackReason(spec.changeType)

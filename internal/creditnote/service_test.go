@@ -195,6 +195,17 @@ func (m *memStore) List(_ context.Context, filter ListFilter) ([]domain.CreditNo
 	return result, nil
 }
 
+// ListIssuedByInvoice mirrors the store's filter over the double's notes.
+func (m *memStore) ListIssuedByInvoice(_ context.Context, tenantID, invoiceID string) ([]domain.CreditNote, error) {
+	var result []domain.CreditNote
+	for _, cn := range m.notes {
+		if cn.TenantID == tenantID && cn.InvoiceID == invoiceID && cn.Status == domain.CreditNoteIssued {
+			result = append(result, cn)
+		}
+	}
+	return result, nil
+}
+
 // InvoiceSums mirrors the store's filters over the double's notes. The
 // filters themselves are checked against Postgres in
 // invoice_sums_differential_integration_test.go.

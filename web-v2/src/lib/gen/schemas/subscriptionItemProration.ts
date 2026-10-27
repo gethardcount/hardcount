@@ -18,12 +18,30 @@ export interface SubscriptionItemProration {
   /** Share of the full billing cycle that was left, from 0 to 1. */
   proration_factor: number;
   /**
-     * Gross amount, tax included: the invoice total (`invoice`), the
-     * amount credited to the balance (`credit`), or the amount due
-     * removed from the unpaid invoice (`adjustment`).
+     * Gross amount, tax included: the invoice total (`invoice`), or
+     * the whole credit for unused time (`credit` and `adjustment`).
+     * `credited_to_balance_cents` and `reduced_open_invoices_cents`
+     * say where the credit went.
      */
   amount_cents: number;
+  /**
+     * `invoice`: a proration invoice was created. `credit`: some or
+     * all of the credit went to the customer's balance. `adjustment`:
+     * all of it reduced the amount due on open invoices.
+     */
   type: SubscriptionItemProrationType;
   /** The proration invoice. Present when `type` is `invoice`. */
   invoice_id?: string;
+  /**
+     * The part of the credit added to the customer's balance, tax
+     * included: shares on paid invoices. A share on an invoice whose
+     * payment is still processing counts here; if that payment fails,
+     * it reduces the invoice instead. 0 when `type` is `invoice`.
+     */
+  credited_to_balance_cents: number;
+  /**
+     * The part of the credit taken off the amount due on open
+     * invoices, tax included. 0 when `type` is `invoice`.
+     */
+  reduced_open_invoices_cents: number;
 }

@@ -194,9 +194,19 @@ test('At risk shows every currency with runs, not the default-only figure', () =
 
 test('proration toasts use the subscription currency', () => {
   setActiveCurrency('CAD')
-  assert.equal(prorationText({ type: 'invoice', amount_cents: 1200 }, 'USD'), 'Proration invoice created for $12.00')
-  assert.equal(prorationText({ type: 'adjustment', amount_cents: -1200 }, 'EUR'), 'Open invoice reduced by €12.00')
-  assert.equal(prorationText({ type: 'credit', amount_cents: -1200 }, 'GBP'), '£12.00 credited to customer balance')
+  assert.equal(prorationText({ type: 'invoice', amount_cents: 1200, credited_to_balance_cents: 0, reduced_open_invoices_cents: 0 }, 'USD'), 'Proration invoice created for $12.00')
+  assert.equal(prorationText({ type: 'adjustment', amount_cents: -1200, credited_to_balance_cents: 0, reduced_open_invoices_cents: 1200 }, 'EUR'), 'Open invoice reduced by €12.00')
+  assert.equal(prorationText({ type: 'credit', amount_cents: -1200, credited_to_balance_cents: 1200, reduced_open_invoices_cents: 0 }, 'GBP'), '£12.00 credited to customer balance')
+})
+
+// #1280: a decrease whose credit went partly to the balance (paid invoices)
+// and partly off an open invoice names each part. It used to say the whole
+// $16.67 was credited to the balance.
+test('a credit that went two ways names each part', () => {
+  assert.equal(
+    prorationText({ type: 'credit', amount_cents: 1667, credited_to_balance_cents: 167, reduced_open_invoices_cents: 1500 }, 'USD'),
+    '$1.67 credited to customer balance, and $15.00 taken off open invoices',
+  )
 })
 
 // The Home revenue chart's Y axis wrote a literal "$": a GBP workspace read
