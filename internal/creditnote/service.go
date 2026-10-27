@@ -1434,20 +1434,26 @@ func (s *Service) CreateRefund(ctx context.Context, tenantID string, input Refun
 		return domain.CreditNote{}, errs.InvalidState("invoice was paid outside Stripe — there is no card to refund; issue a credit note allocated to out_of_band_amount_cents instead")
 	}
 
-	// Default amount to the remaining refundable balance. Mirrors the
-	// Service.Create cap so the caller gets the same error if they ask for
-	// more than is left, but lets them omit amount_cents entirely for the
-	// common "refund everything" case.
+	// No amount: refund the most Create's two caps allow, what was paid by
+	// card and not yet refunded, but no more than the invoice can still be
+	// credited (a note to the customer's balance or settled outside Stripe
+	// uses up part of the invoice too). Create checks both again under the
+	// invoice lock.
 	amount := input.AmountCents
 	if amount == 0 {
 		sums, err := s.store.InvoiceSums(ctx, tenantID, input.InvoiceID)
 		if err != nil {
 			return domain.CreditNote{}, err
 		}
-		amount = inv.AmountPaidCents - sums.RefundCents
-		if amount <= 0 {
+		refundable := inv.CardRefundableCents(sums.RefundCents)
+		if refundable <= 0 {
 			return domain.CreditNote{}, errs.InvalidState("invoice has already been fully refunded")
 		}
+		creditable := inv.TotalAmountCents - sums.CreditedCents
+		if creditable <= 0 {
+			return domain.CreditNote{}, errs.InvalidState("invoice has already been fully credited")
+		}
+		amount = min(refundable, creditable)
 	}
 	if amount <= 0 {
 		return domain.CreditNote{}, errs.Invalid("amount_cents", "must be greater than 0")

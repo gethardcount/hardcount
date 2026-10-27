@@ -11,7 +11,7 @@ import type { RefundInvoiceBodyReason } from './refundInvoiceBodyReason';
 
 export type RefundInvoiceBody = {
   /**
-     * Amount to refund. 0 or absent refunds the full remaining amount.
+     * Amount to refund. 0 or absent refunds what was paid by card and not yet refunded, up to what is left of the invoice total.
      * @minimum 0
      */
   amount_cents?: number;

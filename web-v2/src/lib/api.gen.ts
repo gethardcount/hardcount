@@ -3832,8 +3832,10 @@ export interface paths {
          *     issues a credit note (a document that reduces what the customer
          *     owes) for the refund, and sends the refund to Stripe.
          *
-         *     Leave out `amount_cents`, or send 0, to refund everything not yet
-         *     refunded. The response is the credit note. Check its
+         *     Leave out `amount_cents`, or send 0, to refund what was paid by card
+         *     and not yet refunded. If other credit notes already cover part of the
+         *     invoice, the refund stops at what is left of the invoice total. The
+         *     response is the credit note. Check its
          *     `refund_status`: if Stripe refused the refund, it is `failed`. If
          *     Stripe gave no clear answer, it is `unknown`: the customer may
          *     already be refunded, so don't refund again in the Stripe Dashboard.
@@ -14371,7 +14373,7 @@ export interface operations {
                 "application/json": {
                     /**
                      * Format: int64
-                     * @description Amount to refund. 0 or absent refunds the full remaining amount.
+                     * @description Amount to refund. 0 or absent refunds what was paid by card and not yet refunded, up to what is left of the invoice total.
                      */
                     amount_cents?: number;
                     /** @enum {string} */

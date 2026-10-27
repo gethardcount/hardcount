@@ -372,3 +372,29 @@ func TestCreateRefund_NoAmount_StopsAtWhatIsLeftToCredit(t *testing.T) {
 		t.Errorf("refunded %d over %d notes, want 9000 over 2", sum, notes)
 	}
 }
+
+// A refund with no amount goes back only to the card: on a 100.00 invoice
+// paid 40.00 by the customer's credit balance and 60.00 by card, it refunds
+// 60.00, though 100.00 is left to credit.
+func TestCreateRefund_NoAmount_StopsAtWhatWasPaidByCard(t *testing.T) {
+	r := newSumsRig(t, "CN Sums Refund Card Part")
+	_, inv := seedInvoiceForCN(t, r.db, r.tenantID, "sumscard", domain.InvoicePaid, domain.PaymentSucceeded, "pi_sums_card")
+	tx, err := r.db.BeginTx(r.ctx, postgres.TxTenant, r.tenantID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.ExecContext(r.ctx, `UPDATE invoices SET amount_paid_cents = 6000, credits_applied_cents = 4000 WHERE id = $1`, inv.ID); err != nil {
+		t.Fatalf("split the payment: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	refund, err := r.svc.CreateRefund(r.ctx, r.tenantID, creditnote.RefundInput{InvoiceID: inv.ID, Reason: "requested_by_customer"})
+	if err != nil {
+		t.Fatalf("CreateRefund with no amount: %v", err)
+	}
+	if refund.RefundAmountCents != 6000 || refund.TotalCents != 6000 {
+		t.Errorf("refund note total %d refund %d, want 6000 each: the part paid by card", refund.TotalCents, refund.RefundAmountCents)
+	}
+}
