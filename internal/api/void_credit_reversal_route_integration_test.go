@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/sagarsuperuser/velox/internal/config"
 	"github.com/sagarsuperuser/velox/internal/credit"
@@ -21,6 +22,7 @@ type voidRig struct {
 	ctx      context.Context
 	call     func(method, path string, req flowReq) flowResp
 	credits  *credit.Service
+	db       *postgres.DB
 	tenantID string
 	custID   string
 }
@@ -37,6 +39,7 @@ func newVoidRig(t *testing.T) *voidRig {
 		t:        t,
 		ctx:      postgres.WithLivemode(context.Background(), false),
 		credits:  credit.NewService(credit.NewPostgresStore(db)),
+		db:       db,
 		tenantID: tenantID,
 	}
 	r.call = func(method, path string, req flowReq) flowResp {
@@ -111,14 +114,16 @@ func TestVoid_ReturnsEveryCreditApplication(t *testing.T) {
 	}
 }
 
-// A credit application racing the void. The void locks the invoice and adds
-// up the applications inside that lock, so an application either commits
-// before the lock and is handed back, or waits and then finds the invoice
-// voided and draws nothing. Either way the customer ends with all of the
-// credit. Each round runs both at once on a new invoice.
+// A credit application racing the void, with the order forced. A test
+// transaction holds the invoice row; the void queues on it first, then the
+// application. When the test lets go, the void runs first. The application
+// must wait for the void and then find the invoice voided and draw nothing:
+// it locks the invoice before it writes a usage row. Were it to write its
+// usage row first, the void's sum would miss that row, and the customer would
+// end short by what it drew. Each round uses a new invoice.
 func TestVoid_RacingCreditApplication_ReturnsWhatWasDrawn(t *testing.T) {
 	skipShort(t)
-	const rounds = 8
+	const rounds = 3
 	r := newVoidRig(t)
 	var held int64
 	for round := range rounds {
@@ -132,30 +137,64 @@ func TestVoid_RacingCreditApplication_ReturnsWhatWasDrawn(t *testing.T) {
 		r.grant(25)
 		held += 35
 
+		gate, err := r.db.BeginTx(r.ctx, postgres.TxTenant, r.tenantID)
+		if err != nil {
+			t.Fatalf("round %d: begin gate: %v", round, err)
+		}
+		if _, err := gate.ExecContext(r.ctx, `SELECT 1 FROM invoices WHERE id = $1 FOR UPDATE`, invoiceID); err != nil {
+			postgres.Rollback(gate)
+			t.Fatalf("round %d: hold the invoice: %v", round, err)
+		}
+
 		var wg sync.WaitGroup
-		start := make(chan struct{})
+		var voided flowResp
 		var drawn int64
 		var applyErr error
-		var voided flowResp
-		wg.Add(2)
+		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			<-start
-			drawn, applyErr = r.credits.ApplyToInvoice(r.ctx, r.tenantID, r.custID, invoiceID, 25)
-		}()
-		go func() {
-			defer wg.Done()
-			<-start
 			voided = r.call("POST", "/v1/invoices/"+invoiceID+"/void", flowReq{})
 		}()
-		close(start)
+		r.waitForLockWaiters(1)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			drawn, applyErr = r.credits.ApplyToInvoice(r.ctx, r.tenantID, r.custID, invoiceID, 25)
+		}()
+		r.waitForLockWaiters(2)
+		postgres.Rollback(gate)
 		wg.Wait()
+
 		voided.want(t, 200, "void")
 		if applyErr != nil {
 			t.Fatalf("round %d: racing application: %v", round, applyErr)
 		}
+		if drawn != 0 {
+			t.Errorf("round %d: the application after the void drew %d, want 0", round, drawn)
+		}
 		if got := r.balance(); got != held {
 			t.Fatalf("round %d: balance after the void = %d, want %d (the racing application drew %d)", round, got, held, drawn)
 		}
+	}
+}
+
+// waitForLockWaiters waits until n sessions of the test database wait on a
+// lock.
+func (r *voidRig) waitForLockWaiters(n int) {
+	r.t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var waiting int
+		if err := r.db.Pool.QueryRowContext(r.ctx, `SELECT count(*) FROM pg_stat_activity
+			WHERE datname = current_database() AND wait_event_type = 'Lock'`).Scan(&waiting); err != nil {
+			r.t.Fatalf("read lock waiters: %v", err)
+		}
+		if waiting >= n {
+			return
+		}
+		if time.Now().After(deadline) {
+			r.t.Fatalf("%d sessions wait on a lock after 10s, want %d", waiting, n)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
