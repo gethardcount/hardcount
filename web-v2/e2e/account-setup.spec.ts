@@ -306,6 +306,11 @@ test('a price override for one customer: the upcoming invoice bills the negotiat
     code: `e2e-deal-${id}`, name: `E2E Deal plan ${id}`, currency: 'USD', billing_interval: 'monthly', base_amount_cents: 0,
     prices: [{ meter_id: meter.id, mode: 'per_unit', unit_amount_cents: '2' }],
   })
+  // A plan the customer is not on: its price is listed after the customer's.
+  await api<PlanDetail>('POST', '/plans', {
+    code: `e2e-deal-other-${id}`, name: `E2E Deal other plan ${id}`, currency: 'USD', billing_interval: 'monthly', base_amount_cents: 0,
+    prices: [{ meter_id: meter.id, mode: 'per_unit', unit_amount_cents: '5' }],
+  })
   const clock = await createClock()
   const customer = await createCustomer(clock.id)
   const subscription = await createSubscription(customer.id, plan.id)
@@ -330,6 +335,9 @@ test('a price override for one customer: the upcoming invoice bills the negotiat
   const add = page.getByRole('dialog', { name: 'Add price override' })
   await add.getByRole('button', { name: 'Select a plan price...' }).click()
   const priceName = `${plan.name} · ${meter.name}`
+  // The prices of the customer's own plans come first, and the form says so.
+  await expect(page.getByRole('option').first()).toHaveText(new RegExp(`^${escapeRegExp(`${priceName} — list $0.02 / call`)}`))
+  await expect(add.getByText("Prices of this customer's plans are listed first.", { exact: true })).toBeVisible()
   await pick(page, plan.name, new RegExp(`^${escapeRegExp(`${priceName} — list $0.02 / call`)}`))
   await add.getByLabel(/^Price per unit/).fill('0.01')
   await expect(add.getByText('List price: $0.02 / call.', { exact: false })).toBeVisible()
@@ -445,6 +453,7 @@ test('install a recipe: the preview lists what it will create, the install creat
   await expect(installed.getByText('Installed', { exact: true })).toBeVisible()
   await installed.getByRole('button', { name: 'View' }).click()
   await expect(dialog.getByText('Installed with these settings', { exact: true })).toBeVisible()
+  await expect(dialog.getByText("Set at install and fixed here. To change them, edit the plan and its prices on the plan's page.", { exact: true })).toBeVisible()
   await expect(dialog.getByLabel('Plan name', { exact: true })).toHaveValue(planName)
   await expect(dialog.getByLabel('Plan name', { exact: true })).toBeDisabled()
   await expect(dialog.getByRole('button', { name: 'Already installed' })).toBeDisabled()

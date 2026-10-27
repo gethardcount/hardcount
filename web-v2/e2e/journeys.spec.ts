@@ -8,6 +8,8 @@ import {
   type Customer, type Invoice, type Plan, type Seed, type Subscription,
 } from './fixtures/seed'
 
+const USAGE_ESTIMATE = "Estimate at each subscription's current prices. Past invoices may differ."
+
 // The few things an operator does most. Each test seeds what it needs through
 // the API, does one job through the screen, and checks that the screen shows
 // what the API holds. The arithmetic behind the numbers is tested in Go.
@@ -716,6 +718,9 @@ test("Margin shows no margin without a provider cost, and each model's margin wi
   await expect(card.getByRole('link', { name: 'Set up provider costs' })).toHaveAttribute('href', '/provider-costs')
   await expect(card.getByText('Provider cost', { exact: true }).locator('..')).toContainText('—')
   await expect(card.getByText('Margin', { exact: true }).locator('..').last()).not.toContainText('%')
+  // The report prices the window at current prices, so the card says it is
+  // an estimate (ADR-130 §10).
+  await expect(card.getByText(USAGE_ESTIMATE)).toBeVisible()
 
   // With a provider cost for the model, its row shows its own margin: the
   // number the server worked out, in the same form as the headline. The rate
@@ -766,6 +771,30 @@ test("Margin shows no margin without a provider cost, and each model's margin wi
   const row = pricedCard.getByRole('row').filter({ hasText: 'claude-haiku-4.5' })
   await expect(row.getByRole('cell').last()).toHaveText(`${(haiku!.margin_bps! / 100).toFixed(1)}%`)
   await expect(pricedCard.getByRole('columnheader', { name: 'Margin' })).toBeVisible()
+})
+
+// The Activity card's Cycle view is the billing period, priced as its
+// invoice will be. A 7, 30 or 90-day view is priced at each subscription's
+// current prices, so it says it is an estimate. That is not a problem: it
+// used to show "Usage may be incomplete" for every such view.
+test("the customer's Activity card says a chosen window is an estimate, not a problem", async ({ page }) => {
+  const { clock, customer } = await subscribedCustomer()
+  await page.goto(`/customers/${customer.id}`)
+  const activity = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Activity', exact: true }) })
+  await expect(activity.getByText('Billed usage', { exact: true })).toBeVisible()
+  await expect(activity.getByText(USAGE_ESTIMATE)).toHaveCount(0)
+
+  await activity.getByRole('tab', { name: '30d' }).click()
+  await expect(activity.getByText(USAGE_ESTIMATE)).toBeVisible()
+  await expect(activity.getByText('Usage may be incomplete')).toHaveCount(0)
+
+  // The API says the same: source "explicit" and no warning.
+  const to = new Date(clock.frozen_time)
+  const from = new Date(to.getTime() - 30 * 86_400_000)
+  const iso = (d: Date) => d.toISOString().replace(/\.\d+Z$/, 'Z')
+  const usage = await api<{ period: { source: string }; warnings: string[] }>(
+    'GET', `/customers/${customer.id}/usage?from=${iso(from)}&to=${iso(to)}`)
+  expect([usage.period.source, usage.warnings]).toEqual(['explicit', []])
 })
 
 test('grant credits from the customer page', async ({ page }) => {

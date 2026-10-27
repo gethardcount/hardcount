@@ -289,10 +289,6 @@ func (s *CustomerUsageService) Get(ctx context.Context, tenantID, customerID str
 			}
 		}
 	}
-	if source == "explicit" && len(activeSubs) > 0 {
-		warnings = append(warnings, "Estimate: usage over a chosen window is priced at each subscription's current-period prices.")
-	}
-
 	meters, w, err := s.composeMeters(ctx, tenantID, meterIDs, rows, rowPlans)
 	if err != nil {
 		return CustomerUsageResult{}, err

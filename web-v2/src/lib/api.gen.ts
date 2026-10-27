@@ -8220,7 +8220,15 @@ export interface components {
                 from: string;
                 /** Format: date-time */
                 to: string;
-                /** @enum {string} */
+                /**
+                 * @description `current_billing_cycle`: no `from` and `to` were sent, and
+                 *     the amounts are what the period's invoices bill.
+                 *     `explicit`: the window you sent. Its amounts are an
+                 *     estimate: each subscription's usage in the window is
+                 *     priced at the prices of its current billing period, so a
+                 *     past window can differ from its invoices.
+                 * @enum {string}
+                 */
                 source: "current_billing_cycle" | "explicit";
             };
             /**
@@ -8245,6 +8253,10 @@ export interface components {
                 /** Format: int64 */
                 amount_cents: number;
             }[];
+            /**
+             * @description Problems found working out this usage, in words, such as usage
+             *     that no price takes or a meter whose usage went below zero.
+             */
             warnings: string[];
             /** @description One entry per UTC day in the period, including days with no usage. */
             buckets: {

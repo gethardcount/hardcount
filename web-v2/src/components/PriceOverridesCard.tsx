@@ -5,6 +5,8 @@ import { api, formatDate, type Meter, type Plan, type PlanPrice, type PriceOverr
 import { priceRate } from '@/lib/priceDisplay'
 import { showApiError } from '@/lib/formErrors'
 import { PriceShapeFields, buildPriceShape, usePriceShape } from '@/components/PriceShapeFields'
+import { useCustomerSubscriptions } from '@/hooks/useCustomerCurrency'
+import { CUSTOMER_PLANS_FIRST_HINT, customerPlanIds, customerPlansFirst } from '@/lib/overridePlans'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -61,6 +63,11 @@ export function PriceOverridesCard({ customerId, readOnly = false }: { customerI
     }
     return out
   }, [plansData, metersData])
+
+  // The plans of the customer's subscriptions: their prices are listed first
+  // in the form (empty until the subscriptions load).
+  const { data: subsData } = useCustomerSubscriptions(customerId)
+  const customerPlans = useMemo(() => customerPlanIds(subsData?.data ?? []), [subsData])
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['price-overrides', customerId] })
@@ -126,6 +133,7 @@ export function PriceOverridesCard({ customerId, readOnly = false }: { customerI
         <CreateOverrideDialog
           customerId={customerId}
           prices={[...prices.values()]}
+          customerPlans={customerPlans}
           existing={overrides}
           onClose={() => setCreating(false)}
           onCreated={() => { setCreating(false); refresh() }}
@@ -143,9 +151,10 @@ export function PriceOverridesCard({ customerId, readOnly = false }: { customerI
   )
 }
 
-function CreateOverrideDialog({ customerId, prices, existing, onClose, onCreated }: {
+function CreateOverrideDialog({ customerId, prices, customerPlans, existing, onClose, onCreated }: {
   customerId: string
   prices: ListedPrice[]
+  customerPlans: Set<string>
   existing: PriceOverride[]
   onClose: () => void
   onCreated: () => void
@@ -160,13 +169,17 @@ function CreateOverrideDialog({ customerId, prices, existing, onClose, onCreated
   const replacing = !!selected && existing.some(o => o.price_id === priceId)
 
   const options = useMemo(() =>
-    [...prices]
-      .sort((a, b) => describe(a).localeCompare(describe(b)))
-      .map(p => ({
-        value: p.price.id,
-        label: `${describe(p)} — list ${listRate(p)}`,
-        keywords: [p.plan.name, p.plan.code, p.meter?.event_name ?? ''],
-      })), [prices])
+    customerPlansFirst(
+      [...prices].sort((a, b) => describe(a).localeCompare(describe(b))),
+      p => p.plan.id,
+      customerPlans,
+    ).map(p => ({
+      value: p.price.id,
+      label: `${describe(p)} — list ${listRate(p)}`,
+      keywords: [p.plan.name, p.plan.code, p.meter?.event_name ?? ''],
+    })), [prices, customerPlans])
+  const someMine = prices.some(p => customerPlans.has(p.plan.id))
+  const someOther = prices.some(p => !customerPlans.has(p.plan.id))
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -208,6 +221,9 @@ function CreateOverrideDialog({ customerId, prices, existing, onClose, onCreated
               emptyMessage="No plan prices yet. Add one on a plan first."
               triggerClassName="w-full"
             />
+            {someMine && someOther && (
+              <p className="text-xs text-muted-foreground">{CUSTOMER_PLANS_FIRST_HINT}</p>
+            )}
             {replacing && (
               <p className="text-xs text-amber-600 dark:text-amber-500">
                 This customer already has an override on this price. Saving replaces it from the next billing period.

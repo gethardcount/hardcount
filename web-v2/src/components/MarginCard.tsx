@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/table'
 import { formatCents, formatDate, getCurrencySymbol } from '@/lib/api'
 import { formatCivilPeriod } from '@/lib/dates'
+import { USAGE_ESTIMATE_NOTE } from '@/lib/activityPeriod'
 import { marginCardView } from '@/lib/actionOutcomes'
 import { formatMarginBps, marginCostNote, marginCostState } from '@/lib/marginCost'
 import {
@@ -122,6 +123,9 @@ export function MarginCard({ customerId, customerTestClockId, currency }: { cust
                 {formatCivilPeriod(marginWindow.from, marginWindow.to, undefined)}
               </p>
             )}
+            {/* The report always prices a window the card sends, so its
+                "Usage billed" is an estimate at current prices (ADR-130 §10). */}
+            <p className="text-xs text-muted-foreground mt-1">{USAGE_ESTIMATE_NOTE}</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <select

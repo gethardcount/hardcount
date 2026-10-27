@@ -4156,7 +4156,14 @@ type CustomerUsage struct {
 	// totals and daily `buckets` cover its own subscription's whole
 	// period, including usage a threshold invoice already billed.
 	Period struct {
-		From   time.Time                 `json:"from"`
+		From time.Time `json:"from"`
+
+		// Source `current_billing_cycle`: no `from` and `to` were sent, and
+		// the amounts are what the period's invoices bill.
+		// `explicit`: the window you sent. Its amounts are an
+		// estimate: each subscription's usage in the window is
+		// priced at the prices of its current billing period, so a
+		// past window can differ from its invoices.
 		Source CustomerUsagePeriodSource `json:"source"`
 		To     time.Time                 `json:"to"`
 	} `json:"period"`
@@ -4178,10 +4185,18 @@ type CustomerUsage struct {
 		AmountCents int64  `json:"amount_cents"`
 		Currency    string `json:"currency"`
 	} `json:"totals"`
+
+	// Warnings Problems found working out this usage, in words, such as usage
+	// that no price takes or a meter whose usage went below zero.
 	Warnings []string `json:"warnings"`
 }
 
-// CustomerUsagePeriodSource defines model for CustomerUsage.Period.Source.
+// CustomerUsagePeriodSource `current_billing_cycle`: no `from` and `to` were sent, and
+// the amounts are what the period's invoices bill.
+// `explicit`: the window you sent. Its amounts are an
+// estimate: each subscription's usage in the window is
+// priced at the prices of its current billing period, so a
+// past window can differ from its invoices.
 type CustomerUsagePeriodSource string
 
 // CustomerUsageMeter defines model for CustomerUsageMeter.

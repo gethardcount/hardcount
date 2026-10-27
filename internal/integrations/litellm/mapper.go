@@ -483,8 +483,8 @@ func MapPayload(p StandardLoggingPayload) (Mapping, error) {
 	if tier, ok := promptTiers[fam.recipeToken]; known && ok {
 		dims[DimContextTier] = tier.of(u)
 	}
-	// Forward useful operator-set metadata into dimensions for
-	// pricing-rule dispatch. We promote `team_id` and `tags`
+	// Forward useful operator-set metadata into dimensions, where a
+	// price's dimension_match can name them. We promote `team_id` and `tags`
 	// specifically because LiteLLM's spend page uses them as the
 	// primary slice axes; everything else stays in the event's
 	// metadata column for audit.

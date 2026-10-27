@@ -4,7 +4,7 @@
 // customer Activity "Daily usage" chart labels.
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { revenueBucketLabel, utcBucketLabel } from '../src/lib/chartLabels.ts'
+import { compactAxisTick, revenueBucketLabel, utcBucketLabel } from '../src/lib/chartLabels.ts'
 
 test('revenue day bucket "2026-10-15" reads Oct 15, not Oct 14', () => {
   assert.equal(revenueBucketLabel('2026-10-15'), 'Oct 15')
@@ -23,4 +23,9 @@ test('usage bucket at UTC midnight Oct 1 reads Oct 1, not Sep 30', () => {
 
 test('an unparseable key is shown as itself', () => {
   assert.equal(revenueBucketLabel('garbage'), 'garbage')
+})
+
+// The Daily usage chart's quantity axis is 40px wide: a tick must fit it.
+test('quantity axis ticks are short: 180000 reads 180K', () => {
+  assert.deepEqual([0, 950, 45000, 135000, 180000, 2_500_000].map(compactAxisTick), ['0', '950', '45K', '135K', '180K', '2.5M'])
 })

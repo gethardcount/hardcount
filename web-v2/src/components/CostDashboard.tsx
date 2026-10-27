@@ -22,7 +22,7 @@ import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts'
 import { api, amountsByCurrencyText, formatCents, formatRate, formatDate } from '@/lib/api'
-import { utcBucketLabel } from '@/lib/chartLabels'
+import { compactAxisTick, utcBucketLabel } from '@/lib/chartLabels'
 import type { CustomerUsage, CustomerUsageMeter, CustomerUsagePrice, Subscription, Invoice, InvoicePreview } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { cycleProgress, rollingWindow, sinceMs, type EffectiveNow } from '@/lib/effectiveNow'
@@ -35,7 +35,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { LoadError } from '@/components/LoadError'
 import { Callout } from '@/components/Callout'
 import { Button } from '@/components/ui/button'
-import { activityCyclePeriodLabel } from '@/lib/activityPeriod'
+import { activityCyclePeriodLabel, usageEstimateNote } from '@/lib/activityPeriod'
 import { UNPRICED_SENTENCE, UNPRICED_TITLE, meterQuantityLine, unpricedLine, unpricedMeters } from '@/lib/unpricedUsage'
 import { previewView } from '@/lib/invoicePreview'
 import { invoicePreviewNotes } from '@/lib/invoicePreviewNotes'
@@ -426,6 +426,7 @@ function ActivitySection({ customerId, customerTestClockId, currency }: { custom
   // below show each quantity with its unit.
   const zeroCurrency = data?.totals[0]?.currency ?? currency
   const totalText = data ? (amountsByCurrencyText(data.totals) ?? (zeroCurrency ? formatCents(0, zeroCurrency) : '—')) : ''
+  const estimateNote = data ? usageEstimateNote(data.period) : null
 
   return (
     <section>
@@ -482,6 +483,9 @@ function ActivitySection({ customerId, customerTestClockId, currency }: { custom
             <CardContent className="px-5 py-4">
               <p className="text-xs uppercase tracking-wide text-muted-foreground">Billed usage</p>
               <p className="text-2xl font-semibold tabular-nums mt-1">{totalText}</p>
+              {estimateNote && (
+                <p className="text-xs text-muted-foreground mt-1">{estimateNote}</p>
+              )}
               {latestAt && latestHref && (
                 <p className="text-xs text-muted-foreground mt-2">
                   No usage in this window. Latest usage: {formatDate(latestAt)}.{' '}
@@ -612,6 +616,7 @@ function UsageChart({ usage }: { usage: CustomerUsage }) {
               tickLine={false}
               axisLine={false}
               width={40}
+              tickFormatter={compactAxisTick}
             />
             <Tooltip
               contentStyle={{

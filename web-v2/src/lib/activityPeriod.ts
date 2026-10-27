@@ -22,3 +22,14 @@ export function activityCyclePeriodLabel(
   if (period.source !== 'current_billing_cycle') return null
   return formatCivilPeriod(period.from, period.to, timezone) || null
 }
+
+// A window the operator chose (source "explicit": the Activity card's 7d,
+// 30d and 90d, and every Margin card window) is priced at each
+// subscription's current prices, not at the prices each past period had
+// (ADR-130 §10). The page says so under the figure. The current billing
+// cycle is exact, so it says nothing.
+export const USAGE_ESTIMATE_NOTE = "Estimate at each subscription's current prices. Past invoices may differ."
+
+export function usageEstimateNote(period: { source: string }): string | null {
+  return period.source === 'explicit' ? USAGE_ESTIMATE_NOTE : null
+}

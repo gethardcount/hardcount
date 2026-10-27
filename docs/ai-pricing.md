@@ -214,6 +214,20 @@ The meter's aggregation has its own rule: it can change until the meter has
 a usage event, then it is fixed (409 `meter_has_usage`). Held usage does not
 count until it is released. Every price of the meter bills under it.
 
+## Usage on a yearly plan
+
+A subscription has one billing period. On a yearly plan, usage is billed
+once a year, on the invoice at the end of the year.
+
+- **To bill high usage sooner,** set a spend threshold on the subscription
+  (`amount_gte` on `PUT /v1/subscriptions/{id}/billing-thresholds`). When
+  the year's usage reaches it, Velox invoices the usage so far instead of
+  waiting for the end of the year.
+- **To bill usage every month beside a yearly fee,** give the customer two
+  subscriptions: one on a yearly plan with the fee and no prices, and one
+  on a monthly plan with the usage prices. The two plans share no meter, so
+  Velox allows both.
+
 ## Price a Claude model Velox does not know
 
 A Claude name Velox does not know keeps its own name in `model`, such as

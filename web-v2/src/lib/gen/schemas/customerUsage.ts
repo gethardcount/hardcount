@@ -33,6 +33,10 @@ export interface CustomerUsage {
   meters: CustomerUsageMeter[];
   /** One entry per currency. */
   totals: CustomerUsageTotalsItem[];
+  /**
+     * Problems found working out this usage, in words, such as usage
+     * that no price takes or a meter whose usage went below zero.
+     */
   warnings: string[];
   /** One entry per UTC day in the period, including days with no usage. */
   buckets: CustomerUsageBucketsItem[];

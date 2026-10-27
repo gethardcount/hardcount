@@ -262,7 +262,7 @@ function RecipeDialog({ recipe, onClose }: { recipe: RecipeListItem; onClose: ()
           )}
           {installed && (
             <p className="text-xs text-muted-foreground mt-2">
-              Set at install and fixed here. To change them, edit the plan on its page and the prices on the Pricing page.
+              Set at install and fixed here. To change them, edit the plan and its prices on the plan's page.
             </p>
           )}
         </div>
