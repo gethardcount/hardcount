@@ -54,6 +54,7 @@ alerting tier: what should page someone, and what is only informational.
 | `velox_webhook_outbox_pending` | > 1000 | Webhook dispatcher stuck (−1 = metric query failed) |
 | `increase(velox_email_outbox_dead_lettered_total{mode="live"}[1h])` by `cause` | > 0 | See [Emails not going out](email-outbox-backed-up.md) |
 | `increase(velox_webhook_outbox_dead_lettered_total{mode="live"}[1h])` | > 0 | Webhook events given up on before any delivery was written, so no endpoint gets them. See [Webhook outbox backed up](webhook-outbox-backed-up.md) |
+| `increase(velox_webhook_outbox_enqueue_failures_total[1h])` by `event_type` | > 0 | A webhook event could not be queued, so no endpoint gets it. The ERROR log "failed to enqueue webhook event" names the tenant. See [Webhook outbox backed up](webhook-outbox-backed-up.md) |
 | `velox_creditnote_pending_tax_reversals` | any row older than 24h (alert on age, not presence) | An issued credit note whose tax reversal at the provider is still owed. See the note below the table |
 | `velox_invoice_pending_tax_reversals` | any row older than 24h | A voided `stripe_tax` invoice whose committed tax transaction has no confirmed reversal. See the note below the table |
 | `velox_creditnote_pending_issue_drafts` | sustained growth over days | Clawback drafts not issuing. Alert on growth or age, not presence. See [Clawback drafts waiting](unclear-charge.md#clawback-drafts-waiting) |

@@ -9,6 +9,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+
+	"github.com/sagarsuperuser/velox/internal/domain"
 )
 
 // newMetricsRouter mirrors router.go's mount: Metrics() on the root mux, one
@@ -116,6 +118,20 @@ func TestOutboxDeadLetterSeries_ExistAtZero(t *testing.T) {
 	} {
 		if !have[want] {
 			t.Errorf("series %s is not exported before the first dead letter", want)
+		}
+	}
+}
+
+// Every known event type's enqueue-failure series exists at 0 before any
+// failure, so increase() alerts on the first one. The count comes first:
+// WithLabelValues below would create a missing series.
+func TestWebhookOutboxEnqueueFailures_StartAtZero(t *testing.T) {
+	if got := testutil.CollectAndCount(webhookOutboxEnqueueFailures); got != len(domain.KnownWebhookEventTypes) {
+		t.Fatalf("series: %d, want one per known event type (%d)", got, len(domain.KnownWebhookEventTypes))
+	}
+	for eventType := range domain.KnownWebhookEventTypes {
+		if got := testutil.ToFloat64(webhookOutboxEnqueueFailures.WithLabelValues(eventType)); got != 0 {
+			t.Errorf("%s: %v, want 0", eventType, got)
 		}
 	}
 }
