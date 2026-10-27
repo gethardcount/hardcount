@@ -150,6 +150,12 @@ func (s *Service) CreateSetupSession(ctx context.Context, tenantID, customerID, 
 	}
 	stripeCustomerID, err := s.stripe.EnsureStripeCustomer(ctx, tenantID, customerID)
 	if err != nil {
+		// A refusal (Stripe not connected) reaches the caller as it is, so
+		// its sentence is the whole message.
+		var de *errs.DomainError
+		if errors.As(err, &de) {
+			return "", "", err
+		}
 		return "", "", fmt.Errorf("ensure stripe customer: %w", err)
 	}
 	// Build the default return URL: portalBaseURL + setupCompletePath

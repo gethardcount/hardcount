@@ -2,7 +2,6 @@ package tenant
 
 import (
 	"crypto/subtle"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
@@ -64,6 +63,14 @@ type bootstrapResponse struct {
 func (h *BootstrapHandler) bootstrap(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
+	// The body is optional (the token may come as a Bearer header instead).
+	// It is read before the guards; whether it parses says nothing about
+	// the install or the token.
+	var req BootstrapRequest
+	if !respond.DecodeStrict(w, r, &req, respond.EmptyBodyOK) {
+		return
+	}
+
 	// Guard order (ADR-073): already-bootstrapped FIRST, before any
 	// token comparison. The old token-first order made the 403-vs-409
 	// split a PERPETUAL token-validity oracle on bootstrapped installs;
@@ -89,9 +96,6 @@ func (h *BootstrapHandler) bootstrap(w http.ResponseWriter, r *http.Request) {
 			"bootstrap disabled — set VELOX_BOOTSTRAP_TOKEN env var to enable")
 		return
 	}
-
-	var req BootstrapRequest
-	_ = json.NewDecoder(r.Body).Decode(&req)
 
 	provided := strings.TrimSpace(req.Token)
 	if provided == "" {

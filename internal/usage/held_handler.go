@@ -1,7 +1,6 @@
 package usage
 
 import (
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -83,8 +82,7 @@ type ReleaseHeldRequest struct {
 func (h *Handler) releaseHeld(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	var req ReleaseHeldRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &req) {
 		return
 	}
 	ext := strings.TrimSpace(req.ExternalCustomerID)

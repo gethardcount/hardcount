@@ -3,9 +3,13 @@ package billing
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/sagarsuperuser/velox/internal/api/respond"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/subscription"
@@ -371,8 +375,9 @@ func TestCreatePreview_CustomerNotFound(t *testing.T) {
 }
 
 // TestDecodeCreatePreviewRequest covers the JSON wire-decoding edge
-// cases the handler relies on: empty body is treated as {}, partial
-// period is rejected with field tagging, RFC 3339 must parse.
+// cases the handler relies on: empty body is treated as {}, an unknown key
+// is refused, partial period is rejected with field tagging, RFC 3339 must
+// parse.
 func TestDecodeCreatePreviewRequest(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -386,13 +391,19 @@ func TestDecodeCreatePreviewRequest(t *testing.T) {
 		{name: "with subscription", body: `{"customer_id":"vlx_cus_abc","subscription_id":"vlx_sub_xyz"}`, wantCID: "vlx_cus_abc", wantSID: "vlx_sub_xyz"},
 		{name: "with full period", body: `{"customer_id":"vlx_cus_abc","period":{"from":"2026-04-01T00:00:00Z","to":"2026-05-01T00:00:00Z"}}`, wantCID: "vlx_cus_abc"},
 		{name: "malformed json", body: `{`, wantErr: true},
+		{name: "unknown key", body: `{"customer_id":"vlx_cus_abc","subscription":"vlx_sub_xyz"}`, wantErr: true},
 		{name: "unparseable from", body: `{"customer_id":"vlx_cus_abc","period":{"from":"yesterday","to":"2026-05-01T00:00:00Z"}}`, wantErr: true},
 		{name: "unparseable to", body: `{"customer_id":"vlx_cus_abc","period":{"from":"2026-04-01T00:00:00Z","to":"tomorrow"}}`, wantErr: true},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			req, err := decodeCreatePreviewRequest([]byte(tc.body))
+			var wire CreatePreviewWireRequest
+			err := respond.DecodeBody(httptest.NewRequest(http.MethodPost, "/", strings.NewReader(tc.body)), &wire, respond.EmptyBodyOK)
+			var req CreatePreviewRequest
+			if err == nil {
+				req, err = createPreviewRequestFromWire(wire)
+			}
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("expected error, got %+v", req)

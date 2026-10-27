@@ -15,6 +15,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/audit"
 	veloxauth "github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
@@ -238,6 +239,14 @@ func (h *PublicPaymentHandler) createCheckoutSession(w http.ResponseWriter, r *h
 	// EnsureStripeCustomer is idempotent (short-circuits on the persisted id),
 	// so a replay/retry doesn't mint duplicate Stripe Customers.
 	stripeCustomerID, err := h.ensurer.EnsureStripeCustomer(scopedCtx, token.TenantID, token.CustomerID)
+	if errs.Code(err) == errs.CodeStripeNotConnected {
+		// The seller has no Stripe keys for this mode: a state, not an
+		// outage, so a 409 the page explains (the hosted invoice page's
+		// code for the same state), not a 502. Stripe was never called.
+		respond.Error(w, r, http.StatusConflict, "invalid_request_error", errs.CodeOnlinePaymentUnavailable,
+			"Adding a card online isn't available for this account right now. Please contact your billing administrator.")
+		return
+	}
 	if err != nil {
 		slog.ErrorContext(scopedCtx, "public payment: ensure stripe customer",
 			"customer_id", token.CustomerID, "error", err)

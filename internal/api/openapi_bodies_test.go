@@ -43,9 +43,10 @@ type requestBody struct {
 }
 
 // serverSet is why a field of a type the handler also returns is not in the
-// request schema: the handler decodes the whole type, and the server sets or
-// ignores the field.
-const serverSet = "Read-only. The handler decodes the type it returns, so a body read back from GET is accepted; the server sets or ignores this field."
+// request schema: the handler decodes the whole type, and the server sets the
+// field, so a body that sends it is refused with 422 naming it
+// (respond.ReadOnly).
+const serverSet = "Read-only. The handler decodes the type it returns; the server sets this field, and a body that sends it is refused with 422."
 
 // propertiesRefused is why a usage event decodes `properties`: it was the old
 // name of `dimensions`, and an event that still sends it is refused with 422.
@@ -94,7 +95,7 @@ var requestBodies = map[string]requestBody{
 	"POST /v1/usage-events/backfill":                                    {body: usage.APIEvent{}, undocumented: map[string]string{"properties": propertiesRefused}},
 	"POST /v1/usage-events/held/release":                                {body: usage.ReleaseHeldRequest{}},
 	"POST /v1/usage-events/held/discard":                                {body: usage.DiscardHeldRequest{}},
-	"PUT /v1/provider-costs":                                            {body: domain.ProviderCostRate{}, undocumented: readOnly("id", "tenant_id", "created_at", "updated_at")},
+	"PUT /v1/provider-costs":                                            {body: usage.ProviderCostRequest{}},
 	"POST /v1/invoices":                                                 {body: invoice.CreateInput{}},
 	"POST /v1/invoices/create_preview":                                  {body: billing.CreatePreviewWireRequest{}},
 	"POST /v1/invoices/{id}/send":                                       {body: invoice.SendEmailInput{}},

@@ -2,7 +2,6 @@ package auth
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -56,8 +55,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var input CreateKeyInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &input) {
 		return
 	}
 
@@ -145,11 +143,8 @@ func (h *Handler) rotate(w http.ResponseWriter, r *http.Request) {
 	// Body is optional — POST /rotate with no body defaults to immediate
 	// revocation of the old key. An empty request should not 400.
 	var input RotateKeyInput
-	if r.ContentLength > 0 {
-		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-			respond.BadRequest(w, r, "invalid JSON body")
-			return
-		}
+	if !respond.DecodeStrict(w, r, &input, respond.EmptyBodyOK) {
+		return
 	}
 
 	result, err := h.svc.RotateKey(r.Context(), tenantID, id, input)

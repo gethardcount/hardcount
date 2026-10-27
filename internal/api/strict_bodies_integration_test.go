@@ -278,7 +278,7 @@ func TestSetupSession_StripeNotConnected(t *testing.T) {
 			t.Errorf("POST %s without Stripe: %d %s, want 409 stripe_not_connected", path, res.status, res.raw)
 			continue
 		}
-		if msg := flowStr(res.body, "error", "message"); !strings.Contains(msg, "Stripe is not connected") || !strings.Contains(msg, "Settings") {
+		if msg := flowStr(res.body, "error", "message"); msg != "Stripe is not connected for this mode. Connect it under Settings, then try again." {
 			t.Errorf("POST %s without Stripe: message %q, want it to say Stripe is not connected and where to connect it", path, msg)
 		}
 	}

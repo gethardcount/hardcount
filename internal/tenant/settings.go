@@ -466,8 +466,7 @@ func (h *SettingsHandler) upsert(w http.ResponseWriter, r *http.Request) {
 	before := ts
 	haveBefore := h.auditLogger != nil
 
-	if err := json.NewDecoder(r.Body).Decode(&ts); err != nil {
-		respond.BadRequest(w, r, "invalid JSON")
+	if !respond.DecodeStrict(w, r, &ts, respond.ReadOnly("tenant_id", "created_at", "updated_at")) {
 		return
 	}
 	ts.TenantID = tenantID

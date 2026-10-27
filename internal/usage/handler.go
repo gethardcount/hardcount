@@ -301,8 +301,7 @@ func (h *Handler) ingest(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
 	var evt APIEvent
-	if err := json.NewDecoder(r.Body).Decode(&evt); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &evt) {
 		return
 	}
 
@@ -387,8 +386,7 @@ func (h *Handler) backfill(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
 	var evt APIEvent
-	if err := json.NewDecoder(r.Body).Decode(&evt); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &evt) {
 		return
 	}
 
@@ -580,7 +578,7 @@ func (h *Handler) batchIngest(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
 	var events []APIEvent
-	if err := json.NewDecoder(r.Body).Decode(&events); err != nil {
+	if err := respond.DecodeBody(r, &events); err != nil {
 		// The router caps request bodies via MaxBytesReader; a too-big
 		// batch must read as "split your batch" (413), not as malformed
 		// JSON (400) — the byte cap fires mid-array on valid JSON.
@@ -588,6 +586,12 @@ func (h *Handler) batchIngest(w http.ResponseWriter, r *http.Request) {
 		if errors.As(err, &maxErr) {
 			respond.Error(w, r, http.StatusRequestEntityTooLarge, "invalid_request_error", "batch_too_large",
 				fmt.Sprintf("request body exceeds %d bytes — send smaller batches", maxErr.Limit))
+			return
+		}
+		// An unknown key on any event refuses the whole batch, naming it.
+		var bodyErr *respond.BodyError
+		if errors.As(err, &bodyErr) && bodyErr.Field != "" {
+			respond.WriteBodyError(w, r, err)
 			return
 		}
 		respond.BadRequest(w, r, "expected JSON array of events")

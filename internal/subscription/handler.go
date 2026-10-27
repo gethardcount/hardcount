@@ -789,8 +789,7 @@ func (h *Handler) extendTrial(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
 	var body ExtendTrialInput
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &body) {
 		return
 	}
 	if body.TrialEnd.IsZero() {

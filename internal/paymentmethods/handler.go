@@ -2,7 +2,6 @@ package paymentmethods
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -261,6 +260,11 @@ func (h *Handler) operatorSendSetupEmail(w http.ResponseWriter, r *http.Request)
 		respond.BadRequest(w, r, "missing tenant or customer id")
 		return
 	}
+	// The body first: a refused body must not start the cooldown.
+	var req SendSetupEmailRequest
+	if !respond.DecodeStrict(w, r, &req, respond.EmptyBodyOK) {
+		return
+	}
 	if h.customerLookup == nil || h.emailer == nil {
 		respond.Error(w, r, http.StatusServiceUnavailable, "api_error",
 			"email_unavailable",
@@ -287,10 +291,6 @@ func (h *Handler) operatorSendSetupEmail(w http.ResponseWriter, r *http.Request)
 				"a setup link was sent to this customer recently — wait before sending again")
 			return
 		}
-	}
-	var req SendSetupEmailRequest
-	if r.Body != nil {
-		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
 	note := strings.TrimSpace(req.Note)
 	if len(note) > 2000 {
@@ -375,8 +375,8 @@ func (h *Handler) operatorCreateSetupSession(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	var req SetupSessionRequest
-	if r.Body != nil {
-		_ = json.NewDecoder(r.Body).Decode(&req)
+	if !respond.DecodeStrict(w, r, &req, respond.EmptyBodyOK) {
+		return
 	}
 	url, sessionID, err := h.svc.CreateSetupSession(r.Context(), tenantID, customerID, req.ReturnURL)
 	if err != nil {

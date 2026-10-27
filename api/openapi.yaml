@@ -127,7 +127,13 @@ components:
               type: string
             param:
               type: string
-              description: The request field the error is about. Sent only when the error names one.
+              description: |
+                The request field the error is about. Sent only when the error
+                names one. A request body may hold only the fields its
+                operation lists: a field it does not list, or one the server
+                sets (such as `id`), is refused with 422 and `param` naming
+                it. The Stripe and Postmark webhooks and the LiteLLM callback
+                take their sender's body as it comes.
 
     MemberInvitation:
       type: object
@@ -5866,17 +5872,19 @@ paths:
                 $ref: "#/components/schemas/Error"
         "409":
           description: |
-            `email_not_configured`: this server has no SMTP set up. Nothing
-            was sent and no setup link was created. Like any other call, it
-            starts the one-minute cooldown.
+            Nothing was sent. `email_not_configured`: this server has no SMTP
+            set up, and no setup link was created. `stripe_not_connected`:
+            Stripe is not connected for this mode. Like any other call that
+            gets this far, it starts the one-minute cooldown.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
         "422":
           description: |
-            `note_too_long` (more than 2000 bytes) or
-            `missing_email` (the customer has no email).
+            `note_too_long` (more than 2000 bytes),
+            `missing_email` (the customer has no email), or an unknown
+            field (`param` names it).
           content:
             application/json:
               schema:
@@ -5894,8 +5902,7 @@ paths:
                 $ref: "#/components/schemas/Error"
         "500":
           description: |
-            Stripe is not connected for this mode, or the setup session
-            could not be created. No email was queued.
+            The setup session could not be created. No email was queued.
           content:
             application/json:
               schema:
@@ -5928,8 +5935,6 @@ paths:
         added. The card is saved when Stripe reports the setup succeeded.
         The link is written to the audit log; if the audit row cannot be
         written, no link is returned.
-
-        Fails with 500 when Stripe is not connected for this mode.
       operationId: createCustomerPaymentSetupSession
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -5967,6 +5972,18 @@ paths:
                     description: Stripe Checkout Session ID.
         "404":
           description: Customer not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: "`stripe_not_connected`: Stripe is not connected for this mode. Connect it under Settings."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: The body has an unknown field (`param` names it).
           content:
             application/json:
               schema:
@@ -6398,8 +6415,14 @@ paths:
                 $ref: "#/components/schemas/Error"
         "429":
           description: Rate limited (60/min/IP)
+        "409":
+          description: The seller has not connected Stripe for this mode, so a card cannot be added online. Code `online_payment_unavailable`. The token still works.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "502":
-          description: Stripe is not connected for this mode, or Stripe could not create the session. Code `stripe_error`.
+          description: Stripe could not create the session. Code `stripe_error`.
           content:
             application/json:
               schema:
@@ -9917,7 +9940,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "422":
-          description: Invalid recipient or CC entry
+          description: "`email` is missing or invalid, a CC entry is invalid, or the body has an unknown field (`param` names it)"
 
   /v1/invoices/{id}/line-items:
     post:
@@ -10553,7 +10576,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "422":
-          description: Not issued (draft/voided), or invalid recipient
+          description: "Not issued (draft/voided), `email` is missing or invalid, or the body has an unknown field (`param` names it)"
 
   /v1/credit-notes/{id}:
     get:

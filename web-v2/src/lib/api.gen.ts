@@ -515,8 +515,6 @@ export interface paths {
          *     added. The card is saved when Stripe reports the setup succeeded.
          *     The link is written to the audit log; if the audit row cannot be
          *     written, no link is returned.
-         *
-         *     Fails with 500 when Stripe is not connected for this mode.
          */
         post: operations["createCustomerPaymentSetupSession"];
         delete?: never;
@@ -3505,7 +3503,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description Invalid recipient or CC entry */
+                /** @description `email` is missing or invalid, a CC entry is invalid, or the body has an unknown field (`param` names it) */
                 422: {
                     headers: {
                         [name: string]: unknown;
@@ -3927,7 +3925,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description Not issued (draft/voided), or invalid recipient */
+                /** @description Not issued (draft/voided), `email` is missing or invalid, or the body has an unknown field (`param` names it) */
                 422: {
                     headers: {
                         [name: string]: unknown;
@@ -6806,7 +6804,14 @@ export interface components {
                 code?: string;
                 message?: string;
                 request_id?: string;
-                /** @description The request field the error is about. Sent only when the error names one. */
+                /**
+                 * @description The request field the error is about. Sent only when the error
+                 *     names one. A request body may hold only the fields its
+                 *     operation lists: a field it does not list, or one the server
+                 *     sets (such as `id`), is refused with 422 and `param` naming
+                 *     it. The Stripe and Postmark webhooks and the LiteLLM callback
+                 *     take their sender's body as it comes.
+                 */
                 param?: string;
             };
         };
@@ -10867,9 +10872,10 @@ export interface operations {
                 };
             };
             /**
-             * @description `email_not_configured`: this server has no SMTP set up. Nothing
-             *     was sent and no setup link was created. Like any other call, it
-             *     starts the one-minute cooldown.
+             * @description Nothing was sent. `email_not_configured`: this server has no SMTP
+             *     set up, and no setup link was created. `stripe_not_connected`:
+             *     Stripe is not connected for this mode. Like any other call that
+             *     gets this far, it starts the one-minute cooldown.
              */
             409: {
                 headers: {
@@ -10880,8 +10886,9 @@ export interface operations {
                 };
             };
             /**
-             * @description `note_too_long` (more than 2000 bytes) or
-             *     `missing_email` (the customer has no email).
+             * @description `note_too_long` (more than 2000 bytes),
+             *     `missing_email` (the customer has no email), or an unknown
+             *     field (`param` names it).
              */
             422: {
                 headers: {
@@ -10902,10 +10909,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /**
-             * @description Stripe is not connected for this mode, or the setup session
-             *     could not be created. No email was queued.
-             */
+            /** @description The setup session could not be created. No email was queued. */
             500: {
                 headers: {
                     [name: string]: unknown;
@@ -10985,6 +10989,24 @@ export interface operations {
             };
             /** @description Customer not found. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `stripe_not_connected`: Stripe is not connected for this mode. Connect it under Settings. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The body has an unknown field (`param` names it). */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -11302,6 +11324,15 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description The seller has not connected Stripe for this mode, so a card cannot be added online. Code `online_payment_unavailable`. The token still works. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Rate limited (60/min/IP) */
             429: {
                 headers: {
@@ -11309,7 +11340,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Stripe is not connected for this mode, or Stripe could not create the session. Code `stripe_error`. */
+            /** @description Stripe could not create the session. Code `stripe_error`. */
             502: {
                 headers: {
                     [name: string]: unknown;

@@ -4548,7 +4548,12 @@ type Error struct {
 		Code    string `json:"code,omitempty"`
 		Message string `json:"message,omitempty"`
 
-		// Param The request field the error is about. Sent only when the error names one.
+		// Param The request field the error is about. Sent only when the error
+		// names one. A request body may hold only the fields its
+		// operation lists: a field it does not list, or one the server
+		// sets (such as `id`), is refused with 422 and `param` naming
+		// it. The Stripe and Postmark webhooks and the LiteLLM callback
+		// take their sender's body as it comes.
 		Param     string `json:"param,omitempty"`
 		RequestId string `json:"request_id,omitempty"`
 

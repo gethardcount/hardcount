@@ -2,7 +2,6 @@ package customer
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -238,8 +237,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
 	var input UpdateInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &input) {
 		return
 	}
 
@@ -290,10 +288,11 @@ func (h *Handler) upsertBillingProfile(w http.ResponseWriter, r *http.Request) {
 	customerID := chi.URLParam(r, "id")
 
 	// Strict: a dropped `tax_exempt` would leave tax_status at its default
-	// and tax an exempt customer. Read-only fields from a GET are declared on
-	// the type, so a GET body sent back is still accepted.
+	// and tax an exempt customer. The fields the server sets are refused by
+	// name, not accepted and ignored.
 	var bp domain.CustomerBillingProfile
-	if !respond.DecodeStrict(w, r, &bp) {
+	if !respond.DecodeStrict(w, r, &bp,
+		respond.ReadOnly("customer_id", "tenant_id", "profile_status", "created_at", "updated_at")) {
 		return
 	}
 	bp.CustomerID = customerID

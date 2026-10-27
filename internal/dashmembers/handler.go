@@ -2,7 +2,6 @@ package dashmembers
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"time"
@@ -162,8 +161,7 @@ func (h *Handler) invite(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	tenantID := auth.TenantID(ctx)
 	var req InviteReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &req) {
 		return
 	}
 	inv, err := h.svc.Invite(ctx, tenantID, auth.UserID(ctx), req.Email)
@@ -236,8 +234,7 @@ type AcceptInviteReq struct {
 func (h *Handler) acceptInvite(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var req AcceptInviteReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &req) {
 		return
 	}
 	res, err := h.svc.AcceptInvite(ctx, req.Token, req.Password)

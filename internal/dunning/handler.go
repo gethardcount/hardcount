@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -175,67 +174,68 @@ func (h *Handler) getPolicy(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, r, http.StatusOK, policy)
 }
 
-// decodePolicyBody decodes a policy payload and REFUSES the replaced keys by
-// name: the pre-ADR-112 `final_action`, and the three schedule fields that
-// retry_days replaced (2026-10-23).
-//
-// encoding/json drops unknown fields silently, so a caller still sending
-// `final_action: "cancel_subscription"` would have stored a policy that
-// pauses and never writes off, and one still sending `retry_schedule:
-// ["1h"]` would get retries days apart — a schedule or terminal action they
-// did not choose, applied to real money, with a 200 on the way out.
-// DisallowUnknownFields would be the blunt version and would also reject
-// harmless extra keys.
-func decodePolicyBody(r *http.Request) (domain.DunningPolicy, error) {
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		return domain.DunningPolicy{}, errors.New("invalid JSON body")
-	}
-	var legacy struct {
-		FinalAction      *string          `json:"final_action"`
-		RetrySchedule    *json.RawMessage `json:"retry_schedule"`
-		MaxRetryAttempts *json.RawMessage `json:"max_retry_attempts"`
-		GracePeriodDays  *json.RawMessage `json:"grace_period_days"`
-	}
-	if err := json.Unmarshal(body, &legacy); err == nil {
-		if legacy.FinalAction != nil {
-			return domain.DunningPolicy{}, errs.Invalid("final_action",
-				"final_action is no longer accepted — it decided two separate things. Send final_subscription_action (none|pause|cancel) and final_invoice_action (none|mark_uncollectible) instead")
-		}
-		for _, old := range []struct {
-			field string
-			sent  bool
-		}{
-			{"grace_period_days", legacy.GracePeriodDays != nil},
-			{"retry_schedule", legacy.RetrySchedule != nil},
-			{"max_retry_attempts", legacy.MaxRetryAttempts != nil},
-		} {
-			if field := old.field; old.sent {
-				return domain.DunningPolicy{}, errs.Invalid(field,
-					field+" is no longer accepted. Send retry_days instead: the whole days to wait before each retry, the first counted from the failed payment (or the collection that found no card), for example [3, 4, 7] for retries on day 3, 7 and 14")
-			}
-		}
-	}
-	var policy domain.DunningPolicy
-	if err := json.Unmarshal(body, &policy); err != nil {
+// policyBody is a policy payload: the policy's fields, plus the keys it
+// replaced, declared only so they can be refused by name with what to send
+// instead: the pre-ADR-112 `final_action`, and the three schedule fields
+// that retry_days replaced (2026-10-23). A caller still sending
+// `final_action: "cancel_subscription"` would otherwise store a policy that
+// pauses and never writes off.
+type policyBody struct {
+	domain.DunningPolicy
+	FinalAction      *json.RawMessage `json:"final_action"`
+	RetrySchedule    *json.RawMessage `json:"retry_schedule"`
+	MaxRetryAttempts *json.RawMessage `json:"max_retry_attempts"`
+	GracePeriodDays  *json.RawMessage `json:"grace_period_days"`
+}
+
+// policyReadOnly are the policy fields the server sets: set-default moves
+// is_default, and an edit clears seeded (ADR-123). A body that sends one is
+// refused, naming it.
+var policyReadOnly = respond.ReadOnly("id", "tenant_id", "is_default", "seeded", "created_at", "updated_at")
+
+// decodePolicyBody decodes a policy payload strictly (respond.DecodeBody)
+// and refuses the replaced keys by name. It writes the refusal and returns
+// false; the handler returns on false.
+func decodePolicyBody(w http.ResponseWriter, r *http.Request) (domain.DunningPolicy, bool) {
+	var body policyBody
+	if err := respond.DecodeBody(r, &body, policyReadOnly); err != nil {
 		var typeErr *json.UnmarshalTypeError
-		if errors.As(err, &typeErr) && strings.HasPrefix(typeErr.Field, "retry_days") {
-			return domain.DunningPolicy{}, errs.Invalid("retry_days",
-				"retry_days is a list of whole days, for example [3, 4, 7]")
+		// The field path names the embedded struct: DunningPolicy.retry_days.
+		if errors.As(err, &typeErr) && strings.HasPrefix(strings.TrimPrefix(typeErr.Field, "DunningPolicy."), "retry_days") {
+			respond.ValidationField(w, r, "retry_days", "retry_days is a list of whole days, for example [3, 4, 7]")
+			return domain.DunningPolicy{}, false
 		}
-		return domain.DunningPolicy{}, errors.New("invalid JSON body")
+		respond.WriteBodyError(w, r, err)
+		return domain.DunningPolicy{}, false
 	}
-	return policy, nil
+	if body.FinalAction != nil {
+		respond.ValidationField(w, r, "final_action",
+			"final_action is no longer accepted — it decided two separate things. Send final_subscription_action (none|pause|cancel) and final_invoice_action (none|mark_uncollectible) instead")
+		return domain.DunningPolicy{}, false
+	}
+	for _, old := range []struct {
+		field string
+		sent  bool
+	}{
+		{"grace_period_days", body.GracePeriodDays != nil},
+		{"retry_schedule", body.RetrySchedule != nil},
+		{"max_retry_attempts", body.MaxRetryAttempts != nil},
+	} {
+		if old.sent {
+			respond.ValidationField(w, r, old.field,
+				old.field+" is no longer accepted. Send retry_days instead: the whole days to wait before each retry, the first counted from the failed payment (or the collection that found no card), for example [3, 4, 7] for retries on day 3, 7 and 14")
+			return domain.DunningPolicy{}, false
+		}
+	}
+	return body.DunningPolicy, true
 }
 
 func (h *Handler) createPolicy(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
-	policy, err := decodePolicyBody(r)
-	if err != nil {
-		respond.FromError(w, r, err, "dunning_policy")
+	policy, ok := decodePolicyBody(w, r)
+	if !ok {
 		return
 	}
-	policy.ID = "" // server-assigned
 	result, err := h.svc.UpsertPolicy(r.Context(), tenantID, policy)
 	if err != nil {
 		respond.FromError(w, r, err, "dunning_policy")
@@ -258,9 +258,8 @@ func (h *Handler) createPolicy(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) updatePolicy(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
-	policy, err := decodePolicyBody(r)
-	if err != nil {
-		respond.FromError(w, r, err, "dunning_policy")
+	policy, ok := decodePolicyBody(w, r)
+	if !ok {
 		return
 	}
 	policy.ID = id
@@ -420,8 +419,7 @@ func (h *Handler) resolveRun(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
 	var input ResolveInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &input) {
 		return
 	}
 

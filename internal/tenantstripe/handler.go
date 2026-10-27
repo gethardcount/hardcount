@@ -2,7 +2,6 @@ package tenantstripe
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -57,8 +56,7 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var in ConnectInput
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &in) {
 		return
 	}
 
@@ -118,8 +116,7 @@ func (h *Handler) setWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var in SetWebhookInput
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &in) {
 		return
 	}
 

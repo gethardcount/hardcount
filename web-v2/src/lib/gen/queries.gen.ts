@@ -1765,8 +1765,6 @@ export const getCreateCustomerPaymentSetupSessionUrl = (customerId: string,) => 
  * added. The card is saved when Stripe reports the setup succeeded.
  * The link is written to the audit log; if the audit row cannot be
  * written, no link is returned.
- *
- * Fails with 500 when Stripe is not connected for this mode.
  * @summary Create a link for the customer to add a payment method
  */
 export const createCustomerPaymentSetupSession = async (customerId: string,

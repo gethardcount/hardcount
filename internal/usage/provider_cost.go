@@ -510,11 +510,11 @@ func (h *ProviderCostHandler) list(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, r, http.StatusOK, map[string]any{"data": rates})
 }
 
-// providerCostRequest is the PUT /v1/provider-costs body, decoded strictly:
+// ProviderCostRequest is the PUT /v1/provider-costs body, decoded strictly:
 // an unknown field is a 422 naming it. unit_cost_cents is kept raw so every
 // bad value is a 422 naming it (domain.ParseDecimal), not a 400 for the
 // whole body.
-type providerCostRequest struct {
+type ProviderCostRequest struct {
 	Provider      string          `json:"provider"`
 	Model         string          `json:"model"`
 	TokenType     string          `json:"token_type"`
@@ -544,7 +544,7 @@ func parseUnitCostCents(raw json.RawMessage) (decimal.Decimal, error) {
 
 func (h *ProviderCostHandler) upsert(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
-	var req providerCostRequest
+	var req ProviderCostRequest
 	// Strict, so an old field such as cost_per_token is a 422 naming it,
 	// even beside unit_cost_cents.
 	if !respond.DecodeStrict(w, r, &req) {

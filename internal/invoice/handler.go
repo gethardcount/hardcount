@@ -791,11 +791,8 @@ func (h *Handler) recordOfflinePayment(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
 	var input RecordPaymentInput
-	if r.ContentLength > 0 {
-		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-			respond.BadRequest(w, r, "invalid JSON body")
-			return
-		}
+	if !respond.DecodeStrict(w, r, &input, respond.EmptyBodyOK) {
+		return
 	}
 
 	inv, err := h.svc.RecordOfflinePayment(r.Context(), tenantID, id, input.Note)
@@ -883,8 +880,11 @@ func (h *Handler) sendEmail(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
 	var body SendEmailInput
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Email == "" {
-		respond.BadRequest(w, r, "email is required")
+	if !respond.DecodeStrict(w, r, &body) {
+		return
+	}
+	if body.Email == "" {
+		respond.ValidationField(w, r, "email", "email is required")
 		return
 	}
 	// The To address gets the same check as a customer's stored email.

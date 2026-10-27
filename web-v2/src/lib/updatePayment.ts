@@ -43,5 +43,10 @@ export function checkoutErrorCopy(code: string | undefined, who: string): string
   if (code === 'invalid_token') {
     return `This link has expired or was already used. Ask ${who} for a new one.`
   }
+  // The seller has not set up online card payments. Trying again will not
+  // help, so the copy does not say to.
+  if (code === 'online_payment_unavailable') {
+    return `Adding a card online isn't available yet. Contact ${who} to update your payment method another way.`
+  }
   return `We couldn’t open the card form right now. Please try again in a few minutes. If it keeps failing, contact ${who}.`
 }

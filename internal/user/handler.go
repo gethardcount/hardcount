@@ -2,7 +2,6 @@ package user
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -177,8 +176,7 @@ type loginResp struct {
 // account existence via response timing.
 func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	var req LoginReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &req) {
 		return
 	}
 	if req.Email == "" {
@@ -306,8 +304,7 @@ func (h *Handler) setMode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req SetModeReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &req) {
 		return
 	}
 
@@ -417,8 +414,7 @@ type RequestResetReq struct {
 // user, to avoid account enumeration.
 func (h *Handler) requestPasswordReset(w http.ResponseWriter, r *http.Request) {
 	var req RequestResetReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &req) {
 		return
 	}
 	if req.Email == "" {
@@ -542,8 +538,7 @@ func (h *Handler) checkPasswordResetToken(w http.ResponseWriter, r *http.Request
 // token failures into a single 422.
 func (h *Handler) confirmPasswordReset(w http.ResponseWriter, r *http.Request) {
 	var req ConfirmResetReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &req) {
 		return
 	}
 	if req.Token == "" {

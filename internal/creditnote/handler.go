@@ -2,7 +2,6 @@ package creditnote
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -458,14 +457,16 @@ func (h *Handler) sendEmail(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
-	if h.emailSender == nil {
-		respond.FromError(w, r, errs.InvalidState("credit-note email is not configured on this deployment"), "credit_note_email")
+	var body SendEmailRequest
+	if !respond.DecodeStrict(w, r, &body) {
 		return
 	}
-
-	var body SendEmailRequest
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Email == "" {
-		respond.BadRequest(w, r, "email is required")
+	if body.Email == "" {
+		respond.ValidationField(w, r, "email", "email is required")
+		return
+	}
+	if h.emailSender == nil {
+		respond.FromError(w, r, errs.InvalidState("credit-note email is not configured on this deployment"), "credit_note_email")
 		return
 	}
 	// The To address gets the same check as a customer's stored email.
