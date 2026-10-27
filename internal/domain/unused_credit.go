@@ -9,13 +9,45 @@ import (
 
 // CreditShare is one invoice's part of the credit for unused, prepaid time:
 // GrossCents is the credit note's amount, tax included. ToBalance says the
-// share goes to the customer's balance: the invoice is paid, or its charge is
-// in flight, which Issue holds until the charge settles and which normally
-// succeeds. Otherwise the share reduces what the open invoice still asks for.
+// note is a balance credit: the invoice is paid, or its charge is in flight,
+// which Issue holds until the charge settles and which normally succeeds.
+// Otherwise the note lowers what the invoice asks for.
+//
+// BalanceCents, DueCents and HeldCents say where the share's money goes, as
+// creditnote.Service.Issue applies it to the invoice as allocation read it.
+// They add up to GrossCents:
+//   - BalanceCents: to the customer's balance. All of a ToBalance share, and
+//     on an open invoice the part above what it still asks for: that part
+//     relieves the customer credits applied to it, which Issue hands back to
+//     the balance (ADR-061 amendment 2026-10-12).
+//   - DueCents: off what an open invoice still asks for.
+//   - HeldCents: on a draft invoice. Issue holds the note until the invoice is
+//     finalized, and where it goes then depends on whether it is paid by then.
 type CreditShare struct {
-	InvoiceID  string
-	GrossCents int64
-	ToBalance  bool
+	InvoiceID    string
+	GrossCents   int64
+	ToBalance    bool
+	BalanceCents int64
+	DueCents     int64
+	HeldCents    int64
+}
+
+// creditShareFor sizes the share of gross on inv, with where its money goes
+// (see CreditShare). It mirrors Issue: a draft is held (issueHeld), a paid or
+// in-flight invoice takes a balance credit, and an open one has
+// min(gross, amount due) taken off what it asks for and the rest returned.
+func creditShareFor(inv Invoice, gross int64) CreditShare {
+	sh := CreditShare{InvoiceID: inv.ID, GrossCents: gross, ToBalance: inv.PaymentStatus == PaymentSucceeded || inv.PaymentInFlight()}
+	switch {
+	case inv.Status == InvoiceDraft:
+		sh.HeldCents = gross
+	case sh.ToBalance:
+		sh.BalanceCents = gross
+	default:
+		sh.DueCents = min(gross, max(0, inv.AmountDueCents))
+		sh.BalanceCents = gross - sh.DueCents
+	}
+	return sh
 }
 
 // AllocateUnusedCredit splits netCents of unused prepaid time (tax excluded)
@@ -122,7 +154,7 @@ func AllocateUnusedCredit(sources []Invoice, credited map[string]int64, itemID s
 		if gross <= 0 {
 			continue
 		}
-		shares = append(shares, CreditShare{InvoiceID: c.inv.ID, GrossCents: gross, ToBalance: c.inv.PaymentStatus == PaymentSucceeded || c.inv.PaymentInFlight()})
+		shares = append(shares, creditShareFor(c.inv, gross))
 	}
 	return shares, unplaced
 }

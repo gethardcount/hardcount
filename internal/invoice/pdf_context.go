@@ -8,7 +8,7 @@ import (
 
 // BuildPDFContext assembles everything RenderPDF needs beyond the
 // invoice and its lines — bill-to (customer + billing profile), company
-// header (tenant settings), and the invoice's issued credit notes — in
+// header (tenant settings), and every issued credit note on the invoice — in
 // ONE place. The emailed, dashboard-download, and hosted-page PDFs each
 // hand-rolled this block and had drifted three ways: the emailed PDF
 // carried no buyer address and no credit notes (an emailed invoice
@@ -35,7 +35,7 @@ func BuildPDFContext(
 	ctx context.Context,
 	customers CustomerGetter,
 	settings SettingsGetter,
-	creditNotes CreditNoteLister,
+	creditNotes IssuedCreditNoteLister,
 	tenantID string,
 	inv *domain.Invoice,
 ) (BillToInfo, CompanyInfo, []CreditNoteInfo) {
@@ -97,11 +97,8 @@ func BuildPDFContext(
 
 	var cnInfos []CreditNoteInfo
 	if creditNotes != nil {
-		if notes, err := creditNotes.List(ctx, tenantID, inv.ID); err == nil {
+		if notes, err := creditNotes.ListIssued(ctx, tenantID, inv.ID); err == nil {
 			for _, cn := range notes {
-				if cn.Status != domain.CreditNoteIssued {
-					continue
-				}
 				cnInfos = append(cnInfos, CreditNoteInfo{
 					Number:               cn.CreditNoteNumber,
 					Reason:               cn.Reason,

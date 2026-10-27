@@ -95,3 +95,63 @@ func TestE2E_DunningPolicyDelete(t *testing.T) {
 		t.Errorf("audit rows for the deleted policy: %v, want one delete", actions)
 	}
 }
+
+// TestE2E_DunningPolicyDelete_RefusedOnceItHasRun: a policy that has run
+// payment retries on an invoice keeps that history pointing at it, so it
+// cannot be deleted. The delete is refused with a reason, like the other two
+// refusals, even after every customer is moved off it (#1215). Before, the
+// database refused the delete and the API answered 500.
+//
+// The run is made the way it happens for real: a customer on the policy with
+// no card is billed, and Velox starts payment retries on the unpaid invoice.
+func TestE2E_DunningPolicyDelete_RefusedOnceItHasRun(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	ts := httptest.NewServer(NewServer(db, clock.Real(), nil))
+	defer ts.Close()
+
+	tenantID := testutil.CreateTestTenant(t, db, "Dunning Delete History Co")
+	key := createAPIKeyWithMode(t, db, tenantID, false)
+	call := func(method, path string, req flowReq) flowResp {
+		t.Helper()
+		req.bearer = key
+		return flowDo(t, ts, method, path, req)
+	}
+	newPolicy := func(name string) string {
+		t.Helper()
+		return flowStr(call("POST", "/v1/dunning/policies", flowReq{body: map[string]any{
+			"name": name, "enabled": true, "retry_days": []int{3, 3},
+		}}).want(t, 201, "create policy "+name).body, "id")
+	}
+	newPolicy("Standard (history)")
+	usedID := newPolicy("Used (history)")
+
+	customerID := flowStr(call("POST", "/v1/customers", flowReq{body: map[string]any{
+		"external_id": "dunning-delete-history", "display_name": "No Card Customer", "email": "ap@dunning-delete-history.test",
+	}}).want(t, 201, "create customer").body, "id")
+	call("PATCH", "/v1/customers/"+customerID, flowReq{body: map[string]any{"dunning_policy_id": usedID}}).want(t, 200, "assign the customer")
+	planID := flowStr(call("POST", "/v1/plans", flowReq{body: map[string]any{
+		"code": "history_plan", "name": "History plan", "currency": "USD", "billing_interval": "monthly",
+		"base_amount_cents": 2500, "base_bill_timing": "in_advance",
+	}}).want(t, 201, "create plan").body, "id")
+	call("POST", "/v1/subscriptions", flowReq{body: map[string]any{
+		"code": "history-sub", "display_name": "History Sub", "customer_id": customerID,
+		"items": []map[string]any{{"plan_id": planID, "quantity": 1}},
+	}}).want(t, 201, "create subscription")
+
+	invoices := flowList(call("GET", "/v1/invoices?customer_id="+customerID, flowReq{}).want(t, 200, "list invoices").body, "data")
+	if len(invoices) != 1 {
+		t.Fatalf("invoices for the new subscription: %d, want 1", len(invoices))
+	}
+	runs := flowList(call("GET", "/v1/dunning/runs?invoice_id="+flowStr(invoices[0], "id"), flowReq{}).want(t, 200, "list runs").body, "data")
+	if len(runs) != 1 || flowStr(runs[0], "policy_id") != usedID {
+		t.Fatalf("payment retry runs on the unpaid invoice: %v, want one on the policy %s", runs, usedID)
+	}
+
+	// Move the customer off it: only the history is left.
+	call("PATCH", "/v1/customers/"+customerID, flowReq{body: map[string]any{"dunning_policy_id": ""}}).want(t, 200, "unassign the customer")
+	res := call("DELETE", "/v1/dunning/policies/"+usedID, flowReq{}).want(t, 409, "delete a policy that has run")
+	if msg := res.errMessage(); !strings.Contains(msg, "1 invoice") {
+		t.Errorf("refusal message %q, want it to say the policy has run on 1 invoice", msg)
+	}
+	call("GET", "/v1/dunning/policies/"+usedID, flowReq{}).want(t, 200, "the refused policy is still there")
+}

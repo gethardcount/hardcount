@@ -194,9 +194,41 @@ test('At risk shows every currency with runs, not the default-only figure', () =
 
 test('proration toasts use the subscription currency', () => {
   setActiveCurrency('CAD')
-  assert.equal(prorationText({ type: 'invoice', amount_cents: 1200 }, 'USD'), 'Proration invoice created for $12.00')
-  assert.equal(prorationText({ type: 'adjustment', amount_cents: -1200 }, 'EUR'), 'Open invoice reduced by €12.00')
-  assert.equal(prorationText({ type: 'credit', amount_cents: -1200 }, 'GBP'), '£12.00 credited to customer balance')
+  assert.equal(prorationText({ type: 'invoice', amount_cents: 1200, credited_to_balance_cents: 0, reduced_open_invoices_cents: 0, held_on_draft_invoices_cents: 0 }, 'USD'), 'Proration invoice created for $12.00')
+  assert.equal(prorationText({ type: 'adjustment', amount_cents: -1200, credited_to_balance_cents: 0, reduced_open_invoices_cents: 1200, held_on_draft_invoices_cents: 0 }, 'EUR'), 'Open invoice reduced by €12.00')
+  assert.equal(prorationText({ type: 'credit', amount_cents: -1200, credited_to_balance_cents: 1200, reduced_open_invoices_cents: 0, held_on_draft_invoices_cents: 0 }, 'GBP'), '£12.00 credited to customer balance')
+})
+
+// #1280: a decrease whose credit went partly to the balance (paid invoices)
+// and partly off an open invoice names each part. It used to say the whole
+// $16.67 was credited to the balance.
+test('a credit that went two ways names each part', () => {
+  assert.equal(
+    prorationText({ type: 'credit', amount_cents: 1667, credited_to_balance_cents: 167, reduced_open_invoices_cents: 1500, held_on_draft_invoices_cents: 0 }, 'USD'),
+    '$1.67 credited to customer balance, and $15.00 taken off open invoices',
+  )
+})
+
+// A credit on a draft invoice waits for the draft to be finalized: it has not
+// reached the balance or reduced an open invoice yet.
+test('a credit held on a draft invoice says it waits for the draft', () => {
+  assert.equal(
+    prorationText({ type: 'adjustment', amount_cents: 1419, credited_to_balance_cents: 0, reduced_open_invoices_cents: 0, held_on_draft_invoices_cents: 1419 }, 'USD'),
+    '$14.19 held until the draft invoice is finalized',
+  )
+  assert.equal(
+    prorationText({ type: 'credit', amount_cents: 600, credited_to_balance_cents: 100, reduced_open_invoices_cents: 200, held_on_draft_invoices_cents: 300 }, 'USD'),
+    '$1.00 credited to customer balance, $2.00 taken off open invoices, and $3.00 held until the draft invoice is finalized',
+  )
+})
+
+// No invoice had room left: nothing was credited, so the toast says so
+// instead of "$0.00 credited to customer balance".
+test('a credit with no room says nothing was credited', () => {
+  assert.equal(
+    prorationText({ type: 'credit', amount_cents: 0, credited_to_balance_cents: 0, reduced_open_invoices_cents: 0, held_on_draft_invoices_cents: 0 }, 'USD'),
+    'Nothing credited: the invoices had nothing left to credit',
+  )
 })
 
 // The Home revenue chart's Y axis wrote a literal "$": a GBP workspace read

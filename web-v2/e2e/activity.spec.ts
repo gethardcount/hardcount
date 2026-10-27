@@ -150,7 +150,8 @@ async function shootDunningRun(page: Page, invoice: Invoice, name: string) {
   const link = page.getByRole('link', { name: invoice.invoice_number, exact: true })
   const showing = page.getByText(/^Showing \d+–\d+ of \d+$/)
   for (let p = 1; !(await link.isVisible()); p++) {
-    await expect(link.or(showing)).toBeVisible()
+    // .first(): the row and the page counter can both be on screen.
+    await expect(link.or(showing).first()).toBeVisible()
     if (await link.isVisible()) break
     if (p >= 40) throw new Error(`run for ${invoice.invoice_number} not found in ${p} pages`)
     await page.getByLabel('Go to next page').click()

@@ -21,10 +21,17 @@ the screen, and that the main things an operator does work end to end.
   shows what the API returned. The arithmetic behind the numbers is tested in
   Go, not here.
 - `subscriptions.spec.ts` changes subscriptions on screen: a plan change now
-  (with its proration invoice) and at renewal, cancel at period end, undo and
-  cancel now, quantity and item changes against the upcoming invoice, and the
-  trial and collection controls. Each journey checks the page, the toast and
-  any invoice the change made against the API.
+  (with its proration invoice) and at renewal, a change now to a yearly plan
+  (the dialog's words and the invoice the toast names), a seat decrease whose
+  credit goes partly to the balance and partly off an open invoice, a seat
+  decrease over a draft renewal (its credit waits for the draft), cancel at
+  period end, undo and cancel now, quantity and item changes against the
+  upcoming invoice, and the trial and collection controls. Each journey checks
+  the page, the toast and any invoice the change made against the API.
+- `dunning.spec.ts` opens the Resolve dialog of a payment-retry run (nothing
+  is chosen, and Resolve waits for a choice), and deletes a dunning policy
+  that has run (the page shows why it is refused). Each run is made the real
+  way: a customer with no card on file is billed.
 - `account-setup.spec.ts` sets up what an operator sells and how they
   collect. It creates a meter and a plan, then adds the plan's price for the
   meter, which applies at once while no one has subscribed. It saves a
@@ -36,7 +43,10 @@ the screen, and that the main things an operator does work end to end.
   tries to delete it and makes it the default, then puts the old default
   back.
 - `invoices.spec.ts` takes invoices through their life on screen: a one-off
-  invoice from draft to finalized (and Save & send), a credit note before and
+  invoice from draft to finalized, through the Finalize confirmation (and
+  Save & send), the Finalize confirmation's email line with Stripe connected
+  (the Stripe connection and the server's email setting are set in the
+  browser), a credit note before and
   after an offline payment, void and write-off, and the credit notes page.
   Each journey checks the dashboard and the customer's payment page against
   the API.

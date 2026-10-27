@@ -127,13 +127,32 @@ export function atRiskText(stats: {
 // prorationText is the toast after a subscription item change that prorated.
 // The amount is in the subscription's currency (the plans' currency), never
 // the workspace default; with the plan not loaded, it has no symbol.
+//
+// A credit can go up to three ways at once (#1280): to the balance, off the
+// amount due of open invoices, and held on a draft until it is finalized.
+// Each part is named with its own amount; the whole credit is never called a
+// balance credit.
 export function prorationText(
-  p: { type: 'invoice' | 'credit' | 'adjustment'; amount_cents: number },
+  p: {
+    type: 'invoice' | 'credit' | 'adjustment'
+    amount_cents: number
+    credited_to_balance_cents: number
+    reduced_open_invoices_cents: number
+    held_on_draft_invoices_cents: number
+  },
   currency: string | undefined,
 ): string {
-  const abs = Math.abs(p.amount_cents)
-  const amount = currency ? formatCents(abs, currency) : formatCentsBare(abs)
-  if (p.type === 'invoice') return `Proration invoice created for ${amount}`
-  if (p.type === 'adjustment') return `Open invoice reduced by ${amount}`
-  return `${amount} credited to customer balance`
+  const money = (cents: number) => {
+    const abs = Math.abs(cents)
+    return currency ? formatCents(abs, currency) : formatCentsBare(abs)
+  }
+  if (p.type === 'invoice') return `Proration invoice created for ${money(p.amount_cents)}`
+  const parts: string[] = []
+  if (p.credited_to_balance_cents > 0) parts.push(`${money(p.credited_to_balance_cents)} credited to customer balance`)
+  if (p.reduced_open_invoices_cents > 0) parts.push(`${money(p.reduced_open_invoices_cents)} taken off open invoices`)
+  if (p.held_on_draft_invoices_cents > 0) parts.push(`${money(p.held_on_draft_invoices_cents)} held until the draft invoice is finalized`)
+  if (parts.length === 0) return 'Nothing credited: the invoices had nothing left to credit'
+  if (parts.length === 1 && p.reduced_open_invoices_cents > 0) return `Open invoice reduced by ${money(p.reduced_open_invoices_cents)}`
+  if (parts.length === 1) return parts[0]
+  return `${parts.slice(0, -1).join(', ')}, and ${parts[parts.length - 1]}`
 }

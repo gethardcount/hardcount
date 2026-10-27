@@ -57,6 +57,9 @@ type Store interface {
 	// InvoiceSums adds up every credit note on one invoice, in one query
 	// with no page limit.
 	InvoiceSums(ctx context.Context, tenantID, invoiceID string) (InvoiceSums, error)
+	// ListIssuedByInvoice returns every issued credit note on one invoice,
+	// newest first, with no page limit: the invoice PDF prints each one.
+	ListIssuedByInvoice(ctx context.Context, tenantID, invoiceID string) ([]domain.CreditNote, error)
 	// Count counts the credit notes the filter matches, ignoring its limit
 	// and offset (the list's total).
 	Count(ctx context.Context, filter ListFilter) (int, error)

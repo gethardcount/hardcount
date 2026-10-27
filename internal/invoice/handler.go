@@ -43,9 +43,18 @@ type SettingsGetter interface {
 // silently.
 const CreditNoteLaneCap = 100
 
-// CreditNoteLister fetches credit notes for an invoice.
+// CreditNoteLister fetches credit notes for an invoice, at most
+// CreditNoteLaneCap of them, for the Activity timeline.
 type CreditNoteLister interface {
 	List(ctx context.Context, tenantID, invoiceID string) ([]domain.CreditNote, error)
+}
+
+// IssuedCreditNoteLister reads every issued credit note on an invoice, with
+// no page limit, for the invoice PDF. It is kept apart from the timeline's
+// capped CreditNoteLister: the PDF is a customer document and must print
+// every note that changed what the invoice asks for.
+type IssuedCreditNoteLister interface {
+	ListIssued(ctx context.Context, tenantID, invoiceID string) ([]domain.CreditNote, error)
 }
 
 // PaymentCharger creates a Stripe PaymentIntent for a finalized invoice on
@@ -256,6 +265,7 @@ type Handler struct {
 	customers       CustomerGetter
 	settings        SettingsGetter
 	creditNotes     CreditNoteLister
+	pdfCreditNotes  IssuedCreditNoteLister
 	charger         PaymentCharger
 	paymentSetups   PaymentSetupGetter
 	dunning         DunningResolver
@@ -285,19 +295,22 @@ type auditWriter interface {
 }
 
 type HandlerDeps struct {
-	CreditNotes     CreditNoteLister
-	Charger         PaymentCharger
-	PaymentSetups   PaymentSetupGetter
-	Dunning         DunningResolver
-	EmailEvents     EmailEventLister
-	DunningTimeline DunningTimelineFetcher
-	RefundIssuer    RefundIssuer
+	CreditNotes CreditNoteLister
+	// IssuedCreditNotes feeds the invoice PDF (download and email).
+	IssuedCreditNotes IssuedCreditNoteLister
+	Charger           PaymentCharger
+	PaymentSetups     PaymentSetupGetter
+	Dunning           DunningResolver
+	EmailEvents       EmailEventLister
+	DunningTimeline   DunningTimelineFetcher
+	RefundIssuer      RefundIssuer
 }
 
 func NewHandler(svc *Service, customers CustomerGetter, settings SettingsGetter, deps ...HandlerDeps) *Handler {
 	h := &Handler{svc: svc, customers: customers, settings: settings}
 	if len(deps) > 0 {
 		h.creditNotes = deps[0].CreditNotes
+		h.pdfCreditNotes = deps[0].IssuedCreditNotes
 		h.charger = deps[0].Charger
 		h.paymentSetups = deps[0].PaymentSetups
 		h.dunning = deps[0].Dunning
@@ -917,7 +930,7 @@ func (h *Handler) sendEmail(w http.ResponseWriter, r *http.Request) {
 	// this path previously hand-rolled a THINNER context (no buyer
 	// address/tax id, no credit notes), so the emailed document diverged
 	// from the downloaded one.
-	bt, ci, cnInfos := BuildPDFContext(ctx, h.customers, h.settings, h.creditNotes, tenantID, &inv)
+	bt, ci, cnInfos := BuildPDFContext(ctx, h.customers, h.settings, h.pdfCreditNotes, tenantID, &inv)
 
 	pdfBytes, err := RenderPDF(ctx, inv, items, bt, cnInfos, ci)
 	if err != nil {
@@ -2249,7 +2262,7 @@ func (h *Handler) downloadPDF(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// One shared context builder across emailed/downloaded/hosted PDFs.
-	bt, ci, cnInfos := BuildPDFContext(r.Context(), h.customers, h.settings, h.creditNotes, tenantID, &inv)
+	bt, ci, cnInfos := BuildPDFContext(r.Context(), h.customers, h.settings, h.pdfCreditNotes, tenantID, &inv)
 
 	pdfBytes, err := RenderPDF(r.Context(), inv, items, bt, cnInfos, ci)
 	if err != nil {

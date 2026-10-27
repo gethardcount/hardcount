@@ -91,3 +91,73 @@ export function messageLines(message: string | undefined | null): string[] {
 export function stripePaymentUrl(paymentIntentId: string, livemode: boolean): string {
   return `https://dashboard.stripe.com/${livemode ? '' : 'test/'}payments/${encodeURIComponent(paymentIntentId)}`
 }
+
+// What finalizing a draft does, for the confirmation before it (#1109). It
+// follows the server: invoice.Service.Finalize issues the invoice (a manual
+// one gets its tax worked out first), and the finalize route then collects it
+// at once through billing.CollectInvoice: the customer's credit balance first,
+// then the card on file, or with no card an email asking for one.
+//   - hasCard: whether the customer has a default card; undefined while the
+//     page has not loaded it.
+//   - hasEmail: whether the customer has an email address.
+//   - canEmailSetupLinks: whoami.can_email_setup_links. The no-card email
+//     needs SMTP and PAYMENT_UPDATE_URL; without them nothing is sent, so
+//     only true promises one.
+//   - taxAtFinalize: a manual invoice, whose tax is worked out at finalize.
+//   - stripeConnected: whether Stripe is connected in this mode (GET
+//     /settings/stripe has a row for it, the same test as the server's
+//     StripeClients.HasFor); undefined while not known. Without it no card
+//     can be charged, a setup link is refused (409 stripe_not_connected) and
+//     the update-payment page says adding a card isn't available, so the
+//     confirmation promises none of them.
+//   - collectionPaused: the invoice's subscription has collection paused
+//     now (pause_collection in force, as domain.PauseCollection.InForceAt).
+//     The finalize still queues the invoice, but the auto-charge claim skips
+//     a paused subscription's invoices (notPausedForCollection), so nothing
+//     is collected until collection resumes.
+export function finalizeConfirmLines(o: {
+  collectionPaused: boolean
+  stripeConnected: boolean | undefined
+  hasCard: boolean | undefined
+  hasEmail: boolean
+  canEmailSetupLinks: boolean | undefined
+  taxAtFinalize: boolean
+}): string[] {
+  const lines = ["The invoice is issued. You can't edit it afterwards, and the only way to cancel it is to void it."]
+  if (o.taxAtFinalize) lines.push('Tax is worked out now, so the total may change.')
+  const collect = "Velox then collects payment right away. It uses the customer's credit balance first."
+  const canEmail = o.canEmailSetupLinks === true
+  if (o.collectionPaused) {
+    lines.push('Collection is paused on this subscription, so nothing is charged now. Velox collects payment once collection resumes.')
+  } else if (o.stripeConnected === false) {
+    lines.push(`${collect} Stripe isn't connected in this mode, so no card can be charged or added online. Connect Stripe under Settings to collect by card.`)
+  } else if (o.stripeConnected === undefined) {
+    lines.push(`${collect} If anything is left to pay, it charges their card on file if they have one and if Stripe is connected.`)
+  } else if (o.hasCard === true) {
+    lines.push(`${collect} If anything is left to pay, it charges their card on file.`)
+  } else if (o.hasCard === false) {
+    if (!o.hasEmail) {
+      lines.push(`${collect} The customer has no card on file and no email address, so nothing is charged.`)
+    } else if (canEmail) {
+      lines.push(`${collect} The customer has no card on file, so if anything is left to pay, Velox emails them a link to add one.`)
+    } else {
+      lines.push(`${collect} The customer has no card on file and this server can't email setup links, so if anything is left to pay, copy a setup link from the customer page and send it to them.`)
+    }
+  } else if (canEmail) {
+    lines.push(`${collect} If anything is left to pay, it charges their card on file, or emails them a link to add one.`)
+  } else {
+    lines.push(`${collect} If anything is left to pay, it charges their card on file if they have one.`)
+  }
+  return lines
+}
+
+// collectionPausedNow says whether a subscription's collection pause holds
+// collection at nowMs (the page's effective now, test clock aware). It is the
+// server's collection rule (notPausedForCollection, InForceAt): a pause with
+// no resumes_at holds, a timed one holds strictly before resumes_at. Unlike
+// collectionPausedFlag it does not look at the subscription's status: the
+// claim skips a paused row's invoices whatever its status.
+export function collectionPausedNow(pause: { resumes_at?: string | null } | null | undefined, nowMs: number): boolean {
+  if (!pause) return false
+  return !pause.resumes_at || new Date(pause.resumes_at).getTime() > nowMs
+}

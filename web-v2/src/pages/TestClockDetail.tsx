@@ -616,6 +616,13 @@ function AdvanceClockDialog({
             {exceedsMaxWindow && (
               <p className="text-xs text-destructive mt-1">Target exceeds the 1-year per-advance limit. Pick a date on or before <span className="font-mono">{formatDateTime(maxAllowed.toISOString())}</span>, then advance again.</p>
             )}
+            {/* Stopgap until #1276: a move bills every due period before it
+                runs payment retries, so a retry policy that pauses or cancels
+                acts after a period a real clock would never have billed. */}
+            <p className="text-xs text-muted-foreground mt-1.5">
+              Testing payment retries that pause or cancel a subscription? Move the clock to the last retry first, then on to the
+              next billing date. One longer move bills the next period before the pause or cancel happens.
+            </p>
           </div>
 
           {/* Fixed-height slot so the warning appearing/disappearing while

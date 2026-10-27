@@ -95,7 +95,7 @@ func (f *fakeSettings) Get(_ context.Context, tenantID string) (domain.TenantSet
 
 type fakeCreditNotes struct{}
 
-func (fakeCreditNotes) List(_ context.Context, _, _ string) ([]domain.CreditNote, error) {
+func (fakeCreditNotes) ListIssued(_ context.Context, _, _ string) ([]domain.CreditNote, error) {
 	return nil, nil
 }
 

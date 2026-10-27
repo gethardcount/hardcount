@@ -1514,6 +1514,12 @@ func (s *Service) List(ctx context.Context, filter ListFilter) ([]domain.CreditN
 	return s.store.List(ctx, filter)
 }
 
+// ListIssuedForInvoice returns every issued credit note on the invoice,
+// newest first, with no page limit, for the invoice PDF.
+func (s *Service) ListIssuedForInvoice(ctx context.Context, tenantID, invoiceID string) ([]domain.CreditNote, error) {
+	return s.store.ListIssuedByInvoice(ctx, tenantID, invoiceID)
+}
+
 // Count counts the credit notes the filter matches, ignoring its limit and
 // offset.
 func (s *Service) Count(ctx context.Context, filter ListFilter) (int, error) {

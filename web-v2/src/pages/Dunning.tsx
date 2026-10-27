@@ -577,19 +577,22 @@ function ResolveDialog({ run, invoiceMap, onClose, onResolved }: {
   onClose: () => void
   onResolved: () => void
 }) {
-  const [resolution, setResolution] = useState('payment_recovered')
+  // No choice is made for the operator: each one changes the invoice, and
+  // "Payment recovered" records a payment (#1234).
+  const [resolution, setResolution] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
   const inv = invoiceMap[run.invoice_id]
 
   const resolutionOptions = [
-    { value: 'payment_recovered', label: 'Payment recovered', description: 'Customer has paid -- mark invoice as paid and close dunning.', variant: 'default' as const },
+    { value: 'payment_recovered', label: 'Payment recovered', description: 'The customer paid you another way. Records the payment, marks the invoice paid and stops the retries.', variant: 'default' as const },
     { value: 'invoice_voided', label: 'Void invoice', description: 'Annul the invoice and stop collection — e.g. billed in error or waived. Reverses any applied credits and cancels the pending charge; the invoice no longer counts as revenue. For a payment collected offline, use "Payment recovered" instead.', variant: 'destructive' as const },
     { value: 'invoice_not_collectible', label: 'Write off invoice', description: 'Marks the invoice as uncollectible (bad debt). Halts dunning automation. The invoice stays on the books for audit. Subscription stays active — cancel separately if needed.', variant: 'destructive' as const },
   ]
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!resolution) return
     setSaving(true)
     try {
       await api.resolveDunningRun(run.id, resolution)
@@ -627,7 +630,7 @@ function ResolveDialog({ run, invoiceMap, onClose, onResolved }: {
               {resolutionOptions.map(opt => {
                 const selected = resolution === opt.value
                 return (
-                  <button key={opt.value} type="button"
+                  <button key={opt.value} type="button" aria-pressed={selected}
                     onClick={() => setResolution(opt.value)}
                     className={cn(
                       'w-full text-left px-4 py-3 rounded-lg border-2 transition-all',
@@ -657,7 +660,7 @@ function ResolveDialog({ run, invoiceMap, onClose, onResolved }: {
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-            <Button type="submit" disabled={saving}
+            <Button type="submit" disabled={saving || !resolution}
               variant={resolution === 'invoice_not_collectible' ? 'destructive' : 'default'}>
               {saving ? 'Resolving...' : 'Resolve'}
             </Button>

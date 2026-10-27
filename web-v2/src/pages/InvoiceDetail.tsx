@@ -20,9 +20,10 @@ import { InvoiceAttention } from '@/components/InvoiceAttention'
 import { TestClockBanner } from '@/components/TestClockBanner'
 import { ActivityList, ActivityZone } from '@/components/ActivityList'
 import { Callout } from '@/components/Callout'
-import { pickInvoiceNotice, writtenOffCardLine, writtenOffSubscriptionLine } from '@/lib/invoiceNotice'
+import { collectionPausedNow, finalizeConfirmLines, pickInvoiceNotice, writtenOffCardLine, writtenOffSubscriptionLine } from '@/lib/invoiceNotice'
 import { issueDates, sellerBlock, sellerMissing, SELLER_SETTINGS_PATH } from '@/lib/invoiceDocument'
 import { authApi } from '@/lib/auth'
+import { useAuth } from '@/contexts/AuthContext'
 import { classifyError } from '@/lib/errorCopy'
 import { useGetInvoice } from '@/lib/gen/queries.gen'
 import type { Invoice } from '@/lib/gen/schemas/invoice'
@@ -51,6 +52,10 @@ import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
 import { TypedConfirmDialog } from '@/components/TypedConfirmDialog'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
@@ -147,6 +152,7 @@ export default function InvoiceDetailPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [showVoidConfirm, setShowVoidConfirm] = useState(false)
+  const [showFinalizeConfirm, setShowFinalizeConfirm] = useState(false)
   const [showRotatePublicTokenConfirm, setShowRotatePublicTokenConfirm] = useState(false)
   const [showEmailModal, setShowEmailModal] = useState(false)
   const [showCreditModal, setShowCreditModal] = useState(false)
@@ -307,15 +313,17 @@ export default function InvoiceDetailPage() {
   const timelineDegraded = timelineData?.degraded ?? []
   const timelineTruncated = timelineData?.truncated ?? false
 
-  // Payment-method snapshot serves two purposes on this page:
+  // Payment-method snapshot serves three purposes on this page:
   //   1. The success-state card on paid invoices (brand •••• last4).
   //   2. The Collect payment button's disabled state — when no PM is
   //      ready, charging will fail, so the button gates on
   //      paymentSetup.setup_status === 'ready'. Mirrors the disable-
   //      with-tooltip pattern Velox uses for Finalize-on-tax-failure.
+  //   3. The Finalize confirmation on a draft, which says whether the
+  //      card on file is charged or the customer is emailed for one.
   //
-  // Fetched whenever the invoice exists (and isn't a draft) so the
-  // button has data before render. v1 caveat on the success card: uses
+  // Fetched whenever the invoice exists so the button and the
+  // confirmation have data before render. v1 caveat on the success card: uses
   // the customer's CURRENT default method, which may differ from what
   // was actually charged (deferred — needs a schema migration to
   // snapshot brand+last4 onto the invoice at payment time).
@@ -326,7 +334,7 @@ export default function InvoiceDetailPage() {
   const { data: paymentMethodsList } = useQuery({
     queryKey: ['customer-payment-methods', invoice?.customer_id],
     queryFn: () => api.listCustomerPaymentMethods(invoice!.customer_id),
-    enabled: !!invoice?.customer_id && invoice?.status !== 'draft',
+    enabled: !!invoice?.customer_id,
   })
   const hasPaymentMethod = (paymentMethodsList?.data ?? []).some(pm => pm.is_default)
 
@@ -364,13 +372,25 @@ export default function InvoiceDetailPage() {
   })
 
   // Server config (SMTP + PAYMENT_UPDATE_URL): whether "Email a payment-method
-  // link" on a written-off invoice can really send. Read only for that case.
+  // link" on a written-off invoice can really send, and whether the Finalize
+  // confirmation on a draft may promise the no-card email. Read only for those.
   const { data: whoami } = useQuery({
     queryKey: ['whoami'],
     queryFn: () => authApi.whoami(),
-    enabled: invoice?.status === 'uncollectible',
+    enabled: invoice?.status === 'uncollectible' || invoice?.status === 'draft',
     staleTime: Infinity,
   })
+
+  // Whether Stripe is connected in this mode, for the Finalize confirmation:
+  // without it no card is charged and none can be added online. Same query
+  // key as Settings, so connecting Stripe there refreshes it.
+  const { user } = useAuth()
+  const { data: stripeCreds } = useQuery({
+    queryKey: ['stripe-credentials'],
+    queryFn: () => api.listStripeCredentials(),
+    enabled: invoice?.status === 'draft' && !!user,
+  })
+  const stripeConnected = stripeCreds && user ? stripeCreds.data.some(c => c.livemode === user.livemode) : undefined
 
   const invalidateAll = () => {
     queryClient.invalidateQueries({ queryKey: ['invoice', id] })
@@ -398,8 +418,8 @@ export default function InvoiceDetailPage() {
 
   const finalizeMutation = useMutation({
     mutationFn: () => api.finalizeInvoice(id!),
-    onSuccess: () => { invalidateAll(); toast.success(`Invoice ${invoice?.invoice_number} finalized`) },
-    onError: (err) => showApiError(err, 'Failed to finalize'),
+    onSuccess: () => { invalidateAll(); setShowFinalizeConfirm(false); toast.success(`Invoice ${invoice?.invoice_number} finalized`) },
+    onError: (err) => { setShowFinalizeConfirm(false); showApiError(err, 'Failed to finalize') },
   })
 
   const voidMutation = useMutation({
@@ -667,7 +687,7 @@ export default function InvoiceDetailPage() {
             const taxBlocked = invoice.tax_status === 'pending'
             if (!taxBlocked) {
               return (
-                <Button size="sm" onClick={() => finalizeMutation.mutate()} disabled={acting}>
+                <Button size="sm" onClick={() => setShowFinalizeConfirm(true)} disabled={acting}>
                   {finalizeMutation.isPending ? <><Loader2 size={14} className="animate-spin mr-1.5" />Finalizing…</> : 'Finalize'}
                 </Button>
               )
@@ -1495,6 +1515,37 @@ export default function InvoiceDetailPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* Finalize Confirm (#1109) — a plain Confirm/Cancel: finalizing is
+          the normal next step for a draft, but it can't be undone and it
+          starts collection at once, so the operator sees what will happen
+          to this customer first. */}
+      <AlertDialog open={showFinalizeConfirm} onOpenChange={(open) => { if (!open && !finalizeMutation.isPending) setShowFinalizeConfirm(false) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Finalize invoice {invoice.invoice_number}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {formatCents(invoice.total_amount_cents, invoice.currency)} to {customer?.display_name || invoice.bill_to_snapshot?.display_name || 'this customer'}.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-2 text-sm text-muted-foreground">
+            {finalizeConfirmLines({
+              collectionPaused: collectionPausedNow(subscription?.pause_collection, effectiveNow(testClock?.frozen_time)),
+              stripeConnected,
+              hasCard: paymentMethodsList === undefined ? undefined : hasPaymentMethod,
+              hasEmail: !!customer?.email,
+              canEmailSetupLinks: whoami?.can_email_setup_links,
+              taxAtFinalize: !invoice.billing_reason || invoice.billing_reason === 'manual',
+            }).map(line => <p key={line}>{line}</p>)}
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={finalizeMutation.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => finalizeMutation.mutate()} disabled={finalizeMutation.isPending}>
+              {finalizeMutation.isPending ? <><Loader2 size={14} className="animate-spin mr-1.5" />Finalizing…</> : 'Finalize'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Void Confirm — short: what voiding does, then the one choice an
           operator most often gets wrong (void vs mark uncollectible). */}

@@ -9,10 +9,12 @@
  */
 import type { SubscriptionItem } from './subscriptionItem';
 import type { SubscriptionItemProration } from './subscriptionItemProration';
+import type { SubscriptionNewPeriodInvoice } from './subscriptionNewPeriodInvoice';
 
 export interface SubscriptionItemChangeResult {
   item: SubscriptionItem;
   /** When the change takes effect. For a scheduled plan change, the end of the current period. */
   effective_at: string;
   proration?: SubscriptionItemProration;
+  new_period_invoice?: SubscriptionNewPeriodInvoice;
 }

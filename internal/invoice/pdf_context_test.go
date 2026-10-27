@@ -94,8 +94,16 @@ func (f *fakePDFSettings) Get(_ context.Context, _ string) (domain.TenantSetting
 
 type fakePDFCreditNotes struct{ notes []domain.CreditNote }
 
-func (f *fakePDFCreditNotes) List(_ context.Context, _, _ string) ([]domain.CreditNote, error) {
-	return f.notes, nil
+// ListIssued mirrors the store: issued notes only (the status filter is
+// checked against Postgres in TestE2E_InvoicePDF_PrintsEveryIssuedCreditNote).
+func (f *fakePDFCreditNotes) ListIssued(_ context.Context, _, _ string) ([]domain.CreditNote, error) {
+	var out []domain.CreditNote
+	for _, n := range f.notes {
+		if n.Status == domain.CreditNoteIssued {
+			out = append(out, n)
+		}
+	}
+	return out, nil
 }
 
 // TestBuildPDFContext_OneBuilderForAllSurfaces: the emailed, downloaded,

@@ -1745,6 +1745,24 @@ func (e SubscriptionItemProrationType) Valid() bool {
 	}
 }
 
+// Defines values for SubscriptionNewPeriodInvoiceStatus.
+const (
+	SubscriptionNewPeriodInvoiceStatusDraft     SubscriptionNewPeriodInvoiceStatus = "draft"
+	SubscriptionNewPeriodInvoiceStatusFinalized SubscriptionNewPeriodInvoiceStatus = "finalized"
+)
+
+// Valid indicates whether the value is a known member of the SubscriptionNewPeriodInvoiceStatus enum.
+func (e SubscriptionNewPeriodInvoiceStatus) Valid() bool {
+	switch e {
+	case SubscriptionNewPeriodInvoiceStatusDraft:
+		return true
+	case SubscriptionNewPeriodInvoiceStatusFinalized:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SubscriptionPauseCollectionBehavior.
 const (
 	SubscriptionPauseCollectionBehaviorKeepAsDraft SubscriptionPauseCollectionBehavior = "keep_as_draft"
@@ -2635,16 +2653,16 @@ func (e UpdatePlanJSONBodyBaseBillTiming) Valid() bool {
 
 // Defines values for UpdatePlanJSONBodyStatus.
 const (
-	UpdatePlanJSONBodyStatusActive   UpdatePlanJSONBodyStatus = "active"
-	UpdatePlanJSONBodyStatusArchived UpdatePlanJSONBodyStatus = "archived"
+	Active   UpdatePlanJSONBodyStatus = "active"
+	Archived UpdatePlanJSONBodyStatus = "archived"
 )
 
 // Valid indicates whether the value is a known member of the UpdatePlanJSONBodyStatus enum.
 func (e UpdatePlanJSONBodyStatus) Valid() bool {
 	switch e {
-	case UpdatePlanJSONBodyStatusActive:
+	case Active:
 		return true
-	case UpdatePlanJSONBodyStatusArchived:
+	case Archived:
 		return true
 	default:
 		return false
@@ -6233,16 +6251,36 @@ type SubscriptionItemChangeResult struct {
 	// Item One priced line of a subscription. It pairs a plan with a quantity.
 	Item SubscriptionItem `json:"item"`
 
+	// NewPeriodInvoice The invoice an immediate change to a plan with another billing
+	// interval created for the new period it starts.
+	NewPeriodInvoice SubscriptionNewPeriodInvoice `json:"new_period_invoice,omitempty"`
+
 	// Proration What Velox did to settle the rest of the period for an item change.
 	Proration SubscriptionItemProration `json:"proration,omitempty"`
 }
 
 // SubscriptionItemProration What Velox did to settle the rest of the period for an item change.
 type SubscriptionItemProration struct {
-	// AmountCents Gross amount, tax included: the invoice total (`invoice`), the
-	// amount credited to the balance (`credit`), or the amount due
-	// removed from the unpaid invoice (`adjustment`).
+	// AmountCents Gross amount, tax included: the invoice total (`invoice`), or
+	// the whole credit for unused time (`credit` and `adjustment`).
+	// `credited_to_balance_cents`, `reduced_open_invoices_cents` and
+	// `held_on_draft_invoices_cents` say where the credit went.
 	AmountCents int64 `json:"amount_cents"`
+
+	// CreditedToBalanceCents The part of the credit added to the customer's balance, tax
+	// included. On a paid invoice, all of its part. On an open invoice
+	// paid partly with credits, the part above what it still asks for:
+	// those credits go back to the balance. A part on an invoice whose
+	// payment is still processing counts here; if that payment fails,
+	// it reduces the invoice instead. 0 when `type` is `invoice`.
+	CreditedToBalanceCents int64 `json:"credited_to_balance_cents"`
+
+	// HeldOnDraftInvoicesCents The part of the credit on draft invoices, tax included. It is
+	// held until the draft is finalized, then applied by how the
+	// invoice stands: if paid, to the customer's balance; if still
+	// open, off what it asks for first, as above. 0 when `type` is
+	// `invoice`.
+	HeldOnDraftInvoicesCents int64 `json:"held_on_draft_invoices_cents"`
 
 	// InvoiceId The proration invoice. Present when `type` is `invoice`.
 	InvoiceId string `json:"invoice_id,omitempty"`
@@ -6250,11 +6288,23 @@ type SubscriptionItemProration struct {
 	OldPlanId string `json:"old_plan_id"`
 
 	// ProrationFactor Share of the full billing cycle that was left, from 0 to 1.
-	ProrationFactor float64                       `json:"proration_factor"`
-	Type            SubscriptionItemProrationType `json:"type"`
+	ProrationFactor float64 `json:"proration_factor"`
+
+	// ReducedOpenInvoicesCents The part of the credit taken off the amount due on open
+	// invoices, tax included. 0 when `type` is `invoice`.
+	ReducedOpenInvoicesCents int64 `json:"reduced_open_invoices_cents"`
+
+	// Type `invoice`: a proration invoice was created. `credit`: some of
+	// the credit went to the customer's balance, or no invoice had
+	// room for any of it (`amount_cents` is then 0). `adjustment`:
+	// none of it went to the balance.
+	Type SubscriptionItemProrationType `json:"type"`
 }
 
-// SubscriptionItemProrationType defines model for SubscriptionItemProration.Type.
+// SubscriptionItemProrationType `invoice`: a proration invoice was created. `credit`: some of
+// the credit went to the customer's balance, or no invoice had
+// room for any of it (`amount_cents` is then 0). `adjustment`:
+// none of it went to the balance.
 type SubscriptionItemProrationType string
 
 // SubscriptionItemThreshold defines model for SubscriptionItemThreshold.
@@ -6264,6 +6314,28 @@ type SubscriptionItemThreshold struct {
 	// UsageGte Usage quantity threshold, as a decimal string.
 	UsageGte string `json:"usage_gte"`
 }
+
+// SubscriptionNewPeriodInvoice The invoice an immediate change to a plan with another billing
+// interval created for the new period it starts.
+type SubscriptionNewPeriodInvoice struct {
+	Currency      string `json:"currency"`
+	Id            string `json:"id"`
+	InvoiceNumber string `json:"invoice_number"`
+
+	// Status `draft` when the invoice was not issued yet: collection is
+	// paused, or its tax could not be calculated yet. Its total may
+	// then change before it is finalized.
+	Status SubscriptionNewPeriodInvoiceStatus `json:"status"`
+
+	// TotalAmountCents The invoice total when the change created it. On a `draft`
+	// whose tax could not be calculated yet, it has no tax in it.
+	TotalAmountCents int64 `json:"total_amount_cents"`
+}
+
+// SubscriptionNewPeriodInvoiceStatus `draft` when the invoice was not issued yet: collection is
+// paused, or its tax could not be calculated yet. Its total may
+// then change before it is finalized.
+type SubscriptionNewPeriodInvoiceStatus string
 
 // SubscriptionPauseCollection Present on a subscription while collection is paused. New invoices
 // are still created, but stay drafts and are not charged.

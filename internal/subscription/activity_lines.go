@@ -383,20 +383,39 @@ func prorationSegment(meta map[string]any, lb lineLabels) activity.Segment {
 			return activity.Segment{activity.T("Proration invoice "), activity.L(activity.LinkInvoice, id, lb.invoices[id]), activity.T(" "), money}
 		}
 		return activity.Segment{activity.T("Proration invoice "), money}
-	case "credit":
+	case "credit", "adjustment":
 		if amt == 0 && limitedCredit(meta) {
 			return activity.Segment{activity.T("No credit: the invoices had nothing left to credit")}
 		}
-		// Part of the credit may have reduced an open invoice instead of
-		// reaching the balance: show each part.
-		if adj, ok := metaInt(meta, "adjusted_cents"); ok && adj > 0 && adj < amt {
-			seg = activity.Segment{activity.T("Credit "), activity.M(amt-adj, metaString(meta, "currency")), activity.T(", ")}
-			seg = append(seg, adjustedSegment(meta, lb, false, activity.M(adj, metaString(meta, "currency")))...)
-		} else {
+		// A credit can go up to three ways: to the balance, off open
+		// invoices (adjusted_cents), and held on drafts until they are
+		// finalized (held_cents). Each part is shown with its amount. An
+		// adjustment row written before adjusted_cents was stamped on one
+		// is all off open invoices.
+		cur := metaString(meta, "currency")
+		held, _ := metaInt(meta, "held_cents")
+		adj, hasAdj := metaInt(meta, "adjusted_cents")
+		if !hasAdj && metaString(meta, "proration_type") == "adjustment" {
+			adj = amt - held
+		}
+		if bal := amt - adj - held; bal > 0 {
+			seg = activity.Segment{activity.T("Credit "), activity.M(bal, cur)}
+		}
+		if adj > 0 {
+			if seg != nil {
+				seg = append(seg, activity.T(", "))
+			}
+			seg = append(seg, adjustedSegment(meta, lb, seg == nil, activity.M(adj, cur))...)
+		}
+		if held > 0 {
+			if seg != nil {
+				seg = append(seg, activity.T(", "))
+			}
+			seg = append(seg, heldSegment(meta, lb, seg == nil, activity.M(held, cur))...)
+		}
+		if seg == nil {
 			seg = activity.Segment{activity.T("Credit "), money}
 		}
-	case "adjustment":
-		seg = adjustedSegment(meta, lb, true, money)
 	default:
 		return nil
 	}
@@ -421,6 +440,25 @@ func adjustedSegment(meta map[string]any, lb lineLabels, first bool, money activ
 		return activity.Segment{activity.T(open + " "), activity.L(activity.LinkInvoice, id, lb.invoices[id]), activity.T(" adjusted by "), money}
 	}
 	return activity.Segment{activity.T(open + " adjusted by "), money}
+}
+
+// heldSegment is "Credit $14.19 held until draft invoice VLX-000120 is
+// finalized": the part of a credit on a draft invoice, whose note waits for
+// the draft to be finalized. It names the draft when there is exactly one,
+// or "2 draft invoices" when there are several.
+func heldSegment(meta map[string]any, lb lineLabels, first bool, money activity.Part) activity.Segment {
+	var seg activity.Segment
+	if first {
+		seg = activity.Segment{activity.T("Credit ")}
+	}
+	seg = append(seg, money)
+	if n, ok := metaInt(meta, "held_invoice_count"); ok && n > 1 {
+		return append(seg, activity.T(fmt.Sprintf(" held until %d draft invoices are finalized", n)))
+	}
+	if id := metaString(meta, "held_invoice_id"); lb.invoices[id] != "" {
+		return append(seg, activity.T(" held until draft invoice "), activity.L(activity.LinkInvoice, id, lb.invoices[id]), activity.T(" is finalized"))
+	}
+	return append(seg, activity.T(" held until the draft invoice is finalized"))
 }
 
 // limitedCredit reports a row whose credit for unused time did not fit in the
