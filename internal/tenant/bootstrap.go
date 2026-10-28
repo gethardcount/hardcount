@@ -51,14 +51,13 @@ type BootstrapRequest struct {
 
 // BootstrapResponse is POST /v1/bootstrap's 201.
 type BootstrapResponse struct {
-	Tenant             domain.Tenant `json:"tenant"`
-	OwnerEmail         string        `json:"owner_email"`
-	OwnerPassword      string        `json:"owner_password"`
-	PasswordGenerated  bool          `json:"password_generated"`
-	SecretKeyTest      string        `json:"secret_key_test"`
-	SecretKeyLive      string        `json:"secret_key_live"`
-	PublishableKeyTest string        `json:"publishable_key_test"`
-	Message            string        `json:"message"`
+	Tenant            domain.Tenant `json:"tenant"`
+	OwnerEmail        string        `json:"owner_email"`
+	OwnerPassword     string        `json:"owner_password"`
+	PasswordGenerated bool          `json:"password_generated"`
+	SecretKeyTest     string        `json:"secret_key_test"`
+	SecretKeyLive     string        `json:"secret_key_live"`
+	Message           string        `json:"message"`
 }
 
 func (h *BootstrapHandler) bootstrap(w http.ResponseWriter, r *http.Request) {
@@ -138,13 +137,12 @@ func (h *BootstrapHandler) bootstrap(w http.ResponseWriter, r *http.Request) {
 	// (browser, proxy) out of the loop.
 	w.Header().Set("Cache-Control", "no-store")
 	respond.JSON(w, r, http.StatusCreated, BootstrapResponse{
-		Tenant:             result.Tenant,
-		OwnerEmail:         result.OwnerUser.Email,
-		OwnerPassword:      result.OwnerPassword,
-		PasswordGenerated:  result.PasswordGenerated,
-		SecretKeyTest:      result.TestSecretKey,
-		SecretKeyLive:      result.LiveSecretKey,
-		PublishableKeyTest: result.TestPublishableKey,
-		Message:            "Bootstrap complete. Save these credentials — they will not be shown again.",
+		Tenant:            result.Tenant,
+		OwnerEmail:        result.OwnerUser.Email,
+		OwnerPassword:     result.OwnerPassword,
+		PasswordGenerated: result.PasswordGenerated,
+		SecretKeyTest:     result.TestSecretKey,
+		SecretKeyLive:     result.LiveSecretKey,
+		Message:           "Bootstrap complete. Save these credentials — they will not be shown again.",
 	})
 }

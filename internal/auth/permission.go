@@ -29,8 +29,7 @@ const (
 	PermAPIKeyWrite Permission = "apikey:write"
 
 	// PermTestClockWrite grants create / advance / delete on test_clocks.
-	// Only secret-mode keys hold this — publishable keys are for browser
-	// contexts and must never be able to move time for an entire tenant.
+	// Secret keys and dashboard sessions hold it; platform keys do not.
 	PermTestClockWrite Permission = "testclock:write"
 )
 
@@ -38,10 +37,9 @@ const (
 type KeyType string
 
 const (
-	KeyTypePlatform    KeyType = "platform"    // hc_platform_ — tenant management
-	KeyTypeSecret      KeyType = "secret"      // hc_secret_   — full tenant access
-	KeyTypePublishable KeyType = "publishable" // hc_pub_      — restricted tenant access
-	KeyTypeSession     KeyType = "session"     // dashboard cookie session — role-scoped access
+	KeyTypePlatform KeyType = "platform" // hc_platform_ — tenant management
+	KeyTypeSecret   KeyType = "secret"   // hc_secret_   — full tenant access
+	KeyTypeSession  KeyType = "session"  // dashboard cookie session — role-scoped access
 )
 
 // TypePrefix returns the type-only prefix (e.g. "hc_secret_"). Used when
@@ -50,8 +48,6 @@ func (kt KeyType) TypePrefix() string {
 	switch kt {
 	case KeyTypePlatform:
 		return "hc_platform_"
-	case KeyTypePublishable:
-		return "hc_pub_"
 	default:
 		return "hc_secret_"
 	}
@@ -91,20 +87,6 @@ var keyPermissions = map[KeyType]map[Permission]bool{
 		PermAPIKeyWrite:       true,
 		PermTestClockWrite:    true,
 	},
-	// Publishable keys are browser-embeddable (hc_pub_live_… ships in JS
-	// SDKs), so they get NO tenant-wide scopes at all — not even reads. An
-	// earlier pass removed the write scopes (a visitor could create customers /
-	// fake usage); the reads were left, but they are the same exposure class:
-	// hc_pub_ + customer:read lets any visitor to any embedding page list
-	// every customer's PII, pull every invoice PDF, read tenant revenue via
-	// /analytics, and bulk-export CSVs. Stripe's pk_ equivalents deliberately
-	// cannot list customers or read revenue. Hardcount has no current browser flow
-	// that needs these reads (the cost dashboard and hosted/payment pages
-	// authenticate with their own per-resource tokens, not publishable keys),
-	// so the safe default is an empty scope set: a publishable key authenticates
-	// but reads nothing tenant-wide. Re-add a NARROW, purpose-built scope here
-	// only when a concrete browser use case names what it needs.
-	KeyTypePublishable: {},
 	// Dashboard sessions inherit the full secret-key permission set today.
 	// Invites shipped (ADR-081) but roles are deliberately NOT enforced:
 	// user_tenants.role records owner/admin/member for the future split,

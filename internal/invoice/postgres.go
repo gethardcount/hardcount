@@ -160,7 +160,6 @@ const (
 	idxInvoicesInvoiceNumberUnique = "invoices_tenant_id_livemode_invoice_number_key"
 	idxInvoicesPublicTokenUnique   = "idx_invoices_public_token_hash"
 	idxInvoicesThresholdPerCycle   = "idx_invoices_threshold_unique_per_cycle"
-	idxInvoicesStripeInvoiceID     = "idx_invoices_stripe_invoice_id"
 )
 
 // mapInvoiceUniqueViolation routes a Postgres unique-violation error to
@@ -209,9 +208,6 @@ func mapInvoiceUniqueViolation(err error, inv domain.Invoice) error {
 	case idxInvoicesThresholdPerCycle:
 		return errs.AlreadyExists("threshold_cycle",
 			"threshold invoice already exists for this subscription cycle").WithCode("invoice_threshold_cycle_taken")
-	case idxInvoicesStripeInvoiceID:
-		return errs.AlreadyExists("stripe_invoice_id",
-			"a Hardcount invoice is already linked to this Stripe invoice id").WithCode("invoice_stripe_id_taken")
 	}
 	// Unknown constraint — surface the constraint name in the message
 	// so the operator + logs identify what fired, instead of squashing
@@ -235,7 +231,7 @@ const invCols = `id, tenant_id, customer_id, COALESCE(subscription_id,''), invoi
 	tax_status, tax_deferred_at, tax_retry_count, tax_pending_reason,
 	COALESCE(tax_error_code,''), tax_next_retry_at,
 	COALESCE(payment_card_brand,''), COALESCE(payment_card_last4,''),
-	COALESCE(public_token_encrypted,''), COALESCE(billing_reason,''), COALESCE(stripe_invoice_id,''),
+	COALESCE(public_token_encrypted,''), COALESCE(billing_reason,''),
 	is_simulated, tax_reversed_at,
 	COALESCE(payment_anomaly_kind,''), COALESCE(payment_anomaly_payment_intent_id,''), COALESCE(payment_anomaly_captured_cents,0),
 	COALESCE(billing_timezone,''), no_pm_notified_at, charge_attempt_seq,
@@ -361,8 +357,8 @@ func (s *PostgresStore) CreateAudited(
 			source_plan_changed_at, source_subscription_item_id, source_change_type,
 			tax_provider, tax_calculation_id, tax_reverse_charge, tax_exempt_reason,
 			tax_status, tax_deferred_at, tax_retry_count, tax_pending_reason, tax_error_code, billing_reason,
-			stripe_invoice_id, is_simulated, billing_timezone, auto_charge_pending)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44)
+			is_simulated, billing_timezone, auto_charge_pending)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43)
 		RETURNING `+invCols,
 		id, tenantID, inv.CustomerID, postgres.NullableString(inv.SubscriptionID), inv.InvoiceNumber,
 		inv.Status, inv.PaymentStatus, inv.Currency,
@@ -380,7 +376,6 @@ func (s *PostgresStore) CreateAudited(
 		string(taxStatus), postgres.NullableTime(inv.TaxDeferredAt), inv.TaxRetryCount, inv.TaxPendingReason,
 		postgres.NullableString(inv.TaxErrorCode),
 		postgres.NullableString(string(inv.BillingReason)),
-		postgres.NullableString(inv.StripeInvoiceID),
 		inv.IsSimulated,
 		postgres.NullableString(inv.BillingTimezone),
 		collectionQueuedAtFinalize(inv.Status, inv.PaymentStatus),
@@ -2315,9 +2310,9 @@ func (s *PostgresStore) createWithLineItemsInTx(ctx context.Context, tx *sql.Tx,
 			source_plan_changed_at, source_subscription_item_id, source_change_type,
 			tax_provider, tax_calculation_id, tax_reverse_charge, tax_exempt_reason,
 			tax_status, tax_deferred_at, tax_retry_count, tax_pending_reason, tax_error_code, billing_reason,
-			stripe_invoice_id, public_token_encrypted, public_token_hash, paid_at, voided_at, is_simulated,
+			public_token_encrypted, public_token_hash, paid_at, voided_at, is_simulated,
 			billing_timezone, auto_charge_pending)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46,$47,$48,$49)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46,$47,$48)
 		RETURNING `+invCols,
 		id, tenantID, inv.CustomerID, postgres.NullableString(inv.SubscriptionID), inv.InvoiceNumber,
 		inv.Status, inv.PaymentStatus, inv.Currency,
@@ -2336,7 +2331,6 @@ func (s *PostgresStore) createWithLineItemsInTx(ctx context.Context, tx *sql.Tx,
 		string(taxStatus), postgres.NullableTime(inv.TaxDeferredAt), inv.TaxRetryCount, inv.TaxPendingReason,
 		postgres.NullableString(inv.TaxErrorCode),
 		postgres.NullableString(string(inv.BillingReason)),
-		postgres.NullableString(inv.StripeInvoiceID),
 		postgres.NullableString(encToken), postgres.NullableString(tokenHash),
 		postgres.NullableTime(inv.PaidAt), postgres.NullableTime(inv.VoidedAt),
 		inv.IsSimulated,
@@ -3822,7 +3816,7 @@ func (s *PostgresStore) scanInvDest(inv *domain.Invoice) []any {
 		(*string)(&inv.TaxStatus), &inv.TaxDeferredAt, &inv.TaxRetryCount, &inv.TaxPendingReason,
 		&inv.TaxErrorCode, &inv.TaxNextRetryAt,
 		&inv.PaymentCardBrand, &inv.PaymentCardLast4,
-		decryptScanner{enc: s.enc, dst: &inv.PublicToken}, (*string)(&inv.BillingReason), &inv.StripeInvoiceID,
+		decryptScanner{enc: s.enc, dst: &inv.PublicToken}, (*string)(&inv.BillingReason),
 		&inv.IsSimulated, &inv.TaxReversedAt,
 		&inv.PaymentAnomalyKind, &inv.PaymentAnomalyPaymentIntentID, &inv.PaymentAnomalyCapturedCents,
 		&inv.BillingTimezone, &inv.NoPMNotifiedAt, &inv.ChargeAttemptSeq,
@@ -3925,37 +3919,6 @@ func (s *PostgresStore) GetByPublicToken(ctx context.Context, token string) (dom
 		return domain.Invoice{}, false, err
 	}
 	return inv, livemode, nil
-}
-
-// GetByStripeInvoiceID resolves a Stripe invoice id (in_xxx) to its imported
-// Hardcount invoice row. Built as the idempotency lookup for the Stripe importer
-// removed in the 2026-04-29 lean-cut (rebuild deferred until a design-partner
-// cutover), so it has no production caller today. When an importer returns,
-// re-running an import after a finalized invoice has already landed must
-// detect the existing row and emit skip-equivalent (or skip-divergent)
-// rather than ErrAlreadyExists from a unique-violation collision.
-//
-// Empty stripeInvoiceID returns ErrNotFound rather than matching the
-// partial unique index's NULL gap (no Hardcount-native invoice should match).
-// Runs under TxTenant — an importer always has a tenant in context, and
-// scoping by tenant is the standard RLS posture for this store.
-func (s *PostgresStore) GetByStripeInvoiceID(ctx context.Context, tenantID, stripeInvoiceID string) (domain.Invoice, error) {
-	if stripeInvoiceID == "" {
-		return domain.Invoice{}, errs.ErrNotFound
-	}
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return domain.Invoice{}, err
-	}
-	defer postgres.Rollback(tx)
-
-	var inv domain.Invoice
-	err = tx.QueryRowContext(ctx, `SELECT `+invCols+` FROM invoices WHERE stripe_invoice_id = $1`, stripeInvoiceID).
-		Scan(s.scanInvDest(&inv)...)
-	if err == sql.ErrNoRows {
-		return domain.Invoice{}, errs.ErrNotFound
-	}
-	return inv, err
 }
 
 // baseFundsPeriod is the one status predicate for "this invoice charged the

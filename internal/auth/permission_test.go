@@ -21,26 +21,6 @@ func TestHasPermission_SecretHasAll(t *testing.T) {
 	}
 }
 
-func TestHasPermission_PublishableRestricted(t *testing.T) {
-	// Publishable keys ship in browsers and get NO tenant-wide scopes —
-	// authenticate-only. Two regressions guarded here:
-	//   - the pre-FEAT-5-readiness write leak (customer:write + usage:write let
-	//     any visitor create customers / fake usage), and
-	//   - the read leak (customer:read in a browser key exposes all-customer
-	//     PII, every invoice PDF, tenant revenue via /analytics, and CSV
-	//     exports) — tenant-wide reads are the same exposure class as writes.
-	notHas := []Permission{
-		PermCustomerRead, PermUsageRead, PermSubscriptionRead, PermInvoiceRead,
-		PermCustomerWrite, PermUsageWrite,
-		PermPricingWrite, PermSubscriptionWrite, PermInvoiceWrite, PermDunningWrite, PermAPIKeyWrite, PermTenantWrite,
-	}
-	for _, p := range notHas {
-		if HasPermission(KeyTypePublishable, p) {
-			t.Errorf("publishable should NOT have %s", p)
-		}
-	}
-}
-
 func TestHasPermission_PlatformOnlyTenants(t *testing.T) {
 	if !HasPermission(KeyTypePlatform, PermTenantRead) {
 		t.Error("platform should have tenant:read")
@@ -63,11 +43,6 @@ func TestAllPermissions(t *testing.T) {
 	secretPerms := AllPermissions(KeyTypeSecret)
 	if len(secretPerms) != 15 {
 		t.Errorf("secret should have 15 permissions, got %d", len(secretPerms))
-	}
-
-	pubPerms := AllPermissions(KeyTypePublishable)
-	if len(pubPerms) != 0 {
-		t.Errorf("publishable should have 0 permissions (authenticate-only), got %d", len(pubPerms))
 	}
 
 	platformPerms := AllPermissions(KeyTypePlatform)

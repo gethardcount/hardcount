@@ -81,13 +81,12 @@ type BootstrapOpts struct {
 // the raw keys and the (possibly generated) owner password appear here
 // exactly once and are not retrievable afterwards.
 type BootstrapResult struct {
-	Tenant             domain.Tenant
-	OwnerUser          domain.User
-	OwnerPassword      string
-	PasswordGenerated  bool
-	TestSecretKey      string
-	LiveSecretKey      string
-	TestPublishableKey string
+	Tenant            domain.Tenant
+	OwnerUser         domain.User
+	OwnerPassword     string
+	PasswordGenerated bool
+	TestSecretKey     string
+	LiveSecretKey     string
 }
 
 func RunBootstrap(ctx context.Context, db *postgres.DB, deps BootstrapDeps, opts BootstrapOpts) (BootstrapResult, error) {
@@ -128,7 +127,6 @@ func RunBootstrap(ctx context.Context, db *postgres.DB, deps BootstrapDeps, opts
 	tenantID := postgres.NewID("hc_ten")
 	testSecretKey, testSecretPrefix, testSecretID := mintKey("hc_secret_test_")
 	liveSecretKey, liveSecretPrefix, liveSecretID := mintKey("hc_secret_live_")
-	testPubKey, testPubPrefix, testPubID := mintKey("hc_pub_test_")
 
 	tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
@@ -187,7 +185,7 @@ func RunBootstrap(ctx context.Context, db *postgres.DB, deps BootstrapDeps, opts
 		return BootstrapResult{}, fmt.Errorf("seed tenant settings: %w", err)
 	}
 
-	// Mint paired test + live secret keys plus a test publishable key.
+	// Mint paired test + live secret keys.
 	// Per Stripe's pattern you can't mint cross-mode keys post-auth (a
 	// test-mode caller mints test keys), so the only path to a FIRST
 	// live key is here. Operators not charging real money ignore it.
@@ -217,9 +215,6 @@ func RunBootstrap(ctx context.Context, db *postgres.DB, deps BootstrapDeps, opts
 		return BootstrapResult{}, err
 	}
 	if err := insertKey(liveSecretID, liveSecretPrefix, liveSecretKey, "secret", true, "Bootstrap Key (Live)"); err != nil {
-		return BootstrapResult{}, err
-	}
-	if err := insertKey(testPubID, testPubPrefix, testPubKey, "publishable", false, "Bootstrap Publishable Key (Test)"); err != nil {
 		return BootstrapResult{}, err
 	}
 
@@ -274,7 +269,6 @@ func RunBootstrap(ctx context.Context, db *postgres.DB, deps BootstrapDeps, opts
 		}{
 			{testSecretID, "Bootstrap Key (Test)", "secret", false},
 			{liveSecretID, "Bootstrap Key (Live)", "secret", true},
-			{testPubID, "Bootstrap Publishable Key (Test)", "publishable", false},
 		} {
 			if err := deps.Audit.LogInTx(ctx, tx, audit.Entry{
 				Action:        domain.AuditActionCreate,
@@ -318,13 +312,12 @@ func RunBootstrap(ctx context.Context, db *postgres.DB, deps BootstrapDeps, opts
 	}
 
 	return BootstrapResult{
-		Tenant:             createdTenant,
-		OwnerUser:          ownerUser,
-		OwnerPassword:      ownerPassword,
-		PasswordGenerated:  generated,
-		TestSecretKey:      testSecretKey,
-		LiveSecretKey:      liveSecretKey,
-		TestPublishableKey: testPubKey,
+		Tenant:            createdTenant,
+		OwnerUser:         ownerUser,
+		OwnerPassword:     ownerPassword,
+		PasswordGenerated: generated,
+		TestSecretKey:     testSecretKey,
+		LiveSecretKey:     liveSecretKey,
 	}, nil
 }
 

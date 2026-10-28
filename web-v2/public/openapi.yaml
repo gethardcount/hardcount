@@ -62,7 +62,7 @@ components:
       scheme: bearer
       description: |
         API key authentication. Use `Authorization: Bearer hc_secret_...`
-        Key types: hc_platform_ (tenant mgmt), hc_secret_ (full access), hc_pub_ (restricted)
+        Key types: hc_platform_ (tenant mgmt), hc_secret_ (full access)
     SessionCookie:
       type: apiKey
       in: cookie
@@ -1168,10 +1168,7 @@ components:
 
     InvoiceLineType:
       type: string
-      enum: [base_fee, usage, add_on, discount, tax]
-      description: |
-        `discount` and `tax` appear only on lines added before 2026-10-22;
-        a new line cannot use them.
+      enum: [base_fee, usage, add_on]
 
     ItemChangeType:
       type: string
@@ -1495,12 +1492,6 @@ components:
           $ref: "#/components/schemas/ItemChangeType"
         billing_reason:
           $ref: "#/components/schemas/InvoiceBillingReason"
-        stripe_invoice_id:
-          type: string
-          description: |
-            Source Stripe invoice id (`in_xxx`). Set only on invoices the
-            Stripe importer wrote before it was removed on 2026-04-29.
-            Empty on every other invoice.
         is_simulated:
           type: boolean
           description: |
@@ -3580,16 +3571,15 @@ components:
             - invoice_not_collectible
             - retries_exhausted
             - action_failed
-            - manually_resolved
             - amount_below_minimum
           description: |
             How the run ended, set when it is resolved. Exception:
             `action_failed` is set on a run that is still `active`. The
             final action (pause, cancel or mark uncollectible) failed and
-            will be retried at `next_action_at`. `manually_resolved` appears
-            only on older runs. `amount_below_minimum`: a charge on the
-            invoice was refused by Stripe because the amount is below its
-            minimum charge, so the run ended without its final action.
+            will be retried at `next_action_at`. `amount_below_minimum`: a
+            charge on the invoice was refused by Stripe because the amount is
+            below its minimum charge, so the run ended without its final
+            action.
         created_at:
           type: string
           format: date-time
@@ -4262,7 +4252,7 @@ components:
           example: hc_secret_test_1a2b3c4d
         key_type:
           type: string
-          enum: [platform, secret, publishable]
+          enum: [platform, secret]
         livemode:
           type: boolean
         name:
@@ -4531,7 +4521,7 @@ components:
 
     BootstrapResult:
       type: object
-      required: [tenant, owner_email, owner_password, password_generated, secret_key_test, secret_key_live, publishable_key_test, message]
+      required: [tenant, owner_email, owner_password, password_generated, secret_key_test, secret_key_live, message]
       properties:
         tenant:
           $ref: "#/components/schemas/Tenant"
@@ -4549,9 +4539,6 @@ components:
         secret_key_live:
           type: string
           description: Live-mode secret key (`hc_secret_live_...`).
-        publishable_key_test:
-          type: string
-          description: Test-mode publishable key (`hc_pub_test_...`).
         message:
           type: string
 
@@ -11606,7 +11593,7 @@ paths:
                     type: string
                   key_type:
                     type: string
-                    enum: [platform, secret, publishable]
+                    enum: [platform, secret]
         "401":
           description: Missing, revoked, or expired credential
           content:
@@ -12951,8 +12938,7 @@ paths:
                 $ref: "#/components/schemas/Error"
         "422":
           description: |
-            `resolution` is missing or not one of the three values. The
-            old value `manually_resolved` is refused with its own message.
+            `resolution` is missing or not one of the three values.
           content:
             application/json:
               schema:
@@ -13495,7 +13481,7 @@ paths:
                   description: Label shown in the key list. Must not be blank.
                 key_type:
                   type: string
-                  enum: [secret, publishable, platform]
+                  enum: [secret, platform]
                   default: secret
                 expires_at:
                   type: string
@@ -14150,7 +14136,7 @@ paths:
         `Authorization: Bearer <token>`. Never send it in the query string.
 
         In one transaction it creates the first tenant, its owner user, a
-        test secret key, a live secret key and a test publishable key. The
+        test secret key and a live secret key. The
         response is the only place the keys appear, and the password too
         when Hardcount generated it. The response has `Cache-Control: no-store`.
 

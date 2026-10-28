@@ -187,7 +187,7 @@ func TestE2E_ClockSoak_MonthEndAnchorThroughYearBoundary(t *testing.T) {
 	//
 	// Inputs: one item, quantity 1 (the default), on a plan with
 	// base_amount_cents 5000, monthly, base_bill_timing omitted (pricing
-	// defaults it to in_arrears), no meters, no coupon, no credit grant, and
+	// defaults it to in_arrears), no meters, no credit grant, and
 	// no tax setup on a freshly bootstrapped tenant.
 	//
 	// Engine rules that decide the number:

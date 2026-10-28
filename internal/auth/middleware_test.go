@@ -74,7 +74,7 @@ func TestMiddleware_ValidSecretKey(t *testing.T) {
 
 func TestMiddleware_XAPIKeyFallback(t *testing.T) {
 	svc := NewService(newMemStore())
-	result, _ := svc.CreateKey(postgres.WithLivemode(t.Context(), true), "t1", CreateKeyInput{Name: "Test", KeyType: KeyTypePublishable})
+	result, _ := svc.CreateKey(postgres.WithLivemode(t.Context(), true), "t1", CreateKeyInput{Name: "Test", KeyType: KeyTypeSecret})
 
 	mw := Middleware(svc)
 	var gotKeyType KeyType
@@ -91,8 +91,8 @@ func TestMiddleware_XAPIKeyFallback(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Errorf("status: got %d, want 200", rec.Code)
 	}
-	if gotKeyType != KeyTypePublishable {
-		t.Errorf("key_type: got %q, want publishable", gotKeyType)
+	if gotKeyType != KeyTypeSecret {
+		t.Errorf("key_type: got %q, want secret", gotKeyType)
 	}
 }
 
@@ -125,14 +125,13 @@ func TestRequire_SecretKeyHasFullAccess(t *testing.T) {
 	}
 }
 
-func TestRequire_PublishableKeyRestricted(t *testing.T) {
+func TestRequire_PlatformKeyHasNoTenantScopes(t *testing.T) {
 	svc := NewService(newMemStore())
-	result, _ := svc.CreateKey(postgres.WithLivemode(t.Context(), true), "t1", CreateKeyInput{Name: "Pub", KeyType: KeyTypePublishable})
+	ctx := postgres.WithLivemode(t.Context(), true)
+	result, _ := svc.CreateKey(WithKeyType(ctx, KeyTypePlatform), "t1", CreateKeyInput{Name: "Plat", KeyType: KeyTypePlatform})
 
-	// Publishable keys get NO tenant-wide scopes — authenticate-only. Every
-	// read AND write path is closed: tenant-wide reads in a browser key leak
-	// all-customer PII/revenue, the same exposure class as the writes the
-	// earlier readiness pass cut.
+	// A platform key manages tenants and holds no scope inside one: every
+	// tenant read and write is a 403.
 	denied := []Permission{
 		PermCustomerRead, PermUsageRead, PermSubscriptionRead, PermInvoiceRead,
 		PermCustomerWrite, PermUsageWrite,
@@ -150,7 +149,7 @@ func TestRequire_PublishableKeyRestricted(t *testing.T) {
 			handler.ServeHTTP(rec, req)
 
 			if rec.Code != http.StatusForbidden {
-				t.Errorf("pub key should NOT have %s, got %d (want 403)", perm, rec.Code)
+				t.Errorf("platform key should NOT have %s, got %d (want 403)", perm, rec.Code)
 			}
 		})
 	}
@@ -165,8 +164,6 @@ func TestLivemodeFromRawKey(t *testing.T) {
 	}{
 		{"secret_live", "hc_secret_live_" + "ff", true, true},
 		{"secret_test", "hc_secret_test_" + "aa", false, true},
-		{"pub_live", "hc_pub_live_abc", true, true},
-		{"pub_test", "hc_pub_test_abc", false, true},
 		{"platform_live", "hc_plat_live_xyz", true, true},
 		{"empty", "", false, false},
 		{"no_mode_infix", "hc_cps_customer_portal_token", false, false},
@@ -250,8 +247,7 @@ func TestRequireMethod_GETUsesReadPOSTUsesWrite(t *testing.T) {
 	// Secret holds customer:read but NOT tenant:write (tenant scopes are
 	// platform-only), so RequireMethod(customer:read, tenant:write) passes read
 	// methods (arg0 held) and 403s write methods (arg1 absent) — isolating
-	// GET/HEAD/OPTIONS→arg0 and POST/PUT/PATCH/DELETE→arg1. (Publishable keys,
-	// formerly the read-only fixture here, now carry no scopes at all.)
+	// GET/HEAD/OPTIONS→arg0 and POST/PUT/PATCH/DELETE→arg1.
 	sec, _ := svc.CreateKey(postgres.WithLivemode(t.Context(), true), "t1", CreateKeyInput{Name: "Sec", KeyType: KeyTypeSecret})
 
 	mw := Middleware(svc)(RequireMethod(PermCustomerRead, PermTenantWrite)(

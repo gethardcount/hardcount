@@ -23,9 +23,8 @@ Each rule is explained in the section named after it.
   - Some work runs under `postgres.TxBypass`, where RLS does not apply, and must filter by tenant itself. Examples: background jobs, sign-in and sessions, public links, incoming webhooks, Stripe credential settings, and team members. The full list is in `docs/architecture.md` (Design rules).
   - A new `TxBypass` use fails `internal/arch/txbypass_allowlist_test.go` until it is listed.
 - chi/v5 for HTTP routing.
-- API key auth with 3 stored key types: platform, secret and publishable (`api_keys_key_type_check`).
-  - Publishable keys carry no permissions today.
-  - Dashboard sessions use a fourth, in-code type, `KeyTypeSession`, with the secret-key permission set (`internal/auth/permission.go`).
+- API key auth with 2 stored key types: platform and secret (`api_keys_key_type_check`).
+  - Dashboard sessions use a third, in-code type, `KeyTypeSession`, with the secret-key permission set (`internal/auth/permission.go`).
 - HMAC-SHA256 webhook signing (both inbound Stripe and outbound).
 
 ## Money-path changes

@@ -25,17 +25,14 @@ const (
 
 // Defines values for APIKeyKeyType.
 const (
-	APIKeyKeyTypePlatform    APIKeyKeyType = "platform"
-	APIKeyKeyTypePublishable APIKeyKeyType = "publishable"
-	APIKeyKeyTypeSecret      APIKeyKeyType = "secret"
+	APIKeyKeyTypePlatform APIKeyKeyType = "platform"
+	APIKeyKeyTypeSecret   APIKeyKeyType = "secret"
 )
 
 // Valid indicates whether the value is a known member of the APIKeyKeyType enum.
 func (e APIKeyKeyType) Valid() bool {
 	switch e {
 	case APIKeyKeyTypePlatform:
-		return true
-	case APIKeyKeyTypePublishable:
 		return true
 	case APIKeyKeyTypeSecret:
 		return true
@@ -677,7 +674,6 @@ const (
 	DunningRunResolutionAmountBelowMinimum    DunningRunResolution = "amount_below_minimum"
 	DunningRunResolutionInvoiceNotCollectible DunningRunResolution = "invoice_not_collectible"
 	DunningRunResolutionInvoiceVoided         DunningRunResolution = "invoice_voided"
-	DunningRunResolutionManuallyResolved      DunningRunResolution = "manually_resolved"
 	DunningRunResolutionPaymentRecovered      DunningRunResolution = "payment_recovered"
 	DunningRunResolutionRetriesExhausted      DunningRunResolution = "retries_exhausted"
 )
@@ -692,8 +688,6 @@ func (e DunningRunResolution) Valid() bool {
 	case DunningRunResolutionInvoiceNotCollectible:
 		return true
 	case DunningRunResolutionInvoiceVoided:
-		return true
-	case DunningRunResolutionManuallyResolved:
 		return true
 	case DunningRunResolutionPaymentRecovered:
 		return true
@@ -952,11 +946,9 @@ func (e InvoiceLineItemInputLineType) Valid() bool {
 
 // Defines values for InvoiceLineType.
 const (
-	InvoiceLineTypeAddOn    InvoiceLineType = "add_on"
-	InvoiceLineTypeBaseFee  InvoiceLineType = "base_fee"
-	InvoiceLineTypeDiscount InvoiceLineType = "discount"
-	InvoiceLineTypeTax      InvoiceLineType = "tax"
-	InvoiceLineTypeUsage    InvoiceLineType = "usage"
+	InvoiceLineTypeAddOn   InvoiceLineType = "add_on"
+	InvoiceLineTypeBaseFee InvoiceLineType = "base_fee"
+	InvoiceLineTypeUsage   InvoiceLineType = "usage"
 )
 
 // Valid indicates whether the value is a known member of the InvoiceLineType enum.
@@ -965,10 +957,6 @@ func (e InvoiceLineType) Valid() bool {
 	case InvoiceLineTypeAddOn:
 		return true
 	case InvoiceLineTypeBaseFee:
-		return true
-	case InvoiceLineTypeDiscount:
-		return true
-	case InvoiceLineTypeTax:
 		return true
 	case InvoiceLineTypeUsage:
 		return true
@@ -2128,17 +2116,14 @@ func (e GetHealth200JSONResponseBodyStatus) Valid() bool {
 
 // Defines values for CreateApiKeyJSONBodyKeyType.
 const (
-	CreateApiKeyJSONBodyKeyTypePlatform    CreateApiKeyJSONBodyKeyType = "platform"
-	CreateApiKeyJSONBodyKeyTypePublishable CreateApiKeyJSONBodyKeyType = "publishable"
-	CreateApiKeyJSONBodyKeyTypeSecret      CreateApiKeyJSONBodyKeyType = "secret"
+	CreateApiKeyJSONBodyKeyTypePlatform CreateApiKeyJSONBodyKeyType = "platform"
+	CreateApiKeyJSONBodyKeyTypeSecret   CreateApiKeyJSONBodyKeyType = "secret"
 )
 
 // Valid indicates whether the value is a known member of the CreateApiKeyJSONBodyKeyType enum.
 func (e CreateApiKeyJSONBodyKeyType) Valid() bool {
 	switch e {
 	case CreateApiKeyJSONBodyKeyTypePlatform:
-		return true
-	case CreateApiKeyJSONBodyKeyTypePublishable:
 		return true
 	case CreateApiKeyJSONBodyKeyTypeSecret:
 		return true
@@ -3013,17 +2998,14 @@ func (e ReceiveStripeWebhook200JSONResponseBodyStatus) Valid() bool {
 
 // Defines values for GetV1Whoami200JSONResponseBodyKeyType.
 const (
-	Platform    GetV1Whoami200JSONResponseBodyKeyType = "platform"
-	Publishable GetV1Whoami200JSONResponseBodyKeyType = "publishable"
-	Secret      GetV1Whoami200JSONResponseBodyKeyType = "secret"
+	Platform GetV1Whoami200JSONResponseBodyKeyType = "platform"
+	Secret   GetV1Whoami200JSONResponseBodyKeyType = "secret"
 )
 
 // Valid indicates whether the value is a known member of the GetV1Whoami200JSONResponseBodyKeyType enum.
 func (e GetV1Whoami200JSONResponseBodyKeyType) Valid() bool {
 	switch e {
 	case Platform:
-		return true
-	case Publishable:
 		return true
 	case Secret:
 		return true
@@ -3635,9 +3617,6 @@ type BootstrapResult struct {
 	// OwnerPassword Dashboard login password (the one you sent, or the generated one).
 	OwnerPassword     string `json:"owner_password"`
 	PasswordGenerated bool   `json:"password_generated"`
-
-	// PublishableKeyTest Test-mode publishable key (`hc_pub_test_...`).
-	PublishableKeyTest string `json:"publishable_key_test"`
 
 	// SecretKeyLive Live-mode secret key (`hc_secret_live_...`).
 	SecretKeyLive string `json:"secret_key_live"`
@@ -4416,10 +4395,10 @@ type DunningRun struct {
 	// Resolution How the run ended, set when it is resolved. Exception:
 	// `action_failed` is set on a run that is still `active`. The
 	// final action (pause, cancel or mark uncollectible) failed and
-	// will be retried at `next_action_at`. `manually_resolved` appears
-	// only on older runs. `amount_below_minimum`: a charge on the
-	// invoice was refused by Stripe because the amount is below its
-	// minimum charge, so the run ended without its final action.
+	// will be retried at `next_action_at`. `amount_below_minimum`: a
+	// charge on the invoice was refused by Stripe because the amount is
+	// below its minimum charge, so the run ended without its final
+	// action.
 	Resolution DunningRunResolution `json:"resolution,omitempty"`
 	ResolvedAt time.Time            `json:"resolved_at,omitempty"`
 
@@ -4437,10 +4416,10 @@ type DunningRun struct {
 // DunningRunResolution How the run ended, set when it is resolved. Exception:
 // `action_failed` is set on a run that is still `active`. The
 // final action (pause, cancel or mark uncollectible) failed and
-// will be retried at `next_action_at`. `manually_resolved` appears
-// only on older runs. `amount_below_minimum`: a charge on the
-// invoice was refused by Stripe because the amount is below its
-// minimum charge, so the run ended without its final action.
+// will be retried at `next_action_at`. `amount_below_minimum`: a
+// charge on the invoice was refused by Stripe because the amount is
+// below its minimum charge, so the run ended without its final
+// action.
 type DunningRunResolution string
 
 // DunningRunState `active`: retries are running. `escalated`: retries ran out
@@ -4891,11 +4870,6 @@ type Invoice struct {
 	// nothing).
 	Status InvoiceStatus `json:"status"`
 
-	// StripeInvoiceId Source Stripe invoice id (`in_xxx`). Set only on invoices the
-	// Stripe importer wrote before it was removed on 2026-04-29.
-	// Empty on every other invoice.
-	StripeInvoiceId string `json:"stripe_invoice_id,omitempty"`
-
 	// StripePaymentIntentId The Stripe PaymentIntent of the card charge that paid the
 	// invoice, or of its last charge that is in progress or failed. It
 	// can be absent after a charge was sent: for example when the
@@ -5089,15 +5063,12 @@ type InvoiceLineItem struct {
 	Description        string    `json:"description"`
 
 	// DimensionMatch On a usage line, the labels its price takes. Absent for a price that takes every event, and on other lines.
-	DimensionMatch map[string]string `json:"dimension_match,omitempty"`
-	Id             string            `json:"id"`
-	InvoiceId      string            `json:"invoice_id"`
-
-	// LineType `discount` and `tax` appear only on lines added before 2026-10-22;
-	// a new line cannot use them.
-	LineType InvoiceLineType        `json:"line_type"`
-	Metadata map[string]interface{} `json:"metadata,omitempty"`
-	MeterId  string                 `json:"meter_id,omitempty"`
+	DimensionMatch map[string]string      `json:"dimension_match,omitempty"`
+	Id             string                 `json:"id"`
+	InvoiceId      string                 `json:"invoice_id"`
+	LineType       InvoiceLineType        `json:"line_type"`
+	Metadata       map[string]interface{} `json:"metadata,omitempty"`
+	MeterId        string                 `json:"meter_id,omitempty"`
 
 	// MeterUnit The meter's unit ("tokens", "seconds", …), stamped on usage lines at write time so invoice surfaces can apply the display-scale convention (token rates read "$3.00 / 1M tokens"). Empty on non-usage lines and on lines written before the 0173 backfill.
 	MeterUnit string `json:"meter_unit,omitempty"`
@@ -5158,8 +5129,7 @@ type InvoiceLineItemInput struct {
 // InvoiceLineItemInputLineType Defaults to `add_on`.
 type InvoiceLineItemInputLineType string
 
-// InvoiceLineType `discount` and `tax` appear only on lines added before 2026-10-22;
-// a new line cannot use them.
+// InvoiceLineType defines model for InvoiceLineType.
 type InvoiceLineType string
 
 // InvoicePaymentStatus Payment-attempt status. `unknown` marks a Stripe charge attempt that

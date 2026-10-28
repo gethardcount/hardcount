@@ -1025,7 +1025,7 @@ export interface LineItem {
   // to "$0.00".
   unit_amount_decimal: string
   // Meter the usage line was rated from. Stamped by the billing engine on
-  // usage lines only; absent on base-fee, add-on, discount and tax lines.
+  // usage lines only; absent on base-fee and add-on lines.
   // Carries the drill-down from a disputed line back to the events behind it.
   meter_id?: string
   // Meter unit stamped on usage lines ("tokens", …) — drives the per-1M

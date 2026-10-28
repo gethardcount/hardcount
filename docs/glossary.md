@@ -23,12 +23,11 @@ Words used in the Hardcount docs and dashboard. For the big picture, read
   `_live_` in its prefix) or the dashboard's mode switch picks which set you
   see. Tenant settings are shared, but each mode has its own Stripe
   connection. [More](api-keys.md)
-- **API key types (secret, publishable, platform)**: The three kinds of
-  key you send as `Authorization: Bearer <key>`. A secret key
-  (`hc_secret_`) has full access to one tenant and stays on your server. A
-  publishable key (`hc_pub_`) is safe in a browser, but reads no tenant
-  data. A platform key (`hc_platform_`) manages tenants and is not issued
-  in the product. [More](api-keys.md)
+- **API key types (secret, platform)**: The two kinds of key you send as
+  `Authorization: Bearer <key>`. A secret key (`hc_secret_`) has full
+  access to one tenant and stays on your server. A platform key
+  (`hc_platform_`) manages tenants and is not issued in the product.
+  [More](api-keys.md)
 
 ## Pricing and usage
 

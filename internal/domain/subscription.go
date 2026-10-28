@@ -551,7 +551,7 @@ type Subscription struct {
 
 	// Items is populated by store reads that hydrate the subscription with
 	// its current priced lines. Writes through Store.Create require a
-	// non-empty Items slice; runtime lookups (billing engine, coupon apply)
+	// non-empty Items slice; runtime lookups (billing engine)
 	// iterate this. A subscription without items is not a valid state.
 	Items []SubscriptionItem `json:"items,omitempty"`
 }

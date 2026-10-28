@@ -4931,7 +4931,7 @@ export interface paths {
                             email?: string;
                             key_id?: string;
                             /** @enum {string} */
-                            key_type?: "platform" | "secret" | "publishable";
+                            key_type?: "platform" | "secret";
                         };
                     };
                 };
@@ -6871,7 +6871,7 @@ export interface paths {
          *     `Authorization: Bearer <token>`. Never send it in the query string.
          *
          *     In one transaction it creates the first tenant, its owner user, a
-         *     test secret key, a live secret key and a test publishable key. The
+         *     test secret key and a live secret key. The
          *     response is the only place the keys appear, and the password too
          *     when Hardcount generated it. The response has `Cache-Control: no-store`.
          *
@@ -7717,12 +7717,8 @@ export interface components {
          * @enum {string}
          */
         InvoiceBillingReason: "subscription_cycle" | "subscription_create" | "subscription_cancel" | "subscription_update" | "manual" | "threshold";
-        /**
-         * @description `discount` and `tax` appear only on lines added before 2026-10-22;
-         *     a new line cannot use them.
-         * @enum {string}
-         */
-        InvoiceLineType: "base_fee" | "usage" | "add_on" | "discount" | "tax";
+        /** @enum {string} */
+        InvoiceLineType: "base_fee" | "usage" | "add_on";
         /**
          * @description Classifies per-item proration artifacts so the dedup index can
          *     distinguish a plan-change and a quantity-change that happen to
@@ -7953,12 +7949,6 @@ export interface components {
             source_subscription_item_id?: string;
             source_change_type?: components["schemas"]["ItemChangeType"];
             billing_reason?: components["schemas"]["InvoiceBillingReason"];
-            /**
-             * @description Source Stripe invoice id (`in_xxx`). Set only on invoices the
-             *     Stripe importer wrote before it was removed on 2026-04-29.
-             *     Empty on every other invoice.
-             */
-            stripe_invoice_id?: string;
             /**
              * @description Whether this invoice's domain timestamps (created/issued/due/paid)
              *     were stamped on a test clock's simulated time rather than
@@ -9343,13 +9333,13 @@ export interface components {
              * @description How the run ended, set when it is resolved. Exception:
              *     `action_failed` is set on a run that is still `active`. The
              *     final action (pause, cancel or mark uncollectible) failed and
-             *     will be retried at `next_action_at`. `manually_resolved` appears
-             *     only on older runs. `amount_below_minimum`: a charge on the
-             *     invoice was refused by Stripe because the amount is below its
-             *     minimum charge, so the run ended without its final action.
+             *     will be retried at `next_action_at`. `amount_below_minimum`: a
+             *     charge on the invoice was refused by Stripe because the amount is
+             *     below its minimum charge, so the run ended without its final
+             *     action.
              * @enum {string}
              */
-            resolution?: "payment_recovered" | "invoice_voided" | "invoice_not_collectible" | "retries_exhausted" | "action_failed" | "manually_resolved" | "amount_below_minimum";
+            resolution?: "payment_recovered" | "invoice_voided" | "invoice_not_collectible" | "retries_exhausted" | "action_failed" | "amount_below_minimum";
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -9869,7 +9859,7 @@ export interface components {
              */
             key_prefix: string;
             /** @enum {string} */
-            key_type: "platform" | "secret" | "publishable";
+            key_type: "platform" | "secret";
             livemode: boolean;
             name: string;
             tenant_id: string;
@@ -10071,8 +10061,6 @@ export interface components {
             secret_key_test: string;
             /** @description Live-mode secret key (`hc_secret_live_...`). */
             secret_key_live: string;
-            /** @description Test-mode publishable key (`hc_pub_test_...`). */
-            publishable_key_test: string;
             message: string;
         };
         AuditLogEntry: {
@@ -15824,10 +15812,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /**
-             * @description `resolution` is missing or not one of the three values. The
-             *     old value `manually_resolved` is refused with its own message.
-             */
+            /** @description `resolution` is missing or not one of the three values. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -16430,7 +16415,7 @@ export interface operations {
                      * @default secret
                      * @enum {string}
                      */
-                    key_type?: "secret" | "publishable" | "platform";
+                    key_type?: "secret" | "platform";
                     /**
                      * Format: date-time
                      * @description Optional. Must be in the future. Omit for a key that does not expire.

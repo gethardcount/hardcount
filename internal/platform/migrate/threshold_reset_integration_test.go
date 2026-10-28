@@ -41,6 +41,9 @@ INSERT INTO invoices (id, tenant_id, customer_id, subscription_id, invoice_numbe
 // down goes to the version before, not one step, so a later migration does
 // not take this one's place.
 //
+// The up stops before oldDataVersion, which drops an invoice column the
+// snapshot reads.
+//
 // Mutation: an up that keeps the column turns this red.
 func TestThresholdResetColumnDropped(t *testing.T) {
 	dsn, db := scratchDB(t, "hardcount_test_noreset_b_migrate")
@@ -53,7 +56,7 @@ func TestThresholdResetColumnDropped(t *testing.T) {
 	}
 	before := thresholdResetSnapshot(t, db)
 
-	if err := up(ctx, dsn, migrationFiles()); err != nil {
+	if err := up(ctx, dsn, filesBefore(t, oldDataVersion)); err != nil {
 		t.Fatalf("up: %v", err)
 	}
 	if columnExists(t, db, "subscriptions", "billing_threshold_reset_cycle") {
@@ -63,7 +66,7 @@ func TestThresholdResetColumnDropped(t *testing.T) {
 		t.Errorf("the up changed thresholds or invoices:\nbefore %s\nafter  %s", before, after)
 	}
 
-	if _, err := down(ctx, dsn, migrationFiles(), thresholdResetVersion-1); err != nil {
+	if _, err := down(ctx, dsn, filesBefore(t, oldDataVersion), thresholdResetVersion-1); err != nil {
 		t.Fatalf("down to %d: %v", thresholdResetVersion-1, err)
 	}
 	if !columnExists(t, db, "subscriptions", "billing_threshold_reset_cycle") {

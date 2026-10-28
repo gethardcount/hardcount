@@ -15,8 +15,8 @@ customer created after the calls is usually not invoiced, because it
 predates the subscription
 ([held usage](#usage-for-a-customer-hardcount-does-not-know-yet)).
 
-1. **Hardcount running, and a secret API key.** A publishable key cannot send
-   usage. The commands below use the variables from [the first invoice
+1. **Hardcount running, and a secret API key.** The commands below use
+   the variables from [the first invoice
    page](../first-invoice.md#before-you-start):
 
    ```bash

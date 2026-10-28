@@ -103,7 +103,7 @@ curl -X POST http://localhost:8080/v1/bootstrap \
   -d '{"tenant_name":"Acme","owner_email":"you@example.com","owner_password":"a-strong-password-12ch"}'
 ```
 
-**You see:** JSON with `owner_email`, `owner_password`, `secret_key_test` (`hc_secret_test_…`), `secret_key_live` (`hc_secret_live_…`) and `publishable_key_test`.
+**You see:** JSON with `owner_email`, `owner_password`, `secret_key_test` (`hc_secret_test_…`) and `secret_key_live` (`hc_secret_live_…`).
 
 Save it in your password manager now. It is shown once, and Hardcount keeps only hashes, so it cannot be shown again. A second call answers `409 already_bootstrapped`.
 

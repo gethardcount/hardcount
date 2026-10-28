@@ -13,6 +13,5 @@ export type CreateApiKeyBodyKeyType = typeof CreateApiKeyBodyKeyType[keyof typeo
 
 export const CreateApiKeyBodyKeyType = {
   secret: 'secret',
-  publishable: 'publishable',
   platform: 'platform',
 } as const;
