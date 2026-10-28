@@ -19,7 +19,7 @@ original text.
 
 ## [Unreleased]
 
-**Velox is now Hardcount ([#PRNUM](https://github.com/gethardcount/hardcount/pull/PRNUM)).** The old names are not read. Rename what you run and call:
+**Velox is now Hardcount ([#1409](https://github.com/gethardcount/hardcount/pull/1409)).** The old names are not read. Rename what you run and call:
 
 - Commands: `velox`, `velox-bootstrap`, `velox-doctor` are `hardcount`, `hardcount-bootstrap`, `hardcount-doctor`.
 - Settings: every `VELOX_*` variable is `HARDCOUNT_*`, such as `HARDCOUNT_ENCRYPTION_KEY`.
@@ -33,7 +33,7 @@ original text.
 - Stripe metadata keys and idempotency keys: `hardcount_*`, such as `hardcount_invoice_id`.
 - Repository: `github.com/gethardcount/hardcount`. The Go module path stays `github.com/sagarsuperuser/velox` for now.
 
-**v0.9.0 needs a fresh database ([#1354](https://github.com/getvelox/velox/pull/1354), [#PRNUM](https://github.com/gethardcount/hardcount/pull/PRNUM)).** A database made by Velox is refused, and nothing in it changes. From a build of `main`, `hardcount migrate` and start-up stop with `this database was made by Velox`; from v0.8.x, with `no migration record`.
+**v0.9.0 needs a fresh database ([#1354](https://github.com/getvelox/velox/pull/1354), [#1409](https://github.com/gethardcount/hardcount/pull/1409)).** A database made by Velox is refused, and nothing in it changes. From a build of `main`, `hardcount migrate` and start-up stop with `this database was made by Velox`; from v0.8.x, with `no migration record`.
 
 **Pricing: prices belong to the plan ([ADR-130](docs/adr/130-usage-prices-belong-to-the-plan.md)).**
 
