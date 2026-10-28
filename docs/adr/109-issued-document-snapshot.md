@@ -19,7 +19,7 @@ invoice footer to what an invoice copies.
 
 ## Context
 
-Walking FLOW CU1 surfaced this. Invoice `HC-000145` was already
+Walking FLOW CU1 surfaced this. Invoice `VLX-000145` was already
 `finalized`. Editing the customer's billing profile afterwards — a new
 `address_line1`, then a corrected VAT number — changed the PDF that
 `GET /v1/invoices/{id}/pdf` returns for that finalized invoice:
@@ -86,7 +86,7 @@ Consequences, in order of severity:
    the new letterhead.
 
 Nothing here is a hypothetical: items 1 and 2 were both reproduced by
-hand against `HC-000145` during the walk.
+hand against `VLX-000145` during the walk.
 
 ### Industry anchor
 

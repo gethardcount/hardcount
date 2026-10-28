@@ -261,7 +261,7 @@ shipped with Hardcount.
      }"
    ```
 
-   **You see:** a `hc_sub_...` with `status=active`, and current period
+   **You see:** an `hc_sub_...` with `status=active`, and current period
    bounds set to monthly (anchor: now).
 
 ---

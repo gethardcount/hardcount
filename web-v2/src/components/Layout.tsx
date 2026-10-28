@@ -449,7 +449,7 @@ export function Layout({ children }: { children: ReactNode }) {
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <div className="px-2 py-1.5 text-[10px] text-muted-foreground/60 tracking-wide">
-                Hardcount v2.0
+                Hardcount
               </div>
             </DropdownMenuContent>
           </DropdownMenu>

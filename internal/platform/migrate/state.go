@@ -144,9 +144,10 @@ const (
 //	tables, no 180               ->  refuse (ErrNoMigrationRecord)
 //	otherwise                    ->  migration 180 runs the baseline
 //
-// The first covers a database a build of Velox's main branch made: v0.9.0
-// is the first Hardcount release and installs fresh only. The third covers
-// a Velox 0.8.x database and a backup restored without its migration
+// The first covers a database a build of Velox's main branch made after
+// the switch to goose (#1198): v0.9.0 is the first Hardcount release and
+// installs fresh only. The third covers a Velox 0.8.x database, one from
+// an older build of main, and a backup restored without its migration
 // table: Hardcount cannot tell which version the tables are at.
 // "Otherwise" covers no goose table and one holding only row 0, which a
 // rolled-back migration 180 leaves behind.

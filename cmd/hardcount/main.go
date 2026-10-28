@@ -473,20 +473,20 @@ Commands:
   help                 Show this help
 
 Environment:
-  DATABASE_URL              PostgreSQL connection string — admin/migration role (or the
-                            split DB_HOST/DB_NAME/DB_USER/DB_PASSWORD shape; full list in
-                            deploy/compose/.env.example)
-  APP_DATABASE_URL          Runtime connection for the least-privilege hardcount_app role (RLS
-                            enforced). Used verbatim; REQUIRED in staging/production. Local
-                            dev derives hardcount_app:hardcount_app from DATABASE_URL when unset.
-  PORT                      HTTP port (default: 8080)
-  APP_ENV                   Environment: local, staging, production (default: local)
-  RUN_MIGRATIONS_ON_BOOT    Run migrations on server start (default: false)
-  HARDCOUNT_BOOTSTRAP_TOKEN     Token for POST /v1/bootstrap endpoint (min 16 chars outside local)
-  PAYMENT_UPDATE_URL        Base URL for payment update page (e.g. https://app.example.com/update-payment)
-  PAYMENT_UPDATE_RETURN_URL Where Stripe Checkout returns after the public payment-update flow; must be a real SPA route, e.g. https://app.example.com/payment-method-added (handler appends ?status=success|cancel)
-  HARDCOUNT_ENCRYPTION_KEY      64-char hex key for PII encryption at rest
-  REDIS_URL                 Redis URL for distributed rate limiting`)
+  DATABASE_URL               PostgreSQL connection string — admin/migration role (or the
+                             split DB_HOST/DB_NAME/DB_USER/DB_PASSWORD shape; full list in
+                             deploy/compose/.env.example)
+  APP_DATABASE_URL           Runtime connection for the least-privilege hardcount_app role (RLS
+                             enforced). Used verbatim; REQUIRED in staging/production. Local
+                             dev derives hardcount_app:hardcount_app from DATABASE_URL when unset.
+  PORT                       HTTP port (default: 8080)
+  APP_ENV                    Environment: local, staging, production (default: local)
+  RUN_MIGRATIONS_ON_BOOT     Run migrations on server start (default: false)
+  HARDCOUNT_BOOTSTRAP_TOKEN  Token for POST /v1/bootstrap endpoint (min 16 chars outside local)
+  PAYMENT_UPDATE_URL         Base URL for payment update page (e.g. https://app.example.com/update-payment)
+  PAYMENT_UPDATE_RETURN_URL  Where Stripe Checkout returns after the public payment-update flow; must be a real SPA route, e.g. https://app.example.com/payment-method-added (handler appends ?status=success|cancel)
+  HARDCOUNT_ENCRYPTION_KEY   64-char hex key for PII encryption at rest
+  REDIS_URL                  Redis URL for distributed rate limiting`)
 }
 
 // deriveAppURL replaces the user:password in a DATABASE_URL with hardcount_app:hardcount_app.

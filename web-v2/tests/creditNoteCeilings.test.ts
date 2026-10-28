@@ -12,7 +12,7 @@
 //      read `max $58.59`; typing $20 was accepted by the field and caught only
 //      by the allocation line going ✗. (this change)
 //
-// The fixture below is that real invoice — HC-000067, walked 2026-08-03.
+// The fixture below is that real invoice — VLX-000067, walked 2026-08-03.
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import {
@@ -21,7 +21,7 @@ import {
   type CeilingNote,
 } from '../src/lib/creditNoteCeilings.ts'
 
-// HC-000067: $88.59 total = $20.00 credits + $68.59 card, with CN-000030
+// VLX-000067: $88.59 total = $20.00 credits + $68.59 card, with CN-000030
 // already issued for $80.00 of which $10.00 went back to the card.
 const HC67 = {
   invoiceTotalCents: 8859,

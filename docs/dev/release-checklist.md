@@ -97,7 +97,7 @@ These prove that the images the quick start pulls work, and that an existing ins
 
 ### Upgrade drill
 
-Skip it for v0.9.0, the first release named Hardcount: its previous release, Velox v0.8.2, has no upgrade path. On a v0.8.2 database, step 2 says `no migration record`, and step 3 refuses to start. A database made by a build of Velox's `main` is refused with `this database was made by Velox`.
+Skip it for v0.9.0, the first release named Hardcount: its previous release, Velox v0.8.2, has no upgrade path. The `.env` that v0.8.2's quickstart writes names `VELOX_*` settings, so step 2 stops at `docker compose pull` with `required variable HARDCOUNT_APP_DB_PASSWORD is missing a value`. With the settings renamed by hand, `hardcount migrate status` says `no migration record` for a v0.8.2 database, and `made by Velox` for one a build of Velox's `main` made after the switch to goose (#1198); start-up refuses both.
 
 1. Run `./quickstart.sh destroy` to start from an empty install. Check out the previous release tag and run `./quickstart.sh`, then `./quickstart.sh demo`.
    **You see:** the demo's invoice link. Open it and note the invoice number, total and line amounts. Download its PDF.

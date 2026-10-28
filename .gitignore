@@ -50,6 +50,10 @@ hardcount-api
 # extending the list a third time.
 /hardcount-api*
 /hardcount-bench*
+#
+# Binaries built before the rename to Hardcount still sit at the root under
+# the old name (velox, velox-bootstrap, velox-api-…). Keep them ignored.
+/velox*
 
 # k6 writes its run summary into whatever directory it is invoked from, so a
 # path-anchored ignore keeps missing it — this is the third directory it has

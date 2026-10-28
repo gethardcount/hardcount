@@ -27,9 +27,11 @@ node_modules
 .vscode
 .idea
 
-# Build outputs and local binaries (the repo tracks a prebuilt hardcount-bootstrap;
-# the image builds its own from source)
-hardcount-bootstrap
+# Build outputs and local binaries. Root-level binaries a local `go build`
+# leaves behind (hardcount, hardcount-bootstrap, …, and velox* from before the
+# rename); the image builds its own from source.
+/hardcount*
+/velox*
 bin/
 dist/
 *.test

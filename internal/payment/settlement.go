@@ -544,7 +544,7 @@ func (s *Stripe) escalatePaymentAnomaly(ctx context.Context, tenantID string, in
 // Session instead") — so for every hosted-page attempt, PI cancel alone was
 // a no-op that logged a warning while the session stayed live until its
 // ExpiresAt (<=1h), leaving a voided invoice payable. Found on the FLOW D2
-// walk (HC-000004): void → PI cancel refused → session still open.
+// walk (VLX-000004): void → PI cancel refused → session still open.
 // Expiring the session is what actually closes that window; the PI then
 // terminates with it.
 //

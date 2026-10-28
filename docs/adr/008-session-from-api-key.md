@@ -15,7 +15,7 @@ Superseded by [ADR-011](011-email-password-auth-and-clean-api-keys.md). This ADR
 
 ## Context
 
-ADR-007 reverted the dashboard from email+password sessions to bearer-key auth: the operator pastes a `hc_secret_…` key into `/login`, the browser stores it in `localStorage`, and every request rides `Authorization: Bearer <key>`. That correctly aligned with `project_auth_decision.md` ("API keys custom-built; user auth via WorkOS/Clerk later") and removed ~2k LOC of password / session / invitation surface.
+ADR-007 reverted the dashboard from email+password sessions to bearer-key auth: the operator pastes an `hc_secret_…` key into `/login`, the browser stores it in `localStorage`, and every request rides `Authorization: Bearer <key>`. That correctly aligned with `project_auth_decision.md` ("API keys custom-built; user auth via WorkOS/Clerk later") and removed ~2k LOC of password / session / invitation surface.
 
 A security review of the result surfaced concerns the bare-Bearer-localStorage shape could not answer:
 

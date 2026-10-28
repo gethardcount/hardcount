@@ -278,7 +278,7 @@ WHERE g.entry_type = 'grant' AND g.consumed_cents < g.amount_cents;`,
 	{
 		Name:   "cost_dashboard_token_plaintext_at_rest",
 		Domain: "customers",
-		Why:    "customers.cost_dashboard_token_hash must hold a SHA-256 blind index, never the credential itself; a hc_pcd_-prefixed value means some writer stored the raw public-dashboard token and a DB read yields a replayable URL (migration 0172)",
+		Why:    "customers.cost_dashboard_token_hash must hold a SHA-256 blind index, never the credential itself; an hc_pcd_-prefixed value means some writer stored the raw public-dashboard token and a DB read yields a replayable URL (migration 0172)",
 		SQL:    `SELECT id, tenant_id, livemode, external_id, cost_dashboard_token_hash, updated_at FROM customers WHERE cost_dashboard_token_hash IS NOT NULL AND (cost_dashboard_token_hash LIKE 'hc_%' OR length(cost_dashboard_token_hash) <> 64)`,
 	},
 	{

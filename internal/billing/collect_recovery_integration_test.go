@@ -341,7 +341,7 @@ func (decliningRetrier) RetryPayment(context.Context, string, string, string) er
 // retry was mis-anchored in the past — schedules the next one from when it
 // ran, not from when it was due. With the production resolver wired, every
 // run used to read as simulated, so each later retry was dated in the past
-// too and fired on the next tick (HC-000081: "Oct 4" then "Oct 7", both on
+// too and fired on the next tick (VLX-000081: "Oct 4" then "Oct 7", both on
 // Oct 11).
 func TestProcessDueRuns_LateWallClockRetryKeepsCadence_RealStore(t *testing.T) {
 	h := newCollectHarness(t)

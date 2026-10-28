@@ -120,7 +120,7 @@ func (i Invoice) Parked() bool {
 // Stripe's ids, and an offline payment leaves it empty (migration 00203
 // refuses anything else). Before, an offline payment wrote a synthetic
 // "out_of_band:<time>" id there, every reader had to know the prefix, and
-// one that did not offered a card refund on a bank transfer (HC-000068,
+// one that did not offered a card refund on a bank transfer (VLX-000068,
 // 2026-08-02).
 func (i Invoice) HasCardPayment() bool {
 	return i.StripePaymentIntentID != ""

@@ -429,7 +429,7 @@ func (s *PostgresStore) ActionRequiredObsolete(ctx context.Context, tenantID, in
 // mark_uncollectible dunning outcome makes the invoice uncollectible in
 // the same breath as it enqueues the escalation email that ANNOUNCES
 // that outcome, so a blanket settled-check muted the one email whose
-// purpose is that state (found on the FLOW I6 walk, HC-000016).
+// purpose is that state (found on the FLOW I6 walk, VLX-000016).
 func (s *PostgresStore) InvoiceTerminalState(ctx context.Context, tenantID, invoiceNumber string) (string, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {

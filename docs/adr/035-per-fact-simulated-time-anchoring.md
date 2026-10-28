@@ -277,7 +277,7 @@ mis-anchored first retry above) restarts the cadence from now. The clamp
 was keyed on the bool from `clock.BindEffectiveNow`, but that reports
 "an instant was bound", and the engine resolver binds a clock-less instant
 for every wall-clock invoice. With the resolver wired, as in production,
-every run read as simulated and the clamp never ran. HC-000081 retried
+every run read as simulated and the clamp never ran. VLX-000081 retried
 "Oct 4" then "Oct 7" on consecutive ticks on Oct 11. `processRun` now keys
 on `clock.SimOf` (a test clock is bound), the same test `StartDunning` uses.
 The unit test for the clamp wired no resolver, so it could not see this.

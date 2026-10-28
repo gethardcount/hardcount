@@ -25,7 +25,7 @@ import { CreditCard, AlertTriangle, ExternalLink, ShieldCheck, Clock, Loader2, I
  * voided AND uncollectible alike. So a written-off invoice showed the amber
  * "Payment method needed · Amount Due" demand here while the other public page
  * told the same customer collection was closed. Found live on TC Walk Co
- * HC-000152 (and HC-000136 had been sitting in that state with a live token).
+ * VLX-000152 (and VLX-000136 had been sitting in that state with a live token).
  *
  * That page's own comment records this rule being missed once before: #651
  * relabelled one figure and left its twin saying "Amount Due" — "Same rule,

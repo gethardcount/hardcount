@@ -133,7 +133,7 @@ Ship the prepaid-commit primitive on the existing credit-block ledger:
 
 ## Amendment 2026-08-04 — exposure is surfaced; the payment gate stays deferred
 
-Triggered by a live observation on HC-000060: $96.52 invoiced, $0.00
+Triggered by a live observation on VLX-000060: $96.52 invoiced, $0.00
 collected, dunning since Jul 30, and **$100.00 of the customer's credit
 fully spendable** — with nothing anywhere in the product saying so.
 

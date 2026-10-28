@@ -28,7 +28,7 @@ The cost of carrying the home-grown stack forward is real: ~2k LOC of password h
 
 ## Decision
 
-Revert the dashboard to API-key login. The operator pastes a `hc_secret_…` key (printed by `make bootstrap` or visible on `/api-keys`) into a single-input login screen; the browser stores it in `localStorage` and rides every request as `Authorization: Bearer <key>`. No cookies, no sessions, no users, no invitations.
+Revert the dashboard to API-key login. The operator pastes an `hc_secret_…` key (printed by `make bootstrap` or visible on `/api-keys`) into a single-input login screen; the browser stores it in `localStorage` and rides every request as `Authorization: Bearer <key>`. No cookies, no sessions, no users, no invitations.
 
 The backend exposes a tiny `GET /v1/whoami` that returns `{tenant_id, key_id, key_type, livemode}` from the validated bearer-key context. The dashboard hits it once on login to validate the pasted key and populate the `AuthContext`; it requires no specific permission so any valid key (publishable or secret) passes.
 
@@ -69,7 +69,7 @@ When that trigger fires, evaluate Zitadel and WorkOS first — both give the sur
 
 - **Stay with the in-house email+password stack.** Rejected. Compounds a documented deviation rather than correcting it; carries ~2k LOC of maintenance for an audience of one; doesn't replace the eventual SSO/MFA conversation that any real design partner will trigger anyway.
 - **Migrate to Zitadel now.** Rejected for current stage. Adds a sibling container to the OSS self-host story for a feature no current customer needs. The first DP may want WorkOS instead, or specifically not Zitadel; building the integration before knowing optimises the wrong shape. The right time is when the trigger above fires.
-- **Add a one-shot CLI command that mints a session cookie from a `hc_secret_…` key.** Rejected. Introduces a sidecar UX (run a CLI to log in) without gaining anything over Bearer-on-every-request. The dashboard already has `Authorization: Bearer` plumbing; adding a session layer on top is a half-revert.
+- **Add a one-shot CLI command that mints a session cookie from an `hc_secret_…` key.** Rejected. Introduces a sidecar UX (run a CLI to log in) without gaining anything over Bearer-on-every-request. The dashboard already has `Authorization: Bearer` plumbing; adding a session layer on top is a half-revert.
 
 ## Related
 

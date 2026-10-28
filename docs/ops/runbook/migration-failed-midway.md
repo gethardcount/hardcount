@@ -317,8 +317,8 @@ this database was made by Velox, Hardcount's old name (its tables give new rows 
 **Why:** Hardcount was called Velox until v0.9.0. A build of Velox made this
 database: its `tenants` table gives new rows `vlx_` ids, where Hardcount's
 gives `hc_` ids. v0.9.0 installs fresh only, so Hardcount changes nothing.
-A Velox 0.8.x database stops earlier, with
-[no migration record](#tables-but-no-migration-record).
+A Velox 0.8.x database, or one from a build of `main` before the switch to
+goose (#1198), stops with [no migration record](#tables-but-no-migration-record).
 
 **Fix:** point `DATABASE_URL` (and `APP_DATABASE_URL`) at an empty database
 and start again. The limited database user is now `hardcount_app`

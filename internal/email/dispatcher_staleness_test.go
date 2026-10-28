@@ -101,7 +101,7 @@ func TestDispatcherStalenessGate(t *testing.T) {
 		// mark_uncollectible marks the invoice uncollectible in the same
 		// breath as it enqueues this email, so a blanket settled-gate
 		// skipped it every time and the customer was never told (FLOW I6
-		// walk, HC-000016).
+		// walk, VLX-000016).
 		//
 		// The SETUP LINK is the second exemption, added 2026-08-05. This
 		// test used to assert it stayed muted, on the reasoning that

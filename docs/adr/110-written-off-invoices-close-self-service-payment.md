@@ -36,7 +36,7 @@ Two customer-facing pages disagreed about it. The hosted invoice page had said
 tokenized payment-update page had never been taught the state and kept showing
 an amber **"Payment method needed · Amount Due $30.00"** demand. One invoice,
 two links from the same dunning email, opposite answers (found live on TC Walk
-Co HC-000152; HC-000136 had been sitting in that state with a live token).
+Co VLX-000152; VLX-000136 had been sitting in that state with a live token).
 
 Making them agree required deciding *which* page was right — which is a
 product question, not a consistency one, so it was checked against the

@@ -88,7 +88,7 @@ const (
 	// operator void, which retires the REMAINING balance only (consumed stays
 	// consumed), so every hour the customer keeps drawing is recovery
 	// permanently lost. Nothing surfaced the state, so nobody could void in
-	// time — observed live on HC-000060: $96.52 invoiced, $0.00 collected,
+	// time — observed live on VLX-000060: $96.52 invoiced, $0.00 collected,
 	// $100.00 still drawable, dunning since Jul 30, and no surface said so.
 	// docs/dev/design/prepaid-commits.md D3 named this exact surfacing a
 	// "fast-follow candidate"; this is that fast-follow.

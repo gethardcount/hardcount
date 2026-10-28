@@ -9156,7 +9156,7 @@ type DiscardHeldUsageJSONBody struct {
 
 // ReleaseHeldUsageJSONBody defines parameters for ReleaseHeldUsage.
 type ReleaseHeldUsageJSONBody struct {
-	// CustomerId Release into this customer (a `hc_cus_` id) instead of
+	// CustomerId Release into this customer (an `hc_cus_` id) instead of
 	// the one whose external ID matches, for a `user` value
 	// that had a typo.
 	CustomerId string `json:"customer_id,omitempty"`

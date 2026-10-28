@@ -12,7 +12,7 @@ export type ReleaseHeldUsageBody = {
   /** The external ID the rows were held under. */
   external_customer_id: string;
   /**
-     * Release into this customer (a `hc_cus_` id) instead of
+     * Release into this customer (an `hc_cus_` id) instead of
      * the one whose external ID matches, for a `user` value
      * that had a typo.
      */

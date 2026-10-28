@@ -374,7 +374,7 @@ Check each line before the first real customer.
 
 ## Upgrade to a new release
 
-Hardcount was called Velox before v0.9.0. v0.9.0 installs fresh only: it refuses a database made by Velox, a 0.8.x release or a build of `main` ([why](ops/runbook/migration-failed-midway.md#the-database-was-made-by-velox)).
+Hardcount was called Velox before v0.9.0. v0.9.0 installs fresh only: it refuses a database made by Velox, a 0.8.x release or a build of `main` ([why](ops/runbook/migration-failed-midway.md#the-database-was-made-by-velox)). A Velox install does not get that far with these steps: its `.env` names `VELOX_*` settings, so `docker compose pull` in step 4 stops with `required variable HARDCOUNT_APP_DB_PASSWORD is missing a value`. Install Hardcount fresh, from [step 1](#1-install-a-pinned-release) of this page, with an empty database: a new VM, or a new Compose data volume.
 
 Database changes (migrations) run by themselves as the new version starts.
 
@@ -407,7 +407,7 @@ Database changes (migrations) run by themselves as the new version starts.
    docker compose run --rm hardcount-api migrate status
    ```
 
-   **You see:** a few `Container … Running` lines, then the plan. It lists the migrations to apply. If it says `no migration record`, stop: the upgrade will not run ([why](ops/runbook/migration-failed-midway.md#tables-but-no-migration-record)). A Velox 0.8.x install says this, a later Velox build says `made by Velox`, and neither can be upgraded.
+   **You see:** a few `Container … Running` lines, then the plan. It lists the migrations to apply. If it says `no migration record`, stop: the upgrade will not run ([why](ops/runbook/migration-failed-midway.md#tables-but-no-migration-record)).
 
 5. Start the new images.
 

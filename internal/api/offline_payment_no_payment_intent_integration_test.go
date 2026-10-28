@@ -15,7 +15,7 @@ import (
 // cheque). Hardcount used to record it by writing "out_of_band:<time>" into the
 // invoice's Stripe PaymentIntent column, so every reader of that column had
 // to know the prefix, and one that did not offered a card refund on a bank
-// transfer (HC-000068). Now the column holds only Stripe's ids: an offline
+// transfer (VLX-000068). Now the column holds only Stripe's ids: an offline
 // payment leaves it empty and sets paid_out_of_band, Stripe's own field.
 //
 // Both operator paths that record one are driven over the real router and

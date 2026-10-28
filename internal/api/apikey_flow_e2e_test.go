@@ -46,7 +46,7 @@ func TestE2E_APIKeyLifecycle(t *testing.T) {
 	// Create: the full key comes back once, in the session's mode.
 	keyID, rawKey := createKey("CI server", "secret")
 	if !strings.HasPrefix(rawKey, "hc_secret_test_") {
-		t.Fatalf("raw key %q: want a hc_secret_test_ key (the session is in test mode)", rawKey)
+		t.Fatalf("raw key %q: want an hc_secret_test_ key (the session is in test mode)", rawKey)
 	}
 
 	// Use: whoami names this key and this account, and a read works.

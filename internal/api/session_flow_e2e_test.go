@@ -90,7 +90,7 @@ func TestE2E_DashboardSession_ModeAndPasswordReset(t *testing.T) {
 		"name": "Live server", "key_type": "secret",
 	}}).want(t, 201, "create a key in live mode").body
 	if raw := flowStr(liveKey, "raw_key"); !strings.HasPrefix(raw, "hc_secret_live_") || flowObj(liveKey, "key")["livemode"] != true {
-		t.Errorf("key made in live mode: raw %q, key %v; want a hc_secret_live_ key", raw, flowObj(liveKey, "key"))
+		t.Errorf("key made in live mode: raw %q, key %v; want an hc_secret_live_ key", raw, flowObj(liveKey, "key"))
 	}
 
 	// And back.

@@ -9,7 +9,9 @@ This folder runs Hardcount on one machine: Postgres, Redis, the Hardcount API, t
 
 Production on one VM runs the published release images, set by `HARDCOUNT_IMAGE` and `HARDCOUNT_DASHBOARD_IMAGE` in `.env`. Leave those two lines out, and `docker compose up -d` builds both images from your checkout. The first build takes a few minutes. Everything else is the same.
 
-To upgrade a stack built from source, run these in `deploy/compose`. This example moves to `v0.9.0`.
+To upgrade a stack built from source, run these in `deploy/compose`. This example moves to `v0.9.1`.
+
+A Velox install (Hardcount's name before v0.9.0) cannot be upgraded. Its `.env` names `VELOX_*` settings, so `docker compose build` in step 2 stops with `required variable HARDCOUNT_APP_DB_PASSWORD is missing a value`. Install Hardcount fresh, with an empty database: a new VM, or a new Compose data volume ([why](../../docs/ops/runbook/migration-failed-midway.md#the-database-was-made-by-velox)).
 
 1. Take a backup. [Production on one VM, step 7](../../docs/production-one-vm.md#7-back-up-every-night) sets up this command. If your checkout is not in `/opt/hardcount`, change its two `/opt/hardcount` paths.
 
@@ -23,7 +25,7 @@ To upgrade a stack built from source, run these in `deploy/compose`. This exampl
 
    ```bash
    git fetch --tags
-   git checkout v0.9.0
+   git checkout v0.9.1
    docker compose build
    ```
 
@@ -35,7 +37,7 @@ To upgrade a stack built from source, run these in `deploy/compose`. This exampl
    docker compose run --rm hardcount-api migrate status
    ```
 
-   **You see:** the plan. If it says `ahead`, this install ran newer code than the release: check out a newer release and build again. If it says `no migration record`, stop: the upgrade will not run ([why](../../docs/ops/runbook/migration-failed-midway.md#tables-but-no-migration-record)). A Velox 0.8.x install says this, a later Velox build says `made by Velox`, and neither can be upgraded.
+   **You see:** the plan. If it says `ahead`, this install ran newer code than the release: check out a newer release and build again. If it says `no migration record`, stop: the upgrade will not run ([why](../../docs/ops/runbook/migration-failed-midway.md#tables-but-no-migration-record)).
 
 4. Start the new build. It applies the database upgrades as it starts.
 

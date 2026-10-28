@@ -95,7 +95,7 @@ type TokenValidateResponse struct {
 	// without it the page asked a customer to pay an invoice we had
 	// already annulled — amount_due_cents survives a void by design
 	// (the void reverses collection, it doesn't rewrite the figure).
-	// Found on the FLOW D4 walk (HC-000005, voided).
+	// Found on the FLOW D4 walk (VLX-000005, voided).
 	InvoiceStatus  string               `json:"invoice_status"`
 	AmountDueCents int64                `json:"amount_due_cents"`
 	Currency       string               `json:"currency"`
