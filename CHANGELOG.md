@@ -19,6 +19,10 @@ original text.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-28
+
+The first release named Hardcount. Usage prices belong to the plan, a usage event says when it will not be billed, prepaid credit carries its currency, and migrations run with goose. It installs fresh only: it refuses a database made by Velox or by any earlier build.
+
 **Velox is now Hardcount ([#1409](https://github.com/gethardcount/hardcount/pull/1409)).** The old names are not read. Rename what you run and call:
 
 - Commands: `velox`, `velox-bootstrap`, `velox-doctor` are `hardcount`, `hardcount-bootstrap`, `hardcount-doctor`.
@@ -392,6 +396,7 @@ original text.
 
 ### Security
 
+- **Setting a password now refuses common leaked passwords (2026-10-18).** Bootstrap, password reset and invite accept refuse about 30,000 passwords of 12 or more characters, such as `Password1234`, in any letter case. Passwords already set still work. ([#1222](https://github.com/getvelox/velox/pull/1222))
 - **Go 1.26.10 (2026-10-21).** Clears GO-2026-6809 in `crypto/x509`, which `govulncheck` reaches from Hardcount code; CI lint failed on every branch until this lands. No application code change.
 - **The client address comes from chi's trusted-proxy middleware (2026-10-20).** `X-Forwarded-For` counts only from a `TRUST_PROXY` address, every header line is read, and an entry that is not a bare IP stops at the proxy. Rate limits, audit and session rows, logs and traces all use it ([ADR-095](docs/adr/095-login-security-roadmap-and-mfa.md#amendment-2026-10-20-the-client-address-comes-from-chi), [#1315](https://github.com/gethardcount/hardcount/pull/1315)).
 - **Traces no longer carry a link's token (2026-10-20).** A request span is renamed to `{method} {route}` once routed, such as `GET /v1/public/invoices/{token}` (before, `:id` replaced ID-like parts). Its `url.path` holds the route or a redacted path, and `client.address` the trusted client address. Redaction covers hosted invoice, payment-update, cost-dashboard and invite links, in traces and the access log ([#1315](https://github.com/gethardcount/hardcount/pull/1315)).
@@ -429,7 +434,6 @@ Fixes before the first partner installs. Long invoice PDFs go onto more pages, a
 
 ### Security
 
-- **Setting a password now refuses common leaked passwords (2026-10-18).** Bootstrap, password reset and invite accept refuse about 30,000 passwords of 12 or more characters, such as `Password1234`, in any letter case. Passwords already set still work. ([#1222](https://github.com/getvelox/velox/pull/1222))
 - **Dashboard sign-ins record the real client address (2026-10-18).** A login or invite accept stored the first `X-Forwarded-For` entry, which any client can write, in `dashboard_sessions.ip`. It now stores the address `TRUST_PROXY` resolves, the same one the audit log and rate limits use. Nothing reads this column yet. ([#1203](https://github.com/getvelox/velox/pull/1203))
 
 ## [0.8.1] - 2026-10-17
@@ -5364,23 +5368,18 @@ Documentation only: the README heading "Fewer dependencies" uses typographic quo
 
 ---
 
-Historical entries (pre-Addendum) are summarised in
-`web-v2/src/pages/Changelog.tsx`. When the next release is cut, the
-contents of `[Unreleased]` above will move under a new
-`## [0.X.0] - YYYY-MM-DD` heading here, and a matching entry will be
-curated into the public changelog page.
-
-[Unreleased]: https://github.com/getvelox/velox/compare/v0.8.2...HEAD
-[0.8.2]: https://github.com/getvelox/velox/compare/v0.8.1...v0.8.2
-[0.8.1]: https://github.com/getvelox/velox/compare/v0.8.0...v0.8.1
-[0.8.0]: https://github.com/getvelox/velox/compare/v0.7.0...v0.8.0
-[0.7.0]: https://github.com/getvelox/velox/compare/v0.6.1...v0.7.0
-[0.6.1]: https://github.com/getvelox/velox/compare/v0.6.0...v0.6.1
-[0.6.0]: https://github.com/getvelox/velox/compare/v0.5.0...v0.6.0
-[0.5.0]: https://github.com/getvelox/velox/compare/v0.4.0...v0.5.0
-[0.4.0]: https://github.com/getvelox/velox/compare/v0.3.2...v0.4.0
-[0.3.2]: https://github.com/getvelox/velox/compare/v0.3.1...v0.3.2
-[0.3.1]: https://github.com/getvelox/velox/compare/v0.3.0...v0.3.1
-[0.3.0]: https://github.com/getvelox/velox/compare/v0.2.0...v0.3.0
-[0.2.0]: https://github.com/getvelox/velox/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/getvelox/velox/releases/tag/v0.1.0
+[Unreleased]: https://github.com/gethardcount/hardcount/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/gethardcount/hardcount/compare/v0.8.2...v0.9.0
+[0.8.2]: https://github.com/gethardcount/hardcount/compare/v0.8.1...v0.8.2
+[0.8.1]: https://github.com/gethardcount/hardcount/compare/v0.8.0...v0.8.1
+[0.8.0]: https://github.com/gethardcount/hardcount/compare/v0.7.0...v0.8.0
+[0.7.0]: https://github.com/gethardcount/hardcount/compare/v0.6.1...v0.7.0
+[0.6.1]: https://github.com/gethardcount/hardcount/compare/v0.6.0...v0.6.1
+[0.6.0]: https://github.com/gethardcount/hardcount/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/gethardcount/hardcount/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/gethardcount/hardcount/compare/v0.3.2...v0.4.0
+[0.3.2]: https://github.com/gethardcount/hardcount/compare/v0.3.1...v0.3.2
+[0.3.1]: https://github.com/gethardcount/hardcount/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/gethardcount/hardcount/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/gethardcount/hardcount/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/gethardcount/hardcount/releases/tag/v0.1.0

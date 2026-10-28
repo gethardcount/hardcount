@@ -1,7 +1,7 @@
 # ADR-125: Run migrations with goose from one v0.8.1 baseline
 
 **Date:** 2026-10-18
-**Status:** Accepted (2026-10-18). The cut-over is built; it ships in v0.9.0.
+**Status:** Accepted (2026-10-18). The cut-over is built; it ships in v0.9.0. Amended 2026-10-22 ([#1354](https://github.com/gethardcount/hardcount/pull/1354)) and 2026-10-28 ([#1409](https://github.com/gethardcount/hardcount/pull/1409)): the takeover of a v0.8.x database and the upgrade from a build of `main` are dropped. v0.9.0 installs fresh only and refuses an older database. The text below about taking over a v0.8.x database is history.
 **Supersedes:** [ADR-124](124-plain-golang-migrate-each-file-sets-its-lock-limit.md), which was never built
 **Amends:** [ADR-073](073-selfhost-boot-and-bootstrap-contract.md) (decision 3, the migration runner, is replaced) and [ADR-107](107-unknown-is-terminal-until-a-human.md) (migration 0009's rollback stops shipping)
 

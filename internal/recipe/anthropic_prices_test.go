@@ -11,7 +11,7 @@ import (
 // anthropicPricesChecked is the date anthropicListPrices was last compared
 // with Anthropic's pricing page. When you check the page again, update the
 // table and this date (docs/dev/release-checklist.md).
-const anthropicPricesChecked = "2026-10-22"
+const anthropicPricesChecked = "2026-10-28"
 
 // anthropicPricingPage is the page the table is copied from.
 const anthropicPricingPage = "https://platform.claude.com/docs/en/about-claude/pricing"

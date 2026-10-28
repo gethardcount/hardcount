@@ -136,11 +136,8 @@ Every message is an HTTP `POST` to your URL with
 - A few events also carry facts the resource does not hold, such as who
   canceled a subscription. They sit beside the resource in `data`. The
   [catalog](#event-catalog) lists them for each event.
-- This shape is new in the next release. An event queued before you
-  upgrade is always sent with its old `data`: on its retries, which run up
-  to about 26.5 hours, and on any replay. So accept both shapes for that
-  long after you upgrade, and on a replay of an older event
-  ([old key → new key](../CHANGELOG.md#unreleased)).
+- This shape is new in v0.9.0. v0.9.0 installs fresh, so no event in it
+  has an older shape ([old key → new key](../CHANGELOG.md)).
 
 Headers:
 

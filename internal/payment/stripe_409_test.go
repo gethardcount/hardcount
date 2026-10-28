@@ -36,10 +36,15 @@ import (
 // another request is still using. The 409 status
 // (https://docs.stripe.com/api/errors) and the code idempotency_key_in_use
 // with its message (https://docs.stripe.com/error-codes) are documented. The
-// error type is not: invalid_request_error is the type the old classifier read
-// as "no charge occurred". The classifier now keys on the status, so the real
-// type cannot change the result. The release checklist's "Key in use" step
-// gets the real reply from test mode; record its type here.
+// error type is not, so the release checklist's "Key in use" step reads it from
+// test mode. Observed 2026-10-28 (v0.9.0 walk, two concurrent
+// POST /v1/payment_intents with one key): HTTP 409, code
+// idempotency_key_in_use, type invalid_request_error. That is the type the old
+// classifier read as "no charge occurred", and the other request under the key
+// went on to charge the card. The classifier now keys on the status, so the
+// type cannot change the result. Stripe's live message differs from the one
+// below ("There is currently another in-progress request using this Idempotent
+// Key ..."); the classifier does not read the message.
 const stripe409KeyInUse = `{"error":{"code":"idempotency_key_in_use","doc_url":"https://stripe.com/docs/error-codes/idempotency-key-in-use","message":"The idempotency key provided is currently being used in another request. This occurs if your integration is making duplicate requests simultaneously.","type":"invalid_request_error"}}`
 
 // stripe409NoCode is a 409 of type invalid_request_error with no code, so the

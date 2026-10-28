@@ -7,65 +7,7 @@ first. Every shipped change, with its date, is in the
 
 ## Now
 
-**v0.9.0**, not released yet:
-
-- **Done:** Velox is now Hardcount: the binaries, settings, key and id
-  prefixes, image, metrics, headers and session cookie carry the new name
-  ([#1409](https://github.com/gethardcount/hardcount/pull/1409)). Code that
-  calls the API or checks webhook signatures must change.
-- **Done:** migrations run with goose, and `hardcount migrate force` is gone.
-  There is no upgrade from Velox (v0.8.x or a build of `main`): install
-  fresh.
-- **Done:** a card payment the customer's bank wants them to confirm (3-D
-  Secure) is no longer treated as a declined card.
-- **Done:** each prepaid credit carries its own currency and pays only
-  invoices in that currency. Grant and adjust take a `currency`
-  ([ADR-129](adr/129-credit-carries-its-own-currency.md)).
-- **Done:** a meter has one aggregation, which every price of it bills
-  under. It is fixed once the meter has a usage event; held usage does
-  not count. A meter's `key` is now
-  `event_name`, the name usage events send it by
-  ([ADR-130](adr/130-usage-prices-belong-to-the-plan.md) §2).
-- **Done:** a price is `per_unit`, `graduated` or `package`, and a package
-  price bills a part package as a whole one. Every `*_cents` field is in
-  the currency's smallest unit, provider costs included
-  ([ADR-130](adr/130-usage-prices-belong-to-the-plan.md) §3).
-- **Done:** eight API operations that another operation already did are
-  removed. The [CHANGELOG](../CHANGELOG.md) names the replacement for each.
-- **Done:** a dunning policy's schedule is one list of days, `retry_days`:
-  the days to wait before each retry. It replaces three fields that had to
-  agree.
-- **Done:** publishable API keys are removed, and so are the values kept
-  only for data an earlier version wrote: the `manually_resolved`
-  resolution, the `discount` and `tax` line types, an invoice's
-  `stripe_invoice_id`, and the old coupon tables.
-- **Done:** the commands in the [first-invoice guide](first-invoice.md)
-  run in CI on every pull request, on that pull request's build, and each
-  output is checked against the page, so a change that breaks them fails.
-- **Done: usage prices are set per plan.** A price belongs to a plan, so
-  two plans can charge different rates for one meter. A price change applies
-  at once on a plan no one has subscribed to, and from each subscriber's next
-  billing period otherwise, on a test clock too. A subscriber who first
-  joins the plan in a period after a change pays it from then. A customer's negotiated
-  rate names one plan price. Rating rules, meter pricing rules and a meter's
-  default price are gone
-  ([ADR-130](adr/130-usage-prices-belong-to-the-plan.md)).
-- **Done:** a recipe file holds only meters and plans with their
-  prices, and an install creates nothing else: no dunning policy and no
-  webhook endpoint.
-- **Done:** the answer to a usage event says when Hardcount, as it stored
-  the event, found a reason it is not billed: no price of the plan takes
-  it, the plan does not price its meter, no subscription covers its time,
-  or its period was already invoiced. A batch answer gives each event's status
-  ([ADR-130](adr/130-usage-prices-belong-to-the-plan.md) §12).
-- **Not in v0.9.0:** a base fee change that waits for each subscriber's
-  next period. The base fee stays locked while a subscription that is not
-  canceled uses the plan; to change it, create a new plan and move subscribers to it
-  ([ADR-130](adr/130-usage-prices-belong-to-the-plan.md) section 5).
-
-Everything else v0.9.0 changes: [Unreleased](../CHANGELOG.md#unreleased).
-
-Also now, in v0.9.0 or right after it:
+Right after v0.9.0:
 
 - A secret API key that can only send usage, for LiteLLM and other
   gateways.
@@ -140,6 +82,18 @@ Each item waits until someone using Hardcount needs it:
 - A separate docs site. The docs stay in this repo.
 
 ## Shipped recently
+
+October 2026, v0.9.0 ([everything it changes](../CHANGELOG.md)):
+
+- **Velox is now Hardcount.** Binaries, settings, key and id prefixes, images, metrics, headers and the cookie carry the new name. v0.9.0 installs fresh: it refuses a database an earlier build made.
+- **Usage prices are set per plan.** Two plans can charge different rates for one meter. A price is `per_unit`, `graduated` or `package`, and a change applies from each subscriber's next billing period. The base fee stays locked while a subscription uses the plan; to change it, make a new plan ([ADR-130](adr/130-usage-prices-belong-to-the-plan.md)).
+- **A meter has one aggregation,** fixed once it has a usage event. Its `key` is now `event_name`.
+- **A usage event says when it will not be billed.** The 201 and each batch result carry a `billing_status`: no price takes it, the plan does not price its meter, no subscription covers its time, or its period was already invoiced.
+- **Prepaid credit carries its currency** and pays only invoices in that currency ([ADR-129](adr/129-credit-carries-its-own-currency.md)).
+- **3-D Secure is not a decline.** A card payment the bank wants the customer to confirm is no longer treated as a declined card.
+- **Migrations run with goose.** A failed migration leaves nothing to repair, and `hardcount migrate force` is gone.
+- **One shape for the API.** Lists answer `{data, total}`, every error uses one envelope, request bodies with an unknown field are refused, and publishable API keys are removed.
+- **The first-invoice guide runs in CI** on every pull request, and each output is checked against the page.
 
 October 2026 (v0.5.0 to v0.8.2):
 

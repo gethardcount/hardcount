@@ -25,8 +25,8 @@ You need:
   On Debian or Ubuntu: `sudo apt install jq`.
 
 This page matches the newest code on `main`. The quick start starts the
-newest release, v0.8.2, which can answer some steps differently. On v0.8.2,
-follow [this page as of v0.8.2](https://github.com/gethardcount/hardcount/blob/v0.8.2/docs/first-invoice.md).
+newest release, v0.9.0, which can answer some steps differently. On v0.9.0,
+follow [this page as of v0.9.0](https://github.com/gethardcount/hardcount/blob/v0.9.0/docs/first-invoice.md).
 
 Open a terminal in the `hardcount` folder that the quick start downloaded. Save
 the address and your test API key in two variables. Every command below
