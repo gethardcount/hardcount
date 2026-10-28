@@ -69,7 +69,7 @@ above any token ever issued. `leader_fence(role, token)` is a `STABLE` SQL
 function (`EXISTS … holder_token = token AND paused_at IS NULL AND expires_at
 > now()`); `leader_status` is a view for operators; `leader_pause` /
 `leader_unpause` are SQL functions callable from any psql session.
-`velox_app` gets `SELECT, UPDATE` on the table and `EXECUTE` on the
+`hardcount_app` gets `SELECT, UPDATE` on the table and `EXECUTE` on the
 functions — never ownership, never `INSERT/DELETE`. No `tenant_id`: the table
 sits outside the RLS fence like `schema_migrations`.
 
@@ -161,10 +161,10 @@ rebalancing to build).
 ### Observability
 
 `SELECT * FROM leader_status` answers "who leads what, since when, expires
-when, paused by whom" from any replica. Prometheus: `velox_leader_last_tick_age_seconds{role}`
+when, paused by whom" from any replica. Prometheus: `hardcount_leader_last_tick_age_seconds{role}`
 (cluster fact, scraped from the table by any replica; an error/never-ran
 state is exported separately, never as a negative the alert would ignore),
-`velox_leader_paused{role}`, `velox_leader_lease_lost_total{role,reason}`
+`hardcount_leader_paused{role}`, `hardcount_leader_lease_lost_total{role,reason}`
 (the named trigger instrument for revisiting the TTL). Transition-only INFO
 logs move into the leader package. No doctor check: every reachable row
 state is legal or self-heals (the ACQUIRE upsert recreates a missing row;
@@ -192,7 +192,7 @@ bar for a defect class with no instance.
   will publish the worse number beside the much better partition number.
 - **Pooler support:** the app pool is transaction-pooler safe by
   construction (`set_config(…, true)` RLS GUCs are already transaction-local).
-  Only migrations (`LockKeyMigrateHybrid`, session-scoped) and `velox migrate`
+  Only migrations (`LockKeyMigrateHybrid`, session-scoped) and `hardcount migrate`
   keep a direct/session-mode requirement. `VerifyAdvisoryLockTopology`, the
   keepalive bound, the three `Locker` seams and `lock_adapter.go` are
   deleted in PR-D; `docs/ops/postgres-requirements.md` is narrowed, not
@@ -221,7 +221,7 @@ bar for a defect class with no instance.
   per-tick shape) can never take over from a dead leader; a config typo
   closes the shared pool; lib/pq coupling. It hands back the hard part.
 - **River's elector**: internal package, Go ≥ 1.26 from v0.45.0, brings a
-  job-queue schema Velox does not use.
+  job-queue schema Hardcount does not use.
 - **One global leader**: loses per-role pause and the billing/dunning
   independence already relied on; concentrates every tick on one replica.
 - **Full token threading through every money writer**: the site-set is every
@@ -270,7 +270,7 @@ superseded leader from firing it twice. Enumerated from
 | `subscription.collection_resumed` webhook + audit | `subscription/postgres.go` `clearLiftedPauseTx`, reached by the resumers (`ResumeLiftedPause` from `ProcessExpiredPauseCollections[ForClock]`) and, on the dunning tick, by `SetDunningPause` when the pause it finds has lifted | **was unguarded — fixed in PR-B; changed in #1384:** the clear is a CAS on the pause the caller read (`resumes_at`, still lifted, same setter), and the event and audit row are written in the clear's transaction (ADR-036). A miss writes and announces nothing. *(PR-B's predicate `AND pause_collection_behavior IS NOT NULL` on `ClearPauseCollection` is gone: the operator's clear now takes the row lock first (`lockSubForPauseTx`), and that lock serializes it with every other pause writer.)* |
 | `subscription.collection_paused` webhook + audit (dunning's pause) | `subscription/postgres.go` `SetDunningPause`, from the dunning tick's final action | written in the pause's transaction, after the row lock (`lockSubForPauseTx`); only when this call paused (`DunningPauseWritten`). A superseded tick that retries finds the pause in force (`DunningPauseAlreadyHeld`) or the invoice paid (`DunningPauseInvoiceSettled`) and writes nothing (#1384) |
 | billing-cycle period write | `billing/engine.go` `commitPeriodClose`, `handleTrialState`; `billing/threshold_scan.go` `fireThreshold`; `subscription/service.go` `applyCrossIntervalPlanSwapTx` | **was unguarded — fixed in PR-B, superseded by ADR-115 (2026-08-30):** every period writer runs `ClosePeriodTx`, one UPDATE that row-locks the subscription and proves the (status, period start, watermark) snapshot the writer read, as the FIRST statement of the transaction that also inserts its invoice. Plan swaps and threshold resets go through the same CAS — they truncate from a fresh snapshot, which the CAS accepts; a stale write is refused. `ErrWatermarkMoved` → the loser wrote nothing (the engine re-reads once; the swap returns 409 `subscription_period_moved`) |
-| Stripe calls from reconcilers (tax retry/reversal, payment_unknown, refunds) | `billing/tax_retry.go`, `creditnote/service.go`, `payment/reconciler.go` | idempotency keys per object (`velox_tax_rev_<cn>`, `inv_taxrev_<inv>`, attempt-sequence PI keys) + CAS marks; Stripe dedups the second call |
+| Stripe calls from reconcilers (tax retry/reversal, payment_unknown, refunds) | `billing/tax_retry.go`, `creditnote/service.go`, `payment/reconciler.go` | idempotency keys per object (`hardcount_tax_rev_<cn>`, `inv_taxrev_<inv>`, attempt-sequence PI keys) + CAS marks; Stripe dedups the second call |
 | audit rows | everywhere | evidence, not money; a duplicate row is noise the reader tolerates — deliberately not gated |
 
 Verdict: after PR-B no effect reachable from a leader tick fires without a
@@ -289,7 +289,7 @@ completed") was not what shipped for panics. The runner recovered the panic
 tick as completed. A tick that panicked on every run (one malformed row with
 no per-item recover) therefore stamped a fresh completion each interval:
 billing or dunning could halt for every tenant while
-`velox_leader_last_tick_age_seconds` stayed healthy. Found by the 2026-10-08
+`hardcount_leader_last_tick_age_seconds` stayed healthy. Found by the 2026-10-08
 lease correctness review (finding L1).
 
 Fix: the runner's `recover` now wraps `gate.Lead`, as this section always
@@ -297,7 +297,7 @@ assumed, so the panic unwinds through `Lead`. `Lead` records whether work
 returned. If it did not, it releases with outcome 3 (failed), which is the same
 SQL branch as a lost lease: `last_tick_*` untouched, `not_before = now() +
 min(interval, 60 s)`. It then reports `reason="panicked"` on
-`velox_leader_lease_lost_total` and lets the panic continue to the runner,
+`hardcount_leader_lease_lost_total` and lets the panic continue to the runner,
 which logs it with the stack. A deterministic panic now retries at most once
 per cooldown, pages on the lease-lost counter at once, and ages the stall
 gauge. Each retry re-runs the tick's work up to the panic point; every effect
@@ -381,7 +381,7 @@ What changed:
    is released as interrupted even if its work then panicked, so a deploy
    (often the one with the fix) adds no wait; the panic is still reported.
    Roles faster than 60 s are unchanged.
-6. **`velox_leader_lease_lost_total{role, reason="panicked"}` starts at 0.**
+6. **`hardcount_leader_lease_lost_total{role, reason="panicked"}` starts at 0.**
    The page row is `increase(...[1h]) > 0`, and a series first exported at 1
    has no earlier sample, so the first panicked tick after a start never
    paged. Only `panicked` is created at boot; a `heartbeat_timeout` series

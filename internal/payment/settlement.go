@@ -94,7 +94,7 @@ func (s *Stripe) SettleSucceeded(ctx context.Context, tenantID string, inv domai
 	// the advance TARGET, not the retry/boundary the charge fired at, so a
 	// sim-Mar-7 dunning recovery stamped "paid Apr 1". The inline settle
 	// hands the anchor over on ctx; the webhook path recovers it from the
-	// PI's velox_anchor_at metadata. Wall charges carry no anchor.
+	// PI's hardcount_anchor_at metadata. Wall charges carry no anchor.
 	if a, ok := settleAnchorFrom(ctx); ok {
 		now = a
 	}
@@ -279,7 +279,7 @@ func (s *Stripe) SettleSucceeded(ctx context.Context, tenantID string, inv domai
 type PaymentFailure struct {
 	PaymentIntentID string
 	Message         string
-	// Purpose is the PaymentIntent's velox_purpose metadata. A dunning
+	// Purpose is the PaymentIntent's hardcount_purpose metadata. A dunning
 	// retry skips the generic customer email (dunning sends its own per
 	// attempt); a hosted Checkout attempt never moves the invoice.
 	Purpose string
@@ -296,7 +296,7 @@ type PaymentFailure struct {
 	PaymentMethodID string
 	// CardMessage is Stripe's message for a card error, when the source has
 	// one (cardErrorMessage): the reason the customer's payment-failed email
-	// shows. Message is the invoice's text, and can be Velox's own
+	// shows. Message is the invoice's text, and can be Hardcount's own
 	// ("reconciled: requires_payment_method", "payment failed") or Stripe's
 	// developer text for another error type, so it is never emailed.
 	CardMessage string
@@ -544,7 +544,7 @@ func (s *Stripe) escalatePaymentAnomaly(ctx context.Context, tenantID string, in
 // Session instead") — so for every hosted-page attempt, PI cancel alone was
 // a no-op that logged a warning while the session stayed live until its
 // ExpiresAt (<=1h), leaving a voided invoice payable. Found on the FLOW D2
-// walk (VLX-000004): void → PI cancel refused → session still open.
+// walk (HC-000004): void → PI cancel refused → session still open.
 // Expiring the session is what actually closes that window; the PI then
 // terminates with it.
 //
@@ -571,7 +571,7 @@ func (s *Stripe) StopCollection(ctx context.Context, tenantID string, inv domain
 // ExpireCheckoutSessions is StopCollection's first leg on its own, for a
 // write-off: a written-off invoice must not stay payable on a Checkout page
 // the customer still has open (ADR-110 closes self-service payment on one).
-// The write-off's transaction already closed Velox's claims; this expires the
+// The write-off's transaction already closed Hardcount's claims; this expires the
 // sessions at Stripe. Best-effort, as for a void: ExpiresAt (at most an hour)
 // bounds a session whose expire call fails, and a payment that still lands
 // settles the written-off invoice once (uncollectible -> paid). It does not
@@ -653,7 +653,7 @@ func dunningSimFailedAt(ctx context.Context, inv domain.Invoice) time.Time {
 	return inv.IssuedAtOrZero()
 }
 
-// anchorFromEventPayload extracts data.object.metadata.velox_anchor_at from
+// anchorFromEventPayload extracts data.object.metadata.hardcount_anchor_at from
 // a Stripe webhook event. Returns false on absence or parse failure — the
 // settle then falls back to the invoice-pin binding (paid_at) or the issue
 // instant (dunning), never errors: a malformed anchor must not block a
@@ -664,7 +664,7 @@ func dunningSimFailedAt(ctx context.Context, inv domain.Invoice) time.Time {
 // no production event carries, so the webhook never recovered the anchor;
 // its test built that shape by hand (found 2026-10-11).
 func anchorFromEventPayload(event domain.StripeWebhookEvent) (time.Time, bool) {
-	raw := piMetadataFromPayload(event.Payload)["velox_anchor_at"]
+	raw := piMetadataFromPayload(event.Payload)["hardcount_anchor_at"]
 	if raw == "" {
 		return time.Time{}, false
 	}

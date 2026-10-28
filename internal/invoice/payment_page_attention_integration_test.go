@@ -35,7 +35,7 @@ func TestGet_PaymentPageOpenBanner_RealStore(t *testing.T) {
 
 	// An unfilled claim minted just now: the page link may be reaching the
 	// customer, so it holds collection.
-	sessID := postgres.NewID("vlx_cks")
+	sessID := postgres.NewID("hc_cks")
 	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		t.Fatalf("begin: %v", err)

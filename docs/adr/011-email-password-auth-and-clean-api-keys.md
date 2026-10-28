@@ -19,7 +19,7 @@ Accepted
 
 ## Context
 
-Velox's auth model has zigzagged. ADR-007 reverted from email+password to "API key paste" because the email+password surface had been built ahead of evidence — the silent deviation from `project_auth_decision.md`. ADR-008 then refined the dashboard half by minting an httpOnly cookie derived from the pasted API key (so the credential isn't JS-readable).
+Hardcount's auth model has zigzagged. ADR-007 reverted from email+password to "API key paste" because the email+password surface had been built ahead of evidence — the silent deviation from `project_auth_decision.md`. ADR-008 then refined the dashboard half by minting an httpOnly cookie derived from the pasted API key (so the credential isn't JS-readable).
 
 The combined effect is that **the API key is the dashboard sign-in credential**, and a series of safeguards exist to prevent the foot-guns that creates:
 
@@ -34,7 +34,7 @@ Each safeguard is correct given the model. None of them would exist if the dashb
 
 By 2026-05-01 we hit a line where adding more API key features (Rotate UI, restricted keys, IP allowlist) requires either expanding the safeguard surface or finally separating dashboard auth from API key auth. The latter is the simpler path forward. It also removes a real DP-credibility friction: "paste your secret API key into the login screen" is not a UX a non-Stripe-trained operator expects.
 
-A 2026-05-01 industry survey across Stripe, GitHub, AWS IAM, Auth0, Datadog, Vercel, Twilio, and Paddle found that **every mature platform separates user auth from API key auth**. Stripe has account login (email+2FA) entirely separate from `sk_live_…` keys. GitHub has user accounts entirely separate from PATs. None use API-key-as-dashboard-login. Velox's current model is the outlier.
+A 2026-05-01 industry survey across Stripe, GitHub, AWS IAM, Auth0, Datadog, Vercel, Twilio, and Paddle found that **every mature platform separates user auth from API key auth**. Stripe has account login (email+2FA) entirely separate from `sk_live_…` keys. GitHub has user accounts entirely separate from PATs. None use API-key-as-dashboard-login. Hardcount's current model is the outlier.
 
 ## Decision
 
@@ -42,7 +42,7 @@ Add a minimal homegrown email+password auth for the dashboard. Make `dashboard_s
 
 ### Why homegrown over WorkOS / Zitadel / Clerk
 
-1. **OSS purity**. Self-hosters picked Velox because it has no SaaS dependencies — `Postgres + binary` is the moat. Forcing them to register for WorkOS would either add friction or maintain two complete auth modes. Homegrown email+password is zero-dependency.
+1. **OSS purity**. Self-hosters picked Hardcount because it has no SaaS dependencies — `Postgres + binary` is the moat. Forcing them to register for WorkOS would either add friction or maintain two complete auth modes. Homegrown email+password is zero-dependency.
 2. **The recipe is well-trodden**. `bcrypt cost 12` + `crypto/rand` + `subtle.ConstantTimeCompare` + Redis-backed login rate-limit is ~600 LOC of standard Go. Not experimental cryptography. Auditing the recipe is faster than auditing a vendor integration.
 3. **Email+password is the dashboard standard**. Every operator expects it. API-key paste was a workaround for not-yet-built auth; it isn't a feature.
 4. **WorkOS-later is non-breaking**. Add a `users.workos_user_id NULL` column when SAML/SSO becomes a DP requirement. Same `users` table, dual sign-in paths.
@@ -59,7 +59,7 @@ ADR-007 reverted email+password because it was built **ahead of evidence**, in v
 
 ```sql
 CREATE TABLE users (
-    id            TEXT PRIMARY KEY DEFAULT 'vlx_usr_' || encode(gen_random_bytes(12), 'hex'),
+    id            TEXT PRIMARY KEY DEFAULT 'hc_usr_' || encode(gen_random_bytes(12), 'hex'),
     email         CITEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -75,7 +75,7 @@ CREATE TABLE user_tenants (
 );
 
 CREATE TABLE password_reset_tokens (
-    id         TEXT PRIMARY KEY DEFAULT 'vlx_prt_' || encode(gen_random_bytes(12), 'hex'),
+    id         TEXT PRIMARY KEY DEFAULT 'hc_prt_' || encode(gen_random_bytes(12), 'hex'),
     user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     token_hash TEXT NOT NULL UNIQUE,
     expires_at TIMESTAMPTZ NOT NULL,
@@ -116,7 +116,7 @@ Pre-launch with one operator and one tenant: drop existing rows, no backfill. Op
 
 **Cookie path** (dashboard):
 ```
-velox_session cookie
+hardcount_session cookie
   → SHA256(value) → dashboard_sessions row (revoked_at IS NULL, expires_at > NOW())
   → users row → user_tenants row
   → ctx: { tenant_id, user_id, role:'owner', permissions: <full> }
@@ -124,7 +124,7 @@ velox_session cookie
 
 **Bearer path** (SDK/curl):
 ```
-Authorization: Bearer vlx_secret_…
+Authorization: Bearer hc_secret_…
   → prefix lookup → api_keys row (revoked_at IS NULL, expires_at IS NULL OR > NOW())
   → ctx: { tenant_id, key_id, key_type, permissions: <by tier> }
 ```
@@ -137,7 +137,7 @@ The two paths are now structurally independent. Permission middleware doesn't ca
 
 - Still produces a tenant + the 3 API keys (for SDK callers — unchanged contract)
 - Additionally produces a user (email + password) bound to the tenant via `user_tenants`
-- Email source: `--email` flag or `VELOX_BOOTSTRAP_EMAIL` env. Password source: `--password` flag or random-generated and printed once
+- Email source: `--email` flag or `HARDCOUNT_BOOTSTRAP_EMAIL` env. Password source: `--password` flag or random-generated and printed once
 - The console output explains: "Email + password for dashboard login. API keys for SDK/curl callers."
 
 ### Permission map
@@ -173,7 +173,7 @@ Already-existing Redis rate limiter gets a new key shape: `auth:login:<email_low
 
 ### Email infrastructure for password reset
 
-Velox's existing `internal/email` package handles tenant-configured SMTP for invoice emails. Reuse for password reset emails — new template, same dispatcher.
+Hardcount's existing `internal/email` package handles tenant-configured SMTP for invoice emails. Reuse for password reset emails — new template, same dispatcher.
 
 Edge case: if SMTP isn't configured, password reset emails can't be sent. Mitigation: a `make reset-password --email=foo@bar` CLI subcommand that bypasses email and prints a one-time reset link to stdout. Operators in the no-SMTP-yet state always have a recovery path.
 

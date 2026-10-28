@@ -23,7 +23,7 @@ import (
 // confirm (3-D Secure, test card 4000 0027 6000 3184): a 402 card_error
 // whose code and decline code are both authentication_required, with the
 // PaymentIntent left at requires_payment_method. The message is the
-// developer text the Stripe sandbox walk of 2026-10-22 saw in Velox's
+// developer text the Stripe sandbox walk of 2026-10-22 saw in Hardcount's
 // activity (ux-review-2026-10-22-stripe.md, P4).
 const (
 	confirmDevText = "This payment requires authentication. If the customer is off session, ask them to return to your application and complete the payment."
@@ -188,7 +188,7 @@ func TestE2E_OffSessionCharge_BankNeedsCustomerToConfirm(t *testing.T) {
 			"created": time.Now().Unix(), "livemode": false,
 			"data": map[string]any{"object": map[string]any{
 				"id": "seti_" + pm, "object": "setup_intent", "status": "succeeded", "payment_method": pm,
-				"metadata": map[string]any{"velox_customer_id": customerID},
+				"metadata": map[string]any{"hardcount_customer_id": customerID},
 			}},
 		})
 		flowDo(t, ts, "POST", endpoint, flowReq{header: map[string]string{"Stripe-Signature": sig}, body: payload}).want(t, 200, "setup_intent.succeeded")

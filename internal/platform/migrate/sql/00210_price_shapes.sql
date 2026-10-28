@@ -9,7 +9,7 @@
 -- every *_cents field: cost_per_token (dollars) is unit_cost_cents.
 --
 -- Every row of these tables, and every invoice line labelled flat, would
--- need converting. This release has no upgrade path from Velox 0.8.x, so
+-- need converting. This release has no upgrade path from Hardcount 0.8.x, so
 -- nothing is converted: if any such row exists, the upgrade stops here
 -- before changing anything, and the error counts them. 00211 checks the
 -- new mode constraints against the rows already there, which are none.
@@ -35,7 +35,7 @@ BEGIN
     IF n > 0 THEN found := found || format(E'\n  %s invoice line(s) priced flat', n); END IF;
     IF found <> '' THEN
         RAISE EXCEPTION 'migration 00210 renames the price shapes and moves provider costs to cents, and this database has rows it does not convert:%', found
-            USING HINT = 'This release has no upgrade path from Velox 0.8.x: install fresh (see the v0.9.0 release notes). On a development database, re-create it: docs/ops/runbook/migration-failed-midway.md#00210-found-prices-it-does-not-convert';
+            USING HINT = 'This release has no upgrade path from Hardcount 0.8.x: install fresh (see the v0.9.0 release notes). On a development database, re-create it: docs/ops/runbook/migration-failed-midway.md#00210-found-prices-it-does-not-convert';
     END IF;
 END
 $$;

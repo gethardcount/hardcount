@@ -46,7 +46,7 @@ func RefundParts(refundCents, creditCents, outOfBandCents int64, currency string
 		out = append(out, Segment{M(creditCents, currency), T(" to credit balance")})
 	}
 	if outOfBandCents > 0 {
-		out = append(out, Segment{M(outOfBandCents, currency), T(" refunded outside Velox")})
+		out = append(out, Segment{M(outOfBandCents, currency), T(" refunded outside Hardcount")})
 	}
 	return out
 }
@@ -82,7 +82,7 @@ func DeclineCodes() []string {
 }
 
 // DeclineReason is a failed charge's problem line: the mapped decline code
-// when there is one, else the provider's own text without Velox's wrappers.
+// when there is one, else the provider's own text without Hardcount's wrappers.
 func DeclineReason(declineCode, providerText string) string {
 	if r, ok := declineReasons[strings.ToLower(strings.TrimSpace(declineCode))]; ok {
 		return r
@@ -95,7 +95,7 @@ func DeclineReason(declineCode, providerText string) string {
 // event stores as its reason.
 var wrappers = []string{"payment failed: ", "payment state unknown: "}
 
-// StripWrapper removes Velox's own wrapper from a provider's message
+// StripWrapper removes Hardcount's own wrapper from a provider's message
 // ("payment failed: Your card was declined." → "Your card was declined."),
 // so only the provider's words reach the screen.
 func StripWrapper(s string) string {

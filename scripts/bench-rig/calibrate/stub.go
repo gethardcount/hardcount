@@ -6,7 +6,7 @@
 // Build-tagged `ignore` so it stays out of ./... — run it via calibrate.sh,
 // which is the only supported entry point.
 //
-// The point: ingest.js reports numbers about Velox, and nothing about Velox
+// The point: ingest.js reports numbers about Hardcount, and nothing about Hardcount
 // tells us whether those numbers are true. Pointing the same script at a
 // system whose behaviour we set exactly — 20ms per request, n events counted
 // server-side — makes the load generator itself falsifiable.

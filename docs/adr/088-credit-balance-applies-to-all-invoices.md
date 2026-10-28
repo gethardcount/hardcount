@@ -47,13 +47,13 @@ per-type opt-out.
 - **Metronome** applies credits continuously against the draft.
 
 Parity synthesis: **no platform excludes a subscription's first or final
-invoice** from automatic application — Velox charging full price there was out
+invoice** from automatic application — Hardcount charging full price there was out
 of parity with every surveyed vendor. One-off invoices split the industry
-(Stripe+Chargebee apply, Lago excludes); Velox anchors on Stripe.
+(Stripe+Chargebee apply, Lago excludes); Hardcount anchors on Stripe.
 
 ## Why apply at manual invoices too (the split call)
 
-Stripe parity is Velox's stated anchor, and the two largest platforms agree.
+Stripe parity is Hardcount's stated anchor, and the two largest platforms agree.
 The customer-visible logic is also simpler to explain: "your balance pays your
 invoices" with no invoice-type asterisk. Rejected alternative: Lago-style
 exclusion (shippable, but creates the support question "why didn't my credit
@@ -61,7 +61,7 @@ apply?"); deferred alternative: a Chargebee-style per-type toggle —
 over-engineering pre-launch, trigger = the first design partner asking to
 reserve balance for subscription charges only.
 
-## Velox-specific boundaries
+## Hardcount-specific boundaries
 
 - The **credit ledger** is a general balance (refunds, goodwill,
   cancel-proration credits) — the Stripe model. **Prepaid commits (ADR-078)**
@@ -69,7 +69,7 @@ reserve balance for subscription charges only.
   in-arrears-only rule applies to *its* commitment credits and is not imported
   here.
 - Application happens at finalize-time amount computation (Stripe-exact:
-  Velox's finalize step is the analogue of Stripe finalization), never at
+  Hardcount's finalize step is the analogue of Stripe finalization), never at
   payment time, and never retroactively to already-finalized invoices.
   *Superseded 2026-10-19: credit is applied at collection, and again on each
   later collection attempt. See [the amendment](#amendment-2026-10-19-credit-is-applied-when-the-invoice-is-collected).*
@@ -118,11 +118,11 @@ credit step into the collector, and the code has worked like this since:
   ADR-116 relies on this: the sweep's visit "settles it when credits arrive".
 
 **Decision.** Keep the code's behaviour and fix the record (decided
-2026-10-18 on [#1281](https://github.com/getvelox/velox/issues/1281)).
+2026-10-18 on [#1281](https://github.com/gethardcount/hardcount/issues/1281)).
 Applying credit at collection means new credit pays what the customer
 already owes at the next attempt, before the card is charged again. Stripe
 applies its balance "to the next invoice finalised for the customer" (quoted
-above); Velox differs from Stripe on purpose here.
+above); Hardcount differs from Stripe on purpose here.
 
 **What integrators see.** `invoice.finalized` is sent before the credit
 step, so its `amount_due_cents` is the amount before credit. Its payload now

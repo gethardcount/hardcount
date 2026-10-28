@@ -5,7 +5,7 @@
 
 ## Summary
 
-When a test-clock catch-up fails, the clock stores the reason in `last_failure_reason` (cut to 500 characters) and the dashboard shows it. `POST /v1/test-clocks/{id}/retry-advance` moves a clock from `internal_failure` back to `advancing` and runs the catch-up again. This is safe because catch-up bills only subscriptions that are still due. Amended 2026-05-05: setting `VELOX_TEST_CLOCK_INJECT_FAILURE` makes the next catch-up fail once, so the failure path can be tested. Status: active, amended; deleting a clock is now a hard delete ([ADR-086](086-simulated-data-lifecycle.md)), not the soft delete named below.
+When a test-clock catch-up fails, the clock stores the reason in `last_failure_reason` (cut to 500 characters) and the dashboard shows it. `POST /v1/test-clocks/{id}/retry-advance` moves a clock from `internal_failure` back to `advancing` and runs the catch-up again. This is safe because catch-up bills only subscriptions that are still due. Amended 2026-05-05: setting `HARDCOUNT_TEST_CLOCK_INJECT_FAILURE` makes the next catch-up fail once, so the failure path can be tested. Status: active, amended; deleting a clock is now a hard delete ([ADR-086](086-simulated-data-lifecycle.md)), not the soft delete named below.
 
 ## Context
 
@@ -42,7 +42,7 @@ Industry references walked:
 - **Recurly / Chargebee** — sandbox-time-travel features expose
   retry on transient errors.
 
-Velox's `runCatchupLoop` is already idempotent on subs (only
+Hardcount's `runCatchupLoop` is already idempotent on subs (only
 processes rows whose `next_billing_at <= frozen_time`), so
 resuming from where the previous attempt stopped is safe by
 construction. The missing pieces were the persistence column
@@ -165,7 +165,7 @@ The internal_failure UI path is real and worth verifying in any
 integration smoke test — but the operator had no reproducible
 trigger to do so.
 
-Added `VELOX_TEST_CLOCK_INJECT_FAILURE` env knob:
+Added `HARDCOUNT_TEST_CLOCK_INJECT_FAILURE` env knob:
 
 - `runCatchupLoop` checks the env at the top of the function
   via `injectedCatchupFailureReason()`. If set, it returns an

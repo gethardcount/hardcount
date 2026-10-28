@@ -5,11 +5,11 @@
 
 ## Summary
 
-When a charge fails, Velox starts the invoice's dunning run (its schedule of payment retries) at once, and a background sweep creates any run that was missed. Both paths call `StartDunning`, which creates at most one run per invoice, so the sweep safely repairs the gap a crash leaves between marking the invoice failed and starting dunning. The retry schedule is anchored on the invoice's own timestamps, so a run the sweep creates late is the same as one created at once. Storing the retry date as a column on the invoice, as Stripe does, is rejected for good: dunning is its own domain, and test-clock invoices still need the inline path. Status: active.
+When a charge fails, Hardcount starts the invoice's dunning run (its schedule of payment retries) at once, and a background sweep creates any run that was missed. Both paths call `StartDunning`, which creates at most one run per invoice, so the sweep safely repairs the gap a crash leaves between marking the invoice failed and starting dunning. The retry schedule is anchored on the invoice's own timestamps, so a run the sweep creates late is the same as one created at once. Storing the retry date as a column on the invoice, as Stripe does, is rejected for good: dunning is its own domain, and test-clock invoices still need the inline path. Status: active.
 
 ## Context
 
-When a payment fails, Velox creates a `dunning_run` — a stateful collection
+When a payment fails, Hardcount creates a `dunning_run` — a stateful collection
 campaign (state `active`/`resolved`/`escalated`, `attempt_count`, `next_action_at`,
 a per-run frozen policy binding, an append-only events timeline, the operator
 "in collection" badge). `dunning.StartDunning` (`internal/dunning/service.go:246`)
@@ -61,7 +61,7 @@ The load-bearing invariant any future change **must preserve**:
 That equivalence **is** the derivability the "derived dunning" goal is after: the
 run's **existence** is derivable (the state-agnostic `NOT EXISTS` sweep re-drives
 it) and its **schedule** is derivable (invoice-anchored). "No run to lose" is
-already achieved. **Derivability is not the same as single-mechanism** — Velox
+already achieved. **Derivability is not the same as single-mechanism** — Hardcount
 gets the self-healing-by-construction property without collapsing the campaign
 into a scalar.
 
@@ -84,7 +84,7 @@ recorded here as **reasons, not accidents**:
 
 1. **Full-derive / `next_payment_attempt`-on-invoice (the Stripe scalar model).**
    Stripe can carry the retry schedule as a scalar column on the invoice because
-   its dunning lives in the *same* service. Velox deliberately made dunning a
+   its dunning lives in the *same* service. Hardcount deliberately made dunning a
    stateful campaign *aggregate* in its own domain (escalation, resolution, policy
    binding, per-attempt events, the runs tab). Collapsing that into an invoice
    column would either lose the campaign richness or drag dunning's schema onto

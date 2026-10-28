@@ -5,8 +5,8 @@
 //
 // (Dockerfile ARG VERSION → the CI release job passes the git tag). The
 // "dev" default means an unstamped local build says so honestly —
-// pre-2026-07-06 `velox version` printed a hardcoded April date on every
-// build and the Velox-Version response header pinned the same stale
+// pre-2026-07-06 `hardcount version` printed a hardcoded April date on every
+// build and the Hardcount-Version response header pinned the same stale
 // constant, so "what version are you running?" was unanswerable.
 package version
 

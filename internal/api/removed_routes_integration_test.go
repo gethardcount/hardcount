@@ -186,7 +186,7 @@ func TestKeptEventDeliveries_AnswersTheCHANGELOGNames(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create endpoint: %v", err)
 	}
-	root, err := store.CreateEvent(ctx, tenantID, domain.WebhookEvent{EventType: "customer.created", Payload: map[string]any{"customer_id": "vlx_cus_1"}})
+	root, err := store.CreateEvent(ctx, tenantID, domain.WebhookEvent{EventType: "customer.created", Payload: map[string]any{"customer_id": "hc_cus_1"}})
 	if err != nil {
 		t.Fatalf("create event: %v", err)
 	}
@@ -213,7 +213,7 @@ func TestKeptEventDeliveries_AnswersTheCHANGELOGNames(t *testing.T) {
 	}
 
 	for name, id := range map[string]string{
-		"unknown id":             "vlx_whe_doesnotexist",
+		"unknown id":             "hc_whe_doesnotexist",
 		"another tenant's event": otherEvent.ID,
 	} {
 		t.Run(name, func(t *testing.T) {

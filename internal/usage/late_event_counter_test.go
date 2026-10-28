@@ -11,7 +11,7 @@ import (
 // TestIngest_LateEventCounted pins the late-event visibility contract
 // (2026-07-10 design review): a live event stamped >24h in the past is
 // ACCEPTED (late events are industry-standard; a hard reject breaks retries)
-// but counted on velox_usage_late_event_total + WARNed, because it may fall
+// but counted on hardcount_usage_late_event_total + WARNed, because it may fall
 // inside an already-finalized period where it is stored-but-unbilled. A
 // fresh event is not counted; backfill-origin events are excluded (the
 // documented-safe intentional path).

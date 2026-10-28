@@ -84,7 +84,7 @@ func scratchDatabase(t *testing.T, name string) (string, *sql.DB) {
 // cleanDBErr's exclusion → this goes red (and the next process's
 // migrate.Up would refuse the database: tables, no record).
 func TestHarness_CleanDBKeepsVersionTables(t *testing.T) {
-	url, pool := scratchDatabase(t, "velox_testutil_clean")
+	url, pool := scratchDatabase(t, "hardcount_testutil_clean")
 	if err := migrate.Up(url); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestHarness_CleanDBKeepsVersionTables(t *testing.T) {
 // extension's, and migrate.Up then builds it from the baseline. Mutation: drop only tables; the baseline's CREATE
 // FUNCTION then fails on a function the reset left behind.
 func TestHarness_ResetAfterFailedUp(t *testing.T) {
-	url, pool := scratchDatabase(t, "velox_testutil_reset")
+	url, pool := scratchDatabase(t, "hardcount_testutil_reset")
 	if err := migrate.Up(url); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}

@@ -164,7 +164,7 @@ func TestLiteLLM_WedgeE2E(t *testing.T) {
 	// A Claude Code /v1/messages call (call_type anthropic_messages), shaped
 	// like the LiteLLM 1.83.9 proxy record in
 	// internal/integrations/litellm/testdata/litellm-1.83.9-proxy-messages-split.json
-	// and scaled by 100. Before 2026-10-22 Velox skipped this call type and
+	// and scaled by 100. Before 2026-10-22 Hardcount skipped this call type and
 	// billed nothing. At claude-sonnet-4.5's rates: 100,000 input → 30¢,
 	// 500,000 cache reads at $0.30/M → 15¢, 4M 5m writes → 1500¢, 6M 1h
 	// writes → 3600¢, 50,000 output → 75¢: 5220¢.

@@ -1,4 +1,4 @@
-// Package middleware provides HTTP middleware for the Velox API server.
+// Package middleware provides HTTP middleware for the Hardcount API server.
 // Includes rate limiting, idempotency keys, Prometheus metrics, CORS, and
 // cursor-based pagination helpers.
 package middleware
@@ -12,7 +12,7 @@ import (
 )
 
 // CORS lets browser pages on the allowed origins call the API and read the
-// response. github.com/rs/cors answers preflights and sets the headers; Velox
+// response. github.com/rs/cors answers preflights and sets the headers; Hardcount
 // only decides which origins match.
 //
 // allowedOrigins comes from config.ParseCORSOrigins, the parser behind the
@@ -37,7 +37,7 @@ func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
 	opts := cors.Options{
 		AllowedMethods: []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete},
 		AllowedHeaders: []string{"Authorization", "Content-Type", "X-API-Key", "Idempotency-Key"},
-		ExposedHeaders: []string{"Velox-Version", "Velox-Request-Id", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset", "Retry-After"},
+		ExposedHeaders: []string{"Hardcount-Version", "Hardcount-Request-Id", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset", "Retry-After"},
 		MaxAge:         86400,
 	}
 	if slices.Contains(allowedOrigins, "*") {

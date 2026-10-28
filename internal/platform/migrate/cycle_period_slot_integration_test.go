@@ -50,7 +50,7 @@ func cycleSlotInvoice(id, reason string) string {
 //
 // Mutation: an up that keeps manual invoices in the slot turns this red.
 func TestCyclePeriodSlot_ManualInvoicesDoNotHoldIt(t *testing.T) {
-	dsn, db := scratchDB(t, "velox_test_cycleslot_migrate")
+	dsn, db := scratchDB(t, "hardcount_test_cycleslot_migrate")
 	ctx := context.Background()
 	if err := up(ctx, dsn, filesBefore(t, cycleSlotVersion)); err != nil {
 		t.Fatalf("up to before %d: %v", cycleSlotVersion, err)

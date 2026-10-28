@@ -82,7 +82,7 @@ func (m *invoicesMock) createInvoice(tenantID string, inv domain.Invoice, items 
 	if m.createInvoiceErr != nil {
 		return domain.Invoice{}, m.createInvoiceErr
 	}
-	inv.ID = fmt.Sprintf("vlx_inv_test_%d", len(m.createdInvoices)+1)
+	inv.ID = fmt.Sprintf("hc_inv_test_%d", len(m.createdInvoices)+1)
 	inv.TenantID = tenantID
 	m.createdInvoices = append(m.createdInvoices, inv)
 	m.createdLineItems = append(m.createdLineItems, items)
@@ -118,7 +118,7 @@ func (m *invoicesMock) NextInvoiceNumber(_ context.Context, _ string) (string, e
 	if m.nextNumberErr != nil {
 		return "", m.nextNumberErr
 	}
-	return "VLX-000042", nil
+	return "HC-000042", nil
 }
 
 func (m *invoicesMock) FindBaseInvoiceForPeriod(_ context.Context, _, _ string, _ time.Time) (domain.Invoice, error) {
@@ -295,10 +295,10 @@ func TestUpdateItem_ProrationDedup_UpgradeReturnsExisting(t *testing.T) {
 
 	existingAt := time.Now().UTC().Add(-time.Minute)
 	existingInvoice := domain.Invoice{
-		ID:                       "vlx_inv_prior",
+		ID:                       "hc_inv_prior",
 		TenantID:                 tenantID,
 		SubscriptionID:           subID,
-		InvoiceNumber:            "VLX-000001",
+		InvoiceNumber:            "HC-000001",
 		Status:                   domain.InvoiceFinalized,
 		SourcePlanChangedAt:      &existingAt,
 		SourceSubscriptionItemID: itemID,
@@ -631,7 +631,7 @@ func TestUpdateItem_ProrationDeferredTaxCarriesRetryFacts(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Event dispatch tests — P0 #2. Design partners building on Velox need a
+// Event dispatch tests — P0 #2. Design partners building on Hardcount need a
 // webhook stream for subscription lifecycle the same way Stripe customers
 // depend on customer.subscription.*. These tests pin the dispatch contract
 // for every mutating handler so a silent regression can't ship.
@@ -1154,7 +1154,7 @@ func TestRemoveItem_ProratesAsCredit(t *testing.T) {
 
 // TestHandleItemProration_DefersOnInArrears locks in the industry-standard
 // gate: in_arrears items must NOT emit an immediate proration invoice or
-// credit at mutation time. Pre-fix Velox emitted both, then also billed
+// credit at mutation time. Pre-fix Hardcount emitted both, then also billed
 // full-period at cycle close → ~half-plan over/undercharge per change.
 // Post-fix: silent defer with info log; cycle close handles the math.
 func TestHandleItemProration_DefersOnInArrears(t *testing.T) {

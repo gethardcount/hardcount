@@ -8,11 +8,11 @@
 
 ## Summary
 
-A plan's base price (`base_amount_cents`), `base_bill_timing` and meter set can change only while no live subscription (any status except `canceled` or `archived`) uses the plan. After that, such an edit is refused with a message to create a new plan, because subscriptions read the plan at billing time and would be billed differently mid-cycle. Name, description, `tax_code` and status stay editable. Velox does not version plans or copy them onto each subscription. Status: active.
+A plan's base price (`base_amount_cents`), `base_bill_timing` and meter set can change only while no live subscription (any status except `canceled` or `archived`) uses the plan. After that, such an edit is refused with a message to create a new plan, because subscriptions read the plan at billing time and would be billed differently mid-cycle. Name, description, `tax_code` and status stay editable. Hardcount does not version plans or copy them onto each subscription. Status: active.
 
 ## Context
 
-Velox plans are currently mutable in place. Active subscriptions read the plan live at billing time (`pricing.GetPlan` inside `billing.Engine.billOnePeriod`). Operator edits to a plan's `base_amount_cents`, `base_bill_timing`, or `meter_ids` therefore **silently change what existing subs bill at their next cycle close** — including potentially producing revenue gaps (an in_arrears base period that never gets invoiced because the plan flipped to in_advance mid-cycle).
+Hardcount plans are currently mutable in place. Active subscriptions read the plan live at billing time (`pricing.GetPlan` inside `billing.Engine.billOnePeriod`). Operator edits to a plan's `base_amount_cents`, `base_bill_timing`, or `meter_ids` therefore **silently change what existing subs bill at their next cycle close** — including potentially producing revenue gaps (an in_arrears base period that never gets invoiced because the plan flipped to in_advance mid-cycle).
 
 This was caught while testing ADR-031: an operator flips a plan's `base_bill_timing` from `in_arrears` to `in_advance` while a mid-period sub exists; the next cycle invoice bills the upcoming period's base in_advance, but the elapsed period's base is never billed. Same shape applies to any base-price mutation.
 
@@ -28,7 +28,7 @@ Surveyed billing platforms on this exact question:
 | **Chargebee, Recurly** | Plans are editable but **changes only apply to new subscriptions by default.** Active subs carry their snapshot of plan-as-created. Operator can opt into "apply to existing subs" with a separate workflow. |
 | **Zuora** | Product Rate Plans are explicitly versioned. Subscriptions reference a specific version. Mutations create new versions. |
 
-**Common pattern:** every mature billing platform either makes billing-affecting fields **always immutable** (Stripe, Orb) or **snapshots them at sub attach** (Lago, Chargebee, Recurly, Zuora). Velox is the outlier — mutable plans, live-reading engine, no snapshot, no versioning.
+**Common pattern:** every mature billing platform either makes billing-affecting fields **always immutable** (Stripe, Orb) or **snapshots them at sub attach** (Lago, Chargebee, Recurly, Zuora). Hardcount is the outlier — mutable plans, live-reading engine, no snapshot, no versioning.
 
 **Correction (2026-10-23):** the Lago row and Lago's place in the "snapshot" group are wrong. Lago edits a plan in place. While subscriptions use a plan, its base fee (`amount_cents`) and each charge's prices (`properties`) and filters stay editable. Draft invoices that hold a subscription on that plan are flagged for refresh. The plan's code, interval, currency, trial, `pay_in_advance` and monthly billing of charges and fixed charges lock. Each charge's model, code, `pay_in_advance`, proration and minimum lock too; its display name and tax codes stay editable. `plan_overrides`, which need a premium licence, create a child plan for one subscription. A plan edit sent with `cascade_updates` also changes each child plan that still has the old base fee or charge prices. Checked in lago-api `2e52dfc` (2026-10-22): `app/services/plans/update_service.rb:32-49`, `:101-125` and `:151-190`, `app/services/charges/update_service.rb:27-87`, `app/services/subscriptions/create_service.rb:37`.
 
@@ -52,7 +52,7 @@ Concretely, in `pricing.Service.UpdatePlan`:
 
 ### Why soft-block, not "always immutable" like Stripe
 
-Stripe's stricter rule is correct at their scale (millions of merchants, billions of price objects, can't be wrong even once). For Velox at pre-launch / first-DP scale, the soft-block balances:
+Stripe's stricter rule is correct at their scale (millions of merchants, billions of price objects, can't be wrong even once). For Hardcount at pre-launch / first-DP scale, the soft-block balances:
 - **Bug prevention**: silent billing gaps blocked once a sub attaches (the actual harm)
 - **Operator UX**: typo correction on a brand-new plan ("oops, $99 not $98") works without forcing plan replacement
 
@@ -60,7 +60,7 @@ When a DP demands strict immutability (audit / SOC2 reasons), the upgrade path i
 
 ### Why not snapshot-at-sub (Lago / Chargebee shape)
 
-- Velox's existing data model has `subscription_items.plan_id` as a foreign key, not embedded plan terms. Switching to embedded would be a multi-day refactor (new columns, migration, engine reads, dashboard UX for "sub's effective terms vs plan's current terms" drift).
+- Hardcount's existing data model has `subscription_items.plan_id` as a foreign key, not embedded plan terms. Switching to embedded would be a multi-day refactor (new columns, migration, engine reads, dashboard UX for "sub's effective terms vs plan's current terms" drift).
 - The flexibility this buys ("edit a plan, no existing sub is affected") is duplicated by the soft-block + create-new-plan workflow at zero structural cost.
 - Stripe is the canonical reference and Stripe doesn't snapshot. Snapshot-at-sub is a useful pattern for complex enterprise catalogs but isn't necessary for the AI-infra wedge.
 

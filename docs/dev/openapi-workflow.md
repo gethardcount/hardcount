@@ -33,7 +33,7 @@ their SDKs aligned with their HTTP surface.
    for example `useGetInvoice(id)`. The hook handles the URL, the query keys
    and the typed response shape. The mutator (`orvalClient`, the function
    every generated request goes through) sends the request through
-   `apiRequest`, so cookies, error-envelope parsing and `Velox-Request-Id`
+   `apiRequest`, so cookies, error-envelope parsing and `Hardcount-Request-Id`
    capture keep working unchanged.
 5. **Run the local gates:** `go build ./...`, `go vet ./...`,
    `go test ./... -short`, `cd web-v2 && npx tsc -b`. Use `tsc -b`:
@@ -133,7 +133,7 @@ clear dependency.
 - session-cookie auth;
 - parsing of the Stripe-style error envelope (the `{ error: {…} }` JSON
   wrapper on failure responses) into `ApiError`;
-- capture of the `Velox-Request-Id` header into `setLastRequestId`, for
+- capture of the `Hardcount-Request-Id` header into `setLastRequestId`, for
   "Report an issue" trace handles.
 
 Reusing the wrapper keeps generated hooks on the same auth posture as every
@@ -159,7 +159,7 @@ They regenerate from the same spec on `make gen`, and they do different jobs:
   pointer marshals as `""`, which would break wire-shape parity with the
   existing `domain.Invoice` JSON output. The cost: callers cannot tell
   "field absent" from "field present and empty" at the type level. For
-  Velox's domain types, every empty string means the same as "absent", so
+  Hardcount's domain types, every empty string means the same as "absent", so
   that is the right call.
 - **Generated hooks cannot send `Idempotency-Key` yet.** The spec declares
   the header, but orval leaves header parameters out of the hooks it

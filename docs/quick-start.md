@@ -1,6 +1,6 @@
-# Quick start: run Velox and its demo
+# Quick start: run Hardcount and its demo
 
-This page starts Velox on your own computer and runs its demo. The demo bills
+This page starts Hardcount on your own computer and runs its demo. The demo bills
 one test customer for a month of AI token usage, so you can see the whole
 flow: usage in, invoice out.
 
@@ -8,10 +8,10 @@ flow: usage in, invoice out.
 
 | Word | Meaning |
 |---|---|
-| Test mode | The side of Velox where nothing charges real money. The dashboard opens in it. |
+| Test mode | The side of Hardcount where nothing charges real money. The dashboard opens in it. |
 | Meter | A counter for one kind of usage, here AI tokens. |
-| Recipe | A ready-made pricing setup that Velox creates in one call. |
-| Usage event | One "this customer used this much" record that your app sends to Velox. |
+| Recipe | A ready-made pricing setup that Hardcount creates in one call. |
+| Usage event | One "this customer used this much" record that your app sends to Hardcount. |
 | Test clock | A pretend clock for test customers. Moving it forward makes a month pass in seconds. |
 | Provider cost | What your AI provider, such as Anthropic, charges you per token. |
 | Margin | What you billed a customer, minus what their usage cost you, as a percent of what you billed. |
@@ -26,18 +26,18 @@ You need:
 
 You do not need Go, Node, jq or a database. Docker downloads everything else.
 
-## Part 1: Start Velox
+## Part 1: Start Hardcount
 
-1. Download Velox and start it.
+1. Download Hardcount and start it.
 
    ```bash
-   git clone https://github.com/getvelox/velox.git
-   cd velox/deploy/compose
+   git clone https://github.com/gethardcount/hardcount.git
+   cd hardcount/deploy/compose
    ./quickstart.sh
    ```
 
    The script makes a private `.env` file with new secrets. Then it starts
-   five containers: the Velox server, its dashboard, Postgres, Redis and
+   five containers: the Hardcount server, its dashboard, Postgres, Redis and
    nginx (a web server that puts the server and the dashboard on one
    address). The first start
    downloads the images, which can take a few minutes.
@@ -45,12 +45,12 @@ You do not need Go, Node, jq or a database. Docker downloads everything else.
    **You see:**
 
    ```text
-   Velox is running.
+   Hardcount is running.
 
      Dashboard   http://localhost:8080
-     Email       admin@velox.local
+     Email       admin@hardcount.local
      Password    <your password>
-     Test key    vlx_secret_test_…
+     Test key    hc_secret_test_…
 
    Open the dashboard address in your browser and sign in with this email and
    password. The password is shown only once. The dashboard opens in test mode,
@@ -65,7 +65,7 @@ You do not need Go, Node, jq or a database. Docker downloads everything else.
    and password.
 
    **You see:** Home, with a strip at the top: "Test mode. You're viewing test
-   data. No real money moves." Its four cards show zero, because Velox has
+   data. No real money moves." Its four cards show zero, because Hardcount has
    no data yet: MRR (monthly recurring revenue), Revenue, Customers and
    Failed payments.
 
@@ -86,13 +86,13 @@ You do not need Go, Node, jq or a database. Docker downloads everything else.
    whole run takes about two minutes.
 
 The demo checks every step. If one fails, it stops there with a ✗ line that
-says what went wrong. So a finished run means each step below worked. The IDs (the `vlx_…` values), dates and PDF size differ on every run.
+says what went wrong. So a finished run means each step below worked. The IDs (the `hc_…` values), dates and PDF size differ on every run.
 
 ### What each demo step does
 
-1. **Check that Velox is running.**
+1. **Check that Hardcount is running.**
 
-   **You see:** `✓ Velox is up at http://localhost:8080`
+   **You see:** `✓ Hardcount is up at http://localhost:8080`
 
 2. **Load ready-made prices for Claude tokens.** One call applies the
    `anthropic_style` recipe. It creates a meter named Tokens, a price for
@@ -101,46 +101,46 @@ says what went wrong. So a finished run means each step below worked. The IDs (t
    read and cache write. The prices start at Anthropic's public list prices, which you can
    change later. If you run the demo again, this step reuses the same setup.
 
-   **You see:** `✓ Prices loaded: a tokens meter, a price for each model and token type, and plan vlx_pln_…`
+   **You see:** `✓ Prices loaded: a tokens meter, a price for each model and token type, and plan hc_pln_…`
 
 3. **Create a test clock and a demo customer on it.** The clock starts at
    today's date. The customer is "ACME Corp", and each run makes a new one.
 
-   **You see:** `✓ Customer ACME Corp (vlx_cus_…) is on test clock vlx_tclk_…`
+   **You see:** `✓ Customer ACME Corp (hc_cus_…) is on test clock hc_tclk_…`
 
 4. **Put ACME Corp on the plan.** This is a subscription: it says which plan
    a customer pays for, and when each month starts. Here the month starts
    today.
 
-   **You see:** `✓ Subscription vlx_sub_…, status active`
+   **You see:** `✓ Subscription hc_sub_…, status active`
 
 5. **Save what the AI provider charges you per token.** These are made-up
    costs for two models. Claude Sonnet 4.5 costs $1.20 per million input
    tokens, $4.50 per million output tokens and $0.05 per million cache-read
    tokens. Claude Haiku 4.5 costs $0.80 per million input tokens and $4.00
    per million output tokens, closer to its price, so it earns you less.
-   From now on, Velox records your cost on each usage event that arrives.
+   From now on, Hardcount records your cost on each usage event that arrives.
    Usage that arrived earlier stays without a cost.
 
-   **You see:** `✓ Saved 5 costs for two models. Velox now records your cost on each new usage event.`
+   **You see:** `✓ Saved 5 costs for two models. Hardcount now records your cost on each new usage event.`
 
 6. **Send token usage, the way a LiteLLM proxy sends it.** LiteLLM is a
    proxy that sits between your app and AI providers. The demo sends ten AI
-   calls to the same Velox address that LiteLLM reports to. Five go to
+   calls to the same Hardcount address that LiteLLM reports to. Five go to
    Claude Sonnet 4.5. Each used 120,000 prompt tokens (40,000 of them read
-   from the cache) and 35,000 output tokens. Velox splits it into three
+   from the cache) and 35,000 output tokens. Hardcount splits it into three
    usage events: 80,000 input, 40,000 cache read and 35,000 output. Five go
    to Claude Haiku 4.5. Each used 120,000 prompt tokens and 50,000 output
-   tokens, so Velox splits it into two usage events.
+   tokens, so Hardcount splits it into two usage events.
 
    **You see:** `✓ 10 AI calls became 25 usage events, one for each token type in each call`
 
 7. **Move the test clock forward one month.** The demo moves the clock 32
    days ahead, past the end of ACME Corp's first month. While the clock
-   moves, Velox closes that month and makes the invoice. The demo waits for
+   moves, Hardcount closes that month and makes the invoice. The demo waits for
    the clock to finish, for up to 30 seconds.
 
-   **You see:** `✓ The clock now reads <a date 32 days from now>. Velox billed ACME Corp's month while the clock moved.`
+   **You see:** `✓ The clock now reads <a date 32 days from now>. Hardcount billed ACME Corp's month while the clock moved.`
 
 8. **Show the invoice ACME Corp receives.** The demo checks that the
    invoice is finalized (issued and no longer a draft), has a line for each
@@ -150,7 +150,7 @@ says what went wrong. So a finished run means each step below worked. The IDs (t
    **You see:**
 
    ```text
-     VLX-000001  total $5.73 USD  status finalized
+     HC-000001  total $5.73 USD  status finalized
        Tokens (claude-sonnet-4.5 · input)  → $1.20
        Tokens (claude-sonnet-4.5 · output)  → $2.62
        Tokens (claude-sonnet-4.5 · cache_read)  → $0.06
@@ -186,15 +186,15 @@ At the end, the demo prints two links:
 ```text
   Open these links to see it in the dashboard (sign in first; it opens
   in test mode, where the demo ran):
-    Invoice:  http://localhost:8080/invoices/vlx_inv_…
-    Customer: http://localhost:8080/customers/vlx_cus_…
+    Invoice:  http://localhost:8080/invoices/hc_inv_…
+    Customer: http://localhost:8080/customers/hc_cus_…
 ```
 
 ## Part 3: See it in the dashboard
 
 1. Open the **Invoice** link.
 
-   **You see:** invoice VLX-000001 for ACME Corp, with the five token lines
+   **You see:** invoice HC-000001 for ACME Corp, with the five token lines
    and the $5.73 total. To see the PDF, open the **⋯** menu at the top right and choose
    **Preview PDF** or **Download PDF**.
 
@@ -227,19 +227,19 @@ expected. Use the two links instead.
 | To | Run | You see |
 |---|---|---|
 | Run the demo again | `./quickstart.sh demo` | The same nine steps, for a new customer and a new invoice number. |
-| Stop Velox and keep its data | `./quickstart.sh stop` | "Stopped. Your data is kept. Run ./quickstart.sh to start again." |
-| Start it again | `./quickstart.sh` | The same "Velox is running." box. |
-| Stop Velox and delete its data (cannot be undone) | `./quickstart.sh destroy` | "Stopped, and the data of this quickstart install is deleted." |
+| Stop Hardcount and keep its data | `./quickstart.sh stop` | "Stopped. Your data is kept. Run ./quickstart.sh to start again." |
+| Start it again | `./quickstart.sh` | The same "Hardcount is running." box. |
+| Stop Hardcount and delete its data (cannot be undone) | `./quickstart.sh destroy` | "Stopped, and the data of this quickstart install is deleted." |
 
 ## If something goes wrong
 
 | What you see | What to do |
 |---|---|
-| A message that a port is already in use | Run `./quickstart.sh destroy`, then `VELOX_PORT=9000 ./quickstart.sh`. The dashboard is then at `http://localhost:9000`. |
-| "Velox did not become healthy in three minutes." | Read the log lines it prints above that message. |
+| A message that a port is already in use | Run `./quickstart.sh destroy`, then `HARDCOUNT_PORT=9000 ./quickstart.sh`. The dashboard is then at `http://localhost:9000`. |
+| "Hardcount did not become healthy in three minutes." | Read the log lines it prints above that message. |
 | "The first login was created earlier, and its password is shown only once." | The file that kept the password, `quickstart-credentials.json`, was removed. If you still have the password, sign in with it. If not, run `./quickstart.sh destroy` and start again. |
-| "Velox is not running. Run ./quickstart.sh first." | Run `./quickstart.sh`, then the demo again. |
-| A ✗ line during the demo | It says which check failed, under the step that failed. [Open an issue](https://github.com/getvelox/velox/issues) with that output. |
+| "Hardcount is not running. Run ./quickstart.sh first." | Run `./quickstart.sh`, then the demo again. |
+| A ✗ line during the demo | It says which check failed, under the step that failed. [Open an issue](https://github.com/gethardcount/hardcount/issues) with that output. |
 
 The quick start runs the latest published release, so changes merged after
 that release are not in it yet.

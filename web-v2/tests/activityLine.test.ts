@@ -47,10 +47,10 @@ test('the Recorded part shows the year only when it is not the current year', ()
 })
 
 test('a link goes to the page of the object it names', () => {
-  assert.equal(linkRoute({ kind: 'invoice', id: 'vlx_inv_1', label: 'VLX-000123' }), '/invoices/vlx_inv_1')
-  assert.equal(linkRoute({ kind: 'subscription', id: 'vlx_sub_1', label: 'Starter' }), '/subscriptions/vlx_sub_1')
+  assert.equal(linkRoute({ kind: 'invoice', id: 'hc_inv_1', label: 'HC-000123' }), '/invoices/hc_inv_1')
+  assert.equal(linkRoute({ kind: 'subscription', id: 'hc_sub_1', label: 'Starter' }), '/subscriptions/hc_sub_1')
   // A credit note has no page of its own: the list, filtered to its number.
-  assert.equal(linkRoute({ kind: 'credit_note', id: 'vlx_cn_1', label: 'CN-000012' }), '/credit-notes?search=CN-000012')
+  assert.equal(linkRoute({ kind: 'credit_note', id: 'hc_cn_1', label: 'CN-000012' }), '/credit-notes?search=CN-000012')
   // An unknown kind from a newer server draws no link.
   assert.equal(linkRoute({ kind: 'plan' as never, id: 'x', label: 'x' }), null)
 })

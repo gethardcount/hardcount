@@ -93,9 +93,9 @@ func (r *lagRig) customerCounts() (subs, invoices int) {
 	return subs, invoices
 }
 
-var vlxIDPattern = regexp.MustCompile(`^vlx_[a-z]+_[0-9A-Za-z]+$`)
+var hcIDPattern = regexp.MustCompile(`^hc_[a-z]+_[0-9A-Za-z]+$`)
 
-// normalizeIDs replaces every Velox object id in v with a placeholder
+// normalizeIDs replaces every Hardcount object id in v with a placeholder
 // numbered by first appearance, so two runs (or two tenants) compare equal
 // when only their ids differ. Map keys are walked in sorted order.
 func normalizeIDs(v any, seen map[string]string) any {
@@ -116,7 +116,7 @@ func normalizeIDs(v any, seen map[string]string) any {
 		}
 		return x
 	case string:
-		if !vlxIDPattern.MatchString(x) {
+		if !hcIDPattern.MatchString(x) {
 			return x
 		}
 		if p, ok := seen[x]; ok {

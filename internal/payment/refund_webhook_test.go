@@ -64,7 +64,7 @@ func TestHandleWebhook_RefundUpdated_AppliesStatus(t *testing.T) {
 	}
 }
 
-// TestHandleWebhook_RefundUpdated_ForeignRefundAcked: a refund Velox didn't
+// TestHandleWebhook_RefundUpdated_ForeignRefundAcked: a refund Hardcount didn't
 // create (ErrNotFound) that is OLD (well outside the race window) is ack'd
 // permanently — no error, no credit-note fabrication.
 func TestHandleWebhook_RefundUpdated_ForeignRefundAcked(t *testing.T) {

@@ -99,7 +99,7 @@ func TestE2E_CustomerIDIsTenantAndModeScoped(t *testing.T) {
 	refused := []struct{ name, suffix, customerID string }{
 		{"another tenant's customer", "tenant", otherTenant},
 		{"same tenant, other mode", "mode", otherMode},
-		{"unknown id", "unknown", "vlx_cus_does_not_exist"},
+		{"unknown id", "unknown", "hc_cus_does_not_exist"},
 	}
 
 	for _, ep := range endpoints {
@@ -274,8 +274,8 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 			"provider": "openai", "model": "model-" + tag, "token_type": "input", "unit_cost_cents": "0.0001",
 		}))
 		// createAPIKeyWithMode derives the key id from the key itself.
-		mode := strings.SplitN(strings.TrimPrefix(key, "vlx_secret_"), "_", 2)
-		r.apiKey = "vlx_key_e2e_" + mode[1][:8] + "_" + mode[0]
+		mode := strings.SplitN(strings.TrimPrefix(key, "hc_secret_"), "_", 2)
+		r.apiKey = "hc_key_e2e_" + mode[1][:8] + "_" + mode[0]
 		return r
 	}
 	own := seed(aLive, keyALive, "own")
@@ -286,11 +286,11 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 		{"another tenant's", seed(bLive, keyBLive, "tenant")},
 		{"same tenant, other mode", seed(aTest, keyATest, "mode")},
 		{"unknown id", scopeRefs{
-			cus: "vlx_cus_missing", ext: "missing_cus", price: "vlx_prc_missing", meter: "vlx_mtr_missing", meterKey: "missing_meter",
-			plan: "vlx_pln_missing", plan2: "vlx_pln_missing2", plan3: "vlx_pln_missing3",
-			sub: "vlx_sub_missing", item: "vlx_si_missing", activeSub: "vlx_sub_missing2", activeItem: "vlx_si_missing2",
-			draftInv: "vlx_inv_missing", finalInv: "vlx_inv_missing2", creditNote: "vlx_cn_missing", dunningRun: "vlx_drun_missing",
-			policy: "vlx_dpol_missing", override: "vlx_cpo_missing", hook: "vlx_whe_missing", rate: "vlx_pcr_missing", apiKey: "vlx_key_missing",
+			cus: "hc_cus_missing", ext: "missing_cus", price: "hc_prc_missing", meter: "hc_mtr_missing", meterKey: "missing_meter",
+			plan: "hc_pln_missing", plan2: "hc_pln_missing2", plan3: "hc_pln_missing3",
+			sub: "hc_sub_missing", item: "hc_si_missing", activeSub: "hc_sub_missing2", activeItem: "hc_si_missing2",
+			draftInv: "hc_inv_missing", finalInv: "hc_inv_missing2", creditNote: "hc_cn_missing", dunningRun: "hc_drun_missing",
+			policy: "hc_dpol_missing", override: "hc_cpo_missing", hook: "hc_whe_missing", rate: "hc_pcr_missing", apiKey: "hc_key_missing",
 		}},
 	}
 
@@ -376,8 +376,8 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 		{"cost dashboard token rotate [path customer]", "POST", at("/v1/customers/%s/rotate-cost-dashboard-token", cus), none, 404, "", 200},
 		{"payment method setup session [path customer]", "POST", at("/v1/customers/%s/payment-methods/setup-session", cus), none, 404, "", 0},
 		{"payment method setup email [path customer]", "POST", at("/v1/customers/%s/payment-methods/send-setup-email", cus), none, 404, "", 0},
-		{"payment method set default [path customer]", "POST", at("/v1/customers/%s/payment-methods/vlx_pm_any/default", cus), none, 404, "", 0},
-		{"payment method detach [path customer]", "DELETE", at("/v1/customers/%s/payment-methods/vlx_pm_any", cus), none, 404, "", 0},
+		{"payment method set default [path customer]", "POST", at("/v1/customers/%s/payment-methods/hc_pm_any/default", cus), none, 404, "", 0},
+		{"payment method detach [path customer]", "DELETE", at("/v1/customers/%s/payment-methods/hc_pm_any", cus), none, 404, "", 0},
 		{"usage ingest [external_customer_id]", "POST", fixed("/v1/usage-events"), func(o, f scopeRefs) any {
 			return map[string]any{"external_customer_id": f.ext, "event_name": o.meterKey, "quantity": 1, "idempotency_key": "scope-ingest-ext-" + f.ext}
 		}, 422, "", 201},
@@ -627,7 +627,7 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 		customer, path      int
 	}{
 		{"another tenant's", aTest, otherClock, 422, 404},
-		{"unknown id", aTest, "vlx_clk_missing", 422, 404},
+		{"unknown id", aTest, "hc_clk_missing", 422, 404},
 		{"live key, test-mode clock", aLive, ownClock, 422, 403},
 	} {
 		ids := []string{c.clockID}

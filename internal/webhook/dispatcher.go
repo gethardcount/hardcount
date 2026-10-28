@@ -63,7 +63,7 @@ func NewDispatcher(outbox *OutboxStore, svc *Service, cfg DispatcherConfig, gate
 func (d *Dispatcher) Config() DispatcherConfig { return d.cfg }
 
 // Start runs the dispatcher loop until ctx is cancelled. Intended to be
-// launched as a goroutine from cmd/velox during boot, alongside the existing
+// launched as a goroutine from cmd/hardcount during boot, alongside the existing
 // webhook retry worker.
 func (d *Dispatcher) Start(ctx context.Context) {
 	slog.Info("webhook outbox dispatcher started",

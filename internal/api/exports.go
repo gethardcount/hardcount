@@ -60,7 +60,7 @@ import (
 //
 // AUDIT (ADR-090 §7): every export here emits an action=export audit row
 // BEFORE the first byte streams, and fails closed if it cannot. This is the
-// only READ path in Velox that writes to audit_log — see auditExport for why
+// only READ path in Hardcount that writes to audit_log — see auditExport for why
 // the ordering is load-bearing.
 
 const (
@@ -280,7 +280,7 @@ func exportAbort(ctx context.Context, cw *csv.Writer, resource string, err error
 // exportAuditFailed answers a request whose audit row could not be written. No
 // CSV headers have been set and no bytes written, so this is a clean 500 — the
 // export simply does not happen. audit.Logger.Log has already logged the cause
-// and incremented velox_audit_write_errors_total.
+// and incremented hardcount_audit_write_errors_total.
 func exportAuditFailed(w http.ResponseWriter, r *http.Request, resourceType string, err error) {
 	slog.ErrorContext(r.Context(), "export REFUSED — its audit row could not be written (fail-closed)",
 		"resource", resourceType, "error", err)
@@ -391,12 +391,12 @@ func (h *exportsHandler) exportInvoices(w http.ResponseWriter, r *http.Request) 
 		// recovery is a distinct accounting event; the export was the only
 		// durable place an accountant could locate one, and it could not.
 		// tax_provider + tax_transaction_id are the RELIEF HATCH (ADR-111).
-		// Velox no longer reverses tax on write-off, so claiming bad-debt
+		// Hardcount no longer reverses tax on write-off, so claiming bad-debt
 		// relief is the tenant's own conditioned claim (UK: 6 months + written
 		// off to a separate bad-debt account; CA/NY/TX: charged off for
 		// federal income tax purposes). Every other input those tests need is
 		// already here — status, tax_amount_cents, uncollectible_at, due_at,
-		// paid_at, amount_paid_cents. What was missing is whether Velox had
+		// paid_at, amount_paid_cents. What was missing is whether Hardcount had
 		// ALREADY reversed at the provider, which is the one fact deciding
 		// whether the tenant's own claim would be a double claim.
 		"tax_provider", "tax_transaction_id", "tax_reversed_at",
@@ -748,7 +748,7 @@ func (h *exportsHandler) exportAuditLog(w http.ResponseWriter, r *http.Request) 
 				metaJSON = string(b)
 			}
 		}
-		// csvSafe every column that is not a Velox-minted id or a closed
+		// csvSafe every column that is not a Hardcount-minted id or a closed
 		// vocabulary. resource_label carries customer display names and
 		// plan/subscription codes; actor_name is a customer's display name on
 		// customer-actor rows; metadata is a free-form bag.

@@ -48,7 +48,7 @@ var (
 
 func creationAddRow(changedAt time.Time, planID string, qty int64) domain.SubscriptionItemChange {
 	return domain.SubscriptionItemChange{
-		ID: "vlx_sic_add", TenantID: "t1", SubscriptionID: "sub_1",
+		ID: "hc_sic_add", TenantID: "t1", SubscriptionID: "sub_1",
 		SubscriptionItemID: "it_1", ChangeType: "add",
 		ToPlanID: planID, ToQuantity: qty, ChangedAt: changedAt,
 	}

@@ -147,7 +147,7 @@ wall-clock too (e.g. Stripe webhook outage).
 ### 7. One email per retry attempt
 
 The generic payment-failed email is skipped when the PI carries
-`velox_purpose=dunning_retry` metadata. (Amended 2026-10-11: the skip lives in
+`hardcount_purpose=dunning_retry` metadata. (Amended 2026-10-11: the skip lives in
 `SettleFailed`, so it applies to whichever source reports the decline — the
 charge response, the webhook or the reconciler — not only the webhook.) Dunning's `paymentRetrierAdapter` tags retry PIs via a
 dedicated `Stripe.ChargeInvoiceForDunningRetry` method (typed,
@@ -202,7 +202,7 @@ the natural "queue of due work" shape.
   loses static type safety. A dedicated typed method
   (`ChargeInvoiceForDunningRetry`) on the concrete `*Stripe` is
   narrower and more explicit.
-- **Context-threading `velox_purpose`.** Initial implementation;
+- **Context-threading `hardcount_purpose`.** Initial implementation;
   reverted in favor of the typed method. Ctx-threading is the right
   pattern for cross-cutting concerns (tenant, livemode, deadline)
   but inappropriate for a narrow per-call configuration that lives
@@ -277,7 +277,7 @@ mis-anchored first retry above) restarts the cadence from now. The clamp
 was keyed on the bool from `clock.BindEffectiveNow`, but that reports
 "an instant was bound", and the engine resolver binds a clock-less instant
 for every wall-clock invoice. With the resolver wired, as in production,
-every run read as simulated and the clamp never ran. VLX-000081 retried
+every run read as simulated and the clamp never ran. HC-000081 retried
 "Oct 4" then "Oct 7" on consecutive ticks on Oct 11. `processRun` now keys
 on `clock.SimOf` (a test clock is bound), the same test `StartDunning` uses.
 The unit test for the clamp wired no resolver, so it could not see this.
@@ -294,7 +294,7 @@ draft: it enters collection only when finalized, so its `no_payment_method`
 run starts then.
 
 Every simulated charge already records its instant in the PI's
-`velox_anchor_at` metadata (section 1's paid_at anchor).
+`hardcount_anchor_at` metadata (section 1's paid_at anchor).
 `payment.dunningSimFailedAt` hands that to `StartDunning`, falling back to
 `issued_at` when no charge carried one (an old PI). All three decline
 reports now carry it: the charge response, the webhook and the reconciler.

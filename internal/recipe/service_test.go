@@ -48,7 +48,7 @@ func (m *memStore) GetByKeyTx(_ context.Context, _ *sql.Tx, _ string, recipeKey 
 }
 
 func (m *memStore) CreateTx(_ context.Context, _ *sql.Tx, inst domain.RecipeInstance) (domain.RecipeInstance, error) {
-	inst.ID = "vlx_rci_test_" + inst.RecipeKey
+	inst.ID = "hc_rci_test_" + inst.RecipeKey
 	m.byKey[inst.RecipeKey] = inst
 	return inst, nil
 }
@@ -141,7 +141,7 @@ func TestService_Preview_RejectsBadOverride(t *testing.T) {
 func TestService_ListRecipes_TagsInstalled(t *testing.T) {
 	store := newMemStore()
 	store.byKey["anthropic_style"] = domain.RecipeInstance{
-		ID: "vlx_rci_existing", TenantID: "t1",
+		ID: "hc_rci_existing", TenantID: "t1",
 		RecipeKey: "anthropic_style", RecipeVersion: "1.0.0",
 	}
 	svc := NewService(nil, store, loadRegistry(t), nil)
@@ -159,8 +159,8 @@ func TestService_ListRecipes_TagsInstalled(t *testing.T) {
 			found = true
 			if item.Instantiated == nil {
 				t.Error("expected Instantiated to be populated for installed recipe")
-			} else if item.Instantiated.ID != "vlx_rci_existing" {
-				t.Errorf("Instantiated.ID: got %q, want vlx_rci_existing", item.Instantiated.ID)
+			} else if item.Instantiated.ID != "hc_rci_existing" {
+				t.Errorf("Instantiated.ID: got %q, want hc_rci_existing", item.Instantiated.ID)
 			}
 		} else if item.Instantiated != nil {
 			t.Errorf("recipe %q should be uninstalled but Instantiated is set", item.Key)

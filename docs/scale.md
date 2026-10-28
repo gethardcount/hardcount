@@ -1,6 +1,6 @@
-# How much traffic Velox handles
+# How much traffic Hardcount handles
 
-Velox keeps all its billing data in one Postgres database. This page answers
+Hardcount keeps all its billing data in one Postgres database. This page answers
 one question: how many usage events per second can that database take, and
 what do you do when you need more?
 
@@ -16,9 +16,9 @@ tokens on one model.
    memory), with 10 events in each request. It passed all five runs after one
    Postgres setting change ([WAL pool size](failure-modes/rfm-001-wal-pool-exhaustion.md)),
    and four of five without it.
-3. After one Velox fix ([#818](https://github.com/getvelox/velox/issues/818)),
+3. After one Hardcount fix ([#818](https://github.com/gethardcount/hardcount/issues/818)),
    the database was the limit every time: first its memory, then how fast
-   its disk could write. The Velox process was never short of CPU. Need
+   its disk could write. The Hardcount process was never short of CPU. Need
    more? See [If you need more](#if-you-need-more).
 
 ## What one small server handles
@@ -29,7 +29,7 @@ that rate) for 20 minutes, with no errors and memory to spare. Disk space is wha
 The server was a Hetzner CX23: 2 shared vCPU, 4 GB memory and a 40 GB disk.
 Its list price was €6.49 a month before VAT, checked on 2026-10-17
 ([Hetzner cloud prices](https://www.hetzner.com/cloud/)). It ran the whole
-stack from [Run Velox in production on one VM](production-one-vm.md), with the
+stack from [Run Hardcount in production on one VM](production-one-vm.md), with the
 published v0.8.0 images and stock Postgres 16 settings. A second server in the
 same data center sent the load through Caddy, over plain HTTP.
 
@@ -38,10 +38,10 @@ same data center sent the load through Caddy, over plain HTTP.
 | Ingest, steady: 12 events/s, about 1 million a day | p50 11.3 ms, p99 50.8 ms |
 | Ingest, bursts: 60 events/s | p50 11.3 ms, p99 52.9 ms |
 | Errors | 0 of 12,158 requests |
-| Memory | 765 MiB used at the peak, of 3,819 MiB (20%). Postgres used 128 MiB, Velox 15 MiB. |
+| Memory | 765 MiB used at the peak, of 3,819 MiB (20%). Postgres used 128 MiB, Hardcount 15 MiB. |
 | CPU, during ingest | 12% of both cores on average, 25% at the peak |
 | Billing: 300 invoices | All finished in 32 s. CPU was about 70% busy while it ran. |
-| Dashboard | Most calls under 45 ms at p99. The invoice list is the slow one: 145 ms p50, 173 ms p99. The cause, a few database reads per row, is fixed after v0.8.0 ([#1142](https://github.com/getvelox/velox/issues/1142)); not yet re-measured. |
+| Dashboard | Most calls under 45 ms at p99. The invoice list is the slow one: 145 ms p50, 173 ms p99. The cause, a few database reads per row, is fixed after v0.8.0 ([#1142](https://github.com/gethardcount/hardcount/issues/1142)); not yet re-measured. |
 
 **Disk.** At 1 million events a day the database grows by 15 to 18 GB a month
 ([how the data grows](ops/postgres-requirements.md#how-the-data-grows)), so
@@ -98,11 +98,11 @@ p99 means 99 of every 100 requests finished within that time.
   On RDS, after a quiet spell, the stock of ready-made log files can run out,
   and every write waits while a new one is made. The third run caught this
   live. [The fix is one setting](failure-modes/rfm-001-wal-pool-exhaustion.md).
-- **Two problems the runs found in Velox itself.** The first runs found one
+- **Two problems the runs found in Hardcount itself.** The first runs found one
   database row that every request updated (the API key's last-used time)
-  ([#818](https://github.com/getvelox/velox/issues/818)). It was fixed before
+  ([#818](https://github.com/gethardcount/hardcount/issues/818)). It was fixed before
   the `db.m7g.4xlarge` rows above. The per-customer usage totals read every
-  event one by one ([#819](https://github.com/getvelox/velox/issues/819)). It
+  event one by one ([#819](https://github.com/gethardcount/hardcount/issues/819)). It
   is still open.
 - **What was not tested:** traffic spikes (the load was steady), runs longer
   than 10 minutes, and more than one availability zone.
@@ -118,13 +118,13 @@ p99 means 99 of every 100 requests finished within that time.
 
 ## If you need more
 
-These steps come before Velox needs any new dependency:
+These steps come before Hardcount needs any new dependency:
 
 1. Use the batch endpoint. It writes the whole batch in one database commit,
    with up to 1,000 events or 1 MB per request, whichever comes first.
 2. Give the database more memory, then faster disks. This is what the runs
    above ran out of.
-3. Add API copies. Ingest keeps no state in the Velox process, so this should
+3. Add API copies. Ingest keeps no state in the Hardcount process, so this should
    help, but it has not been measured.
 4. Split `usage_events` by month (partitioning). Not built. On a split table,
    Postgres requires every unique rule to include the column the table is
@@ -134,11 +134,11 @@ These steps come before Velox needs any new dependency:
 5. Set a retention window on raw events. Not built. Deleting an event
    deletes its idempotency key with it, so this needs the key table from
    step 4 too.
-6. Move analytics to a read replica. Not built. Velox has no reader
+6. Move analytics to a read replica. Not built. Hardcount has no reader
    connection setting today.
 
 **Already run Kafka? Keep it.** Point a consumer at the batch ingest endpoint.
 
-How Lago's guidance on scale compares: [How Velox compares](comparison.md).
+How Lago's guidance on scale compares: [How Hardcount compares](comparison.md).
 
-**Next:** [Run Velox in production on one VM](production-one-vm.md).
+**Next:** [Run Hardcount in production on one VM](production-one-vm.md).

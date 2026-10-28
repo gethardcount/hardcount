@@ -2,14 +2,14 @@
 
 **Status:** Accepted (amended 2026-10-19, 2026-10-20)
 **Date:** 2026-07-30
-**Supersedes:** the `velox_inv_<id>_<UpdatedAt>` key shape, and the
+**Supersedes:** the `hardcount_inv_<id>_<UpdatedAt>` key shape, and the
 money-path playbook's gate #2 wording that blessed it.
 **Builds on:** ADR-029 (disjoint wall/clock charge flows), ADR-049
 (payment reconciler), ADR-059 (in-flight invoice guards).
 
 ## Summary
 
-Each Stripe charge sends the idempotency key `velox_inv_<invoice_id>_<charge_attempt_seq>`, with a `_dunning_retry` suffix on dunning retries. Every write that records a PaymentIntent id on the invoice bumps the counter `charge_attempt_seq`. So does the stale-hold sweep when Stripe has no payment for a lost charge (amendment 2026-10-19) or, 24 hours after the attempt, for a parked one (amendment 2026-10-20). No other write does. The old seed, `updated_at`, also moved on unrelated writes such as a tax commit, so a retry after a lost response could create a second PaymentIntent and charge twice. A Stripe idempotency conflict now counts as an unknown outcome, not a decline, because it proves an earlier attempt reached Stripe. Status: active; the case it left open, an unclear result with no PaymentIntent id, is now handled by [ADR-107](107-unknown-is-terminal-until-a-human.md) and [ADR-127](127-a-lost-charge-result-is-resolved-by-asking-stripe.md).
+Each Stripe charge sends the idempotency key `hardcount_inv_<invoice_id>_<charge_attempt_seq>`, with a `_dunning_retry` suffix on dunning retries. Every write that records a PaymentIntent id on the invoice bumps the counter `charge_attempt_seq`. So does the stale-hold sweep when Stripe has no payment for a lost charge (amendment 2026-10-19) or, 24 hours after the attempt, for a parked one (amendment 2026-10-20). No other write does. The old seed, `updated_at`, also moved on unrelated writes such as a tax commit, so a retry after a lost response could create a second PaymentIntent and charge twice. A Stripe idempotency conflict now counts as an unknown outcome, not a decline, because it proves an earlier attempt reached Stripe. Status: active; the case it left open, an unclear result with no PaymentIntent id, is now handled by [ADR-107](107-unknown-is-terminal-until-a-human.md) and [ADR-127](127-a-lost-charge-result-is-resolved-by-asking-stripe.md).
 
 ## Context
 
@@ -62,7 +62,7 @@ actions sit in the same window.
 The drift was **observed**, not theorised (#677):
 
 ```
-velox_inv_<id>_1785420781393005000  →  velox_inv_<id>_1785420781397042000
+hardcount_inv_<id>_1785420781393005000  →  hardcount_inv_<id>_1785420781397042000
 ```
 
 The deeper problem is that the invariant could not be stated, so it could
@@ -80,7 +80,7 @@ Seed the key from an explicit counter, `invoices.charge_attempt_seq`
 (migration 0165):
 
 ```
-velox_inv_<invoice_id>_<charge_attempt_seq>[_<purpose>]
+hardcount_inv_<invoice_id>_<charge_attempt_seq>[_<purpose>]
 ```
 
 The counter is bumped by exactly the three writes that record a charge
@@ -165,7 +165,7 @@ presents a different key and opens a second PI. Recovering that would
 need two counters (attempted vs resolved) — a state machine to avoid one
 column.
 
-**Search Stripe by `metadata.velox_invoice_id` on 409.** Viable (the
+**Search Stripe by `metadata.hardcount_invoice_id` on 409.** Viable (the
 metadata is already stamped) and it would close the residual above, but
 it adds a Stripe client method and a network round-trip on a rare path.
 Deferred with the ADR-062 work rather than bolted on here.

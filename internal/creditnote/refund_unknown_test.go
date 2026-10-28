@@ -91,7 +91,7 @@ func issueUnknownRefund(t *testing.T, svc *Service, refunder *fakeRefunder) doma
 	return cn
 }
 
-// Stripe made the refund though Velox never heard back: Retry adopts it and
+// Stripe made the refund though Hardcount never heard back: Retry adopts it and
 // sends nothing.
 func TestRetryRefund_UnknownAdoptsTheRefundStripeMade(t *testing.T) {
 	t.Parallel()
@@ -418,8 +418,8 @@ func TestRefund_RequestEndsDuringTheStripeCall(t *testing.T) {
 			t.Fatalf("returned note = (%q, %q), want (issued, unknown)", cn.Status, cn.RefundStatus)
 		}
 		got := store.notes[cn.ID]
-		if got.RefundStatus != refundUnknown || got.RefundUnknownKey != "velox_cn_"+cn.ID {
-			t.Fatalf("stored refund leg = (%q, key %q), want (unknown, velox_cn_%s)", got.RefundStatus, got.RefundUnknownKey, cn.ID)
+		if got.RefundStatus != refundUnknown || got.RefundUnknownKey != "hardcount_cn_"+cn.ID {
+			t.Fatalf("stored refund leg = (%q, key %q), want (unknown, hardcount_cn_%s)", got.RefundStatus, got.RefundUnknownKey, cn.ID)
 		}
 	})
 }
@@ -431,7 +431,7 @@ type ctxAudit struct{}
 func (ctxAudit) LogInTx(ctx context.Context, _ *sql.Tx, _ audit.Entry) error { return ctx.Err() }
 
 // seedIssuedNoneRefund is an issued note whose refund leg has no recorded
-// outcome: Issue sent velox_cn_<id> to Stripe (or was about to), then crashed
+// outcome: Issue sent hardcount_cn_<id> to Stripe (or was about to), then crashed
 // or lost its write before recording the answer.
 func seedIssuedNoneRefund(t *testing.T, store *memStore) domain.CreditNote {
 	t.Helper()
@@ -449,7 +449,7 @@ func seedIssuedNoneRefund(t *testing.T, store *memStore) domain.CreditNote {
 
 // From "none", Issue's request may still be running at Stripe, or may yet be
 // made by Stripe's incident recovery, and its outcome was never recorded. So
-// Retry refund resends that same request, velox_cn_<id>, as it does from
+// Retry refund resends that same request, hardcount_cn_<id>, as it does from
 // "unknown", and reads the refund's current status after it. A new key could
 // start a second refund (https://docs.stripe.com/error-low-level#content-errors).
 func TestRetryRefund_NoneResendsTheIssueRequest(t *testing.T) {
@@ -471,8 +471,8 @@ func TestRetryRefund_NoneResendsTheIssueRequest(t *testing.T) {
 		if len(refunder.findCalls) != 1 {
 			t.Fatalf("Stripe lookups before the resend = %d, want 1", len(refunder.findCalls))
 		}
-		if len(refunder.calls) != 1 || refunder.calls[0].idempotencyKey != "velox_cn_"+cn.ID {
-			t.Fatalf("requests = %+v, want one with Issue's key velox_cn_%s", refunder.calls, cn.ID)
+		if len(refunder.calls) != 1 || refunder.calls[0].idempotencyKey != "hardcount_cn_"+cn.ID {
+			t.Fatalf("requests = %+v, want one with Issue's key hardcount_cn_%s", refunder.calls, cn.ID)
 		}
 		if out.StripeRefundID != "re_fake_1" || out.RefundStatus != domain.RefundFailed {
 			t.Fatalf("refund leg = (%q, %q), want (re_fake_1, failed): the saved answer is stale", out.StripeRefundID, out.RefundStatus)
@@ -489,8 +489,8 @@ func TestRetryRefund_NoneResendsTheIssueRequest(t *testing.T) {
 			t.Fatal("RetryRefund returned no error for an unclear answer")
 		}
 		got := store.notes[cn.ID]
-		if got.RefundStatus != refundUnknown || got.RefundUnknownKey != "velox_cn_"+cn.ID {
-			t.Fatalf("refund leg = (%q, key %q), want (unknown, velox_cn_%s)", got.RefundStatus, got.RefundUnknownKey, cn.ID)
+		if got.RefundStatus != refundUnknown || got.RefundUnknownKey != "hardcount_cn_"+cn.ID {
+			t.Fatalf("refund leg = (%q, key %q), want (unknown, hardcount_cn_%s)", got.RefundStatus, got.RefundUnknownKey, cn.ID)
 		}
 	})
 
@@ -505,8 +505,8 @@ func TestRetryRefund_NoneResendsTheIssueRequest(t *testing.T) {
 			t.Fatalf("operator message = %q: Issue's request may have made the refund", safeMessage(err))
 		}
 		got := store.notes[cn.ID]
-		if got.RefundStatus != refundUnknown || got.RefundUnknownKey != "velox_cn_"+cn.ID {
-			t.Fatalf("refund leg = (%q, key %q), want (unknown, velox_cn_%s)", got.RefundStatus, got.RefundUnknownKey, cn.ID)
+		if got.RefundStatus != refundUnknown || got.RefundUnknownKey != "hardcount_cn_"+cn.ID {
+			t.Fatalf("refund leg = (%q, key %q), want (unknown, hardcount_cn_%s)", got.RefundStatus, got.RefundUnknownKey, cn.ID)
 		}
 	})
 }

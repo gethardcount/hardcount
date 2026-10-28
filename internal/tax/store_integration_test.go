@@ -52,8 +52,8 @@ func TestPostgresStore_Record(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Record: %v", err)
 	}
-	if !strings.HasPrefix(id, "vlx_tcalc_") {
-		t.Errorf("id %q does not look like a tax_calculation id (expected vlx_tcalc_ prefix)", id)
+	if !strings.HasPrefix(id, "hc_tcalc_") {
+		t.Errorf("id %q does not look like a tax_calculation id (expected hc_tcalc_ prefix)", id)
 	}
 
 	// Read back via TxBypass so we verify the write landed regardless of RLS.
@@ -175,7 +175,7 @@ func TestPostgresStore_LinkInvoice(t *testing.T) {
 
 	// Idempotent + non-clobbering: a second call with a different id must NOT
 	// overwrite the existing link (the WHERE invoice_id IS NULL guard).
-	if err := store.LinkInvoice(ctx, tenantID, "vlx_inv_other", "calc_link_xyz"); err != nil {
+	if err := store.LinkInvoice(ctx, tenantID, "hc_inv_other", "calc_link_xyz"); err != nil {
 		t.Fatalf("LinkInvoice (second): %v", err)
 	}
 	if got := readInvoiceID(); got != invoiceID {

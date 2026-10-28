@@ -15,7 +15,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/testutil"
 )
 
-// deadLettered reads velox_email_outbox_dead_lettered_total for one cause in
+// deadLettered reads hardcount_email_outbox_dead_lettered_total for one cause in
 // test mode; 0 when the series does not exist.
 func deadLettered(t *testing.T, cause string) float64 {
 	t.Helper()
@@ -24,7 +24,7 @@ func deadLettered(t *testing.T, cause string) float64 {
 		t.Fatalf("gather: %v", err)
 	}
 	for _, f := range families {
-		if f.GetName() != "velox_email_outbox_dead_lettered_total" {
+		if f.GetName() != "hardcount_email_outbox_dead_lettered_total" {
 			continue
 		}
 	metrics:

@@ -14,14 +14,14 @@ import (
 )
 
 // Helpers for the real-Postgres tests in this package. Each test gets a
-// scratch database of its own, so the shared velox_test database the
+// scratch database of its own, so the shared hardcount_test database the
 // other packages use is never touched.
 
 func adminTestURL() string {
 	if u := strings.TrimSpace(os.Getenv("TEST_ADMIN_DATABASE_URL")); u != "" {
 		return u
 	}
-	return "postgres://velox:velox@localhost:5432/velox_test?sslmode=disable"
+	return "postgres://hardcount:hardcount@localhost:5432/hardcount_test?sslmode=disable"
 }
 
 // scratchDB creates an empty database and returns its DSN and a pool for
@@ -133,7 +133,7 @@ func gooseRows(t *testing.T, db *sql.DB, version int64) int {
 	return n
 }
 
-// buildV08 turns a database that Up has migrated into what Velox v0.8.x
+// buildV08 turns a database that Up has migrated into what Hardcount v0.8.x
 // leaves: the tables, no goose record, and golang-migrate's two-column
 // record at (180, false). The baseline was generated from v0.8.1's schema
 // (ADR-125).

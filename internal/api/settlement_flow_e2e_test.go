@@ -29,8 +29,8 @@ import (
 // record-payment success path had only a unit test, and no test sent a
 // Stripe webhook over HTTP into a real database.
 //
-// The PaymentIntents are not created through Velox (that needs a card saved
-// at Stripe). The events find their invoice by its velox_invoice_id
+// The PaymentIntents are not created through Hardcount (that needs a card saved
+// at Stripe). The events find their invoice by its hardcount_invoice_id
 // metadata, the path a webhook takes when it arrives before the charge has
 // recorded its PaymentIntent on the invoice.
 func TestE2E_InvoiceSettlement_OfflineAndStripeWebhook(t *testing.T) {
@@ -174,7 +174,7 @@ func TestE2E_InvoiceSettlement_OfflineAndStripeWebhook(t *testing.T) {
 		obj := map[string]any{
 			"id": piID, "object": "payment_intent", "amount": flowInt(inv, "amount_due_cents"),
 			"currency": strings.ToLower(flowStr(inv, "currency")), "customer": "cus_settlement_flow",
-			"metadata": map[string]any{"velox_tenant_id": tenantID, "velox_invoice_id": flowStr(inv, "id"), "velox_customer_id": customerID},
+			"metadata": map[string]any{"hardcount_tenant_id": tenantID, "hardcount_invoice_id": flowStr(inv, "id"), "hardcount_customer_id": customerID},
 		}
 		for k, v := range fields {
 			obj[k] = v
@@ -195,7 +195,7 @@ func TestE2E_InvoiceSettlement_OfflineAndStripeWebhook(t *testing.T) {
 	if bytes.Equal(tampered, succeeded) {
 		t.Fatal("test setup: the tampered body equals the signed one")
 	}
-	deliver("/v1/webhooks/stripe/vlx_spc_unknown", succeeded, signature).want(t, 404, "event for an unknown endpoint")
+	deliver("/v1/webhooks/stripe/hc_spc_unknown", succeeded, signature).want(t, 404, "event for an unknown endpoint")
 	if res := deliver(endpoint, succeeded, foreignSignature).want(t, 400, "event signed with another secret"); !strings.Contains(res.errMessage(), "invalid signature") {
 		t.Errorf("wrong-secret refusal message %q, want invalid signature", res.errMessage())
 	}

@@ -69,7 +69,7 @@ func TestListFailedWithoutDunningRun_CandidateSet(t *testing.T) {
 		due := periodStart.AddDate(0, 0, 30)
 		inv, err := store.Create(ctx, tenantID, domain.Invoice{
 			CustomerID: cust.ID, SubscriptionID: sub.ID,
-			InvoiceNumber: fmt.Sprintf("VLX-BACKFILL-%03d", n),
+			InvoiceNumber: fmt.Sprintf("HC-BACKFILL-%03d", n),
 			Status:        domain.InvoiceDraft, PaymentStatus: domain.PaymentPending, Currency: "USD",
 			BillingPeriodStart: periodStart, BillingPeriodEnd: periodEnd,
 			IssuedAt: &periodStart, DueAt: &due, NetPaymentTermDays: 30,

@@ -94,7 +94,7 @@ func TestMRRQueries_RemoveAware_CurrencyScoped_AddRemoveMovement(t *testing.T) {
 
 	mkSub := func(code string, activatedAt time.Time, canceledAt *time.Time) string {
 		t.Helper()
-		id := postgres.NewID("vlx_sub")
+		id := postgres.NewID("hc_sub")
 		status := "active"
 		if canceledAt != nil {
 			status = "canceled"
@@ -111,7 +111,7 @@ func TestMRRQueries_RemoveAware_CurrencyScoped_AddRemoveMovement(t *testing.T) {
 	}
 	mkItem := func(subID, planID string, qty int64, createdAt time.Time) string {
 		t.Helper()
-		id := postgres.NewID("vlx_si")
+		id := postgres.NewID("hc_si")
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO subscription_items (id, tenant_id, subscription_id, plan_id, quantity, metadata, created_at, updated_at)
 			VALUES ($1, $2, $3, $4, $5, '{}'::jsonb, $6, $6)

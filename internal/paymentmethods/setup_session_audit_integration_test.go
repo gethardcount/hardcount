@@ -95,7 +95,7 @@ func TestCreateSetupSessionAudit(t *testing.T) {
 	}
 
 	t.Run("minted session emits one row", func(t *testing.T) {
-		custID := postgres.NewID("vlx_cus")
+		custID := postgres.NewID("hc_cus")
 		svc := NewService(newMemStore(), &sessionStripe{}, nil)
 		svc.SetAuditLogger(logger)
 
@@ -121,7 +121,7 @@ func TestCreateSetupSessionAudit(t *testing.T) {
 	})
 
 	t.Run("second link for the same customer emits again", func(t *testing.T) {
-		custID := postgres.NewID("vlx_cus")
+		custID := postgres.NewID("hc_cus")
 		svc := NewService(newMemStore(), &sessionStripe{}, nil)
 		svc.SetAuditLogger(logger)
 
@@ -136,7 +136,7 @@ func TestCreateSetupSessionAudit(t *testing.T) {
 	})
 
 	t.Run("audit failure propagates and returns no URL", func(t *testing.T) {
-		custID := postgres.NewID("vlx_cus")
+		custID := postgres.NewID("hc_cus")
 		failing := &erroringAudit{}
 		svc := NewService(newMemStore(), &sessionStripe{}, nil)
 		svc.SetAuditLogger(failing)
@@ -157,7 +157,7 @@ func TestCreateSetupSessionAudit(t *testing.T) {
 	})
 
 	t.Run("failed Stripe mint emits nothing", func(t *testing.T) {
-		custID := postgres.NewID("vlx_cus")
+		custID := postgres.NewID("hc_cus")
 		stripe := &sessionStripe{sessionErr: errors.New("stripe down")}
 		svc := NewService(newMemStore(), stripe, nil)
 		svc.SetAuditLogger(logger)

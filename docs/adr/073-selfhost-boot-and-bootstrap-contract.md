@@ -8,8 +8,8 @@
 One function, `tenant.RunBootstrap`, creates a tenant, its keys and its
 owner user in one transaction; the CLI and `POST /v1/bootstrap` both call
 it. The app's database pool uses `APP_DATABASE_URL` as given. Outside
-local development, Velox refuses to start when it is unset, when its
-password is empty, `velox_app` or the user name, or when it connects as
+local development, Hardcount refuses to start when it is unset, when its
+password is empty, `hardcount_app` or the user name, or when it connects as
 a role that can bypass Row-Level Security.
 Production also refuses to start without a reachable Redis (amendment
 2026-08-30).
@@ -28,14 +28,14 @@ replaced the runner with goose, whose own lock also polls (amendment
 Three self-host roots from the 2026-07-02 audit:
 
 1. **Two bootstrap writers had already drifted.** The CLI
-   (`cmd/velox-bootstrap`) creates tenant + settings + test/live keys +
+   (`cmd/hardcount-bootstrap`) creates tenant + settings + test/live keys +
    owner user; the HTTP `POST /v1/bootstrap` created tenant + two
    unmarked test keys — no owner user (dashboard login impossible), no
    live key, no settings seed. An HTTP-bootstrapped install was a
-   dead end. Docs referenced `VELOX_OWNER_*` env vars nothing reads.
+   dead end. Docs referenced `HARDCOUNT_OWNER_*` env vars nothing reads.
 2. **APP_DATABASE_URL was documented but never read.** The runtime RLS
    pool was derived by swapping credentials to the hardcoded
-   `velox_app:velox_app`; the production compose init script created
+   `hardcount_app:hardcount_app`; the production compose init script created
    the role with exactly that public password. Anyone with TCP reach to
    Postgres had cross-tenant read/write.
 3. **The hybrid migration runner raced.** `upHybrid` decided what to
@@ -52,8 +52,8 @@ Three self-host roots from the 2026-07-02 audit:
    handler are thin callers. It runs **everything in ONE bypass tx** —
    `pg_advisory_xact_lock(LockKeyBootstrap)`, the exists/uniqueness
    guards re-checked under the lock, tenant insert, `tenant_settings`
-   seed, three keys (`vlx_secret_test_`, `vlx_secret_live_`,
-   `vlx_pub_test_`; livemode pinned per insert against the 0021
+   seed, three keys (`hc_secret_test_`, `hc_secret_live_`,
+   `hc_pub_test_`; livemode pinned per insert against the 0021
    trigger), owner user + tenant attach via an injected tx-scoped
    `deps.CreateUserTx` (tenant must not import its peer `user`).
    All inputs validate BEFORE the first write (email shape; password
@@ -68,7 +68,7 @@ Three self-host roots from the 2026-07-02 audit:
    token-configured oracle are both gone; the disclosure of
    virgin-install state is accepted (rate-limited since P12, and the
    409 pre-check is one cheap SELECT). Owner email/password are
-   optional request fields (defaults: `admin@velox.local`, generated
+   optional request fields (defaults: `admin@hardcount.local`, generated
    96-bit password) returned once with `Cache-Control: no-store`.
    The bootstrap token must never appear in a query string (body or
    Authorization header only — keeps it out of proxy access logs).
@@ -76,9 +76,9 @@ Three self-host roots from the 2026-07-02 audit:
    - Set → used as-is for the app pool. Unopenable = fatal in EVERY
      env (explicit config never silently degrades).
    - Set, non-local, and its password is empty (trust-auth shape),
-     `velox_app`, or equal to its username → fatal.
+     `hardcount_app`, or equal to its username → fatal.
    - Unset, non-local → fatal ("set APP_DATABASE_URL…"). Unset, local →
-     today's `velox_app:velox_app` derivation, warn-and-fallback
+     today's `hardcount_app:hardcount_app` derivation, warn-and-fallback
      unchanged.
    - **Runtime-role capability check** (the actual closure of the
      finding — both panel lenses ruled it in scope): after opening the
@@ -89,11 +89,11 @@ Three self-host roots from the 2026-07-02 audit:
      cannot see. Table-ownership is NOT checked: every RLS table uses
      `FORCE ROW LEVEL SECURITY`, so owners are subject; only
      superuser/BYPASSRLS capability defeats it.
-   - `VELOX_BOOTSTRAP_TOKEN`, when set in non-local, must be ≥ 16
+   - `HARDCOUNT_BOOTSTRAP_TOKEN`, when set in non-local, must be ≥ 16
      chars (config.validateFatal) — it mints the owner login and the
      live key, so a guessable token is deployment takeover.
 3. **The whole hybrid migration loop is serialized**, not just
-   `applyNoTx`. `upHybrid`/`rollbackHybrid` take a Velox-owned
+   `applyNoTx`. `upHybrid`/`rollbackHybrid` take a Hardcount-owned
    session-scoped advisory lock (`LockKeyMigrateHybrid` — deliberately
    NOT golang-migrate's derived id, which would deadlock the library's
    own `Lock()`) on a dedicated conn for the loop's whole duration.
@@ -117,7 +117,7 @@ Three self-host roots from the 2026-07-02 audit:
      there, which fail-closes the rate limiter — without Redis the
      bootstrap/login walkthrough 429s and invites the `APP_ENV=local`
      workaround that silently reopens the RLS fallback);
-   - `VELOX_APP_DB_PASSWORD` passed to BOTH services (init script runs
+   - `HARDCOUNT_APP_DB_PASSWORD` passed to BOTH services (init script runs
      in the postgres container), consumed via `psql -v pw=… PASSWORD
      :'pw'` (correct literal quoting), with `openssl rand -hex 24`
      guidance so the DSN stays URL-safe by construction; existing
@@ -128,8 +128,8 @@ Three self-host roots from the 2026-07-02 audit:
      rate-limit bucket keyed on the nginx container IP and audit logs
      record the proxy);
    - `SMTP_TLS`, `LOG_LEVEL`, `DASHBOARD_BASE_URL`,
-     `VELOX_EMAIL_BIDX_KEY` passthroughs; fabricated
-     `VELOX_DASHBOARD_*` and phantom `STRIPE_WEBHOOK_SECRET` (nothing
+     `HARDCOUNT_EMAIL_BIDX_KEY` passthroughs; fabricated
+     `HARDCOUNT_DASHBOARD_*` and phantom `STRIPE_WEBHOOK_SECRET` (nothing
      reads it — Stripe webhook secrets are per-tenant in the DB)
      removed.
 5. **Docs route operators to the real path.** `docs/self-host.md`
@@ -142,13 +142,13 @@ Three self-host roots from the 2026-07-02 audit:
 
 ## Accepted residuals
 
-- HTTP bootstrap key prefixes change from unmarked `vlx_secret_` to
-  mode-marked (`vlx_secret_test_`/`vlx_secret_live_`) with no compat
+- HTTP bootstrap key prefixes change from unmarked `hc_secret_` to
+  mode-marked (`hc_secret_test_`/`hc_secret_live_`) with no compat
   shim — pre-launch; the unmarked form parsed as LIVE, which is itself
   a reason it dies.
-- `VELOX_APP_DB_PASSWORD` is visible in `docker inspect` alongside its
+- `HARDCOUNT_APP_DB_PASSWORD` is visible in `docker inspect` alongside its
   sibling secrets — moving one var to docker secrets while
-  `POSTGRES_PASSWORD`/`VELOX_ENCRYPTION_KEY` stay in env would be
+  `POSTGRES_PASSWORD`/`HARDCOUNT_ENCRYPTION_KEY` stay in env would be
   theater on a single VM.
 - The `app.bypass_rls` GUC remains reachable by any role holding valid
   credentials — RLS defends against app bugs, not hostile SQL clients;
@@ -178,7 +178,7 @@ api/database/scheduler, and the limiter exempts `/health*` — so the load
 balancer keeps routing 1/N of traffic to a process that answers 429 to
 all of it. The boot contract now has two Redis guards, one per failure
 class: `config.validateFatal` rejects an UNSET `REDIS_URL` in production
-(beside the encryption-key fatal); `cmd/velox/main.go` opens and pings
+(beside the encryption-key fatal); `cmd/hardcount/main.go` opens and pings
 Redis (`mw.OpenRedis`, 5 s bound) after the topology check and refuses
 to start in production on an invalid or unreachable one. Other
 environments warn and run fail-open. The config warning that said the
@@ -191,7 +191,7 @@ Decision 3 says a migrator blocked in `pg_advisory_lock` and another
 migrator's `CREATE INDEX CONCURRENTLY` wait on each other in a way
 "Postgres cannot detect (advisory waits aren't in its deadlock graph)".
 That is wrong. An experiment on 2026-10-17 (E3, Postgres 16,
-[CI run 39047170196](https://github.com/getvelox/velox/actions/runs/39047170196))
+[CI run 39047170196](https://github.com/gethardcount/hardcount/actions/runs/39047170196))
 showed what happens:
 
 - The index build waits on the blocked call's transaction (a `virtualxid`
@@ -211,7 +211,7 @@ cancelled statement, not a deploy that hangs forever. The polling lock
 in decision 3 was the right fix for it.
 
 [ADR-124](124-plain-golang-migrate-each-file-sets-its-lock-limit.md)
-replaces the runner from decision 3. Velox will run golang-migrate as it
+replaces the runner from decision 3. Hardcount will run golang-migrate as it
 is. Each new migration file sets its own lock limit, and one process
 applies migrations at a time, so no second migrator waits on the lock
 during an index build. Until the PR that deletes the runner merges,
@@ -227,7 +227,7 @@ one baseline at version 180.
 goose's own session lock polls `pg_try_advisory_lock`, as decision 3's
 lock does. So copies that start together still take turns, and a waiting
 copy cannot deadlock against a `CREATE INDEX CONCURRENTLY`. The library
-now keeps that guarantee, and Velox no longer needs the
+now keeps that guarantee, and Hardcount no longer needs the
 one-migrator rule that ADR-124 planned. The 2026-10-17 correction of the
 deadlock claim still stands. Decision 3 describes the code up to v0.8.1;
 from v0.9.0 the runner and its lock key (76540007) are gone.

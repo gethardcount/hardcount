@@ -41,7 +41,7 @@ func filesBefore(t *testing.T, v int64) fstest.MapFS {
 // refuses an invoice on a subscription with no pause, and the Down removes
 // the column.
 func TestPauseInvoice_UpAndRollback(t *testing.T) {
-	dsn, db := scratchDB(t, "velox_migrate_pause_invoice")
+	dsn, db := scratchDB(t, "hardcount_migrate_pause_invoice")
 	ctx := context.Background()
 	if err := up(ctx, dsn, filesBefore(t, pauseInvoiceVersion)); err != nil {
 		t.Fatalf("Up to before %d: %v", pauseInvoiceVersion, err)

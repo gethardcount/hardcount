@@ -11,7 +11,7 @@ When a mid-period change prorates against an `in_advance` invoice that is still 
 
 A mid-period subscription change (plan up/downgrade, quantity change, add/remove
 item, cross-interval swap) on an `in_advance` plan prorates against the
-current-period prebill invoice. Every Velox proration path resolves that source
+current-period prebill invoice. Every Hardcount proration path resolves that source
 invoice and, until now, **silently deferred** when it was finalized but **not
 paid** — `handleItemProration` returned `nil` with an info log, and
 `BillOnPlanSwapImmediate` skipped its credit. The change still applied; no
@@ -108,7 +108,7 @@ proration charge invoice (upgrade).
 
 ## Why this design
 
-- **Reuses the correct primitive Velox already had.** `CreateAndIssueAdjustment`
+- **Reuses the correct primitive Hardcount already had.** `CreateAndIssueAdjustment`
   is payment-status-aware: on a finalized/unpaid invoice it only reduces
   `amount_due` + reverses proportional tax (no refund/credit allocation); on a
   paid invoice it produces a refundable credit. Routing every unpaid-source

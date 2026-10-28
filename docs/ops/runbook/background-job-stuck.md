@@ -1,6 +1,6 @@
 # A background job is stuck
 
-Velox runs its billing, payment retries, webhooks and emails in background
+Hardcount runs its billing, payment retries, webhooks and emails in background
 jobs. Back to the [runbook index](index.md).
 
 ## How the jobs share work
@@ -48,8 +48,8 @@ Three things keep a tick from running twice:
 - The `scheduler` check in the `/health/ready` body starts with
   `degraded`. The status code stays 200.
 - Subscriptions due for billing are not being invoiced, and the
-  `velox_billing_cycles_total` rate drops to 0.
-- `velox_leader_last_tick_age_seconds{role}` is above 3× the role's
+  `hardcount_billing_cycles_total` rate drops to 0.
+- `hardcount_leader_last_tick_age_seconds{role}` is above 3× the role's
   interval, or 5 minutes for the roles that run every few seconds.
 - An outbox keeps growing, or webhook retries stop.
 
@@ -69,7 +69,7 @@ in [Scheduler interval and batch size](#scheduler-interval-and-batch-size).
 - **No replica is polling** for the role.
 - **A panic.** The poll loop survives it, so the `/health/ready` scheduler
   check stays `ok`; it shows as
-  `velox_leader_lease_lost_total{reason="panicked"}`. See [Fix](#fix).
+  `hardcount_leader_lease_lost_total{reason="panicked"}`. See [Fix](#fix).
 
 A long tick is not a stuck one. A billing tick bills every subscription
 that is due before it ends, so on a busy billing day it can run for hours.
@@ -104,10 +104,10 @@ The next tick starts one interval after it ends.
      Check every replica's logs and `/health/ready`.
 
 3. **For billing, check whether the tick is draining.** While a long tick
-   runs, `velox_billing_due_subscriptions` falls page by page.
+   runs, `hardcount_billing_due_subscriptions` falls page by page.
    - If it is falling, the tick is working through a backlog. A restart
      only restarts the drain.
-   - If it is flat and `velox_billing_failing_subscriptions{state="retrying"}`
+   - If it is flat and `hardcount_billing_failing_subscriptions{state="retrying"}`
      is zero, the tick is wedged.
    - Subscriptions whose billing is failing are not in the due gauge. The
      run skips them while they wait, then attempts them again.
@@ -115,7 +115,7 @@ The next tick starts one interval after it ends.
      be busy retrying them while the due gauge is flat. Fresh
      `bill subscription failed` log lines mean it is working, not wedged
      (see [Billing failing](billing-failing.md)).
-   - `velox_billing_cycle_duration_seconds` is recorded only when a tick
+   - `hardcount_billing_cycle_duration_seconds` is recorded only when a tick
      ends. It shows how long past ticks took, not the one running now.
 
 4. **Look for long queries and the scheduler's last run.** Run the SQL in
@@ -190,7 +190,7 @@ The next tick starts one interval after it ends.
 ## Verify
 
 `SELECT * FROM leader_status` shows a small `last_tick_age_s` for the role,
-and `velox_leader_last_tick_age_seconds{role}` falls back below
+and `hardcount_leader_last_tick_age_seconds{role}` falls back below
 max(3× the role's interval, 5 minutes).
 
 After a database failover the roles carry on, because the row moved with
@@ -207,7 +207,7 @@ SELECT leader_unpause('email_outbox');
 While a role is paused, no replica takes it. Work queues up and resumes on
 unpause: an outbox drains, and a billing cycle catches up on its next tick.
 A pause survives restarts, because it is a row, not a process. So
-**unpause is part of the change**, and `velox_leader_paused` is the
+**unpause is part of the change**, and `hardcount_leader_paused` is the
 reminder.
 
 Do not edit `leader_leases` by hand beyond these two functions, and
@@ -223,11 +223,11 @@ clearing `not_before` after a panic is fixed (see [Fix](#fix)).
 
 | Metric | Alert when |
 |---|---|
-| `velox_leader_last_tick_age_seconds{role}` | > max(3× the role's interval, 5 min): no replica has finished a tick |
-| `velox_leader_held{role}` | Stays 1 while `last_tick_age` grows: a tick is wedged but still renewing. See [Check](#check) step 3 for billing |
-| `velox_leader_paused{role}` | 1 outside a planned window |
-| `velox_leader_lease_lost_total{role,reason}` | Any increase, except `reason="paused"`. See [Lease-lost reasons](#lease-lost-reasons) |
-| `velox_leader_status_scrape_errors_total` | 1: the view could not be read. The database is the problem, not the roles |
+| `hardcount_leader_last_tick_age_seconds{role}` | > max(3× the role's interval, 5 min): no replica has finished a tick |
+| `hardcount_leader_held{role}` | Stays 1 while `last_tick_age` grows: a tick is wedged but still renewing. See [Check](#check) step 3 for billing |
+| `hardcount_leader_paused{role}` | 1 outside a planned window |
+| `hardcount_leader_lease_lost_total{role,reason}` | Any increase, except `reason="paused"`. See [Lease-lost reasons](#lease-lost-reasons) |
+| `hardcount_leader_status_scrape_errors_total` | 1: the view could not be read. The database is the problem, not the roles |
 
 ### Lease-lost reasons
 
@@ -260,13 +260,13 @@ unpaused.
   [wait ladder](billing-failing.md#why). Then the subscription parks
   and the panic stops. On the hourly production tick the first three
   attempts land on three ticks in a row.
-- The subscription shows up in `velox_billing_failing_subscriptions`, and
+- The subscription shows up in `hardcount_billing_failing_subscriptions`, and
   its id and stack are in the `bill subscription panicked` ERROR log. See
   [Billing failing](billing-failing.md).
 
 ## A subscription is due but not billed
 
-`velox_billing_oldest_due_age_seconds{mode}` above 2× the billing interval
+`hardcount_billing_oldest_due_age_seconds{mode}` above 2× the billing interval
 means a subscription has been due for billing that long, and its billing is
 not saved as failing. "Due" starts when `INVOICE_GRACE_PERIOD` has passed
 after the period end, so a subscription inside its grace is not counted
@@ -274,7 +274,7 @@ after the period end, so a subscription inside its grace is not counted
 
 There are two causes:
 
-- **Billing is behind.** `velox_billing_due_subscriptions` is large and
+- **Billing is behind.** `hardcount_billing_due_subscriptions` is large and
   falling on a busy day, and it catches up.
 - **One subscription's attempts are interrupted, or hit connection errors,
   on every tick.** The count is small and flat. Its id is in the
@@ -282,7 +282,7 @@ There are two causes:
   `transient`.
 
 A subscription that fails to bill for any other reason is not counted here.
-It is in `velox_billing_failing_subscriptions`; see
+It is in `hardcount_billing_failing_subscriptions`; see
 [Billing failing](billing-failing.md).
 
 ## Scheduler interval and batch size
@@ -292,7 +292,7 @@ variables:
 
 - The scheduler ticks every **1 hour** in staging and production, and every
   **5 minutes** only when `APP_ENV=local`.
-- It processes a fixed **50 subscriptions per tick** (`cmd/velox/main.go`).
+- It processes a fixed **50 subscriptions per tick** (`cmd/hardcount/main.go`).
 
 Drain a tenant with a backlog on demand with `POST /v1/billing/run`, not by
 tuning these. It loops until that tenant has nothing left that it will
@@ -306,12 +306,12 @@ attempt.
   the leader is committing at that instant, because its due fetch skips
   locked rows. The leader's commit bills it.
 
-Watch `velox_billing_cycle_duration_seconds` to check that each tick fits
+Watch `hardcount_billing_cycle_duration_seconds` to check that each tick fits
 inside the interval. One replica holds the `billing` role per tick and
 renews it while it works. So if a tick runs long, the next tick starts one
 interval after the long one ends, on whichever replica polls first. There
 is no collision and no lock wait, only a growing backlog.
-`velox_leader_last_tick_age_seconds{role="billing"}` is the cluster-wide
+`hardcount_leader_last_tick_age_seconds{role="billing"}` is the cluster-wide
 lag.
 
 ## Poolers and migrations

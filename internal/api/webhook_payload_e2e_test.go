@@ -19,7 +19,7 @@ import (
 )
 
 // The payload rule (ADR-131), checked over the real router and database:
-// every outbox row Velox queues carries, under its family's resource key,
+// every outbox row Hardcount queues carries, under its family's resource key,
 // the resource as the API returns it. Each check compares the event's
 // resource with a GET of the same resource right after the action, field
 // by field. A field that moved after the event was queued (a post-commit
@@ -256,7 +256,7 @@ func TestE2E_WebhookPayloads_InvoicePaymentDunningPaymentMethod(t *testing.T) {
 		obj := map[string]any{
 			"id": piID, "object": "payment_intent", "amount": cents, "amount_received": cents, "currency": "usd",
 			"customer": "cus_webhook_payload",
-			"metadata": map[string]any{"velox_tenant_id": tenantID, "velox_invoice_id": invoiceID, "velox_customer_id": customerID},
+			"metadata": map[string]any{"hardcount_tenant_id": tenantID, "hardcount_invoice_id": invoiceID, "hardcount_customer_id": customerID},
 		}
 		for k, v := range fields {
 			obj[k] = v
@@ -305,7 +305,7 @@ func TestE2E_WebhookPayloads_InvoicePaymentDunningPaymentMethod(t *testing.T) {
 	}
 
 	// A charge in another currency: the event shows the invoice as it was
-	// before Velox recorded the charge, then the payment settles as usual.
+	// before Hardcount recorded the charge, then the payment settles as usual.
 	idG := newInvoice("Other currency", 6000)
 	before := getInvoice(idG)
 	deliver(stripeEvent("evt_wp_g", "payment_intent.succeeded", piObject("pi_wp_g", idG, 6000, map[string]any{"status": "succeeded", "currency": "eur"})), "payment_intent.succeeded in EUR")
@@ -315,7 +315,7 @@ func TestE2E_WebhookPayloads_InvoicePaymentDunningPaymentMethod(t *testing.T) {
 	if cur.Data["incoming_payment_intent_id"] != "pi_wp_g" || cur.Data["captured_cents"] != float64(6000) {
 		t.Errorf("payment.currency_mismatch extras = %v / %v, want pi_wp_g / 6000", cur.Data["incoming_payment_intent_id"], cur.Data["captured_cents"])
 	}
-	// The charge's currency, as Velox writes currencies (upper case), beside
+	// The charge's currency, as Hardcount writes currencies (upper case), beside
 	// the invoice's.
 	if cur.Data["charge_currency"] != "EUR" || flowStr(cur.Data["invoice"].(map[string]any), "currency") != "USD" {
 		t.Errorf("payment.currency_mismatch charge_currency = %v, invoice currency %v; want EUR and USD",
@@ -359,10 +359,10 @@ func TestE2E_WebhookPayloads_InvoicePaymentDunningPaymentMethod(t *testing.T) {
 	}
 
 	// A Checkout that saved a card, then the same card saved through a
-	// Velox setup session.
+	// Hardcount setup session.
 	deliver(stripeEvent("evt_wp_cs", "checkout.session.completed", map[string]any{
 		"id": "cs_wp", "object": "checkout.session", "mode": "setup", "status": "complete",
-		"customer": "cus_webhook_payload", "metadata": map[string]any{"velox_tenant_id": tenantID, "velox_customer_id": customerID},
+		"customer": "cus_webhook_payload", "metadata": map[string]any{"hardcount_tenant_id": tenantID, "hardcount_customer_id": customerID},
 	}), "checkout.session.completed")
 	got = events.next("checkout card", domain.EventPaymentMethodUpdated)
 	upd := got[domain.EventPaymentMethodUpdated]
@@ -377,7 +377,7 @@ func TestE2E_WebhookPayloads_InvoicePaymentDunningPaymentMethod(t *testing.T) {
 
 	deliver(stripeEvent("evt_wp_seti", "setup_intent.succeeded", map[string]any{
 		"id": "seti_wp", "object": "setup_intent", "status": "succeeded", "payment_method": "pm_flow",
-		"customer": "cus_webhook_payload", "metadata": map[string]any{"velox_customer_id": customerID},
+		"customer": "cus_webhook_payload", "metadata": map[string]any{"hardcount_customer_id": customerID},
 	}), "setup_intent.succeeded")
 	got = events.next("setup intent", domain.EventPaymentMethodAttached)
 	att := got[domain.EventPaymentMethodAttached]
@@ -397,11 +397,11 @@ func TestE2E_WebhookPayloads_InvoicePaymentDunningPaymentMethod(t *testing.T) {
 	events.next("remove card")
 	deliver(stripeEvent("evt_wp_seti_late", "setup_intent.succeeded", map[string]any{
 		"id": "seti_wp_late", "object": "setup_intent", "status": "succeeded", "payment_method": "pm_flow",
-		"customer": "cus_webhook_payload", "metadata": map[string]any{"velox_customer_id": customerID},
+		"customer": "cus_webhook_payload", "metadata": map[string]any{"hardcount_customer_id": customerID},
 	}), "late setup_intent.succeeded")
 	deliver(stripeEvent("evt_wp_cs_late", "checkout.session.completed", map[string]any{
 		"id": "cs_wp_late", "object": "checkout.session", "mode": "setup", "status": "complete",
-		"customer": "cus_webhook_payload", "metadata": map[string]any{"velox_tenant_id": tenantID, "velox_customer_id": customerID},
+		"customer": "cus_webhook_payload", "metadata": map[string]any{"hardcount_tenant_id": tenantID, "hardcount_customer_id": customerID},
 	}), "late checkout.session.completed")
 	if late := events.next("late card events"); len(late) != 0 {
 		t.Errorf("late events for a removed card queued %v, want none", late)
@@ -418,7 +418,7 @@ func TestE2E_WebhookPayloads_InvoicePaymentDunningPaymentMethod(t *testing.T) {
 	if rov.Data["incoming_payment_intent_id"] != "pi_wp_d" || rov.Data["captured_cents"] != float64(3000) {
 		t.Errorf("payment.received_on_voided_invoice extras = %v / %v, want pi_wp_d / 3000", rov.Data["incoming_payment_intent_id"], rov.Data["captured_cents"])
 	}
-	// D was never charged: no PaymentIntent, and not paid outside Velox
+	// D was never charged: no PaymentIntent, and not paid outside Hardcount
 	// either. docs/webhooks.md says so.
 	if inv := rov.Data["invoice"].(map[string]any); inv["stripe_payment_intent_id"] != nil || inv["paid_out_of_band"] != false {
 		t.Errorf("payment.received_on_voided_invoice invoice = PI %v, paid_out_of_band %v; want none and false", inv["stripe_payment_intent_id"], inv["paid_out_of_band"])

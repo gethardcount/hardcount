@@ -341,7 +341,7 @@ func TestCreateRefund_StripeFailure_IssuesWithFailedStatus(t *testing.T) {
 // post-refund credit-grant DB error) would call Stripe again with no
 // dedup and create a DUPLICATE refund — customer over-refunded.
 //
-// Key shape: `velox_cn_<cn_id>`. Same key + same params returns the
+// Key shape: `hardcount_cn_<cn_id>`. Same key + same params returns the
 // cached response from Stripe.
 func TestIssue_PassesIdempotencyKeyToStripe(t *testing.T) {
 	svc, _, _, refunder := setupRefundSvc(t)
@@ -357,7 +357,7 @@ func TestIssue_PassesIdempotencyKeyToStripe(t *testing.T) {
 	if len(refunder.calls) != 1 {
 		t.Fatalf("expected 1 refund call, got %d", len(refunder.calls))
 	}
-	expected := "velox_cn_" + cn.ID
+	expected := "hardcount_cn_" + cn.ID
 	if refunder.calls[0].idempotencyKey != expected {
 		t.Errorf("idempotency_key: got %q, want %q", refunder.calls[0].idempotencyKey, expected)
 	}
@@ -369,7 +369,7 @@ func TestIssue_PassesIdempotencyKeyToStripe(t *testing.T) {
 //
 // The retry converges via reconcile-then-create (ADR-063 amendment,
 // 2026-08-04), NOT via key reuse: an earlier version of this test pinned
-// the retry to Issue()'s eternal `velox_cn_<id>` key, encoding the exact
+// the retry to Issue()'s eternal `hardcount_cn_<id>` key, encoding the exact
 // broken premise the amendment removes — Stripe v1 keys expire after ~24h
 // (a late retry of a stuck partial refund minted a second live refund) and
 // within the horizon a key replay returns the SAVED first response, stale
@@ -427,11 +427,11 @@ func TestRetryRefund(t *testing.T) {
 		// response would be stale) — and the create must stamp the CN id as
 		// metadata, which is what future adoption converges on.
 		key := refunder.calls[0].idempotencyKey
-		if !strings.HasPrefix(key, "velox_cn_"+cn.ID+"_r_") {
-			t.Errorf("idempotency_key: got %q, want state-generation key velox_cn_%s_r_<gen>", key, cn.ID)
+		if !strings.HasPrefix(key, "hardcount_cn_"+cn.ID+"_r_") {
+			t.Errorf("idempotency_key: got %q, want state-generation key hardcount_cn_%s_r_<gen>", key, cn.ID)
 		}
 		if refunder.calls[0].creditNoteID != cn.ID {
-			t.Errorf("create must stamp velox_cn_id metadata: got %q want %q", refunder.calls[0].creditNoteID, cn.ID)
+			t.Errorf("create must stamp hardcount_cn_id metadata: got %q want %q", refunder.calls[0].creditNoteID, cn.ID)
 		}
 	})
 

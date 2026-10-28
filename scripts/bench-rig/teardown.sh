@@ -7,7 +7,7 @@
 # not the last, and it deletes by TAG rather than by a list of ids held in a
 # file that a crashed run would never have written.
 #
-#   ./teardown.sh          # delete everything tagged Project=velox-bench
+#   ./teardown.sh          # delete everything tagged Project=hardcount-bench
 #   ./teardown.sh --check  # report what exists, delete nothing
 #
 # Exit codes are load-bearing — the watchdog and any automation branch on them:
@@ -18,7 +18,7 @@ set -uo pipefail
 
 REGION="${AWS_REGION:-ap-south-1}"
 TAG_KEY="Project"
-TAG_VAL="velox-bench"
+TAG_VAL="hardcount-bench"
 CHECK_ONLY=0
 case "${1:-}" in
   "") CHECK_ONLY=0 ;;
@@ -67,7 +67,7 @@ instances=$(q instances ec2 describe-instances \
   --query 'Reservations[].Instances[].InstanceId' --output text)
 
 dbs=$(q rds rds describe-db-instances \
-  --query "DBInstances[?starts_with(DBInstanceIdentifier, 'velox-bench')].DBInstanceIdentifier" \
+  --query "DBInstances[?starts_with(DBInstanceIdentifier, 'hardcount-bench')].DBInstanceIdentifier" \
   --output text)
 
 sgs=$(q security-groups ec2 describe-security-groups \
@@ -79,14 +79,14 @@ keys=$(q key-pairs ec2 describe-key-pairs \
   --query 'KeyPairs[].KeyName' --output text)
 
 subnetgroups=$(q db-subnet-groups rds describe-db-subnet-groups \
-  --query "DBSubnetGroups[?starts_with(DBSubnetGroupName, 'velox-bench')].DBSubnetGroupName" \
+  --query "DBSubnetGroups[?starts_with(DBSubnetGroupName, 'hardcount-bench')].DBSubnetGroupName" \
   --output text)
 
 # The custom parameter group (provision.sh creates it so the instance boots with
 # the instrumentation settings). Not billable, but it is residue, and a stale
 # one with different settings would silently shape the NEXT rig's numbers.
 paramgroups=$(q db-parameter-groups rds describe-db-parameter-groups \
-  --query "DBParameterGroups[?starts_with(DBParameterGroupName, 'velox-bench')].DBParameterGroupName" \
+  --query "DBParameterGroups[?starts_with(DBParameterGroupName, 'hardcount-bench')].DBParameterGroupName" \
   --output text)
 
 # RDS snapshots of rig instances. provision.sh/teardown.sh never take one
@@ -95,7 +95,7 @@ paramgroups=$(q db-parameter-groups rds describe-db-parameter-groups \
 # silence — "CLEAN" must cover it. Scoped to rig instances; snapshots of
 # anything else in the account are not this script's to touch.
 snapshots=$(q db-snapshots rds describe-db-snapshots \
-  --query "DBSnapshots[?starts_with(DBInstanceIdentifier, 'velox-bench') || starts_with(DBSnapshotIdentifier, 'velox-bench')].DBSnapshotIdentifier" \
+  --query "DBSnapshots[?starts_with(DBInstanceIdentifier, 'hardcount-bench') || starts_with(DBSnapshotIdentifier, 'hardcount-bench')].DBSnapshotIdentifier" \
   --output text)
 
 say "inventory in $REGION:"

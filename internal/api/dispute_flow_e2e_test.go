@@ -16,7 +16,7 @@ import (
 // TestE2E_CardDispute_RecordedNeverActedOn takes an invoice paid by card
 // through Stripe's dispute events over the real router and database (#979):
 //
-//   - the events carry no velox_* metadata (a Dispute has its own, empty
+//   - the events carry no hardcount_* metadata (a Dispute has its own, empty
 //     metadata), and are still recorded against the invoice that the
 //     disputed PaymentIntent paid;
 //   - they arrive out of order (the close first) and redelivered, and the
@@ -24,8 +24,8 @@ import (
 //     one payment.dispute_closed;
 //   - the invoice stays paid with its amounts, and shows the dispute_lost
 //     notice and the dispute rows on its timeline;
-//   - a dispute on a payment no Velox invoice holds is acknowledged and
-//     recorded nowhere; a status Velox does not know fails the delivery so
+//   - a dispute on a payment no Hardcount invoice holds is acknowledged and
+//     recorded nowhere; a status Hardcount does not know fails the delivery so
 //     Stripe sends it again.
 func TestE2E_CardDispute_RecordedNeverActedOn(t *testing.T) {
 	db := testutil.SetupTestDB(t)
@@ -80,7 +80,7 @@ func TestE2E_CardDispute_RecordedNeverActedOn(t *testing.T) {
 		"created": time.Now().Unix(), "livemode": false,
 		"data": map[string]any{"object": map[string]any{
 			"id": pi, "object": "payment_intent", "status": "succeeded", "amount": 4500, "currency": currency,
-			"metadata": map[string]any{"velox_tenant_id": tenantID, "velox_invoice_id": invID, "velox_customer_id": customerID},
+			"metadata": map[string]any{"hardcount_tenant_id": tenantID, "hardcount_invoice_id": invID, "hardcount_customer_id": customerID},
 		}},
 	}, 200, "payment_intent.succeeded")
 	paid := getInvoice()
@@ -164,12 +164,12 @@ func TestE2E_CardDispute_RecordedNeverActedOn(t *testing.T) {
 		t.Errorf("dispute audit rows naming %s: %d, want 3 (one per event, redelivery included once)", pi, n)
 	}
 
-	// A dispute on a payment no Velox invoice holds: acknowledged, recorded nowhere.
-	deliver(dispute("evt_dispute_flow_foreign", "charge.dispute.created", "du_foreign", "pi_not_velox", "needs_response", opened), 200, "dispute on a foreign payment")
+	// A dispute on a payment no Hardcount invoice holds: acknowledged, recorded nowhere.
+	deliver(dispute("evt_dispute_flow_foreign", "charge.dispute.created", "du_foreign", "pi_not_hardcount", "needs_response", opened), 200, "dispute on a foreign payment")
 	if n := flowCount(t, db, `SELECT count(*) FROM invoice_disputes WHERE stripe_dispute_id = 'du_foreign'`); n != 0 {
 		t.Errorf("foreign dispute rows: %d, want 0", n)
 	}
-	// A status Velox does not know: the delivery fails, so Stripe redelivers,
+	// A status Hardcount does not know: the delivery fails, so Stripe redelivers,
 	// and nothing is recorded or marked processed.
 	deliver(dispute("evt_dispute_flow_unknown", "charge.dispute.updated", "du_dispute_flow", pi, "under_arbitration", lostAt.Add(time.Hour)), 500, "dispute with an unknown status")
 	if n := flowCount(t, db, `SELECT count(*) FROM stripe_webhook_events WHERE stripe_event_id = 'evt_dispute_flow_unknown'`); n != 0 {
@@ -179,7 +179,7 @@ func TestE2E_CardDispute_RecordedNeverActedOn(t *testing.T) {
 		t.Errorf("disputes after the unknown status: %v, want still one, lost", got)
 	}
 
-	call("GET", "/v1/invoices/vlx_inv_missing/disputes", flowReq{}).want(t, 404, "disputes of a missing invoice")
+	call("GET", "/v1/invoices/hc_inv_missing/disputes", flowReq{}).want(t, 404, "disputes of a missing invoice")
 	if u := stripe.unexpected(); len(u) != 0 {
 		t.Errorf("unexpected Stripe calls: %v (a dispute needs none)", u)
 	}

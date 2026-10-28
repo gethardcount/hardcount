@@ -92,13 +92,13 @@ func (f *writeFixture) customerAndMeter(externalID string) (string, string) {
 		f.t.Fatalf("begin: %v", err)
 	}
 	defer postgres.Rollback(tx)
-	customerID := postgres.NewID("vlx_cus")
+	customerID := postgres.NewID("hc_cus")
 	if _, err := tx.ExecContext(f.ctx, `INSERT INTO customers (id, tenant_id, external_id, display_name, email) VALUES ($1, $2, $3, 'Writes', 'writes@example.com')`, customerID, f.tenantID, externalID); err != nil {
 		f.t.Fatalf("customer: %v", err)
 	}
 	var meterID string
 	if err := tx.QueryRowContext(f.ctx, `SELECT id FROM meters WHERE event_name = 'tokens'`).Scan(&meterID); err != nil {
-		meterID = postgres.NewID("vlx_mtr")
+		meterID = postgres.NewID("hc_mtr")
 		if _, err := tx.ExecContext(f.ctx, `INSERT INTO meters (id, tenant_id, name, event_name, unit, aggregation) VALUES ($1, $2, 'Tokens', 'tokens', 'tokens', 'sum')`, meterID, f.tenantID); err != nil {
 			f.t.Fatalf("meter: %v", err)
 		}
@@ -397,7 +397,7 @@ func TestSpend_OldBinaryRace_RealStore(t *testing.T) {
 	if _, err := old.ExecContext(f.ctx, `
 		INSERT INTO usage_events (id, tenant_id, customer_id, meter_id, quantity, properties, idempotency_key, timestamp, origin)
 		VALUES ($1, $2, $3, $4, 101000, '{"model":"claude-sonnet-4.5","provider":"anthropic","token_type":"input"}', 'rd-1:input', now(), 'api')
-	`, postgres.NewID("vlx_evt"), f.tenantID, cus, mtr); err != nil {
+	`, postgres.NewID("hc_evt"), f.tenantID, cus, mtr); err != nil {
 		t.Fatalf("old-binary insert: %v", err)
 	}
 
@@ -669,7 +669,7 @@ func TestRelease_WaitsForInFlightOldInput_RealStore(t *testing.T) {
 				quantity, properties, idempotency_key, event_at, reason)
 			VALUES ($1, $2, 'litellm', 'cus_cut', 'tokens', $3, jsonb_build_object('token_type', $4::text),
 				'cut-1:' || $4, '2026-10-01T00:00:00Z', 'customer_not_found')
-		`, fmt.Sprintf("vlx_hue_cut%d", i), f.tenantID, r.qty, r.role); err != nil {
+		`, fmt.Sprintf("hc_hue_cut%d", i), f.tenantID, r.qty, r.role); err != nil {
 			t.Fatalf("hold %s: %v", r.role, err)
 		}
 	}
@@ -690,7 +690,7 @@ func TestRelease_WaitsForInFlightOldInput_RealStore(t *testing.T) {
 	if _, err := old.ExecContext(f.ctx, `
 		INSERT INTO usage_events (id, tenant_id, customer_id, meter_id, quantity, properties, idempotency_key, timestamp, origin)
 		VALUES ($1, $2, $3, $4, 101000, '{"token_type":"input"}', 'cut-1:input', '2026-10-01T00:00:00Z', 'api')
-	`, postgres.NewID("vlx_evt"), f.tenantID, cus, mtr); err != nil {
+	`, postgres.NewID("hc_evt"), f.tenantID, cus, mtr); err != nil {
 		t.Fatalf("old input: %v", err)
 	}
 	if _, err := old.ExecContext(f.ctx, `UPDATE usage_held_events SET status = 'released', resolved_at = now() WHERE idempotency_key = 'cut-1:input'`); err != nil {

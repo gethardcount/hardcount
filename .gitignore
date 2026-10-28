@@ -8,15 +8,15 @@ tmp/
 # Written by deploy/compose/quickstart.sh; holds the install's API keys.
 deploy/compose/quickstart-credentials.json
 .DS_Store
-/velox
-/velox-bench-seed
+/hardcount
+/hardcount-bench-seed
 temp.txt
 MANUAL_TEST_BUGS.md
 
 # Local agent worktrees + settings (Claude Code)
 .claude/
 .playwright-mcp/
-velox-api
+hardcount-api
 
 # Walk screenshots dropped at the repo root.
 #
@@ -35,21 +35,21 @@ velox-api
 /*.jpg
 /*.jpeg
 
-# Compiled binaries at the repo root (an 18.8MB velox-bootstrap Mach-O
+# Compiled binaries at the repo root (an 18.8MB hardcount-bootstrap Mach-O
 # slipped into git via #374 — go build drops artifacts named after the
 # package in CWD; bin/ is already ignored, the root wasn't).
-/velox
-/velox-bootstrap
-/velox-cli
-/velox-doctor
-/velox-bench-seed
+/hardcount
+/hardcount-bootstrap
+/hardcount-cli
+/hardcount-doctor
+/hardcount-bench-seed
 #
-# ...and the enumeration failed anyway: a 54MB `velox-api-adr101` sat untracked
+# ...and the enumeration failed anyway: a 54MB `hardcount-api-adr101` sat untracked
 # at the root because the list above names exact binaries and a
 # branch-suffixed build isn't one of them. Glob the prefixes rather than
 # extending the list a third time.
-/velox-api*
-/velox-bench*
+/hardcount-api*
+/hardcount-bench*
 
 # k6 writes its run summary into whatever directory it is invoked from, so a
 # path-anchored ignore keeps missing it — this is the third directory it has

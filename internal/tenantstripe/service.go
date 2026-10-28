@@ -11,7 +11,7 @@ import (
 
 	"github.com/stripe/stripe-go/v82"
 
-	veloxauth "github.com/sagarsuperuser/velox/internal/auth"
+	hardcountauth "github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
@@ -159,7 +159,7 @@ func (s *Service) Connect(ctx context.Context, tenantID string, in ConnectInput)
 func (s *Service) runPostConnectRetry(tenantID string, livemode bool, expected int) {
 	ctx, cancel := context.WithTimeout(context.Background(), PostConnectRetryTimeout)
 	defer cancel()
-	ctx = veloxauth.WithTenantID(ctx, tenantID)
+	ctx = hardcountauth.WithTenantID(ctx, tenantID)
 	ctx = postgres.WithLivemode(ctx, livemode)
 
 	start := time.Now()

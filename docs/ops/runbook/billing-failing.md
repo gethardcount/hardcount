@@ -1,12 +1,12 @@
 # Subscriptions whose billing is failing
 
-When Velox cannot bill a subscription at the end of its period, it saves
+When Hardcount cannot bill a subscription at the end of its period, it saves
 the failure on the subscription and tries again later, waiting longer each
 time. Back to the [runbook index](index.md).
 
 ## Symptom
 
-- `velox_billing_failing_subscriptions{mode,state}` is above zero.
+- `hardcount_billing_failing_subscriptions{mode,state}` is above zero.
 - Or a customer was not invoiced for a period that has ended.
 
 ## Why
@@ -46,12 +46,12 @@ due does not restart billing; retry after it.
 
 ### Why the error rate falls
 
-`velox_billing_cycle_errors_total` falls once a fault has lasted a few
+`hardcount_billing_cycle_errors_total` falls once a fault has lasted a few
 ticks, because a subscription that failed is not attempted again until its
 wait has passed. On the hourly production tick, the first three ticks each
 retry everything (the waits are 15 minutes, then 1 hour). From the fourth
 tick the waits are longer than the tick. So a low error rate is not an
-all-clear: alert on `velox_billing_failing_subscriptions` too.
+all-clear: alert on `hardcount_billing_failing_subscriptions` too.
 
 ## Check
 
@@ -139,7 +139,7 @@ A call that times out returns an error, but may already have cleared the
 failure. A repeat call can then answer 409 `billing_not_failing` while the
 next billing run bills the subscription.
 
-`velox_billing_failing_subscriptions` falls on the next scrape.
+`hardcount_billing_failing_subscriptions` falls on the next scrape.
 
 **Not covered here:** a subscription on a test clock never appears in this
 gauge or list. Its failure stops the clock; see

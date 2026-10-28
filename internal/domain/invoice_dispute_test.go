@@ -7,7 +7,7 @@ import (
 )
 
 // TestDisputeStatus_ValidAndClosed: the eight statuses Stripe documents for a
-// Dispute are the eight Velox stores (the column's CHECK lists the same), and
+// Dispute are the eight Hardcount stores (the column's CHECK lists the same), and
 // exactly won, lost, warning_closed and prevented are closed.
 func TestDisputeStatus_ValidAndClosed(t *testing.T) {
 	closed := map[DisputeStatus]bool{
@@ -84,7 +84,7 @@ func lostDispute(closedAt time.Time) *InvoiceDispute {
 // tests below.)
 func TestClassifyDisputeLost(t *testing.T) {
 	closedAt := time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)
-	paid := Invoice{ID: "vlx_inv_d", Status: InvoicePaid, PaymentStatus: PaymentSucceeded, Currency: "USD"}
+	paid := Invoice{ID: "hc_inv_d", Status: InvoicePaid, PaymentStatus: PaymentSucceeded, Currency: "USD"}
 
 	if att := ClassifyInvoiceAttention(paid, AttentionContext{}); att != nil {
 		t.Fatalf("control: paid invoice without a lost dispute has attention %+v", att)
@@ -123,7 +123,7 @@ func TestClassifyDisputeLost(t *testing.T) {
 func TestClassifyDisputeLost_WithPaymentAnomaly(t *testing.T) {
 	closedAt := time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)
 	inv := Invoice{
-		ID: "vlx_inv_d", Status: InvoicePaid, PaymentStatus: PaymentSucceeded, Currency: "USD",
+		ID: "hc_inv_d", Status: InvoicePaid, PaymentStatus: PaymentSucceeded, Currency: "USD",
 		StripePaymentIntentID:         "pi_lost_1",
 		PaymentAnomalyKind:            EventPaymentDuplicateCharge,
 		PaymentAnomalyPaymentIntentID: "pi_extra_1",
@@ -158,13 +158,13 @@ func TestClassifyDisputeLost_WithPaymentAnomaly(t *testing.T) {
 // bought prepaid credit. The bank has the money back but the credit is still
 // spendable, and an ordinary credit note is refused on such an invoice. So
 // the notice says how much can still be spent and names the one action that
-// retires it (commit relief, as money returned outside Velox); once the
+// retires it (commit relief, as money returned outside Hardcount); once the
 // credit is all spent there is nothing to retire and no credit note to point
 // to.
 func TestClassifyDisputeLost_PrepaidCommit(t *testing.T) {
 	closedAt := time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)
 	inv := Invoice{
-		ID: "vlx_inv_c", Status: InvoicePaid, PaymentStatus: PaymentSucceeded, Currency: "USD",
+		ID: "hc_inv_c", Status: InvoicePaid, PaymentStatus: PaymentSucceeded, Currency: "USD",
 		BillingReason: BillingReasonManual,
 	}
 

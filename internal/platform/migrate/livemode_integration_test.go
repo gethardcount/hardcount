@@ -45,7 +45,7 @@ func insertCustomerWithMode(ctx context.Context, db *sql.DB, id string, mode *st
 // Mutation: an up that keeps IS DISTINCT FROM 'off', or treats ” as live,
 // turns this red.
 func TestLivemodeTrigger_RequiresMode(t *testing.T) {
-	dsn, db := scratchDB(t, "velox_test_livemode_trigger")
+	dsn, db := scratchDB(t, "hardcount_test_livemode_trigger")
 	ctx := context.Background()
 	if err := up(ctx, dsn, migrationFiles()); err != nil {
 		t.Fatalf("up: %v", err)
@@ -124,7 +124,7 @@ func TestLivemodeTrigger_RequiresMode(t *testing.T) {
 const livemodePoliciesVersion = 214
 
 // visibleCustomers lists the customer ids the tenant_isolation policy shows
-// to velox_app (a role RLS applies to) for tenant ten_lm. A non-nil mode is
+// to hardcount_app (a role RLS applies to) for tenant ten_lm. A non-nil mode is
 // set as app.livemode; nil leaves it unset.
 func visibleCustomers(t *testing.T, ctx context.Context, db *sql.DB, mode *string) string {
 	t.Helper()
@@ -133,7 +133,7 @@ func visibleCustomers(t *testing.T, ctx context.Context, db *sql.DB, mode *strin
 		t.Fatal(err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.Exec(`SET LOCAL ROLE velox_app`); err != nil {
+	if _, err := tx.Exec(`SET LOCAL ROLE hardcount_app`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tx.Exec(`SELECT set_config('app.bypass_rls', 'off', true), set_config('app.tenant_id', 'ten_lm', true)`); err != nil {
@@ -161,7 +161,7 @@ func visibleCustomers(t *testing.T, ctx context.Context, db *sql.DB, mode *strin
 // Mutation: an up that keeps IS DISTINCT FROM 'off' on customers turns this
 // red.
 func TestLivemodePolicies_RequireMode(t *testing.T) {
-	dsn, db := scratchDB(t, "velox_test_livemode_policies")
+	dsn, db := scratchDB(t, "hardcount_test_livemode_policies")
 	ctx := context.Background()
 	if err := up(ctx, dsn, migrationFiles()); err != nil {
 		t.Fatalf("up: %v", err)

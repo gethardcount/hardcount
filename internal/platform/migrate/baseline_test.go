@@ -12,7 +12,7 @@ import (
 // The baseline keeps the properties migration 180 relies on, so an edit
 // cannot break them: no session settings, no transaction control (goose's
 // transaction holds the whole baseline and row 180), and grants only on
-// Velox's own objects, only to velox_app. That it applies under each role
+// Hardcount's own objects, only to hardcount_app. That it applies under each role
 // setup is the migrations CI job's (scripts/ci/migrations-fresh-install.sh).
 // Mutation: a COMMIT, a GRANT ... ON SCHEMA or a grant to another role
 // added to the baseline; each fails here.
@@ -42,7 +42,7 @@ func TestBaselineFile(t *testing.T) {
 		"SELECT pg_catalog.set_config('search_path', '', true);",
 		"CREATE TABLE public.tenants (",
 		"INSERT INTO public.leader_leases (role, holder_token)\nSELECT r, (extract(epoch FROM clock_timestamp()) * 1000)::bigint",
-		"REVOKE UPDATE, DELETE, TRUNCATE ON TABLE public.audit_log FROM velox_app;",
+		"REVOKE UPDATE, DELETE, TRUNCATE ON TABLE public.audit_log FROM hardcount_app;",
 	} {
 		if !strings.Contains(baselineSQL, want) {
 			t.Errorf("the baseline lacks %q", want)
@@ -66,9 +66,9 @@ func TestBaselineFile(t *testing.T) {
 			t.Errorf("statement %d controls the transaction: %q", i+1, s)
 		case !grantStatement.MatchString(s):
 		case strings.Contains(s, " ON SCHEMA "):
-			t.Errorf("statement %d grants on a schema, which belongs to the install, not to Velox: %q", i+1, s)
-		case !strings.HasSuffix(s, " TO VELOX_APP") && !strings.HasSuffix(s, " FROM VELOX_APP"):
-			t.Errorf("statement %d grants to a role other than velox_app: %q", i+1, s)
+			t.Errorf("statement %d grants on a schema, which belongs to the install, not to Hardcount: %q", i+1, s)
+		case !strings.HasSuffix(s, " TO HARDCOUNT_APP") && !strings.HasSuffix(s, " FROM HARDCOUNT_APP"):
+			t.Errorf("statement %d grants to a role other than hardcount_app: %q", i+1, s)
 		}
 	}
 }

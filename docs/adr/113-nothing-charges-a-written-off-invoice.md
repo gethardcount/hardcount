@@ -47,7 +47,7 @@ exists for collecting it later?*
 their write-off IS an artifact whose removal restores the receivable with an
 audit trail. Stripe models write-off as a bare status and compensates by
 making the status payable — affordable for Stripe because it owns its tax
-ledger and re-reports on recovery. Velox had imported Stripe's bare-status
+ledger and re-reports on recovery. Hardcount had imported Stripe's bare-status
 model *and* the payable-status compensation **without** Stripe's tax
 machinery — the mismatch ADR-111 spent an arc cleaning up.
 
@@ -90,7 +90,7 @@ machinery — the mismatch ADR-111 spent an arc cleaning up.
   ADR-110's amendment: analytics recompute from current status, so a flip
   erases the write-off from history; and it silently re-arms every machine.
   Chargebee/Zuora reinstate honestly only because a reversal ARTIFACT
-  remains; Velox's bare status has none. The fresh invoice gets the same
+  remains; Hardcount's bare status has none. The fresh invoice gets the same
   outcome and leaves both objects truthful.
 - **Keeping charge-in-place frozen behind a kill trigger** — proposed, then
   overtaken: the user asked for the design-truth answer with build/removal

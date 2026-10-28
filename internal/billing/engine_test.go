@@ -44,7 +44,7 @@ func (s *stubClockReader) Get(_ context.Context, tenantID, id string) (domain.Te
 }
 
 // mockSettings is a minimal SettingsReader for engine tests. Hands out
-// VLX-000001, VLX-000002, ... deterministically; Get returns a zero-value
+// HC-000001, HC-000002, ... deterministically; Get returns a zero-value
 // TenantSettings so net_payment_terms defaults to the engine's fallback.
 // wireBaseTax wires a tax resolver onto an engine — required for
 // any path that calls ApplyTaxToLineItems. Production engine
@@ -341,7 +341,7 @@ type mockSettings struct{ next int }
 
 func (m *mockSettings) NextInvoiceNumber(_ context.Context, _ string) (string, error) {
 	m.next++
-	return fmt.Sprintf("VLX-%06d", m.next), nil
+	return fmt.Sprintf("HC-%06d", m.next), nil
 }
 
 func (m *mockSettings) NextInvoiceNumberTx(ctx context.Context, _ *sql.Tx, tenantID string) (string, error) {
@@ -669,7 +669,7 @@ func (m *mockSubs) ApplyDuePendingItemPlansAtomic(_ context.Context, _, id strin
 		// subscription_items emits a 'plan' change row so segment-
 		// aware billing sees the boundary swap.
 		m.itemChanges = append(m.itemChanges, domain.SubscriptionItemChange{
-			ID:                 fmt.Sprintf("vlx_sic_%d", len(m.itemChanges)+1),
+			ID:                 fmt.Sprintf("hc_sic_%d", len(m.itemChanges)+1),
 			TenantID:           s.TenantID,
 			SubscriptionID:     s.ID,
 			SubscriptionItemID: it.ID,
@@ -933,7 +933,7 @@ func queuedAtBirth(inv domain.Invoice) bool {
 }
 
 func (m *mockInvoices) CreateInvoice(_ context.Context, tenantID string, inv domain.Invoice) (domain.Invoice, error) {
-	inv.ID = fmt.Sprintf("vlx_inv_%d", len(m.invoices)+1)
+	inv.ID = fmt.Sprintf("hc_inv_%d", len(m.invoices)+1)
 	inv.TenantID = tenantID
 	inv.AutoChargePending = queuedAtBirth(inv)
 	m.invoices = append(m.invoices, inv)
@@ -941,7 +941,7 @@ func (m *mockInvoices) CreateInvoice(_ context.Context, tenantID string, inv dom
 }
 
 func (m *mockInvoices) CreateLineItem(_ context.Context, tenantID string, item domain.InvoiceLineItem) (domain.InvoiceLineItem, error) {
-	item.ID = fmt.Sprintf("vlx_ili_%d", len(m.lineItems)+1)
+	item.ID = fmt.Sprintf("hc_ili_%d", len(m.lineItems)+1)
 	item.TenantID = tenantID
 	m.lineItems = append(m.lineItems, item)
 	return item, nil
@@ -1010,7 +1010,7 @@ func (m *mockInvoices) CreateInvoiceWithLineItemsAudited(ctx context.Context, te
 	if m.createErr != nil {
 		return domain.Invoice{}, m.createErr
 	}
-	inv.ID = fmt.Sprintf("vlx_inv_%d", len(m.invoices)+1)
+	inv.ID = fmt.Sprintf("hc_inv_%d", len(m.invoices)+1)
 	inv.TenantID = tenantID
 	inv.AutoChargePending = queuedAtBirth(inv)
 	if emit != nil {
@@ -1028,7 +1028,7 @@ func (m *mockInvoices) CreateInvoiceWithLineItemsAudited(ctx context.Context, te
 	m.invoices = append(m.invoices, inv)
 	for _, item := range items {
 		item.InvoiceID = inv.ID
-		item.ID = fmt.Sprintf("vlx_ili_%d", len(m.lineItems)+1)
+		item.ID = fmt.Sprintf("hc_ili_%d", len(m.lineItems)+1)
 		item.TenantID = tenantID
 		m.lineItems = append(m.lineItems, item)
 	}
@@ -1382,7 +1382,7 @@ func (a *fakeCreditNoteAdjuster) CreateAndIssueAdjustment(_ context.Context, _, 
 		return domain.CreditNote{}, a.err
 	}
 	a.calls = append(a.calls, cnAdjustCall{invoiceID: invoiceID, gross: grossCents})
-	return domain.CreditNote{ID: fmt.Sprintf("vlx_cn_%d", len(a.calls)), TotalCents: grossCents}, nil
+	return domain.CreditNote{ID: fmt.Sprintf("hc_cn_%d", len(a.calls)), TotalCents: grossCents}, nil
 }
 
 func (a *fakeCreditNoteAdjuster) LockInvoicesForDraftsTx(_ context.Context, _ *sql.Tx, _ string, invoiceIDs []string) error {
@@ -1403,7 +1403,7 @@ func (a *fakeCreditNoteAdjuster) CreateAdjustmentDraftTx(_ context.Context, _ *s
 	// too, the list the per-invoice relief assertions read.
 	a.calls = append(a.calls, cnAdjustCall{invoiceID: invoiceID, gross: grossCents})
 	a.draftCall = append(a.draftCall, cnAdjustCall{invoiceID: invoiceID, gross: grossCents})
-	return domain.CreditNote{ID: fmt.Sprintf("vlx_cn_draft_%d", len(a.draftCall)), TotalCents: grossCents}, nil
+	return domain.CreditNote{ID: fmt.Sprintf("hc_cn_draft_%d", len(a.draftCall)), TotalCents: grossCents}, nil
 }
 
 func (a *fakeCreditNoteAdjuster) Issue(_ context.Context, _, id string) (domain.CreditNote, error) {

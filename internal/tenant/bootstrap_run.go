@@ -16,7 +16,7 @@ import (
 )
 
 // RunBootstrap is the ONLY code path that provisions a tenant (ADR-073).
-// The HTTP handler and cmd/velox-bootstrap are thin callers — the two
+// The HTTP handler and cmd/hardcount-bootstrap are thin callers — the two
 // writers had already drifted apart once (HTTP minted no owner user, no
 // live key, no settings row: a dashboard dead-end), so the shared
 // sequence is the fix, not doc'd parity.
@@ -44,7 +44,7 @@ var ErrOwnerEmailExists = errs.AlreadyExists("owner_email", "an account with thi
 
 // BootstrapDeps are the cross-domain seams RunBootstrap needs. The
 // tenant package must not import its peer package user, so callers
-// wire these (router.go and cmd/velox-bootstrap both pass
+// wire these (router.go and cmd/hardcount-bootstrap both pass
 // user.HashPassword + user.PostgresStore.CreateInTx).
 type BootstrapDeps struct {
 	// HashPassword validates the plaintext (length ≥ user.MinPasswordLength,
@@ -68,7 +68,7 @@ type BootstrapDeps struct {
 // BootstrapOpts parameterize one bootstrap run.
 type BootstrapOpts struct {
 	TenantName    string // default "Demo Tenant"
-	OwnerEmail    string // default admin@velox.local
+	OwnerEmail    string // default admin@hardcount.local
 	OwnerPassword string // empty = generate a 96-bit one, returned once
 	// FirstTenantOnly refuses when ANY tenant exists — the HTTP
 	// endpoint's one-shot semantics. The CLI passes false: additional
@@ -101,7 +101,7 @@ func RunBootstrap(ctx context.Context, db *postgres.DB, deps BootstrapDeps, opts
 	}
 	ownerEmail := strings.TrimSpace(opts.OwnerEmail)
 	if ownerEmail == "" {
-		ownerEmail = "admin@velox.local"
+		ownerEmail = "admin@hardcount.local"
 	}
 	// The owner signs in with this address and password-reset emails go
 	// to it, so it gets the same check as every other address.
@@ -125,10 +125,10 @@ func RunBootstrap(ctx context.Context, db *postgres.DB, deps BootstrapDeps, opts
 		return BootstrapResult{}, err
 	}
 
-	tenantID := postgres.NewID("vlx_ten")
-	testSecretKey, testSecretPrefix, testSecretID := mintKey("vlx_secret_test_")
-	liveSecretKey, liveSecretPrefix, liveSecretID := mintKey("vlx_secret_live_")
-	testPubKey, testPubPrefix, testPubID := mintKey("vlx_pub_test_")
+	tenantID := postgres.NewID("hc_ten")
+	testSecretKey, testSecretPrefix, testSecretID := mintKey("hc_secret_test_")
+	liveSecretKey, liveSecretPrefix, liveSecretID := mintKey("hc_secret_live_")
+	testPubKey, testPubPrefix, testPubID := mintKey("hc_pub_test_")
 
 	tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
@@ -181,7 +181,7 @@ func RunBootstrap(ctx context.Context, db *postgres.DB, deps BootstrapDeps, opts
 			tenant_id, default_currency, timezone, invoice_prefix,
 			net_payment_terms, tax_provider, tax_on_failure
 		)
-		VALUES ($1, 'USD', 'UTC', 'VLX', 30, 'manual', 'block')
+		VALUES ($1, 'USD', 'UTC', 'HC', 30, 'manual', 'block')
 		ON CONFLICT (tenant_id) DO NOTHING
 	`, tenantID); err != nil {
 		return BootstrapResult{}, fmt.Errorf("seed tenant settings: %w", err)
@@ -339,11 +339,11 @@ func generatePassword() string {
 
 // mintKey returns a freshly generated raw key with the given mode-aware
 // prefix, its DB lookup prefix (full prefix + first 12 hex chars), and
-// a newly-minted vlx_key id — the same indexed-prefix shape
+// a newly-minted hc_key id — the same indexed-prefix shape
 // auth.Service.CreateKey writes, so ValidateKey finds these rows.
 func mintKey(prefix string) (raw, dbPrefix, id string) {
 	secret := make([]byte, 32)
 	_, _ = rand.Read(secret)
 	secretHex := hex.EncodeToString(secret)
-	return prefix + secretHex, prefix + secretHex[:12], postgres.NewID("vlx_key")
+	return prefix + secretHex, prefix + secretHex[:12], postgres.NewID("hc_key")
 }

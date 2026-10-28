@@ -1,4 +1,4 @@
-# Writing style for Velox docs
+# Writing style for Hardcount docs
 
 How to write docs in this repo so they are easy to read and still precise.
 Use it when you write a new doc and when you touch an old one. It applies to
@@ -16,9 +16,9 @@ most are short of time.
 
 | Reader | What they need | Main docs |
 |---|---|---|
-| Evaluator: an engineer or founder deciding if Velox fits, usually not a billing expert | What it is, who it is for, how to try it, in 5 minutes | README, self-host, architecture |
+| Evaluator: an engineer or founder deciding if Hardcount fits, usually not a billing expert | What it is, who it is for, how to try it, in 5 minutes | README, self-host, architecture |
 | Integrator: a developer wiring a product to the API | Exact requests, status codes, copy-paste examples | API docs, webhooks, integrations |
-| Operator: an SRE running Velox, sometimes during an incident | Symptom, then command, then how to check the fix | self-host, deploy, `docs/ops/` |
+| Operator: an SRE running Hardcount, sometimes during an incident | Symptom, then command, then how to check the fix | self-host, deploy, `docs/ops/` |
 | Contributor: an engineer making a first change | Where the code is, the rules, and why | CONTRIBUTING, architecture, ADRs |
 | Reviewer: a senior engineer skimming for 2 minutes | The result, the evidence, the reasoning | ENGINEERING.md, benchmarks |
 | AI agent working in the repo | Rules it can extract fast and follow exactly | CLAUDE.md, playbooks |
@@ -78,10 +78,10 @@ until the end, rewrite it.
 
 Set on 2026-10-17. Every reader-facing page (README, guides, `docs/` pages a
 user opens) meets it, on top of the rules above. Write for a friendly, busy
-person who has never heard of Velox. The reader should never have to decode a
+person who has never heard of Hardcount. The reader should never have to decode a
 word.
 
-1. **Say what the thing is in one plain line.** "Velox is a billing system
+1. **Say what the thing is in one plain line.** "Hardcount is a billing system
    you run yourself" before any feature list.
 2. **Say why it exists and who it is for.** One or two lines each, near the
    top.
@@ -175,9 +175,9 @@ A line has up to three parts:
    - an API key: `by API key <key name>`;
    - the customer: `Customer, on the payment page` or
      `Customer, in the portal`;
-   - anything Velox did on its own: `Automatic`.
+   - anything Hardcount did on its own: `Automatic`.
 
-   Never `system`, `api_key`, `operator`, "an operator" or "by Velox". The
+   Never `system`, `api_key`, `operator`, "an operator" or "by Hardcount". The
    actor comes from a fact written with the row. A row with no such fact
    shows no actor; only legacy rows lack one.
 5. **Plain words.** No enum codes, table names, Go errors, meter keys or
@@ -249,7 +249,7 @@ any corrections. The story of how the result was reached goes in an appendix.
 ## Checks
 
 - **[Vale](https://vale.sh)** lints prose against rules 2, 5 and 6
-  (`.vale.ini`, rules in `.vale/styles/Velox/`). CI comments only on lines a
+  (`.vale.ini`, rules in `.vale/styles/Hardcount/`). CI comments only on lines a
   PR adds and never fails the build. Run `vale <file>` locally.
 - **[lychee](https://lychee.cli.rs)** checks that every internal link and
   `#anchor` resolves. CI fails on a broken one. Run

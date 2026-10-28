@@ -20,7 +20,7 @@ func TestDispatchInvoiceFinalized_PayloadCarriesCreditsApplied(t *testing.T) {
 	e.SetEventDispatcher(d)
 
 	inv := domain.Invoice{
-		ID:                  "vlx_inv_1",
+		ID:                  "hc_inv_1",
 		InvoiceNumber:       "INV-0001",
 		CustomerID:          "cus_1",
 		Status:              domain.InvoiceFinalized,
@@ -59,7 +59,7 @@ func TestDispatchInvoiceFinalized_ZeroCreditsAppliedIsSent(t *testing.T) {
 	e.SetEventDispatcher(d)
 
 	e.DispatchInvoiceFinalized(context.Background(), "t1", domain.Invoice{
-		ID: "vlx_inv_2", Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
+		ID: "hc_inv_2", Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
 		TotalAmountCents: 500, AmountDueCents: 500, Currency: "USD",
 	})
 

@@ -1,4 +1,4 @@
-# Velox dashboard (web-v2) — static SPA served by nginx.
+# Hardcount dashboard (web-v2) — static SPA served by nginx.
 #
 # Separate Dockerfile (not a stage in the root Dockerfile) on purpose: the
 # root file's FINAL stage must stay the API image — a plain `docker build .`
@@ -36,8 +36,8 @@ FROM nginx:1.30-alpine
 # on a high-severity finding that already has a fix.
 RUN apk upgrade --no-cache
 
-LABEL org.opencontainers.image.source="https://github.com/getvelox/velox"
-LABEL org.opencontainers.image.description="Velox dashboard (web-v2 SPA)"
+LABEL org.opencontainers.image.source="https://github.com/gethardcount/hardcount"
+LABEL org.opencontainers.image.description="Hardcount dashboard (web-v2 SPA)"
 LABEL org.opencontainers.image.licenses="MIT"
 
 COPY --from=build /repo/web-v2/dist /usr/share/nginx/html

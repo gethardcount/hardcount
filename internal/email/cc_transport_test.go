@@ -173,7 +173,7 @@ func (s staticSuppression) IsSuppressed(_ context.Context, _, email string) (boo
 func newCCTestSender(t *testing.T, srv *scriptedSMTP) *Sender {
 	t.Helper()
 	host, port := srv.addr()
-	return &Sender{host: host, port: port, from: "billing@velox.test", tlsMode: "none"}
+	return &Sender{host: host, port: port, from: "billing@hardcount.test", tlsMode: "none"}
 }
 
 // TestCC_HeaderAndEnvelope: one MIME message, one SMTP transaction —

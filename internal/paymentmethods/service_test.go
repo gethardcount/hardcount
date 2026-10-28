@@ -110,7 +110,7 @@ func (m *memStore) Upsert(_ context.Context, tenantID string, in PaymentMethod, 
 	}
 
 	m.next++
-	id := "vlx_pm_mem_" + in.StripePaymentMethodID
+	id := "hc_pm_mem_" + in.StripePaymentMethodID
 	now := time.Now().UTC()
 	row := PaymentMethod{
 		ID:                    id,
@@ -326,7 +326,7 @@ func TestAttach_FirstBecomesDefault(t *testing.T) {
 }
 
 // TestAttach_SecondDoesNotStealDefault — a second card attached without
-// makeDefault (a hosted-page payment, a SetupIntent Velox did not create)
+// makeDefault (a hosted-page payment, a SetupIntent Hardcount did not create)
 // while one is already default keeps the existing default. Switching takes
 // SetDefault, or a setup flow (makeDefault).
 func TestAttach_SecondDoesNotStealDefault(t *testing.T) {
@@ -343,7 +343,7 @@ func TestAttach_SecondDoesNotStealDefault(t *testing.T) {
 	}
 }
 
-// A card saved through a Velox setup flow (makeDefault) becomes the default
+// A card saved through a Hardcount setup flow (makeDefault) becomes the default
 // beside a working one: exactly one default, the new card, and Stripe's copy
 // is pointed at it. The audit log records the attach and the default change.
 func TestAttach_MakeDefaultTakesTheDefaultAndSyncsStripe(t *testing.T) {
@@ -379,7 +379,7 @@ func TestAttach_MakeDefaultTakesTheDefaultAndSyncsStripe(t *testing.T) {
 		t.Fatalf("Stripe default sync: calls=%d pm=%q, want once with pm_new", stripe.setDefaultCalls, stripe.setDefaultPMID)
 	}
 	// The attach writes the attached row, then a default_changed row: the
-	// card Velox charges changed.
+	// card Hardcount charges changed.
 	if len(audit.logs) < 2 {
 		t.Fatalf("audit rows = %v, want attached then default_changed", audit.logs)
 	}
@@ -486,7 +486,7 @@ func TestAttach_BesideMakesNoStripeCall(t *testing.T) {
 }
 
 // The first card becomes the default by the store's rule, and its attach
-// points Stripe's copy at it (Stripe's default follows Velox's).
+// points Stripe's copy at it (Stripe's default follows Hardcount's).
 func TestAttach_FirstCardSyncsStripeDefault(t *testing.T) {
 	store := newMemStore()
 	stripe := &fakeStripe{}

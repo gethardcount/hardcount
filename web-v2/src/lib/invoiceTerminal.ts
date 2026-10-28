@@ -16,7 +16,7 @@
  *      invoice still showed the amber demand — while the hosted invoice page,
  *      facing the same customer from the same dunning email, already said
  *      "This invoice is closed". Two public pages, opposite answers, same
- *      invoice (found live on TC Walk Co VLX-000152, 2026-08-05).
+ *      invoice (found live on TC Walk Co HC-000152, 2026-08-05).
  *
  * Three misses of one rule is the point at which a shared predicate is cheaper
  * than the next miss. Both public pages now read this, and it is pinned by

@@ -1,9 +1,9 @@
 # RFM-001: Commits freeze every few seconds after a quiet spell (WAL pool runs dry)
 
-Shipped as guidance in v0.4.0 ([#852](https://github.com/getvelox/velox/pull/852)).
+Shipped as guidance in v0.4.0 ([#852](https://github.com/gethardcount/hardcount/pull/852)).
 Operator steps: [runbook](../ops/runbook/rds-wal-pool.md).
 
-Diagnosed on AWS during Velox's
+Diagnosed on AWS during Hardcount's
 [sustained-throughput benchmark](../benchmarks/sustained-throughput.md);
 reproducible with the rig scripts in [`scripts/bench-rig/`](../../scripts/bench-rig/).
 

@@ -27,9 +27,9 @@ func TestPlanFor(t *testing.T) {
 		{"up to date", state{gooseTable: true, applied: []int64{180, 181, 182}}, PlanUpToDate, 182, nil, nil},
 		{"ahead", state{gooseTable: true, applied: []int64{180, 181, 182, 183, 184}}, PlanAhead, 184, nil, []int64{183, 184}},
 		{"rolled-back 180: row 0 only", state{gooseTable: true}, PlanEmpty, 0, []int64{180, 181, 182}, nil},
-		{"Velox tables, no record", state{veloxTables: true}, PlanUnrecorded, 0, nil, nil},
-		{"Velox tables, goose row 0 only", state{veloxTables: true, gooseTable: true}, PlanUnrecorded, 0, nil, nil},
-		{"Velox tables, goose rows but not 180", state{veloxTables: true, gooseTable: true, applied: []int64{183}}, PlanUnrecorded, 183, nil, nil},
+		{"Hardcount tables, no record", state{hardcountTables: true}, PlanUnrecorded, 0, nil, nil},
+		{"Hardcount tables, goose row 0 only", state{hardcountTables: true, gooseTable: true}, PlanUnrecorded, 0, nil, nil},
+		{"Hardcount tables, goose rows but not 180", state{hardcountTables: true, gooseTable: true, applied: []int64{183}}, PlanUnrecorded, 183, nil, nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -61,49 +61,49 @@ func TestFormatPlan(t *testing.T) {
 			name: "behind, with an index build",
 			plan: Plan{State: PlanBehind, Database: 180, Latest: 182, Pending: planFiles[1:]},
 			want: `database:     180 (goose_db_version)
-this release: 182 (velox v0.9.1)
+this release: 182 (hardcount v0.9.1)
 state:        behind, 2 migrations to apply
   00181_usage_rollup_index.sql             no transaction (index build)
   00182_add_invoice_memo.sql
 running now:  no
-next: take a backup, then run "velox migrate". A server started with RUN_MIGRATIONS_ON_BOOT=true runs it as it starts.
+next: take a backup, then run "hardcount migrate". A server started with RUN_MIGRATIONS_ON_BOOT=true runs it as it starts.
 `,
 		},
 		{
 			name: "empty",
 			plan: Plan{State: PlanEmpty, Latest: 180, Pending: planFiles[:1]},
 			want: `database:     empty
-this release: 180 (velox v0.9.1)
+this release: 180 (hardcount v0.9.1)
 state:        empty, 1 migration to apply
   00180 baseline
 running now:  no
-next: take a backup, then run "velox migrate". A server started with RUN_MIGRATIONS_ON_BOOT=true runs it as it starts.
+next: take a backup, then run "hardcount migrate". A server started with RUN_MIGRATIONS_ON_BOOT=true runs it as it starts.
 `,
 		},
 		{
 			name: "no migration record",
 			plan: Plan{State: PlanUnrecorded, Latest: 182},
-			want: `database:     Velox tables, no migration record
-this release: 182 (velox v0.9.1)
-state:        no migration record, velox migrate will not run
+			want: `database:     Hardcount tables, no migration record
+this release: 182 (hardcount v0.9.1)
+state:        no migration record, hardcount migrate will not run
 running now:  no
-next: restore the backup together with its migration table, or use an empty database. Upgrading from Velox 0.8.x is not supported; install fresh. Steps: docs/ops/runbook/migration-failed-midway.md
+next: restore the backup together with its migration table, or use an empty database. Upgrading from Hardcount 0.8.x is not supported; install fresh. Steps: docs/ops/runbook/migration-failed-midway.md
 `,
 		},
 		{
 			name: "up to date, a migration running",
-			plan: Plan{State: PlanUpToDate, Database: 182, Latest: 182, Running: "yes, pid 4242 (velox-migrate)"},
+			plan: Plan{State: PlanUpToDate, Database: 182, Latest: 182, Running: "yes, pid 4242 (hardcount-migrate)"},
 			want: `database:     182 (goose_db_version)
-this release: 182 (velox v0.9.1)
+this release: 182 (hardcount v0.9.1)
 state:        up to date, nothing to apply
-running now:  yes, pid 4242 (velox-migrate)
+running now:  yes, pid 4242 (hardcount-migrate)
 `,
 		},
 		{
 			name: "ahead",
 			plan: Plan{State: PlanAhead, Database: 183, Latest: 182, Ahead: []PlanVersion{{183, time.Date(2026, 11, 2, 9, 30, 0, 0, time.UTC)}}},
 			want: `database:     183 (goose_db_version)
-this release: 182 (velox v0.9.1)
+this release: 182 (hardcount v0.9.1)
 state:        ahead, the database has migrations this release does not ship
   00183   applied 2026-11-02 09:30:00 UTC
 running now:  no

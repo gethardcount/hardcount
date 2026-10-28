@@ -22,14 +22,14 @@ const LockTimeoutRunbookPath = "docs/ops/runbook/migration-failed-midway.md#it-w
 // lock_timeout expires ("canceling statement due to lock timeout").
 const pgLockNotAvailable = "55P03"
 
-// ErrNoMigrationRecord says the database has Velox tables but goose has
+// ErrNoMigrationRecord says the database has Hardcount tables but goose has
 // not recorded migration 180. Up, Down and CheckSchemaReady return it
-// before they change anything; `velox migrate status` shows it as
+// before they change anything; `hardcount migrate status` shows it as
 // PlanUnrecorded.
-var ErrNoMigrationRecord = errors.New("this database has Velox tables but no migration record " +
-	"(goose_db_version has no row for 180), so Velox cannot tell which version they are at. Nothing was changed. " +
+var ErrNoMigrationRecord = errors.New("this database has Hardcount tables but no migration record " +
+	"(goose_db_version has no row for 180), so Hardcount cannot tell which version they are at. Nothing was changed. " +
 	"Restore the backup together with its migration table, or use an empty database. " +
-	"Upgrading from Velox 0.8.x is not supported; install fresh. Steps: " + RunbookPath)
+	"Upgrading from Hardcount 0.8.x is not supported; install fresh. Steps: " + RunbookPath)
 
 // FileError says a migration failed. goose stops at the first failure and
 // records nothing for it.
@@ -98,8 +98,8 @@ type LockWaitError struct {
 }
 
 func (e *LockWaitError) Error() string {
-	return fmt.Sprintf("another Velox process is migrating this database (it holds advisory lock %d), "+
-		"and this one waited %s for it: `velox migrate status` shows it under \"running now\". "+
+	return fmt.Sprintf("another Hardcount process is migrating this database (it holds advisory lock %d), "+
+		"and this one waited %s for it: `hardcount migrate status` shows it under \"running now\". "+
 		"Run the upgrade again when it has finished. Nothing was changed.",
 		lock.DefaultLockID, e.Waited)
 }

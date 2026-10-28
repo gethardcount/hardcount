@@ -38,7 +38,7 @@ func (pinnedClock) SimForSubscription(context.Context, string, string) (clock.Si
 	return clock.Sim{}, errs.ErrNotFound
 }
 func (p pinnedClock) SimForInvoice(context.Context, string, string) (clock.Sim, error) {
-	return clock.Sim{At: p.at, TestClockID: "vlx_tclk_zero_due"}, nil
+	return clock.Sim{At: p.at, TestClockID: "hc_tclk_zero_due"}, nil
 }
 
 // bypassExec runs one statement on a transaction RLS does not filter, in test
@@ -184,7 +184,7 @@ func TestIssue_ToZeroOnDunnedInvoice_MarksPaidInIssueTx(t *testing.T) {
 		r := newZeroDueRig(t, "CN Zero Due Settles", domain.PaymentFailed)
 		// The customer had opened the hosted payment page: an open checkout claim.
 		bypassExec(t, r.ctx, r.db, `INSERT INTO checkout_sessions (id, tenant_id, invoice_id, livemode, amount_cents, currency, status, expires_at)
-			VALUES ('vlx_cs_zero_due', $1, $2, false, 10000, 'USD', 'open', now() + interval '1 hour')`, r.tenantID, r.inv.ID)
+			VALUES ('hc_cs_zero_due', $1, $2, false, 10000, 'USD', 'open', now() + interval '1 hour')`, r.tenantID, r.inv.ID)
 		draft := r.draft(t, 10000)
 
 		issued, err := r.notes.Issue(r.ctx, r.tenantID, draft.ID)

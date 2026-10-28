@@ -16,7 +16,7 @@ import (
 //
 // Why: while that value lived in the column, every reader of it had to know
 // the prefix, and a reader that checked only "has a PaymentIntent" offered a
-// card refund on a bank transfer (VLX-000068). An offline payment now sets
+// card refund on a bank transfer (HC-000068). An offline payment now sets
 // paid_out_of_band and leaves the column empty, so that check is always
 // right. Migration 00203 refuses the prefix in the column; this catches code
 // that would still write it, or still look for it, before a database does.

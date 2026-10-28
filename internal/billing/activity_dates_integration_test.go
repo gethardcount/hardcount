@@ -29,7 +29,7 @@ func (cardOnFile) ResolveForCharge(context.Context, string, string) (string, str
 }
 
 // anchoredCharger is the card charge as payment.Stripe makes it on a test
-// clock: the PaymentIntent carries ctx's simulated instant as velox_anchor_at,
+// clock: the PaymentIntent carries ctx's simulated instant as hardcount_anchor_at,
 // and the settle stamps paid_at from that anchor. Only Stripe is left out;
 // the settle is the real invoice store's.
 type anchoredCharger struct {
@@ -68,7 +68,7 @@ func TestTrialExpiry_TestClock_ChargeNotBeforeIssue(t *testing.T) {
 		current_billing_period_start = $2, current_billing_period_end = $3, next_billing_at = $3 WHERE id = $4`,
 		f.cycleStart, trialEnd, trialEnd.AddDate(0, 1, 0), f.subID)
 
-	clockID := postgres.NewID("vlx_tclk")
+	clockID := postgres.NewID("hc_tclk")
 	execTx(t, f.db, r.base, f.tenantID,
 		`INSERT INTO test_clocks (id, tenant_id, livemode, name, frozen_time, status) VALUES ($1, $2, false, 'trial card clock', $3, 'advancing')`,
 		clockID, f.tenantID, frozen)

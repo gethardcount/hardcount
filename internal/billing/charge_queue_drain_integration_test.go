@@ -123,7 +123,7 @@ func TestListAutoChargePending_CursorBreaksCreatedAtTiesByID(t *testing.T) {
 // a clock with 100 or more queued invoices would loop until Advance times out.
 func TestListAutoChargePendingForClock_PagesAfterTheCursor(t *testing.T) {
 	h := newCollectHarness(t)
-	const clockID = "vlx_tclk_drain"
+	const clockID = "hc_tclk_drain"
 	first := h.seed(t, "INV-CLK-1")
 	second := h.seed(t, "INV-CLK-2")
 	tx, err := h.db.BeginTx(h.ctx, postgres.TxBypass, "")

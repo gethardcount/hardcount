@@ -79,7 +79,7 @@ func itSignIn(h http.Handler, ip, email, password string) int {
 	return itSignInWith(h, ip, email, password, nil).Code
 }
 
-// itSignInWith signs in from ip, sending the velox_device cookie when
+// itSignInWith signs in from ip, sending the hardcount_device cookie when
 // browser is not nil.
 func itSignInWith(h http.Handler, ip, email, password string, browser *http.Cookie) *httptest.ResponseRecorder {
 	body, _ := json.Marshal(LoginReq{Email: email, Password: password})
@@ -93,7 +93,7 @@ func itSignInWith(h http.Handler, ip, email, password string, browser *http.Cook
 	return rr
 }
 
-// deviceCookie is the velox_device cookie a sign-in set.
+// deviceCookie is the hardcount_device cookie a sign-in set.
 func deviceCookie(t *testing.T, rr *httptest.ResponseRecorder) *http.Cookie {
 	t.Helper()
 	if rr.Code != http.StatusOK {
@@ -104,7 +104,7 @@ func deviceCookie(t *testing.T, rr *httptest.ResponseRecorder) *http.Cookie {
 			return c
 		}
 	}
-	t.Fatal("the sign-in set no velox_device cookie")
+	t.Fatal("the sign-in set no hardcount_device cookie")
 	return nil
 }
 
@@ -237,7 +237,7 @@ func TestLoginThrottle_Cleanup(t *testing.T) {
 	}
 }
 
-// TestLoginThrottle_BrowserIsKnownPerEmail: a velox_device cookie makes a
+// TestLoginThrottle_BrowserIsKnownPerEmail: a hardcount_device cookie makes a
 // browser known only for the email it signed in to. A guesser who signs in
 // to an account of their own and keeps that cookie is a new browser for
 // every other email, so the email's wait holds them. Control: the owner's

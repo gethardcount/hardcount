@@ -43,7 +43,7 @@ func TestOverview_CreditBalanceByCurrency(t *testing.T) {
 		}
 		defer postgres.Rollback(tx)
 		if _, err := tx.Exec(`INSERT INTO customer_credit_ledger (id, tenant_id, customer_id, entry_type, currency, amount_cents, balance_after, description)
-			VALUES ($1, $2, $3, 'grant', $4, $5, $5, 'seed')`, postgres.NewID("vlx_ccl"), tenantID, customerID, currency, cents); err != nil {
+			VALUES ($1, $2, $3, 'grant', $4, $5, $5, 'seed')`, postgres.NewID("hc_ccl"), tenantID, customerID, currency, cents); err != nil {
 			t.Fatalf("seed %s ledger row: %v", currency, err)
 		}
 		if err := tx.Commit(); err != nil {

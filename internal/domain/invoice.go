@@ -120,7 +120,7 @@ func (i Invoice) Parked() bool {
 // Stripe's ids, and an offline payment leaves it empty (migration 00203
 // refuses anything else). Before, an offline payment wrote a synthetic
 // "out_of_band:<time>" id there, every reader had to know the prefix, and
-// one that did not offered a card refund on a bank transfer (VLX-000068,
+// one that did not offered a card refund on a bank transfer (HC-000068,
 // 2026-08-02).
 func (i Invoice) HasCardPayment() bool {
 	return i.StripePaymentIntentID != ""
@@ -336,7 +336,7 @@ type Invoice struct {
 	// invoice paid out of band.
 	StripePaymentIntentID string `json:"stripe_payment_intent_id,omitempty"`
 	// PaidOutOfBand is set when the operator recorded the payment as made
-	// outside Velox (RecordOfflinePayment: a bank transfer, a cheque, cash).
+	// outside Hardcount (RecordOfflinePayment: a bank transfer, a cheque, cash).
 	// Stripe's paid_out_of_band. Such an invoice has no PaymentIntent (a
 	// CHECK holds both), so there is no card to refund.
 	PaidOutOfBand     bool   `json:"paid_out_of_band"`
@@ -422,7 +422,7 @@ type Invoice struct {
 	BillingReason InvoiceBillingReason `json:"billing_reason,omitempty"`
 
 	// StripeInvoiceID is the source Stripe invoice id (in_xxx) for an invoice
-	// imported from a Stripe account. Empty for Velox-native invoices. The
+	// imported from a Stripe account. Empty for Hardcount-native invoices. The
 	// column and its partial unique index (idx_invoices_stripe_invoice_id;
 	// migration 0063) remain from the Stripe importer that was deliberately
 	// removed in the 2026-04-29 lean-cut — nothing currently writes this
@@ -549,7 +549,7 @@ type InvoiceLineItem struct {
 	TaxCode         string  `json:"tax_code,omitempty"`
 	// TaxabilityReason carries the Stripe-canonical structured reason
 	// (e.g. "standard_rated", "reverse_charge", "not_collecting",
-	// "customer_exempt", "product_exempt", "zero_rated"), or Velox's own
+	// "customer_exempt", "product_exempt", "zero_rated"), or Hardcount's own
 	// TaxReasonPrepaidCreditPurchase on a prepaid-commit purchase line under
 	// the manual or Stripe Tax provider. The dashboard renders a badge for
 	// non-trivial values, and the PDF appends a legend when a line is

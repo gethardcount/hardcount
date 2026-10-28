@@ -32,7 +32,7 @@ var stripeTaxOutcomes *prometheus.CounterVec
 
 func init() {
 	c := prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "velox_tax_outcome_total",
+		Name: "hardcount_tax_outcome_total",
 		Help: "Count of non-happy Stripe tax outcomes, by outcome (deferred) and reason.",
 	}, []string{"outcome", "reason"})
 	if err := prometheus.DefaultRegisterer.Register(c); err != nil {
@@ -149,7 +149,7 @@ func (p *StripeTaxProvider) Calculate(ctx context.Context, req Request) (*Result
 	// key for 24h; the calculation itself expires after 24h too.
 	if scope := calculationScope(ctx); scope != "" {
 		sum := sha256.Sum256(append([]byte(scope+"\x00"), reqRaw...))
-		params.IdempotencyKey = stripe.String("velox_tax_calc_" + hex.EncodeToString(sum[:20]))
+		params.IdempotencyKey = stripe.String("hardcount_tax_calc_" + hex.EncodeToString(sum[:20]))
 	}
 
 	calc, err := client.V1TaxCalculations.Create(ctx, params)
@@ -235,7 +235,7 @@ func (p *StripeTaxProvider) Commit(ctx context.Context, calcRef, invoiceID strin
 		Calculation: stripe.String(calcRef),
 		Reference:   stripe.String(invoiceID),
 	}
-	params.IdempotencyKey = stripe.String("velox_tax_commit_" + invoiceID)
+	params.IdempotencyKey = stripe.String("hardcount_tax_commit_" + invoiceID)
 	txn, err := client.V1TaxTransactions.CreateFromCalculation(ctx, params)
 	if err != nil {
 		return "", fmt.Errorf("stripe tax: commit calculation %s for invoice %s: %w", calcRef, invoiceID, err)
@@ -289,7 +289,7 @@ func (p *StripeTaxProvider) Reverse(ctx context.Context, req ReversalRequest) (*
 	// request makes Stripe return the cached response on retry. Same
 	// pattern as payment.StripeRefunder. Key shape derived from the
 	// reference so retries of the same logical reversal converge.
-	params.IdempotencyKey = stripe.String("velox_tax_rev_" + ref)
+	params.IdempotencyKey = stripe.String("hardcount_tax_rev_" + ref)
 	txn, err := client.V1TaxTransactions.CreateReversal(ctx, params)
 	if err != nil {
 		return nil, fmt.Errorf("stripe tax: reverse transaction %s for credit note %s: %w",
@@ -562,7 +562,7 @@ func (p *StripeTaxProvider) mapResult(calc *stripe.TaxCalculation, req Request) 
 // parseStripeRate parses a Stripe Tax `percentage_decimal` string (e.g.
 // "8.875") into the precise percent rate as float64. Stripe documents
 // this field as a string precisely to avoid lossy float round-trip;
-// Velox stores it verbatim into the tax_rate NUMERIC(7,4) column per
+// Hardcount stores it verbatim into the tax_rate NUMERIC(7,4) column per
 // ADR-042/043. Returns 0 on parse failure (caller logs at the call
 // site).
 func parseStripeRate(pct string) float64 {

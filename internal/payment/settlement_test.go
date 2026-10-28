@@ -146,7 +146,7 @@ func (staticCustomerEmail) GetCustomerEmail(_ context.Context, _, _ string) (str
 func TestSettleSucceeded_ConcurrentRedeliveryFiresSideEffectsOnce(t *testing.T) {
 	invoices := newMockInvoiceUpdater()
 	invoices.invoices["inv_1"] = domain.Invoice{
-		ID: "inv_1", TenantID: "t1", CustomerID: "cus_1", InvoiceNumber: "VLX-1",
+		ID: "inv_1", TenantID: "t1", CustomerID: "cus_1", InvoiceNumber: "HC-1",
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentProcessing,
 		StripePaymentIntentID: "pi_abc", TotalAmountCents: 2900, Currency: "USD",
 	}
@@ -221,7 +221,7 @@ func TestSettleSucceeded_MarksPaidFromAnySource(t *testing.T) {
 func TestSettleFailed_ConcurrentRedeliveryFiresSideEffectsOnce(t *testing.T) {
 	invoices := newMockInvoiceUpdater()
 	invoices.invoices["inv_1"] = domain.Invoice{
-		ID: "inv_1", TenantID: "t1", CustomerID: "cus_1", InvoiceNumber: "VLX-1",
+		ID: "inv_1", TenantID: "t1", CustomerID: "cus_1", InvoiceNumber: "HC-1",
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentProcessing,
 		StripePaymentIntentID: "pi_x", TotalAmountCents: 4200, Currency: "USD",
 	}
@@ -274,7 +274,7 @@ func TestSettleFailed_InlinePresetThenWebhookStillNotifiesOnce(t *testing.T) {
 	// Inline charge path already flipped payment_status=failed with pi_y but did
 	// NOT notify (failNotedPI for inv_1 stays empty).
 	invoices.invoices["inv_1"] = domain.Invoice{
-		ID: "inv_1", TenantID: "t1", CustomerID: "cus_1", InvoiceNumber: "VLX-2",
+		ID: "inv_1", TenantID: "t1", CustomerID: "cus_1", InvoiceNumber: "HC-2",
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed,
 		StripePaymentIntentID: "pi_y", LastPaymentError: "declined",
 	}
@@ -447,7 +447,7 @@ func (d sequencedDunningResolver) ResolveByInvoice(ctx context.Context, _, _ str
 func TestSettleSucceeded_ReceiptRidesSettleTx_AndDetachedFromCancel(t *testing.T) {
 	invoices := newMockInvoiceUpdater()
 	invoices.invoices["inv_1"] = domain.Invoice{
-		ID: "inv_1", TenantID: "t1", CustomerID: "cus_1", InvoiceNumber: "VLX-1",
+		ID: "inv_1", TenantID: "t1", CustomerID: "cus_1", InvoiceNumber: "HC-1",
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentProcessing,
 		StripePaymentIntentID: "pi_abc", TotalAmountCents: 2900, Currency: "USD",
 	}
@@ -493,7 +493,7 @@ func TestSettleFailed_NoticeRidesFailStampTx_BeforeDunningStart(t *testing.T) {
 	run := func(suppress bool) (seq *callSequencer, dunning *mockDunningStarter) {
 		invoices := newMockInvoiceUpdater()
 		invoices.invoices["inv_1"] = domain.Invoice{
-			ID: "inv_1", TenantID: "t1", CustomerID: "cus_1", InvoiceNumber: "VLX-1",
+			ID: "inv_1", TenantID: "t1", CustomerID: "cus_1", InvoiceNumber: "HC-1",
 			Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentProcessing,
 		}
 		invoices.byPI["pi_abc"] = "inv_1"

@@ -19,7 +19,7 @@ const BelowMinimumCode = "amount_below_minimum"
 // another way, or add the amount to the customer's next invoice by hand
 // (Lago's model; the min-charge check of 2026-10-22).
 //
-// Velox learns the minimum from Stripe's answer, never from a table of its
+// Hardcount learns the minimum from Stripe's answer, never from a table of its
 // own: Stripe applies the minimum of the account's settlement currency when
 // the charge needs converting, so a fixed table is exact only when the
 // charge currency matches a bank account's.

@@ -24,7 +24,7 @@ import (
 
 const e2eGrace = time.Hour
 
-// ingestAt posts one usage event stamped ts that reaches Velox at arrival.
+// ingestAt posts one usage event stamped ts that reaches Hardcount at arrival.
 func (r *lagRig) ingestAt(ts, arrival time.Time, qty int64) {
 	r.t.Helper()
 	r.eventSeq++
@@ -44,7 +44,7 @@ func usageBilled(invs []lagInvoice) int64 {
 }
 
 // TestInvoiceGrace_LateUsageInsideTheGraceIsBilled is the policy's headline:
-// an event stamped in April that reaches Velox 30 minutes after April ended
+// an event stamped in April that reaches Hardcount 30 minutes after April ended
 // is on April's invoice, because the invoice is built an hour after the
 // period end. POST /v1/billing/run waits for the grace like the scheduler: a
 // run at B+30m closes nothing and saves no failure. Once the invoice is

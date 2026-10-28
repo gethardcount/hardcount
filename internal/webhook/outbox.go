@@ -108,7 +108,7 @@ func (s *OutboxStore) Enqueue(ctx context.Context, tx *sql.Tx, tenantID, eventTy
 		return "", fmt.Errorf("outbox: marshal payload: %w", err)
 	}
 
-	id := postgres.NewID("vlx_whob")
+	id := postgres.NewID("hc_whob")
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO webhook_outbox (id, tenant_id, event_type, payload, status, attempts, next_attempt_at)
 		VALUES ($1, $2, $3, $4, 'pending', 0, now())

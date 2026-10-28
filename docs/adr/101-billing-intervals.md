@@ -5,7 +5,7 @@ Status: Accepted (owner decision; phased — see Rollout)
 
 ## Summary
 
-Each subscription item's billable date ranges are stored in a `billing_intervals` table, written in the same transaction as the item change that opens or closes them. Billing a period, a cancel or a usage window intersects those ranges with the period, instead of re-reading the `subscription_item_changes` log and applying day rules at billing time. Reading the log that way had caused a run of proration bugs (wrong charges for part of a period), and deciding each range once, when the change is written, removes that class. Database constraints refuse overlapping or duplicate open ranges, and a live item with no range makes its subscription's billing fail with an error instead of billing zero. Status: active; fully rolled out on 2026-07-28, when the old log reader and the `VELOX_BILLING_INTERVALS_READER` switch were deleted.
+Each subscription item's billable date ranges are stored in a `billing_intervals` table, written in the same transaction as the item change that opens or closes them. Billing a period, a cancel or a usage window intersects those ranges with the period, instead of re-reading the `subscription_item_changes` log and applying day rules at billing time. Reading the log that way had caused a run of proration bugs (wrong charges for part of a period), and deciding each range once, when the change is written, removes that class. Database constraints refuse overlapping or duplicate open ranges, and a live item with no range makes its subscription's billing fail with an error instead of billing zero. Status: active; fully rolled out on 2026-07-28, when the old log reader and the `HARDCOUNT_BILLING_INTERVALS_READER` switch were deleted.
 
 ## Context
 
@@ -107,16 +107,16 @@ clamp is applied only to adds inside the current open period, against
 CurrentBillingPeriodStart; historical precision is immaterial (only
 intervals intersecting the current period forward are ever billed).
 
-**Amended 2026-10-23 (B5, [#1374](https://github.com/getvelox/velox/pull/1374)):
+**Amended 2026-10-23 (B5, [#1374](https://github.com/gethardcount/hardcount/pull/1374)):
 the backfill is deleted.** It existed only for items written before the
-dual-write. Velox 0.9.0 cannot take over a 0.8.x database, so every
+dual-write. Hardcount 0.9.0 cannot take over a 0.8.x database, so every
 database it runs on was created from the goose baseline, long after the
 dual-write shipped (2026-07-27), and every item already has its intervals
 (`TestIntervals_FreshDatabaseNeedsNoBackfill`). A database that ran any
 build from 2026-07-27 on had the backfill run at each start, so it has
 nothing left to rebuild either. The boot-time run was not
 free: two copies starting together raced on it, which deadlocked behind
-PgBouncer ([#1364](https://github.com/getvelox/velox/issues/1364)), and on a
+PgBouncer ([#1364](https://github.com/gethardcount/hardcount/issues/1364)), and on a
 fresh database it gave a trial canceled before it converted an interval it
 never had (`source = 'backfill'`). Nothing reconstructs the table now; a
 live item with no interval still fails its subscription's billing loudly.
@@ -157,7 +157,7 @@ live item with no interval still fails its subscription's billing loudly.
    refused by trigger (0160), closing the writer bypass the residue
    class revealed. Sweep evidence: 140/140 active subs, 2 allowlisted,
    0 unexplained.
-3. **Cutover**: `VELOX_BILLING_INTERVALS_READER=off|shadow|on`,
+3. **Cutover**: `HARDCOUNT_BILLING_INTERVALS_READER=off|shadow|on`,
    global env, read ONCE at boot (no half-legacy invoices); clamp +
    interpretation stay dormant one release.
    **Machinery SHIPPED 2026-07-27** (mode plumbed through the one
@@ -180,7 +180,7 @@ live item with no interval still fails its subscription's billing loudly.
    readers in agreement). The legacy fact-log interpretation
    (`itemBaseSegments`), the shadow comparator + allowlist classifier,
    the one-statement UNION snapshot, and the
-   `VELOX_BILLING_INTERVALS_READER` modes are deleted; the reader is a
+   `HARDCOUNT_BILLING_INTERVALS_READER` modes are deleted; the reader is a
    dumb interval×window intersection over `ListItemIntervals`, keeping
    the loud missing-interval invariant. A set env var now logs a boot
    WARN naming the removal (never silently ignored). The corpus test

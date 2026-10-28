@@ -77,7 +77,7 @@ func (t *thresholdInvoices) GetLatestThresholdInvoiceForCycle(context.Context, s
 	if t.fire == nil {
 		return domain.Invoice{}, errs.ErrNotFound
 	}
-	return domain.Invoice{ID: "vlx_inv_fire", BillingPeriodEnd: *t.fire}, nil
+	return domain.Invoice{ID: "hc_inv_fire", BillingPeriodEnd: *t.fire}, nil
 }
 
 func (t *thresholdInvoices) ListLineItems(context.Context, string, string) ([]domain.InvoiceLineItem, error) {
@@ -163,8 +163,8 @@ func (f *customerUsageFixture) seedSubIn(
 		t.Fatalf("create plan: %v", err)
 	}
 
-	subID = postgres.NewID("vlx_sub")
-	itemID := postgres.NewID("vlx_si")
+	subID = postgres.NewID("hc_sub")
+	itemID := postgres.NewID("hc_si")
 	tx, err := f.db.BeginTx(ctx, postgres.TxTenant, f.tenantID)
 	if err != nil {
 		t.Fatalf("begin sub: %v", err)

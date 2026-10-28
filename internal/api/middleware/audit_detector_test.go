@@ -102,7 +102,7 @@ func TestAuditCoverage_ReportsOnlyUncoveredMutations(t *testing.T) {
 		{
 			name:       "204 counts as 2xx — a silent delete is still an uncovered mutation",
 			method:     "DELETE",
-			path:       "/v1/silent-204/vlx_cus_123",
+			path:       "/v1/silent-204/hc_cus_123",
 			route:      "/v1/silent-204/{id}", // pattern, never the raw path (cardinality)
 			wantStatus: http.StatusNoContent,
 			wantReport: true,
@@ -156,9 +156,9 @@ func TestAuditCoverage_ReportsOnlyUncoveredMutations(t *testing.T) {
 			delta := uncoveredCount(t, tc.route) - before
 			switch {
 			case tc.wantReport && delta != 1:
-				t.Errorf("velox_audit_uncovered_mutation_total{route=%q}: got +%v, want +1 — an uncovered mutation went unreported", tc.route, delta)
+				t.Errorf("hardcount_audit_uncovered_mutation_total{route=%q}: got +%v, want +1 — an uncovered mutation went unreported", tc.route, delta)
 			case !tc.wantReport && delta != 0:
-				t.Errorf("velox_audit_uncovered_mutation_total{route=%q}: got +%v, want +0 — the detector cried wolf", tc.route, delta)
+				t.Errorf("hardcount_audit_uncovered_mutation_total{route=%q}: got +%v, want +0 — the detector cried wolf", tc.route, delta)
 			}
 		})
 	}
@@ -169,7 +169,7 @@ func TestAuditCoverage_ReportsOnlyUncoveredMutations(t *testing.T) {
 // swapped a committed mutation's response for a 503, which the Idempotency layer
 // then cached for 24h (ADR-089). An observer observes.
 func TestAuditCoverage_NeverMutatesTheResponse(t *testing.T) {
-	body := `{"id":"vlx_inv_1","invoice_number":"INV-0001"}`
+	body := `{"id":"hc_inv_1","invoice_number":"INV-0001"}`
 
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -223,7 +223,7 @@ func TestAuditCoverage_PreservesStreaming(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "text/csv")
-		for _, chunk := range []string{"id,amount\n", "vlx_ue_1,10\n", "vlx_ue_2,20\n"} {
+		for _, chunk := range []string{"id,amount\n", "hc_ue_1,10\n", "hc_ue_2,20\n"} {
 			_, _ = io.WriteString(w, chunk)
 			f.Flush()
 			flushed++
@@ -236,7 +236,7 @@ func TestAuditCoverage_PreservesStreaming(t *testing.T) {
 	if flushed != 3 {
 		t.Errorf("flushes: got %d, want 3", flushed)
 	}
-	if want := "id,amount\nvlx_ue_1,10\nvlx_ue_2,20\n"; rec.Body.String() != want {
+	if want := "id,amount\nhc_ue_1,10\nhc_ue_2,20\n"; rec.Body.String() != want {
 		t.Errorf("streamed body: got %q, want %q", rec.Body.String(), want)
 	}
 	if !rec.Flushed {
@@ -289,7 +289,7 @@ func TestAuditCoverage_RealEmissionIsSilent(t *testing.T) {
 	r.Use(AuditCoverage(func(string, string) bool { return false }))
 	r.Post("/v1/invoices", func(w http.ResponseWriter, req *http.Request) {
 		if err := logger.Log(req.Context(), tenantID, domain.AuditActionCreate,
-			"invoice", "vlx_inv_real", "INV-0001", nil); err != nil {
+			"invoice", "hc_inv_real", "INV-0001", nil); err != nil {
 			t.Errorf("emit: %v", err)
 		}
 		w.WriteHeader(http.StatusCreated)
@@ -362,11 +362,11 @@ func TestAuditCoverage_IdempotentReplayIsNotAnUncoveredMutation(t *testing.T) {
 		handlerCalls.Add(1)
 		// A REAL audit row — the emission self-marks the request (Logger.Log).
 		if err := logger.Log(req.Context(), tenantID, domain.AuditActionCreate,
-			"invoice", "vlx_inv_1", "INV-0001", nil); err != nil {
+			"invoice", "hc_inv_1", "INV-0001", nil); err != nil {
 			t.Errorf("emit: %v", err)
 		}
 		w.WriteHeader(http.StatusCreated)
-		_, _ = io.WriteString(w, `{"id":"vlx_inv_1"}`)
+		_, _ = io.WriteString(w, `{"id":"hc_inv_1"}`)
 	})
 
 	before := uncoveredCount(t, "/v1/invoices")
@@ -392,7 +392,7 @@ func TestAuditCoverage_IdempotentReplayIsNotAnUncoveredMutation(t *testing.T) {
 		t.Errorf("audit rows after the original + its replay: got %d, want 1 — a replay must not record a mutation that never happened", n)
 	}
 	if delta := uncoveredCount(t, "/v1/invoices") - before; delta != 0 {
-		t.Errorf("velox_audit_uncovered_mutation_total{route=\"/v1/invoices\"}: got +%v, want +0 — the detector reported an idempotent replay as an uncovered mutation", delta)
+		t.Errorf("hardcount_audit_uncovered_mutation_total{route=\"/v1/invoices\"}: got +%v, want +0 — the detector reported an idempotent replay as an uncovered mutation", delta)
 	}
 }
 

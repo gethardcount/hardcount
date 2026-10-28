@@ -18,7 +18,7 @@ var eventTypeValue = regexp.MustCompile(`^[a-z_]+(\.[a-z_]+)+$`)
 
 // declaredEventTypes reads every string constant named Event* in this
 // package whose value looks like an event type. Emit sites dispatch these
-// constants, so a constant that is declared is a type Velox can send.
+// constants, so a constant that is declared is a type Hardcount can send.
 func declaredEventTypes(t *testing.T) map[string]string {
 	t.Helper()
 	entries, err := os.ReadDir(".")
@@ -76,7 +76,7 @@ func sortedKeys[V any](m map[string]V) []string {
 }
 
 // TestWebhookCatalog_EveryDeclaredEventIsSubscribable: every event type
-// Velox can send is in KnownWebhookEventTypes, the set endpoint create and
+// Hardcount can send is in KnownWebhookEventTypes, the set endpoint create and
 // update validate against. payment.currency_mismatch was emitted for months
 // while missing from it, so no endpoint could subscribe to it by name.
 func TestWebhookCatalog_EveryDeclaredEventIsSubscribable(t *testing.T) {

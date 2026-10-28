@@ -63,14 +63,14 @@ func TestReadRoutesHonest(t *testing.T) {
 	// D-06: a read route keyed by a customer or meter id answers 404 for an
 	// id that does not exist, not 200 with zeros or an empty list.
 	t.Run("unknown id is 404", func(t *testing.T) {
-		const missing = "vlx_cus_does_not_exist"
+		const missing = "hc_cus_does_not_exist"
 		routes := []struct{ unknown, known string }{
 			{"/v1/credits/balance/" + missing, "/v1/credits/balance/" + customerID},
 			{"/v1/credits/ledger/" + missing, "/v1/credits/ledger/" + customerID},
 			{"/v1/credits/grants/" + missing, "/v1/credits/grants/" + customerID},
 			{"/v1/customers/" + missing + "/sent-emails", "/v1/customers/" + customerID + "/sent-emails"},
 			{"/v1/customers/" + missing + "/margin", "/v1/customers/" + customerID + "/margin"},
-			{"/v1/plans/vlx_pln_does_not_exist/prices", "/v1/plans/" + planID + "/prices"},
+			{"/v1/plans/hc_pln_does_not_exist/prices", "/v1/plans/" + planID + "/prices"},
 		}
 		for _, r := range routes {
 			if got := call("GET", r.unknown, nil); got.status != 404 {

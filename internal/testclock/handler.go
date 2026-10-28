@@ -65,7 +65,7 @@ func (h *Handler) requireTestMode(next http.Handler) http.Handler {
 			return
 		}
 		if live {
-			respond.Forbidden(w, r, "test clocks are only available in test mode — use a test-mode API key (vlx_secret_test_...)")
+			respond.Forbidden(w, r, "test clocks are only available in test mode — use a test-mode API key (hc_secret_test_...)")
 			return
 		}
 		next.ServeHTTP(w, r)

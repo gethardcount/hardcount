@@ -297,7 +297,7 @@ func (s *PostgresStore) upsertPolicyTx(ctx context.Context, tx *sql.Tx, tenantID
 				return domain.DunningPolicy{}, fmt.Errorf("hand over seeded default: %w", err)
 			}
 		}
-		newID := postgres.NewID("vlx_dpol")
+		newID := postgres.NewID("hc_dpol")
 		row := tx.QueryRowContext(ctx, `
 			INSERT INTO dunning_policies (id, tenant_id, name, enabled, is_default,
 				retry_days, final_subscription_action, final_invoice_action, created_at, updated_at)
@@ -365,7 +365,7 @@ func (s *PostgresStore) SeedDefaultPoliciesTx(ctx context.Context, tx *sql.Tx, t
 				retry_days, final_subscription_action, final_invoice_action, created_at, updated_at)
 			VALUES ($1,$2,$3,$4,true,true,$5,$6,$7,$8,$8)
 			RETURNING `+policyColumns,
-			postgres.NewID("vlx_dpol"), tenantID, p.Name, p.Enabled, daysJSON,
+			postgres.NewID("hc_dpol"), tenantID, p.Name, p.Enabled, daysJSON,
 			p.FinalSubscriptionAction, p.FinalInvoiceAction, now,
 		))
 		if err != nil {
@@ -443,7 +443,7 @@ func (s *PostgresStore) StartRun(ctx context.Context, tenantID string, run domai
 }
 
 func (s *PostgresStore) createRunTx(ctx context.Context, tx *sql.Tx, tenantID string, run domain.InvoiceDunningRun) (domain.InvoiceDunningRun, error) {
-	id := postgres.NewID("vlx_drun")
+	id := postgres.NewID("hc_drun")
 	// Honor caller-provided CreatedAt — dunning Service passes
 	// s.clock.Now() so test-clock-driven runs (started during a
 	// clock-advance billing cycle) have created_at on simulation
@@ -1058,7 +1058,7 @@ func (s *PostgresStore) CreateEvent(ctx context.Context, tenantID string, event 
 }
 
 func (s *PostgresStore) createEventTx(ctx context.Context, tx *sql.Tx, tenantID string, event domain.InvoiceDunningEvent) (domain.InvoiceDunningEvent, error) {
-	id := postgres.NewID("vlx_devt")
+	id := postgres.NewID("hc_devt")
 	// Honor caller-supplied CreatedAt so each event row carries the
 	// simulated instant the fact actually occurred — started at cycle
 	// close, retry #N at its scheduled fire time, escalated at the

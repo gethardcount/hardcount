@@ -229,7 +229,7 @@ share is F(seed) recomputed under the rule.
 - **Non-additive buckets are unchanged.** Under `reset=false` the fire drops
   them (§4). Under `reset=true` the fire is outside the closer's window.
 - **No fire, no change.** Disjoint windows of one meter in a cycle (an item
-  removed and re-added) still rate each window from tier 0. Velox models the
+  removed and re-added) still rate each window from tier 0. Hardcount models the
   re-add as a separate item, and Stripe gives each item its own ladder.
   Changing that is a separate decision.
 
@@ -367,7 +367,7 @@ written-off threshold invoice would double-collect. That is no longer true,
 so the `RecoveryWarning.code` value is gone (pre-launch; ADR-110's table
 row and "Still deferred" item are closed).
 
-**Read-side alarm.** velox-doctor's
+**Read-side alarm.** hardcount-doctor's
 `usage_billed_once_per_customer_meter_window` now counts a written-off
 invoice as live (as `idx_invoices_billing_idempotency` already did). A
 cycle invoice billing a written-off threshold window again is flagged,
@@ -389,7 +389,7 @@ billed but unpaid, so both edges are closed. See the
 [ADR-050 amendment](050-unpaid-source-proration-policy.md#amendment-2026-10-23-a-written-off-invoice-is-unpaid).)*
 
 **Not changed: Stripe Checkout on a write-off.** A write-off closes
-Velox's Checkout claim but does not expire the session at Stripe; only a
+Hardcount's Checkout claim but does not expire the session at Stripe; only a
 void calls `StopCollection`. Under this decision a payment through a page
 the customer still has open settles the invoice once and cleanly, so it
 is hygiene, not part of this fix. Separate follow-up.

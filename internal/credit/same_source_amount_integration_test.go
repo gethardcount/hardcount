@@ -30,7 +30,7 @@ func TestAppendEntry_SameSourceDifferentAmountIsRefused(t *testing.T) {
 	entry := func(amount int64) domain.CreditLedgerEntry {
 		return domain.CreditLedgerEntry{
 			CustomerID: cust.ID, EntryType: domain.CreditGrant, Currency: "USD", AmountCents: amount,
-			Description: "credit note CN-1", SourceCreditNoteID: "vlx_cn_same_source",
+			Description: "credit note CN-1", SourceCreditNoteID: "hc_cn_same_source",
 		}
 	}
 

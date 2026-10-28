@@ -2,7 +2,7 @@ package billing_test
 
 // #981: usage that matches no price is left off the invoice (the peer norm),
 // but never silently. Each invoice that is built without it logs a warning
-// and adds its quantity to velox_usage_unpriced_quantity_total{meter_id}.
+// and adds its quantity to hardcount_usage_unpriced_quantity_total{meter_id}.
 // These tests run the real engine on real Postgres and read the counter from
 // the default Prometheus registry. Meter ids are unique per test, so the
 // counter of one test cannot leak into another.
@@ -24,7 +24,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/usage"
 )
 
-// unpricedCounter reads velox_usage_unpriced_quantity_total for one meter
+// unpricedCounter reads hardcount_usage_unpriced_quantity_total for one meter
 // in test mode (every test here runs with livemode=false); 0 when the
 // series does not exist.
 func unpricedCounter(t *testing.T, meterID string) float64 {
@@ -34,7 +34,7 @@ func unpricedCounter(t *testing.T, meterID string) float64 {
 		t.Fatalf("gather metrics: %v", err)
 	}
 	for _, mf := range mfs {
-		if mf.GetName() != "velox_usage_unpriced_quantity_total" {
+		if mf.GetName() != "hardcount_usage_unpriced_quantity_total" {
 			continue
 		}
 		for _, m := range mf.GetMetric() {
@@ -84,8 +84,8 @@ func seedUnpricedSub(t *testing.T, ctx context.Context, f *thresholdFixture, ext
 	if err != nil {
 		t.Fatalf("create customer: %v", err)
 	}
-	subID = postgres.NewID("vlx_sub")
-	itemID := postgres.NewID("vlx_si")
+	subID = postgres.NewID("hc_sub")
+	itemID := postgres.NewID("hc_si")
 	var gte any
 	if amountGTE > 0 {
 		gte = amountGTE

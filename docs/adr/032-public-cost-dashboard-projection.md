@@ -6,7 +6,7 @@
 
 ## Summary
 
-`GET /v1/public/cost-dashboard/{token}` returns one customer's current-period usage and cost as sanitized JSON that a partner can show in its own app. The `vlx_pcd_` token is the only credential: rotating it ends the old URL at once, and an invalid or rotated token gets the same 401. Fields come from an explicit allowlist, so email, names, billing profile and metadata never leak, and the endpoint shares the hosted invoice page's 60-per-minute-per-IP limit. The token is stored only as a SHA-256 hash (migration 0172) and is shown once, when it is rotated. Status: active, amended 2026-10-12: the response also carries the customer's credit position, including an estimate of what remains after this period's usage.
+`GET /v1/public/cost-dashboard/{token}` returns one customer's current-period usage and cost as sanitized JSON that a partner can show in its own app. The `hc_pcd_` token is the only credential: rotating it ends the old URL at once, and an invalid or rotated token gets the same 401. Fields come from an explicit allowlist, so email, names, billing profile and metadata never leak, and the endpoint shares the hosted invoice page's 60-per-minute-per-IP limit. The token is stored only as a SHA-256 hash (migration 0172) and is shown once, when it is rotated. Status: active, amended 2026-10-12: the response also carries the customer's credit position, including an estimate of what remains after this period's usage.
 
 ## Context
 
@@ -20,7 +20,7 @@ Ship a single sanitized JSON endpoint for the public projection. Defer the embed
 
 ### Token
 
-- Format: `vlx_pcd_` + 64 hex (32 bytes entropy). Same shape as the hosted-invoice public token (ADR-021).
+- Format: `hc_pcd_` + 64 hex (32 bytes entropy). Same shape as the hosted-invoice public token (ADR-021).
 - Persisted plaintext in `customers.cost_dashboard_token` with a partial UNIQUE index.
 - Rotation invalidates the previous token IMMEDIATELY — no grace window. Read-only surface; the rotation intent is "stop the previous URL right now."
 - Audit log entry on rotation (`action=rotate`, `metadata.surface=cost_dashboard_token`). Plaintext token NEVER in the audit row.
@@ -28,8 +28,8 @@ Ship a single sanitized JSON endpoint for the public projection. Defer the embed
 ### Lookup
 
 - Token lookup uses RLS-bypass (`TxBypass`). The token IS the credential — no tenant context yet, and the returned customer's `tenant_id` is what scopes everything downstream.
-- 401 envelope identical for invalid / never-existed / rotated tokens (anti-enumeration). Same shape Velox uses for revoked API keys.
-- Prefix-mismatch fast-path: any token not starting with `vlx_pcd_` → 401 without DB lookup.
+- 401 envelope identical for invalid / never-existed / rotated tokens (anti-enumeration). Same shape Hardcount uses for revoked API keys.
+- Prefix-mismatch fast-path: any token not starting with `hc_pcd_` → 401 without DB lookup.
 
 ### Sanitization contract
 
@@ -63,7 +63,7 @@ Mounted under the existing `hostedInvoiceRL` 60/min/IP bucket. Tighter than the 
 ## Consequences
 
 **Positive:**
-- Velox can now demo the AI-native cost-visibility pitch end-to-end. Partner embeds the JSON into their own app; rotation gives the operator a kill switch.
+- Hardcount can now demo the AI-native cost-visibility pitch end-to-end. Partner embeds the JSON into their own app; rotation gives the operator a kill switch.
 - Sanitization is explicit (allowlist, not denylist) — future operator-facing additions don't leak by accident.
 - Same token + rotation shape as hosted invoice (ADR-021) — one mental model for operators.
 
@@ -75,7 +75,7 @@ Mounted under the existing `hostedInvoiceRL` 60/min/IP bucket. Tighter than the 
 
 > **Corrected 2026-08-03 (FLOW CU8 parity check).** This section previously
 > claimed "Lago / Orb / Metronome: none ship a partner-embeddable cost
-> dashboard out of the box. Velox is shipping ahead of the peer set here."
+> dashboard out of the box. Hardcount is shipping ahead of the peer set here."
 > **That is false, and it was the line carrying the wedge argument.** All three
 > ship exactly that, two of them as literally an embeddable iframe URL. The
 > re-checked findings, each verified against official documentation, are below.
@@ -100,7 +100,7 @@ Mounted under the existing `hostedInvoiceRL` 60/min/IP bucket. Tighter than the 
   URL to an invoice portal and a signed, non-expiring URL to a customer portal…
   These portals can be directly accessed by your customers"*, showing invoices
   plus current usage ([invoice-portal](https://docs.withorb.com/invoicing/invoice-portal)).
-  Orb also documents the build-your-own path as first-class, for Velox's exact
+  Orb also documents the build-your-own path as first-class, for Hardcount's exact
   use case: *"Retrieving usage can be especially useful to power in-product
   visibility for your end customers"*
   ([usage-visibility](https://docs.withorb.com/product-catalog/usage-visibility)).
@@ -127,7 +127,7 @@ Mounted under the existing `hostedInvoiceRL` 60/min/IP bucket. Tighter than the 
 Two gaps are real, and only one of them is a UI question:
 
 1. **No pixels.** Every usage-based peer ships something an end customer can
-   look at; Velox ships JSON. This stays deferred and the reasoning is
+   look at; Hardcount ships JSON. This stays deferred and the reasoning is
    unchanged — Stripe, the volume leader, ships *only* the API and expects the
    vendor to build the dashboard, and an AI-infra design partner has its own
    product UI that an iframe fights (Metronome's `color_overrides` exists
@@ -136,7 +136,7 @@ Two gaps are real, and only one of them is a UI question:
    Trigger unchanged: build when a design partner asks.
 2. **Current period only — and this one is a *data* gap, not a UI gap.** Peers
    expose history and time series (Metronome 30/60/90 days, Orb history plus
-   current, both AI consoles down to minute granularity). Velox's projection
+   current, both AI consoles down to minute granularity). Hardcount's projection
    cannot answer "what did I spend yesterday versus today", which is table
    stakes for the AI-infra ICP this endpoint exists to serve. **Deferred with
    trigger: if the first design partner is AI infrastructure, historical
@@ -144,8 +144,8 @@ Two gaps are real, and only one of them is a UI question:
    a UI and is where the peer set is genuinely ahead.**
 
 Token shape is unaffected by the above: Orb's customer-portal URL is likewise
-non-expiring, so Velox's non-expiry is at parity. The plaintext-at-rest storage
-noted under Negative is Velox-specific and remains gated on the first
+non-expiring, so Hardcount's non-expiry is at parity. The plaintext-at-rest storage
+noted under Negative is Hardcount-specific and remains gated on the first
 production deploy.
 
 ## Amendment 2026-10-12: the projection carries the credit position

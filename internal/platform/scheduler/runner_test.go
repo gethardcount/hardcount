@@ -110,7 +110,7 @@ func TestRun_PanicUnwindsThroughTheGate(t *testing.T) {
 
 // TestRun_StopsOnContextCancel asserts the runner exits cleanly when
 // the parent ctx is cancelled — no leaked goroutines or stuck loops
-// when cmd/velox shuts down.
+// when cmd/hardcount shuts down.
 func TestRun_StopsOnContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})

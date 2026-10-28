@@ -19,7 +19,7 @@ import (
 // over HTTP: every other test mints its key with a database helper.
 func TestE2E_APIKeyLifecycle(t *testing.T) {
 	db := testutil.SetupTestDB(t)
-	t.Setenv("VELOX_BOOTSTRAP_TOKEN", "apikey-flow-bootstrap")
+	t.Setenv("HARDCOUNT_BOOTSTRAP_TOKEN", "apikey-flow-bootstrap")
 	ts := httptest.NewServer(NewServer(db, clock.Real(), nil))
 	defer ts.Close()
 
@@ -45,8 +45,8 @@ func TestE2E_APIKeyLifecycle(t *testing.T) {
 
 	// Create: the full key comes back once, in the session's mode.
 	keyID, rawKey := createKey("CI server", "secret")
-	if !strings.HasPrefix(rawKey, "vlx_secret_test_") {
-		t.Fatalf("raw key %q: want a vlx_secret_test_ key (the session is in test mode)", rawKey)
+	if !strings.HasPrefix(rawKey, "hc_secret_test_") {
+		t.Fatalf("raw key %q: want a hc_secret_test_ key (the session is in test mode)", rawKey)
 	}
 
 	// Use: whoami names this key and this account, and a read works.
@@ -100,7 +100,7 @@ func TestE2E_APIKeyLifecycle(t *testing.T) {
 		"expires_in_seconds": 3600,
 	}}).want(t, 200, "rotate with a grace period")
 	newID, newRaw := flowStr(rot.body, "new_key", "id"), flowStr(rot.body, "raw_key")
-	if newID == "" || newID == oldID || !strings.HasPrefix(newRaw, "vlx_secret_test_") {
+	if newID == "" || newID == oldID || !strings.HasPrefix(newRaw, "hc_secret_test_") {
 		t.Fatalf("rotation returned new key %q (raw %q), want a fresh test-mode secret key", newID, newRaw)
 	}
 	if flowStr(rot.body, "new_key", "name") != "Billing worker" || flowStr(rot.body, "new_key", "key_type") != "secret" {
@@ -142,8 +142,8 @@ func TestE2E_APIKeyLifecycle(t *testing.T) {
 	// A publishable key proves which account it belongs to and reads no
 	// data (docs/api-keys.md, "Key types").
 	pubID, pubRaw := createKey("Checkout page", "publishable")
-	if !strings.HasPrefix(pubRaw, "vlx_pub_test_") {
-		t.Errorf("publishable raw key %q: want vlx_pub_test_", pubRaw)
+	if !strings.HasPrefix(pubRaw, "hc_pub_test_") {
+		t.Errorf("publishable raw key %q: want hc_pub_test_", pubRaw)
 	}
 	if got := flowStr(flowDo(t, ts, "GET", "/v1/whoami", flowReq{bearer: pubRaw}).want(t, 200, "whoami with a publishable key").body, "key_id"); got != pubID {
 		t.Errorf("whoami with the publishable key names %q, want %q", got, pubID)

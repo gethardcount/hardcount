@@ -5,7 +5,7 @@ Status: Accepted (partly superseded by [ADR-103](103-single-payment-source.md) o
 
 ## Summary
 
-Each charge attempt is one row in `invoice_charge_attempts`, created when Velox creates the PaymentIntent and updated by PaymentIntent id as Stripe reports the outcome. The row records what triggered the attempt (`auto_charge`, `charge_now` or `dunning_retry`; see the 2026-10-20 amendment) and its test-clock time, and a `succeeded` outcome is final. Before this, a failed charge reached the invoice timeline only through a Stripe webhook row or a dunning (payment retry) row, so a simulated invoice with dunning off could hide it. [ADR-103](103-single-payment-source.md) moved the outcome write into the settle transaction and made these rows the only source of payment rows on the timeline. Status: active, partly superseded by ADR-103 and by [ADR-104](104-one-activity-lane-entity-calendar.md), which removed the separate real-time timeline card. [ADR-128](128-activity-line-standard.md) reverses one rule below: an attempt made on the hosted payment page is to be dated on the invoice's clock, not on real time. Until that change ships, it is still dated on real time.
+Each charge attempt is one row in `invoice_charge_attempts`, created when Hardcount creates the PaymentIntent and updated by PaymentIntent id as Stripe reports the outcome. The row records what triggered the attempt (`auto_charge`, `charge_now` or `dunning_retry`; see the 2026-10-20 amendment) and its test-clock time, and a `succeeded` outcome is final. Before this, a failed charge reached the invoice timeline only through a Stripe webhook row or a dunning (payment retry) row, so a simulated invoice with dunning off could hide it. [ADR-103](103-single-payment-source.md) moved the outcome write into the settle transaction and made these rows the only source of payment rows on the timeline. Status: active, partly superseded by ADR-103 and by [ADR-104](104-one-activity-lane-entity-calendar.md), which removed the separate real-time timeline card. [ADR-128](128-activity-line-standard.md) reverses one rule below: an attempt made on the hosted payment page is to be dated on the invoice's clock, not on real time. Until that change ships, it is still dated on real time.
 
 ## Context
 
@@ -45,7 +45,7 @@ Writers (all best-effort — see Consequences):
    empty-PI shape, whose row is the attempt's *only* record).
 2. **The settle paths** (`SettleSucceeded` / `SettleFailed` — webhook,
    inline sync-success, reconciler) upsert the outcome by PI. For a PI
-   Velox didn't mint inline (hosted checkout) this insert IS the
+   Hardcount didn't mint inline (hosted checkout) this insert IS the
    record, `trigger_source='external'`, deliberately wall-clock — an
    interactive act is a wall fact.
 
@@ -145,7 +145,7 @@ database before the charge call records its own attempt, the charge call's
 
 **Change.** Writer 1 now records a third trigger. `charge_now` is a charge
 someone asked for: "Charge now" in the dashboard, or
-`POST /v1/invoices/{id}/collect`. `auto_charge` keeps the charges Velox
+`POST /v1/invoices/{id}/collect`. `auto_charge` keeps the charges Hardcount
 makes without that button: cycle close, finalize and the auto-charge
 sweep. The PaymentIntent and its idempotency key are the same
 for both, so Stripe sees no change. Writer 1 also stamps `actor_type` and
@@ -164,8 +164,8 @@ automatic charges. Rows written before migration 189 keep `auto_charge`
 and no actor; nothing is guessed for them.
 
 **Rolling back.** The release before this one counts only `auto_charge`
-and `dunning_retry` as Velox's own attempts when it judges a late payment
-report (`veloxAttemptStandingTx`). It does not see a `charge_now` row, so
+and `dunning_retry` as Hardcount's own attempts when it judges a late payment
+report (`hardcountAttemptStandingTx`). It does not see a `charge_now` row, so
 a late decline for an older automatic attempt can look like the newest
 attempt. The invoice can then move back onto the older PaymentIntent, and
 a second failure email can go out. During a rolling deploy this needs a

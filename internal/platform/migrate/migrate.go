@@ -1,4 +1,4 @@
-// Package migrate applies Velox's database migrations with goose
+// Package migrate applies Hardcount's database migrations with goose
 // (ADR-125).
 //
 // Migration 180 is a Go migration that runs the baseline, the starting
@@ -88,7 +88,7 @@ func openPool(dsn string) (*sql.DB, error) {
 		return nil, fmt.Errorf("parse migration db url: %w", err)
 	}
 	cfg.RuntimeParams["lock_timeout"] = strconv.FormatInt(timeout.Milliseconds(), 10)
-	cfg.RuntimeParams["application_name"] = "velox-migrate"
+	cfg.RuntimeParams["application_name"] = "hardcount-migrate"
 	db := stdlib.OpenDB(*cfg)
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
@@ -128,7 +128,7 @@ func newProvider(db *sql.DB, fsys fs.FS, locked bool) (*goose.Provider, error) {
 //   - search_path is public. The baseline names every object public.x, so
 //     a later file that says CREATE TABLE x must put x in public too, not
 //     in a schema the admin user's search_path lists first (its own
-//     schema, under Postgres's default "$user", public), where velox_app
+//     schema, under Postgres's default "$user", public), where hardcount_app
 //     would not find it. The pool is closed after the command, so the
 //     setting goes with it.
 //   - goose's "failed to acquire lock" becomes a LockWaitError. goose
@@ -217,7 +217,7 @@ func up(ctx context.Context, dsn string, fsys fs.FS) error {
 	return nil
 }
 
-// upError maps goose's error to Velox's typed errors.
+// upError maps goose's error to Hardcount's typed errors.
 func upError(err error, fsys fs.FS, st state, applied []*goose.MigrationResult) error {
 	var waited *LockWaitError
 	if errors.As(err, &waited) {

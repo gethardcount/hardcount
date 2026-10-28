@@ -32,13 +32,13 @@ var bypassKinds = map[string]string{
 	"webhook":    "incoming webhooks",
 	"stripe":     "Stripe credential settings (`internal/tenantstripe`)",
 	"members":    "team members and invites (`internal/dashmembers`)",
-	"tool":       "`velox-bench-seed`",
+	"tool":       "`hardcount-bench-seed`",
 	"definer":    "", // postgres.DB.BeginTx itself
 }
 
 // txBypassUsers: "file Func" or "file Recv.Func" -> kind.
 var txBypassUsers = map[string]string{
-	"cmd/velox-bench-seed/main.go bootstrapFixtures": "tool",
+	"cmd/hardcount-bench-seed/main.go bootstrapFixtures": "tool",
 
 	"internal/platform/postgres/postgres.go DB.BeginTx": "definer",
 

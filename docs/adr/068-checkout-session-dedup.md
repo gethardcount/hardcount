@@ -5,7 +5,7 @@
 
 ## Summary
 
-Velox records a hosted Stripe Checkout session (the customer's payment page) in `checkout_sessions` before creating it, so an invoice has at most one open session. The Stripe call uses an idempotency key from that record and a 1-hour expiry, and paying, voiding or reducing the amount due closes the record in the same transaction. A second charge on a paid invoice, a captured amount that differs from the amount due, or a payment on a voided invoice raises a critical alert; the operator does any refund. Amended 2026-10-11: a hosted session and a Velox charge (auto-charge, dunning retry or Collect) now exclude each other, and a reconciler sweep records how each session ended. Status: active, amended 2026-10-11; [ADR-100](100-currency-coherence-guard-ring.md) added a currency-mismatch alert at settle.
+Hardcount records a hosted Stripe Checkout session (the customer's payment page) in `checkout_sessions` before creating it, so an invoice has at most one open session. The Stripe call uses an idempotency key from that record and a 1-hour expiry, and paying, voiding or reducing the amount due closes the record in the same transaction. A second charge on a paid invoice, a captured amount that differs from the amount due, or a payment on a voided invoice raises a critical alert; the operator does any refund. Amended 2026-10-11: a hosted session and a Hardcount charge (auto-charge, dunning retry or Collect) now exclude each other, and a reconciler sweep records how each session ended. Status: active, amended 2026-10-11; [ADR-100](100-currency-coherence-guard-ring.md) added a currency-mismatch alert at settle.
 
 ## Context
 
@@ -108,11 +108,11 @@ work, not silently skipped.
 ## Amendment 2026-10-11: one payer at a time
 
 **What changed.** The ledger stopped two hosted sessions paying one
-invoice, but nothing stopped a hosted session and a Velox charge (the
+invoice, but nothing stopped a hosted session and a Hardcount charge (the
 automatic charge, a dunning retry, or Collect) from both taking money. Now
 they exclude each other:
 
-- **Velox charges skip an invoice the customer may be paying.** The three
+- **Hardcount charges skip an invoice the customer may be paying.** The three
   charge claims refuse while `domain.HostedCheckoutLiveSQL` holds: an
   unfilled claim for 65 minutes, a recorded `open`/`superseded` session
   until the hosted sweep records how it ended, and a `completed` session
@@ -125,7 +125,7 @@ they exclude each other:
   `TestChargeClaim_SeesHostedClaimCommittedWhileItWaited`). The dunning
   due-run scans apply the same fragment, so a blocked run does not hold
   the head of the queue.
-- **No hosted session while Velox charges, or after an unrecorded hosted
+- **No hosted session while Hardcount charges, or after an unrecorded hosted
   payment.** The hosted claim also refuses while the charge lease is held
   (a charge on its way to Stripe is still `pending`), and while a
   `completed` session's payment is unrecorded.
@@ -136,14 +136,14 @@ they exclude each other:
   Stripe as soon as the customer pays, so it is recorded on the next run
   rather than after expiry. It also settles any `completed` session whose
   invoice is still unpaid. It calls
-  `SettleSucceeded` directly, so a hosted payment on an invoice Velox
+  `SettleSucceeded` directly, so a hosted payment on an invoice Hardcount
   already charged raises `payment.duplicate_charge` even when no webhook
   ever arrived, and skips a payment the webhook already escalated (the
   invoice's anomaly marker names its PaymentIntent) so one charge raises
   one alert.
 - **Fixes on the session path:** the Stripe expiry is fixed at claim
   creation + 1h (a clock-relative expiry changed the params under a fixed
-  idempotency key, so every re-drive failed); a session Velox failed to
+  idempotency key, so every re-drive failed); a session Hardcount failed to
   record is never handed out, nor is one whose claim was replaced while
   its create was in flight (it is expired instead); a pending claim too old
   to re-drive (Stripe requires an expiry at least 30 minutes ahead) is
@@ -158,7 +158,7 @@ pay only on manual-collection invoices. Lago delays the first automatic
 charge 10 minutes, which narrows the race without closing it. A hold column
 with its own release reconciler and operator action was designed and
 rejected as heavier than the risk: the session table already carries the
-state. An abandoned page blocks Velox charges until the first reconciler
+state. An abandoned page blocks Hardcount charges until the first reconciler
 run after its expiry (runs are hourly in production); a paid one until the
 payment is recorded, by its webhook or the next run. The 24-hour cap is the
 backstop.

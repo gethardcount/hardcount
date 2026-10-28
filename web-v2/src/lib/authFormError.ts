@@ -1,6 +1,6 @@
 // The one line shown under a sign-in, forgot-password, reset-password or
 // accept-invite form when the request fails. These pages used to show
-// "Cannot connect to Velox API" for some failures and the browser's own
+// "Cannot connect to Hardcount API" for some failures and the browser's own
 // "Failed to fetch" for others, and a password rule as a bare fragment
 // ("must be at most 72 bytes …").
 //

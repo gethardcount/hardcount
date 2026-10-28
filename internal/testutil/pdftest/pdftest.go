@@ -1,4 +1,4 @@
-// Package pdftest reads back what Velox's PDF renderers drew, for tests.
+// Package pdftest reads back what Hardcount's PDF renderers drew, for tests.
 //
 // Read returns each page's text with its position. Position matters: text
 // drawn below a page's bottom edge is still in the file, so finding a

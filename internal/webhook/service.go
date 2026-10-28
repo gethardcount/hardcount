@@ -98,11 +98,11 @@ type Service struct {
 	// layers — this shipped as two independent decisions once (the
 	// validator allowed localhost "for local development" while the
 	// egress-hardened dialer refused all loopback unconditionally), and
-	// the result was an endpoint the operator could create but Velox
+	// the result was an endpoint the operator could create but Hardcount
 	// could never deliver to: every delivery sat pending with the refusal
 	// visible only in the delivery detail. In production the exception is
 	// OFF at both layers, because a tenant-supplied loopback URL is SSRF
-	// against the deployment itself (velox's own :8080 included).
+	// against the deployment itself (hardcount's own :8080 included).
 	allowLoopback bool
 }
 
@@ -363,7 +363,7 @@ type CreateEndpointInput struct {
 // emits. Pre-2026-07-05 any string was accepted and matchesEvent silently
 // skipped unknown names — a subscriber to a Stripe-trained name (e.g.
 // "invoice.payment_failed"; real name payment.failed) got silence forever,
-// and Velox's own recipes shipped two such phantoms. "*" subscribes to
+// and Hardcount's own recipes shipped two such phantoms. "*" subscribes to
 // everything.
 func validateEventNames(events []string) error {
 	for _, e := range events {
@@ -386,7 +386,7 @@ func validateEventNames(events []string) error {
 		}
 		if !domain.KnownWebhookEventTypes[e] {
 			return errs.Invalid("events", fmt.Sprintf(
-				"unknown event type %q — Velox never emits it, so this subscription would receive silence; see the event catalog in docs/webhooks.md", e))
+				"unknown event type %q — Hardcount never emits it, so this subscription would receive silence; see the event catalog in docs/webhooks.md", e))
 		}
 	}
 	return nil
@@ -483,10 +483,10 @@ func (s *Service) CreateEndpoint(ctx context.Context, tenantID string, input Cre
 }
 
 // SecretRotationGracePeriod is how long a rotated-out secret keeps
-// signing alongside its replacement. Velox uses 72h; Stripe's hosted
+// signing alongside its replacement. Hardcount uses 72h; Stripe's hosted
 // equivalent caps at 24h
 // (https://docs.stripe.com/webhooks/signature). The intentional
-// deviation: self-hosted Velox deployments often have slower deploy
+// deviation: self-hosted Hardcount deployments often have slower deploy
 // cadences (manual rolls, no central CI fleet), so 24h would force a
 // rushed cutover for tenants whose ops team checks the webhook
 // receivers once a week. 72h covers a typical "find the change request
@@ -499,7 +499,7 @@ const SecretRotationGracePeriod = 72 * time.Hour
 // RotateSecret generates a new signing secret for an endpoint and returns it
 // alongside the grace-period expiry. The previous secret stays valid for
 // SecretRotationGracePeriod — dispatcher signs outbound events with BOTH
-// secrets during the window (two v1= entries in Velox-Signature, Stripe
+// secrets during the window (two v1= entries in Hardcount-Signature, Stripe
 // multi-signature style) so receivers can stage a verifier update without
 // breaking production traffic. After the window, only the new secret is
 // used. The new secret is returned once to the caller (dashboard shows it,
@@ -695,7 +695,7 @@ func computeSignature(payload []byte, timestamp, secret string) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-// buildSignatureHeader produces the Velox-Signature header value.
+// buildSignatureHeader produces the Hardcount-Signature header value.
 //
 // In steady state, it's a single-sig "t=<ts>,v1=<sig>". During a
 // grace-period rotation (secondary secret populated and not yet
@@ -1115,8 +1115,8 @@ func (s *Service) attemptDelivery(ctx context.Context, d domain.WebhookDelivery,
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Velox-Signature", sigHeader)
-	req.Header.Set("Velox-Event-Type", event.EventType)
+	req.Header.Set("Hardcount-Signature", sigHeader)
+	req.Header.Set("Hardcount-Event-Type", event.EventType)
 
 	resp, err := s.client.Do(req)
 	if err != nil {

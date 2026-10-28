@@ -57,7 +57,7 @@ func (r *Reconciler) SetHostedSessions(ledger HostedSessionLedger, reader Checko
 // sweepHostedSessions asks Stripe how each unresolved hosted Checkout
 // session stands. It exists for the payment no webhook reported: the hosted
 // PI is not on the invoice until it settles, so the PI sweeps above can never
-// find it, and the invoice would stay unpaid (and blocked from Velox charges)
+// find it, and the invoice would stay unpaid (and blocked from Hardcount charges)
 // until someone noticed.
 //
 //   - complete and paid -> settle through the shared primitive. That records

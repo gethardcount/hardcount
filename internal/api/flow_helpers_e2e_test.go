@@ -223,7 +223,7 @@ func flowList(m map[string]any, key string) []map[string]any {
 }
 
 // flowBootstrap creates the account and its owner through POST
-// /v1/bootstrap (VELOX_BOOTSTRAP_TOKEN must be set before NewServer) and
+// /v1/bootstrap (HARDCOUNT_BOOTSTRAP_TOKEN must be set before NewServer) and
 // returns the body: tenant, secret_key_test, secret_key_live.
 func flowBootstrap(t *testing.T, ts *httptest.Server, token, email, password string) map[string]any {
 	t.Helper()

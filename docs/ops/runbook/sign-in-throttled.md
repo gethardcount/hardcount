@@ -8,11 +8,11 @@ A team member cannot sign in because of the sign-in throttle. Back to the
 - The sign-in page says `Too many sign-in attempts. Try again in N minutes.`
 - `POST /v1/auth/login` answers 429 with code `login_throttled`.
 - The log has `auth: sign-in throttled` lines, and
-  `velox_auth_login_total{outcome="throttled"}` rises.
+  `hardcount_auth_login_total{outcome="throttled"}` rises.
 
 ## Why
 
-Velox counts sign-in tries in the `login_throttle` table before it checks
+Hardcount counts sign-in tries in the `login_throttle` table before it checks
 the password. A wait of 1 to 15 minutes starts at the 5th try from one
 address for one email. It also starts at the 10th try for one email from
 any address, counting only browsers that never signed in to it. A count
@@ -38,7 +38,7 @@ Two causes are common:
 ## Check
 
 1. Is the client address right? Sign in, switch the dashboard to test mode
-   and open the audit log. The newest `login` entry shows the address Velox
+   and open the audit log. The newest `login` entry shows the address Hardcount
    saw. If it is your load balancer's or proxy's address, fix `TRUST_PROXY`
    ([Settings](../../self-host.md#settings)).
 2. Who is trying? Each wrong password logs `auth: failed login attempt` with
@@ -46,7 +46,7 @@ Two causes are common:
    address), `user_id` when the email has an account, and `ip`:
 
    ```bash
-   docker compose logs velox-api | grep -E 'failed login attempt|sign-in throttled'
+   docker compose logs hardcount-api | grep -E 'failed login attempt|sign-in throttled'
    ```
 
 ## Fix
@@ -68,4 +68,4 @@ Two causes are common:
 
 ## Verify
 
-The person signs in, and `velox_auth_login_total{outcome="ok"}` rises.
+The person signs in, and `hardcount_auth_login_total{outcome="ok"}` rises.

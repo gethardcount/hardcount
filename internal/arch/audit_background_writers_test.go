@@ -20,7 +20,7 @@ import (
 // mutating routes and the engine are NOT — those call sites still use the own-tx `Log`, which
 // writes the row in a SEPARATE transaction AFTER the business change has already
 // committed. If that write fails, the mutation stands and its evidence does not.
-// That is the `row_lost` outcome on velox_audit_write_errors_total, and nothing
+// That is the `row_lost` outcome on hardcount_audit_write_errors_total, and nothing
 // retries it.
 //
 // Every one of these discards the error (`_ =`), which is correct and is also the

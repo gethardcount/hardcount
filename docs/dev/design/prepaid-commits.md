@@ -1,7 +1,7 @@
 # Design — Prepaid commits + drawdown (LOCKED)
 
 > - **Decided:** a prepaid commit (credit a customer pays for up front, then uses up) is a line on a manual invoice. Finalizing that invoice grants the credit in the same transaction, and voiding it retires what is left. Customer credit never pays a commit invoice, and promotional credit is spent first.
-> - **Shipped:** v0.1.0, in [#371](https://github.com/getvelox/velox/pull/371) (migration `0136_prepaid_commits`), with the dashboard in [#372](https://github.com/getvelox/velox/pull/372). Design written 2026-07-05.
+> - **Shipped:** v0.1.0, in [#371](https://github.com/gethardcount/hardcount/pull/371) (migration `0136_prepaid_commits`), with the dashboard in [#372](https://github.com/gethardcount/hardcount/pull/372). Design written 2026-07-05.
 > - **Current docs:** [Sell prepaid credit](../../ai-pricing.md#sell-prepaid-credit-a-prepaid-commit) in the AI pricing reference. The current rules are [ADR-078](../../adr/078-prepaid-commits-phase-1.md). Where this page and the code disagree, the code wins.
 
 **Status:** LOCKED for build (2026-07-05) after (1) Orb 3-0 adversarial
@@ -30,7 +30,7 @@ resulting credit balance down (drawdown) as usage consumes it. Commits +
 drawdown is a core pillar of the product's wedge, its market-entry
 differentiator ([[project_positioning_wedge]] item 6). The first DP
 (design partner — an early customer who co-develops the product)
-profile — AI infra, Series A–B — sells **commit + usage**. Velox
+profile — AI infra, Series A–B — sells **commit + usage**. Hardcount
 already has the metering and an Orb-style credit-block ledger (Orb: a
 commercial usage-billing platform peer): `consumed_cents` per block,
 FIFO drain, structural idempotency — dedup enforced by the schema
@@ -39,7 +39,7 @@ commit primitive is the missing headline.
 Peer-verified: gross purchase invoicing (the commit purchase is billed
 on a real invoice) is unanimous; exhaust→overage (usage past an
 exhausted balance bills as overage rather than being blocked), expiry,
-and $0 fully-covered invoices are already correct in Velox.
+and $0 fully-covered invoices are already correct in Hardcount.
 
 ## Phase 1 (build target) — locked decisions
 
@@ -249,7 +249,7 @@ priority = named phase-2 escape hatch).
   needed.
 - Threshold: `tenant_settings.credit_balance_low_threshold_cents`
   (nullable; NULL = no low alerts; depleted/recovered always on).
-- Cleanup ride-along: delete the phantom `VELOX_BILLING_ALERTS_INTERVAL`
+- Cleanup ride-along: delete the phantom `HARDCOUNT_BILLING_ALERTS_INTERVAL`
   from `deploy/compose/docker-compose.yml:118` (nothing reads it).
 
 ### D9. Commit line schema + validation

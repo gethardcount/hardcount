@@ -103,7 +103,7 @@ func getOverview(t *testing.T, db *postgres.DB, tenantID string) OverviewRespons
 // its id. TxBypass with an explicit tenant_id, mirroring the fixture helpers.
 func seedClock(t *testing.T, db *postgres.DB, tenantID string) string {
 	t.Helper()
-	id := postgres.NewID("vlx_tclk")
+	id := postgres.NewID("hc_tclk")
 	execBypass(t, db, `INSERT INTO test_clocks (id, tenant_id, frozen_time) VALUES ($1, $2, now())`, id, tenantID)
 	return id
 }

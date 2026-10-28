@@ -155,7 +155,7 @@ func (s *Service) CreateKey(ctx context.Context, tenantID string, input CreateKe
 	hash := sha256.Sum256(append(salt, []byte(rawKey)...))
 	hashHex := hex.EncodeToString(hash[:])
 
-	id := postgres.NewID("vlx_key")
+	id := postgres.NewID("hc_key")
 
 	key, err := s.store.Create(ctx, domain.APIKey{
 		ID:        id,
@@ -188,9 +188,9 @@ var ErrInvalidKey = errors.New("invalid api key")
 // ValidateKey looks up a key by prefix, verifies hash, checks expiry.
 //
 // Accepts three prefix forms, in priority order:
-//  1. "vlx_{type}_live_..." (new, post-FEAT-8)
-//  2. "vlx_{type}_test_..." (new, post-FEAT-8)
-//  3. "vlx_{type}_..."       (legacy, pre-FEAT-8 — treated as live)
+//  1. "hc_{type}_live_..." (new, post-FEAT-8)
+//  2. "hc_{type}_test_..." (new, post-FEAT-8)
+//  3. "hc_{type}_..."       (legacy, pre-FEAT-8 — treated as live)
 //
 // Backward compat for (3) keeps existing production keys working through
 // the cutover. Newly issued keys always use form (1) or (2).

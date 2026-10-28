@@ -37,7 +37,7 @@ func NewEncryptor(hexKey string) (*Encryptor, error) {
 }
 
 // NewNoop returns an encryptor that passes values through without encryption.
-// Used when VELOX_ENCRYPTION_KEY is not set (dev / migration).
+// Used when HARDCOUNT_ENCRYPTION_KEY is not set (dev / migration).
 func NewNoop() *Encryptor {
 	return &Encryptor{key: nil}
 }
@@ -153,7 +153,7 @@ func NewBlinder(hexKey string) (*Blinder, error) {
 }
 
 // NewNoopBlinder returns a Blinder that returns the empty string for any
-// input. Used when VELOX_EMAIL_BIDX_KEY is not configured — the column gets
+// input. Used when HARDCOUNT_EMAIL_BIDX_KEY is not configured — the column gets
 // NULL/empty and the magic-link lookup path silently returns "no match".
 func NewNoopBlinder() *Blinder { return &Blinder{key: nil} }
 

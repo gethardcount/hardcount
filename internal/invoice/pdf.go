@@ -392,7 +392,7 @@ func RenderPDF(ctx context.Context, inv domain.Invoice, lineItems []domain.Invoi
 
 	// ── Header ──
 	// The seller block prints only what the tenant entered. It used to fall
-	// back to "Velox", which put a made-up seller on a customer document; an
+	// back to "Hardcount", which put a made-up seller on a customer document; an
 	// unset company name now prints no name at all, and the dashboard warns
 	// the operator to fill in Settings → Business details.
 	companyName := sellerName(company...)

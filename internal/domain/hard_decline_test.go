@@ -27,7 +27,7 @@ func TestIsHardDecline(t *testing.T) {
 	// Retried on the normal schedule: recoverable declines, Radar decisions,
 	// codes Stripe's retry rule does not treat as final, the one Stripe code
 	// that needs the customer to authenticate rather than a new card, and
-	// anything Velox does not know.
+	// anything Hardcount does not know.
 	retried := []string{
 		"insufficient_funds", "do_not_honor", "generic_decline", "card_declined",
 		"try_again_later", "processing_error", "issuer_not_available", "card_velocity_exceeded",

@@ -30,7 +30,7 @@ import (
 //   - one email from browsers that never signed in to it, over all
 //     addresses: attempts 1 to 10 reach the check, and the 10th starts a
 //     1-minute wait;
-//   - a browser that signed in to the email before carries the velox_device
+//   - a browser that signed in to the email before carries the hardcount_device
 //     cookie, and its attempts count only against that browser.
 
 const (
@@ -45,7 +45,7 @@ const (
 func throttleServer(t *testing.T) (*postgres.DB, *httptest.Server) {
 	t.Helper()
 	db := testutil.SetupTestDB(t)
-	t.Setenv("VELOX_BOOTSTRAP_TOKEN", throttleBootToken)
+	t.Setenv("HARDCOUNT_BOOTSTRAP_TOKEN", throttleBootToken)
 	t.Setenv("TRUST_PROXY", "127.0.0.1/32")
 	ts := httptest.NewServer(NewServer(db, clock.Real(), nil))
 	t.Cleanup(ts.Close)
@@ -66,7 +66,7 @@ type signInTry struct {
 }
 
 // authPost posts to a /v1/auth path from client address ip, with the
-// velox_device cookie when browser is not nil.
+// hardcount_device cookie when browser is not nil.
 func authPost(t *testing.T, ts *httptest.Server, path, ip string, browser *http.Cookie, body map[string]any) signInTry {
 	t.Helper()
 	enc, err := json.Marshal(body)
@@ -105,11 +105,11 @@ func authPost(t *testing.T, ts *httptest.Server, path, ip string, browser *http.
 	}
 	for _, c := range resp.Cookies() {
 		switch c.Name {
-		case "velox_device":
+		case "hardcount_device":
 			if c.Value != "" {
 				out.browser = c
 			}
-		case "velox_session":
+		case "hardcount_session":
 			if c.Value != "" {
 				out.session = c
 			}
@@ -266,7 +266,7 @@ func TestE2E_LoginThrottle_SuccessResetsTheCount(t *testing.T) {
 }
 
 // TestE2E_LoginThrottle_NewBrowserSignInClearsTheEmailCount: a sign-in from
-// a browser with no velox_device cookie was counted under the email, so it
+// a browser with no hardcount_device cookie was counted under the email, so it
 // clears the email's count. Without that, a script with no cookie jar, or a
 // person in a private window, would pile up waits with every sign-in.
 func TestE2E_LoginThrottle_NewBrowserSignInClearsTheEmailCount(t *testing.T) {
@@ -296,23 +296,23 @@ func TestE2E_LoginThrottle_CapsOneEmailAcrossAddresses(t *testing.T) {
 
 	home := trySignIn(t, ts, "203.0.113.50", throttleOwner, throttlePassword, nil).want(t, http.StatusOK, "owner signs in at home")
 	if home.browser == nil {
-		t.Fatal("a sign-in set no velox_device cookie")
+		t.Fatal("a sign-in set no hardcount_device cookie")
 	}
 	if !home.browser.HttpOnly || home.browser.Path != "/v1/auth" {
-		t.Errorf("velox_device cookie: HttpOnly %v, Path %q; want HttpOnly, /v1/auth", home.browser.HttpOnly, home.browser.Path)
+		t.Errorf("hardcount_device cookie: HttpOnly %v, Path %q; want HttpOnly, /v1/auth", home.browser.HttpOnly, home.browser.Path)
 	}
 
 	tripAccount(t, ts, throttleOwner, "192.0.2")
 
 	// A browser that never signed in to this email waits, at any address.
 	trySignIn(t, ts, "203.0.113.51", throttleOwner, throttlePassword, nil).wantThrottled(t, "right password from a new browser")
-	// A velox_device cookie the server never set is a new browser. Held out,
+	// A hardcount_device cookie the server never set is a new browser. Held out,
 	// it shows the known-browser check reads the stored row, not just the
 	// cookie's shape. (A cookie set for another email: user package,
 	// TestLoginThrottle_BrowserIsKnownPerEmail.)
 	trySignIn(t, ts, "203.0.113.53", throttleOwner, throttlePassword,
-		&http.Cookie{Name: "velox_device", Value: strings.Repeat("7c", 32)}).
-		wantThrottled(t, "right password with a made-up velox_device cookie")
+		&http.Cookie{Name: "hardcount_device", Value: strings.Repeat("7c", 32)}).
+		wantThrottled(t, "right password with a made-up hardcount_device cookie")
 
 	// The owner's browser is not slowed, even from a new address.
 	trySignIn(t, ts, "203.0.113.52", throttleOwner, throttlePassword, home.browser).want(t, http.StatusOK, "owner's browser from a new address")
@@ -383,7 +383,7 @@ func TestE2E_LoginThrottle_PasswordResetLetsTheOwnerBackIn(t *testing.T) {
 		"token": token, "password": newPassword,
 	}).want(t, http.StatusOK, "confirm the reset")
 	if reset.browser == nil {
-		t.Fatal("a completed reset set no velox_device cookie")
+		t.Fatal("a completed reset set no hardcount_device cookie")
 	}
 
 	// The laptop is now a known browser: the wait does not hold it out.
@@ -416,7 +416,7 @@ func TestE2E_LoginThrottle_InviteAcceptMarksTheBrowser(t *testing.T) {
 		"token": token, "password": memberPassword,
 	}).want(t, http.StatusOK, "accept the invite")
 	if accept.session == nil || accept.browser == nil {
-		t.Fatalf("accept set session %v, velox_device %v; want both", accept.session != nil, accept.browser != nil)
+		t.Fatalf("accept set session %v, hardcount_device %v; want both", accept.session != nil, accept.browser != nil)
 	}
 	// The browser that accepted is known: the wait does not hold it out.
 	trySignIn(t, ts, desk, member, memberPassword, accept.browser).want(t, http.StatusOK, "member at the desk that accepted")

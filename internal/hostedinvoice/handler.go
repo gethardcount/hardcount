@@ -379,7 +379,7 @@ func (h *Handler) viewInvoice(w http.ResponseWriter, r *http.Request) {
 
 // createCheckoutSession is the Pay button target. Creates a Stripe Checkout
 // Session in payment mode for the invoice's outstanding amount. Tax is
-// already computed on the invoice (Velox owns the tax decision, not
+// already computed on the invoice (Hardcount owns the tax decision, not
 // Stripe), so the session uses a pre-totaled price_data line item and
 // does not enable Stripe's automatic_tax.
 func (h *Handler) createCheckoutSession(w http.ResponseWriter, r *http.Request) {

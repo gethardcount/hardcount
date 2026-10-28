@@ -128,7 +128,7 @@ func seedFinalized(t *testing.T, fi *fakeInvoices, fc *fakeCustomers, fs *fakeSe
 	t.Helper()
 	now := time.Now().UTC()
 	inv := domain.Invoice{
-		ID:               "vlx_inv_1",
+		ID:               "hc_inv_1",
 		TenantID:         "t_1",
 		CustomerID:       "cus_1",
 		SubscriptionID:   "sub_1",
@@ -196,7 +196,7 @@ func newTestHandler(fi InvoiceResolver, fc CustomerGetter, fs SettingsGetter, st
 		Settings:    fs,
 		CreditNotes: fakeCreditNotes{},
 		Stripe:      stripe,
-		BaseURL:     "https://app.velox.dev",
+		BaseURL:     "https://app.hardcount.dev",
 	})
 }
 
@@ -226,17 +226,17 @@ func TestViewInvoice_DraftHidden_404(t *testing.T) {
 	fi := newFakeInvoices()
 	// Defense-in-depth: even if the DB somehow carries a draft with a
 	// token (future regression), the public route must not leak it.
-	fi.byToken["vlx_pinv_draft"] = domain.Invoice{
-		ID:          "vlx_inv_d",
+	fi.byToken["hc_pinv_draft"] = domain.Invoice{
+		ID:          "hc_inv_d",
 		TenantID:    "t_1",
 		Status:      domain.InvoiceDraft,
-		PublicToken: "vlx_pinv_draft",
+		PublicToken: "hc_pinv_draft",
 	}
 	h := newTestHandler(fi, newFakeCustomers(), newFakeSettings(), &fakeCheckout{})
 	r := mountRouter(h)
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/vlx_pinv_draft", nil)
+	req := httptest.NewRequest(http.MethodGet, "/hc_pinv_draft", nil)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusNotFound {
@@ -248,13 +248,13 @@ func TestViewInvoice_Finalized_OK(t *testing.T) {
 	fi := newFakeInvoices()
 	fc := newFakeCustomers()
 	fs := newFakeSettings()
-	seedFinalized(t, fi, fc, fs, "vlx_pinv_ok")
+	seedFinalized(t, fi, fc, fs, "hc_pinv_ok")
 
 	h := newTestHandler(fi, fc, fs, &fakeCheckout{})
 	r := mountRouter(h)
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/vlx_pinv_ok", nil)
+	req := httptest.NewRequest(http.MethodGet, "/hc_pinv_ok", nil)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
@@ -303,20 +303,20 @@ func TestViewInvoice_Paid_PayDisabled(t *testing.T) {
 	fi := newFakeInvoices()
 	fc := newFakeCustomers()
 	fs := newFakeSettings()
-	inv := seedFinalized(t, fi, fc, fs, "vlx_pinv_paid")
+	inv := seedFinalized(t, fi, fc, fs, "hc_pinv_paid")
 	paidAt := time.Now().UTC()
 	inv.Status = domain.InvoicePaid
 	inv.PaymentStatus = domain.PaymentSucceeded
 	inv.AmountDueCents = 0
 	inv.AmountPaidCents = 11620
 	inv.PaidAt = &paidAt
-	fi.byToken["vlx_pinv_paid"] = inv
+	fi.byToken["hc_pinv_paid"] = inv
 
 	h := newTestHandler(fi, fc, fs, &fakeCheckout{})
 	r := mountRouter(h)
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/vlx_pinv_paid", nil)
+	req := httptest.NewRequest(http.MethodGet, "/hc_pinv_paid", nil)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
@@ -336,17 +336,17 @@ func TestViewInvoice_Voided_PayDisabled(t *testing.T) {
 	fi := newFakeInvoices()
 	fc := newFakeCustomers()
 	fs := newFakeSettings()
-	inv := seedFinalized(t, fi, fc, fs, "vlx_pinv_void")
+	inv := seedFinalized(t, fi, fc, fs, "hc_pinv_void")
 	voidedAt := time.Now().UTC()
 	inv.Status = domain.InvoiceVoided
 	inv.VoidedAt = &voidedAt
-	fi.byToken["vlx_pinv_void"] = inv
+	fi.byToken["hc_pinv_void"] = inv
 
 	h := newTestHandler(fi, fc, fs, &fakeCheckout{})
 	r := mountRouter(h)
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/vlx_pinv_void", nil)
+	req := httptest.NewRequest(http.MethodGet, "/hc_pinv_void", nil)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
@@ -363,14 +363,14 @@ func TestCheckout_Finalized_ReturnsURL(t *testing.T) {
 	fi := newFakeInvoices()
 	fc := newFakeCustomers()
 	fs := newFakeSettings()
-	seedFinalized(t, fi, fc, fs, "vlx_pinv_pay")
+	seedFinalized(t, fi, fc, fs, "hc_pinv_pay")
 
 	stripe := &fakeCheckout{url: "https://checkout.stripe.com/c/cs_test_abc"}
 	h := newTestHandler(fi, fc, fs, stripe)
 	r := mountRouter(h)
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/vlx_pinv_pay/checkout", nil)
+	req := httptest.NewRequest(http.MethodPost, "/hc_pinv_pay/checkout", nil)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
@@ -387,13 +387,13 @@ func TestCheckout_Finalized_ReturnsURL(t *testing.T) {
 	if stripe.lastTenant != "t_1" {
 		t.Errorf("stripe.lastTenant = %q", stripe.lastTenant)
 	}
-	if stripe.lastInvoice.ID != "vlx_inv_1" {
+	if stripe.lastInvoice.ID != "hc_inv_1" {
 		t.Errorf("stripe.lastInvoice.ID = %q", stripe.lastInvoice.ID)
 	}
-	if stripe.lastSuccess != "https://app.velox.dev/invoice/vlx_pinv_pay?paid=1" {
+	if stripe.lastSuccess != "https://app.hardcount.dev/invoice/hc_pinv_pay?paid=1" {
 		t.Errorf("success url = %q", stripe.lastSuccess)
 	}
-	if stripe.lastCancel != "https://app.velox.dev/invoice/vlx_pinv_pay" {
+	if stripe.lastCancel != "https://app.hardcount.dev/invoice/hc_pinv_pay" {
 		t.Errorf("cancel url = %q", stripe.lastCancel)
 	}
 }
@@ -402,16 +402,16 @@ func TestCheckout_Paid_Conflict(t *testing.T) {
 	fi := newFakeInvoices()
 	fc := newFakeCustomers()
 	fs := newFakeSettings()
-	inv := seedFinalized(t, fi, fc, fs, "vlx_pinv_paid2")
+	inv := seedFinalized(t, fi, fc, fs, "hc_pinv_paid2")
 	inv.Status = domain.InvoicePaid
 	inv.AmountDueCents = 0
-	fi.byToken["vlx_pinv_paid2"] = inv
+	fi.byToken["hc_pinv_paid2"] = inv
 
 	h := newTestHandler(fi, fc, fs, &fakeCheckout{})
 	r := mountRouter(h)
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/vlx_pinv_paid2/checkout", nil)
+	req := httptest.NewRequest(http.MethodPost, "/hc_pinv_paid2/checkout", nil)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusConflict {
@@ -423,14 +423,14 @@ func TestCheckout_NoStripe_ServiceUnavailable(t *testing.T) {
 	fi := newFakeInvoices()
 	fc := newFakeCustomers()
 	fs := newFakeSettings()
-	seedFinalized(t, fi, fc, fs, "vlx_pinv_noStripe")
+	seedFinalized(t, fi, fc, fs, "hc_pinv_noStripe")
 
 	// Stripe intentionally nil — dev environment without Stripe creds.
 	h := newTestHandler(fi, fc, fs, nil)
 	r := mountRouter(h)
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/vlx_pinv_noStripe/checkout", nil)
+	req := httptest.NewRequest(http.MethodPost, "/hc_pinv_noStripe/checkout", nil)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusServiceUnavailable {
@@ -442,14 +442,14 @@ func TestCheckout_StripeError_BadGateway(t *testing.T) {
 	fi := newFakeInvoices()
 	fc := newFakeCustomers()
 	fs := newFakeSettings()
-	seedFinalized(t, fi, fc, fs, "vlx_pinv_err")
+	seedFinalized(t, fi, fc, fs, "hc_pinv_err")
 
 	stripe := &fakeCheckout{err: errors.New("stripe exploded")}
 	h := newTestHandler(fi, fc, fs, stripe)
 	r := mountRouter(h)
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/vlx_pinv_err/checkout", nil)
+	req := httptest.NewRequest(http.MethodPost, "/hc_pinv_err/checkout", nil)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadGateway {
@@ -461,13 +461,13 @@ func TestDownloadPDF_Finalized_OK(t *testing.T) {
 	fi := newFakeInvoices()
 	fc := newFakeCustomers()
 	fs := newFakeSettings()
-	seedFinalized(t, fi, fc, fs, "vlx_pinv_pdf")
+	seedFinalized(t, fi, fc, fs, "hc_pinv_pdf")
 
 	h := newTestHandler(fi, fc, fs, &fakeCheckout{})
 	r := mountRouter(h)
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/vlx_pinv_pdf/pdf", nil)
+	req := httptest.NewRequest(http.MethodGet, "/hc_pinv_pdf/pdf", nil)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
@@ -519,7 +519,7 @@ func TestViewInvoice_LineHasOneQuantityAndOneUnitPrice(t *testing.T) {
 	fi := newFakeInvoices()
 	fc := newFakeCustomers()
 	fs := newFakeSettings()
-	inv := seedFinalized(t, fi, fc, fs, "vlx_pinv_frac")
+	inv := seedFinalized(t, fi, fc, fs, "hc_pinv_frac")
 	fi.lineItems[inv.ID] = []domain.InvoiceLineItem{{
 		ID:              "li_frac",
 		InvoiceID:       inv.ID,
@@ -543,7 +543,7 @@ func TestViewInvoice_LineHasOneQuantityAndOneUnitPrice(t *testing.T) {
 	r := mountRouter(h)
 
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/vlx_pinv_frac", nil))
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/hc_pinv_frac", nil))
 	if w.Code != http.StatusOK {
 		t.Fatalf("got %d, want 200, body=%s", w.Code, w.Body.String())
 	}
@@ -580,18 +580,18 @@ func TestViewInvoice_CarriesTaxExemptReason(t *testing.T) {
 	fi := newFakeInvoices()
 	fc := newFakeCustomers()
 	fs := newFakeSettings()
-	inv := seedFinalized(t, fi, fc, fs, "vlx_pinv_exempt")
+	inv := seedFinalized(t, fi, fc, fs, "hc_pinv_exempt")
 	// Exempt invoice: $0 tax, an operator-supplied reason, not reverse-charge.
 	inv.TaxAmountCents = 0
 	inv.TaxExemptReason = "Reseller — resale certificate"
 	inv.TaxReverseCharge = false
-	fi.byToken["vlx_pinv_exempt"] = inv
+	fi.byToken["hc_pinv_exempt"] = inv
 
 	h := newTestHandler(fi, fc, fs, &fakeCheckout{})
 	r := mountRouter(h)
 
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/vlx_pinv_exempt", nil))
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/hc_pinv_exempt", nil))
 	if w.Code != http.StatusOK {
 		t.Fatalf("got %d, want 200, body=%s", w.Code, w.Body.String())
 	}

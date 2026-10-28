@@ -56,7 +56,7 @@ problem:
   Go error strings on screen; no links to the invoices and credit notes a row
   names.
 
-These are Velox's own defects. The standard is anchored on them, not on
+These are Hardcount's own defects. The standard is anchored on them, not on
 industry shape. Where it makes a design choice that no billing product was
 verified to make (day headers), it says so.
 
@@ -111,7 +111,7 @@ with main's; the working session does that comparison in his place.
 
 | # | Question | Decided |
 |---|---|---|
-| 1 | The word for anything Velox did on its own | "Automatic". "Invoice paid · by Velox" reads as if Velox paid |
+| 1 | The word for anything Hardcount did on its own | "Automatic". "Invoice paid · by Hardcount" reads as if Hardcount paid |
 | 2 | Day headers on activity cards | Yes. A design choice: one test-clock advance drops many rows on one day |
 | 3 | Green only for money | Yes. Finalized, activated and resumed rows turn grey |
 | 4 | Where the timezone is named | Once, in the card header ("Times in GMT+5:30"), not on every row |
@@ -127,8 +127,8 @@ Which time a line shows depends on why it happened:
 | Basis | Kind of line | Real-clock entity | Test-clock entity |
 |---|---|---|---|
 | Act | A person, an API key or the customer acted | The real moment | The clock's time at that moment, plus Recorded |
-| Due | Velox acted at an instant the contract names | When the scheduler acted, within minutes of the named instant | The named instant exactly, plus Recorded |
-| Check | Velox found something by checking (a spend threshold crossed) | When the check ran | When the check ran: once per advance, so a long jump dates it at the jump's end |
+| Due | Hardcount acted at an instant the contract names | When the scheduler acted, within minutes of the named instant | The named instant exactly, plus Recorded |
+| Check | Hardcount found something by checking (a spend threshold crossed) | When the check ran | When the check ran: once per advance, so a long jump dates it at the jump's end |
 | Cause | The line follows from another event (a receipt after a payment) | The cause's instant | The cause's instant, plus Recorded |
 | Legacy | Rows written before the real-time stamps existed | Their only time | Their only time, no Recorded part |
 
@@ -238,7 +238,7 @@ made the attempt owns its facts.
   are already in Go. The browser lacks the facts the words depend on, and API
   callers would get different sentences from the dashboard.
 - **C. Relative times with the exact time on hover.** It hides the exact time
-  behind a hover, and Velox puts no information behind hover only.
+  behind a hover, and Hardcount puts no information behind hover only.
 - **D. One credit-note title per refund status** (today's nine titles). The
   title's amount changes meaning between them. One title with the total, and
   meta parts for where each dollar went, says it once.

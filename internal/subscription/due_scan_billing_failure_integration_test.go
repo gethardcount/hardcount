@@ -56,8 +56,8 @@ func newBFSeed(t *testing.T, suffix string) *bfSeed {
 		t: t, db: db, admin: admin,
 		ctx:      leadertest.Token(t, admin, postgres.WithLivemode(context.Background(), false), leader.RoleBilling),
 		store:    subscription.NewPostgresStore(db),
-		tenantID: "vlx_ten_bf" + suffix,
-		clockID:  "vlx_tclk_bf" + suffix,
+		tenantID: "hc_ten_bf" + suffix,
+		clockID:  "hc_tclk_bf" + suffix,
 		now:      time.Now().UTC().Truncate(time.Microsecond),
 	}
 	s.frozen = s.now.Add(-10 * 24 * time.Hour)

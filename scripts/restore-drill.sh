@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Velox Backup + Restore Drill
+# Hardcount Backup + Restore Drill
 #
 # Exercises the full backup → restore → validate loop against an ephemeral
 # Postgres container. Run periodically (docs/ops/backup-considerations.md
@@ -13,14 +13,14 @@
 #      rotation — the drill must not affect production backup infra).
 #   3. Starts a one-shot Postgres container on a non-standard port.
 #   4. Invokes scripts/restore.sh against the ephemeral container with
-#      VELOX_RESTORE_CONFIRM=yes.
+#      HARDCOUNT_RESTORE_CONFIRM=yes.
 #   5. Re-reads the same critical-table counts and fails if any diverge.
 #   6. Appends a pass/fail line to DRILL_LOG with timings so trend-over-time
 #      on backup/restore duration is visible.
 #   7. Tears the container down even on error.
 #
 # Usage:
-#   SOURCE_DATABASE_URL="postgres://velox:velox@localhost:5432/velox?sslmode=disable" \
+#   SOURCE_DATABASE_URL="postgres://hardcount:hardcount@localhost:5432/hardcount?sslmode=disable" \
 #     ./scripts/restore-drill.sh
 #
 # Optional environment variables:
@@ -31,7 +31,7 @@
 #   DRILL_PG_PORT          Host port exposed by the ephemeral container
 #                          (default: 15432 — picked to avoid the usual 5432).
 #   DRILL_LOG              Path to the drill history file (default:
-#                          ~/.velox/drill.log). Auto-created.
+#                          ~/.hardcount/drill.log). Auto-created.
 #   CRITICAL_TABLES        Space-separated list of tables to count-match
 #                          (default: tenants customers subscriptions
 #                          invoices customer_credit_ledger).
@@ -65,8 +65,8 @@ DRILL_PG_IMAGE="${DRILL_PG_IMAGE:-postgres:16-alpine}"
 # unless the operator overrode PG_RESTORE explicitly.
 export PG_RESTORE="${PG_RESTORE:-docker run --rm -i --network host $DRILL_PG_IMAGE pg_restore}"
 DRILL_PG_PORT="${DRILL_PG_PORT:-15432}"
-DRILL_CONTAINER_NAME="${DRILL_CONTAINER_NAME:-velox-drill-$$}"
-DRILL_LOG="${DRILL_LOG:-$HOME/.velox/drill.log}"
+DRILL_CONTAINER_NAME="${DRILL_CONTAINER_NAME:-hardcount-drill-$$}"
+DRILL_LOG="${DRILL_LOG:-$HOME/.hardcount/drill.log}"
 CRITICAL_TABLES="${CRITICAL_TABLES:-tenants customers subscriptions invoices customer_credit_ledger}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -123,7 +123,7 @@ mkdir -p "$(dirname "$DRILL_LOG")" 2>/dev/null || true
 # Capture source row counts
 # ---------------------------------------------------------------------------
 
-BACKUP_WORKDIR=$(mktemp -d "${TMPDIR:-/tmp}/velox-drill.XXXXXX")
+BACKUP_WORKDIR=$(mktemp -d "${TMPDIR:-/tmp}/hardcount-drill.XXXXXX")
 SOURCE_COUNTS_FILE="$BACKUP_WORKDIR/source_counts.txt"
 
 log "Capturing source row counts (${CRITICAL_TABLES})..."
@@ -170,9 +170,9 @@ log "Step 1/3 complete in ${BACKUP_DURATION}s."
 log "Step 2/3: launching ephemeral Postgres ($DRILL_PG_IMAGE) on port $DRILL_PG_PORT"
 docker run -d \
   --name "$DRILL_CONTAINER_NAME" \
-  -e POSTGRES_DB=velox_drill \
-  -e POSTGRES_USER=velox \
-  -e POSTGRES_PASSWORD=velox \
+  -e POSTGRES_DB=hardcount_drill \
+  -e POSTGRES_USER=hardcount \
+  -e POSTGRES_PASSWORD=hardcount \
   -p "${DRILL_PG_PORT}:5432" \
   "$DRILL_PG_IMAGE" >/dev/null || die "docker run failed." 5
 DRILL_CONTAINER_STARTED=yes
@@ -181,7 +181,7 @@ DRILL_CONTAINER_STARTED=yes
 WAIT_DEADLINE=$(( $(date +%s) + 60 ))
 READY=""
 while [ "$(date +%s)" -lt "$WAIT_DEADLINE" ]; do
-  if docker exec "$DRILL_CONTAINER_NAME" pg_isready -U velox -d velox_drill -q 2>/dev/null; then
+  if docker exec "$DRILL_CONTAINER_NAME" pg_isready -U hardcount -d hardcount_drill -q 2>/dev/null; then
     READY=yes
     break
   fi
@@ -190,13 +190,13 @@ done
 [ -n "$READY" ] || die "Ephemeral Postgres did not become ready within 60s." 5
 log "Ephemeral Postgres is ready."
 
-# Provision the Velox runtime role the archive's GRANTs reference — the same
+# Provision the Hardcount runtime role the archive's GRANTs reference — the same
 # step the DR runbook prescribes on a fresh cluster (restore.sh refuses to
 # run without it, so the drill rehearses the full documented procedure).
-docker exec "$DRILL_CONTAINER_NAME" psql -U velox -d velox_drill -q -c \
-  "CREATE ROLE velox_app LOGIN PASSWORD 'velox_app'" || die "Could not provision velox_app role in ephemeral cluster." 5
+docker exec "$DRILL_CONTAINER_NAME" psql -U hardcount -d hardcount_drill -q -c \
+  "CREATE ROLE hardcount_app LOGIN PASSWORD 'hardcount_app'" || die "Could not provision hardcount_app role in ephemeral cluster." 5
 
-TARGET_URL="postgres://velox:velox@localhost:${DRILL_PG_PORT}/velox_drill?sslmode=disable"
+TARGET_URL="postgres://hardcount:hardcount@localhost:${DRILL_PG_PORT}/hardcount_drill?sslmode=disable"
 
 # ---------------------------------------------------------------------------
 # Step 3 — Restore
@@ -204,7 +204,7 @@ TARGET_URL="postgres://velox:velox@localhost:${DRILL_PG_PORT}/velox_drill?sslmod
 
 RESTORE_START=$(date +%s)
 log "Step 3/3: restoring $BACKUP_FILE → ephemeral DB"
-DATABASE_URL="$TARGET_URL" VELOX_RESTORE_CONFIRM=yes \
+DATABASE_URL="$TARGET_URL" HARDCOUNT_RESTORE_CONFIRM=yes \
   "$SCRIPT_DIR/restore.sh" "$BACKUP_FILE" \
   2>&1 | while IFS= read -r line; do log "  restore: $line"; done || die "restore.sh exited non-zero." 3
 

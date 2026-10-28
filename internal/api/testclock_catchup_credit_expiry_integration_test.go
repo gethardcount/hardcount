@@ -69,7 +69,7 @@ func TestCatchup_CreditExpiryRunsAfterDunningRetries_RealStore(t *testing.T) {
 
 			// The clock as Advance leaves it for the worker: marked advancing,
 			// frozen_time already at the target.
-			clockID := postgres.NewID("vlx_tclk")
+			clockID := postgres.NewID("hc_tclk")
 			tx, err := r.db.BeginTx(r.ctx, postgres.TxBypass, "")
 			if err != nil {
 				t.Fatalf("begin: %v", err)

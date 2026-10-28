@@ -25,7 +25,7 @@ import { CreditCard, AlertTriangle, ExternalLink, ShieldCheck, Clock, Loader2, I
  * voided AND uncollectible alike. So a written-off invoice showed the amber
  * "Payment method needed · Amount Due" demand here while the other public page
  * told the same customer collection was closed. Found live on TC Walk Co
- * VLX-000152 (and VLX-000136 had been sitting in that state with a live token).
+ * HC-000152 (and HC-000136 had been sitting in that state with a live token).
  *
  * That page's own comment records this rule being missed once before: #651
  * relabelled one figure and left its twin saying "Amount Due" — "Same rule,
@@ -164,7 +164,7 @@ export default function UpdatePaymentPage() {
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="w-full max-w-md">
-        {/* Brand header — the TENANT's identity, not Velox: this is the
+        {/* Brand header — the TENANT's identity, not Hardcount: this is the
             payment-recovery funnel, and a customer arriving from a
             failed-payment email who sees an unknown brand treats the
             page as phishing (audit P13). Falls back to a neutral header
@@ -304,7 +304,7 @@ export default function UpdatePaymentPage() {
         </Card>
 
         <p className="text-xs text-muted-foreground text-center mt-6">
-          Powered by Velox Billing
+          Powered by Hardcount Billing
         </p>
       </div>
     </div>

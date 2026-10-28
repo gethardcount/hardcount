@@ -46,7 +46,7 @@ func TestMRRMovement_TotalPastInt64Fails(t *testing.T) {
 			t.Fatalf("begin: %v", err)
 		}
 		defer postgres.Rollback(tx)
-		subID := postgres.NewID("vlx_sub")
+		subID := postgres.NewID("hc_sub")
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO subscriptions (id, tenant_id, code, display_name, customer_id, status, billing_time,
 				activated_at, current_billing_period_start, current_billing_period_end, next_billing_at, created_at, updated_at)
@@ -57,7 +57,7 @@ func TestMRRMovement_TotalPastInt64Fails(t *testing.T) {
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO subscription_items (id, tenant_id, subscription_id, plan_id, quantity, metadata, created_at, updated_at)
 			VALUES ($1, $2, $3, $4, 1, '{}'::jsonb, $5, $5)
-		`, postgres.NewID("vlx_si"), tenantID, subID, p.ID, at); err != nil {
+		`, postgres.NewID("hc_si"), tenantID, subID, p.ID, at); err != nil {
 			t.Fatalf("insert item: %v", err)
 		}
 		if err := tx.Commit(); err != nil {

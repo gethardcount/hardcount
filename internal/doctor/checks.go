@@ -10,7 +10,7 @@
 // away:
 //
 //   - stripe_invoice_id IS NULL       — importer rows dropped components
-//   - id NOT LIKE 'vlx_inv_safe%%'     — old velox-migrate-safety seeder rows
+//   - id NOT LIKE 'hc_inv_safe%%'     — old hardcount-migrate-safety seeder rows
 //   - created_at >= '2026-07-05'      — pre-#365/#347 grandfathered subs
 //   - grace intervals on sweeps       — post-commit stamps lag their tx
 package doctor
@@ -27,7 +27,7 @@ var Checks = []Check{
 		Name:   "invoice_due_conservation",
 		Domain: "invoices",
 		Why:    "an invoice's total is accounted for exactly once: amount_due = total - paid - credits_applied - the part of issued credit notes that reduced it (a note's total minus its refund/credit/out-of-band channels), and those three never exceed the total. Drift means money owed and money booked disagree. A row that is over its total was relieved twice (before 2026-10-12 a credit note issued after customer credits were applied clamped amount_due at zero and kept the credits); the customer is owed the excess as a manual credit grant",
-		SQL:    `SELECT i.id, i.tenant_id, i.status, i.payment_status, i.total_amount_cents, i.amount_paid_cents, i.credits_applied_cents, COALESCE(cn.reduced, 0) AS credit_notes_reduced_cents, i.amount_due_cents FROM invoices i LEFT JOIN LATERAL (SELECT SUM(total_cents - refund_amount_cents - credit_amount_cents - out_of_band_amount_cents) AS reduced FROM credit_notes WHERE invoice_id = i.id AND status = 'issued') cn ON true WHERE i.stripe_invoice_id IS NULL AND i.id NOT LIKE 'vlx_inv_safe%' AND (i.amount_due_cents <> GREATEST(i.total_amount_cents - i.amount_paid_cents - i.credits_applied_cents - COALESCE(cn.reduced, 0), 0) OR i.amount_paid_cents + i.credits_applied_cents + COALESCE(cn.reduced, 0) > i.total_amount_cents)`,
+		SQL:    `SELECT i.id, i.tenant_id, i.status, i.payment_status, i.total_amount_cents, i.amount_paid_cents, i.credits_applied_cents, COALESCE(cn.reduced, 0) AS credit_notes_reduced_cents, i.amount_due_cents FROM invoices i LEFT JOIN LATERAL (SELECT SUM(total_cents - refund_amount_cents - credit_amount_cents - out_of_band_amount_cents) AS reduced FROM credit_notes WHERE invoice_id = i.id AND status = 'issued') cn ON true WHERE i.stripe_invoice_id IS NULL AND i.id NOT LIKE 'hc_inv_safe%' AND (i.amount_due_cents <> GREATEST(i.total_amount_cents - i.amount_paid_cents - i.credits_applied_cents - COALESCE(cn.reduced, 0), 0) OR i.amount_paid_cents + i.credits_applied_cents + COALESCE(cn.reduced, 0) > i.total_amount_cents)`,
 	},
 	{
 		Name:   "invoice_paid_settled_coherence",
@@ -39,7 +39,7 @@ var Checks = []Check{
 		Name:   "invoice_terminal_timestamp_coherence",
 		Domain: "invoices",
 		Why:    "voided=>voided_at, finalized=>issued_at, and uncollectible_at never on draft/finalized — the status machine stamps these in the same UPDATE",
-		SQL:    `SELECT id, tenant_id, status, issued_at, voided_at, uncollectible_at FROM invoices WHERE stripe_invoice_id IS NULL AND id NOT LIKE 'vlx_inv_safe%' AND ((status = 'voided' AND voided_at IS NULL) OR (status = 'finalized' AND issued_at IS NULL) OR (uncollectible_at IS NOT NULL AND status IN ('draft','finalized')))`,
+		SQL:    `SELECT id, tenant_id, status, issued_at, voided_at, uncollectible_at FROM invoices WHERE stripe_invoice_id IS NULL AND id NOT LIKE 'hc_inv_safe%' AND ((status = 'voided' AND voided_at IS NULL) OR (status = 'finalized' AND issued_at IS NULL) OR (uncollectible_at IS NOT NULL AND status IN ('draft','finalized')))`,
 	},
 	{
 		Name:   "ledger_row_structural_bounds",
@@ -278,8 +278,8 @@ WHERE g.entry_type = 'grant' AND g.consumed_cents < g.amount_cents;`,
 	{
 		Name:   "cost_dashboard_token_plaintext_at_rest",
 		Domain: "customers",
-		Why:    "customers.cost_dashboard_token_hash must hold a SHA-256 blind index, never the credential itself; a vlx_pcd_-prefixed value means some writer stored the raw public-dashboard token and a DB read yields a replayable URL (migration 0172)",
-		SQL:    `SELECT id, tenant_id, livemode, external_id, cost_dashboard_token_hash, updated_at FROM customers WHERE cost_dashboard_token_hash IS NOT NULL AND (cost_dashboard_token_hash LIKE 'vlx_%' OR length(cost_dashboard_token_hash) <> 64)`,
+		Why:    "customers.cost_dashboard_token_hash must hold a SHA-256 blind index, never the credential itself; a hc_pcd_-prefixed value means some writer stored the raw public-dashboard token and a DB read yields a replayable URL (migration 0172)",
+		SQL:    `SELECT id, tenant_id, livemode, external_id, cost_dashboard_token_hash, updated_at FROM customers WHERE cost_dashboard_token_hash IS NOT NULL AND (cost_dashboard_token_hash LIKE 'hc_%' OR length(cost_dashboard_token_hash) <> 64)`,
 	},
 	{
 		Name:   "cn_deferred_draft_stale",
@@ -298,7 +298,7 @@ WHERE g.entry_type = 'grant' AND g.consumed_cents < g.amount_cents;`,
 		SQL: `SELECT id, tenant_id, invoice_number, status, tax_amount_cents, tax_calculation_id, issued_at
 		FROM invoices
 		WHERE stripe_invoice_id IS NULL
-		  AND id NOT LIKE 'vlx_inv_safe%'
+		  AND id NOT LIKE 'hc_inv_safe%'
 		  AND is_simulated = false
 		  AND tax_provider = 'stripe_tax'
 		  AND tax_status = 'ok'

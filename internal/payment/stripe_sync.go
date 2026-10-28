@@ -80,12 +80,12 @@ func (s *StripeBillingSync) SyncBillingProfile(ctx context.Context, stripeCustom
 		return fmt.Errorf("stripe customer update: %w", err)
 	}
 
-	// Reconcile tax_ids[] on the Stripe Customer. Velox stores a single
+	// Reconcile tax_ids[] on the Stripe Customer. Hardcount stores a single
 	// (type, value) on the billing profile; Stripe stores a collection
 	// keyed by id. Reconcile = list existing → delete the ones that
 	// don't match desired → create if desired isn't already present.
 	// Best-effort: failure logs but doesn't unwind the customer update
-	// (per the Velox→Stripe sync pattern). Phase 2 of the sync gap-
+	// (per the Hardcount→Stripe sync pattern). Phase 2 of the sync gap-
 	// closure (2026-05-29) — Stripe Dashboard's Tax IDs tab now mirrors
 	// the operator's billing profile, matching Lago/Recurly/Chargebee.
 	if err := s.reconcileTaxIDs(ctx, sc, stripeCustomerID, bp.TaxIDType, bp.TaxID); err != nil {
@@ -95,7 +95,7 @@ func (s *StripeBillingSync) SyncBillingProfile(ctx context.Context, stripeCustom
 }
 
 // reconcileTaxIDs aligns the Stripe Customer's tax_ids[] collection
-// with the single (desiredType, desiredValue) Velox tracks per
+// with the single (desiredType, desiredValue) Hardcount tracks per
 // billing profile. Idempotent: re-running with the same desired pair
 // is a no-op (list shows it already present, nothing to delete or
 // create). Empty desired = clear all existing.

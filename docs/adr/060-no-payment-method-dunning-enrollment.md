@@ -99,7 +99,7 @@ and the dunning state machine.
 ## Alternatives considered
 
 - **An explicit `incomplete`/gated subscription state (Stripe
-  `payment_behavior`).** Rejected as the *default* — Velox is B2B,
+  `payment_behavior`).** Rejected as the *default* — Hardcount is B2B,
   operator-gated, PaymentIntent-only; create-live matches the AI-native peer
   set (Orb/Lago/Metronome). An *opt-in* gate is deferred (below).
 - **A persisted `collection_state`/`past_due` subscription column.**
@@ -108,7 +108,7 @@ and the dunning state machine.
   stored status would lie on self-pay/reconciler paths). Health, when
   surfaced, will be *derived* on read.
 - **Do nothing (pre-launch, no victim yet).** Rejected — this is a silent
-  money/recovery sink in a core path, the class Velox fixes at the root
+  money/recovery sink in a core path, the class Hardcount fixes at the root
   regardless of stage; the fix is contained and zero-migration.
 
 ## Deferred (trigger-gated, for a design partner)

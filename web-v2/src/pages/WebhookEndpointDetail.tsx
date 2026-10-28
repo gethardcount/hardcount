@@ -155,7 +155,7 @@ export default function WebhookEndpointDetailPage() {
           of the Endpoints tab, not a third surface. */}
       <div>
         <h1 className="text-2xl font-semibold text-foreground">Webhooks</h1>
-        <p className="text-sm text-muted-foreground mt-1">Velox calls a URL in your app when something happens, such as an invoice paid or a payment failed, so your app can react.</p>
+        <p className="text-sm text-muted-foreground mt-1">Hardcount calls a URL in your app when something happens, such as an invoice paid or a payment failed, so your app can react.</p>
       </div>
 
       <Tabs value="endpoints" onValueChange={(t) => { if (t === 'events') navigate('/webhooks/events') }} className="mt-6">
@@ -290,7 +290,7 @@ export default function WebhookEndpointDetailPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Resume endpoint?</AlertDialogTitle>
             <AlertDialogDescription>
-              Velox will send matching events to <span className="font-mono break-all">{endpoint?.url}</span>.
+              Hardcount will send matching events to <span className="font-mono break-all">{endpoint?.url}</span>.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

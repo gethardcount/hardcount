@@ -1,37 +1,37 @@
 # Webhooks
 
-A webhook is a message Velox sends to a URL in your app when something
+A webhook is a message Hardcount sends to a URL in your app when something
 happens, such as an invoice paid, a payment failed or a credit balance
 running low. Your app can then react: send a receipt, pause a service,
 remind a customer to top up.
 
 ## Receive your first event
 
-You run a small test receiver, register it with Velox, make something
+You run a small test receiver, register it with Hardcount, make something
 happen, and check the message.
 
-**Before you start:** Velox is running, and you have a test API key (see
-[API keys](api-keys.md)). Open a terminal in the `velox` folder and set:
+**Before you start:** Hardcount is running, and you have a test API key (see
+[API keys](api-keys.md)). Open a terminal in the `hardcount` folder and set:
 
 ```bash
-export VELOX=http://localhost:8080
-export VELOX_KEY=vlx_secret_test_…   # your test key
+export HARDCOUNT=http://localhost:8080
+export HARDCOUNT_KEY=hc_secret_test_…   # your test key
 ```
 
 1. **Start the test receiver.** It answers every message with `200` and
    writes each one to a file.
 
    ```bash
-   python3 scripts/dev/webhook-sink.py /tmp/velox-webhooks.jsonl
+   python3 scripts/dev/webhook-sink.py /tmp/hardcount-webhooks.jsonl
    ```
 
-   **You see:** `webhook sink on 127.0.0.1:9099 -> /tmp/velox-webhooks.jsonl (paths under /fail return 500)`
+   **You see:** `webhook sink on 127.0.0.1:9099 -> /tmp/hardcount-webhooks.jsonl (paths under /fail return 500)`
 
-2. **Pick the address Velox will call.** It depends on how you run Velox.
+2. **Pick the address Hardcount will call.** It depends on how you run Hardcount.
 
    - **From source** (`make dev`): use `http://localhost:9099/ok`.
    - **In Docker** (the [quick start](quick-start.md) or a server): inside
-     its container, `localhost` is the container itself, and Velox refuses
+     its container, `localhost` is the container itself, and Hardcount refuses
      private network addresses, so it cannot reach the receiver directly.
      In a second terminal, start a tunnel, which gives your computer a
      public `https://` address. For example:
@@ -48,35 +48,35 @@ export VELOX_KEY=vlx_secret_test_…   # your test key
 
    ```bash
    jq -n --arg url "$HOOK_URL" '{url: $url, events: ["*"]}' |
-     curl -s -X POST "$VELOX/v1/webhook-endpoints/endpoints" \
-       -H "Authorization: Bearer $VELOX_KEY" \
+     curl -s -X POST "$HARDCOUNT/v1/webhook-endpoints/endpoints" \
+       -H "Authorization: Bearer $HARDCOUNT_KEY" \
        -H "Content-Type: application/json" \
        -d @-
    ```
 
-   **You see:** JSON with `endpoint.id` (`vlx_whe_…`) and `secret`
+   **You see:** JSON with `endpoint.id` (`hc_whe_…`) and `secret`
    (`whsec_…`). The secret is shown only this once. Save it:
    `export WHSEC=whsec_…`.
 
 4. **Make something happen.** Run the demo again. It creates a
    subscription and a month of usage, then bills it.
    - Docker quick start: `cd deploy/compose && ./quickstart.sh demo`
-   - From source: `./scripts/demo.sh $VELOX_KEY`
+   - From source: `./scripts/demo.sh $HARDCOUNT_KEY`
 
    Then look at the file:
 
    ```bash
-   tail -n 3 /tmp/velox-webhooks.jsonl
+   tail -n 3 /tmp/hardcount-webhooks.jsonl
    ```
 
    **You see:** one JSON line per message, each with `"path": "/ok"`, a
    `"sig"` such as `t=…,v1=…`, and a `"body"` whose `event_type` is, for
    example, `subscription.created` or `invoice.finalized`.
 
-5. **Check the signature.** This proves the message came from Velox.
+5. **Check the signature.** This proves the message came from Hardcount.
 
    ```bash
-   head -n 1 /tmp/velox-webhooks.jsonl | python3 -c '
+   head -n 1 /tmp/hardcount-webhooks.jsonl | python3 -c '
    import hashlib, hmac, json, os, sys
    r = json.loads(sys.stdin.readline())
    p = dict(x.split("=", 1) for x in r["sig"].split(","))
@@ -90,7 +90,7 @@ The dashboard shows the same messages: open **Webhooks**, then your
 endpoint, to see each delivery and its result.
 
 To test failures, register an address whose path starts with `/fail`, such
-as `http://localhost:9099/fail`. The receiver answers `500`, so Velox
+as `http://localhost:9099/fail`. The receiver answers `500`, so Hardcount
 retries on the schedule below.
 
 ## Three rules for your receiver
@@ -116,21 +116,21 @@ Every message is an HTTP `POST` to your URL with
 
 ```json
 {
-  "id": "vlx_whevt_…",
+  "id": "hc_whevt_…",
   "event_type": "invoice.paid",
   "created_at": "2026-07-05T14:03:22Z",
   "data": {
-    "invoice": { "id": "vlx_inv_…", "customer_id": "vlx_cus_…", "status": "paid", "amount_paid_cents": 4900, "…": "…" }
+    "invoice": { "id": "hc_inv_…", "customer_id": "hc_cus_…", "status": "paid", "amount_paid_cents": 4900, "…": "…" }
   }
 }
 ```
 
-- `id` is the event's ID and `created_at` is when Velox created the event.
+- `id` is the event's ID and `created_at` is when Hardcount created the event.
   Both stay the same on every retry and replay, so use `id` to skip repeats
   (rule 1).
 - `data` holds the resource the event is about, under the resource's name:
   `data.invoice`, `data.subscription` and so on. It is the same object the
-  API returns for that resource, as it was when Velox created the event.
+  API returns for that resource, as it was when Hardcount created the event.
   Every event of a family carries the same resource. To act on the newest
   state, read the resource from the API.
 - A few events also carry facts the resource does not hold, such as who
@@ -146,8 +146,8 @@ Headers:
 
 | Header | Value |
 |---|---|
-| `Velox-Signature` | `t=<unix-seconds>,v1=<hex hmac>` |
-| `Velox-Event-Type` | The event type, so you can route the message before you read the body |
+| `Hardcount-Signature` | `t=<unix-seconds>,v1=<hex hmac>` |
+| `Hardcount-Event-Type` | The event type, so you can route the message before you read the body |
 
 ## Verifying signatures
 
@@ -166,7 +166,7 @@ Node:
 ```js
 const crypto = require("crypto");
 
-function verifyVeloxSignature(rawBody, header, secret, toleranceSec = 300) {
+function verifyHardcountSignature(rawBody, header, secret, toleranceSec = 300) {
   const t = header.match(/(?:^|,)t=(\d+)/)?.[1];
   // Collect every v1= entry: there are two during a secret rotation.
   const sigs = [...header.matchAll(/v1=([0-9a-f]+)/g)].map(m => m[1]);
@@ -188,7 +188,7 @@ Python:
 ```python
 import hashlib, hmac, re, time
 
-def verify_velox_signature(raw_body: bytes, header: str, secret: str, tolerance: int = 300) -> bool:
+def verify_hardcount_signature(raw_body: bytes, header: str, secret: str, tolerance: int = 300) -> bool:
     m = re.search(r"(?:^|,)t=(\d+)", header)
     sigs = re.findall(r"v1=([0-9a-f]+)", header)
     if not m or not sigs:
@@ -206,7 +206,7 @@ The secret (`whsec_…`) is shown once when you create the endpoint, and once
 when you rotate it.
 
 1. Call `POST /v1/webhook-endpoints/endpoints/{id}/rotate-secret`.
-   **You see:** the new secret. For the next 72 hours, Velox signs each
+   **You see:** the new secret. For the next 72 hours, Hardcount signs each
    message with both the old and the new secret.
 2. Update your receiver to use the new secret within those 72 hours.
    **You see:** messages keep passing your check.
@@ -229,11 +229,11 @@ the [API reference](api-surface.md#the-full-reference)):
 - `events` takes event names from the [catalog](#event-catalog). `"*"`
   means every event, and a prefix such as `"invoice.*"` means every event
   that starts with it.
-- An event name Velox never sends is refused with `422`, so a typo cannot
+- An event name Hardcount never sends is refused with `422`, so a typo cannot
   leave you waiting for messages that never come.
 - The URL must start with `https://` and must not point to a private
   network address, IPv4 or IPv6, such as `10.0.0.1`, `169.254.169.254`,
-  `fd00::1` or `fe80::1`. Velox checks the address when you save the URL
+  `fd00::1` or `fe80::1`. Hardcount checks the address when you save the URL
   and again each time it sends.
 - On a server (`APP_ENV=production`), `localhost` is refused too. In local
   development, `localhost` is allowed, over `http://` as well.
@@ -255,7 +255,7 @@ status within 10 seconds. Anything else is retried on this schedule:
 That is six attempts over about 26.5 hours. After the last one, the
 delivery is marked failed.
 
-Velox does not follow redirects, so a `3xx` answer is retried like any
+Hardcount does not follow redirects, so a `3xx` answer is retried like any
 other failure: register the URL that answers with the `2xx` itself.
 
 **If your endpoint was down for longer:** failed deliveries stay visible in
@@ -289,20 +289,20 @@ returns them.
 |---|---|---|
 | `invoice.finalized` | An invoice is final and ready to pay. Sent once per invoice, including the invoice for a mid-period upgrade, seat increase or added item. A draft sends it when it is finalized. Its `amount_due_cents` is before credit ([more](#invoicefinalized-shows-the-amount-before-credit)). Under Stripe Tax, `tax_transaction_id` can be recorded after this event; `GET /v1/invoices/{id}` shows it | — |
 | `invoice.paid` | An invoice is fully paid, by card, credit or an offline payment, or a credit note left nothing due. Its `amount_paid_cents` is what was paid at that moment, 0 when credit or a credit note covered the rest *(always sent)* | — |
-| `invoice.payment_recorded` | Someone recorded a payment made outside Velox, such as a bank transfer or cheque. `recovered_from` is the status it was paid from: `finalized` or `uncollectible` | `recovered_from` |
+| `invoice.payment_recorded` | Someone recorded a payment made outside Hardcount, such as a bank transfer or cheque. `recovered_from` is the status it was paid from: `finalized` or `uncollectible` | `recovered_from` |
 | `invoice.marked_uncollectible` | An invoice was written off as bad debt | — |
-| `invoice.voided` | An invoice was voided. Under Stripe Tax, Velox reverses the invoice's tax after it sends this event; `GET /v1/invoices/{id}` shows `tax_reversed_at` once that is done. | — |
+| `invoice.voided` | An invoice was voided. Under Stripe Tax, Hardcount reverses the invoice's tax after it sends this event; `GET /v1/invoices/{id}` shows `tax_reversed_at` once that is done. | — |
 
 ### `invoice.finalized` shows the amount before credit
 
-Velox uses the customer's credit when it collects the invoice. That is
+Hardcount uses the customer's credit when it collects the invoice. That is
 after it sends `invoice.finalized`, usually within seconds. Then it charges
 the card for what is left. So in this event's invoice:
 
 - `amount_due_cents` is the amount before credit.
 - `credits_applied_cents` is 0: credit is used after this event.
 
-Credit is used again each time Velox tries to collect an unpaid invoice,
+Credit is used again each time Hardcount tries to collect an unpaid invoice,
 such as a payment retry. So credit the customer gets later can pay an older
 invoice.
 
@@ -314,9 +314,9 @@ read the invoice with `GET /v1/invoices/{id}`: its `amount_due_cents` and
 ### Payments: `data.invoice`
 
 `data.invoice` is the invoice the payment was for, in the same shape as for
-the invoice events. Velox has no separate payment object. The invoice holds
+the invoice events. Hardcount has no separate payment object. The invoice holds
 the charge's Stripe PaymentIntent (`stripe_payment_intent_id`), its error
-(`last_payment_error`) and whether it was paid outside Velox
+(`last_payment_error`) and whether it was paid outside Hardcount
 (`paid_out_of_band`).
 
 | Event | Sent when | Also in `data` |
@@ -327,7 +327,7 @@ the charge's Stripe PaymentIntent (`stripe_payment_intent_id`), its error
 | `payment.amount_mismatch` | A charge settled for a different amount than the invoice owed | `incoming_payment_intent_id`, `captured_cents` |
 | `payment.currency_mismatch` | A charge settled in a different currency than the invoice's. `charge_currency` is the charge's currency, in upper case; compare it with the invoice's `currency`. The payment is recorded as usual and nothing is converted. Review it in Stripe. | `incoming_payment_intent_id`, `captured_cents`, `charge_currency` |
 | `payment.received_on_voided_invoice` | Money arrived for a voided invoice. Refund it. | `incoming_payment_intent_id`, `captured_cents` |
-| `payment.dispute_opened` | A customer disputed a card payment with their bank (a chargeback), and Velox recorded it against the invoice. Sent once per dispute. *(always sent)* | `dispute` |
+| `payment.dispute_opened` | A customer disputed a card payment with their bank (a chargeback), and Hardcount recorded it against the invoice. Sent once per dispute. *(always sent)* | `dispute` |
 | `payment.dispute_closed` | A recorded dispute closed. Sent again if Stripe turns a loss into a win. *(always sent)* | `dispute` |
 
 For the four anomaly events, `incoming_payment_intent_id` is the charge that
@@ -335,12 +335,12 @@ raised the event and `captured_cents` is what it took. Match the charge by
 `incoming_payment_intent_id`, not by the invoice's `stripe_payment_intent_id`:
 
 - `payment.duplicate_charge`: the invoice's `stripe_payment_intent_id` is
-  the other charge, the one Velox recorded on the paid invoice. It is left
-  out when Velox recorded none, such as when credit paid the invoice or it
-  was paid outside Velox (`paid_out_of_band` is true).
+  the other charge, the one Hardcount recorded on the paid invoice. It is left
+  out when Hardcount recorded none, such as when credit paid the invoice or it
+  was paid outside Hardcount (`paid_out_of_band` is true).
 - `payment.amount_mismatch`: the invoice was just paid by this charge, so
   its `stripe_payment_intent_id` is this charge and `amount_paid_cents` is
-  what Velox booked.
+  what Hardcount booked.
 - `payment.currency_mismatch` and `payment.received_on_voided_invoice`: the
   invoice is as it was when the charge arrived. Its
   `stripe_payment_intent_id` may be this charge, an earlier one, or none.
@@ -350,7 +350,7 @@ raised the event and `captured_cents` is what it took. Match the charge by
 `evidence_due_by` (the deadline to respond in Stripe), `opened_at`, and
 `closed_at` once it is closed. On `payment.dispute_closed`, `status` is
 `won`, `lost`, `warning_closed` (an inquiry that never became a chargeback)
-or `prevented`. When the first Stripe event Velox receives is already the
+or `prevented`. When the first Stripe event Hardcount receives is already the
 close, both events are sent with the closed status, in either order. What a
 dispute does and how to turn on Stripe's dispute events:
 [Card disputes](ops/runbook/card-disputes.md).
@@ -360,7 +360,7 @@ dispute does and how to turn on Stripe's dispute events:
 `data.payment_method` is the saved card as
 `GET /v1/customers/{id}/payment-methods` lists it: its brand, last 4 digits,
 expiry and whether it is the default. A Stripe event that arrives after the
-card was removed in Velox leaves it removed and sends neither event.
+card was removed in Hardcount leaves it removed and sends neither event.
 
 | Event | Sent when | Also in `data` |
 |---|---|---|
@@ -403,12 +403,12 @@ schedule's is its `cancel_at` and `cancel_effective_at`.
 
 | Event | Sent when | Also in `data` |
 |---|---|---|
-| `customer.email_bounced` | An email to a customer bounced, and Velox stopped emailing that address. `reason` is the email provider's | `reason` |
-| `customer.email_complained` | A customer marked an email from Velox as spam, and Velox stopped emailing that address. `reason` is the email provider's | `reason` |
+| `customer.email_bounced` | An email to a customer bounced, and Hardcount stopped emailing that address. `reason` is the email provider's | `reason` |
+| `customer.email_complained` | A customer marked an email from Hardcount as spam, and Hardcount stopped emailing that address. `reason` is the email provider's | `reason` |
 
 ### Dunning: `data.dunning_run`
 
-Dunning is Velox retrying a failed payment on a schedule. `data.dunning_run`
+Dunning is Hardcount retrying a failed payment on a schedule. `data.dunning_run`
 is the run as `GET /v1/dunning/runs/{id}` returns it under `run`: its
 invoice, state, attempts and how it was resolved.
 

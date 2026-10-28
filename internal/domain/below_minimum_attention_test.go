@@ -9,7 +9,7 @@ import (
 func belowMinimumInvoice() Invoice {
 	at := time.Date(2026, 10, 22, 6, 46, 57, 0, time.UTC)
 	return Invoice{
-		ID: "vlx_inv_min", Status: InvoiceFinalized, PaymentStatus: PaymentPending,
+		ID: "hc_inv_min", Status: InvoiceFinalized, PaymentStatus: PaymentPending,
 		AmountDueCents: 30, Currency: "USD", UpdatedAt: at.Add(time.Hour),
 		TaxFacts:         TaxFacts{TaxStatus: InvoiceTaxOK},
 		LastPaymentError: "Amount must be at least $0.50 usd",
@@ -62,7 +62,7 @@ func TestClassify_AmountBelowMinimum(t *testing.T) {
 				t.Errorf("detail %q does not say Collect payment applies a credit balance", att.Detail)
 			}
 			// The minimum depends on the account's settlement currency, so
-			// Velox names no figure; Stripe's sentence in provider_response
+			// Hardcount names no figure; Stripe's sentence in provider_response
 			// does.
 			if strings.Contains(att.Detail, "$0.50") {
 				t.Errorf("detail %q names a minimum; it is true only for an account that settles in USD", att.Detail)

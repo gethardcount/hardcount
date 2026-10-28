@@ -188,7 +188,7 @@ test('a one-off invoice: save a draft from the customer page, add a line, finali
     await expect(confirm).not.toContainText('emails them')
     await expect(confirm).not.toContainText('copy a setup link')
   } else if (canEmail) {
-    await expect(confirm).toContainText('The customer has no card on file, so if anything is left to pay, Velox emails them a link to add one.')
+    await expect(confirm).toContainText('The customer has no card on file, so if anything is left to pay, Hardcount emails them a link to add one.')
   } else {
     await expect(confirm).toContainText("The customer has no card on file and this server can't email setup links, so if anything is left to pay, copy a setup link from the customer page and send it to them.")
     await expect(confirm).not.toContainText('emails them')
@@ -236,7 +236,7 @@ test('a one-off invoice: save a draft from the customer page, add a line, finali
 })
 
 // With Stripe connected, the Finalize confirmation of a customer with no card
-// says Velox emails them a link to add one only when this server can email
+// says Hardcount emails them a link to add one only when this server can email
 // setup links (whoami.can_email_setup_links), and otherwise sends the
 // operator to copy one. CI connects no Stripe and sets no PAYMENT_UPDATE_URL,
 // so both answers are set in the browser: the page must read them on a draft.
@@ -263,7 +263,7 @@ test('finalize confirmation with Stripe connected: the no-card email is promised
     await page.getByRole('button', { name: 'Finalize', exact: true }).click()
     const confirm = page.getByRole('alertdialog', { name: `Finalize invoice ${draft.invoice_number}?` })
     if (can) {
-      await expect(confirm).toContainText('The customer has no card on file, so if anything is left to pay, Velox emails them a link to add one.')
+      await expect(confirm).toContainText('The customer has no card on file, so if anything is left to pay, Hardcount emails them a link to add one.')
     } else {
       await expect(confirm).toContainText("The customer has no card on file and this server can't email setup links, so if anything is left to pay, copy a setup link from the customer page and send it to them.")
     }

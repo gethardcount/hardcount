@@ -1,8 +1,8 @@
 # AI pricing reference
 
-**New to Velox?** Start with [Send usage and get your first
+**New to Hardcount?** Start with [Send usage and get your first
 invoice](first-invoice.md). It runs every call in order. This page assumes
-you did it, so `VELOX`, `VELOX_KEY` and `CUSTOMER_ID` are set in your
+you did it, so `HARDCOUNT`, `HARDCOUNT_KEY` and `CUSTOMER_ID` are set in your
 terminal.
 
 ## Words on this page
@@ -32,15 +32,15 @@ list prices, which you can change later.
 | `replicate_style` | `gpu_seconds` | GPU time, by `gpu_type`: `h100`, `a100`, `a40`, `t4`, `cpu` | (none: one price per second for each GPU type) |
 
 Send the model name exactly as the table shows it, in the `model`
-dimension. A LiteLLM proxy does this for you: Velox turns a name such as
+dimension. A LiteLLM proxy does this for you: Hardcount turns a name such as
 `claude-sonnet-4-5-20250929` into `claude-sonnet-4.5`.
 
 - **A Claude name matches a model only when it is the model's id, or the id
   with a date or version ending,** such as `-20250929`, `-v1:0`,
   `@20250805` or `@default`. Bedrock, Google Cloud and Foundry prefixes are
-  removed first. A name Velox does not know, such as `claude-opus-4-9`, is
+  removed first. A name Hardcount does not know, such as `claude-opus-4-9`, is
   never priced as an older model. It keeps its own name and has no price
-  until you add one ([how](#price-a-claude-model-velox-does-not-know)).
+  until you add one ([how](#price-a-claude-model-hardcount-does-not-know)).
 - **Claude Haiku 5.5 has two prices.** A call whose prompt is over 100,000
   tokens pays the higher one, for every token of the call, output included.
   The prompt counts input, cache reads and cache writes. Its events carry
@@ -60,10 +60,10 @@ adds its own plan with its own prices, in the plan's currency.
 To see the recipes, and to apply one with your own plan name:
 
 ```bash
-curl -s "$VELOX/v1/recipes" -H "Authorization: Bearer $VELOX_KEY" \
+curl -s "$HARDCOUNT/v1/recipes" -H "Authorization: Bearer $HARDCOUNT_KEY" \
   | jq -c '[.data[] | {key, name}]'
-curl -s -X POST "$VELOX/v1/recipes/openai_style/instantiate" \
-  -H "Authorization: Bearer $VELOX_KEY" \
+curl -s -X POST "$HARDCOUNT/v1/recipes/openai_style/instantiate" \
+  -H "Authorization: Bearer $HARDCOUNT_KEY" \
   -H "Content-Type: application/json" \
   -d '{"overrides": {"plan_name": "GPT API"}}' \
   | jq -c '{recipe_key, plans: .created_objects.plan_ids}'
@@ -74,7 +74,7 @@ plan:
 
 ```text
 [{"key":"anthropic_style","name":"Anthropic (Claude) token pricing"},{"key":"openai_style","name":"OpenAI (GPT) token pricing"},{"key":"replicate_style","name":"GPU compute pricing (per-second)"}]
-{"recipe_key":"openai_style","plans":["vlx_pln_…"]}
+{"recipe_key":"openai_style","plans":["hc_pln_…"]}
 ```
 
 The overrides are `currency` (`USD`, `EUR` or `GBP`), `plan_name` and
@@ -92,9 +92,9 @@ takes the plan's currency.
 1. **Find the `tokens` meter and your plan.**
 
    ```bash
-   METER_ID=$(curl -s "$VELOX/v1/meters?limit=100" -H "Authorization: Bearer $VELOX_KEY" \
+   METER_ID=$(curl -s "$HARDCOUNT/v1/meters?limit=100" -H "Authorization: Bearer $HARDCOUNT_KEY" \
      | jq -r '.data[] | select(.event_name == "tokens") | .id')
-   PLAN_ID=$(curl -s "$VELOX/v1/plans?limit=100" -H "Authorization: Bearer $VELOX_KEY" \
+   PLAN_ID=$(curl -s "$HARDCOUNT/v1/plans?limit=100" -H "Authorization: Bearer $HARDCOUNT_KEY" \
      | jq -r '.data[] | select(.name == "GPT API") | .id')
    echo "$METER_ID $PLAN_ID"
    ```
@@ -102,7 +102,7 @@ takes the plan's currency.
    This reads your 100 newest meters and plans. If you have more, add
    `&offset=100` to look further ([Lists](api-surface.md#lists)).
 
-   **You see:** the two IDs, such as `vlx_mtr_… vlx_pln_…`.
+   **You see:** the two IDs, such as `hc_mtr_… hc_pln_…`.
 
 2. **Add the price.**
 
@@ -110,14 +110,14 @@ takes the plan's currency.
    jq -n --arg meter "$METER_ID" \
        '{meter_id: $meter, dimension_match: {model: "my-model", token_type: "input"},
          mode: "per_unit", unit_amount_cents: "0.0002"}' \
-     | curl -s -X POST "$VELOX/v1/plans/$PLAN_ID/prices" \
-       -H "Authorization: Bearer $VELOX_KEY" \
+     | curl -s -X POST "$HARDCOUNT/v1/plans/$PLAN_ID/prices" \
+       -H "Authorization: Bearer $HARDCOUNT_KEY" \
        -H "Content-Type: application/json" \
        -d @- | jq -c '{id, dimension_match, unit_amount_cents, effective}'
    ```
 
    **You see:**
-   `{"id":"vlx_prc_…","dimension_match":{"model":"my-model","token_type":"input"},"unit_amount_cents":"0.0002","effective":"next_period"}`
+   `{"id":"hc_prc_…","dimension_match":{"model":"my-model","token_type":"input"},"unit_amount_cents":"0.0002","effective":"next_period"}`
 
 `effective` says when it applies. On a plan no subscription has used it is
 `now`. On a used plan it is `next_period`: each subscriber pays it from
@@ -127,7 +127,7 @@ the moment they join ([Change a price](#change-a-price)). Add one price for
 each kind of token you sell. Other plans that price the `tokens` meter are
 not changed.
 
-## How Velox picks the price for an event
+## How Hardcount picks the price for an event
 
 - **One price for each event.** A price takes an event whose labels include
   every label of the price. When several prices of the plan take an event,
@@ -146,20 +146,20 @@ not changed.
   label to one of them, or give a shared label another value.
 
 **Usage that no price takes is not billed.** The usual cause is a new model
-name. Velox makes and sends the invoice without that usage. You see it in
+name. Hardcount makes and sends the invoice without that usage. You see it in
 five places:
 
 - the answer that sent the event: `billing_status: "no_price"` on its 201,
   or a `no_price` count on a batch or a LiteLLM delivery, counted in
-  `velox_usage_unbilled_total{reason="no_price"}`. It is what Velox found
+  `hardcount_usage_unbilled_total{reason="no_price"}`. It is what Hardcount found
   when the event arrived. An event with no `billing_status` is not
   promised to be billed
-  ([more](api-surface.md#what-velox-found-when-the-event-arrived));
+  ([more](api-surface.md#what-hardcount-found-when-the-event-arrived));
 - the "not billed" row of the customer's usage, on the customer page and
   in `GET /v1/customers/{id}/usage` (the current billing period, unless
   you pass `from` and `to`), marked `no_price`;
 - the warning on the invoice preview, which gives the quantity;
-- the `velox_usage_unpriced_quantity_total{meter_id, mode}` metric (usage
+- the `hardcount_usage_unpriced_quantity_total{meter_id, mode}` metric (usage
   of customers on a test clock is not counted);
 - a server log line when the invoice is made.
 
@@ -224,31 +224,31 @@ once a year, on the invoice at the end of the year.
 
 - **To bill some usage sooner,** set a spend threshold on the subscription
   (`amount_gte` on `PUT /v1/subscriptions/{id}/billing-thresholds`). The
-  first time the year's usage reaches it, Velox invoices the usage so far.
+  first time the year's usage reaches it, Hardcount invoices the usage so far.
   A threshold fires at most once a billing period, so once a year here:
   usage after it waits for the invoice at the end of the year. Usage of a
   `max` or `last` meter is never billed early.
 - **To bill usage every month beside a yearly fee,** give the customer two
   subscriptions: one on a yearly plan with the fee and no prices, and one
   on a monthly plan with the usage prices. The two plans share no meter, so
-  Velox allows both.
+  Hardcount allows both.
 
-## Price a Claude model Velox does not know
+## Price a Claude model Hardcount does not know
 
-A Claude name Velox does not know keeps its own name in `model`, such as
+A Claude name Hardcount does not know keeps its own name in `model`, such as
 `claude-opus-4-9`. Price it as in [Price a model a recipe does not
 cover](#price-a-model-a-recipe-does-not-cover), with one price for each kind
 of token. This example adds it to the `anthropic_style` plan "AI API":
 
 ```bash
 # Your 100 newest plans. With more, add &offset=100 to look further.
-CLAUDE_PLAN_ID=$(curl -s "$VELOX/v1/plans?limit=100" -H "Authorization: Bearer $VELOX_KEY" \
+CLAUDE_PLAN_ID=$(curl -s "$HARDCOUNT/v1/plans?limit=100" -H "Authorization: Bearer $HARDCOUNT_KEY" \
   | jq -r '.data[] | select(.name == "AI API") | .id')
 jq -n --arg meter "$METER_ID" \
     '{meter_id: $meter, dimension_match: {model: "claude-opus-4-9", token_type: "input"},
       mode: "per_unit", unit_amount_cents: "0.0015"}' \
-  | curl -s -X POST "$VELOX/v1/plans/$CLAUDE_PLAN_ID/prices" \
-    -H "Authorization: Bearer $VELOX_KEY" \
+  | curl -s -X POST "$HARDCOUNT/v1/plans/$CLAUDE_PLAN_ID/prices" \
+    -H "Authorization: Bearer $HARDCOUNT_KEY" \
     -H "Content-Type: application/json" \
     -d @- | jq -c '{dimension_match, effective}'
 ```
@@ -271,14 +271,14 @@ per million, on the `anthropic_style` plan "AI API":
 
 ```bash
 # Your 100 newest plans. With more, add &offset=100 to look further.
-CLAUDE_PLAN_ID=$(curl -s "$VELOX/v1/plans?limit=100" -H "Authorization: Bearer $VELOX_KEY" \
+CLAUDE_PLAN_ID=$(curl -s "$HARDCOUNT/v1/plans?limit=100" -H "Authorization: Bearer $HARDCOUNT_KEY" \
   | jq -r '.data[] | select(.name == "AI API") | .id')
 jq -n --arg meter "$METER_ID" \
     '{meter_id: $meter,
       dimension_match: {model: "claude-opus-4.6", model_raw: "vertex_ai/claude-opus-4-6@default", token_type: "input"},
       mode: "per_unit", unit_amount_cents: "0.00055"}' \
-  | curl -s -X POST "$VELOX/v1/plans/$CLAUDE_PLAN_ID/prices" \
-    -H "Authorization: Bearer $VELOX_KEY" \
+  | curl -s -X POST "$HARDCOUNT/v1/plans/$CLAUDE_PLAN_ID/prices" \
+    -H "Authorization: Bearer $HARDCOUNT_KEY" \
     -H "Content-Type: application/json" \
     -d @- | jq -c '{dimension_match, effective}'
 ```
@@ -309,21 +309,21 @@ $10,000 of credit.
        '{customer_id: $cus, line_items: [{description: "Annual commit",
          line_type: "add_on", quantity: 1, unit_amount_cents: 900000,
          commit_granted_cents: 1000000}]}' \
-     | curl -s -X POST "$VELOX/v1/invoices" \
-       -H "Authorization: Bearer $VELOX_KEY" \
+     | curl -s -X POST "$HARDCOUNT/v1/invoices" \
+       -H "Authorization: Bearer $HARDCOUNT_KEY" \
        -H "Content-Type: application/json" \
        -d @- | jq -r .id)
    echo "$COMMIT_INVOICE_ID"
    ```
 
-   **You see:** the invoice ID, such as `vlx_inv_…`. The invoice is a
+   **You see:** the invoice ID, such as `hc_inv_…`. The invoice is a
    draft.
 
 2. **Finalize it.**
 
    ```bash
-   curl -s -X POST "$VELOX/v1/invoices/$COMMIT_INVOICE_ID/finalize" \
-     -H "Authorization: Bearer $VELOX_KEY" | jq -c '{status, total_amount_cents}'
+   curl -s -X POST "$HARDCOUNT/v1/invoices/$COMMIT_INVOICE_ID/finalize" \
+     -H "Authorization: Bearer $HARDCOUNT_KEY" | jq -c '{status, total_amount_cents}'
    ```
 
    **You see:** `{"status":"finalized","total_amount_cents":900000}`
@@ -331,8 +331,8 @@ $10,000 of credit.
 3. **Check the credit balance.**
 
    ```bash
-   curl -s "$VELOX/v1/credits/balance/$CUSTOMER_ID" \
-     -H "Authorization: Bearer $VELOX_KEY" | jq -c '.data[] | {currency, balance_cents, total_granted}'
+   curl -s "$HARDCOUNT/v1/credits/balance/$CUSTOMER_ID" \
+     -H "Authorization: Bearer $HARDCOUNT_KEY" | jq -c '.data[] | {currency, balance_cents, total_granted}'
    ```
 
    **You see:** `{"currency":"USD","balance_cents":1000000,"total_granted":1000000}`
@@ -344,7 +344,7 @@ out](stop-usage-when-credit-runs-out.md).
 
 ### Tax on prepaid credit
 
-With a tax provider on, Velox charges tax once: on the usage, not on the
+With a tax provider on, Hardcount charges tax once: on the usage, not on the
 credit purchase. It treats buying credit as an advance payment. The usage the credit pays for is taxed when it is invoiced.
 
 At 10% tax, the commit above is invoiced at $9,000 with no tax. A later
@@ -358,7 +358,7 @@ the $10,000 of credit pays for about $9,091 of usage and $909 of tax.
 - **Refunds:** refunding unused credit
   ([ADR-080](adr/080-paid-commit-cn-relief.md)) reverses no tax, because the
   purchase carried none. A commit whose purchase was taxed (invoiced before
-  [#1288](https://github.com/getvelox/velox/pull/1288)) still reverses that
+  [#1288](https://github.com/gethardcount/hardcount/pull/1288)) still reverses that
   tax when refunded.
 - **Free (promotional) credit** pays usage invoices the same way, tax
   included.
@@ -371,12 +371,12 @@ tax on, check with your tax adviser:
   used;
 - whether that depends on what the credit can be spent on;
 - if you sell credit below face value, as in the example, whether its use
-  is taxed on the price paid. Velox taxes the usage at its price, so the
+  is taxed on the price paid. Hardcount taxes the usage at its price, so the
   $9,000 commit above leads to tax on about $9,091 of usage;
 - what your invoices must say about an untaxed prepayment.
 
-Velox has no setting to tax the purchase instead. If your country requires
-it, [open an issue](https://github.com/getvelox/velox/issues) before you
+Hardcount has no setting to tax the purchase instead. If your country requires
+it, [open an issue](https://github.com/gethardcount/hardcount/issues) before you
 sell commits with tax on. The decision and its reasons are in
 [ADR-078](adr/078-prepaid-commits-phase-1.md#amendment-2026-10-19--the-purchase-is-not-taxed-the-usage-it-pays-for-is).
 
@@ -387,7 +387,7 @@ invoiced or not, against what that usage cost you. Only you see it, never
 the customer.
 
 1. **Save what your provider charges you per token.** Do this before the
-   usage arrives. Velox records the cost on each event when it arrives, so
+   usage arrives. Hardcount records the cost on each event when it arrives, so
    a cost you change later applies only to later events. Save one cost for
    each model and kind of token. These are made-up costs for Claude Sonnet
    4.5: $1.20 per million input tokens and $4.50 per million output tokens.
@@ -400,7 +400,7 @@ the customer.
    of its prices, and the margin is wrong for one of them. At Anthropic's
    list prices, a prompt over 100,000 tokens costs 5 times as much: if you
    save the cost of shorter prompts, the margin on longer ones reads too
-   high. When a LiteLLM record has `cost_breakdown`, Velox can use
+   high. When a LiteLLM record has `cost_breakdown`, Hardcount can use
    LiteLLM's cost instead of yours
    ([when](integrations/litellm.md#things-to-know)).
 
@@ -412,8 +412,8 @@ the customer.
      jq -n --arg type "$1" --arg cost "$2" \
          '{provider: "anthropic", model: "claude-sonnet-4.5",
            token_type: $type, unit_cost_cents: $cost}' \
-       | curl -s -X PUT "$VELOX/v1/provider-costs" \
-         -H "Authorization: Bearer $VELOX_KEY" \
+       | curl -s -X PUT "$HARDCOUNT/v1/provider-costs" \
+         -H "Authorization: Bearer $HARDCOUNT_KEY" \
          -H "Content-Type: application/json" \
          -d @- | jq -c '{id, token_type, unit_cost_cents}'
    }
@@ -424,8 +424,8 @@ the customer.
    **You see:**
 
    ```text
-   {"id":"vlx_pcr_…","token_type":"input","unit_cost_cents":"0.00012"}
-   {"id":"vlx_pcr_…","token_type":"output","unit_cost_cents":"0.00045"}
+   {"id":"hc_pcr_…","token_type":"input","unit_cost_cents":"0.00012"}
+   {"id":"hc_pcr_…","token_type":"output","unit_cost_cents":"0.00045"}
    ```
 
    The **Provider costs** page lists them.
@@ -434,11 +434,11 @@ the customer.
    period of the invoice in `INVOICE_ID`.
 
    ```bash
-   PERIOD=$(curl -s "$VELOX/v1/invoices/$INVOICE_ID" \
-     -H "Authorization: Bearer $VELOX_KEY" \
+   PERIOD=$(curl -s "$HARDCOUNT/v1/invoices/$INVOICE_ID" \
+     -H "Authorization: Bearer $HARDCOUNT_KEY" \
      | jq -r '.invoice | "from=\(.billing_period_start | @uri)&to=\(.billing_period_end | @uri)"')
-   curl -s "$VELOX/v1/customers/$CUSTOMER_ID/margin?$PERIOD" \
-     -H "Authorization: Bearer $VELOX_KEY" | jq '{revenue_cents, cost_cents, margin_bps}'
+   curl -s "$HARDCOUNT/v1/customers/$CUSTOMER_ID/margin?$PERIOD" \
+     -H "Authorization: Bearer $HARDCOUNT_KEY" | jq '{revenue_cents, cost_cents, margin_bps}'
    ```
 
    **You see,** for a [first invoice](first-invoice.md) made after you
@@ -456,7 +456,7 @@ the customer.
    and a 65% margin (`margin_bps` is in hundredths of a percent).
 
 The margin covers usage only: base fees, credits and taxes are left out.
-Revenue Velox cannot match to a model is shown apart, in
+Revenue Hardcount cannot match to a model is shown apart, in
 `unattributed_revenue_cents`. A token event that names its `provider`,
 `token_type` and `model` but matches no cost rate is counted in
 `unresolved_events`. So is an event whose cost, quantity ×
@@ -473,7 +473,7 @@ customer's time. On a test clock, that is the clock's time. The
 
 ## Usage from a LiteLLM proxy
 
-A LiteLLM proxy can send each AI call to Velox as token events on the
+A LiteLLM proxy can send each AI call to Hardcount as token events on the
 `tokens` meter. Setup, the `user` field, which calls are billed and how
 cache tokens are billed: [LiteLLM integration](integrations/litellm.md).
 

@@ -34,14 +34,14 @@ func TestStripeWebhook_SignatureGate(t *testing.T) {
 		invoices := newMockInvoiceUpdaterH()
 		stripeAdapter := NewStripe(nil, invoices, newMockWebhookStoreHandler(), nil)
 		resolver := &stubResolver{rows: map[string]tenantstripe.EndpointLookup{
-			"vlx_spc_gate": {ID: "vlx_spc_gate", TenantID: "t1", Livemode: true, WebhookSecret: secret},
+			"hc_spc_gate": {ID: "hc_spc_gate", TenantID: "t1", Livemode: true, WebhookSecret: secret},
 		}}
 		return NewHandler(stripeAdapter, resolver)
 	}
 	body := []byte(`{"id":"evt_gate_1","type":"charge.refunded","created":1700000000,"livemode":true,"data":{"object":{}}}`)
 	post := func(t *testing.T, body []byte, header string) int {
 		t.Helper()
-		req := httptest.NewRequest("POST", "/stripe/vlx_spc_gate", strings.NewReader(string(body)))
+		req := httptest.NewRequest("POST", "/stripe/hc_spc_gate", strings.NewReader(string(body)))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Stripe-Signature", header)
 		rec := httptest.NewRecorder()
@@ -90,7 +90,7 @@ func TestWebhookHandler_SuccessfulPayment(t *testing.T) {
 	stripeAdapter := NewStripe(nil, invoices, webhooks, nil)
 	secret := "whsec_handler_test"
 	resolver := &stubResolver{rows: map[string]tenantstripe.EndpointLookup{
-		"vlx_spc_abc": {ID: "vlx_spc_abc", TenantID: "t1", Livemode: true, WebhookSecret: secret},
+		"hc_spc_abc": {ID: "hc_spc_abc", TenantID: "t1", Livemode: true, WebhookSecret: secret},
 	}}
 	handler := NewHandler(stripeAdapter, resolver)
 
@@ -107,15 +107,15 @@ func TestWebhookHandler_SuccessfulPayment(t *testing.T) {
 				"amount":   19900,
 				"currency": "usd",
 				"metadata": map[string]string{
-					"velox_tenant_id":  "t1",
-					"velox_invoice_id": "inv_1",
+					"hardcount_tenant_id":  "t1",
+					"hardcount_invoice_id": "inv_1",
 				},
 			},
 		},
 	}
 	body, _ := json.Marshal(event)
 
-	req := httptest.NewRequest("POST", "/stripe/vlx_spc_abc", strings.NewReader(string(body)))
+	req := httptest.NewRequest("POST", "/stripe/hc_spc_abc", strings.NewReader(string(body)))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Stripe-Signature", signStripePayload(body, secret))
 	rec := httptest.NewRecorder()
@@ -149,7 +149,7 @@ func TestWebhookHandler_OversizedBodyIs413NotSignatureFailure(t *testing.T) {
 	stripeAdapter := NewStripe(nil, newMockInvoiceUpdaterH(), newMockWebhookStoreHandler(), nil)
 	secret := "whsec_size_test"
 	resolver := &stubResolver{rows: map[string]tenantstripe.EndpointLookup{
-		"vlx_spc_abc": {ID: "vlx_spc_abc", TenantID: "t1", Livemode: true, WebhookSecret: secret},
+		"hc_spc_abc": {ID: "hc_spc_abc", TenantID: "t1", Livemode: true, WebhookSecret: secret},
 	}}
 	handler := NewHandler(stripeAdapter, resolver)
 
@@ -168,7 +168,7 @@ func TestWebhookHandler_OversizedBodyIs413NotSignatureFailure(t *testing.T) {
 		t.Fatalf("fixture bug: body is %d bytes, need > %d", len(body), maxWebhookBodySize)
 	}
 
-	req := httptest.NewRequest("POST", "/stripe/vlx_spc_abc", strings.NewReader(string(body)))
+	req := httptest.NewRequest("POST", "/stripe/hc_spc_abc", strings.NewReader(string(body)))
 	req.Header.Set("Stripe-Signature", signStripePayload(body, secret))
 	rec := httptest.NewRecorder()
 	handler.Routes().ServeHTTP(rec, req)
@@ -181,11 +181,11 @@ func TestWebhookHandler_OversizedBodyIs413NotSignatureFailure(t *testing.T) {
 	}
 }
 
-func TestWebhookHandler_NoVeloxMetadata(t *testing.T) {
+func TestWebhookHandler_NoHardcountMetadata(t *testing.T) {
 	stripeAdapter := NewStripe(nil, newMockInvoiceUpdaterH(), newMockWebhookStoreHandler(), nil)
 	secret := "whsec_foreign_test"
 	resolver := &stubResolver{rows: map[string]tenantstripe.EndpointLookup{
-		"vlx_spc_abc": {ID: "vlx_spc_abc", TenantID: "t1", Livemode: true, WebhookSecret: secret},
+		"hc_spc_abc": {ID: "hc_spc_abc", TenantID: "t1", Livemode: true, WebhookSecret: secret},
 	}}
 	handler := NewHandler(stripeAdapter, resolver)
 
@@ -204,19 +204,19 @@ func TestWebhookHandler_NoVeloxMetadata(t *testing.T) {
 	}
 	body, _ := json.Marshal(event)
 
-	req := httptest.NewRequest("POST", "/stripe/vlx_spc_abc", strings.NewReader(string(body)))
+	req := httptest.NewRequest("POST", "/stripe/hc_spc_abc", strings.NewReader(string(body)))
 	req.Header.Set("Stripe-Signature", signStripePayload(body, secret))
 	rec := httptest.NewRecorder()
 	handler.Routes().ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
-		t.Errorf("should return 200 for non-Velox events, got %d", rec.Code)
+		t.Errorf("should return 200 for non-Hardcount events, got %d", rec.Code)
 	}
 
 	var resp map[string]string
 	_ = json.NewDecoder(rec.Body).Decode(&resp)
 	if resp["status"] != "skipped" {
-		t.Errorf("should skip non-Velox events, got %q", resp["status"])
+		t.Errorf("should skip non-Hardcount events, got %q", resp["status"])
 	}
 }
 
@@ -224,18 +224,18 @@ func TestWebhookHandler_NoVeloxMetadata(t *testing.T) {
 // regression for the hosted "update payment" / operator add-card Checkout
 // bug: a setup_intent.succeeded created by Stripe Checkout carries NO metadata
 // on the SetupIntent (Checkout doesn't copy session metadata), so it has no
-// velox_tenant_id. It must NOT be dropped at the HTTP gate the way a foreign
+// hardcount_tenant_id. It must NOT be dropped at the HTTP gate the way a foreign
 // payment_intent is — it reaches HandleWebhook, which resolves the customer
 // from the SetupIntent's `customer` field and attaches the PM.
 func TestWebhookHandler_SetupIntentEmptyMetadata_StillAttaches(t *testing.T) {
 	stripeAdapter := NewStripe(nil, newMockInvoiceUpdaterH(), newMockWebhookStoreHandler(), nil)
 	attacher := &recordingAttacher{}
 	stripeAdapter.SetPaymentMethodAttacher(attacher)
-	stripeAdapter.SetCustomerResolver(&recordingCustomerResolver{wantStripeID: "cus_stripe_99", veloxID: "cus_local_7"})
+	stripeAdapter.SetCustomerResolver(&recordingCustomerResolver{wantStripeID: "cus_stripe_99", hardcountID: "cus_local_7"})
 
 	secret := "whsec_seti_test"
 	resolver := &stubResolver{rows: map[string]tenantstripe.EndpointLookup{
-		"vlx_spc_abc": {ID: "vlx_spc_abc", TenantID: "t1", Livemode: true, WebhookSecret: secret},
+		"hc_spc_abc": {ID: "hc_spc_abc", TenantID: "t1", Livemode: true, WebhookSecret: secret},
 	}}
 	handler := NewHandler(stripeAdapter, resolver)
 
@@ -256,7 +256,7 @@ func TestWebhookHandler_SetupIntentEmptyMetadata_StillAttaches(t *testing.T) {
 	}
 	body, _ := json.Marshal(event)
 
-	req := httptest.NewRequest("POST", "/stripe/vlx_spc_abc", strings.NewReader(string(body)))
+	req := httptest.NewRequest("POST", "/stripe/hc_spc_abc", strings.NewReader(string(body)))
 	req.Header.Set("Stripe-Signature", signStripePayload(body, secret))
 	rec := httptest.NewRecorder()
 	handler.Routes().ServeHTTP(rec, req)
@@ -280,7 +280,7 @@ func TestWebhookHandler_UnknownEndpoint404(t *testing.T) {
 	resolver := &stubResolver{rows: map[string]tenantstripe.EndpointLookup{}}
 	handler := NewHandler(stripeAdapter, resolver)
 
-	req := httptest.NewRequest("POST", "/stripe/vlx_spc_does_not_exist",
+	req := httptest.NewRequest("POST", "/stripe/hc_spc_does_not_exist",
 		strings.NewReader(`{"id":"evt_1"}`))
 	req.Header.Set("Stripe-Signature", "t=0,v1=00")
 	rec := httptest.NewRecorder()
@@ -294,11 +294,11 @@ func TestWebhookHandler_UnknownEndpoint404(t *testing.T) {
 func TestWebhookHandler_SignatureRequired(t *testing.T) {
 	stripeAdapter := NewStripe(nil, newMockInvoiceUpdaterH(), newMockWebhookStoreHandler(), nil)
 	resolver := &stubResolver{rows: map[string]tenantstripe.EndpointLookup{
-		"vlx_spc_abc": {ID: "vlx_spc_abc", TenantID: "t1", Livemode: true, WebhookSecret: "whsec_real"},
+		"hc_spc_abc": {ID: "hc_spc_abc", TenantID: "t1", Livemode: true, WebhookSecret: "whsec_real"},
 	}}
 	handler := NewHandler(stripeAdapter, resolver)
 
-	req := httptest.NewRequest("POST", "/stripe/vlx_spc_abc", strings.NewReader(`{"id":"evt_1"}`))
+	req := httptest.NewRequest("POST", "/stripe/hc_spc_abc", strings.NewReader(`{"id":"evt_1"}`))
 	rec := httptest.NewRecorder()
 	handler.Routes().ServeHTTP(rec, req)
 
@@ -314,7 +314,7 @@ func TestWebhookHandler_TenantMismatchRejects(t *testing.T) {
 	stripeAdapter := NewStripe(nil, newMockInvoiceUpdaterH(), newMockWebhookStoreHandler(), nil)
 	secret := "whsec_mismatch"
 	resolver := &stubResolver{rows: map[string]tenantstripe.EndpointLookup{
-		"vlx_spc_abc": {ID: "vlx_spc_abc", TenantID: "t1", Livemode: true, WebhookSecret: secret},
+		"hc_spc_abc": {ID: "hc_spc_abc", TenantID: "t1", Livemode: true, WebhookSecret: secret},
 	}}
 	handler := NewHandler(stripeAdapter, resolver)
 
@@ -327,13 +327,13 @@ func TestWebhookHandler_TenantMismatchRejects(t *testing.T) {
 			"object": map[string]any{
 				"id":       "pi_other",
 				"object":   "payment_intent",
-				"metadata": map[string]string{"velox_tenant_id": "t2"},
+				"metadata": map[string]string{"hardcount_tenant_id": "t2"},
 			},
 		},
 	}
 	body, _ := json.Marshal(event)
 
-	req := httptest.NewRequest("POST", "/stripe/vlx_spc_abc", strings.NewReader(string(body)))
+	req := httptest.NewRequest("POST", "/stripe/hc_spc_abc", strings.NewReader(string(body)))
 	req.Header.Set("Stripe-Signature", signStripePayload(body, secret))
 	rec := httptest.NewRecorder()
 	handler.Routes().ServeHTTP(rec, req)
@@ -364,7 +364,7 @@ func TestWebhookHandler_TransientFailureRedelivers(t *testing.T) {
 	stripeAdapter := NewStripe(nil, invoices, webhooks, nil)
 	secret := "whsec_transient_test"
 	resolver := &stubResolver{rows: map[string]tenantstripe.EndpointLookup{
-		"vlx_spc_abc": {ID: "vlx_spc_abc", TenantID: "t1", Livemode: true, WebhookSecret: secret},
+		"hc_spc_abc": {ID: "hc_spc_abc", TenantID: "t1", Livemode: true, WebhookSecret: secret},
 	}}
 	handler := NewHandler(stripeAdapter, resolver)
 
@@ -381,8 +381,8 @@ func TestWebhookHandler_TransientFailureRedelivers(t *testing.T) {
 				"amount":   19900,
 				"currency": "usd",
 				"metadata": map[string]string{
-					"velox_tenant_id":  "t1",
-					"velox_invoice_id": "inv_1",
+					"hardcount_tenant_id":  "t1",
+					"hardcount_invoice_id": "inv_1",
 				},
 			},
 		},
@@ -390,7 +390,7 @@ func TestWebhookHandler_TransientFailureRedelivers(t *testing.T) {
 	body, _ := json.Marshal(event)
 
 	send := func() *httptest.ResponseRecorder {
-		req := httptest.NewRequest("POST", "/stripe/vlx_spc_abc", strings.NewReader(string(body)))
+		req := httptest.NewRequest("POST", "/stripe/hc_spc_abc", strings.NewReader(string(body)))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Stripe-Signature", signStripePayload(body, secret))
 		rec := httptest.NewRecorder()
@@ -572,7 +572,7 @@ func (m *mockInvoiceUpdaterHandler) MarkPaymentFailedReportingTransition(_ conte
 	}
 	// This fake does not model the seq (see the mockInvoice comment): the
 	// webhook reports it handles never carry ChargedAtSeq.
-	if !report.MovesInvoice(status, domain.InvoicePaymentStatus(inv.paymentStatus), inv.stripePI, 0, domain.AttemptNotVelox) {
+	if !report.MovesInvoice(status, domain.InvoicePaymentStatus(inv.paymentStatus), inv.stripePI, 0, domain.AttemptNotHardcount) {
 		return domain.Invoice{ID: id, TenantID: inv.tenantID, Status: status,
 			PaymentStatus: domain.InvoicePaymentStatus(inv.paymentStatus), StripePaymentIntentID: inv.stripePI}, domain.PaymentFailureResult{}, nil
 	}

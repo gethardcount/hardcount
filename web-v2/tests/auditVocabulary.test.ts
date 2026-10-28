@@ -24,12 +24,12 @@ import {
 
 function entry(over: Partial<AuditEntry> = {}): AuditEntry {
   return {
-    id: 'vlx_aud_1',
+    id: 'hc_aud_1',
     actor_type: 'user',
-    actor_id: 'vlx_usr_1',
+    actor_id: 'hc_usr_1',
     action: 'update',
     resource_type: 'customer',
-    resource_id: 'vlx_cus_1',
+    resource_id: 'hc_cus_1',
     created_at: '2026-07-14T10:00:00Z',
     ...over,
   }
@@ -105,12 +105,12 @@ test('member.removed carries destructive styling; a plain invite does not', () =
 })
 
 test('test_clock rows deep-link to the clock detail page', () => {
-  assert.equal(resourceLink(entry({ resource_type: 'test_clock', resource_id: 'vlx_tc_9' })), '/test-clocks/vlx_tc_9')
+  assert.equal(resourceLink(entry({ resource_type: 'test_clock', resource_id: 'hc_tc_9' })), '/test-clocks/hc_tc_9')
   // Every other mapped type still resolves.
-  assert.equal(resourceLink(entry({ resource_type: 'invoice', resource_id: 'vlx_inv_1' })), '/invoices/vlx_inv_1')
-  assert.equal(resourceLink(entry({ resource_type: 'customer', resource_id: 'vlx_cus_1' })), '/customers/vlx_cus_1')
+  assert.equal(resourceLink(entry({ resource_type: 'invoice', resource_id: 'hc_inv_1' })), '/invoices/hc_inv_1')
+  assert.equal(resourceLink(entry({ resource_type: 'customer', resource_id: 'hc_cus_1' })), '/customers/hc_cus_1')
   // No detail route → no "View" link (rendering one lands on a blank page).
-  assert.equal(resourceLink(entry({ resource_type: 'user', resource_id: 'vlx_usr_1' })), null)
+  assert.equal(resourceLink(entry({ resource_type: 'user', resource_id: 'hc_usr_1' })), null)
   // Empty resource_id is guarded even for a mapped type.
   assert.equal(resourceLink(entry({ resource_type: 'test_clock', resource_id: '' })), null)
 })
@@ -129,7 +129,7 @@ test('a payment-setup-link row names the action, not a generic "Updated <custome
   assert.equal(
     describeAction(entry({
       resource_type: 'customer', action: 'update', resource_label: 'Acme Corp',
-      metadata: { action: 'setup_link_sent', trigger: 'finalize_no_pm', invoice_id: 'vlx_inv_1' },
+      metadata: { action: 'setup_link_sent', trigger: 'finalize_no_pm', invoice_id: 'hc_inv_1' },
     })),
     'Emailed a payment-method setup link to Acme Corp (invoice finalized with no card on file)',
   )
@@ -142,19 +142,19 @@ test('a row whose subject was torn down offers no link', () => {
   // resolves subject_deleted at read time; the only job here is to stop offering
   // the door.
   assert.equal(
-    resourceLink(entry({ resource_type: 'invoice', resource_id: 'vlx_inv_sim', subject_deleted: true })),
+    resourceLink(entry({ resource_type: 'invoice', resource_id: 'hc_inv_sim', subject_deleted: true })),
     null,
     'a torn-down subject must not render a View link — it 404s')
 
   // The same row while its clock still lives: the subject is there, the link works.
   assert.equal(
-    resourceLink(entry({ resource_type: 'invoice', resource_id: 'vlx_inv_sim', subject_deleted: false })),
-    '/invoices/vlx_inv_sim')
+    resourceLink(entry({ resource_type: 'invoice', resource_id: 'hc_inv_sim', subject_deleted: false })),
+    '/invoices/hc_inv_sim')
 
   // Absent (every wall-clock row): unchanged, still links.
   assert.equal(
-    resourceLink(entry({ resource_type: 'invoice', resource_id: 'vlx_inv_real' })),
-    '/invoices/vlx_inv_real')
+    resourceLink(entry({ resource_type: 'invoice', resource_id: 'hc_inv_real' })),
+    '/invoices/hc_inv_real')
 })
 
 // The audit log printed every *_cents value with the workspace symbol, so a

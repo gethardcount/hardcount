@@ -1,4 +1,4 @@
-# How we test Velox
+# How we test Hardcount
 
 Each code change should ship with a test at the right layer. This page says
 which test to write for a change, how to run each kind, and what is checked
@@ -102,7 +102,7 @@ the built dashboard (`vite preview`, which forwards `/v1` to the API).
   It also checks that the card's times follow the account's zone, not the
   browser's.
 - **Data:** the tests make their data through the public API, with the
-  test-mode secret key from `velox-bootstrap`. Each test uses its own unique
+  test-mode secret key from `hardcount-bootstrap`. Each test uses its own unique
   names, so the suite can run many times against the same database. Use a
   database of your own anyway, so the tests never touch your dev data.
 - **In CI:** the `e2e` job runs on every PR. It is not a required check.
@@ -132,7 +132,7 @@ habits have caught real bugs here:
   change is not done until you have looked at a screenshot of it, in the
   state a user would see.
 - **Check money at the provider.** For a payment or refund, confirm the
-  amount in the Stripe dashboard, not only in Velox.
+  amount in the Stripe dashboard, not only in Hardcount.
 - **For a fix, see the test fail without it.** Revert the fix, run the new
   test, watch it fail, then restore the fix. A test that passes either way
   proves nothing.
@@ -141,12 +141,12 @@ habits have caught real bugs here:
 
 Run the [release checklist](dev/release-checklist.md) before each tag.
 
-The golden-path demo (`scripts/demo.sh`) and the `velox-doctor` sweep also
+The golden-path demo (`scripts/demo.sh`) and the `hardcount-doctor` sweep also
 run in CI on every PR. The doctor checks the money invariants over the rows
 the golden path left behind.
 
 The [first-invoice tutorial](first-invoice.md) runs in the same CI job.
-`cmd/velox-docs-run` runs each code block the page marks
+`cmd/hardcount-docs-run` runs each code block the page marks
 `<!-- docs-run: command -->` in one shell, in order, and checks the block
 marked `<!-- docs-run: output -->` below it. Every code block on the page
 needs one of the two markers, and every command needs an output block. A
@@ -154,13 +154,13 @@ code block the runner cannot read, such as one in a blockquote, is an
 error. So is a marked block that GitHub does not show as a code block, such
 as one inside `<details>` with no blank line before it. A unit test checks
 that each command runs in at least one of the job's passes. To run the page
-yourself, start Velox on
-port 8080 and save your test key in a file such as `~/velox-key.json`, as
-`{"secret_key_test": "vlx_secret_test_…"}`. Then run:
+yourself, start Hardcount on
+port 8080 and save your test key in a file such as `~/hardcount-key.json`, as
+`{"secret_key_test": "hc_secret_test_…"}`. Then run:
 
 ```bash
-go run ./cmd/velox-docs-run \
-  -replace deploy/compose/quickstart-credentials.json=$HOME/velox-key.json \
+go run ./cmd/hardcount-docs-run \
+  -replace deploy/compose/quickstart-credentials.json=$HOME/hardcount-key.json \
   -replace acme-1=acme-$RANDOM docs/first-invoice.md
 ```
 

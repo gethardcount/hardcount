@@ -45,11 +45,11 @@ const PAGE_SIZE = 50
 // "more than 10,000" (audit.CountCap).
 const AUDIT_COUNT_CAP = 10000
 
-// Velox ids are time-sortable, so two keys minted in the same window share a
+// Hardcount ids are time-sortable, so two keys minted in the same window share a
 // long LEADING prefix and differ only at the end — `slice(0, 16)` throws away
 // exactly the entropy that tells them apart. Verified on real data: two
-// distinct keys both rendered as "Key vlx_key_d9d763rm", and another pair as
-// "Key vlx_key_d9ksum3m". This fires precisely in the forensic case (the key
+// distinct keys both rendered as "Key hc_key_d9d763rm", and another pair as
+// "Key hc_key_d9ksum3m". This fires precisely in the forensic case (the key
 // was deleted, so the name join misses and the id is all that is left), which
 // is when telling two keys apart matters most.
 //
@@ -80,7 +80,7 @@ function formatActorName(entry: AuditEntry): string {
     // join). Falls back to a truncated key id for rows written before the
     // name was set, or for keys that have since been deleted.
     if (entry.actor_name) return entry.actor_name
-    return entry.actor_id.startsWith('vlx_') ? `Key ${middleTruncate(entry.actor_id, 20)}` : 'API key'
+    return entry.actor_id.startsWith('hc_') ? `Key ${middleTruncate(entry.actor_id, 20)}` : 'API key'
   }
   if (entry.actor_type === 'user') {
     // Dashboard session operators (#225 actor identity). actor_name is the
@@ -140,7 +140,7 @@ const SIM_CONTEXT_KEYS = new Set(['sim_effective_at', 'test_clock_id'])
 // be made true. What is on screen must be exactly what the filter can find; a
 // chip that lies about where a row lives is worse than no chip.
 //
-// The cost is confined to dev databases (Velox is pre-launch; no production log
+// The cost is confined to dev databases (Hardcount is pre-launch; no production log
 // predates 0148). The subscription Activity timeline still reads the metadata
 // mirror — it offers no clock filter, so it has no promise to break.
 // The backend bounds its COUNT at COUNT_CAP: audit_log can never be pruned, so an

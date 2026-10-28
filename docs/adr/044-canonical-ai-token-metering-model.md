@@ -8,7 +8,7 @@
 
 ## Summary
 
-All AI token usage is metered on one `tokens` meter (aggregation `sum`), with the token role in a `token_type` dimension: `input`, `output`, `cache_read`, `cache_write_5m`, `cache_write_1h`, and more as needed. `model` and `provider` are dimensions too, and prices are pricing rules on that meter that match `{model, token_type}`, so a new model or role adds rules, never meters. Each ingestion mapper must turn a provider's counts into separate, non-overlapping roles (input is prompt tokens minus cached tokens), so the rating engine only sums. The LiteLLM mapper emits `input`, `cache_read`, `cache_write_5m`, `cache_write_1h` and `output`: LiteLLM 1.83.9 reports the split in `prompt_tokens_details.cache_creation_token_details`. When a record has cache writes without a usable split, they bill as `input` and the fallback is counted (`velox_litellm_cache_write_unsplit_total`). Status: active.
+All AI token usage is metered on one `tokens` meter (aggregation `sum`), with the token role in a `token_type` dimension: `input`, `output`, `cache_read`, `cache_write_5m`, `cache_write_1h`, and more as needed. `model` and `provider` are dimensions too, and prices are pricing rules on that meter that match `{model, token_type}`, so a new model or role adds rules, never meters. Each ingestion mapper must turn a provider's counts into separate, non-overlapping roles (input is prompt tokens minus cached tokens), so the rating engine only sums. The LiteLLM mapper emits `input`, `cache_read`, `cache_write_5m`, `cache_write_1h` and `output`: LiteLLM 1.83.9 reports the split in `prompt_tokens_details.cache_creation_token_details`. When a record has cache writes without a usable split, they bill as `input` and the fallback is counted (`hardcount_litellm_cache_write_unsplit_total`). Status: active.
 
 **Amendment (2026-10-22).** An earlier version of this summary said LiteLLM does not report the 5-minute and 1-hour split, so cache writes billed as `input` (1.0x instead of 1.25x or 2x). That was false for LiteLLM 1.83.9, whose usage object carries the split. The mapper now emits both write roles. A call first stored the old way (its `input` quantity includes the writes) is stored the old way again when LiteLLM resends it, decided per call from the stored `input` row, and a held cache-write row of such a call is not billed by a resend or a release. The exception is a release run by the code before this change (a rollback, or the rolling deploy), which does not know the split and can bill those writes twice.
 
@@ -16,12 +16,12 @@ All AI token usage is metered on one `tokens` meter (aggregation `sum`), with th
 
 ## Context
 
-Velox has two incompatible shapes for LLM token usage today, and they don't connect:
+Hardcount has two incompatible shapes for LLM token usage today, and they don't connect:
 
 - **Pricing recipes** (`anthropic_style`, `openai_style`) create **one** `tokens` meter and price via dimensions `operation=input|output` + boolean `cached=true|false` + `model`, with priority-matched rating rules (the `cached` variant wins via `priority=200`).
 - **The LiteLLM ingestion mapper** (`internal/integrations/litellm/mapper.go`) emits **two** meters — `tokens_input` and `tokens_output` — with dimensions `model` + `provider`, no `operation`/`cached`.
 
-So LiteLLM-ingested events never rate against the recipe rules: the headline wedge demo ("point your LiteLLM proxy at Velox and your AI-native plan bills automatically") cannot work end-to-end. Picking the canonical model is a re-litigable architecture decision, hence this ADR. We must define **one** metering model that every ingestion path (LiteLLM today; OpenAI/Bedrock/Vertex/direct tomorrow) and every consumer (recipes, rating rules, cost dashboard) conforms to — so the next provider doesn't re-open this mismatch.
+So LiteLLM-ingested events never rate against the recipe rules: the headline wedge demo ("point your LiteLLM proxy at Hardcount and your AI-native plan bills automatically") cannot work end-to-end. Picking the canonical model is a re-litigable architecture decision, hence this ADR. We must define **one** metering model that every ingestion path (LiteLLM today; OpenAI/Bedrock/Vertex/direct tomorrow) and every consumer (recipes, rating rules, cost dashboard) conforms to — so the next provider doesn't re-open this mismatch.
 
 ### Verified industry research (2026-06-01)
 
@@ -31,10 +31,10 @@ Six sourced agents (metering platforms + the providers' own billing itemization)
   - **Lago** (high): *"Create a single billable metric to track token usage across different models and input/output types"* — `type:[input,output]` is a filter value, model another filter; "one metric, many prices, no duplicated metrics."
   - **OpenMeter** (high): one `tokens_total` meter, `groupBy:{provider,model,type}`; *"We recommend using groups instead of creating multiple meters."*
     - **Correction (2026-10-23):** the repo's sample `tokens_total` meter groups by `model` and `type` only, with no `provider`. Neither `provider` nor the quoted sentence appears in the OpenMeter repo. Both may come from openmeter.io, which was not fetched again. Checked in OpenMeter `f04b561f` (2026-10-22): `config.example.yaml:157-165`.
-  - **Orb / Metronome** (medium): one event per call carrying each role as a property; model/provider as dimensional-pricing group keys. They lean toward one rate per role at the pricing layer — which in Velox is the *same thing* as one meter with N rules matching on the role dimension.
+  - **Orb / Metronome** (medium): one event per call carrying each role as a property; model/provider as dimensional-pricing group keys. They lean toward one rate per role at the pricing layer — which in Hardcount is the *same thing* as one meter with N rules matching on the role dimension.
 - **Provider APIs (OpenAI, Anthropic, high) itemize roles as separate named FIELDS** (`prompt_tokens`/`completion_tokens`; `uncached_input_tokens`/`output_tokens`/`cache_read_input_tokens`/`cache_creation`). This is a per-call *reporting* itemization, **not** a metering data model — even there `model` is a `group_by` dimension (never baked into the field name) and `provider` doesn't exist (each API is first-party). A metering platform consumes this itemization at the mapper boundary.
 
-Velox's own storage already **is** the metering-platform model: one meter, scalar summed quantity, dimensions in `usage_events.properties` (JSONB), rating via `e.properties @> dimension_match`. So this ADR ratifies the model Velox is structurally built for and deletes the two-meter anomaly.
+Hardcount's own storage already **is** the metering-platform model: one meter, scalar summed quantity, dimensions in `usage_events.properties` (JSONB), rating via `e.properties @> dimension_match`. So this ADR ratifies the model Hardcount is structurally built for and deletes the two-meter anomaly.
 
 ### The binding constraint: Anthropic's cache roles
 
@@ -58,7 +58,7 @@ OpenAI adds a normalization wrinkle: its `cached_tokens` is a **subset** of `pro
 
 1. **One meter, key `tokens`** (unit: `tokens`, aggregation: `sum`). No per-role meters.
 2. **Token role is a single dimension `token_type`** on `usage_events.properties` — an **open string enum**, seeded `{input, output, cache_read, cache_write_5m, cache_write_1h}` and extensible (`reasoning`, `audio`, `system`, …).
-3. **`model` and `provider` are dimensions** (`provider` is a Velox-only attribution dimension; no provider API prices by provider).
+3. **`model` and `provider` are dimensions** (`provider` is a Hardcount-only attribution dimension; no provider API prices by provider).
 4. **Pricing is matrix/dimensional**, unchanged mechanism: N `meter_pricing_rules` on the `tokens` meter, each `dimension_match` a JSONB subset over `{model, token_type}` (e.g. `{model:'claude-opus-4', token_type:'cache_write_1h'}`), resolved by the existing priority+claim `e.properties @> dimension_match`. Because `token_type` values are **disjoint**, each `(model, role)` is exactly one rule at one priority — the recipes no longer need the `priority=200` cached-wins trick.
 5. **Mapper-normalization invariant:** every provider mapper is solely responsible for normalizing provider-specific itemization into **additive-disjoint** canonical roles — `uncached_input = prompt_tokens − cached_tokens`, Anthropic `cache_creation` TTL split into `cache_write_5m`/`cache_write_1h`. The **rating engine never does role arithmetic**; `SUM(quantity)` partitioned by `token_type` is always correct. This keeps OpenAI-style subset semantics out of the engine and out of every future mapper's contract.
 
@@ -87,4 +87,4 @@ v1 `token_type` enum: `{input, output, cache_read, cache_write_5m, cache_write_1
 
 **Negative:** full Anthropic cache parity requires the mapper to parse and normalize provider-specific cache itemization (real work, isolated to the mapper). The `token_type` enum is convention-enforced (validated at the mapper), not schema-enforced — consistent with the multi-dim design's free-form-dimension stance.
 
-**Neutral:** the recipe and mapper both change, but the *storage* model and rating mechanism are untouched — this ratifies what Velox already is.
+**Neutral:** the recipe and mapper both change, but the *storage* model and rating mechanism are untouched — this ratifies what Hardcount already is.

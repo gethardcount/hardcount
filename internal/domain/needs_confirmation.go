@@ -11,14 +11,14 @@ import "errors"
 //
 // The card works: the customer confirms the payment on the hosted invoice
 // page, where Stripe runs 3-D Secure. What cannot work is another charge
-// without the customer, so Velox follows Stripe Billing, which lists the
+// without the customer, so Hardcount follows Stripe Billing, which lists the
 // code among those it does not retry: "the scheduled retries continue but
 // the payment only executes if you obtain a new payment method"
 // (https://docs.stripe.com/billing/revenue-recovery/smart-retries#non-retryable-decline-codes).
 // Stripe Billing then emails the customer a link to confirm the payment, and
 // reminders until they do
 // (https://docs.stripe.com/billing/revenue-recovery/customer-emails#payment-confirmation-notifications).
-// Velox's payment-failed email and each dunning reminder carry the hosted
+// Hardcount's payment-failed email and each dunning reminder carry the hosted
 // invoice link with the same request.
 const AuthenticationRequiredCode = "authentication_required"
 

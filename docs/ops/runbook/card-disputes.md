@@ -22,14 +22,14 @@ One of these:
   balance. If you win, Stripe returns the amount. Some card networks first
   send an inquiry: a question about the payment, with a status that starts
   with `warning_`. An inquiry can close without becoming a chargeback.
-- **Velox records the dispute and changes nothing else.** It records each
+- **Hardcount records the dispute and changes nothing else.** It records each
   dispute against the invoice the payment paid, and sends the two webhook
   events. The invoice stays paid, no money moves and no payment retries
   start, because only you know whether the customer still owes the money.
-- **Velox hears about disputes only if Stripe sends them.** The Stripe
+- **Hardcount hears about disputes only if Stripe sends them.** The Stripe
   webhook endpoint must have three events turned on:
   `charge.dispute.created`, `charge.dispute.updated` and
-  `charge.dispute.closed`. They are not in the list the Velox settings page
+  `charge.dispute.closed`. They are not in the list the Hardcount settings page
   shows under the webhook address, so add them by hand: in Stripe, open
   **Developers → Webhooks**, open the endpoint, and add the three events.
 
@@ -61,7 +61,7 @@ The status tells you where the dispute is:
 ## Fix
 
 1. **While it is open, respond in Stripe before `evidence_due_by`.** Open
-   the dispute in Stripe and submit evidence, or accept it. Velox cannot do
+   the dispute in Stripe and submit evidence, or accept it. Hardcount cannot do
    this for you. Do not refund the payment through a credit note meanwhile:
    Stripe refuses refunds on a payment under a chargeback, so the card
    refund fails. An inquiry can be resolved with a full refund.
@@ -70,14 +70,14 @@ The status tells you where the dispute is:
 3. **If it is lost, decide what the invoice should say.** The bank already
    gave the money back to the customer. Choose one:
    - Record the loss with a credit note on the invoice. Put the amount
-     under money returned outside Velox (`out_of_band_amount_cents`), never
+     under money returned outside Hardcount (`out_of_band_amount_cents`), never
      as a card refund: the customer already has the money.
    - Bill the customer again on a new invoice, if they still owe it.
-   - Write it off in your own accounting. Velox cannot mark a paid invoice
+   - Write it off in your own accounting. Hardcount cannot mark a paid invoice
      uncollectible.
 
    **If the invoice bought prepaid credit**, the customer can still spend
-   that credit, and Velox refuses an ordinary credit note on the invoice.
+   that credit, and Hardcount refuses an ordinary credit note on the invoice.
    Retire the credit with commit relief instead. The relief amount goes
    inside `commit_relief`, as `out_of_band_amount_cents`:
 
@@ -101,14 +101,14 @@ The status tells you where the dispute is:
    both payments in Stripe before you refund anything: a refund of the other
    payment can give the customer the same money back twice.
 4. **If it is `prevented`, check the payment in Stripe.** Stripe's dispute
-   prevention settles a dispute by refunding the payment, and Velox does
+   prevention settles a dispute by refunding the payment, and Hardcount does
    not record a refund made in Stripe. Record that refund with a credit
    note, as in step 3. No notice appears for this.
 5. **If a lost dispute later turns into a win** (Stripe calls it a late
    win), Stripe returns the money to your balance, the disputes list shows
    `won` and the notice goes away. If you already acted on the loss, undo
    it: a credit note you issued for the loss is final, so record the money
-   again with a new invoice marked paid outside Velox
+   again with a new invoice marked paid outside Hardcount
    (`POST /v1/invoices/{id}/record-payment`). If you billed the customer
    again and they paid, they have now paid twice: refund that invoice with
    a credit note.
@@ -122,15 +122,15 @@ lost, even after you act. Only a late win removes it.
 
 Two log lines matter:
 
-- `dispute webhook names a payment no Velox invoice holds`: the payment was
-  not made through Velox, so nothing was recorded. For the first 15 minutes
-  after Stripe opens a dispute, Velox asks Stripe to send the event again
+- `dispute webhook names a payment no Hardcount invoice holds`: the payment was
+  not made through Hardcount, so nothing was recorded. For the first 15 minutes
+  after Stripe opens a dispute, Hardcount asks Stripe to send the event again
   instead, because it may not have recorded its own payment yet. If it was
-  a Velox payment, find the invoice by the `stripe_payment_intent_id` in
+  a Hardcount payment, find the invoice by the `stripe_payment_intent_id` in
   the line.
-- `dispute webhook carries a status Velox does not know`: Stripe added a
+- `dispute webhook carries a status Hardcount does not know`: Stripe added a
   dispute status. The delivery fails, so Stripe sends it again for up to
-  three days. Upgrade Velox to a release that knows the status.
+  three days. Upgrade Hardcount to a release that knows the status.
 
-Related: [how Velox handles card payment failures](../../payments.md) and
+Related: [how Hardcount handles card payment failures](../../payments.md) and
 the [webhook events](../../webhooks.md#event-catalog).

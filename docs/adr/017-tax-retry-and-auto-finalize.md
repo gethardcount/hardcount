@@ -130,7 +130,7 @@ warning so post-mortems can answer "why didn't it auto-finalize?"
 References: Recurly + Chargebee both auto-finalize subscription
 invoices on tax-success. Stripe + Lago require a manual finalize
 step but their architectures decouple finalize from tax in a way
-Velox doesn't.
+Hardcount doesn't.
 
 ## Consequences
 

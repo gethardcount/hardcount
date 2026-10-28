@@ -93,9 +93,9 @@ func TestSettings_CreditNotePrefix(t *testing.T) {
 		t.Errorf("after a refused save credit_note_prefix = %q, want ACME-CN", got.CreditNotePrefix)
 	}
 
-	// The stored invoice prefix (the default VLX) is checked too: the same
+	// The stored invoice prefix (the default HC) is checked too: the same
 	// prefix would give an invoice and a credit note the same number.
-	code, body = put(`{"credit_note_prefix":"vlx"}`)
+	code, body = put(`{"credit_note_prefix":"hc"}`)
 	if errObj, _ := body["error"].(map[string]any); code != http.StatusUnprocessableEntity || errObj == nil || errObj["param"] != "credit_note_prefix" {
 		t.Errorf("prefix equal to the invoice prefix: status %d error %v, want 422 on credit_note_prefix", code, body["error"])
 	}

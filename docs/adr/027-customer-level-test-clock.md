@@ -9,7 +9,7 @@ Test clocks attach to the customer, as in Stripe: a customer is pinned to a cloc
 
 ## Context
 
-Velox originally attached test clocks at the **subscription** level
+Hardcount originally attached test clocks at the **subscription** level
 (`subscriptions.test_clock_id`). Operators reported two friction
 points that surfaced during a single-session UX review:
 
@@ -41,7 +41,7 @@ A check of the comparable systems we benchmark against:
 | Stripe | Customer (`POST /v1/customers` with `test_clock`) | Yes — once attached, every Sub / Invoice / PaymentIntent for that customer uses the clock |
 | Lago | (no test-clock primitive) | n/a |
 | Recurly | Customer | Yes |
-| Velox (pre-fix) | Subscription | No |
+| Hardcount (pre-fix) | Subscription | No |
 
 Stripe's all-or-nothing constraint is more restrictive and that's
 the right tradeoff: simulation time consistency for a single

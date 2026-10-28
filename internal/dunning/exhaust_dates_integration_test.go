@@ -127,7 +127,7 @@ func TestExhaust_TestClock_FinalActionsDatedAtTheEscalation(t *testing.T) {
 			admin := testutil.AdminPool(t)
 
 			clocks := testclock.NewPostgresStore(db)
-			clockID := postgres.NewID("vlx_tclk")
+			clockID := postgres.NewID("hc_tclk")
 			if _, err := admin.Exec(`INSERT INTO test_clocks (id, tenant_id, livemode, name, frozen_time, status)
 				VALUES ($1, $2, false, 'exhaust dates', $3, 'advancing')`, clockID, tenantID, frozen); err != nil {
 				t.Fatalf("insert clock: %v", err)

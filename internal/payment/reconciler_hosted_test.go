@@ -54,7 +54,7 @@ func (f fakeSessionReader) GetCheckoutSession(_ context.Context, id string) (Che
 // would hide the one double charge this sweep exists to surface.
 func TestHostedSweep_SettlesPaidSessionsEvenOnAPaidInvoice(t *testing.T) {
 	store := newMockReconcileStore(
-		domain.Invoice{ID: "inv_paid", TenantID: "t1", Status: domain.InvoicePaid, PaymentStatus: domain.PaymentSucceeded, StripePaymentIntentID: "pi_velox"},
+		domain.Invoice{ID: "inv_paid", TenantID: "t1", Status: domain.InvoicePaid, PaymentStatus: domain.PaymentSucceeded, StripePaymentIntentID: "pi_hardcount"},
 		domain.Invoice{ID: "inv_open", TenantID: "t1", Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed},
 	)
 	client := &mockStripeClient{piStates: map[string]PaymentIntentResult{
@@ -113,7 +113,7 @@ func TestHostedSweep_SettlesPaidSessionsEvenOnAPaidInvoice(t *testing.T) {
 func TestHostedSweep_OneAlertPerCharge(t *testing.T) {
 	store := newMockReconcileStore(domain.Invoice{
 		ID: "inv_paid", TenantID: "t1", Status: domain.InvoicePaid, PaymentStatus: domain.PaymentSucceeded,
-		StripePaymentIntentID: "pi_velox", PaymentAnomalyKind: domain.EventPaymentDuplicateCharge,
+		StripePaymentIntentID: "pi_hardcount", PaymentAnomalyKind: domain.EventPaymentDuplicateCharge,
 		PaymentAnomalyPaymentIntentID: "pi_hosted",
 	})
 	client := &mockStripeClient{piStates: map[string]PaymentIntentResult{
@@ -187,7 +187,7 @@ func (r *recordingCardRecorder) RecordCheckoutCard(_ context.Context, tenantID, 
 // given. A failed card record keeps the session unresolved for the next tick.
 func TestHostedSweep_RecordsTheSessionsCard(t *testing.T) {
 	newSweep := func(rec *recordingCardRecorder) (*Reconciler, *fakeHostedLedger) {
-		store := newMockReconcileStore(domain.Invoice{ID: "inv_1", TenantID: "t1", CustomerID: "cus_velox", Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed})
+		store := newMockReconcileStore(domain.Invoice{ID: "inv_1", TenantID: "t1", CustomerID: "cus_hardcount", Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed})
 		client := &mockStripeClient{piStates: map[string]PaymentIntentResult{"pi_hosted": {ID: "pi_hosted", Status: "succeeded", AmountReceivedCents: 5000}}}
 		ledger := &fakeHostedLedger{rows: []CheckoutClaim{{ID: "cks_1", TenantID: "t1", InvoiceID: "inv_1", StripeSessionID: "cs_1", Status: "open"}}}
 		r := NewReconciler(client, store, time.Second)
@@ -201,8 +201,8 @@ func TestHostedSweep_RecordsTheSessionsCard(t *testing.T) {
 	if n, errs := r.sweepHostedSessions(context.Background(), 50, new(scheduler.Panics)); n != 1 || len(errs) != 0 {
 		t.Fatalf("n=%d errs=%v", n, errs)
 	}
-	if len(rec.calls) != 1 || rec.calls[0] != (cardCall{"t1", "cus_velox", "cus_stripe", PurposeHostedInvoicePay}) {
-		t.Fatalf("card calls = %+v, want one for (t1, cus_velox, cus_stripe, hosted pay)", rec.calls)
+	if len(rec.calls) != 1 || rec.calls[0] != (cardCall{"t1", "cus_hardcount", "cus_stripe", PurposeHostedInvoicePay}) {
+		t.Fatalf("card calls = %+v, want one for (t1, cus_hardcount, cus_stripe, hosted pay)", rec.calls)
 	}
 	assertIDs(t, "completed", ledger.completed, "cks_1")
 

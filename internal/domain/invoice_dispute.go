@@ -23,7 +23,7 @@ const (
 	DisputePrevented            DisputeStatus = "prevented"
 )
 
-// Valid reports whether s is one of the eight statuses Velox stores.
+// Valid reports whether s is one of the eight statuses Hardcount stores.
 func (s DisputeStatus) Valid() bool {
 	return s.stage() > 0
 }
@@ -40,7 +40,7 @@ const disputeStageClosed = 5
 // stage orders statuses along the dispute's life, so two snapshots stamped in
 // the same second apply in the order they happened: an inquiry before the
 // chargeback it became, an open dispute before its close. Statuses at the
-// same stage do not order each other. 0 means not a status Velox knows.
+// same stage do not order each other. 0 means not a status Hardcount knows.
 func (s DisputeStatus) stage() int {
 	switch s {
 	case DisputeWarningNeedsResponse:
@@ -59,7 +59,7 @@ func (s DisputeStatus) stage() int {
 }
 
 // InvoiceDispute is a card dispute (chargeback) Stripe reported against one
-// of the invoice's payments (#979). Velox records it and reports it; it never
+// of the invoice's payments (#979). Hardcount records it and reports it; it never
 // changes the invoice's payment status and never moves money because of it.
 // The operator answers the dispute in Stripe, and decides what a lost one
 // means for the invoice.

@@ -300,7 +300,7 @@ func TestStartDunning_ClockPinnedInvoiceCountsFromIssue_RealStore(t *testing.T) 
 	svc.SetResolver(resolver)
 
 	frozen := time.Date(2027, 3, 20, 0, 0, 0, 0, time.UTC)
-	clockID := postgres.NewID("vlx_tclk")
+	clockID := postgres.NewID("hc_tclk")
 	execTx(t, h.db, h.ctx, h.tenantID,
 		`INSERT INTO test_clocks (id, tenant_id, livemode, name, frozen_time, status)
 		 VALUES ($1, $2, false, 'Anchor Clock', $3, 'ready')`, clockID, h.tenantID, frozen)
@@ -341,7 +341,7 @@ func (decliningRetrier) RetryPayment(context.Context, string, string, string) er
 // retry was mis-anchored in the past — schedules the next one from when it
 // ran, not from when it was due. With the production resolver wired, every
 // run used to read as simulated, so each later retry was dated in the past
-// too and fired on the next tick (VLX-000081: "Oct 4" then "Oct 7", both on
+// too and fired on the next tick (HC-000081: "Oct 4" then "Oct 7", both on
 // Oct 11).
 func TestProcessDueRuns_LateWallClockRetryKeepsCadence_RealStore(t *testing.T) {
 	h := newCollectHarness(t)
@@ -409,7 +409,7 @@ func TestStartDunning_ClockPinnedChargedLater_OneRetryNotTheCampaign_RealStore(t
 	issued := time.Date(2027, 5, 1, 0, 0, 0, 0, time.UTC)  // cycle close; paused → draft
 	charged := time.Date(2027, 6, 1, 0, 0, 0, 0, time.UTC) // finalized and declined on a later Advance
 	frozen := time.Date(2027, 6, 5, 0, 0, 0, 0, time.UTC)  // that Advance's target
-	clockID := postgres.NewID("vlx_tclk")
+	clockID := postgres.NewID("hc_tclk")
 	execTx(t, h.db, h.ctx, h.tenantID,
 		`INSERT INTO test_clocks (id, tenant_id, livemode, name, frozen_time, status)
 		 VALUES ($1, $2, false, 'Charged Later', $3, 'ready')`, clockID, h.tenantID, frozen)
@@ -469,7 +469,7 @@ func TestCollector_CardlessDraftCollectedLater_CountsFromCollection_RealStore(t 
 
 	issued := time.Date(2027, 5, 1, 0, 0, 0, 0, time.UTC)
 	frozen := time.Date(2027, 6, 5, 0, 0, 0, 0, time.UTC) // the Advance that collects it
-	clockID := postgres.NewID("vlx_tclk")
+	clockID := postgres.NewID("hc_tclk")
 	execTx(t, h.db, h.ctx, h.tenantID,
 		`INSERT INTO test_clocks (id, tenant_id, livemode, name, frozen_time, status)
 		 VALUES ($1, $2, false, 'Cardless Later', $3, 'ready')`, clockID, h.tenantID, frozen)

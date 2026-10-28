@@ -59,7 +59,7 @@ func TestRetryPendingTax_ScansTheDeclaredSingleSource(t *testing.T) {
 	for i, code := range domain.TaxRetryableErrorCodes() {
 		inv, err := invStore.Create(ctx, tenantID, domain.Invoice{
 			CustomerID:         cust.ID,
-			InvoiceNumber:      "VLX-SCAN-" + string(rune('A'+i)),
+			InvoiceNumber:      "HC-SCAN-" + string(rune('A'+i)),
 			Status:             domain.InvoiceDraft,
 			PaymentStatus:      domain.PaymentPending,
 			Currency:           "USD",

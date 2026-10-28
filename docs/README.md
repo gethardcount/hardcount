@@ -1,28 +1,28 @@
-# Velox documentation
+# Hardcount documentation
 
 **New here? Read the [README](../README.md), then run the
 [quick start](quick-start.md).**
 
 ## Try it
 
-1. [Quick start](quick-start.md): start Velox on your computer with git,
+1. [Quick start](quick-start.md): start Hardcount on your computer with git,
    Docker and a bash shell, run the demo, and see one month of token usage
    become an invoice, its PDF and a margin report.
 2. [What's in the box](features.md): every feature, with what it does for you.
-3. [How Velox compares](comparison.md) with four open-source billing
-   engines, with sources, and [why Velox exists](why-velox.md).
+3. [How Hardcount compares](comparison.md) with four open-source billing
+   engines, with sources, and [why Hardcount exists](why-hardcount.md).
 4. [Roadmap](roadmap.md): what is being built now, next and later, and
-   what Velox will not build. Every change, by date:
+   what Hardcount will not build. Every change, by date:
    [CHANGELOG](../CHANGELOG.md).
 5. [Versioning before 1.0](versioning.md): what a release can break, and
    where each breaking change is written down.
 
 ## Understand it
 
-1. [How Velox works](how-velox-works.md): one picture and six steps, from
+1. [How Hardcount works](how-hardcount-works.md): one picture and six steps, from
    a usage event to a paid invoice.
 2. [Glossary](glossary.md): the words you will meet, plain meaning first.
-3. [How much traffic Velox handles](scale.md): what was measured, and
+3. [How much traffic Hardcount handles](scale.md): what was measured, and
    where one Postgres stops being enough.
 4. [Card payment failure handling](payments.md): declines, ambiguous
    results, crashes mid-charge, duplicate webhooks, refunds, and the known
@@ -62,11 +62,11 @@
 
 ## Engineering
 
-1. [How Velox is engineered](ENGINEERING.md): the rules, with the proof
+1. [How Hardcount is engineered](ENGINEERING.md): the rules, with the proof
    for each.
 2. Measured runs: [correctness under failure](benchmarks/failure-correctness.md)
    and [sustained throughput](benchmarks/sustained-throughput.md).
 
 ---
 
-Changing Velox itself? Contributor docs, design notes and records are in [docs/dev/](dev/README.md).
+Changing Hardcount itself? Contributor docs, design notes and records are in [docs/dev/](dev/README.md).

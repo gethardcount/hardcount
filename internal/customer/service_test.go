@@ -34,7 +34,7 @@ func (m *memoryStore) Create(_ context.Context, tenantID string, c domain.Custom
 			return domain.Customer{}, fmt.Errorf("%w: customer with external_id %q already exists", errs.ErrAlreadyExists, c.ExternalID)
 		}
 	}
-	c.ID = fmt.Sprintf("vlx_cus_%d", len(m.customers)+1)
+	c.ID = fmt.Sprintf("hc_cus_%d", len(m.customers)+1)
 	c.TenantID = tenantID
 	c.Status = domain.CustomerStatusActive
 	m.customers[c.ID] = c
@@ -278,7 +278,7 @@ func TestCustomerService_Create(t *testing.T) {
 		_, err := svc.Create(ctx, "tenant1", CreateInput{
 			ExternalID:  "cus_safety",
 			DisplayName: "Safety",
-			TestClockID: "vlx_tclk_anything",
+			TestClockID: "hc_tclk_anything",
 		})
 		if err == nil {
 			t.Fatal("expected error when test_clock_id is set but checker is unwired")
@@ -291,7 +291,7 @@ func TestCustomerService_Create(t *testing.T) {
 		_, err := svc.Create(ctx, "tenant1", CreateInput{
 			ExternalID:  "cus_404",
 			DisplayName: "Not found",
-			TestClockID: "vlx_tclk_nonexistent",
+			TestClockID: "hc_tclk_nonexistent",
 		})
 		if err == nil {
 			t.Fatal("expected error when clock doesn't exist")
@@ -304,13 +304,13 @@ func TestCustomerService_Create(t *testing.T) {
 		c, err := svc.Create(ctx, "tenant1", CreateInput{
 			ExternalID:  "cus_pinned",
 			DisplayName: "Pinned",
-			TestClockID: "vlx_tclk_real",
+			TestClockID: "hc_tclk_real",
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if c.TestClockID != "vlx_tclk_real" {
-			t.Errorf("got test_clock_id %q, want %q", c.TestClockID, "vlx_tclk_real")
+		if c.TestClockID != "hc_tclk_real" {
+			t.Errorf("got test_clock_id %q, want %q", c.TestClockID, "hc_tclk_real")
 		}
 	})
 }
@@ -364,7 +364,7 @@ func TestCreate_ClockPinnedCustomerBindsTheSimAxis(t *testing.T) {
 		if _, err := svc.Create(ctx, "tenant1", CreateInput{
 			ExternalID:  "cus_pinned",
 			DisplayName: "Pinned",
-			TestClockID: "vlx_tclk_real",
+			TestClockID: "hc_tclk_real",
 		}); err != nil {
 			t.Fatalf("create: %v", err)
 		}
@@ -372,8 +372,8 @@ func TestCreate_ClockPinnedCustomerBindsTheSimAxis(t *testing.T) {
 		if !spy.bound {
 			t.Fatal("emission ran on an UNBOUND ctx — the create row lands with NULL sim columns and the customer's origin is invisible to the clock filter")
 		}
-		if spy.sim.TestClockID != "vlx_tclk_real" {
-			t.Errorf("bound clock = %q, want vlx_tclk_real", spy.sim.TestClockID)
+		if spy.sim.TestClockID != "hc_tclk_real" {
+			t.Errorf("bound clock = %q, want hc_tclk_real", spy.sim.TestClockID)
 		}
 		if !spy.sim.At.Equal(frozen) {
 			t.Errorf("bound instant = %s, want the clock's frozen_time %s", spy.sim.At, frozen)
@@ -471,11 +471,11 @@ func TestCustomerService_RotateCostDashboardToken(t *testing.T) {
 		if err != nil {
 			t.Fatalf("rotate: %v", err)
 		}
-		if !strings.HasPrefix(token, "vlx_pcd_") {
-			t.Errorf("token prefix: got %q, want vlx_pcd_…", token)
+		if !strings.HasPrefix(token, "hc_pcd_") {
+			t.Errorf("token prefix: got %q, want hc_pcd_…", token)
 		}
-		if len(token) != len("vlx_pcd_")+64 {
-			t.Errorf("token length: got %d, want %d (prefix + 64 hex)", len(token), len("vlx_pcd_")+64)
+		if len(token) != len("hc_pcd_")+64 {
+			t.Errorf("token length: got %d, want %d (prefix + 64 hex)", len(token), len("hc_pcd_")+64)
 		}
 		// GetByCostDashboardToken resolves the same customer.
 		got, err := svc.GetByCostDashboardToken(ctx, token)
@@ -508,7 +508,7 @@ func TestCustomerService_RotateCostDashboardToken(t *testing.T) {
 	})
 
 	t.Run("missing customer", func(t *testing.T) {
-		_, err := svc.RotateCostDashboardToken(ctx, "tenant1", "vlx_cus_nonexistent")
+		_, err := svc.RotateCostDashboardToken(ctx, "tenant1", "hc_cus_nonexistent")
 		if err == nil {
 			t.Fatal("expected error for missing customer")
 		}

@@ -14,7 +14,7 @@ import (
 
 // Every error the API answers goes through internal/api/respond, so it has
 // one shape: {"error": {"type", "code", "message", "param", "request_id"}},
-// the Velox-Request-Id header and Content-Type application/json.
+// the Hardcount-Request-Id header and Content-Type application/json.
 //
 // This finds, in non-test code under internal/ and cmd/, every place that
 // writes a response status or body by hand:

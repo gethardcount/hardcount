@@ -7,7 +7,7 @@
 -- so plans.meter_ids goes, and so do the rating rules, the meter pricing
 -- rules and the meter's default price.
 --
--- This release has no upgrade path from Velox 0.8.x, so no price is moved:
+-- This release has no upgrade path from Hardcount 0.8.x, so no price is moved:
 -- if any rating rule, pricing rule, override, plan meter list or invoice line
 -- that names a rating rule exists, the upgrade stops here before changing
 -- anything, and the error counts them.
@@ -35,7 +35,7 @@ BEGIN
     IF n > 0 THEN found := found || format(E'\n  %s invoice line(s) priced by a rating rule', n); END IF;
     IF found <> '' THEN
         RAISE EXCEPTION 'migration 00212 moves usage prices from meters to plans, and this database has prices it does not move:%', found
-            USING HINT = 'This release has no upgrade path from Velox 0.8.x: install fresh (see the v0.9.0 release notes). On a development database, re-create it: docs/ops/runbook/migration-failed-midway.md#00212-found-prices-it-does-not-move';
+            USING HINT = 'This release has no upgrade path from Hardcount 0.8.x: install fresh (see the v0.9.0 release notes). On a development database, re-create it: docs/ops/runbook/migration-failed-midway.md#00212-found-prices-it-does-not-move';
     END IF;
 END
 $$;
@@ -57,7 +57,7 @@ $$;
 -- +goose StatementEnd
 
 CREATE TABLE plan_prices (
-    id              TEXT PRIMARY KEY DEFAULT ('vlx_prc_' || encode(gen_random_bytes(12), 'hex')),
+    id              TEXT PRIMARY KEY DEFAULT ('hc_prc_' || encode(gen_random_bytes(12), 'hex')),
     tenant_id       TEXT NOT NULL REFERENCES tenants(id) ON DELETE RESTRICT,
     livemode        BOOLEAN NOT NULL DEFAULT true,
     plan_id         TEXT NOT NULL REFERENCES plans(id) ON DELETE RESTRICT,
@@ -73,7 +73,7 @@ CREATE INDEX plan_prices_meter ON plan_prices (tenant_id, meter_id);
 -- with removed set and no content. valid_from is '-infinity' for the one
 -- version of a price on a plan no subscription has used.
 CREATE TABLE plan_price_versions (
-    id                   TEXT PRIMARY KEY DEFAULT ('vlx_ppv_' || encode(gen_random_bytes(12), 'hex')),
+    id                   TEXT PRIMARY KEY DEFAULT ('hc_ppv_' || encode(gen_random_bytes(12), 'hex')),
     tenant_id            TEXT NOT NULL REFERENCES tenants(id) ON DELETE RESTRICT,
     livemode             BOOLEAN NOT NULL DEFAULT true,
     price_id             TEXT NOT NULL REFERENCES plan_prices(id) ON DELETE RESTRICT,
@@ -114,7 +114,7 @@ CREATE INDEX plan_price_version_clocks_clock ON plan_price_version_clocks (test_
 -- table is empty (checked above), so it is made again in the new shape.
 DROP TABLE customer_price_overrides;
 CREATE TABLE customer_price_overrides (
-    id                   TEXT PRIMARY KEY DEFAULT ('vlx_cpo_' || encode(gen_random_bytes(12), 'hex')),
+    id                   TEXT PRIMARY KEY DEFAULT ('hc_cpo_' || encode(gen_random_bytes(12), 'hex')),
     tenant_id            TEXT NOT NULL REFERENCES tenants(id) ON DELETE RESTRICT,
     livemode             BOOLEAN NOT NULL DEFAULT true,
     customer_id          TEXT NOT NULL REFERENCES customers(id) ON DELETE RESTRICT,
@@ -167,10 +167,10 @@ CREATE POLICY tenant_isolation ON customer_price_overrides USING (
     OR ((tenant_id = current_setting('app.tenant_id', true))
         AND (livemode = (current_setting('app.livemode', true) IS DISTINCT FROM 'off'))));
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON plan_prices TO velox_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON plan_price_versions TO velox_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON plan_price_version_clocks TO velox_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON customer_price_overrides TO velox_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON plan_prices TO hardcount_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON plan_price_versions TO hardcount_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON plan_price_version_clocks TO hardcount_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON customer_price_overrides TO hardcount_app;
 
 -- An invoice line names the price that billed it, and the events that price
 -- takes. No foreign key: a line is a record of what was billed, and price
@@ -192,7 +192,7 @@ DROP TABLE rating_rule_versions;
 SET LOCAL app.bypass_rls = 'on';
 
 CREATE TABLE rating_rule_versions (
-    id text DEFAULT ('vlx_rrv_' || encode(gen_random_bytes(12), 'hex')) NOT NULL PRIMARY KEY,
+    id text DEFAULT ('hc_rrv_' || encode(gen_random_bytes(12), 'hex')) NOT NULL PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE RESTRICT,
     rule_key text NOT NULL,
     name text NOT NULL,
@@ -218,10 +218,10 @@ CREATE POLICY tenant_isolation ON rating_rule_versions USING (
     (current_setting('app.bypass_rls', true) = 'on')
     OR ((tenant_id = current_setting('app.tenant_id', true))
         AND (livemode = (current_setting('app.livemode', true) IS DISTINCT FROM 'off'))));
-GRANT ALL ON TABLE rating_rule_versions TO velox_app;
+GRANT ALL ON TABLE rating_rule_versions TO hardcount_app;
 
 CREATE TABLE meter_pricing_rules (
-    id text DEFAULT ('vlx_mpr_' || encode(gen_random_bytes(12), 'hex')) NOT NULL PRIMARY KEY,
+    id text DEFAULT ('hc_mpr_' || encode(gen_random_bytes(12), 'hex')) NOT NULL PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE RESTRICT,
     meter_id text NOT NULL REFERENCES meters(id) ON DELETE CASCADE,
     rating_rule_version_id text NOT NULL REFERENCES rating_rule_versions(id) ON DELETE RESTRICT,
@@ -237,7 +237,7 @@ ALTER TABLE meter_pricing_rules FORCE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation ON meter_pricing_rules USING (
     (current_setting('app.bypass_rls', true) = 'on')
     OR (tenant_id = current_setting('app.tenant_id', true)));
-GRANT ALL ON TABLE meter_pricing_rules TO velox_app;
+GRANT ALL ON TABLE meter_pricing_rules TO hardcount_app;
 
 ALTER TABLE plans ADD COLUMN meter_ids jsonb DEFAULT '[]' NOT NULL;
 ALTER TABLE meters ADD COLUMN rating_rule_version_id text REFERENCES rating_rule_versions(id) ON DELETE RESTRICT;
@@ -248,7 +248,7 @@ ALTER TABLE invoice_line_items DROP COLUMN price_id;
 
 DROP TABLE customer_price_overrides;
 CREATE TABLE customer_price_overrides (
-    id text DEFAULT ('vlx_cpo_' || encode(gen_random_bytes(12), 'hex')) NOT NULL PRIMARY KEY,
+    id text DEFAULT ('hc_cpo_' || encode(gen_random_bytes(12), 'hex')) NOT NULL PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE RESTRICT,
     customer_id text NOT NULL REFERENCES customers(id) ON DELETE RESTRICT,
     rating_rule_version_id text NOT NULL REFERENCES rating_rule_versions(id) ON DELETE RESTRICT,
@@ -275,7 +275,7 @@ CREATE POLICY tenant_isolation ON customer_price_overrides USING (
     (current_setting('app.bypass_rls', true) = 'on')
     OR ((tenant_id = current_setting('app.tenant_id', true))
         AND (livemode = (current_setting('app.livemode', true) IS DISTINCT FROM 'off'))));
-GRANT ALL ON TABLE customer_price_overrides TO velox_app;
+GRANT ALL ON TABLE customer_price_overrides TO hardcount_app;
 
 DROP TABLE plan_price_version_clocks;
 DROP TABLE plan_price_versions;

@@ -33,12 +33,12 @@ func (f sentEmailsFake) ListByCustomer(context.Context, string, string) ([]SentE
 func fetchSentEmails(t *testing.T, rows []SentEmailOutboxRow) []map[string]any {
 	t.Helper()
 	store := newMemoryStore()
-	store.customers["vlx_cus_1"] = domain.Customer{ID: "vlx_cus_1", TenantID: "t1"}
+	store.customers["hc_cus_1"] = domain.Customer{ID: "hc_cus_1", TenantID: "t1"}
 	h := NewHandler(NewService(store))
 	h.SetSentEmailsLister(sentEmailsFake{rows: rows})
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", "vlx_cus_1")
+	rctx.URLParams.Add("id", "hc_cus_1")
 	ctx := auth.WithTenantID(req.Context(), "t1")
 	ctx = context.WithValue(ctx, chi.RouteCtxKey, rctx)
 	rr := httptest.NewRecorder()
@@ -86,16 +86,16 @@ func TestSentEmails_EveryRowHasALine(t *testing.T) {
 	dispatched := created.Add(2 * time.Minute)
 	rows := []SentEmailOutboxRow{
 		{ID: "emob_1", EmailType: "invoice", Recipient: "billing@acme.test", Status: "dispatched", DeliveryState: "delivered",
-			CreatedAt: created, DispatchedAt: &dispatched, InvoiceNumber: "VLX-000123"},
+			CreatedAt: created, DispatchedAt: &dispatched, InvoiceNumber: "HC-000123"},
 		{ID: "emob_2", EmailType: "payment_failed", Recipient: "billing@acme.test", Status: "dispatched", DeliveryState: "bounced",
-			CreatedAt: created, DispatchedAt: &dispatched, InvoiceNumber: "VLX-000123"},
+			CreatedAt: created, DispatchedAt: &dispatched, InvoiceNumber: "HC-000123"},
 		{ID: "emob_3", EmailType: "dunning_warning", Recipient: "billing@acme.test", Status: "skipped", DeliveryState: "unknown",
-			CreatedAt: created, InvoiceNumber: "VLX-000123",
-			LastError: "email outbox: obsolete — invoice settled before delivery: invoice VLX-000123 reached voided before delivery"},
+			CreatedAt: created, InvoiceNumber: "HC-000123",
+			LastError: "email outbox: obsolete — invoice settled before delivery: invoice HC-000123 reached voided before delivery"},
 		{ID: "emob_4", EmailType: "dunning_escalation", Recipient: "billing@acme.test", Status: "pending", DeliveryState: "unknown",
-			CreatedAt: created, InvoiceNumber: "VLX-000123"},
+			CreatedAt: created, InvoiceNumber: "HC-000123"},
 		{ID: "emob_5", EmailType: "payment_receipt", Recipient: "billing@acme.test", Status: "dispatched", DeliveryState: "complained",
-			CreatedAt: created, DispatchedAt: &dispatched, InvoiceNumber: "VLX-000123"},
+			CreatedAt: created, DispatchedAt: &dispatched, InvoiceNumber: "HC-000123"},
 	}
 	got := fetchSentEmails(t, rows)
 	if len(got) != len(rows) {
@@ -103,13 +103,13 @@ func TestSentEmails_EveryRowHasALine(t *testing.T) {
 	}
 
 	want := []struct{ title, tone, problem, meta string }{
-		{"Invoice email delivered", "neutral", "", "VLX-000123 · To billing@acme.test"},
-		{"Failed payment notice bounced", "failure", "The customer's mail server rejected it.", "VLX-000123 · To billing@acme.test · Automatic"},
+		{"Invoice email delivered", "neutral", "", "HC-000123 · To billing@acme.test"},
+		{"Failed payment notice bounced", "failure", "The customer's mail server rejected it.", "HC-000123 · To billing@acme.test · Automatic"},
 		// A row skipped before the reason was a field: the line says what
 		// it can know, never "settled first".
-		{"Payment reminder email not sent", "neutral", "", "The invoice was already closed · VLX-000123 · To billing@acme.test · Automatic"},
-		{"Final notice queued", "neutral", "", "VLX-000123 · To billing@acme.test · Automatic"},
-		{"Receipt email marked as spam", "failure", "", "VLX-000123 · To billing@acme.test · Automatic"},
+		{"Payment reminder email not sent", "neutral", "", "The invoice was already closed · HC-000123 · To billing@acme.test · Automatic"},
+		{"Final notice queued", "neutral", "", "HC-000123 · To billing@acme.test · Automatic"},
+		{"Receipt email marked as spam", "failure", "", "HC-000123 · To billing@acme.test · Automatic"},
 	}
 	for i, row := range got {
 		l, ok := row["line"].(map[string]any)

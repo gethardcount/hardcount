@@ -12,7 +12,7 @@ import (
 )
 
 // TestIntervals_FreshDatabaseNeedsNoBackfill is why the boot-time
-// billing-interval backfill was deleted (#1364). Velox 0.9.0 does not take
+// billing-interval backfill was deleted (#1364). Hardcount 0.9.0 does not take
 // over a 0.8.x database, so every database starts from the goose baseline,
 // after the ADR-101 dual-write shipped. On such a database every writer that
 // gives an item a billable lifetime writes its interval in the same

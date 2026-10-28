@@ -256,7 +256,7 @@ func TestPriceChange_FireThenEditThenClose(t *testing.T) {
 	if _, err := tx.Exec(`
 		INSERT INTO usage_events (id, tenant_id, customer_id, meter_id, quantity, timestamp, livemode)
 		VALUES ($1, $2, $3, $4, 500, $5, false)
-	`, postgres.NewID("vlx_ue"), f.tenantID, f.customerID, f.meterID, residualAt); err != nil {
+	`, postgres.NewID("hc_ue"), f.tenantID, f.customerID, f.meterID, residualAt); err != nil {
 		t.Fatalf("seed residual usage: %v", err)
 	}
 	if _, err := tx.Exec(`

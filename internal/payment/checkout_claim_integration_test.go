@@ -16,8 +16,8 @@ import (
 // service stack.
 func seedClaimInvoice(t *testing.T, db *postgres.DB, ctx context.Context, tenantID, status, payStatus string, due int64) string {
 	t.Helper()
-	custID := postgres.NewID("vlx_cus")
-	invID := postgres.NewID("vlx_inv")
+	custID := postgres.NewID("hc_cus")
+	invID := postgres.NewID("hc_inv")
 	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		t.Fatalf("begin: %v", err)

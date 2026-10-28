@@ -9,11 +9,11 @@ a `database/sql`→pgx migration. ADR-061 forward-references it; this is that do
 
 ## Summary
 
-Velox runs four separate re-drive sweeps that each retry a failed post-commit side effect, such as a tax reversal. When consolidated, they move one at a time onto a single queue: a separate `obligations` table, enqueued in the same transaction as the state change and drained with the `webhook_outbox` machinery. Money obligations do not take the webhook queue's give-up-after-15-attempts rule; a tax reversal retries until it succeeds. A separate table means internal tax and refund data can never reach customer webhook endpoints. Temporal was rejected because its enqueue is not part of the Postgres transaction. Moving the data layer from `database/sql` to native pgx was also rejected for now: it would touch every money query and the tenant-isolation boundary, and today it pays off nowhere. The trigger to revisit it is usage-event ingestion becoming a measured bottleneck, and then only on that path. The queue build is deferred until a named trigger fires, because the sweeps are correct today. Amended 2026-08-30: River works with `database/sql`, so it is the first option evaluated when the queue is built.
+Hardcount runs four separate re-drive sweeps that each retry a failed post-commit side effect, such as a tax reversal. When consolidated, they move one at a time onto a single queue: a separate `obligations` table, enqueued in the same transaction as the state change and drained with the `webhook_outbox` machinery. Money obligations do not take the webhook queue's give-up-after-15-attempts rule; a tax reversal retries until it succeeds. A separate table means internal tax and refund data can never reach customer webhook endpoints. Temporal was rejected because its enqueue is not part of the Postgres transaction. Moving the data layer from `database/sql` to native pgx was also rejected for now: it would touch every money query and the tenant-isolation boundary, and today it pays off nowhere. The trigger to revisit it is usage-event ingestion becoming a measured bottleneck, and then only on that path. The queue build is deferred until a named trigger fires, because the sweeps are correct today. Amended 2026-08-30: River works with `database/sql`, so it is the first option evaluated when the queue is built.
 
 ## Context
 
-Velox runs **four bespoke re-drive sweeps** that each recover a post-commit
+Hardcount runs **four bespoke re-drive sweeps** that each recover a post-commit
 async side-effect that failed: tax-commit (#267 `RetryPendingTaxCommit`),
 tax-reversal (#310 `RetryPendingTaxReversal`), clawback-issue (ADR-057
 `RetryPendingClawbackIssue`), and CN-tax-reversal (PR2/ADR-061
@@ -28,7 +28,7 @@ River/Oban/Solid Queue are mainstream; the queue COMPLEMENTS — never replaces 
 idempotency + reconciliation). The question: do we adopt a product (River /
 Temporal), and do we migrate `database/sql`→pgx-native to unlock one?
 
-Velox facts that decide it: `database/sql` over the `pgx/v5/stdlib` driver
+Hardcount facts that decide it: `database/sql` over the `pgx/v5/stdlib` driver
 (`*sql.DB`/`*sql.Tx`; the RLS tenant-isolation core is built on the `BeginTx`
 wrapper — 60 non-test files / 385 query sites). We **already operate** a
 transactional outbox (`webhook_outbox`, ADR-040): in-tx `Enqueue(ctx, tx, …)`,
@@ -136,7 +136,7 @@ migratable set is **5 today** — re-counted 2026-07-05 during the deferral
 reassessment: the plan-swap refund drafts (#381, Bug B transplant) joined
 the clawback-issue family as a fifth issue_pending consumer of the same
 reconciler; still under the ~6–7 line, and notably ADR-078 (commits)
-added ZERO bespoke sweeps); OR a `cmd/velox-worker` process split; OR
+added ZERO bespoke sweeps); OR a `cmd/hardcount-worker` process split; OR
 a second engineer joins (copy-paste a 1-dev shop tolerates, a 2-dev shop
 shouldn't).
 
@@ -170,7 +170,7 @@ the per-effect scans — so a per-effect Source seam would be discarded when (c)
 lands. We therefore shipped only the **thin sweep driver**: a single-method
 `billing.Reconciler{ Name(); Reconcile(ctx, batch) (int, []error) }` + a ~25-line
 ordered driver (`runReconcilers` / `s.reconcilers()`) that owns nil-skip, uniform
-logging, and ONE new per-reconciler metric (`velox_reconciler_sweeps_total{reconciler,mode,outcome}`
+logging, and ONE new per-reconciler metric (`hardcount_reconciler_sweeps_total{reconciler,mode,outcome}`
 — previously only auto-charge was metered). The six recovery sweeps
 (payment_unknown, tax_retry, tax_commit, tax_reversal, clawback_issue,
 cn_tax_reversal) ride it; their re-drive bodies and eligibility SQL are unchanged.
@@ -271,7 +271,7 @@ Why the decision stands anyway:
    row per subscription per cycle would dual-write the due time against
    `next_billing_at` — the exact class the outbox exists to kill.
 2. **The outboxes work and are tested against real Postgres.** Replacing them
-   with a schema Velox does not own costs a data migration for in-flight rows
+   with a schema Hardcount does not own costs a data migration for in-flight rows
    and a rewrite of money-path code for no current gain.
 
 **Trigger to adopt River for the outbox drainers specifically:** a design

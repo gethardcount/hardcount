@@ -1,8 +1,8 @@
 // Package litellm adapts LiteLLM Proxy's StandardLoggingPayload to
-// Velox usage events. LiteLLM is the de-facto AI-API gateway for
+// Hardcount usage events. LiteLLM is the de-facto AI-API gateway for
 // self-hosted LLM stacks (Anthropic / OpenAI / Bedrock / etc.) — this
 // adapter is the wedge integration: drop a `generic_api` callback in
-// LiteLLM, get per-call token + cost tracking in Velox out of the
+// LiteLLM, get per-call token + cost tracking in Hardcount out of the
 // box. See docs/integrations/litellm.md + ADR-033.
 package litellm
 
@@ -17,8 +17,8 @@ import (
 //
 // We deliberately accept the LiteLLM wire shape as-is rather than
 // reshape it on the partner side. Operator just configures LiteLLM's
-// generic_api callback at this endpoint with a Velox API key, and
-// every completion lands in Velox without any glue code.
+// generic_api callback at this endpoint with a Hardcount API key, and
+// every completion lands in Hardcount without any glue code.
 //
 // Fields are a deliberate subset of LiteLLM's spec — only what the
 // adapter actually consumes. LiteLLM's payload carries many more
@@ -55,9 +55,9 @@ type StandardLoggingPayload struct {
 
 	// User is LiteLLM's caller identity, conventionally the
 	// end-user identifier the partner passes to litellm.completion
-	// (`user="..."`). We treat this as the Velox external_customer_id
+	// (`user="..."`). We treat this as the Hardcount external_customer_id
 	// — operators set their LiteLLM call's user= to the customer's
-	// Velox external_id. Missing → that row is rejected with a per-row
+	// Hardcount external_id. Missing → that row is rejected with a per-row
 	// entry in the response's errors[] (the batch still answers 200);
 	// the adapter refuses to bill "anonymous" usage to "unknown customer".
 	User string `json:"user"`
@@ -104,7 +104,7 @@ type StandardLoggingPayload struct {
 	// metadata column and IngestInput carries none, so it is never
 	// persisted. It is also a WHOLE-CALL figure: a call maps to up to
 	// five per-role events, so stamping it per event would multi-count
-	// COGS. Velox's COGS comes from the operator's provider_cost_rates
+	// COGS. Hardcount's COGS comes from the operator's provider_cost_rates
 	// table at ingest (ADR-079), or per role from CostBreakdown (never
 	// from this field; see observedCostMicros).
 	ResponseCost float64 `json:"response_cost,omitempty"`
@@ -223,7 +223,7 @@ type CacheCreationTokenDetails struct {
 
 // Reasons a call's cache writes could not be split by lifetime. The mapper
 // then bills them as input, as before the split existed, and counts the
-// reason on velox_litellm_cache_write_unsplit_total.
+// reason on hardcount_litellm_cache_write_unsplit_total.
 const (
 	// UnsplitNoSplit: the record has cache-write tokens but no 5m/1h split.
 	UnsplitNoSplit = "no_split"
@@ -303,7 +303,7 @@ func (u *Usage) cachedReadTokens() int64 {
 }
 
 // CostBreakdown is LiteLLM's per-component cost split (cents NOT
-// supported upstream — dollars-as-float, per their wire). Velox
+// supported upstream — dollars-as-float, per their wire). Hardcount
 // stores the value verbatim on the usage event metadata; billing
 // math runs through the operator's plan prices, not
 // these floats.

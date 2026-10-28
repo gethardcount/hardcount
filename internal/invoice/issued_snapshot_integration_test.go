@@ -62,7 +62,7 @@ func newSnapRig(t *testing.T, name string) *snapRig {
 }
 
 // newSnapRigWith wires enc into the customer store and the invoice store,
-// the way router.go does when VELOX_ENCRYPTION_KEY is set (always, in
+// the way router.go does when HARDCOUNT_ENCRYPTION_KEY is set (always, in
 // production). nil leaves both stores without a key.
 func newSnapRigWith(t *testing.T, name string, enc *crypto.Encryptor) *snapRig {
 	t.Helper()

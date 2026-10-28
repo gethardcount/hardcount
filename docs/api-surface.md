@@ -1,16 +1,16 @@
-# The Velox API
+# The Hardcount API
 
-The Velox API is how your code talks to Velox: you create customers, send
+The Hardcount API is how your code talks to Hardcount: you create customers, send
 usage, and read invoices with plain HTTP requests and JSON. Everything the dashboard does
 goes through the same API.
 
-New to Velox? Start with [Send usage and get your first invoice](first-invoice.md).
+New to Hardcount? Start with [Send usage and get your first invoice](first-invoice.md).
 
 ## Make your first call
 
 Every call needs three things:
 
-- **The address** of your Velox server. After the
+- **The address** of your Hardcount server. After the
   [quick start](quick-start.md) it is `http://localhost:8080`. All routes
   start with `/v1/`.
 - **An API key** in the header `Authorization: Bearer <key>`. Use a secret
@@ -20,17 +20,17 @@ Every call needs three things:
 Create a test customer:
 
 ```bash
-export VELOX=http://localhost:8080
-export VELOX_KEY=vlx_secret_test_…   # your test key
+export HARDCOUNT=http://localhost:8080
+export HARDCOUNT_KEY=hc_secret_test_…   # your test key
 
-curl -s -X POST "$VELOX/v1/customers" \
-  -H "Authorization: Bearer $VELOX_KEY" \
+curl -s -X POST "$HARDCOUNT/v1/customers" \
+  -H "Authorization: Bearer $HARDCOUNT_KEY" \
   -H "Content-Type: application/json" \
   -d '{"external_id": "cust_123", "display_name": "Acme Inc"}'
 ```
 
 **You see:** status `201` and the new customer as JSON, with an `id` such as
-`vlx_cus_…`. The `external_id` is your own ID for the customer.
+`hc_cus_…`. The `external_id` is your own ID for the customer.
 
 For a worked sequence of calls, see [first invoice](first-invoice.md#steps).
 
@@ -64,7 +64,7 @@ Every list route pages the same way:
 To read everything, add 100 to `offset` until `offset` reaches `total`:
 
 ```bash
-curl -s "$VELOX/v1/plans?limit=100&offset=100" -H "Authorization: Bearer $VELOX_KEY"
+curl -s "$HARDCOUNT/v1/plans?limit=100&offset=100" -H "Authorization: Bearer $HARDCOUNT_KEY"
 ```
 
 Two lists stop counting:
@@ -199,8 +199,8 @@ See [test clock](glossary.md#testing-with-simulated-time).
 
 | Method | Path | What it does |
 |---|---|---|
-| `GET` | `/v1/dunning/runs` | List dunning runs (Velox retrying a failed payment and emailing the customer) |
-| `POST` | `/v1/webhook-endpoints/endpoints` | Register a URL in your app that Velox calls when something happens. See [Webhooks](webhooks.md). |
+| `GET` | `/v1/dunning/runs` | List dunning runs (Hardcount retrying a failed payment and emailing the customer) |
+| `POST` | `/v1/webhook-endpoints/endpoints` | Register a URL in your app that Hardcount calls when something happens. See [Webhooks](webhooks.md). |
 | `GET` | `/v1/audit-log` | Search the audit log: who changed what, and when. Entries cannot be edited. |
 
 ## Sending usage safely
@@ -211,14 +211,14 @@ request.
 1. **Give every event an `idempotency_key`:** a unique ID for that one
    event. An event without one, or with an empty one, is refused with `422`
    and `param: idempotency_key`. In a batch, `errors[]` names each such
-   event and nothing is stored. Without a key, Velox cannot tell a retry
+   event and nothing is stored. Without a key, Hardcount cannot tell a retry
    from new usage.
 2. **Pick the key once, and reuse it on every retry.** A new key on each
    attempt makes each attempt a new event, so the usage is counted again.
 3. **Keep it to 255 characters or fewer.** A longer key is refused with
    `422`.
 4. **Never reuse a key for a different event.** Keys are unique per account
-   and mode, forever. When a key was already used, Velox keeps the first
+   and mode, forever. When a key was already used, Hardcount keeps the first
    event and drops the new one without comparing them. A single event gets
    `200` with the first event and `Idempotent-Replayed: true`; a batch
    counts it in `deduplicated`. So do not build keys from a batch index or a
@@ -240,27 +240,27 @@ value, is refused with `422` and `param: quantity`. The event's
 `dimensions` pick its price; `properties`, the old name, is refused when
 it has a key (`null` or `{}` is ignored).
 
-### What Velox found when the event arrived
+### What Hardcount found when the event arrived
 
-Velox stores every valid event. The answer that wrote it can carry a
-`billing_status`: what Velox found when the event arrived. Velox checked
+Hardcount stores every valid event. The answer that wrote it can carry a
+`billing_status`: what Hardcount found when the event arrived. Hardcount checked
 the event against the customer's subscriptions, the plans and prices in
 force, and the invoices already built at that moment. A status that is
 present was true at that moment:
 
-| `billing_status` | What Velox found | What to do |
+| `billing_status` | What Hardcount found | What to do |
 |---|---|---|
 | `after_close` | The event's time is already invoiced (see Late usage below). | Bill it with a one-off invoice if it should be charged. A price added to a plan does not bill it. |
 | `not_on_plan` | A billing period not invoiced yet holds the event's time, but its plan has no price for the meter. | To bill later usage, add a price for the meter to the plan, or move the customer to a plan that has one. Check the invoice before you bill this event by hand. |
 | `outside_subscription` | No active or trialing subscription of the customer bills the event's time. For example, there is none, or the time is before one starts, in a free trial, or after one ends or its scheduled cancel. | Check the event's customer and timestamp. |
 | `no_price` | The plan that bills the event's time prices the meter, but no price of it takes the event's `dimensions`. A price takes an event whose dimensions include all of its `dimension_match`, compared as strings: the number `1` is not `"1"`. | Add a price for those dimensions to bill later usage. Check the invoice before you bill this event by hand. |
 
-No `billing_status` means Velox found no reason then. It is not a promise
+No `billing_status` means Hardcount found no reason then. It is not a promise
 that the event will be billed.
 
-- Velox checks only the customer's current billing periods. Time after a
+- Hardcount checks only the customer's current billing periods. Time after a
   period end whose invoice is not built yet is not checked, nor is time
-  after a trial's end before Velox ends the trial.
+  after a trial's end before Hardcount ends the trial.
 - A later change can change the outcome either way: a subscription
   created, activated or changed, a trial extended, a scheduled cancel
   undone, or a price added.
@@ -286,7 +286,7 @@ Where it is sent:
 
 An event counts toward the billing period its `timestamp` falls in.
 
-- Velox builds a period's invoice once `INVOICE_GRACE_PERIOD` (default 1
+- Hardcount builds a period's invoice once `INVOICE_GRACE_PERIOD` (default 1
   hour) has passed after the period ends. An event that arrives within that
   time is on the invoice.
 - After that, the invoice does not change. A later event for that period is
@@ -294,7 +294,7 @@ An event counts toward the billing period its `timestamp` falls in.
   answer says so: `billing_status: "after_close"` on the event's 201
   (single and backfill), and an `after_close` count on a batch or a
   LiteLLM delivery. A replay never carries it. What no `billing_status`
-  means is [above](#what-velox-found-when-the-event-arrived).
+  means is [above](#what-hardcount-found-when-the-event-arrived).
 - To bill it, make a one-off invoice: `POST /v1/invoices`, then
   `POST /v1/invoices/{id}/line-items`, then
   `POST /v1/invoices/{id}/finalize`.
@@ -318,13 +318,13 @@ An event counts toward the billing period its `timestamp` falls in.
 - Dunning's final pause or cancel waits for the grace. When retries run out
   inside it, the run waits until the grace ends, then pauses or cancels.
 
-The metric `velox_usage_unbilled_total{reason, origin}` counts the events
+The metric `hardcount_usage_unbilled_total{reason, origin}` counts the events
 answered with each `billing_status` (`reason="after_close"` for late usage).
 Usage on a canceled subscription is answered `outside_subscription`, not
 `after_close`, or `not_on_plan` when another subscription's open period
 holds that time without pricing the meter. An event before a
 subscription's current period is `after_close` whatever plan it is on now:
-adding a price to a plan never bills it. `velox_usage_late_event_total`
+adding a price to a plan never bills it. `hardcount_usage_late_event_total`
 counts events, not sent through the backfill route, whose `timestamp` is
 more than 24 hours older than their arrival. It does not say whether an
 event missed an invoice.
@@ -332,8 +332,8 @@ event missed an invoice.
 ## Errors
 
 Errors return the same JSON body, including an unknown path and a method
-the path does not take. Every response that reaches Velox also has a
-`Velox-Request-Id` header. Send that ID to support when you report a
+the path does not take. Every response that reaches Hardcount also has a
+`Hardcount-Request-Id` header. Send that ID to support when you report a
 problem.
 
 ```json
@@ -401,9 +401,9 @@ specific status for a body that is too large.
   - `conflict_idempotency` (409): another request with this key is still running, or did not finish. Retry later.
   - `conflict_idempotency_unresolved` (409): an earlier request with this key started more than 5 minutes ago and never recorded an outcome. Check whether the resource exists before you retry with a new key.
   - `invalid_request` (400): the body could not be read. This includes any body over 1 MB.
-- **A replayed key** (POST, PUT or PATCH under `/v1` with the same key, method, path and body) returns the first response's status and body, plus `Idempotent-Replayed: true`. The body's `request_id` is the first request's; the `Velox-Request-Id` header is the new request's. The response's other headers are not sent again. A first response of 409 or 422 is not stored: the key is freed, and a retry with the same key runs the request again. The usage routes (`/v1/usage-events…`, `/v1/integrations/litellm/spend`) ignore the header. If a database error stops the server from freeing the key or storing the first response, the key stays reserved: a retry gets `conflict_idempotency`, then `conflict_idempotency_unresolved` once 5 minutes have passed. The request does not run twice.
+- **A replayed key** (POST, PUT or PATCH under `/v1` with the same key, method, path and body) returns the first response's status and body, plus `Idempotent-Replayed: true`. The body's `request_id` is the first request's; the `Hardcount-Request-Id` header is the new request's. The response's other headers are not sent again. A first response of 409 or 422 is not stored: the key is freed, and a retry with the same key runs the request again. The usage routes (`/v1/usage-events…`, `/v1/integrations/litellm/spend`) ignore the header. If a database error stops the server from freeing the key or storing the first response, the key stays reserved: a retry gets `conflict_idempotency`, then `conflict_idempotency_unresolved` once 5 minutes have passed. The request does not run twice.
 - **A plain-text error** comes from two places:
-  - The HTTP server itself, before Velox sees the request. A request too malformed to parse, such as bad syntax or headers that are too large, gets 400 or 431 with no `Velox-Request-Id` header.
+  - The HTTP server itself, before Hardcount sees the request. A request too malformed to parse, such as bad syntax or headers that are too large, gets 400 or 431 with no `Hardcount-Request-Id` header.
   - `/metrics`, the Prometheus scrape route. If it cannot read the metrics, it answers a plain-text 500.
 - **Other JSON shapes:**
   - `GET /health/ready` returns 503 with `{"status", "checks"}`.

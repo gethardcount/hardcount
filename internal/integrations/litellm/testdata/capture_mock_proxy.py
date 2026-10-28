@@ -214,7 +214,7 @@ def serve(cls, port):
 
 
 def write_config(d):
-    callbacks = ["velox"]
+    callbacks = ["hardcount"]
     extra = ""
     if VARIANT == "loghook":
         with open(os.path.join(d, "slow_hook.py"), "w") as f:
@@ -268,11 +268,11 @@ def write_config(d):
 litellm_settings:
   callbacks: %(cbs)s
 callback_settings:
-  velox:
+  hardcount:
     callback_type: generic_api
     endpoint: "http://127.0.0.1:%(cap)d/v1/integrations/litellm/spend"
     headers:
-      Authorization: Bearer vlx_secret_test_capture
+      Authorization: Bearer hc_secret_test_capture
     max_retries: 4
     retry_delay: 1
     timeout: 10

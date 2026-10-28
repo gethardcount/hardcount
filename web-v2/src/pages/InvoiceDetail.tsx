@@ -318,7 +318,7 @@ export default function InvoiceDetailPage() {
   //   2. The Collect payment button's disabled state — when no PM is
   //      ready, charging will fail, so the button gates on
   //      paymentSetup.setup_status === 'ready'. Mirrors the disable-
-  //      with-tooltip pattern Velox uses for Finalize-on-tax-failure.
+  //      with-tooltip pattern Hardcount uses for Finalize-on-tax-failure.
   //   3. The Finalize confirmation on a draft, which says whether the
   //      card on file is charged or the customer is emailed for one.
   //
@@ -693,7 +693,7 @@ export default function InvoiceDetailPage() {
               )
             }
             const reason = invoice.tax_status === 'pending'
-              ? 'Tax is still being calculated, and Velox keeps retrying. You can finalize once it\'s done.'
+              ? 'Tax is still being calculated, and Hardcount keeps retrying. You can finalize once it\'s done.'
               : 'Tax calculation has failed after retries. Resolve the customer billing profile or retry tax before finalizing.'
             return (
               <Tooltip>
@@ -773,7 +773,7 @@ export default function InvoiceDetailPage() {
               )}
               {/* Mark uncollectible is the DELIBERATE exception (ADR-107). It is
                   the only action permitted on a parked invoice (Stripe's answer
-                  was unclear and named no payment) while Velox waits up to a day
+                  was unclear and named no payment) while Hardcount waits up to a day
                   for Stripe: the action for a customer who paid another way, and
                   the exit when Stripe cannot be asked. A payment that is
                   genuinely still resolving is a different matter and is still
@@ -904,7 +904,7 @@ export default function InvoiceDetailPage() {
                 and card lines below are secondary. */}
             <div className="space-y-2">
               <p className="text-foreground">
-                Recorded as bad debt, so Velox won&apos;t collect it; if the customer pays later, record the payment.
+                Recorded as bad debt, so Hardcount won&apos;t collect it; if the customer pays later, record the payment.
               </p>
               <Button size="sm" variant="outline" onClick={() => setShowRecordPaymentDialog(true)} disabled={acting}>
                 <Receipt size={14} className="mr-1.5" />
@@ -1005,7 +1005,7 @@ export default function InvoiceDetailPage() {
           <div className="flex items-start justify-between">
             <div>
               {/* The tenant's company name, or nothing: never a placeholder
-                  seller (the PDF used to print "Velox", this page "VELOX"). */}
+                  seller (the PDF used to print "Hardcount", this page "HARDCOUNT"). */}
               {seller.name && (
                 <p className="text-2xl font-bold tracking-tight text-foreground">{seller.name}</p>
               )}

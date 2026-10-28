@@ -177,7 +177,7 @@ func TestE2E_TestModeIsolation(t *testing.T) {
 }
 
 // createAPIKeyWithMode inserts an api_keys row with the Stripe-style mode
-// infix (vlx_secret_live_… or vlx_secret_test_…) and the correct livemode
+// infix (hc_secret_live_… or hc_secret_test_…) and the correct livemode
 // column value for the trigger to preserve. Uses empty salt so the
 // hash-verification path in ValidateKey equals sha256(rawKey).
 func createAPIKeyWithMode(t *testing.T, db *postgres.DB, tenantID string, livemode bool) string {
@@ -190,12 +190,12 @@ func createAPIKeyWithMode(t *testing.T, db *postgres.DB, tenantID string, livemo
 	secret := make([]byte, 32)
 	_, _ = rand.Read(secret)
 	secretHex := hex.EncodeToString(secret)
-	fullPrefix := "vlx_secret_" + mode + "_"
+	fullPrefix := "hc_secret_" + mode + "_"
 	rawKey := fullPrefix + secretHex
 	dbPrefix := fullPrefix + secretHex[:12]
 	hash := sha256.Sum256([]byte(rawKey))
 	hashHex := hex.EncodeToString(hash[:])
-	keyID := "vlx_key_e2e_" + secretHex[:8] + "_" + mode
+	keyID := "hc_key_e2e_" + secretHex[:8] + "_" + mode
 
 	tx, err := db.BeginTx(context.Background(), postgres.TxBypass, "")
 	if err != nil {

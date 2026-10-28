@@ -6,7 +6,7 @@
 
 ## Summary
 
-Every invoice that bills a subscription's billing period, and every write that moves that period, commits in one transaction whose first statement is a compare-and-swap `UPDATE` (`subscription.ClosePeriodTx`, or `FireScheduledCancellationTx` when a scheduled cancellation fires at the close). That `UPDATE` locks the row and checks that `status`, `current_billing_period_start` and `next_billing_at` still match what the writer read; a writer that lost the race writes nothing and gets `ErrWatermarkMoved`. A threshold invoice that does not reset the period runs the same `UPDATE` with unchanged values, only to take the lock and check. The cycle close also re-reads the threshold watermark inside its transaction and rolls back if a threshold invoice billed part of the window since it built its lines. Before this, two such writers could plan from the same period and both commit, billing usage twice. A plan swap may now return 409 `subscription_period_moved`, and operators should set `idle_in_transaction_session_timeout = '30s'` on `velox_app`. Since 2026-10-18 every write to a subscription's items also locks the subscription row first, and an item change is priced from the state read under that lock ([amendment](#amendment-2026-10-18-item-writers-lock-the-subscription-row-first)).
+Every invoice that bills a subscription's billing period, and every write that moves that period, commits in one transaction whose first statement is a compare-and-swap `UPDATE` (`subscription.ClosePeriodTx`, or `FireScheduledCancellationTx` when a scheduled cancellation fires at the close). That `UPDATE` locks the row and checks that `status`, `current_billing_period_start` and `next_billing_at` still match what the writer read; a writer that lost the race writes nothing and gets `ErrWatermarkMoved`. A threshold invoice that does not reset the period runs the same `UPDATE` with unchanged values, only to take the lock and check. The cycle close also re-reads the threshold watermark inside its transaction and rolls back if a threshold invoice billed part of the window since it built its lines. Before this, two such writers could plan from the same period and both commit, billing usage twice. A plan swap may now return 409 `subscription_period_moved`, and operators should set `idle_in_transaction_session_timeout = '30s'` on `hardcount_app`. Since 2026-10-18 every write to a subscription's items also locks the subscription row first, and an item change is priced from the state read under that lock ([amendment](#amendment-2026-10-18-item-writers-lock-the-subscription-row-first)).
 
 ## Context
 
@@ -84,7 +84,7 @@ Concretely:
    `subscription_period_moved` rather than re-anchoring the period below the
    fire's window (which would re-bill `[now, fire end)` at the next close).
    The operator's instant is never moved silently.
-6. **A read-side alarm.** `velox-doctor` gains
+6. **A read-side alarm.** `hardcount-doctor` gains
    `usage_billed_once_per_subscription_meter_window`: the same usage instant
    of one (subscription, meter, rating-rule bucket) on two live invoices —
    the money shape the CAS exists to prevent, on the read side, no schema.
@@ -136,11 +136,11 @@ settings stores.
   committing at that instant — the due fetch is `SKIP LOCKED`; the leader's
   commit bills it.
 - A lost race logs one Info line and writes nothing; it does not increment
-  `velox_billing_cycle_errors_total` (the engine absorbs it inside
+  `hardcount_billing_cycle_errors_total` (the engine absorbs it inside
   `billSubscription`), and it burns no invoice number.
 - The `reset=false` fire now bumps `updated_at` on the subscription row.
 - **Operational prerequisite (documented, not enforced at boot):**
-  `ALTER ROLE velox_app SET idle_in_transaction_session_timeout = '30s';`.
+  `ALTER ROLE hardcount_app SET idle_in_transaction_session_timeout = '30s';`.
   A frozen holder of a subscription row lock now stalls every other closer of
   that subscription and hides it from the `SKIP LOCKED` fetches; the timeout
   is the liveness bound. No closer transaction spans network I/O (tax runs

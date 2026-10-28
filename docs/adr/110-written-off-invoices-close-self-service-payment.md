@@ -11,14 +11,14 @@ is the terminal INVOICE action, set independently of the subscription's),
 ## Summary
 
 When an invoice is written off (status `uncollectible`), the customer can no
-longer pay it through Velox's public pages. The hosted invoice page and the
+longer pay it through Hardcount's public pages. The hosted invoice page and the
 payment-update page both say collection is closed and point to support. They
 keep the money figure but label it "Invoice amount" instead of "Amount Due".
 The payment-update page keeps its add-a-payment-method button, because a saved
 card still serves the next invoice. Both pages read one shared check in
 `web-v2/src/lib/invoiceTerminal.ts`. Since 2026-10-22 every dashboard screen
 reads an invoice's payment status and amount due through it too, and a lint
-rule fails any other read. Nothing in Velox starts a charge against a
+rule fails any other read. Nothing in Hardcount starts a charge against a
 written-off invoice (see ADR-113), so it is settled only by recording money
 that has already arrived: an offline payment the operator enters
 (`RecordOfflinePayment`), or a provider charge that the ADR-108 search finds
@@ -26,7 +26,7 @@ already succeeded and adopts.
 
 ## Context
 
-Velox has three terminal invoice outcomes. Two are unambiguous — `paid`, and
+Hardcount has three terminal invoice outcomes. Two are unambiguous — `paid`, and
 `voided` (annulled; the debt never existed). The third, `uncollectible`, is
 not: it is a **write-off**, the invoice stays on the books for audit, and
 `RecordOfflinePayment` remains legal against it.
@@ -36,7 +36,7 @@ Two customer-facing pages disagreed about it. The hosted invoice page had said
 tokenized payment-update page had never been taught the state and kept showing
 an amber **"Payment method needed · Amount Due $30.00"** demand. One invoice,
 two links from the same dunning email, opposite answers (found live on TC Walk
-Co VLX-000152; VLX-000136 had been sitting in that state with a live token).
+Co HC-000152; HC-000136 had been sitting in that state with a live token).
 
 Making them agree required deciding *which* page was right — which is a
 product question, not a consistency one, so it was checked against the
@@ -62,7 +62,7 @@ payment-update page ignoring status entirely, and that fix then stopped at
 
 ### The decisive argument is internal, not parity
 
-At the time of this decision Velox **could not charge a written-off invoice at
+At the time of this decision Hardcount **could not charge a written-off invoice at
 all**: `chargeInvoice` refused anything but `finalized`, and the status machine
 had no edge back. A customer Pay button would have called a gate that rejects
 it — so removing it removed a button pointing at a closed door.
@@ -86,7 +86,7 @@ argues for was never touched.)*
   customer's account balance." Dunning halts entirely: "Stopping collection
   also halts all dunning activity."
   https://docs.recurly.com/docs/invoices
-- **Stripe — model verified, UI UNVERIFIED.** Stripe's model is the one Velox
+- **Stripe — model verified, UI UNVERIFIED.** Stripe's model is the one Hardcount
   mirrors: "An uncollectible invoice might still be paid"
   (https://docs.stripe.com/revenue-recognition/methodology/subscriptions-and-invoicing),
   in explicit contrast to void — "the invoice can no longer be paid." `POST
@@ -100,7 +100,7 @@ argues for was never touched.)*
   "Written off but still on the books" is a Stripe concept two of the four
   usage-based peers declined to copy.
 
-**On the label, Velox is ahead of the closers.** Stripe *preserves* the amount
+**On the label, Hardcount is ahead of the closers.** Stripe *preserves* the amount
 on write-off (`amount_due` unchanged), which anchors keeping the figure.
 Chargebee and Recurly zero it, and Chargebee's surface then tells the customer
 the invoice is **"Paid"** — false to someone who never paid.
@@ -108,7 +108,7 @@ the invoice is **"Paid"** — false to someone who never paid.
 ### Do NOT cite as parity
 
 - **Any peer's customer-facing copy.** No vendor publishes hosted-page strings
-  for any invoice state. Velox's wording rests on its own reasoning.
+  for any invoice state. Hardcount's wording rests on its own reasoning.
 - **Stripe's hosted page.** Unverified in both directions. The
   `"hosted_invoice_url": null` in Stripe's `mark_uncollectible` API example is
   a trap, not evidence — that example invoice was never finalized
@@ -127,7 +127,7 @@ the invoice stays `issued` and the customer portal — which "embed[s] a form
 separates "we stopped chasing you" from "you can't pay."
 
 Orb can do that because it never claims a write-off happened; it has no such
-state. Velox does, and a write-off is an accounting assertion — bad debt
+state. Hardcount does, and a write-off is an accounting assertion — bad debt
 recognised. Offering a self-service payment button on an invoice the business
 has formally written off invites the state to be reversed by a route that
 cannot currently reverse it. The honest surface is the one that matches what
@@ -143,7 +143,7 @@ the system can actually do.
 > closed, add-a-card kept — stands, and the "three refusals" table below
 > describes gates that no longer exist.
 
-The limitation this ADR recorded — *"Velox's write-off is a card dead end where
+The limitation this ADR recorded — *"Hardcount's write-off is a card dead end where
 Stripe's is not"* — **is closed.** Its trigger fired the same day it was
 written, so the section it replaced is deleted rather than appended to: leaving
 a "deferred with a trigger" block standing next to the thing that closed it is
@@ -194,8 +194,8 @@ lag its own sweep.
 
 **Parity note, verified:** Stripe *also* decreases reported tax on
 `mark_uncollectible`. The difference is that Stripe owns its tax ledger and can
-re-report on recovery; Velox reversed an *external* Stripe Tax transaction it
-cannot restore. So the refusal is forced by architecture rather than by a Velox
+re-report on recovery; Hardcount reversed an *external* Stripe Tax transaction it
+cannot restore. So the refusal is forced by architecture rather than by a Hardcount
 defect — and **tax re-commit on recovery remains deferred**, trigger: the first
 tax-registered tenant to hit `tax_reversed_unrecoverable`.
 

@@ -14,7 +14,7 @@ import (
 	kjson "sigs.k8s.io/json"
 )
 
-// The one rule for a request body Velox defines (every route but the
+// The one rule for a request body Hardcount defines (every route but the
 // Stripe and Postmark webhooks and the LiteLLM callback, whose senders add
 // fields when they like):
 //

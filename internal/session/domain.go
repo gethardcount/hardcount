@@ -22,7 +22,7 @@ import (
 // CookieName is the HTTP cookie that carries the raw session id. Kept
 // constant so middleware, login, and logout all reference the same
 // name without risk of drift.
-const CookieName = "velox_session"
+const CookieName = "hardcount_session"
 
 // DefaultTTL is the default session lifetime. 7 days matches GitHub's
 // auth cookie default and the prior (ADR-008) value; long enough that

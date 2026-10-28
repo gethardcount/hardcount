@@ -65,10 +65,10 @@ func getRunWire(t *testing.T, store Store, liner EventLiner, runID string) map[s
 func TestGetRun_EventsCarryTheirLines(t *testing.T) {
 	at := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
 	store := newMemStore()
-	store.runs["vlx_dr_1"] = domain.InvoiceDunningRun{ID: "vlx_dr_1", InvoiceID: "vlx_inv_1", State: domain.DunningActive}
+	store.runs["hc_dr_1"] = domain.InvoiceDunningRun{ID: "hc_dr_1", InvoiceID: "hc_inv_1", State: domain.DunningActive}
 	store.events = []domain.InvoiceDunningEvent{
-		{ID: "evt_1", RunID: "vlx_dr_1", EventType: domain.DunningEventStarted, CreatedAt: at},
-		{ID: "evt_2", RunID: "vlx_dr_1", EventType: domain.DunningEventRetryAttempted, AttemptCount: 1, CreatedAt: at.Add(time.Hour)},
+		{ID: "evt_1", RunID: "hc_dr_1", EventType: domain.DunningEventStarted, CreatedAt: at},
+		{ID: "evt_2", RunID: "hc_dr_1", EventType: domain.DunningEventRetryAttempted, AttemptCount: 1, CreatedAt: at.Add(time.Hour)},
 	}
 	liner := &linerFake{
 		lines: map[string]activity.Line{
@@ -77,8 +77,8 @@ func TestGetRun_EventsCarryTheirLines(t *testing.T) {
 		},
 		degraded: []string{"emails"},
 	}
-	body := getRunWire(t, store, liner, "vlx_dr_1")
-	if liner.got.ID != "vlx_dr_1" || liner.got.InvoiceID != "vlx_inv_1" {
+	body := getRunWire(t, store, liner, "hc_dr_1")
+	if liner.got.ID != "hc_dr_1" || liner.got.InvoiceID != "hc_inv_1" {
 		t.Errorf("the liner was given run %+v", liner.got)
 	}
 	events, _ := body["events"].([]any)
@@ -98,7 +98,7 @@ func TestGetRun_EventsCarryTheirLines(t *testing.T) {
 
 	// The run's invoice cannot be read: the events still come back, without
 	// lines, and the lane is named.
-	body = getRunWire(t, store, &linerFake{err: errors.New("invoice gone")}, "vlx_dr_1")
+	body = getRunWire(t, store, &linerFake{err: errors.New("invoice gone")}, "hc_dr_1")
 	events, _ = body["events"].([]any)
 	if len(events) != 2 {
 		t.Fatalf("%d events, want 2", len(events))
@@ -111,7 +111,7 @@ func TestGetRun_EventsCarryTheirLines(t *testing.T) {
 	}
 
 	// The events cannot be read: an empty timeline that says so.
-	body = getRunWire(t, eventsErrStore{store}, liner, "vlx_dr_1")
+	body = getRunWire(t, eventsErrStore{store}, liner, "hc_dr_1")
 	if events, _ := body["events"].([]any); len(events) != 0 {
 		t.Errorf("events %v, want none", events)
 	}

@@ -722,7 +722,7 @@ func (r *recordingEmailNotifier) SendDunningEscalationTx(ctx context.Context, _ 
 type stubCustomerEmail struct{}
 
 func (stubCustomerEmail) GetCustomerEmail(context.Context, string, string) (string, string, []string, error) {
-	return "test@velox.dev", "Test Co", nil, nil
+	return "test@hardcount.dev", "Test Co", nil, nil
 }
 
 // TestProcessDueRunsForClock_EnqueuesEscalationEmailOnExhaust locks in
@@ -1179,7 +1179,7 @@ func TestProcessDueRunsForClock_RecoveryStampsContractedInstant(t *testing.T) {
 
 // clockCapturingRetrier records the ctx time-binding at RetryPayment — the
 // mechanism the paid_at anchor rides on (the charge stamps PI metadata
-// velox_anchor_at from clock.SimOf(ctx)).
+// hardcount_anchor_at from clock.SimOf(ctx)).
 type clockCapturingRetrier struct {
 	sims []clock.Sim
 }
@@ -1196,7 +1196,7 @@ func (c *clockCapturingRetrier) RetryPayment(ctx context.Context, _, _, _ string
 // TestProcessDueRunsForClock_ChargeCtxCarriesAnchoredInstant: each retry's
 // charge must fire under a ctx whose Sim instant is the retry's CONTRACTED
 // next_action_at (clock retained) — that binding is what the payment layer
-// reads into the PI's velox_anchor_at, which the settle prefers for
+// reads into the PI's hardcount_anchor_at, which the settle prefers for
 // paid_at. Pre-fix the ctx carried the catchup's advance-end frozen_time
 // for every retry.
 func TestProcessDueRunsForClock_ChargeCtxCarriesAnchoredInstant(t *testing.T) {

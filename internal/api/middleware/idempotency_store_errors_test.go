@@ -34,7 +34,7 @@ func (h *recordingHandler) WithGroup(string) slog.Handler      { return h }
 
 // A failed release or finalize leaves the key pending, so every retry with it
 // gets 409 for the rest of the key's life. Both must be visible to an
-// operator: counted in velox_idempotency_cache_errors_total and logged at
+// operator: counted in hardcount_idempotency_cache_errors_total and logged at
 // ERROR. releaseKey used to drop its errors with no log and no metric, so a
 // key stuck after a 409/422 (or an ingest 5xx) left no trace at all.
 func TestIdempotency_StoreWriteErrorsAreCountedAndLogged(t *testing.T) {
@@ -67,7 +67,7 @@ func TestIdempotency_StoreWriteErrorsAreCountedAndLogged(t *testing.T) {
 			tc.write(postgres.WithLivemode(context.Background(), false))
 
 			if got := testutil.ToFloat64(idempotencyCacheErrors.WithLabelValues(tc.stage)) - before; got != 1 {
-				t.Errorf("velox_idempotency_cache_errors_total{stage=%q} rose by %v, want 1", tc.stage, got)
+				t.Errorf("hardcount_idempotency_cache_errors_total{stage=%q} rose by %v, want 1", tc.stage, got)
 			}
 
 			var logged *slog.Record

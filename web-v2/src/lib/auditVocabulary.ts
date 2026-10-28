@@ -160,7 +160,7 @@ export const MEDIUM_SEVERITY = new Set([
   'subscription.item_updated', 'collect',
   'member.invite_revoked', 'password_reset_completed',
   // A bulk export copies an entire tenant's customer PII / invoices / usage out
-  // of the system. It is the only READ Velox records at all (ADR-090 §7), and it
+  // of the system. It is the only READ Hardcount records at all (ADR-090 §7), and it
   // is the row an auditor scans for — it must not render as an unaccented,
   // routine-looking line.
   'export',

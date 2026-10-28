@@ -537,7 +537,7 @@ func TestLease_MissingRowRecreated(t *testing.T) {
 // the cadence. Before the fix the runner recovered INSIDE the work, Lead saw
 // a normal return, and a tick that panicked every interval stamped a fresh
 // last_tick_ended_at each time: billing could halt cluster-wide behind a
-// healthy-looking velox_leader_last_tick_age_seconds.
+// healthy-looking hardcount_leader_last_tick_age_seconds.
 //
 // The cooldown is the full interval, not min(interval, 60 s): the tick's
 // other steps and rows already ran (each step recovers, and the first panic
@@ -619,7 +619,7 @@ func TestLease_PanickedTickIsNotACompletion(t *testing.T) {
 // TestLease_PanicAfterLeaseLossReportsOnce: a tick whose lease is taken over
 // and whose work then panics while unwinding on the cancelled ctx is ONE
 // event — the loss. The heartbeat already reported "takeover"; Lead must not
-// add "panicked" for the same tick (velox_leader_lease_lost_total would count
+// add "panicked" for the same tick (hardcount_leader_lease_lost_total would count
 // one tick twice, and LostFunc's contract is one report per tick).
 func TestLease_PanicAfterLeaseLossReportsOnce(t *testing.T) {
 	db := testutil.SetupTestDB(t)

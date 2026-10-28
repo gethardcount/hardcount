@@ -10,7 +10,7 @@ import assert from 'node:assert/strict'
 import { profileOrAbsent, billingProfileCard } from '../src/lib/billingProfileLoad.ts'
 
 const is404 = (e: unknown) => (e as { status?: number })?.status === 404
-const profile = { customer_id: 'vlx_cus_1', tax_status: 'exempt' }
+const profile = { customer_id: 'hc_cus_1', tax_status: 'exempt' }
 
 test('a 404 means the customer has no profile yet', async () => {
   assert.equal(await profileOrAbsent(async () => { throw { status: 404 } }, is404), null)

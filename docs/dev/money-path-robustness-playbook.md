@@ -2,7 +2,7 @@
 
 How to build and review a change that touches money or a state machine, so
 that it never charges twice, never loses an effect, and never leaves a record
-stuck. Every rule below points at real Velox code: copy the pattern, do not
+stuck. Every rule below points at real Hardcount code: copy the pattern, do not
 reinvent it. Guard the money invariants, and do not over-engineer past them.
 
 ## Use this when
@@ -77,7 +77,7 @@ Terms the tables lean on:
 | **livemode** | the flag separating real money data from test-mode data |
 | **ADR-NNN** | an Architecture Decision Record in `docs/adr/` |
 
-| # | Class | Invariant | Fix kind | Velox example |
+| # | Class | Invariant | Fix kind | Hardcount example |
 |---|-------|-----------|----------|---------------|
 | **A** | **Exactly-once / idempotency** | Every money mutation is idempotent-by-construction or dedup-key-guarded | dedup index / CAS / stable Stripe key | proration `idx_invoices_proration_dedup` → `invoice_proration_source_taken`; MarkPaid no-op re-read branch (avoids `amount_paid=amount_due` re-zero) |
 | **B** | **Dual-write atomicity** | Internal state + its coupled effect never diverge | coordinator-tx (internal, ADR-056) / outbox-in-tx (external, ADR-040); reconciler is the *fallback* | `invoice.paid`+`payment.succeeded` enqueue **in** the MarkPaid tx; cancel final-bill folded into the cancel tx (#307) |
@@ -86,9 +86,9 @@ Terms the tables lean on:
 | **E** | **Partial-failure & loud-fail** | A mid-flow crash is recoverable (record-before-effect + requeryable state, or one atomic tx); every money error is surfaced; **no comment claims a backstop that doesn't exist** | in-tx / requeryable state / ERROR+operator path | test-clock panic → `internal_failure` on a `WithoutCancel` ctx; PaymentUnknown loud-fail CRITICAL-with-PI |
 | **F** | **Incomplete-set read** | An effect that spans a *set* must read the *whole* set — no `LIMIT 1` over what is plural | fan-out query over the true set | single-source `FindBaseInvoiceForPeriod` missed the mid-period upgrade sibling → **4 of 5** money bugs (#276/#277/#278) |
 | **G** | **Lifecycle termination (liveness sink)** | Every run/subscription/invoice reaches a terminal state — no stuck-active, no infinite retry, never escalate/cancel a paid customer | ensure a writer advances *every* reachable state to terminal | card-less `auto_charge_pending` retried forever (#297); exhaustRun set `escalated` even when the mover failed (#299) |
-| **H** | **Tenant/livemode isolation** | Every `tenant_id` table has RLS `ENABLE`+**`FORCE`**+policy; app runs as non-superuser `velox_app` (fail-closed); scope is server-derived, never client-supplied; every `TxBypass` carries explicit `WHERE tenant_id` | migration adds RLS in the same PR; `openAppPool` role swap | 45 tables covered; `os.Exit(1)` refuses to boot RLS-bypassed in non-local |
+| **H** | **Tenant/livemode isolation** | Every `tenant_id` table has RLS `ENABLE`+**`FORCE`**+policy; app runs as non-superuser `hardcount_app` (fail-closed); scope is server-derived, never client-supplied; every `TxBypass` carries explicit `WHERE tenant_id` | migration adds RLS in the same PR; `openAppPool` role swap | 45 tables covered; `os.Exit(1)` refuses to boot RLS-bypassed in non-local |
 | **I** | **Time / precision / validation** | Month/year math anchored in tenant TZ (never host `time.Local`). Simulated vs wall-clock never cross-compare. int64 cents with `RoundHalfToEven` (no float). Currency UPPERCASE at store. Malformed input fails loud. A call that never reached the provider isn't a burned attempt | `addIntervalIn` / `time.Now().UTC()` both sides / `ErrTransientSkip` | tenant-TZ `domain.addIntervalIn` (ADR-058); `ErrTransientSkip` rewinds the attempt |
-| **J** | **Contracted-instant stamping** | A transition executed LATE (catchup sweep, background settle, webhook, operator retry) stamps the instant it was *contracted* to fire — never the executor's effective-now; purely operational stamps (`issued_at`, `updated_at`, audit recorded-at) stay at effective-now. One advance crossing N boundaries produces N artifacts each at its own boundary instant | plumb the contracted instant INTO the writer (an `at` param like `resolveRunAt`; a `WithSim` ctx rebind per boundary; a PI-metadata anchor across the provider round-trip) — never re-resolve `clock.Now()` at the write site | **6 sightings before mechanizing**: trial flips, boundary cancels (ADR-097), pause resumes (#516), dunning resolves + success retry rows (#520), retry-charge ctx (#523), `paid_at` via `velox_anchor_at` (#523) |
+| **J** | **Contracted-instant stamping** | A transition executed LATE (catchup sweep, background settle, webhook, operator retry) stamps the instant it was *contracted* to fire — never the executor's effective-now; purely operational stamps (`issued_at`, `updated_at`, audit recorded-at) stay at effective-now. One advance crossing N boundaries produces N artifacts each at its own boundary instant | plumb the contracted instant INTO the writer (an `at` param like `resolveRunAt`; a `WithSim` ctx rebind per boundary; a PI-metadata anchor across the provider round-trip) — never re-resolve `clock.Now()` at the write site | **6 sightings before mechanizing**: trial flips, boundary cancels (ADR-097), pause resumes (#516), dunning resolves + success retry rows (#520), retry-charge ctx (#523), `paid_at` via `hardcount_anchor_at` (#523) |
 
 ### The C1–C4 concurrency sub-table (class D)
 
@@ -169,7 +169,7 @@ Ordered by leverage. A "no" blocks the PR.
    - **Never rely on the API header for engine paths.** They carry none.
 2. **Stripe idempotency key is provenance-stable, not a fresh UUID?**
    - **Rule.** Derive the key from the durable id you dedup on
-     (`velox_inv_<id>_<charge_attempt_seq>`, `velox_cn_<id>`,
+     (`hardcount_inv_<id>_<charge_attempt_seq>`, `hardcount_cn_<id>`,
      `inv_taxrev_<id>`). It must not collide across purposes (finalize vs
      dunning suffix), and it must not dedup two genuinely different charges.
      **The varying part must be the event you mean, never a proxy for it.**
@@ -178,7 +178,7 @@ Ordered by leverage. A "no" blocks the PR.
    - **Proxy test.** When a seed is a proxy, ask what writes it that you did
      not intend. If the answer is "a whole table's worth of writers",
      introduce the explicit counter instead.
-   - **Why.** This gate used to bless `velox_inv_<id>_<UpdatedAt>`. But
+   - **Why.** This gate used to bless `hardcount_inv_<id>_<UpdatedAt>`. But
      `updated_at` answers the much broader question "did anything touch this
      row?". That made every unrelated writer a participant in the payment
      protocol. A tax-commit stamp landing in a crash window then minted a

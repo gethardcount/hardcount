@@ -22,13 +22,13 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 LABEL="${1:?arm label}"; MINWAL="${2:?min_wal_size in MB}"; RATE="${3:-12000}"; BATCH="${4:-10}"; IDLE="${5:-420}"; DUR="${6:-4m}"
-OUT="${OUT:-$HOME/.velox-bench-rig}"; REGION="${AWS_REGION:-ap-south-1}"
+OUT="${OUT:-$HOME/.hardcount-bench-rig}"; REGION="${AWS_REGION:-ap-south-1}"
 aws_() { aws --region "$REGION" "$@"; }
 say() { printf '\n== [%s] %s  (%s)\n' "$LABEL" "$*" "$(date -u +%H:%M:%SZ)"; }
 RES="$OUT/tail-$LABEL"; mkdir -p "$RES"
 
 say "min_wal_size -> $MINWAL MB (dynamic, immediate)"
-aws_ rds modify-db-parameter-group --db-parameter-group-name velox-bench-pg16 \
+aws_ rds modify-db-parameter-group --db-parameter-group-name hardcount-bench-pg16 \
   --parameters "[{\"ParameterName\":\"min_wal_size\",\"ParameterValue\":\"$MINWAL\",\"ApplyMethod\":\"immediate\"}]" >/dev/null
 sleep 30
 live=$(TARGET=aws "$HERE/db-sampler.sh" settings 2>/dev/null | tail -1 | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['min_wal_size'])")
@@ -52,7 +52,7 @@ t_end=$(date -u +%s)
 
 say "pg_wal size (CloudWatch TransactionLogsDiskUsage) across idle + resume"
 aws_ cloudwatch get-metric-statistics --namespace AWS/RDS --metric-name TransactionLogsDiskUsage \
-  --dimensions Name=DBInstanceIdentifier,Value=velox-bench-db \
+  --dimensions Name=DBInstanceIdentifier,Value=hardcount-bench-db \
   --start-time "$(python3 -c "import datetime as d;print(d.datetime.utcfromtimestamp($t_idle0-120).strftime('%Y-%m-%dT%H:%M:%SZ'))")" \
   --end-time "$(python3 -c "import datetime as d;print(d.datetime.utcfromtimestamp($t_end+60).strftime('%Y-%m-%dT%H:%M:%SZ'))")" \
   --period 60 --statistics Average --output json > "$RES/$LABEL.pgwal.json"

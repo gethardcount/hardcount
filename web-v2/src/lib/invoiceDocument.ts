@@ -2,8 +2,8 @@
 // one place, so the detail page agrees with the PDF and the hosted page.
 //
 // Two rules:
-// - Never print a made-up seller. The page used to show "VELOX" and "Your
-//   Company" when the company name was unset, while the PDF printed "Velox".
+// - Never print a made-up seller. The page used to show "HARDCOUNT" and "Your
+//   Company" when the company name was unset, while the PDF printed "Hardcount".
 //   Now an unset name shows nothing on the document and the page says the
 //   seller details are missing, with a link to Settings.
 // - A draft is not issued. Its issue (and, for a composed invoice, due) date

@@ -18,7 +18,7 @@ import (
 // /v1/auth/password-reset/check had no test at any level.
 func TestE2E_DashboardSession_ModeAndPasswordReset(t *testing.T) {
 	db := testutil.SetupTestDB(t)
-	t.Setenv("VELOX_BOOTSTRAP_TOKEN", "session-flow-bootstrap")
+	t.Setenv("HARDCOUNT_BOOTSTRAP_TOKEN", "session-flow-bootstrap")
 	// Reset links are built only from this setting, never from the request.
 	t.Setenv("DASHBOARD_BASE_URL", "http://dash.session-flow.test")
 	ts := httptest.NewServer(NewServer(db, clock.Real(), nil))
@@ -89,8 +89,8 @@ func TestE2E_DashboardSession_ModeAndPasswordReset(t *testing.T) {
 	liveKey := flowDo(t, ts, "POST", "/v1/api-keys", flowReq{cookie: cookie, body: map[string]any{
 		"name": "Live server", "key_type": "secret",
 	}}).want(t, 201, "create a key in live mode").body
-	if raw := flowStr(liveKey, "raw_key"); !strings.HasPrefix(raw, "vlx_secret_live_") || flowObj(liveKey, "key")["livemode"] != true {
-		t.Errorf("key made in live mode: raw %q, key %v; want a vlx_secret_live_ key", raw, flowObj(liveKey, "key"))
+	if raw := flowStr(liveKey, "raw_key"); !strings.HasPrefix(raw, "hc_secret_live_") || flowObj(liveKey, "key")["livemode"] != true {
+		t.Errorf("key made in live mode: raw %q, key %v; want a hc_secret_live_ key", raw, flowObj(liveKey, "key"))
 	}
 
 	// And back.

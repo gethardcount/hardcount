@@ -17,7 +17,7 @@
 -- A policy that cannot be converted exactly stops the upgrade before
 -- anything changes, and the error names it and why: a wait used by a retry
 -- that is not a whole number of days from 1 to 30 (Go durations allowed
--- "36h" or "1h30m"), or values Velox's own policy writer refused (a count
+-- "36h" or "1h30m"), or values Hardcount's own policy writer refused (a count
 -- outside 1 to 15, a first wait outside 1 to 30 days, a schedule shorter
 -- than the count). Rounding such a wait would retry on a day nobody chose.
 -- Under the clean break from 0.8.x only local databases hold such rows.
@@ -40,7 +40,7 @@ UPDATE dunning_policies SET retry_schedule = '[]'::jsonb WHERE jsonb_typeof(retr
 -- The length of a Go duration string (time.ParseDuration's grammar) in
 -- seconds, NULL when it is not one. Temporary: dropped at the end of the Up.
 -- +goose StatementBegin
-CREATE FUNCTION pg_temp.velox_go_duration_seconds(d text) RETURNS numeric
+CREATE FUNCTION pg_temp.hardcount_go_duration_seconds(d text) RETURNS numeric
 LANGUAGE plpgsql IMMUTABLE AS $$
 DECLARE
     s text := d;
@@ -84,7 +84,7 @@ DECLARE
     found text;
 BEGIN
     WITH used AS (
-        SELECT p.id, e.ord, e.entry, pg_temp.velox_go_duration_seconds(e.entry) AS secs
+        SELECT p.id, e.ord, e.entry, pg_temp.hardcount_go_duration_seconds(e.entry) AS secs
         FROM dunning_policies p,
             jsonb_array_elements_text(CASE WHEN jsonb_typeof(p.retry_schedule) = 'array' THEN p.retry_schedule ELSE '[]'::jsonb END)
                 WITH ORDINALITY AS e(entry, ord)
@@ -121,7 +121,7 @@ ALTER TABLE dunning_policies ADD COLUMN retry_days jsonb NOT NULL DEFAULT '[]'::
 
 UPDATE dunning_policies p
 SET retry_days = jsonb_build_array(p.grace_period_days) || COALESCE((
-    SELECT jsonb_agg((pg_temp.velox_go_duration_seconds(e.entry) / 86400)::int ORDER BY e.ord)
+    SELECT jsonb_agg((pg_temp.hardcount_go_duration_seconds(e.entry) / 86400)::int ORDER BY e.ord)
     FROM jsonb_array_elements_text(p.retry_schedule) WITH ORDINALITY AS e(entry, ord)
     WHERE e.ord <= p.max_retry_attempts - 1
 ), '[]'::jsonb);
@@ -142,7 +142,7 @@ ALTER TABLE dunning_policies DROP COLUMN grace_period_days;
 ALTER TABLE dunning_policies DROP COLUMN retry_schedule;
 ALTER TABLE dunning_policies DROP COLUMN max_retry_attempts;
 
-DROP FUNCTION pg_temp.velox_go_duration_seconds(text);
+DROP FUNCTION pg_temp.hardcount_go_duration_seconds(text);
 
 -- +goose Down
 -- Rollback runs only with APP_ENV=local. It writes each schedule back in

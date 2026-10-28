@@ -37,7 +37,7 @@ func TestE2E_ClockSoak_MonthEndAnchorThroughYearBoundary(t *testing.T) {
 		t.Skip("integration test — requires postgres")
 	}
 	db := testutil.SetupTestDB(t)
-	t.Setenv("VELOX_BOOTSTRAP_TOKEN", "soak-bootstrap-token-1234")
+	t.Setenv("HARDCOUNT_BOOTSTRAP_TOKEN", "soak-bootstrap-token-1234")
 
 	srv := NewServer(db, clock.NewFake(time.Date(2026, 1, 31, 10, 0, 0, 0, time.UTC)), nil)
 	ts := httptest.NewServer(srv)
@@ -47,7 +47,7 @@ func TestE2E_ClockSoak_MonthEndAnchorThroughYearBoundary(t *testing.T) {
 	// silently blind — see internal/doctor).
 	adminURL := strings.TrimSpace(os.Getenv("TEST_ADMIN_DATABASE_URL"))
 	if adminURL == "" {
-		adminURL = "postgres://velox:velox@localhost:5432/velox_test?sslmode=disable"
+		adminURL = "postgres://hardcount:hardcount@localhost:5432/hardcount_test?sslmode=disable"
 	}
 	admin, err := sql.Open("pgx", adminURL)
 	if err != nil {

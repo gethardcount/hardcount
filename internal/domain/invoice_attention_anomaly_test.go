@@ -52,7 +52,7 @@ func TestClassifyInvoiceAttention_PaymentAnomalyPiercesTerminal(t *testing.T) {
 	}
 }
 
-// A card payment on an invoice already paid outside Velox: the detail names
+// A card payment on an invoice already paid outside Hardcount: the detail names
 // the extra charge and says how the first payment was made. It has no
 // PaymentIntent to name, and must not pretend to.
 func TestClassifyInvoiceAttention_DuplicateChargeAfterOfflinePayment(t *testing.T) {
@@ -65,7 +65,7 @@ func TestClassifyInvoiceAttention_DuplicateChargeAfterOfflinePayment(t *testing.
 	if att == nil {
 		t.Fatal("no attention for a second payment on an offline-paid invoice")
 	}
-	want := "Extra payment: pi_B. Original payment: recorded as paid outside Velox."
+	want := "Extra payment: pi_B. Original payment: recorded as paid outside Hardcount."
 	if !strings.HasPrefix(att.Detail, want) {
 		t.Errorf("detail = %q, want it to start %q", att.Detail, want)
 	}

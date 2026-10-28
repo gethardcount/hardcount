@@ -1,13 +1,13 @@
 # Audit log gaps
 
-Velox writes an audit row for changes made through the API and dashboard.
+Hardcount writes an audit row for changes made through the API and dashboard.
 Usage ingest and inbound webhooks are exempt (listed in
 `internal/api/audit_routes.go`). This page is for the two metrics that say a
 row failed or is missing. Back to the [runbook index](index.md).
 
 ## Audit write errors
 
-**Symptom:** `velox_audit_write_errors_total` rate > 0/s.
+**Symptom:** `hardcount_audit_write_errors_total` rate > 0/s.
 
 **Why:** the `outcome` label says which of two very different cases you
 have:
@@ -27,7 +27,7 @@ have:
 2. For `row_lost`, search the error log for lines that start with
    `audit: failed`. Their `tenant_id` field names the tenant. The metric has
    no tenant label; the tenant is in the error log
-   ([why](../../adr/090-audit-in-tx-emission.md#note-2026-10-22-why-velox_audit_write_errors_total-carries-no-tenant_id-label)).
+   ([why](../../adr/090-audit-in-tx-emission.md#note-2026-10-22-why-hardcount_audit_write_errors_total-carries-no-tenant_id-label)).
 
 **Fix:**
 
@@ -36,11 +36,11 @@ have:
   2. Identify the affected changes by their missing audit rows.
 - **`mutation_refused`:** investigate the database, not the audit trail.
 
-**Verify:** the `velox_audit_write_errors_total` rate returns to 0.
+**Verify:** the `hardcount_audit_write_errors_total` rate returns to 0.
 
 ## A change with no audit row
 
-**Symptom:** `velox_audit_uncovered_mutation_total{route}` shows any
+**Symptom:** `hardcount_audit_uncovered_mutation_total{route}` shows any
 increase: a route changed data and wrote no audit row.
 
 **Why:** the counter should be **flat zero**. Every route that changes data

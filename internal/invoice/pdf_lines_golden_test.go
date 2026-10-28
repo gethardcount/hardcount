@@ -42,7 +42,7 @@ func TestRenderPDF_LinesRenderUnchanged(t *testing.T) {
 		{LineType: domain.LineTypeUsage, Description: "API calls (calls)", MeterUnit: "calls", Currency: "USD", BillingPeriodStart: &start, BillingPeriodEnd: &issued},
 	}
 	inv := domain.Invoice{
-		ID: "vlx_inv_golden", InvoiceNumber: "VLX-202604-0007", Status: domain.InvoiceFinalized,
+		ID: "hc_inv_golden", InvoiceNumber: "HC-202604-0007", Status: domain.InvoiceFinalized,
 		PaymentStatus: domain.PaymentPending, Currency: "USD",
 		SubtotalCents: 8800, TotalAmountCents: 8800, AmountDueCents: 8800,
 		IssuedAt: &issued, DueAt: &due, NetPaymentTermDays: 30,

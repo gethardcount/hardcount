@@ -69,7 +69,7 @@ func TestCustomerDetail_UnknownCustomer404s(t *testing.T) {
 	}
 
 	for _, route := range routes {
-		if got := do("vlx_cus_does_not_exist", route); got != http.StatusNotFound {
+		if got := do("hc_cus_does_not_exist", route); got != http.StatusNotFound {
 			t.Errorf("%s: made-up id = %d, want 404", route, got)
 		}
 		if got := do(cB.ID, route); got != http.StatusNotFound {

@@ -130,7 +130,7 @@ func TestProration_DedupReplay_NoAuditNoDispatch(t *testing.T) {
 	r := newProrationFinalizeRig(t)
 	r.invoices.createInvoiceErr = errs.AlreadyExists("proration_source",
 		"proration invoice already exists for this item change").WithCode("invoice_proration_source_taken")
-	r.invoices.lookupInvoice = domain.Invoice{ID: "vlx_inv_prior", Status: domain.InvoiceFinalized, TotalAmountCents: 2000}
+	r.invoices.lookupInvoice = domain.Invoice{ID: "hc_inv_prior", Status: domain.InvoiceFinalized, TotalAmountCents: 2000}
 	if rr := r.upgrade(t); rr.Code != http.StatusOK {
 		t.Fatalf("upgrade replay: %d %s", rr.Code, rr.Body.String())
 	}

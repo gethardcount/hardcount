@@ -52,7 +52,7 @@ func serveThroughLogger(t *testing.T, stamp func(context.Context) context.Contex
 	}))
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/invoices", nil)
-	req = req.WithContext(context.WithValue(req.Context(), chimw.RequestIDKey, "vlx_req_abc123"))
+	req = req.WithContext(context.WithValue(req.Context(), chimw.RequestIDKey, "hc_req_abc123"))
 	h.ServeHTTP(httptest.NewRecorder(), req)
 	return cap
 }
@@ -69,8 +69,8 @@ func serveThroughLogger(t *testing.T, stamp func(context.Context) context.Contex
 // put together.
 func TestAccessLog_RecordsWhoNotJustWhat(t *testing.T) {
 	cap := serveThroughLogger(t, func(ctx context.Context) context.Context {
-		ctx = auth.WithTenantID(ctx, "vlx_ten_42")
-		ctx = auth.WithUserID(ctx, "vlx_usr_7")
+		ctx = auth.WithTenantID(ctx, "hc_ten_42")
+		ctx = auth.WithUserID(ctx, "hc_usr_7")
 		return audit.WithClientIP(ctx, "203.0.113.9")
 	})
 
@@ -78,10 +78,10 @@ func TestAccessLog_RecordsWhoNotJustWhat(t *testing.T) {
 		t.Fatalf("log message = %q, want %q", cap.msg, "request")
 	}
 	for key, want := range map[string]string{
-		"tenant_id":  "vlx_ten_42",
-		"actor_id":   "vlx_usr_7",
+		"tenant_id":  "hc_ten_42",
+		"actor_id":   "hc_usr_7",
 		"actor_type": "user",
-		"request_id": "vlx_req_abc123", // the join key to the audit row
+		"request_id": "hc_req_abc123", // the join key to the audit row
 		"ip":         "203.0.113.9",
 		"status":     "200",
 		"method":     "POST",
@@ -102,7 +102,7 @@ func TestAccessLog_AgreesWithTheAuditRowsActor(t *testing.T) {
 	// An API key, not a user: the precedence order inside ResolveActor is the part
 	// most likely to be reimplemented subtly differently by a second copy.
 	stamp := func(ctx context.Context) context.Context {
-		return auth.WithKeyID(auth.WithTenantID(ctx, "vlx_ten_1"), "vlx_key_9")
+		return auth.WithKeyID(auth.WithTenantID(ctx, "hc_ten_1"), "hc_key_9")
 	}
 	cap := serveThroughLogger(t, stamp)
 
@@ -122,7 +122,7 @@ func TestAccessLog_AgreesWithTheAuditRowsActor(t *testing.T) {
 // still honour a deletion request.
 func TestAccessLog_NeverLogsAnActorName(t *testing.T) {
 	cap := serveThroughLogger(t, func(ctx context.Context) context.Context {
-		return auth.WithUserID(auth.WithTenantID(ctx, "vlx_ten_1"), "vlx_usr_7")
+		return auth.WithUserID(auth.WithTenantID(ctx, "hc_ten_1"), "hc_usr_7")
 	})
 	for k, v := range cap.attrs {
 		if strings.Contains(v, "@") {

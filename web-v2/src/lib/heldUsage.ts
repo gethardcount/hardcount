@@ -83,7 +83,7 @@ export function heldUnlisted(listed: HeldCustomer[], totalCustomers: number, tot
   return `Showing the ${listed.length.toLocaleString('en-US')} customers held most recently. ${rowsWord(hiddenRows)} for ${hidden.toLocaleString('en-US')} more ${hidden === 1 ? 'customer' : 'customers'} ${hiddenRows === 1 ? 'is' : 'are'} held too; release or discard these to see them.`
 }
 
-// releaseSummary is the toast after a release. It says plainly what Velox
+// releaseSummary is the toast after a release. It says plainly what Hardcount
 // found for the rows when it wrote them, because rows from before the
 // customer existed usually fall before any billing period. It promises no
 // invoice: a later change can change what is billed, and the invoice is the

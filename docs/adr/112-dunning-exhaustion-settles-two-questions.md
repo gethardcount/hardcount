@@ -39,7 +39,7 @@ Three of those four names describe the **subscription**. One describes the
 and forcing a single choice produced two defects.
 
 **The combination nobody could express.** Stripe's own default outcome is
-cancel the subscription *and* write the invoice off. In Velox you picked one.
+cancel the subscription *and* write the invoice off. In Hardcount you picked one.
 
 **The debt that never closed.** In `manual_review`, `pause`, and
 `cancel_subscription` — three of the four — the unpaid invoice was left
@@ -56,7 +56,7 @@ would outlive the subscription.
 
 ## Industry evidence (verified verbatim 2026-08-05)
 
-**Every peer that has a write-off concept configures both axes. Velox was
+**Every peer that has a write-off concept configures both axes. Hardcount was
 the only one that made them exclusive.**
 
 | | Subscription fate | Invoice fate |
@@ -64,7 +64,7 @@ the only one that made them exclusive.**
 | **Stripe** | "Cancel the subscription" / "Mark the subscription as unpaid" / "Leave the subscription overdue" | derived — cancel ⇒ invoice `uncollectible` |
 | **Recurly** | subscriptions are "only automatically canceled when an invoice fails dunning — and only if your dunning settings are configured to expire subscriptions at the end of the dunning cycle" | "Recurly marks an invoice as failed at the end of the cycle if unpaid. A failed invoice is written off as bad debt" — **default on**; or "configure dunning to never auto-fail the invoice, leaving it overdue indefinitely" |
 | **Chargebee** | "you can define the final action taken on the subscription. You can choose to let the subscription remain active or cancel the subscription at once" | "Mark the invoice as not paid, Void Invoice, Write-off the invoice, Reverse the invoice…" |
-| **Velox (before)** | **one enum — exactly one of four** | |
+| **Hardcount (before)** | **one enum — exactly one of four** | |
 
 - Stripe: https://docs.stripe.com/billing/revenue-recovery/smart-retries —
   the three subscription settings, quoted above. The pairing to write-off is
@@ -79,7 +79,7 @@ Lago and Orb have no write-off state at all (ADR-110's finding: zero hits
 across Lago's 401 doc pages + OpenAPI and Orb's 309 doc pages + API
 reference), so they are not evidence either way on this question.
 
-**On the value itself, Velox was already at parity.** `mark_uncollectible`
+**On the value itself, Hardcount was already at parity.** `mark_uncollectible`
 leaving the subscription running matches Stripe verbatim — *"Stripe treats
 the subscription as if the user paid and stops attempting to collect
 payment. The user's subscription continues as normal."* The gap was never
@@ -125,7 +125,7 @@ or write it off yourself."* The old form said nothing at all about the debt.
 
 ### Auto-void and Chargebee's "Reverse" are refused
 
-Chargebee offers four invoice fates; Velox offers two. Void is not a harsher
+Chargebee offers four invoice fates; Hardcount offers two. Void is not a harsher
 write-off — it is a different assertion: *this sale never happened*. It
 annuls the supply and reverses tax (ADR-111 keeps that behaviour precisely
 because void means annulment). Having a **machine** assert that delivered
@@ -215,7 +215,7 @@ invoice can be paid online.
 ## Still deferred
 
 - **Stripe's `unpaid` subscription state** (a third subscription fate: keep
-  the subscription, keep generating invoices, stop collecting). Velox's
+  the subscription, keep generating invoices, stop collecting). Hardcount's
   `pause` covers the operator intent with `keep_as_draft`. Trigger: a design
   partner who needs the drafted invoices *finalized* rather than held.
 - **A dunning-exhaustion outcome per customer segment.** Stripe reaches this
@@ -297,8 +297,8 @@ Today that is a short race. The due-run pickers skip an open invoice that is
 `processing` or `unknown`. The final retry's own `processing` or unclear
 answer never reaches the final actions either: the first resolves the run as
 recovered, and the second is a skipped retry that does not count. The fix for
-[#976](https://github.com/getvelox/velox/issues/976) makes the hold a common
-path. It records each charge on the invoice before Velox calls Stripe. A crash
+[#976](https://github.com/gethardcount/hardcount/issues/976) makes the hold a common
+path. It records each charge on the invoice before Hardcount calls Stripe. A crash
 during the final retry leaves that record, the payment status still `failed`,
 and the run at its last retry with its 15-minute exhaustion lease. Without
 this amendment, exhaust-on-entry would cancel the subscription when that lease
@@ -353,7 +353,7 @@ never reaches the final actions. #976 handles that path in its own design.
   record closes this, because it exists for the whole call.
 - **A final retry that itself comes back `processing`** resolves the run as
   recovered at once. If that payment later fails, nothing retries the invoice
-  ([#1289](https://github.com/getvelox/velox/issues/1289)).
+  ([#1289](https://github.com/gethardcount/hardcount/issues/1289)).
 
 **Deferred, with a trigger.** After a hold that began inline, the escalation
 records the final retry's instant: `exhaustStampAt` reads the untouched lease

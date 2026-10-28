@@ -17,7 +17,7 @@ import (
 const injection = "\r\nBcc: victim@evil.com"
 
 func injectionTestSender() *Sender {
-	return &Sender{host: "smtp.example.com", port: "587", from: "billing@velox.dev"}
+	return &Sender{host: "smtp.example.com", port: "587", from: "billing@hardcount.dev"}
 }
 
 // parseBuilt parses built bytes and fails if any header line is a Bcc.
@@ -67,8 +67,8 @@ func TestBuiltHeaders_FromName(t *testing.T) {
 			// The name must reach the reader exactly as the tenant set it:
 			// building From from "Name <addr>" text mangles quotes and
 			// backslashes.
-			if from.Name != fromName || from.Address != "billing@velox.dev" {
-				t.Errorf("From = (%q, %q), want (%q, %q)", from.Name, from.Address, fromName, "billing@velox.dev")
+			if from.Name != fromName || from.Address != "billing@hardcount.dev" {
+				t.Errorf("From = (%q, %q), want (%q, %q)", from.Name, from.Address, fromName, "billing@hardcount.dev")
 			}
 		})
 	}
@@ -79,7 +79,7 @@ func TestBuiltHeaders_FromName(t *testing.T) {
 			t.Fatalf("buildPlain: %v", err)
 		}
 		from, err := mail.ParseAddress(parseBuilt(t, raw).Header.Get("From"))
-		if err != nil || from.Name != "" || from.Address != "billing@velox.dev" {
+		if err != nil || from.Name != "" || from.Address != "billing@hardcount.dev" {
 			t.Errorf("From = %+v (err %v), want the bare SMTP_FROM address", from, err)
 		}
 	})
@@ -89,7 +89,7 @@ func TestBuiltHeaders_Subject(t *testing.T) {
 	s := injectionTestSender()
 	dec := new(mime.WordDecoder)
 	for name, subject := range map[string]string{
-		"plain ascii":    "Invoice VLX-001 is ready",
+		"plain ascii":    "Invoice HC-001 is ready",
 		"crlf injection": "Hi" + injection,
 		"non-ascii":      "Invoice INV-1 — EUR 12.00 für Müller",
 	} {
@@ -117,11 +117,11 @@ func TestBuiltHeaders_Subject(t *testing.T) {
 		})
 	}
 	// A plain ASCII subject is written as is, not encoded.
-	raw, err := s.buildPlain(context.Background(), "ap@acme.test", "", "Invoice VLX-001 is ready", "body")
+	raw, err := s.buildPlain(context.Background(), "ap@acme.test", "", "Invoice HC-001 is ready", "body")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), "\r\nSubject: Invoice VLX-001 is ready\r\n") {
+	if !strings.Contains(string(raw), "\r\nSubject: Invoice HC-001 is ready\r\n") {
 		t.Errorf("plain subject altered:\n%s", raw)
 	}
 }
@@ -143,7 +143,7 @@ func TestBuiltHeaders_AddressRefused(t *testing.T) {
 		[]string{"finance@acme.test", "cc@acme.test" + injection}); err == nil {
 		t.Errorf("buildRich with a CRLF Cc: want an error, got\n%s", raw)
 	}
-	badFrom := &Sender{host: "smtp.example.com", port: "587", from: "billing@velox.dev" + injection}
+	badFrom := &Sender{host: "smtp.example.com", port: "587", from: "billing@hardcount.dev" + injection}
 	if raw, err := badFrom.buildPlain(context.Background(), "ap@acme.test", "", "x", "b"); err == nil {
 		t.Errorf("buildPlain with a CRLF SMTP_FROM: want an error, got\n%s", raw)
 	}

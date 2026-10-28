@@ -36,8 +36,8 @@ func TestSendSetupEmail_MissingEmailEnvelope(t *testing.T) {
 	r := chi.NewRouter()
 	r.Mount("/customers/{customer_id}/payment-methods", h.OperatorRoutes())
 
-	req := httptest.NewRequest(http.MethodPost, "/customers/vlx_cus_1/payment-methods/send-setup-email", nil).
-		WithContext(auth.WithTenantID(context.Background(), "vlx_ten_t1"))
+	req := httptest.NewRequest(http.MethodPost, "/customers/hc_cus_1/payment-methods/send-setup-email", nil).
+		WithContext(auth.WithTenantID(context.Background(), "hc_ten_t1"))
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 
@@ -76,8 +76,8 @@ func TestSendSetupEmail_RefusesWhenEmailNotConfigured(t *testing.T) {
 
 	r := chi.NewRouter()
 	r.Mount("/customers/{customer_id}/payment-methods", h.OperatorRoutes())
-	req := httptest.NewRequest(http.MethodPost, "/customers/vlx_cus_1/payment-methods/send-setup-email", nil).
-		WithContext(auth.WithTenantID(context.Background(), "vlx_ten_t1"))
+	req := httptest.NewRequest(http.MethodPost, "/customers/hc_cus_1/payment-methods/send-setup-email", nil).
+		WithContext(auth.WithTenantID(context.Background(), "hc_ten_t1"))
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 

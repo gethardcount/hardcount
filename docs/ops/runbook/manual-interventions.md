@@ -5,7 +5,7 @@ directly, record it in the audit log yourself. Back to the [runbook index](index
 
 ## Force-resolve a stuck dunning run
 
-A dunning run is Velox's schedule of retries for one unpaid invoice. Use
+A dunning run is Hardcount's schedule of retries for one unpaid invoice. Use
 this only when the dashboard **Resolve** action is unavailable.
 
 1. **Pick the resolution that says what actually happened to the invoice.**
@@ -14,7 +14,7 @@ this only when the dashboard **Resolve** action is unavailable.
 
    | Invoice ended up | Use |
    |---|---|
-   | paid outside Velox | `payment_recovered` |
+   | paid outside Hardcount | `payment_recovered` |
    | annulled or billed in error | `invoice_voided` |
    | written off as bad debt | `invoice_not_collectible` |
 
@@ -80,7 +80,7 @@ is paid on it, no charge on it is being confirmed with Stripe and it bills
 nothing else.
 
 If the customer paid a new invoice you made to recover a written-off one,
-Velox does not link the two. The written-off invoice keeps its amount due,
+Hardcount does not link the two. The written-off invoice keeps its amount due,
 so the change is still refused, and a later cancel or downgrade lowers what
 it asks for instead of crediting the customer. Do not record a payment on
 it: the money would be counted twice. Schedule a plan change for the

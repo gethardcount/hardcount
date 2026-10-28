@@ -13,7 +13,7 @@ import (
 )
 
 // The pricing-shapes suite (ADR-130; design §4.17). Each test is one way a
-// business prices with Velox, driven over HTTP against real Postgres, and
+// business prices with Hardcount, driven over HTTP against real Postgres, and
 // checks the invoices it produces line by line, to the cent. CI runs this
 // file, with shape 3 (TestE2E_PlanPrices_TwoPlansPriceOneMeterDifferently
 // and TestE2E_PlanPrices_SwapPricesEachWindowByItsPlan) and the shape

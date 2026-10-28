@@ -30,5 +30,5 @@ WHERE i.payment_status = 'unknown' AND COALESCE(i.stripe_payment_intent_id, '') 
 
 -- +goose Down
 -- Nothing to undo: a restored hold only makes the sweep check the park
--- again, and Velox without REC-5 clears it at that check.
+-- again, and Hardcount without REC-5 clears it at that check.
 SELECT 1;

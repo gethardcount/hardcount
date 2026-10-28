@@ -20,7 +20,7 @@ import (
 var auditWriteErrors *prometheus.CounterVec
 
 // Audit-write failure outcomes. The counter used to carry NO outcome label at all,
-// so an on-call engineer paging on velox_audit_write_errors_total (docs/ops/runbook/audit-log-gaps.md:
+// so an on-call engineer paging on hardcount_audit_write_errors_total (docs/ops/runbook/audit-log-gaps.md:
 // "rate > 0/s — SOC 2 evidence at risk") could not tell from metrics whether:
 //
 //   - evidence was PERMANENTLY LOST (a post-commit own-tx write failed: the mutation
@@ -41,7 +41,7 @@ const (
 
 func init() {
 	c := prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "velox_audit_write_errors_total",
+		Name: "hardcount_audit_write_errors_total",
 		// NO tenant_id label. Prometheus client counters never age out, so a
 		// raw-tenant label mints a permanent time series per tenant that ever has a
 		// single failure — unbounded cardinality that grows with the customer base
@@ -78,7 +78,7 @@ func NewLogger(db *postgres.DB) *Logger {
 // actor_name is resolved at read time by LEFT JOIN — an api_keys name, a
 // customers display_name, or a users email. customers.display_name is ENCRYPTED
 // AT REST (customer.PostgresStore.SetEncryptor), and audit_log has no encryptor,
-// so with VELOX_ENCRYPTION_KEY set — i.e. in production — every customer-actor
+// so with HARDCOUNT_ENCRYPTION_KEY set — i.e. in production — every customer-actor
 // row (a hosted-invoice Pay click, a payment-update link) rendered its Actor as
 // CIPHERTEXT: on the dashboard, and in the CSV handed to an auditor.
 //
@@ -141,7 +141,7 @@ func (l *Logger) Log(ctx context.Context, tenantID, action, resourceType, resour
 	}
 	defer postgres.Rollback(tx)
 
-	id := postgres.NewID("vlx_aud")
+	id := postgres.NewID("hc_aud")
 	// Same ctx-derived sim axis as LogInTx (ADR-090 §5). The residual own-tx
 	// callers are not a lesser class of evidence — the FINALIZE row, the heaviest
 	// evidence in the log, is written through this path by BOTH of its writers:
@@ -424,7 +424,7 @@ func (l *Logger) LogInTx(ctx context.Context, tx *sql.Tx, e Entry) error {
 			resource_type, resource_id, resource_label, metadata, ip_address,
 			request_id, sim_effective_at, test_clock_id, created_at)
 		VALUES ($1, NULLIF(current_setting('app.tenant_id', true), ''), $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-	`, postgres.NewID("vlx_aud"), actorType, actorID, e.Action, e.ResourceType,
+	`, postgres.NewID("hc_aud"), actorType, actorID, e.Action, e.ResourceType,
 		e.ResourceID, e.ResourceLabel, metaJSON,
 		nullIfEmpty(ClientIP(ctx)), nullIfEmpty(chimw.GetReqID(ctx)),
 		simAt, clockID, time.Now().UTC())
@@ -451,7 +451,7 @@ func (l *Logger) LogInTx(ctx context.Context, tx *sql.Tx, e Entry) error {
 // context, in priority order:
 //   - customer — a stamped customer actor (public token flows, auth.WithCustomerActor)
 //   - user     — a dashboard operator on a session cookie (auth.WithUserID, ADR-011)
-//   - api_key  — an SDK / curl caller on a Bearer vlx_… key (auth.WithKeyID)
+//   - api_key  — an SDK / curl caller on a Bearer hc_… key (auth.WithKeyID)
 //   - system   — background workers / cron with no request identity
 //
 // A new kind must also be added to every actor_type CHECK (audit_log,
@@ -622,7 +622,7 @@ func (l *Logger) Query(ctx context.Context, tenantID string, filter QueryFilter)
 // hands an auditor cannot drift from what the dashboard showed them.
 //
 // LEFT JOIN api_keys so the UI can show a human-readable key name instead of the
-// raw actor_id (e.g., "Production" vs "vlx_secret_live_abc123…"). Join is
+// raw actor_id (e.g., "Production" vs "hc_secret_live_abc123…"). Join is
 // (tenant_id, id), which matches the api_keys PK's tenant scope.
 //
 // Also LEFT JOIN customers for actor_type='customer' rows (customer-portal-driven

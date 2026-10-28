@@ -35,7 +35,7 @@ const (
 	TokenTypeCacheWrite1h = "cache_write_1h"
 )
 
-// nonTokenCallTypes are the LiteLLM call types Velox never bills as tokens:
+// nonTokenCallTypes are the LiteLLM call types Hardcount never bills as tokens:
 // images, audio, realtime, moderation, rerank, search, OCR, video, batches,
 // files, fine-tuning, assistants, vector stores, containers, evals, skills,
 // MCP, A2A, response retrieval and management, and names that never label a
@@ -111,7 +111,7 @@ var nonTokenCallTypes = map[string]struct{}{
 	"video_retrieve": {}, "video_retrieve_job": {}, "video_status": {},
 }
 
-// billedByIDBefore are the call types Velox billed before 2026-10-22. Their
+// billedByIDBefore are the call types Hardcount billed before 2026-10-22. Their
 // keys are <id>:<role> whatever the id's length, so a record stored before
 // then deduplicates if it is ever sent again (see keyPrefix).
 var billedByIDBefore = map[string]struct{}{
@@ -395,7 +395,7 @@ func canonicalModel(raw string) string {
 //     charged nothing.
 //   - call_type is on the skip list (image generation, moderation, ...), or
 //     the record is Vertex AI Live audio: skipped. If it carries tokens, a
-//     WARN names the call type and velox_litellm_skipped_with_tokens_total
+//     WARN names the call type and hardcount_litellm_skipped_with_tokens_total
 //     counts it.
 //   - no token counts: skipped, no events. Before the user check, so a
 //     record with nothing to bill and no user is not an error.
@@ -422,7 +422,7 @@ func MapPayload(p StandardLoggingPayload) (Mapping, error) {
 		if hasTokens {
 			// label is a skip-list key or the Live label: a bounded set.
 			skippedWithTokens.WithLabelValues(label).Inc()
-			slog.Warn("litellm: skipped a record that carries tokens; Velox does not bill this call type (velox_litellm_skipped_with_tokens_total)",
+			slog.Warn("litellm: skipped a record that carries tokens; Hardcount does not bill this call type (hardcount_litellm_skipped_with_tokens_total)",
 				"call_type", p.CallType, "route", p.route(), "model", p.Model,
 				"prompt_tokens", u.PromptTokens, "completion_tokens", u.CompletionTokens, "litellm_id", p.ID)
 		}
@@ -543,7 +543,7 @@ func MapPayload(p StandardLoggingPayload) (Mapping, error) {
 	}
 	if reason != "" {
 		cacheWriteUnsplit.WithLabelValues(metricProvider(p.CustomLLMProvider), reason).Inc()
-		slog.Warn("litellm: cache-write tokens have no usable 5m/1h split — billed as input tokens, below the provider's cache-write price (velox_litellm_cache_write_unsplit_total)",
+		slog.Warn("litellm: cache-write tokens have no usable 5m/1h split — billed as input tokens, below the provider's cache-write price (hardcount_litellm_cache_write_unsplit_total)",
 			"reason", reason, "cache_creation_tokens", u.cacheWriteTokens(),
 			"model", modelDim, "litellm_id", p.ID)
 	}
@@ -563,7 +563,7 @@ func MapPayload(p StandardLoggingPayload) (Mapping, error) {
 	}
 	costs := roleCosts(p, cacheRead, w5m, w1h)
 	if reason == UnsplitNoCount {
-		// LiteLLM's input_cost covers writes Velox cannot see or split, so
+		// LiteLLM's input_cost covers writes Hardcount cannot see or split, so
 		// it is not the input event's cost; the rate table prices it.
 		costs.legacyInput = nil
 	}
@@ -606,7 +606,7 @@ func MapPayload(p StandardLoggingPayload) (Mapping, error) {
 // ":<token_type>": LiteLLM's call id. It is also the request_id of the
 // call's row in LiteLLM's own spend log (LiteLLM_SpendLogs, where it is the
 // primary key), so a record rebuilt from that log for a replay
-// (docs/ops/runbook/litellm-spend-gap.md) gets the keys of the record Velox
+// (docs/ops/runbook/litellm-spend-gap.md) gets the keys of the record Hardcount
 // already stored. Nothing else goes into the key: the spend log keeps times
 // to the millisecond only, so a key with startTime in it billed every
 // replayed call a second time.
@@ -690,18 +690,18 @@ type ExternalIngest struct {
 }
 
 // buildEventMetadata composes the per-event metadata blob: LiteLLM's
-// own metadata + a velox.* namespace for adapter-injected context
+// own metadata + a hardcount.* namespace for adapter-injected context
 // (cost figures, source identifier). Operator can query usage events
 // by metadata in the audit dashboard.
 func buildEventMetadata(p StandardLoggingPayload, half string) map[string]any {
 	out := map[string]any{
-		"velox.source":     "litellm",
-		"velox.litellm_id": p.ID,
-		"velox.call_type":  p.CallType,
-		"velox.token_half": half, // the token_type
+		"hardcount.source":     "litellm",
+		"hardcount.litellm_id": p.ID,
+		"hardcount.call_type":  p.CallType,
+		"hardcount.token_half": half, // the token_type
 	}
 	if p.ResponseCost > 0 {
-		out["velox.litellm_response_cost_usd"] = p.ResponseCost
+		out["hardcount.litellm_response_cost_usd"] = p.ResponseCost
 	}
 	if p.CostBreakdown != nil {
 		// Surface the relevant half's cost. LiteLLM reports dollars-
@@ -710,16 +710,16 @@ func buildEventMetadata(p StandardLoggingPayload, half string) map[string]any {
 		switch half {
 		case "input":
 			if p.CostBreakdown.InputCost > 0 {
-				out["velox.litellm_cost_usd"] = p.CostBreakdown.InputCost
+				out["hardcount.litellm_cost_usd"] = p.CostBreakdown.InputCost
 			}
 		case "output":
 			if p.CostBreakdown.OutputCost > 0 {
-				out["velox.litellm_cost_usd"] = p.CostBreakdown.OutputCost
+				out["hardcount.litellm_cost_usd"] = p.CostBreakdown.OutputCost
 			}
 		}
 	}
 	// Forward LiteLLM's own metadata under a namespaced key so it
-	// doesn't collide with our velox.* keys. Operators can still
+	// doesn't collide with our hardcount.* keys. Operators can still
 	// query by `metadata->litellm_metadata->>team_id` etc.
 	if len(p.Metadata) > 0 {
 		out["litellm_metadata"] = p.Metadata

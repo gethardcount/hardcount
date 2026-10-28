@@ -120,7 +120,7 @@ func seedLedger(t *testing.T, db *postgres.DB, tenantID, custID string, now time
 		INSERT INTO customer_credit_ledger (id, tenant_id, customer_id, entry_type, currency, amount_cents, balance_after, description, created_at)
 		VALUES ($1,$2,$3,'expiry','USD',-2000,3000,'expiry', $5),
 		       ($4,$2,$3,'grant', 'USD', 5000,5000,'grant',  $6)
-	`, postgres.NewID("vlx_ccl"), tenantID, custID, postgres.NewID("vlx_ccl"), now.Add(-2*time.Hour), now); err != nil {
+	`, postgres.NewID("hc_ccl"), tenantID, custID, postgres.NewID("hc_ccl"), now.Add(-2*time.Hour), now); err != nil {
 		t.Fatalf("seed ledger: %v", err)
 	}
 	if err := tx.Commit(); err != nil {

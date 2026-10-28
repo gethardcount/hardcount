@@ -33,7 +33,7 @@ func NewStore(db *postgres.DB) *Store {
 
 // SetEncryptor wires the AES-GCM encryptor used for secret_key and
 // webhook_secret columns. When nil / noop, values are stored as plaintext —
-// still acceptable in local-dev (no VELOX_ENCRYPTION_KEY) but the encrypted
+// still acceptable in local-dev (no HARDCOUNT_ENCRYPTION_KEY) but the encrypted
 // path is mandatory in production.
 func (s *Store) SetEncryptor(enc *crypto.Encryptor) {
 	if enc == nil {
@@ -354,7 +354,7 @@ type EndpointLookup struct {
 	WebhookSecret string
 }
 
-// GetByID resolves an opaque webhook endpoint id (vlx_spc_XXX, exposed in the
+// GetByID resolves an opaque webhook endpoint id (hc_spc_XXX, exposed in the
 // Stripe dashboard's endpoint URL) to the owning tenant and the decrypted
 // webhook signing secret. Returns errs.ErrNotFound when the row is gone
 // (tenant disconnected or rotated).

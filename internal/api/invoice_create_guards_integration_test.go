@@ -55,7 +55,7 @@ func (e invoiceGuardEnv) invoiceCount(t *testing.T, customerID string) int {
 	return len(flowList(e.call(t, "GET", "/v1/invoices?customer_id="+customerID, nil).want(t, 200, "list invoices").body, "data"))
 }
 
-// numberSeq is the trailing sequence of an invoice number (VLX-000042 → 42).
+// numberSeq is the trailing sequence of an invoice number (HC-000042 → 42).
 func numberSeq(t *testing.T, number string) int {
 	t.Helper()
 	i := strings.LastIndexFunc(number, func(r rune) bool { return r < '0' || r > '9' })

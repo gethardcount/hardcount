@@ -1,10 +1,10 @@
 # The customer's bank wants them to confirm a payment
 
 Some banks ask the cardholder to confirm a card payment, usually with 3-D
-Secure: a code or an app prompt. A charge Velox makes on its own (at
+Secure: a code or an app prompt. A charge Hardcount makes on its own (at
 finalize, a payment retry, **Collect payment**) has no customer present to
 confirm it, so Stripe refuses it with `authentication_required`. This page
-says what Velox does then, and what you can do. Back to the
+says what Hardcount does then, and what you can do. Back to the
 [runbook index](index.md).
 
 ## Symptom
@@ -28,7 +28,7 @@ One of these:
 - **Retries don't charge that card.** Stripe Billing does not retry
   `authentication_required`
   ([Stripe](https://docs.stripe.com/billing/revenue-recovery/smart-retries#non-retryable-decline-codes)),
-  and neither does Velox. Each scheduled retry counts as an attempt and
+  and neither does Hardcount. Each scheduled retry counts as an attempt and
   charges nothing while that card is the customer's default. When the
   attempts run out, the policy's final action runs, as for any failed
   payment.

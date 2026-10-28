@@ -116,7 +116,7 @@ func TestBillFinalOnImmediateCancel_EndedPeriodIsRefused(t *testing.T) {
 	}{
 		{name: "exactly at period end", canceledAt: periodEnd, wantMsg: "retry billing for this subscription, then cancel again"},
 		{name: "after period end", canceledAt: periodEnd.Add(time.Hour), wantMsg: "retry billing for this subscription, then cancel again"},
-		{name: "after period end on a test clock", canceledAt: periodEnd.Add(time.Hour), clockID: "vlx_tclk_1", wantMsg: "finish or retry the clock advance, then cancel again"},
+		{name: "after period end on a test clock", canceledAt: periodEnd.Add(time.Hour), clockID: "hc_tclk_1", wantMsg: "finish or retry the clock advance, then cancel again"},
 		{name: "exactly at period start", canceledAt: periodStart},
 		{name: "never-activated trial after period end", canceledAt: periodEnd.Add(time.Hour), trial: true},
 	} {

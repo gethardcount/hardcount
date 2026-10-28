@@ -2224,7 +2224,7 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 	//     period billing double-counts the new rate. Emitting an
 	//     immediate credit gives "refund" against money never paid.
 	//     Industry-aligned: Stripe `proration_behavior=none` for this
-	//     case; Lago defers downgrades entirely. Velox defers the
+	//     case; Lago defers downgrades entirely. Hardcount defers the
 	//     proration to cycle close, which bills SEGMENT-AWARE (FLOW B20,
 	//     itemBaseSegments): each slice of the period is billed at the
 	//     plan/qty actually in effect for it — accurate per-segment, no
@@ -2693,7 +2693,7 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 
 // unpaidSourceBlocksCharge is the ADR-050 block: a net charge (upgrade / add /
 // qty-increase) against an in_advance period whose base invoice is finalized
-// but NOT paid is refused. Velox never stacks a second receivable on an unpaid
+// but NOT paid is refused. Hardcount never stacks a second receivable on an unpaid
 // current-period invoice (Recurly blocks past-due changes; Stripe recommends
 // proration_behavior=none on an unpaid latest invoice); the operator settles or
 // voids the outstanding invoice first. errs.InvalidState rolls the item change
@@ -2876,7 +2876,7 @@ func clawbackReason(ct domain.ItemChangeType) string {
 }
 
 // remainingPeriodRatio returns the integer day counts that drive proration
-// math. Per ADR-042 (2026-05-31) Velox switched from float64 prorationFactor
+// math. Per ADR-042 (2026-05-31) Hardcount switched from float64 prorationFactor
 // to integer day-ratio (`amount * remaining / total`) matching engine.go's
 // segment-aware billing pattern and Stripe / Lago / Orb proration semantics.
 // Pre-fix: prorationFactor was float64 hours/24 — introduced ULP error on
@@ -3200,7 +3200,7 @@ func (h *Handler) activityTimeline(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			truncated = total > len(entries)
 			// Plan-name lookup so the timeline shows "Pro Monthly" instead
-			// of "vlx_pln_d83g2obmajdtlif0mk00". Collect every plan_id
+			// of "hc_pln_d83g2obmajdtlif0mk00". Collect every plan_id
 			// referenced in metadata (plan_id, old_plan_id, new_plan_id)
 			// across all entries, batch-fetch via the wired PlanReader,
 			// hand the map to describeSubscriptionAction. Missing plans

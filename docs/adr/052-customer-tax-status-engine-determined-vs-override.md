@@ -5,7 +5,7 @@
 
 ## Summary
 
-The tax engine decides a customer's tax treatment by default. For B2B reverse charge, the operator leaves the customer `standard` and adds a tax ID, and Stripe Tax applies reverse charge only where it is valid (cross-border sales). The `reverse_charge` and `exempt` statuses stay as manual overrides that always force zero tax, and they are the only option with the `manual` and `none` providers. When `reverse_charge` is set on a customer in the seller's own country, Velox logs a warning but does not block the invoice. Status: active.
+The tax engine decides a customer's tax treatment by default. For B2B reverse charge, the operator leaves the customer `standard` and adds a tax ID, and Stripe Tax applies reverse charge only where it is valid (cross-border sales). The `reverse_charge` and `exempt` statuses stay as manual overrides that always force zero tax, and they are the only option with the `manual` and `none` providers. When `reverse_charge` is set on a customer in the seller's own country, Hardcount logs a warning but does not block the invoice. Status: active.
 
 ## Context
 
@@ -33,7 +33,7 @@ No schema change. No new cross-domain wiring.
 
 ## Why this design
 
-Reverse charge is a **jurisdiction determination**, and Velox is tax-neutral (`project_tax_neutrality`) — it does not re-implement jurisdiction rules; it defers them to the engine (Stripe). So the long-term-correct path is "assert the fact (tax ID), let the engine decide," with the manual flag reserved for what the engine can't see. This is exactly Stripe's two-layer model, and it's a strict superset (`feedback_stripe_parity_framing`): we keep the manual override Stripe also has, but stop presenting it as the primary mechanism.
+Reverse charge is a **jurisdiction determination**, and Hardcount is tax-neutral (`project_tax_neutrality`) — it does not re-implement jurisdiction rules; it defers them to the engine (Stripe). So the long-term-correct path is "assert the fact (tax ID), let the engine decide," with the manual flag reserved for what the engine can't see. This is exactly Stripe's two-layer model, and it's a strict superset (`feedback_stripe_parity_framing`): we keep the manual override Stripe also has, but stop presenting it as the primary mechanism.
 
 The warning (not a block) is deliberate. An adversarial design review (2026-06-15) showed a save-time hard 400 is the wrong mechanism in the wrong layer: it can't fire correctly when `CompanyCountry` is unset (the fresh-tenant default), a naive equality check passes the *least* coherent case (reverse_charge + empty customer country), and `CompanyCountry` is a single scalar that cannot model multi-registration — so a block would wrongly reject legitimate cross-registration reverse charge. We honor operator intent (same trust posture as `exempt`) and surface the likely error rather than silently zero-rating it (`feedback_no_silent_fallbacks`), without the false-positive footguns of a write-time guard.
 

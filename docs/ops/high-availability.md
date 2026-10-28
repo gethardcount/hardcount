@@ -1,14 +1,14 @@
-# Run two or more copies of Velox (high availability)
+# Run two or more copies of Hardcount (high availability)
 
-Run two or more copies of the Velox API behind a load balancer. While one copy restarts or crashes, the others keep serving.
+Run two or more copies of the Hardcount API behind a load balancer. While one copy restarts or crashes, the others keep serving.
 
 Downtime during a restart is fine for you? Use [Production on one VM](../production-one-vm.md).
 
 ## What you need
 
-- Two or more `velox-api` copies behind a load balancer.
+- Two or more `hardcount-api` copies behind a load balancer.
 - A managed Postgres with automatic failover and point-in-time restore.
-- A managed Redis. Velox uses it only for rate limiting, and all copies share its counts. If Redis goes down after start-up, see [Redis going down after boot](runbook/replica-will-not-start.md#redis-going-down-after-boot).
+- A managed Redis. Hardcount uses it only for rate limiting, and all copies share its counts. If Redis goes down after start-up, see [Redis going down after boot](runbook/replica-will-not-start.md#redis-going-down-after-boot).
 - A connection pooler is optional: [Postgres requirements → Connection poolers](postgres-requirements.md#connection-poolers).
 
 The settings for each copy are in [Self-host](../self-host.md#settings). Every copy uses the same settings and the same database.
@@ -27,7 +27,7 @@ A few features still assume one copy: the dashboard's live webhook stream, test-
 1. Point the load balancer's health check at `GET /health/ready`.
 
    ```bash
-   curl -fsS https://your-velox-host/health/ready
+   curl -fsS https://your-hardcount-host/health/ready
    ```
 
    **You see:** `{"checks":{"api":"ok","database":"ok","scheduler":"..."},"status":"ok"}`, with status 200.
@@ -68,7 +68,7 @@ On a stop signal (SIGTERM), a copy first tells the load balancer it is leaving: 
 
 The worst case is `SHUTDOWN_DRAIN_DELAY` plus 90 seconds. Usually the three stages take under 2 seconds after the drain delay.
 
-A grace period shorter than that can kill a copy (SIGKILL) halfway through. Velox is built to survive that: queued webhooks and emails a copy had claimed are picked up again when its lease runs out, and the next copy to start recovers a killed test-clock advance. The cost is that a few webhooks or emails can be sent twice.
+A grace period shorter than that can kill a copy (SIGKILL) halfway through. Hardcount is built to survive that: queued webhooks and emails a copy had claimed are picked up again when its lease runs out, and the next copy to start recovers a killed test-clock advance. The cost is that a few webhooks or emails can be sent twice.
 
 ## Upgrades
 
@@ -76,10 +76,10 @@ Read the upgrade notes in the [changelog](../../CHANGELOG.md) first. Then take a
 
 **Database upgrades (migrations):** `RUN_MIGRATIONS_ON_BOOT=true` is safe when several copies start at once: they take turns through a Postgres lock, and each one applies only what is still missing. A waiting copy gives up after 30 minutes and is restarted. What is not covered is old code running on a new schema, so the release notes decide the order:
 
-- **A release whose notes say it has migrations:** stop every old copy, run `velox migrate` once (or start one new copy with `RUN_MIGRATIONS_ON_BOOT=true`), then start the other new copies.
+- **A release whose notes say it has migrations:** stop every old copy, run `hardcount migrate` once (or start one new copy with `RUN_MIGRATIONS_ON_BOOT=true`), then start the other new copies.
 - **A release with no migrations:** upgrade one copy at a time.
-- Upgrading from Velox 0.8.x is not supported; install fresh.
+- Upgrading from Hardcount 0.8.x is not supported; install fresh.
 
-Run `velox migrate status` with the new release first to see the plan. Never roll a migration back in production; see [Self-host](../self-host.md#database-upgrades-migrations).
+Run `hardcount migrate status` with the new release first to see the plan. Never roll a migration back in production; see [Self-host](../self-host.md#database-upgrades-migrations).
 
 **Next:** [A background job is stuck](runbook/background-job-stuck.md): what to check when billing or another background job stops.

@@ -21,7 +21,7 @@ const paymentInFlightHome = "internal/domain/invoice.go"
 //
 // Why: payment_status need not be the whole answer. A fact about an open
 // payment kept elsewhere on the invoice row joins PaymentInFlight, once; the
-// #976 fix is one, a record of each charge written before Velox calls Stripe.
+// #976 fix is one, a record of each charge written before Hardcount calls Stripe.
 // A caller that read the status directly would miss such a fact and keep
 // voiding, writing off, crediting or canceling while a payment may still take
 // money. The check is on the AST, so comments and strings that name IsInFlight

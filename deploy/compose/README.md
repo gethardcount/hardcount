@@ -1,20 +1,20 @@
 # The Docker Compose stack
 
-This folder runs Velox on one machine: Postgres, Redis, the Velox API, the dashboard, and nginx in front of them.
+This folder runs Hardcount on one machine: Postgres, Redis, the Hardcount API, the dashboard, and nginx in front of them.
 
 - **Try it on your own computer:** run `./quickstart.sh` here. It uses the published images and local mode, so sign-in works at `http://localhost:8080` in every browser. Walkthrough: [quick start](../../docs/quick-start.md).
 - **Install it on a server:** follow [Production on one VM](../../docs/production-one-vm.md). It installs a pinned release, then adds HTTPS, email, Stripe, nightly backups and a go-live checklist.
 
 ## Build from source instead
 
-Production on one VM runs the published release images, set by `VELOX_IMAGE` and `VELOX_DASHBOARD_IMAGE` in `.env`. Leave those two lines out, and `docker compose up -d` builds both images from your checkout. The first build takes a few minutes. Everything else is the same.
+Production on one VM runs the published release images, set by `HARDCOUNT_IMAGE` and `HARDCOUNT_DASHBOARD_IMAGE` in `.env`. Leave those two lines out, and `docker compose up -d` builds both images from your checkout. The first build takes a few minutes. Everything else is the same.
 
 To upgrade a stack built from source, run these in `deploy/compose`. This example moves to `v0.9.0`.
 
-1. Take a backup. [Production on one VM, step 7](../../docs/production-one-vm.md#7-back-up-every-night) sets up this command. If your checkout is not in `/opt/velox`, change its two `/opt/velox` paths.
+1. Take a backup. [Production on one VM, step 7](../../docs/production-one-vm.md#7-back-up-every-night) sets up this command. If your checkout is not in `/opt/hardcount`, change its two `/opt/hardcount` paths.
 
    ```bash
-   sudo velox-backup
+   sudo hardcount-backup
    ```
 
    **You see:** `Verified:  yes`.
@@ -32,10 +32,10 @@ To upgrade a stack built from source, run these in `deploy/compose`. This exampl
 3. See what the upgrade will change. `migrate status` only reads.
 
    ```bash
-   docker compose run --rm velox-api migrate status
+   docker compose run --rm hardcount-api migrate status
    ```
 
-   **You see:** the plan. If it says `ahead`, this install ran newer code than the release: check out a newer release and build again. If it says `no migration record`, stop: the upgrade will not run ([why](../../docs/ops/runbook/migration-failed-midway.md#velox-tables-but-no-migration-record)). A Velox 0.8.x install says this, and cannot be upgraded.
+   **You see:** the plan. If it says `ahead`, this install ran newer code than the release: check out a newer release and build again. If it says `no migration record`, stop: the upgrade will not run ([why](../../docs/ops/runbook/migration-failed-midway.md#hardcount-tables-but-no-migration-record)). A Hardcount 0.8.x install says this, and cannot be upgraded.
 
 4. Start the new build. It applies the database upgrades as it starts.
 
@@ -63,46 +63,46 @@ ssh -L 8080:localhost:80 you@server   # localhost:8080 instead if NGINX_HTTP_POR
 | To | Run |
 |---|---|
 | See logs | `docker compose logs -f` |
-| Restart the API | `docker compose restart velox-api` |
+| Restart the API | `docker compose restart hardcount-api` |
 | Stop, keeping data | `docker compose stop` |
 | Stop and delete all data | `docker compose down -v` |
-| See the database's version and the upgrades still to apply | `docker compose run --rm velox-api migrate status` |
-| Open a database shell | `docker compose exec postgres psql -U velox -d velox` |
+| See the database's version and the upgrades still to apply | `docker compose run --rm hardcount-api migrate status` |
+| Open a database shell | `docker compose exec postgres psql -U hardcount -d hardcount` |
 
 To upgrade, see [Upgrade to a new release](../../docs/production-one-vm.md#upgrade-to-a-new-release), or [Build from source instead](#build-from-source-instead).
 
 ## If something goes wrong
 
-To see the settings the API container runs with, ask Docker. The image has no shell and no `env` command, so `docker compose exec velox-api env` fails.
+To see the settings the API container runs with, ask Docker. The image has no shell and no `env` command, so `docker compose exec hardcount-api env` fails.
 
 ```bash
-docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$(docker compose ps -aq velox-api)"
+docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$(docker compose ps -aq hardcount-api)"
 ```
 
 The output holds passwords and keys, so keep it private.
 
-**The API exits with `VELOX_ENCRYPTION_KEY is required in production`.**
+**The API exits with `HARDCOUNT_ENCRYPTION_KEY is required in production`.**
 Set the key in `.env` (`openssl rand -hex 32`) and run `docker compose up -d` again.
 
 **The API exits with `APP_DATABASE_URL is required in production` or `default/guessable password`.**
-Set `VELOX_APP_DB_PASSWORD` in `.env` and start the stack again. Compose builds `APP_DATABASE_URL` from it.
+Set `HARDCOUNT_APP_DB_PASSWORD` in `.env` and start the stack again. Compose builds `APP_DATABASE_URL` from it.
 
 **The API exits with `could not open the app database connection`.**
-The `velox_app` user is missing, or its password differs from `VELOX_APP_DB_PASSWORD`. Postgres creates that user only on its very first start, on an empty data volume. On an existing volume, set the password yourself:
+The `hardcount_app` user is missing, or its password differs from `HARDCOUNT_APP_DB_PASSWORD`. Postgres creates that user only on its very first start, on an empty data volume. On an existing volume, set the password yourself:
 
 ```bash
-docker compose exec -e VELOX_APP_DB_PASSWORD postgres \
-  psql -U velox -d velox -v pw="$VELOX_APP_DB_PASSWORD" \
-  -c "ALTER ROLE velox_app PASSWORD :'pw'"
+docker compose exec -e HARDCOUNT_APP_DB_PASSWORD postgres \
+  psql -U hardcount -d hardcount -v pw="$HARDCOUNT_APP_DB_PASSWORD" \
+  -c "ALTER ROLE hardcount_app PASSWORD :'pw'"
 ```
 
 If the user does not exist at all, create it with the SQL in [Postgres requirements](../../docs/ops/postgres-requirements.md#the-two-database-users).
 
 **The API exits with `role can BYPASS row-level security`.**
-`APP_DATABASE_URL` points at the admin user, usually because `DATABASE_URL` was copied into it. Point it at `velox_app`.
+`APP_DATABASE_URL` points at the admin user, usually because `DATABASE_URL` was copied into it. Point it at `hardcount_app`.
 
 **The API exits with `migration … failed`, or names `goose_db_version`.**
-A database upgrade stopped. A failed migration leaves nothing to repair. Compose keeps starting the API again, and each start tries the upgrade again, so stop it first with `docker compose stop velox-api`. Fix the cause the error names, then start it with `docker compose up -d velox-api`. The cases are in [A database upgrade stopped](../../docs/ops/runbook/migration-failed-midway.md).
+A database upgrade stopped. A failed migration leaves nothing to repair. Compose keeps starting the API again, and each start tries the upgrade again, so stop it first with `docker compose stop hardcount-api`. Fix the cause the error names, then start it with `docker compose up -d hardcount-api`. The cases are in [A database upgrade stopped](../../docs/ops/runbook/migration-failed-midway.md).
 
 **`/health/ready` shows `scheduler: degraded`.**
 The API is up and still answers 200 here, but its background jobs have stopped running. Check the API logs, then see [A background job is stuck](../../docs/ops/runbook/background-job-stuck.md).
@@ -116,4 +116,4 @@ Set `NGINX_HTTP_PORT=8080`, or any free port, in `.env` and start the stack agai
 **Sign-in says it does not work at this address, or Safari does not keep you signed in.**
 You opened the dashboard over plain HTTP. See [Sign in before HTTPS](#sign-in-before-https).
 
-**Next:** [Run Velox in production on one VM](../../docs/production-one-vm.md).
+**Next:** [Run Hardcount in production on one VM](../../docs/production-one-vm.md).

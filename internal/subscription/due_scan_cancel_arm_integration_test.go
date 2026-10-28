@@ -32,8 +32,8 @@ func TestDueScans_CancelArm_Scoping(t *testing.T) {
 	store := subscription.NewPostgresStore(db)
 	ctx := leadertest.Token(t, testutil.AdminPool(t), postgres.WithLivemode(context.Background(), false), leader.RoleBilling)
 
-	const tenantID = "vlx_ten_cancelarm"
-	const clockID = "vlx_tclk_cancelarm"
+	const tenantID = "hc_ten_cancelarm"
+	const clockID = "hc_tclk_cancelarm"
 
 	wallNow := time.Now().UTC().Truncate(time.Microsecond)
 	frozen := wallNow.Add(-90 * 24 * time.Hour) // sim time lags wall by 90d

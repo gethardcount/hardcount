@@ -268,7 +268,7 @@ var lockOrderWriters = []lockOrderWriter{
 }
 
 // twoMeterWriters reference two plans in a fixture the API accepts: their
-// plans bill different meters. Velox refuses one subscription whose plans
+// plans bill different meters. Hardcount refuses one subscription whose plans
 // both bill one meter (rejectMeterOverlap), so these writers cannot deadlock
 // with one plan writer alone. They can with two:
 // TestPlanLockOrder_NoDeadlockAcrossTwoMeterEdits. lo and hi are the plans

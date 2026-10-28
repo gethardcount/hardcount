@@ -1,11 +1,11 @@
 # Create-Preview Endpoint — Technical Design
 
 > - **Decided:** add `POST /v1/invoices/create_preview`, which shows a customer's next invoice without creating it. The preview moves onto the cycle close's usage aggregation (`usage.AggregateByPricingRules`), so both rate usage the same way.
-> - **Shipped:** v0.1.0, in [#28](https://github.com/getvelox/velox/pull/28).
+> - **Shipped:** v0.1.0, in [#28](https://github.com/gethardcount/hardcount/pull/28).
 > - **Current docs:** [Invoice preview](../../features.md#subscriptions-and-invoices) in the feature list, and `/v1/invoices/create_preview` in [`api/openapi.yaml`](../../../api/openapi.yaml). Where this page and the code disagree, the code wins.
-> - **2026-10-23:** the in-app `GET /v1/billing/preview/{subscription_id}` route this page mentions was removed ([#1368](https://github.com/getvelox/velox/pull/1368)). The subscription page now calls `create_preview`.
-> - **2026-10-25:** the price and cost fields this page names were renamed ([ADR-130](../../adr/130-usage-prices-belong-to-the-plan.md) §3, [#1381](https://github.com/getvelox/velox/pull/1381)): `flat`/`flat_amount_cents` is `per_unit`/`unit_amount_cents`, `graduated_tiers` is `tiers` (last tier `up_to: null`), a package rounds up with no overage, and a provider cost is `unit_cost_cents`, with `provider_cost_cents` and `cost_cents` on the wire.
-> - **2026-10-26:** preview lines no longer carry `rating_rule_version_id` or `rule_key` ([ADR-130](../../adr/130-usage-prices-belong-to-the-plan.md) PR-4, [#1386](https://github.com/getvelox/velox/pull/1386)). A usage line names its plan price with `price_id` and the events it takes with `dimension_match`; the response example below still shows the old fields.
+> - **2026-10-23:** the in-app `GET /v1/billing/preview/{subscription_id}` route this page mentions was removed ([#1368](https://github.com/gethardcount/hardcount/pull/1368)). The subscription page now calls `create_preview`.
+> - **2026-10-25:** the price and cost fields this page names were renamed ([ADR-130](../../adr/130-usage-prices-belong-to-the-plan.md) §3, [#1381](https://github.com/gethardcount/hardcount/pull/1381)): `flat`/`flat_amount_cents` is `per_unit`/`unit_amount_cents`, `graduated_tiers` is `tiers` (last tier `up_to: null`), a package rounds up with no overage, and a provider cost is `unit_cost_cents`, with `provider_cost_cents` and `cost_cents` on the wire.
+> - **2026-10-26:** preview lines no longer carry `rating_rule_version_id` or `rule_key` ([ADR-130](../../adr/130-usage-prices-belong-to-the-plan.md) PR-4, [#1386](https://github.com/gethardcount/hardcount/pull/1386)). A usage line names its plan price with `price_id` and the events it takes with `dimension_match`; the response example below still shows the old fields.
 
 > **This is a design document from 2026-04-26**, written alongside the build of `POST /v1/invoices/create_preview` (later corrected 2026-08-23 for 422 error statuses). No ADR decided this endpoint; the shipped code (`internal/billing/preview.go`, `preview_create.go`) and this doc are the record.
 > Later decisions that changed how the preview prices: [ADR-045](../../adr/045-decimal-per-unit-pricing-rates.md) (decimal per-unit rates), [ADR-054](../../adr/054-effective-unit-price-decimal-display.md) (full-precision per-unit price on lines), [ADR-070](../../adr/070-price-change-semantics.md) (prices at the rule version and customer override in force when the period opened; a failed price or override lookup aborts the preview instead of falling back to list price), the 2026-10-16 change that made the default-window preview mirror the cycle close (`previewCycle`: base fees prorate for a short first period and per segment after mid-period changes, and usage is rated over the windows the close bills; an explicit `period` keeps the flat estimate and its mid-period warning), the 2026-10-22 change that made that preview apply a plan change scheduled for the period end, as the close does (an in-advance base bills the new plan's price and period; an explicit `period` still bills the plan the item holds now, as a threshold fire does), and [ADR-066](../../adr/066-threshold-money-semantics.md): after a threshold invoice, the default-window preview bills usage from that invoice's end, and the base fee as the close bills it.
@@ -17,7 +17,7 @@
 
 ## Motivation
 
-Stripe ships `Invoice.create_preview` (formerly `Invoice.upcoming`) as a Tier 1 surface — every customer asks "what is my bill going to be?" before the cycle closes. Velox already has the in-memory plumbing in `Engine.Preview` (the dashboard `GET /v1/billing/preview/{subscription_id}` route). But it's wired against the **old** aggregation path `usage.AggregateForBillingPeriod`, which is not multi-dim aware (multi-dimensional metering: one meter carrying differently-priced slices of usage, split by dimension labels such as model or token type). Week 2 shipped `usage.AggregateByPricingRules` (a LATERAL JOIN using priority+claim resolution — higher-priority rules claim events first, each event counted by at most one rule per billing window — across 5 aggregation modes); the cycle scan (the billing engine's scheduled pass that turns closed cycles into invoices) and the customer-usage endpoint already use it. The preview is the only consumer left on the old path — every multi-dim tenant is silently looking at wrong projected-bill numbers today.
+Stripe ships `Invoice.create_preview` (formerly `Invoice.upcoming`) as a Tier 1 surface — every customer asks "what is my bill going to be?" before the cycle closes. Hardcount already has the in-memory plumbing in `Engine.Preview` (the dashboard `GET /v1/billing/preview/{subscription_id}` route). But it's wired against the **old** aggregation path `usage.AggregateForBillingPeriod`, which is not multi-dim aware (multi-dimensional metering: one meter carrying differently-priced slices of usage, split by dimension labels such as model or token type). Week 2 shipped `usage.AggregateByPricingRules` (a LATERAL JOIN using priority+claim resolution — higher-priority rules claim events first, each event counted by at most one rule per billing window — across 5 aggregation modes); the cycle scan (the billing engine's scheduled pass that turns closed cycles into invoices) and the customer-usage endpoint already use it. The preview is the only consumer left on the old path — every multi-dim tenant is silently looking at wrong projected-bill numbers today.
 
 This slice has three deliverables:
 
@@ -62,7 +62,7 @@ The slice is exactly the same composition pattern as `customer-usage`: customer 
 > **Wire-contract conventions** (consistent with `/v1/*`, see `docs/dev/design/customer-usage.md` § wire-contract):
 >
 > - **Snake-case JSON keys**, struct-tag enforced.
-> - **Customer identity is the customer ID** (`vlx_cus_…`). Mirrors customer-usage.
+> - **Customer identity is the customer ID** (`hc_cus_…`). Mirrors customer-usage.
 > - **Period bounds are RFC 3339** (`2026-04-01T00:00:00Z`). Both inclusive of `from`, exclusive of `to`. If both omitted → defaults to the subscription's current cycle. Partial bounds (one zero, one non-zero) are rejected with 422.
 > - **Empty results are `[]`, never `null`.**
 > - **Decimal quantity** marshals as a precise string (`"1234567.000000000000"`) per ADR-005. Amounts are integer cents.
@@ -76,8 +76,8 @@ Authorization: Bearer <secret_key>
 Content-Type: application/json
 
 {
-  "customer_id": "vlx_cus_abc123",
-  "subscription_id": "vlx_sub_xyz",
+  "customer_id": "hc_cus_abc123",
+  "subscription_id": "hc_sub_xyz",
   "period": {
     "from": "2026-04-01T00:00:00Z",
     "to":   "2026-05-01T00:00:00Z"
@@ -90,8 +90,8 @@ Both `subscription_id` and `period` are optional. If `subscription_id` is omitte
 Response `200`:
 ```json
 {
-  "customer_id": "vlx_cus_abc123",
-  "subscription_id": "vlx_sub_xyz",
+  "customer_id": "hc_cus_abc123",
+  "subscription_id": "hc_sub_xyz",
   "plan_name": "AI API Pro",
   "billing_period_start": "2026-04-01T00:00:00Z",
   "billing_period_end":   "2026-05-01T00:00:00Z",
@@ -107,8 +107,8 @@ Response `200`:
     {
       "line_type": "usage",
       "description": "Tokens (gpt-4 · input)",
-      "meter_id": "vlx_mtr_tokens",
-      "rating_rule_version_id": "vlx_rrv_gpt4_input",
+      "meter_id": "hc_mtr_tokens",
+      "rating_rule_version_id": "hc_rrv_gpt4_input",
       "rule_key": "gpt4_input",
       "dimension_match": { "model": "gpt-4", "token_type": "input" },
       "currency": "USD",
@@ -120,8 +120,8 @@ Response `200`:
     {
       "line_type": "usage",
       "description": "Tokens - output",
-      "meter_id": "vlx_mtr_tokens",
-      "rating_rule_version_id": "vlx_rrv_gpt4_output",
+      "meter_id": "hc_mtr_tokens",
+      "rating_rule_version_id": "hc_rrv_gpt4_output",
       "rule_key": "gpt4_output",
       "dimension_match": { "model": "gpt-4", "token_type": "output" },
       "currency": "USD",

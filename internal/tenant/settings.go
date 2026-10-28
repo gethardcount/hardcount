@@ -63,7 +63,7 @@ func (s *SettingsStore) ListTenantIDs(ctx context.Context) ([]string, error) {
 }
 
 // DefaultSettings returns a fresh TenantSettings populated with
-// Velox defaults. Single source of truth for "what does an
+// Hardcount defaults. Single source of truth for "what does an
 // uninitialized tenant look like" — used by SettingsStore.Get
 // when no row exists yet AND by bootstrap when seeding a new
 // tenant. Pulling this here means the engine path and the API
@@ -75,7 +75,7 @@ func DefaultSettings(tenantID string) domain.TenantSettings {
 		TenantID:         tenantID,
 		DefaultCurrency:  "USD",
 		Timezone:         "UTC",
-		InvoicePrefix:    "VLX",
+		InvoicePrefix:    "HC",
 		CreditNotePrefix: "CN",
 		NetPaymentTerms:  30,
 		TaxProvider:      "manual",
@@ -117,7 +117,7 @@ func (s *SettingsStore) Get(ctx context.Context, tenantID string) (domain.Tenant
 		&ts.CreditBalanceLowThresholdCents, &ts.CreatedAt, &ts.UpdatedAt)
 
 	if err == sql.ErrNoRows {
-		// Synthesize Velox defaults so callers don't have to handle
+		// Synthesize Hardcount defaults so callers don't have to handle
 		// the missing-row case. Mirrors the API handler's behavior;
 		// the engine path previously fell through to silent zero-tax
 		// when ErrNotFound bubbled up. Now Get always returns a
@@ -226,7 +226,7 @@ func (s *SettingsStore) Upsert(ctx context.Context, ts domain.TenantSettings) (d
 //
 // The UPSERT form lazily initializes tenant_settings on first call so a freshly
 // bootstrapped tenant — which has a tenants row but no tenant_settings row —
-// gets VLX-000001, VLX-000002, ... without operators needing to touch the
+// gets HC-000001, HC-000002, ... without operators needing to touch the
 // settings endpoint first. Concurrent callers serialize on the row lock, so
 // no number is handed out twice within a mode.
 //
@@ -582,7 +582,7 @@ func validateSettings(ts *domain.TenantSettings) error {
 		ts.Timezone = "UTC"
 	}
 	if ts.InvoicePrefix == "" {
-		ts.InvoicePrefix = "VLX"
+		ts.InvoicePrefix = "HC"
 	}
 	ts.CreditNotePrefix = strings.TrimSpace(ts.CreditNotePrefix)
 	if ts.CreditNotePrefix == "" {
@@ -715,7 +715,7 @@ func validateSettings(ts *domain.TenantSettings) error {
 	// Seed a sensible default SaaS tax code when stripe_tax is selected and
 	// the tenant has not set their own. txcd_10103001 is Stripe's
 	// "Software as a Service (SaaS) – business use" classification — the
-	// right starting point for the overwhelming majority of Velox tenants.
+	// right starting point for the overwhelming majority of Hardcount tenants.
 	if ts.TaxProvider == "stripe_tax" && ts.DefaultProductTaxCode == "" {
 		ts.DefaultProductTaxCode = "txcd_10103001"
 	}

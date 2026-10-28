@@ -66,7 +66,7 @@ func TestReplay_SendsRootEvent_RealStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create endpoint: %v", err)
 	}
-	if err := svc.Dispatch(ctx, tenantID, "invoice.paid", map[string]any{"invoice_id": "vlx_inv_1"}); err != nil {
+	if err := svc.Dispatch(ctx, tenantID, "invoice.paid", map[string]any{"invoice_id": "hc_inv_1"}); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 	if len(client.bodies) != 1 {

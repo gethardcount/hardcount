@@ -7,9 +7,9 @@ import (
 
 // FetchCardDetails reads the newest card on the Stripe customer and changes
 // nothing at Stripe. It used to set that card as Stripe's default (ignoring
-// errors), which split Stripe's copy from Velox's default, the card Velox
-// charges: after a setup link, Stripe showed the new card while Velox kept
-// charging the old one. Stripe's default now follows Velox's (ADR-053), so
+// errors), which split Stripe's copy from Hardcount's default, the card Hardcount
+// charges: after a setup link, Stripe showed the new card while Hardcount kept
+// charging the old one. Stripe's default now follows Hardcount's (ADR-053), so
 // the read must send no customer update.
 func TestFetchCardDetails_ReadsOnlyAndSendsNoCustomerUpdate(t *testing.T) {
 	stub := withRoutedStripe(t, map[string]func(*http.Request) (int, string){

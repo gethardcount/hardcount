@@ -14,8 +14,8 @@ import (
 // pure so every branch is locked here; openAppPool's os.Exit sites are
 // thin wrappers over these decisions.
 func TestResolveAppURL_Matrix(t *testing.T) {
-	admin := "postgres://velox:velox@db:5432/velox?sslmode=disable"
-	strong := "postgres://velox_app:s3cure-Str0ng-pw@db:5432/velox?sslmode=disable"
+	admin := "postgres://hardcount:hardcount@db:5432/hardcount?sslmode=disable"
+	strong := "postgres://hardcount_app:s3cure-Str0ng-pw@db:5432/hardcount?sslmode=disable"
 
 	cases := []struct {
 		name         string
@@ -29,12 +29,12 @@ func TestResolveAppURL_Matrix(t *testing.T) {
 		{"staging explicit strong", "staging", strong, strong, false, ""},
 		{"prod unset", "production", "", "", false, "APP_DATABASE_URL is required"},
 		{"staging unset", "staging", "", "", false, "APP_DATABASE_URL is required"},
-		{"prod default password", "production", "postgres://velox_app:velox_app@db:5432/velox", "", false, "default/guessable password"},
-		{"prod password equals username", "production", "postgres://app:app@db:5432/velox", "", false, "default/guessable password"},
-		{"prod empty password (trust auth)", "production", "postgres://velox_app@db:5432/velox", "", false, "no password"},
-		{"prod unparseable", "production", "postgres://velox_app:pw@db:5432/velox\x7f??", "", false, "not a parseable"},
-		{"local unset derives", "local", "", "postgres://velox_app:velox_app@db:5432/velox?sslmode=disable", false, ""},
-		{"local explicit default password allowed", "local", "postgres://velox_app:velox_app@db:5432/velox", "postgres://velox_app:velox_app@db:5432/velox", false, ""},
+		{"prod default password", "production", "postgres://hardcount_app:hardcount_app@db:5432/hardcount", "", false, "default/guessable password"},
+		{"prod password equals username", "production", "postgres://app:app@db:5432/hardcount", "", false, "default/guessable password"},
+		{"prod empty password (trust auth)", "production", "postgres://hardcount_app@db:5432/hardcount", "", false, "no password"},
+		{"prod unparseable", "production", "postgres://hardcount_app:pw@db:5432/hardcount\x7f??", "", false, "not a parseable"},
+		{"local unset derives", "local", "", "postgres://hardcount_app:hardcount_app@db:5432/hardcount?sslmode=disable", false, ""},
+		{"local explicit default password allowed", "local", "postgres://hardcount_app:hardcount_app@db:5432/hardcount", "postgres://hardcount_app:hardcount_app@db:5432/hardcount", false, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -74,7 +74,7 @@ func TestCheckRLSCapability_FlagsBypassRoles(t *testing.T) {
 	}
 	adminURL := strings.TrimSpace(os.Getenv("TEST_ADMIN_DATABASE_URL"))
 	if adminURL == "" {
-		adminURL = "postgres://velox:velox@localhost:5432/velox_test?sslmode=disable"
+		adminURL = "postgres://hardcount:hardcount@localhost:5432/hardcount_test?sslmode=disable"
 	}
 	adminPool, err := sql.Open("pgx", adminURL)
 	if err != nil {
@@ -93,15 +93,15 @@ func TestCheckRLSCapability_FlagsBypassRoles(t *testing.T) {
 	}
 
 	// A BYPASSRLS (non-superuser) role must also be flagged.
-	if _, err := adminPool.Exec(`DROP ROLE IF EXISTS velox_p7_bypass`); err != nil {
+	if _, err := adminPool.Exec(`DROP ROLE IF EXISTS hardcount_p7_bypass`); err != nil {
 		t.Fatalf("drop role: %v", err)
 	}
-	if _, err := adminPool.Exec(`CREATE ROLE velox_p7_bypass WITH LOGIN BYPASSRLS PASSWORD 'p7-test-pw'`); err != nil {
+	if _, err := adminPool.Exec(`CREATE ROLE hardcount_p7_bypass WITH LOGIN BYPASSRLS PASSWORD 'p7-test-pw'`); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
-	t.Cleanup(func() { _, _ = adminPool.Exec(`DROP ROLE IF EXISTS velox_p7_bypass`) })
+	t.Cleanup(func() { _, _ = adminPool.Exec(`DROP ROLE IF EXISTS hardcount_p7_bypass`) })
 
-	bypassURL := rewriteUser(t, adminURL, "velox_p7_bypass", "p7-test-pw")
+	bypassURL := rewriteUser(t, adminURL, "hardcount_p7_bypass", "p7-test-pw")
 	bypassPool, err := sql.Open("pgx", bypassURL)
 	if err != nil {
 		t.Fatalf("open bypass: %v", err)
@@ -111,7 +111,7 @@ func TestCheckRLSCapability_FlagsBypassRoles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("capability(bypass): %v", err)
 	}
-	if role != "velox_p7_bypass" || !canBypass {
+	if role != "hardcount_p7_bypass" || !canBypass {
 		t.Fatalf("role=%q canBypass=%v — BYPASSRLS role must be flagged", role, canBypass)
 	}
 }

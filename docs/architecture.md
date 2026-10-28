@@ -1,12 +1,12 @@
 # Architecture
 
-Velox is one Go binary on one PostgreSQL database. The code has one package
+Hardcount is one Go binary on one PostgreSQL database. The code has one package
 per billing domain (customers, pricing, usage, invoices, payments and so on),
 and each package owns its store, service and HTTP handler.
 
 This page is for contributors: which package does each part, and what runs
 in the background. The same flow without code is in
-[How Velox works](how-velox-works.md). The decisions behind this layout are
+[How Hardcount works](how-hardcount-works.md). The decisions behind this layout are
 in the [ADRs](adr/).
 
 ## The life of a usage event
@@ -60,19 +60,19 @@ A paid invoice cannot be voided or written off; issue a credit note instead.
   - public links, such as the hosted invoice page;
   - incoming webhooks;
   - two signed-in areas: Stripe credential settings (`internal/tenantstripe`) and team members and invites (`internal/dashmembers`);
-  - `velox-bench-seed`, which sets up a database for a benchmark.
+  - `hardcount-bench-seed`, which sets up a database for a benchmark.
 - **Every tenant-scoped operation states its mode.** Test mode and live mode are separate data in one tenant. Each entry point puts the mode on the request context with `postgres.WithLivemode`: the auth middleware from the key or session, public links from their row, background jobs per row or per mode. Nothing guesses a missing mode:
   - `postgres.Livemode` returns `ErrLivemodeUnset`, and `BeginTx` refuses a `TxTenant` without a mode or a tenant ID;
   - the database refuses an insert into a table with a `livemode` column when `app.livemode` is not `on` or `off`, and its RLS policies show no row (migrations 00213 and 00214).
-- **PaymentIntent-only Stripe.** No Stripe Billing or Stripe Invoices. Velox owns invoices end to end; Stripe executes the card charge.
+- **PaymentIntent-only Stripe.** No Stripe Billing or Stripe Invoices. Hardcount owns invoices end to end; Stripe executes the card charge.
 - **Billing engine as coordinator.** `billing` is the one package that works across domains. It calls usage, pricing, invoice, payment and the others only through small interfaces it defines itself (`UsageAggregator`, `PricingReader`, `InvoiceWriter`, `InvoiceCharger` and so on). The other domains do not know about each other, and the engine can be tested with fakes.
 - **Ledger and audit records for money.** Credit grants, usage, expiry and adjustments are entries in one credit ledger. The ledger is not strictly append-only: each grant entry keeps a running count of what has been used of it (`consumed_cents`, `cn_retired_cents`), updated in place. The audit log is append-only: the database refuses any change or delete in it.
 
 ## Package layout
 
 ```
-cmd/velox/                  — single Go binary
-cmd/velox-doctor/           — read-only money-invariant sweep (see ENGINEERING.md)
+cmd/hardcount/                  — single Go binary
+cmd/hardcount-doctor/           — read-only money-invariant sweep (see ENGINEERING.md)
 internal/                     (abridged — one package per domain)
   domain/                   — pure domain models, zero deps
   auth/                     — API key auth (3 stored key types plus dashboard sessions, per-route permissions)
@@ -99,7 +99,7 @@ web-v2/                     — operator dashboard (React 19 + TypeScript + Tail
 
 ## Background work
 
-Every copy of Velox runs the same background loops. Jobs that must run once
+Every copy of Hardcount runs the same background loops. Jobs that must run once
 across all copies take a **leader lease** first: a row in the
 `leader_leases` table that lets exactly one copy run one tick of that job.
 The lease expires 10 seconds after its last renewal, so another copy takes
@@ -127,7 +127,7 @@ stuck: [A background job is stuck](ops/runbook/background-job-stuck.md).
 
 ## Tech stack
 
-**Backend** — Go 1.26, chi/v5 router, PostgreSQL 16 with RLS, `shopspring/decimal` for money, `signintech/gopdf` for invoices, `wneessen/go-mail` to build emails (Velox's own SMTP code sends them), Prometheus metrics.
+**Backend** — Go 1.26, chi/v5 router, PostgreSQL 16 with RLS, `shopspring/decimal` for money, `signintech/gopdf` for invoices, `wneessen/go-mail` to build emails (Hardcount's own SMTP code sends them), Prometheus metrics.
 
 **Frontend** — React 19, TypeScript, Vite, TailwindCSS, shadcn/ui, Lucide icons.
 
@@ -138,7 +138,7 @@ stuck: [A background job is stuck](ops/runbook/background-job-stuck.md).
 Tax is calculated by one of three providers in `internal/tax`: `none`, `manual` and `stripe_tax`. Each tenant picks one in `tenant_settings.tax_provider`. The billing engine resolves the provider when it builds the invoice, and reuses the same provider at finalize and at credit-note issue. How an operator chooses and runs them: [Tax calculation](ops/tax-calculation.md).
 
 - **`none`** returns zero per line. `Commit` and `Reverse` do nothing. An empty `tax_provider` falls through to `none`. An unrecognised value is an error that stops invoice creation for that tenant, so a corrupted settings row stalls billing instead of taxing at zero.
-- **`manual`** applies `tenant_settings.tax_rate` (a percent: `7.25` is 7.25%) and `tenant_settings.tax_name` to every line, except a prepaid-commit purchase line, which no provider is asked to tax ([Tax on prepaid credit](ai-pricing.md#tax-on-prepaid-credit)). It handles tax-inclusive pricing (`Request.TaxInclusive`), exempt customers (`StatusExempt`) and reverse-charge customers (`StatusReverseCharge`). `Commit` and `Reverse` do nothing, because there is no state outside Velox to record.
+- **`manual`** applies `tenant_settings.tax_rate` (a percent: `7.25` is 7.25%) and `tenant_settings.tax_name` to every line, except a prepaid-commit purchase line, which no provider is asked to tax ([Tax on prepaid credit](ai-pricing.md#tax-on-prepaid-credit)). It handles tax-inclusive pricing (`Request.TaxInclusive`), exempt customers (`StatusExempt`) and reverse-charge customers (`StatusReverseCharge`). `Commit` and `Reverse` do nothing, because there is no state outside Hardcount to record.
 - **`stripe_tax`** calls Stripe's Tax Calculations API at invoice build, creates a `tax_transaction` at finalize (`Commit`), and reverses it at credit-note issue (`Reverse`). The Stripe client is resolved from the context (`tenant_id` and `livemode`) through the `StripeClientResolver` interface, so each tenant's calls reach its own Stripe account in the right mode.
 
 ### The provider interface
@@ -165,7 +165,7 @@ When `stripe_tax` fails, the error propagates, the engine defers the invoice to 
 | `credentials_unreadable` | The tenant's Stripe credentials for the mode could not be read |
 | `api_error` | Stripe Tax returned an error |
 
-Each failure increments `velox_tax_outcome_total{outcome="deferred", reason}` and logs a `warn`. Successful calculations are not counted.
+Each failure increments `hardcount_tax_outcome_total{outcome="deferred", reason}` and logs a `warn`. Successful calculations are not counted.
 
 `block` is the only `OnFailure` value. The `fallback_manual` policy, which used the tenant's manual rate during a Stripe Tax outage, was removed (see [ADR-041](adr/041-tax-fallback-manual-removed.md)). It traded correctness for availability. An invoice at a guessed tax rate is a compliance risk: a wrong rate exposes regulated marketplaces and tenants registered for EU VAT under OIDAR. Deferring with a retry is safe, the pile of deferred invoices is itself the alert, and a short outage clears on the next tick.
 
@@ -190,7 +190,7 @@ Tax decisions are recorded on the invoice itself, not in a separate audit table:
 | `invoice_line_items.tax_rate` | Rate applied to this line (a percent: `7.25` is 7.25%) |
 | `invoice_line_items.tax_name` | Label shown on the invoice |
 
-The line fields are what the customer sees on the PDF. The invoice fields link to Stripe: they let `Reverse` find the original `tax_transaction`, and let an operator match a Velox invoice to Stripe's tax reports without reading logs.
+The line fields are what the customer sees on the PDF. The invoice fields link to Stripe: they let `Reverse` find the original `tax_transaction`, and let an operator match a Hardcount invoice to Stripe's tax reports without reading logs.
 
 `internal/tax/taxid.go` checks the shape of customer tax IDs (VAT, GST and others) and puts the checked ID on the invoice, so the PDF shows the right legal text. It does not ask a tax authority whether the ID exists.
 

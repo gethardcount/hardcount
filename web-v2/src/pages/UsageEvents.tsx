@@ -261,7 +261,7 @@ export default function UsageEventsPage() {
       <div className="flex flex-wrap justify-between items-center gap-3">
         <div className="min-w-0 flex-1 basis-72">
           <h1 className="text-2xl font-semibold text-foreground">Usage</h1>
-          <p className="text-sm text-muted-foreground mt-1">What each customer used, as your app reported it. Velox adds it up and prices it on their invoices.</p>
+          <p className="text-sm text-muted-foreground mt-1">What each customer used, as your app reported it. Hardcount adds it up and prices it on their invoices.</p>
         </div>
         {total > 0 && (
           <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting}>

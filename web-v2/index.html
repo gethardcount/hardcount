@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Velox</title>
+    <title>Hardcount</title>
     <script>
       // Apply the saved theme before first paint, on every route (sign-in and
       // public pages too), so a dark-mode user never sees a light flash and
@@ -14,7 +14,7 @@
       try {
         var p = location.pathname;
         var customerFacing = /^\/(invoice\/|update-payment|payment-method-added|portal)/.test(p);
-        var t = customerFacing ? 'light' : localStorage.getItem('velox-theme');
+        var t = customerFacing ? 'light' : localStorage.getItem('hardcount-theme');
         if (t === 'dark' || (t !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
           document.documentElement.classList.add('dark');
         }

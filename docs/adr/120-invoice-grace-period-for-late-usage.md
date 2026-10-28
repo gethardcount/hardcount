@@ -1,13 +1,13 @@
 # ADR-120: A period's invoice is built after a grace period, and late usage after it is not billed automatically
 
 **Date:** 2026-10-14
-**Status:** Accepted (amended 2026-10-19: credit expiry no longer uses the grace; amended 2026-10-22: dunning's final pause and cancel wait for the grace; amended 2026-10-22: late usage after the invoice is flagged); amended by [ADR-130](130-usage-prices-belong-to-the-plan.md) (after_close reads the meter's aggregation, built in PR-2; an event's answer says what Velox found when it arrived, and one unbilled counter, built in PR-6 #1390)
+**Status:** Accepted (amended 2026-10-19: credit expiry no longer uses the grace; amended 2026-10-22: dunning's final pause and cancel wait for the grace; amended 2026-10-22: late usage after the invoice is flagged); amended by [ADR-130](130-usage-prices-belong-to-the-plan.md) (after_close reads the meter's aggregation, built in PR-2; an event's answer says what Hardcount found when it arrived, and one unbilled counter, built in PR-6 #1390)
 
-**Amended by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23. Until each part is built, this ADR describes the code. In the after_close rule, "every bucket of the meter is sum or count" becomes "the meter's aggregation is sum or count", and the `last_ever` case goes (PR-2, built in #1376: no meter has a `last_ever` rule any more, so the bullet on it below no longer applies). "Prices its meter" is read from each current plan at its pin of the period: the period's start, or where the subscription first joined the plan in it (PR-4, amended in #1388). Since PR-6 review round 2 the before-the-period-start case no longer asks whether a plan prices the meter (see the amendment of 2026-10-27). Built in PR-6 (#1390), with D07 folded in: the answer that writes an event carries a `billing_status` (`after_close`, `no_price`, `not_on_plan`, `outside_subscription`) when Velox finds a reason it is not billed, as a snapshot of what Velox found then, not a promise; and `velox_usage_after_close_total{origin}` became `velox_usage_unbilled_total{reason, origin}` (see the amendment of 2026-10-27 below). Two stated exceptions to "a flag is never false" stay (see "Where a present status can be wrong" in that amendment): a price write whose transaction spans a period start and commits after the ingest read, and a subscription change that commits between the read and the write. The grace and the after_close flag stay.
+**Amended by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23. Until each part is built, this ADR describes the code. In the after_close rule, "every bucket of the meter is sum or count" becomes "the meter's aggregation is sum or count", and the `last_ever` case goes (PR-2, built in #1376: no meter has a `last_ever` rule any more, so the bullet on it below no longer applies). "Prices its meter" is read from each current plan at its pin of the period: the period's start, or where the subscription first joined the plan in it (PR-4, amended in #1388). Since PR-6 review round 2 the before-the-period-start case no longer asks whether a plan prices the meter (see the amendment of 2026-10-27). Built in PR-6 (#1390), with D07 folded in: the answer that writes an event carries a `billing_status` (`after_close`, `no_price`, `not_on_plan`, `outside_subscription`) when Hardcount finds a reason it is not billed, as a snapshot of what Hardcount found then, not a promise; and `hardcount_usage_after_close_total{origin}` became `hardcount_usage_unbilled_total{reason, origin}` (see the amendment of 2026-10-27 below). Two stated exceptions to "a flag is never false" stay (see "Where a present status can be wrong" in that amendment): a price write whose transaction spans a period start and commits after the ingest read, and a subscription change that commits between the read and the write. The grace and the after_close flag stay.
 
 ## Summary
 
-Velox builds a billing period's invoice once `INVOICE_GRACE_PERIOD` has
+Hardcount builds a billing period's invoice once `INVOICE_GRACE_PERIOD` has
 passed after the period ends. The default is 1 hour, the range is 0 to 72
 hours, and 0 builds it as soon as the period ends. Usage stamped inside the
 period that arrives within the grace is on the invoice, unless a
@@ -15,7 +15,7 @@ spend-threshold invoice was built after its timestamp (see Risks).
 
 Once the invoice is built it does not change. Usage for that period that
 arrives later is stored but billed on no invoice, now or later; the operator
-can bill it with a one-off invoice. Velox does not refuse late usage, and
+can bill it with a one-off invoice. Hardcount does not refuse late usage, and
 since 2026-10-22 it says so on the answer: `billing_status: after_close`
 (see the amendment).
 
@@ -31,7 +31,7 @@ Dunning's final pause or cancel waits for the grace (amended 2026-10-22).
 ## Context
 
 Usage reaches a billing system some time after it happens: pipelines batch,
-retry and replay. Issue #961 asked what Velox does with usage that arrives
+retry and replay. Issue #961 asked what Hardcount does with usage that arrives
 after its period has ended.
 
 Before this change the answer was luck. The hourly billing run closed a
@@ -102,8 +102,8 @@ difference on a later invoice
    keeps that mark, see ADR-112), and no write-off, escalation, email or
    webhook fires then. The dashboard labels the wait "Final step". Test
    clocks still pass no grace.
-4. **Gauges.** `velox_billing_due_subscriptions` and
-   `velox_billing_oldest_due_age_seconds` use the same shifted instant. The
+4. **Gauges.** `hardcount_billing_due_subscriptions` and
+   `hardcount_billing_oldest_due_age_seconds` use the same shifted instant. The
    age is counted from the due instant plus the grace.
 5. **Credit expiry does not use the grace** (amended 2026-10-19). Both
    expiry sweeps skip a grant while a close or a period invoice that can
@@ -120,7 +120,7 @@ difference on a later invoice
 **One grace on the due instant, nothing else.** The close already reads
 usage by event timestamp at close time. Delaying the close is the whole
 mechanism: no draft that is re-aggregated, no second read. A draft that is
-refreshed was the alternative; Velox's draft lines are frozen once written,
+refreshed was the alternative; Hardcount's draft lines are frozen once written,
 so it would have needed a new re-aggregation path.
 
 **Both scan arms and the engine use one instant.** If only the
@@ -223,8 +223,8 @@ pipeline lags longer raises it.
   Every other draw tests expiry at its own instant.
 - **Late usage after the invoice is flagged per event, but not listed.**
   Since 2026-10-22 (amendment below) the answer that writes such an event
-  says so, and `velox_usage_unbilled_total{reason="after_close"}` counts
-  them (`velox_usage_after_close_total` until 2026-10-27). There is still
+  says so, and `hardcount_usage_unbilled_total{reason="after_close"}` counts
+  them (`hardcount_usage_after_close_total` until 2026-10-27). There is still
   no list of them per customer and period, and no dashboard notice.
   **Deferred: the per-customer list** (and a pre-filled one-off invoice).
   Trigger: an operator needs to find which events missed an invoice after
@@ -243,8 +243,8 @@ Usage that arrives after its period's invoice is still stored, answered
   with `billing_status: "after_close"`;
 - `POST /v1/usage-events/batch` and the LiteLLM callback count such rows in
   `after_close`;
-- `velox_usage_after_close_total{origin}` counts them, with a WARN log line
-  per row. (Since 2026-10-27: `velox_usage_unbilled_total{reason="after_close", origin}`.)
+- `hardcount_usage_after_close_total{origin}` counts them, with a WARN log line
+  per row. (Since 2026-10-27: `hardcount_usage_unbilled_total{reason="after_close", origin}`.)
 
 **The rule** (`internal/usage/open_period.go`, `classify`). An event is
 after_close when an active or trialing subscription that prices its meter
@@ -329,14 +329,14 @@ amendment of 2026-10-27 it is not checked against that period's prices. A row th
 counts as `pending_threshold_invoice`: the period's invoice bills it only
 if that threshold invoice is voided first.
 
-## Amendment 2026-10-27: an event's answer says what Velox found (ADR-130 PR-6, D07)
+## Amendment 2026-10-27: an event's answer says what Hardcount found (ADR-130 PR-6, D07)
 
 The after_close signal now has three siblings. The rule is still
 `classify` (`internal/usage/open_period.go`), and the answer that writes
 an event can carry one of four statuses.
 
 **The contract** (main session, 2026-10-27). `billing_status` is what
-Velox found when the event arrived. Velox checks the event against the
+Hardcount found when the event arrived. Hardcount checks the event against the
 customer's subscriptions, the plans and prices in force, and the invoices
 already built at that moment.
 
@@ -348,8 +348,8 @@ already built at that moment.
     time.
   - `no_price`: the plan that bills the time prices the meter, but no
     price of it takes the event's dimensions.
-- No status means Velox found no reason then. It is not a promise that the
-  event will be billed. Velox checks only the customer's current billing
+- No status means Hardcount found no reason then. It is not a promise that the
+  event will be billed. Hardcount checks only the customer's current billing
   periods: time after a period end whose invoice is not built yet is not
   checked. A later change can change the outcome either way: a
   subscription created, activated or changed, a trial extended, a
@@ -406,7 +406,7 @@ silent one. Nothing is sent when an open period bills the event, when an
 unpaid threshold invoice covers it (a void would give it back to the
 period), or when a subscription does not check it (below). A subscription
 that does not check an event outranks every flag of another (review round
-4): that subscription may bill it, so Velox found no reason for the
+4): that subscription may bill it, so Hardcount found no reason for the
 customer as a whole.
 
 **The floor is where the close began to bill** (review round 3). A
@@ -432,7 +432,7 @@ nowhere.
   (hourly by default).
 
 An unpriced event there still gets the close's unpriced-usage WARN and
-`velox_usage_unpriced_quantity_total` (not for a test-clock subscription).
+`hardcount_usage_unpriced_quantity_total` (not for a test-clock subscription).
 
 **Which plan an event is checked against.** The close bills an open
 period by plan stretches: each stretch of the period during which an item
@@ -490,7 +490,7 @@ request. The LiteLLM answer counts the four statuses. The held-usage
 release counts `no_price` beside `not_on_plan`, by the same rule, so a
 released row in the current period that no price takes is never
 `in_open_period`. A replay or a deduplicated row carries no status.
-`velox_usage_unbilled_total{reason, origin}` counts every written row by
+`hardcount_usage_unbilled_total{reason, origin}` counts every written row by
 status, rows the held-usage release writes included (`origin="backfill"`);
 only an `after_close` row also logs a WARN line, as before, because the
 other three are a setup to fix and can be every event of a customer.

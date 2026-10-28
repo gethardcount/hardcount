@@ -18,7 +18,7 @@ type StatusRow struct {
 }
 
 // Status reads the leader_status view (all roles). It is the cluster fact
-// behind the velox_leader_* gauges and the runbook's first query; a role
+// behind the hardcount_leader_* gauges and the runbook's first query; a role
 // that has never ticked reports HasTicked=false with LastTickAgeS=0.
 func Status(ctx context.Context, db *sql.DB) ([]StatusRow, error) {
 	rows, err := db.QueryContext(ctx, `

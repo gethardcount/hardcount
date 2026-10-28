@@ -10,13 +10,13 @@ import (
 	"github.com/sagarsuperuser/velox/internal/doctor"
 )
 
-// The docs that state how many checks velox-doctor has must state the real
+// The docs that state how many checks hardcount-doctor has must state the real
 // number. The count was left behind twice (28 → 30, 30 → 32) when checks were
 // added; this fails the PR that adds the next one until the docs say so.
 func TestDocsStateTheCheckCount(t *testing.T) {
 	for file, pattern := range map[string]string{
-		"ENGINEERING.md":                    `velox-doctor, (\d+) checks`,
-		"benchmarks/failure-correctness.md": "`velox-doctor` now has (\\d+) checks",
+		"ENGINEERING.md":                    `hardcount-doctor, (\d+) checks`,
+		"benchmarks/failure-correctness.md": "`hardcount-doctor` now has (\\d+) checks",
 	} {
 		b, err := os.ReadFile(filepath.Join("..", "..", "docs", file))
 		if err != nil {
@@ -28,7 +28,7 @@ func TestDocsStateTheCheckCount(t *testing.T) {
 			continue
 		}
 		if n, _ := strconv.Atoi(string(m[1])); n != len(doctor.Checks) {
-			t.Errorf("docs/%s says %d checks; velox-doctor has %d", file, n, len(doctor.Checks))
+			t.Errorf("docs/%s says %d checks; hardcount-doctor has %d", file, n, len(doctor.Checks))
 		}
 	}
 }

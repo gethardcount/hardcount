@@ -16,7 +16,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/testutil"
 )
 
-// Facts: dates (ADR-128 §5, PR 7). A line Velox writes at an instant the
+// Facts: dates (ADR-128 §5, PR 7). A line Hardcount writes at an instant the
 // contract names is dated at that instant, on both clocks. Each scenario uses
 // the playbook's "one advance, many boundaries" shape: the test clock is
 // advanced to two days past the boundary, so a row dated at the advance
@@ -306,7 +306,7 @@ func (r *datesRig) finalizeRowMeta(invoiceID string) map[string]any {
 }
 
 // TestActivityDates_BornFinalized is P-1: the finalize audit row of an
-// invoice Velox created already finalized says so (born_finalized: true), so
+// invoice Hardcount created already finalized says so (born_finalized: true), so
 // the "Invoice finalized" line can say why the invoice exists. Writers: the
 // day-1 invoice, the proration invoice of an immediate upgrade, the cycle
 // close and the final invoice of an immediate cancel. The spend threshold's
@@ -365,13 +365,13 @@ func TestActivityDates_BornFinalized(t *testing.T) {
 
 // TestActivityDates_HostedPageAttempts is P-2 (ADR-128 decision 7, reversing
 // ADR-102's wall-clock rule): a charge attempt the settle path records for a
-// PaymentIntent Velox did not make (the hosted payment page) is dated on the
+// PaymentIntent Hardcount did not make (the hosted payment page) is dated on the
 // invoice's test clock, like any other act on a pinned invoice. Writes go
 // through the production payment adapter's settle (the webhook's entry
 // point, on a ctx with no clock) and the real invoice store; reads through
 // the real router.
 //
-// Collision: a Velox-made dunning retry whose failure webhook commits before
+// Collision: a Hardcount-made dunning retry whose failure webhook commits before
 // the charge call records its attempt. The early report stamps the invoice's
 // clock (frozen_time); the retry's own write carries its slot and must win,
 // because the writer that made the attempt owns its facts (the trigger_source

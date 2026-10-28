@@ -10,7 +10,7 @@ import "strings"
 //   - Some codes don't read as English when title-cased ("Do not honor.",
 //     "Lost card.", "Pickup card." — terse and ambiguous).
 //   - Stripe's docs already provide operator-safe phrasings; using them
-//     keeps Velox's UI consistent with how Stripe's own dashboard
+//     keeps Hardcount's UI consistent with how Stripe's own dashboard
 //     renders the same codes.
 //   - Operator copy is uniform regardless of which code surfaces (no
 //     mix of "Insufficient funds" and "Pickup card.").

@@ -53,7 +53,7 @@ func TestSimAxis_ClockDrivenLifecycle_EveryAuditRowIsStamped(t *testing.T) {
 	// A clock frozen well away from wall-clock: sim time and real time must be
 	// distinguishable, or a test that stamps wall-clock passes by accident.
 	frozen := time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC)
-	clockID := postgres.NewID("vlx_tclk")
+	clockID := postgres.NewID("hc_tclk")
 	execTx(t, db, ctx, tenantID,
 		`INSERT INTO test_clocks (id, tenant_id, livemode, name, frozen_time, status)
 		 VALUES ($1, $2, false, 'Parity Clock', $3, 'ready')`, clockID, tenantID, frozen)
@@ -103,8 +103,8 @@ func TestSimAxis_ClockDrivenLifecycle_EveryAuditRowIsStamped(t *testing.T) {
 	// the assertion below pins exactly that.
 	cycleStart := frozen.AddDate(0, -3, 0)
 	cycleEnd := cycleStart.AddDate(0, 1, 0)
-	subID := postgres.NewID("vlx_sub")
-	itemID := postgres.NewID("vlx_si")
+	subID := postgres.NewID("hc_sub")
+	itemID := postgres.NewID("hc_si")
 	execTx(t, db, ctx, tenantID, `
 		INSERT INTO subscriptions (
 			id, tenant_id, code, display_name, customer_id, status, billing_time,

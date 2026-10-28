@@ -335,7 +335,7 @@ func TestBillFinalOnImmediateCancel_AfterThresholdFire_NetNegativeRow(t *testing
 	}
 	invoices := &mockInvoices{invoices: []domain.Invoice{{
 		ID: "inv_thr", TenantID: "t1", CustomerID: "cus_1", SubscriptionID: "sub_1",
-		InvoiceNumber: "VLX-THR-1", BillingReason: domain.BillingReasonThreshold,
+		InvoiceNumber: "HC-THR-1", BillingReason: domain.BillingReasonThreshold,
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentSucceeded,
 		BillingPeriodStart: periodStart, BillingPeriodEnd: fireEnd,
 	}}}

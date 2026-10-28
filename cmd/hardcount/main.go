@@ -68,7 +68,7 @@ func main() {
 			os.Exit(1)
 		}
 	case "version":
-		fmt.Println("velox " + version.Version)
+		fmt.Println("hardcount " + version.Version)
 	case "help", "-h", "--help":
 		printUsage()
 	default:
@@ -111,7 +111,7 @@ func serve() {
 	}
 	defer func() { _ = tracingShutdown(context.Background()) }()
 
-	slog.Info("velox starting", "env", cfg.Env, "port", cfg.Port)
+	slog.Info("hardcount starting", "env", cfg.Env, "port", cfg.Port)
 
 	pool, err := config.OpenPostgres(cfg.DB)
 	if err != nil {
@@ -439,8 +439,8 @@ func runMigrateStatus() {
 	fmt.Print(migrate.FormatPlan(p, version.Version))
 }
 
-// rollbackRefused is what `velox migrate rollback` prints outside local.
-const rollbackRefused = `velox migrate rollback runs only with APP_ENV=local.
+// rollbackRefused is what `hardcount migrate rollback` prints outside local.
+const rollbackRefused = `hardcount migrate rollback runs only with APP_ENV=local.
 Rolling back in staging or production loses data the newer release wrote. To go back, restore the backup taken before the upgrade: docs/production-one-vm.md#going-back`
 
 // runMigrateRollback undoes the latest migration, one step, on a local
@@ -460,7 +460,7 @@ func runMigrateRollback() {
 }
 
 func printUsage() {
-	fmt.Println(`velox — usage-based billing engine
+	fmt.Println(`hardcount — usage-based billing engine
 
 Commands:
   serve                Start the API server (default)
@@ -476,20 +476,20 @@ Environment:
   DATABASE_URL              PostgreSQL connection string — admin/migration role (or the
                             split DB_HOST/DB_NAME/DB_USER/DB_PASSWORD shape; full list in
                             deploy/compose/.env.example)
-  APP_DATABASE_URL          Runtime connection for the least-privilege velox_app role (RLS
+  APP_DATABASE_URL          Runtime connection for the least-privilege hardcount_app role (RLS
                             enforced). Used verbatim; REQUIRED in staging/production. Local
-                            dev derives velox_app:velox_app from DATABASE_URL when unset.
+                            dev derives hardcount_app:hardcount_app from DATABASE_URL when unset.
   PORT                      HTTP port (default: 8080)
   APP_ENV                   Environment: local, staging, production (default: local)
   RUN_MIGRATIONS_ON_BOOT    Run migrations on server start (default: false)
-  VELOX_BOOTSTRAP_TOKEN     Token for POST /v1/bootstrap endpoint (min 16 chars outside local)
+  HARDCOUNT_BOOTSTRAP_TOKEN     Token for POST /v1/bootstrap endpoint (min 16 chars outside local)
   PAYMENT_UPDATE_URL        Base URL for payment update page (e.g. https://app.example.com/update-payment)
   PAYMENT_UPDATE_RETURN_URL Where Stripe Checkout returns after the public payment-update flow; must be a real SPA route, e.g. https://app.example.com/payment-method-added (handler appends ?status=success|cancel)
-  VELOX_ENCRYPTION_KEY      64-char hex key for PII encryption at rest
+  HARDCOUNT_ENCRYPTION_KEY      64-char hex key for PII encryption at rest
   REDIS_URL                 Redis URL for distributed rate limiting`)
 }
 
-// deriveAppURL replaces the user:password in a DATABASE_URL with velox_app:velox_app.
+// deriveAppURL replaces the user:password in a DATABASE_URL with hardcount_app:hardcount_app.
 // Returns "" if the URL can't be parsed. LOCAL DEV ONLY (ADR-073) —
 // staging/production require an explicit APP_DATABASE_URL.
 func deriveAppURL(adminURL string) string {
@@ -497,7 +497,7 @@ func deriveAppURL(adminURL string) string {
 	if err != nil {
 		return ""
 	}
-	u.User = neturl.UserPassword("velox_app", "velox_app")
+	u.User = neturl.UserPassword("hardcount_app", "hardcount_app")
 	return u.String()
 }
 
@@ -523,7 +523,7 @@ func resolveAppURL(env, adminURL, appURL string) (url, fallbackWarn string, err 
 			switch password {
 			case "":
 				return "", "", fmt.Errorf("APP_DATABASE_URL has no password (trust-auth shape) — forbidden in %s; set a real password for the app role (ALTER ROLE %s PASSWORD ...)", env, username)
-			case "velox_app", username:
+			case "hardcount_app", username:
 				return "", "", fmt.Errorf("APP_DATABASE_URL uses the default/guessable password for role %q — forbidden in %s; rotate it (openssl rand -hex 24, then ALTER ROLE ... PASSWORD) and update APP_DATABASE_URL", username, env)
 			}
 		}
@@ -536,7 +536,7 @@ func resolveAppURL(env, adminURL, appURL string) (url, fallbackWarn string, err 
 
 	derived := deriveAppURL(adminURL)
 	if derived == "" || derived == adminURL {
-		return "", "running with admin database connection — RLS NOT enforced. Create the velox_app role.", nil
+		return "", "running with admin database connection — RLS NOT enforced. Create the hardcount_app role.", nil
 	}
 	return derived, "", nil
 }
@@ -557,7 +557,7 @@ func checkRLSCapability(pool *sql.DB) (role string, canBypass bool, err error) {
 // a default/empty password, or with a role that can bypass RLS — the
 // capability check is what catches the path of least resistance
 // (copying DATABASE_URL into APP_DATABASE_URL), which no string check
-// can see. Local dev keeps the velox_app:velox_app derivation and
+// can see. Local dev keeps the hardcount_app:hardcount_app derivation and
 // warn-and-fallback. The returned cleanup is a noop when falling back.
 func openAppPool(cfg config.Config, adminPool *sql.DB) (*sql.DB, func()) {
 	noop := func() {}
@@ -594,7 +594,7 @@ func openAppPool(cfg config.Config, adminPool *sql.DB) (*sql.DB, func()) {
 	}
 	if canBypass {
 		if cfg.Env != "local" {
-			slog.Error("refusing to start: the APP_DATABASE_URL role can BYPASS row-level security (superuser or BYPASSRLS) — tenants would not be isolated. Point APP_DATABASE_URL at a least-privilege role like velox_app, not the admin role — see docs/ops/postgres-requirements.md#the-two-database-users.", "role", role, "env", cfg.Env)
+			slog.Error("refusing to start: the APP_DATABASE_URL role can BYPASS row-level security (superuser or BYPASSRLS) — tenants would not be isolated. Point APP_DATABASE_URL at a least-privilege role like hardcount_app, not the admin role — see docs/ops/postgres-requirements.md#the-two-database-users.", "role", role, "env", cfg.Env)
 			os.Exit(1)
 		}
 		slog.Warn("app database role can bypass RLS — acceptable in local dev only", "role", role)

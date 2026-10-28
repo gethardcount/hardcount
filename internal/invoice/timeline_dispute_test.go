@@ -20,16 +20,16 @@ func TestDisputeTimelineEvents(t *testing.T) {
 	closed := opened.Add(30 * 24 * time.Hour)
 	due := opened.Add(14 * 24 * time.Hour)
 	open := domain.InvoiceDispute{
-		ID: "vlx_dsp_open", StripeDisputeID: "du_open", StripePaymentIntentID: "pi_1",
+		ID: "hc_dsp_open", StripeDisputeID: "du_open", StripePaymentIntentID: "pi_1",
 		Status: domain.DisputeNeedsResponse, Reason: "fraudulent", AmountCents: 4500, Currency: "USD",
 		OpenedAt: opened, EvidenceDueBy: &due,
 	}
 	lost := open
-	lost.ID, lost.StripeDisputeID, lost.Status, lost.ClosedAt = "vlx_dsp_lost", "du_lost", domain.DisputeLost, &closed
+	lost.ID, lost.StripeDisputeID, lost.Status, lost.ClosedAt = "hc_dsp_lost", "du_lost", domain.DisputeLost, &closed
 	won := lost
-	won.ID, won.StripeDisputeID, won.Status = "vlx_dsp_won", "du_won", domain.DisputeWon
+	won.ID, won.StripeDisputeID, won.Status = "hc_dsp_won", "du_won", domain.DisputeWon
 	inquiry := lost
-	inquiry.ID, inquiry.StripeDisputeID, inquiry.Status = "vlx_dsp_inq", "du_inq", domain.DisputeWarningClosed
+	inquiry.ID, inquiry.StripeDisputeID, inquiry.Status = "hc_dsp_inq", "du_inq", domain.DisputeWarningClosed
 
 	rows := disputeTimelineEvents([]domain.InvoiceDispute{open, lost, won, inquiry})
 	if len(rows) != 7 {
@@ -43,14 +43,14 @@ func TestDisputeTimelineEvents(t *testing.T) {
 		amount                      int64
 	}
 	for i, w := range []want{
-		{"dispute:opened:vlx_dsp_open", domain.EventPaymentDisputeOpened, "warning", "Payment disputed", 4500},
-		{"dispute:opened:vlx_dsp_lost", domain.EventPaymentDisputeOpened, "warning", "Payment disputed", 4500},
-		{"dispute:closed:vlx_dsp_lost", domain.EventPaymentDisputeClosed, "failed", "Dispute closed", 4500},
-		{"dispute:opened:vlx_dsp_won", domain.EventPaymentDisputeOpened, "warning", "Payment disputed", 4500},
-		{"dispute:closed:vlx_dsp_won", domain.EventPaymentDisputeClosed, "succeeded", "Dispute closed", 4500},
-		{"dispute:opened:vlx_dsp_inq", domain.EventPaymentDisputeOpened, "warning", "Payment disputed", 4500},
+		{"dispute:opened:hc_dsp_open", domain.EventPaymentDisputeOpened, "warning", "Payment disputed", 4500},
+		{"dispute:opened:hc_dsp_lost", domain.EventPaymentDisputeOpened, "warning", "Payment disputed", 4500},
+		{"dispute:closed:hc_dsp_lost", domain.EventPaymentDisputeClosed, "failed", "Dispute closed", 4500},
+		{"dispute:opened:hc_dsp_won", domain.EventPaymentDisputeOpened, "warning", "Payment disputed", 4500},
+		{"dispute:closed:hc_dsp_won", domain.EventPaymentDisputeClosed, "succeeded", "Dispute closed", 4500},
+		{"dispute:opened:hc_dsp_inq", domain.EventPaymentDisputeOpened, "warning", "Payment disputed", 4500},
 		// An inquiry that closed moved no money, so it shows no amount.
-		{"dispute:closed:vlx_dsp_inq", domain.EventPaymentDisputeClosed, "neutral", "Dispute closed", 0},
+		{"dispute:closed:hc_dsp_inq", domain.EventPaymentDisputeClosed, "neutral", "Dispute closed", 0},
 	} {
 		r := rows[i]
 		if r.ID != w.id || r.EventType != w.eventType || r.Status != w.status || r.Description != w.desc || r.Source != "dispute" {

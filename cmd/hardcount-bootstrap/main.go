@@ -42,18 +42,18 @@ func main() {
 	db := postgres.NewDB(pool, 5*time.Second)
 	ctx := context.Background()
 
-	bootstrapEmail := strings.TrimSpace(os.Getenv("VELOX_BOOTSTRAP_EMAIL"))
-	bootstrapPassword := strings.TrimSpace(os.Getenv("VELOX_BOOTSTRAP_PASSWORD"))
+	bootstrapEmail := strings.TrimSpace(os.Getenv("HARDCOUNT_BOOTSTRAP_EMAIL"))
+	bootstrapPassword := strings.TrimSpace(os.Getenv("HARDCOUNT_BOOTSTRAP_PASSWORD"))
 
 	// Tenant name resolution order:
-	//   1. VELOX_BOOTSTRAP_TENANT env var — works through `make bootstrap`
+	//   1. HARDCOUNT_BOOTSTRAP_TENANT env var — works through `make bootstrap`
 	//      (make swallows positional args and re-interprets them as
 	//      separate targets, so `make bootstrap "Tenant B"` would NOT
 	//      forward "Tenant B" to the binary)
 	//   2. Positional arg(s) — works when invoking the binary directly
-	//      (`go run ./cmd/velox-bootstrap "Tenant B"`)
+	//      (`go run ./cmd/hardcount-bootstrap "Tenant B"`)
 	//   3. RunBootstrap's default: "Demo Tenant"
-	tenantName := strings.TrimSpace(os.Getenv("VELOX_BOOTSTRAP_TENANT"))
+	tenantName := strings.TrimSpace(os.Getenv("HARDCOUNT_BOOTSTRAP_TENANT"))
 	if tenantName == "" && len(os.Args) > 1 {
 		tenantName = strings.Join(os.Args[1:], " ")
 	}
@@ -62,7 +62,7 @@ func main() {
 	// (tenant.RunBootstrap, ADR-073): one all-or-nothing tx creates
 	// tenant + settings + keys + owner user, guards authoritative under
 	// the bootstrap advisory lock. The CLI does NOT block
-	// additional-tenant creation — Velox's model is multi-tenant in the
+	// additional-tenant creation — Hardcount's model is multi-tenant in the
 	// data layer; pass a different email to spin up a second tenant in
 	// the same deployment (useful for cross-tenant tests, FLOW X1 /
 	// A2-disagreeing-identities, and ahead of any "platform admin" UI).
@@ -90,7 +90,7 @@ func main() {
 	}
 
 	fmt.Println("========================================")
-	fmt.Println("  Velox Bootstrap Complete")
+	fmt.Println("  Hardcount Bootstrap Complete")
 	fmt.Println("========================================")
 	fmt.Println()
 	fmt.Printf("  Tenant:     %s\n", result.Tenant.Name)
@@ -101,7 +101,7 @@ func main() {
 	if result.PasswordGenerated {
 		fmt.Printf("  Password: %s   (generated — save this; not retrievable)\n", result.OwnerPassword)
 	} else {
-		fmt.Println("  Password: (the value of VELOX_BOOTSTRAP_PASSWORD)")
+		fmt.Println("  Password: (the value of HARDCOUNT_BOOTSTRAP_PASSWORD)")
 	}
 	fmt.Println()
 	fmt.Println("  API keys for SDK / curl callers:")
@@ -120,9 +120,9 @@ func main() {
 	fmt.Println()
 	fmt.Println("  Need a second tenant for cross-tenant tests? Re-run with a")
 	fmt.Println("  different email:")
-	fmt.Println(`    make bootstrap VELOX_BOOTSTRAP_EMAIL=tenant-b@velox.local \`)
-	fmt.Println(`      VELOX_BOOTSTRAP_PASSWORD='choose-a-password' \`)
-	fmt.Println(`      VELOX_BOOTSTRAP_TENANT='Tenant B'`)
+	fmt.Println(`    make bootstrap HARDCOUNT_BOOTSTRAP_EMAIL=tenant-b@hardcount.local \`)
+	fmt.Println(`      HARDCOUNT_BOOTSTRAP_PASSWORD='choose-a-password' \`)
+	fmt.Println(`      HARDCOUNT_BOOTSTRAP_TENANT='Tenant B'`)
 	fmt.Println("========================================")
 }
 
@@ -130,11 +130,11 @@ func main() {
 // differ from the one that just collided, so the printed remedy is always
 // runnable as-is.
 func suggestFreeEmail(taken string) string {
-	const preferred = "tenant-b@velox.local"
+	const preferred = "tenant-b@hardcount.local"
 	if !strings.EqualFold(strings.TrimSpace(taken), preferred) {
 		return preferred
 	}
-	return "tenant-c@velox.local"
+	return "tenant-c@hardcount.local"
 }
 
 // printEmailExistsGuidance keeps the CLI's actionable re-run options on
@@ -142,10 +142,10 @@ func suggestFreeEmail(taken string) string {
 // routinely (re-running `make bootstrap` with the default email).
 func printEmailExistsGuidance(email string) {
 	if email == "" {
-		email = "admin@velox.local"
+		email = "admin@hardcount.local"
 	}
 	fmt.Fprintf(os.Stderr, "ERROR: an account already exists for %s.\n\n", email)
-	fmt.Fprintln(os.Stderr, "Velox is already bootstrapped for this email. Pick one:")
+	fmt.Fprintln(os.Stderr, "Hardcount is already bootstrapped for this email. Pick one:")
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "  1. Sign in with the existing credentials at http://localhost:5173/login")
 	fmt.Fprintln(os.Stderr, "  2. Create an ADDITIONAL tenant in the same deployment — each tenant")
@@ -155,9 +155,9 @@ func printEmailExistsGuidance(email string) {
 	// example used to be a hardcoded tenant-b@local, so whenever THAT was
 	// the conflicting email the remedy told the operator to re-run the
 	// exact command that had just errored.
-	fmt.Fprintf(os.Stderr, "       make bootstrap VELOX_BOOTSTRAP_EMAIL=%s \\\n", suggestFreeEmail(email))
-	fmt.Fprintln(os.Stderr, `         VELOX_BOOTSTRAP_PASSWORD='choose-a-password' \`)
-	fmt.Fprintln(os.Stderr, `         VELOX_BOOTSTRAP_TENANT='Tenant B'`)
+	fmt.Fprintf(os.Stderr, "       make bootstrap HARDCOUNT_BOOTSTRAP_EMAIL=%s \\\n", suggestFreeEmail(email))
+	fmt.Fprintln(os.Stderr, `         HARDCOUNT_BOOTSTRAP_PASSWORD='choose-a-password' \`)
+	fmt.Fprintln(os.Stderr, `         HARDCOUNT_BOOTSTRAP_TENANT='Tenant B'`)
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "  3. Wipe and re-bootstrap (loses all dev data):")
 	fmt.Fprintln(os.Stderr, "")

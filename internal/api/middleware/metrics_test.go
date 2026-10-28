@@ -44,7 +44,7 @@ func TestMetrics_LabelSpaceIsBounded(t *testing.T) {
 	}
 	for i := 0; i < 50; i++ {
 		hit(h, http.MethodGet, fmt.Sprintf("/v1/customers/cus_%d", i))
-		hit(h, http.MethodGet, fmt.Sprintf("/v1/customers/vlx_cus_%020d", i))
+		hit(h, http.MethodGet, fmt.Sprintf("/v1/customers/hc_cus_%020d", i))
 	}
 	hit(h, "BREW", "/v1/customers/x")
 	hit(h, http.MethodGet, "/v1/sub/ping")
@@ -109,12 +109,12 @@ func TestOutboxDeadLetterSeries_ExistAtZero(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		"velox_email_outbox_dead_lettered_total,cause=permanent,mode=live",
-		"velox_email_outbox_dead_lettered_total,cause=permanent,mode=test",
-		"velox_email_outbox_dead_lettered_total,cause=max_attempts,mode=live",
-		"velox_email_outbox_dead_lettered_total,cause=max_attempts,mode=test",
-		"velox_webhook_outbox_dead_lettered_total,cause=max_attempts,mode=live",
-		"velox_webhook_outbox_dead_lettered_total,cause=max_attempts,mode=test",
+		"hardcount_email_outbox_dead_lettered_total,cause=permanent,mode=live",
+		"hardcount_email_outbox_dead_lettered_total,cause=permanent,mode=test",
+		"hardcount_email_outbox_dead_lettered_total,cause=max_attempts,mode=live",
+		"hardcount_email_outbox_dead_lettered_total,cause=max_attempts,mode=test",
+		"hardcount_webhook_outbox_dead_lettered_total,cause=max_attempts,mode=live",
+		"hardcount_webhook_outbox_dead_lettered_total,cause=max_attempts,mode=test",
 	} {
 		if !have[want] {
 			t.Errorf("series %s is not exported before the first dead letter", want)

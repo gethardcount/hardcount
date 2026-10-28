@@ -88,7 +88,7 @@ func TestFirstInvoiceTroubleshootingMatchesTheAPI(t *testing.T) {
 		}
 	}
 
-	// The counts of rows Velox stores and does not bill are the
+	// The counts of rows Hardcount stores and does not bill are the
 	// usage.UnbilledCounts fields: not held (kept apart until released) and
 	// not skipped (calls that bill nothing, not stored).
 	var unbilled []string
@@ -109,11 +109,11 @@ func TestFirstInvoiceTroubleshootingMatchesTheAPI(t *testing.T) {
 		}
 		sort.Strings(named)
 		if !reflect.DeepEqual(named, unbilled) {
-			t.Errorf("the row %q names the counts %v; the counts Velox stores and does not bill are %v", strings.TrimSpace(r[0]), named, unbilled)
+			t.Errorf("the row %q names the counts %v; the counts Hardcount stores and does not bill are %v", strings.TrimSpace(r[0]), named, unbilled)
 		}
 	}
 	if !found {
-		t.Error("no row says which counts Velox stores and will not bill")
+		t.Error("no row says which counts Hardcount stores and will not bill")
 	}
 
 	// Step 5b with CUSTOMER_REF unset answers 200 with litellm's
@@ -134,7 +134,7 @@ func TestFirstInvoiceTroubleshootingMatchesTheAPI(t *testing.T) {
 	}
 }
 
-// ciPasses returns the arguments of each velox-docs-run call in ci.yml that
+// ciPasses returns the arguments of each hardcount-docs-run call in ci.yml that
 // runs docs/first-invoice.md.
 func ciPasses(t *testing.T) [][]string {
 	t.Helper()
@@ -142,7 +142,7 @@ func ciPasses(t *testing.T) [][]string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	re := regexp.MustCompile(`velox-docs-run"((?: +\S+)*?) +docs/first-invoice\.md\s*$`)
+	re := regexp.MustCompile(`hardcount-docs-run"((?: +\S+)*?) +docs/first-invoice\.md\s*$`)
 	var passes [][]string
 	for _, ln := range strings.Split(string(ci), "\n") {
 		if m := re.FindStringSubmatch(ln); m != nil {
@@ -160,16 +160,16 @@ func TestFirstInvoicePageNamesTheQuickStartRelease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := regexp.MustCompile(`(?m)^VELOX_VERSION="(v[0-9.]+)"$`).FindSubmatch(qs)
+	m := regexp.MustCompile(`(?m)^HARDCOUNT_VERSION="(v[0-9.]+)"$`).FindSubmatch(qs)
 	if m == nil {
-		t.Fatal("deploy/compose/quickstart.sh: no VELOX_VERSION line")
+		t.Fatal("deploy/compose/quickstart.sh: no HARDCOUNT_VERSION line")
 	}
 	release := string(m[1])
 	src, err := os.ReadFile("../../docs/first-invoice.md")
 	if err != nil {
 		t.Fatal(err)
 	}
-	link := "https://github.com/getvelox/velox/blob/" + release + "/docs/first-invoice.md"
+	link := "https://github.com/gethardcount/hardcount/blob/" + release + "/docs/first-invoice.md"
 	if !strings.Contains(string(src), link) {
 		t.Fatalf("docs/first-invoice.md does not link the page as of the quick start's release %s (%s)", release, link)
 	}
@@ -207,10 +207,10 @@ func TestFirstInvoiceDashboardLinksExist(t *testing.T) {
 				continue
 			}
 			found++
-			// /invoices/vlx_inv_… is the route /invoices/:<param>.
+			// /invoices/hc_inv_… is the route /invoices/:<param>.
 			var pat []string
 			for _, seg := range strings.Split(m[1], "/") {
-				if strings.HasPrefix(seg, "vlx_") {
+				if strings.HasPrefix(seg, "hc_") {
 					pat = append(pat, ":[A-Za-z]+")
 				} else {
 					pat = append(pat, regexp.QuoteMeta(seg))
@@ -359,7 +359,7 @@ func TestParseRefusesASubstitutionThatHidesAFailure(t *testing.T) {
 			t.Errorf("%q: want an error, got %v", script, err)
 		}
 	}
-	for _, script := range []string{"X=$(false)\nexport X", "export X=plain", "export VELOX=http://localhost:8080", "export X=\"a b\""} {
+	for _, script := range []string{"X=$(false)\nexport X", "export X=plain", "export HARDCOUNT=http://localhost:8080", "export X=\"a b\""} {
 		if _, err := parse("<!-- docs-run: command -->\n```bash\n" + script + "\n```\n"); err != nil {
 			t.Errorf("%q: want no error, got %v", script, err)
 		}
@@ -385,10 +385,10 @@ func TestMatchOutput(t *testing.T) {
 		want, got string
 		ok        bool
 	}{
-		{"vlx_pln_…", "vlx_pln_abc", true},
-		{"vlx_pln_…", "null", false},
-		{"vlx_pln_…", "vlx_pln_a\nvlx_pln_b", false}, // … stays within one line
-		{`"id": "vlx_sub_…"`, `"id": null`, false},
+		{"hc_pln_…", "hc_pln_abc", true},
+		{"hc_pln_…", "null", false},
+		{"hc_pln_…", "hc_pln_a\nhc_pln_b", false}, // … stays within one line
+		{`"id": "hc_sub_…"`, `"id": null`, false},
 		{`"total_cents": 600,`, `"total_cents": 601,`, false},
 		{"a\nb", "a  \nb\n\n", true}, // trailing spaces and blank lines
 		{"a\nb", "a\nb\nc", false},   // an extra line fails

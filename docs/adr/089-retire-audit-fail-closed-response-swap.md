@@ -6,7 +6,7 @@ Supersedes: the fail-closed half of the AuditLog middleware contract (no prior A
 
 ## Summary
 
-A failed audit-log write never changes the API response: the handler's response is served as is, and the failure is logged and counted in `velox_audit_write_errors_total`. The per-tenant `audit_fail_closed` setting, which swapped a committed response for `503 audit_error`, is removed, and migration 0149 dropped its column. That 503 reported a failure for a change that had already committed, the idempotency layer cached it for 24 hours, and a retry with a new key could repeat the change. Writing audit rows inside the business transaction ([ADR-090](090-audit-in-tx-emission.md)) replaces fail-closed where it is in place, because the change and its row commit or roll back together. Status: active.
+A failed audit-log write never changes the API response: the handler's response is served as is, and the failure is logged and counted in `hardcount_audit_write_errors_total`. The per-tenant `audit_fail_closed` setting, which swapped a committed response for `503 audit_error`, is removed, and migration 0149 dropped its column. That 503 reported a failure for a change that had already committed, the idempotency layer cached it for 24 hours, and a retry with a new key could repeat the change. Writing audit rows inside the business transaction ([ADR-090](090-audit-in-tx-emission.md)) replaces fail-closed where it is in place, because the change and its row commit or roll back together. Status: active.
 
 ## Context
 
@@ -53,7 +53,7 @@ Alternatives considered by the adversarial design panel:
 
 1. **Delete the response swap.** On audit write failure the middleware serves
    the handler's response untouched and records the failure
-   (`velox_audit_write_errors_total{tenant_id}` + ERROR log). The middleware
+   (`hardcount_audit_write_errors_total{tenant_id}` + ERROR log). The middleware
    never mutates a response — banned as a class. The middleware this named has
    since been DELETED (ADR-090: the catch-all is gone, replaced by a route
    registry and a pure-observer detector), and so was its regression test. The
@@ -84,7 +84,7 @@ default posture (fail-open + metric); no live tenant had opted in.
 
 - The `audit_error` 503 body and its "retry" instruction no longer exist;
   clients can no longer be stranded behind a cached audit 503.
-- `velox_audit_write_errors_total` is now unambiguous: every increment is a
+- `hardcount_audit_write_errors_total` is now unambiguous: every increment is a
   lost row on a served request (before, it conflated lost rows with blocked
   requests).
 - MANUAL_TEST's settings-diff flow example changed (the fail-closed flip is

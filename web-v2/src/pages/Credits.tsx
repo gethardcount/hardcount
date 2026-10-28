@@ -110,7 +110,7 @@ const entryTypeLabel = (t: string): string => ENTRY_TYPE_LABELS[t] ?? t
 // exactly-once expiry rides a consumed-vs-amount row-lock gate, not the
 // old description-LIKE dedup. Display-side we render the human phrase and
 // demote the machine id to subtext.
-const EXPIRED_GRANT_RE = /^Expired grant (vlx_ccl_\w+)$/
+const EXPIRED_GRANT_RE = /^Expired grant (hc_ccl_\w+)$/
 
 function SortableHead({
   label, sortKey: key, activeSortKey, sortDir, onSort, className,
@@ -528,7 +528,7 @@ export default function CreditsPage() {
         <div className="min-w-0 flex-1 basis-72">
           <h1 className="text-2xl font-semibold text-foreground">Credits</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Balance a customer can spend. Velox uses it to pay their invoices in the same currency before charging their card{customersWithCredits.size > 0 ? ` · ${totalOutstanding} across ${customersWithCredits.size} customer${customersWithCredits.size !== 1 ? 's' : ''}` : ''}
+            Balance a customer can spend. Hardcount uses it to pay their invoices in the same currency before charging their card{customersWithCredits.size > 0 ? ` · ${totalOutstanding} across ${customersWithCredits.size} customer${customersWithCredits.size !== 1 ? 's' : ''}` : ''}
           </p>
         </div>
         {customersWithCredits.size > 0 && (

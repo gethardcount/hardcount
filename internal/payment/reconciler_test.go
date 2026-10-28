@@ -67,7 +67,7 @@ func (m *mockReconcileStore) MarkPaymentFailedReportingTransition(_ context.Cont
 	if !ok {
 		return domain.Invoice{}, domain.PaymentFailureResult{}, errs.ErrNotFound
 	}
-	if !report.MovesInvoice(inv.Status, inv.PaymentStatus, inv.StripePaymentIntentID, inv.ChargeAttemptSeq, domain.AttemptNotVelox) {
+	if !report.MovesInvoice(inv.Status, inv.PaymentStatus, inv.StripePaymentIntentID, inv.ChargeAttemptSeq, domain.AttemptNotHardcount) {
 		return *inv, domain.PaymentFailureResult{}, nil
 	}
 	first := inv.PaymentStatus != domain.PaymentFailed || inv.StripePaymentIntentID != report.PaymentIntentID

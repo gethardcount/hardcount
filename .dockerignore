@@ -27,9 +27,9 @@ node_modules
 .vscode
 .idea
 
-# Build outputs and local binaries (the repo tracks a prebuilt velox-bootstrap;
+# Build outputs and local binaries (the repo tracks a prebuilt hardcount-bootstrap;
 # the image builds its own from source)
-velox-bootstrap
+hardcount-bootstrap
 bin/
 dist/
 *.test

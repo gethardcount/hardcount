@@ -1,18 +1,18 @@
 # Emails not going out
 
-Velox queues every email in the `email_outbox` table, and a background job
+Hardcount queues every email in the `email_outbox` table, and a background job
 sends them through your SMTP relay. Back to the [runbook index](index.md).
 
 ## Symptom
 
-- `velox_email_outbox_failing_emails{mode="live"}` is above 0. These emails
+- `hardcount_email_outbox_failing_emails{mode="live"}` is above 0. These emails
   were tried 3 or more times and queued over 30 minutes ago, and they keep
   failing.
-- `velox_email_outbox_oldest_due_age_seconds{mode="live"}` is above 1800.
+- `hardcount_email_outbox_oldest_due_age_seconds{mode="live"}` is above 1800.
   An email has been due for 30 minutes and no replica has sent it.
-- `velox_email_outbox_dead_lettered_total` rises. Emails were dead-lettered:
+- `hardcount_email_outbox_dead_lettered_total` rises. Emails were dead-lettered:
   set aside as `failed` and never tried again on their own.
-- `velox_email_outbox_pending` is above 1000.
+- `hardcount_email_outbox_pending` is above 1000.
 - Customers report missing invoice emails.
 
 ## Why
@@ -28,9 +28,9 @@ sends them through your SMTP relay. Back to the [runbook index](index.md).
     credential rotation.
   - `454`: the relay's sending quota or rate is used up, as in the SES
     sandbox.
-  - `email: SMTP not configured (SMTP_HOST unset)`: Velox has no relay.
+  - `email: SMTP not configured (SMTP_HOST unset)`: Hardcount has no relay.
 
-  Velox retries these for about 72 hours (15 tries), then dead-letters them
+  Hardcount retries these for about 72 hours (15 tries), then dead-letters them
   with `cause="max_attempts"`.
 - **The address can never get mail.** It bounced, it is suppressed after an
   earlier bounce, or it is not a valid address. These are dead-lettered at
@@ -83,7 +83,7 @@ different things by row status:
 
 A `last_error` that begins `email: recipient is not a single valid email
 address` is not a provider problem. The row holds an address saved by
-v0.8.2 or earlier, before Velox refused names, quotes and angle brackets,
+v0.8.2 or earlier, before Hardcount refused names, quotes and angle brackets,
 so it failed at once with
 no retry. Retrying the row sends the same address and fails again. Fix the
 customer's email or CC list (or the member's email) and send again.
@@ -92,11 +92,11 @@ customer's email or CC list (or the member's email) and send again.
 
 1. Fix the cause in `last_error`. Verify the sender with the relay, correct
    `SMTP_USERNAME` and `SMTP_PASSWORD`, raise the relay's quota, or set
-   `SMTP_HOST`. Velox reads the `SMTP_*` settings at start-up, so restart it
+   `SMTP_HOST`. Hardcount reads the `SMTP_*` settings at start-up, so restart it
    after changing them.
 2. Once the relay accepts mail, run step 3. Otherwise each pending email
    waits for its next try, up to 12 hours away, and
-   `velox_email_outbox_failing_emails` keeps paging until then.
+   `hardcount_email_outbox_failing_emails` keeps paging until then.
 3. Set `next_attempt_at` to now for every pending row:
 
    ```sql
@@ -132,7 +132,7 @@ customer's email or CC list (or the member's email) and send again.
 
 ## Verify
 
-`velox_email_outbox_failing_emails` falls to 0 as the pending emails are
+`hardcount_email_outbox_failing_emails` falls to 0 as the pending emails are
 sent,
-`velox_email_outbox_oldest_due_age_seconds` stays near 0, and
-`velox_email_outbox_dead_lettered_total` stops rising.
+`hardcount_email_outbox_oldest_due_age_seconds` stays near 0, and
+`hardcount_email_outbox_dead_lettered_total` stops rising.

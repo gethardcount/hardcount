@@ -255,7 +255,7 @@ func TestClassify_ReadsTheMeterOnlyWhenNeeded(t *testing.T) {
 }
 
 // TestClass_BillingStatus: each class answers with its status, and InOpen,
-// Unsettled and Later (Velox found no reason) carry none.
+// Unsettled and Later (Hardcount found no reason) carry none.
 func TestClass_BillingStatus(t *testing.T) {
 	for c, want := range map[Class]string{
 		Outside: "outside_subscription", NotOnPlan: "not_on_plan", AfterClose: "after_close",

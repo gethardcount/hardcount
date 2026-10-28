@@ -59,7 +59,7 @@ tax, and *"Transitioning the state of an invoice from `uncollectible` to `paid`
 through the Pay Invoices API"* increases it again
 (https://docs.stripe.com/tax/reports, verified verbatim).
 
-**Velox shipped the first half and then blocked the second half with a 409.**
+**Hardcount shipped the first half and then blocked the second half with a 409.**
 That is the actual defect the tax gate was papering over.
 
 The round trip is buildable — a re-report is a fresh calculation and a fresh
@@ -100,7 +100,7 @@ which is the same failure with a longer gap.
 ## The jurisdictional argument (corroborating, not load-bearing)
 
 Recovering tax remitted on an uncollected debt is **bad-debt relief** — a
-separate claim, conditioned on facts Velox does not hold:
+separate claim, conditioned on facts Hardcount does not hold:
 
 - **UK** — HMRC VAT Notice 700/18 §2.2: the VAT must already have been
   *"accounted for and paid to HMRC"*; the debt must be *"written off in your
@@ -150,7 +150,7 @@ an invoice as uncollectible results in the following: Stripe treats the
 subscription as if the user paid and stops attempting to collect payment. **The
 user's subscription continues as normal.**"* The pairing runs the other way at
 Stripe: a cancel-on-retry-exhaustion setting is what marks the invoice
-uncollectible. Velox's current behaviour is already parity. Pausing would also
+uncollectible. Hardcount's current behaviour is already parity. Pausing would also
 have deleted a choice the dialog explicitly offers, and would have re-stranded
 parked invoices on terminal subscriptions, where `SetPauseCollection` refuses
 (`internal/subscription/postgres.go:625`) and write-off is the only exit.
@@ -185,7 +185,7 @@ payment that already happened, not initiating one.
 - The relief hatch, minimum version: the invoice CSV export gains `tax_provider`
   and `tax_transaction_id`. It already carries `status`, `tax_amount_cents`,
   `uncollectible_at`, `due_at`, `paid_at` and `amount_paid_cents` — every input
-  the UK/CA/NY/TX tests need. What it lacked was whether Velox had already
+  the UK/CA/NY/TX tests need. What it lacked was whether Hardcount had already
   reversed at the provider, which is the one fact that decides whether the
   tenant's own claim would be a double claim.
 - Invoices written off **before** this change keep their reversal. Nothing can

@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Loader2, Eye, EyeOff } from 'lucide-react'
-import { VeloxLogo } from '@/components/VeloxLogo'
+import { HardcountLogo } from '@/components/HardcountLogo'
 
 // AcceptInvitePage consumes a team-invite link (?token= planted by the
 // invite email). Two shapes, decided by the server's preview:
@@ -83,7 +83,7 @@ export default function AcceptInvitePage() {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-4 bg-background">
       <div className="flex flex-col items-center mb-8">
-        <VeloxLogo size="lg" />
+        <HardcountLogo size="lg" />
         <p className="text-sm text-muted-foreground mt-2">
           {tokenState === 'valid' ? `You've been invited to join ${workspace}` : 'Team invitation'}
         </p>
@@ -176,7 +176,7 @@ export default function AcceptInvitePage() {
                 </>
               ) : (
                 <p className="text-sm text-muted-foreground">
-                  You already have a Velox account with this email. Accepting adds {workspace} to it.
+                  You already have a Hardcount account with this email. Accepting adds {workspace} to it.
                 </p>
               )}
 

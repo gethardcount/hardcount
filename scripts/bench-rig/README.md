@@ -1,4 +1,4 @@
-# Velox benchmark rig — reproduce the numbers yourself
+# Hardcount benchmark rig — reproduce the numbers yourself
 
 Everything in `docs/benchmarks/sustained-throughput.md` is produced by the
 scripts in this directory, and the point of this README is that **you can run
@@ -15,7 +15,7 @@ cd scripts/bench-rig
 | need | why | check |
 |---|---|---|
 | **AWS account + CLI** configured for `ap-south-1` | the rig is 2 EC2 (Graviton) + 1 RDS in one AZ | `aws sts get-caller-identity` answers |
-| **permissions**: EC2 (run/terminate instances, key pairs, security groups, describe), RDS (create/delete instance + subnet/parameter group, describe, log download), SSM `GetParameter` (AMI lookup), CloudWatch `GetMetricStatistics` + Logs `FilterLogEvents` (evidence capture, optional), Service Quotas read (optional); **optional, for the 1-second view**: `pi:GetResourceMetrics`/`pi:Describe*` (Performance Insights via API) and an IAM role named `velox-bench-rds-monitoring` with `AmazonRDSEnhancedMonitoringRole` attached (Enhanced Monitoring; the name matters — the benchmark policy may only pass `velox-bench-*` roles) | that is everything the scripts call. **No IAM writes are needed or used**; the role and the PI grant are one-time account-owner actions, and everything works without them, just without 1 s OS/wait-event data | `./teardown.sh --check` exits `0` (clean: no rig instances, RDS, SGs, keys, subnet/parameter groups, or rig RDS snapshots) — exit `2` means the CLI cannot see the account |
+| **permissions**: EC2 (run/terminate instances, key pairs, security groups, describe), RDS (create/delete instance + subnet/parameter group, describe, log download), SSM `GetParameter` (AMI lookup), CloudWatch `GetMetricStatistics` + Logs `FilterLogEvents` (evidence capture, optional), Service Quotas read (optional); **optional, for the 1-second view**: `pi:GetResourceMetrics`/`pi:Describe*` (Performance Insights via API) and an IAM role named `hardcount-bench-rds-monitoring` with `AmazonRDSEnhancedMonitoringRole` attached (Enhanced Monitoring; the name matters — the benchmark policy may only pass `hardcount-bench-*` roles) | that is everything the scripts call. **No IAM writes are needed or used**; the role and the PI grant are one-time account-owner actions, and everything works without them, just without 1 s OS/wait-event data | `./teardown.sh --check` exits `0` (clean: no rig instances, RDS, SGs, keys, subnet/parameter groups, or rig RDS snapshots) — exit `2` means the CLI cannot see the account |
 | **quota**: ≥ 12 on-demand Standard vCPUs in the region (`L-1216C47A`) for the large rig, ≥ 6 for the small | `c7g.2xlarge` (8) + `c7g.xlarge` (4) | `aws service-quotas get-service-quota --service-code ec2 --quota-code L-1216C47A` |
 | **a default VPC** in the region with subnets in `ap-south-1a` and `ap-south-1b` | RDS subnet groups need two AZs even for Single-AZ | `aws ec2 describe-vpcs --filters Name=isDefault,Values=true` |
 | **locally**: `go`, `k6`, `psql`, `ssh`, `curl`, `python3` (any), `aws` | `calibrate.sh` needs go + k6; the rest is glue | `k6 version` — pin **v2.2.0**, the version the calibration was proven against |
@@ -44,7 +44,7 @@ local Postgres, which is how the sequence is tested without spending anything.
 
 ## Reading the result
 
-`~/.velox-bench-rig/results-<timestamp>/summary.txt`, one line per configuration:
+`~/.hardcount-bench-rig/results-<timestamp>/summary.txt`, one line per configuration:
 
 ```
 batched   offered 1000 ev/s batch 10 | 5/5 passed | p50 median 9.1ms (8.7-9.4) | p99 median 41ms (33-58)
@@ -72,9 +72,9 @@ ceiling   CLOSED-LOOP 16 VUs batch 500 | 1/1 passed | ceiling median 9870 ev/s |
   compare with vendors who only publish that kind of number.
 - **`db-ceiling`** prints the DB's own commit floor for this row shape (leg A:
   a bare `BEGIN; INSERT; COMMIT` per transaction under pgbench — the
-  batch's rows in one multi-row INSERT), the same with Velox's
+  batch's rows in one multi-row INSERT), the same with Hardcount's
   per-transaction RLS protocol (leg B: the same insert plus the `set_config`
-  round trips Velox issues per transaction), and the closed-loop ceiling as a
+  round trips Hardcount issues per transaction), and the closed-loop ceiling as a
   fraction of each.
 
 Every run also leaves its evidence: `<tag>.txt` (k6 summary), `<tag>.k6.json`,
@@ -129,7 +129,7 @@ at checkpoint instead of deleted) ran dry
 
 ## Why the calibration comes first
 
-`ingest.js` reports numbers about Velox, and nothing about Velox tells you
+`ingest.js` reports numbers about Hardcount, and nothing about Hardcount tells you
 whether those numbers are true. `calibrate/` points the same script at a stub
 with a known service time and exact server-side counters and checks six things:
 delivered rate == offered and p50 == truth; server errors are reported and NOT
@@ -142,7 +142,7 @@ checks corresponds to a bug that actually shipped in this rig once.
 ## Things that will bite you (each one did)
 
 - **The bench is live-mode by default** (`BENCH_LIVEMODE=false` for test mode).
-  Live mode is Velox's real (non-simulated) data mode. Test-mode ingest does a
+  Live mode is Hardcount's real (non-simulated) data mode. Test-mode ingest does a
   per-event test-clock lookup production skips, so numbers measured in test mode
   understate production. Fixtures, key, seeded history and pgbench rows must all
   be in the same livemode partition; the scripts refuse otherwise.

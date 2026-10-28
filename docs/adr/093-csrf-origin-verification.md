@@ -6,11 +6,11 @@ Relates: ADR-011 (email+password sessions — the httpOnly cookie this protects)
 
 ## Summary
 
-Velox blocks cross-site request forgery (CSRF: another website making an operator's browser send a request that carries the session cookie) by checking where each request comes from. One middleware, `CSRFGuard`, wraps `/v1/auth` and the `/v1` group and refuses a cross-site POST, PUT, PATCH or DELETE with 403. It trusts the browser's `Sec-Fetch-Site` header first, then `Origin` matched against `CORS_ALLOWED_ORIGINS`; a request with neither header (a script) or a Bearer-key request with no session cookie passes. Header checks replace CSRF tokens because the dashboard is a first-party app that no other site embeds, so no token handling or frontend change is needed. Status: active.
+Hardcount blocks cross-site request forgery (CSRF: another website making an operator's browser send a request that carries the session cookie) by checking where each request comes from. One middleware, `CSRFGuard`, wraps `/v1/auth` and the `/v1` group and refuses a cross-site POST, PUT, PATCH or DELETE with 403. It trusts the browser's `Sec-Fetch-Site` header first, then `Origin` matched against `CORS_ALLOWED_ORIGINS`; a request with neither header (a script) or a Bearer-key request with no session cookie passes. Header checks replace CSRF tokens because the dashboard is a first-party app that no other site embeds, so no token handling or frontend change is needed. Status: active.
 
 ## Context
 
-The dashboard authenticates with an httpOnly `velox_session` cookie (ADR-011);
+The dashboard authenticates with an httpOnly `hardcount_session` cookie (ADR-011);
 the API authenticates with `Authorization: Bearer` keys. A cookie is *ambient
 authority*: the browser attaches it to every request to the API automatically,
 so any page the operator visits can cause an authenticated request. That is the
@@ -18,7 +18,7 @@ CSRF class, and a live walkthrough on 2026-07-16 confirmed it was exploitable
 end-to-end in a real browser, in two shapes:
 
 - **Forced logout.** `POST /v1/auth/logout` answered a request carrying *no*
-  cookie with `Set-Cookie: velox_session=; Max-Age=0`. SameSite=Lax withholds
+  cookie with `Set-Cookie: hardcount_session=; Max-Age=0`. SameSite=Lax withholds
   the cookie from every cross-site request, so an attacker's cross-site POST
   landed in the no-cookie branch, and the browser honoured the clear — logging
   the operator out on sight (auto-submitting form → no click), repeatedly, while
@@ -91,7 +91,7 @@ modern OWASP-endorsed equivalent of a synchronizer token and costs far less: no
 token minting, storage, rotation, or per-request plumbing, and **zero frontend
 changes** (the browser already sends `Origin`/`Sec-Fetch-Site` on same-origin
 requests). A token earns its keep only when the frontend is embedded in
-third-party contexts where `Origin` is unreliable — Velox is not, so tokens stay
+third-party contexts where `Origin` is unreliable — Hardcount is not, so tokens stay
 in the back pocket, to be revisited if embedding ever appears.
 
 ### 4. The logout no-cookie branch clears nothing

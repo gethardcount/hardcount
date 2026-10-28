@@ -39,7 +39,7 @@ func TestPostgresStore_BillingTimezone_RoundTrips(t *testing.T) {
 
 	created, err := invStore.Create(ctx, tenantID, domain.Invoice{
 		CustomerID:         cust.ID,
-		InvoiceNumber:      "VLX-TZ-1",
+		InvoiceNumber:      "HC-TZ-1",
 		Status:             domain.InvoiceDraft,
 		PaymentStatus:      domain.PaymentPending,
 		Currency:           "USD",
@@ -62,7 +62,7 @@ func TestPostgresStore_BillingTimezone_RoundTrips(t *testing.T) {
 		t.Errorf("round-trip BillingTimezone: got %q, want Asia/Kolkata (dropped INSERT column or scanInvDest/invCols misalignment)", got.BillingTimezone)
 	}
 	// Neighbouring columns must not have shifted from the appended column.
-	if got.InvoiceNumber != "VLX-TZ-1" || got.Currency != "USD" {
+	if got.InvoiceNumber != "HC-TZ-1" || got.Currency != "USD" {
 		t.Errorf("neighbouring fields shifted after adding billing_timezone: number=%q currency=%q", got.InvoiceNumber, got.Currency)
 	}
 
@@ -70,7 +70,7 @@ func TestPostgresStore_BillingTimezone_RoundTrips(t *testing.T) {
 	// the COALESCE in invCols), so the read path falls back to the live tenant TZ.
 	adhoc, err := invStore.Create(ctx, tenantID, domain.Invoice{
 		CustomerID:    cust.ID,
-		InvoiceNumber: "VLX-TZ-ADHOC",
+		InvoiceNumber: "HC-TZ-ADHOC",
 		Status:        domain.InvoiceDraft,
 		PaymentStatus: domain.PaymentPending,
 		Currency:      "USD",

@@ -31,7 +31,7 @@ func TestWireShape_SnakeCase(t *testing.T) {
 			AmountGTE: 500000,
 			ItemThresholds: []ItemThresholdInput{
 				{
-					SubscriptionItemID: "vlx_subitem_abc",
+					SubscriptionItemID: "hc_subitem_abc",
 					UsageGTE:           "1000000.123456",
 				},
 			},
@@ -93,7 +93,7 @@ func TestWireShape_SnakeCase(t *testing.T) {
 			AmountGTE: 500000,
 			ItemThresholds: []domain.SubscriptionItemThreshold{
 				{
-					SubscriptionItemID: "vlx_subitem_abc",
+					SubscriptionItemID: "hc_subitem_abc",
 					UsageGTE:           decimal.RequireFromString("1000000.123456"),
 				},
 			},

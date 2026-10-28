@@ -726,7 +726,7 @@ export default function SettingsPage() {
               <CardContent className="p-6">
                 <div className="mb-5">
                   <h2 className="text-sm font-semibold text-foreground">Tax calculation</h2>
-                  <p className="text-xs text-muted-foreground mt-0.5">How Velox adds tax to invoices</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">How Hardcount adds tax to invoices</p>
                 </div>
                 <div>
                   <Label>Tax provider</Label>
@@ -833,7 +833,7 @@ export default function SettingsPage() {
                       <div>
                         <Label className="font-medium text-foreground">Tax-inclusive pricing</Label>
                         <p className="text-xs text-muted-foreground mt-1">
-                          When on, your plan and usage prices already include tax, and Velox shows the tax part inside them.
+                          When on, your plan and usage prices already include tax, and Hardcount shows the tax part inside them.
                           When off (default), tax is added on top of the subtotal.
                         </p>
                       </div>
@@ -1006,7 +1006,7 @@ function PaymentsSection() {
         <div className="flex-1 min-w-0">
           <h2 className="text-sm font-semibold text-foreground">Payments</h2>
           <p className="text-xs text-muted-foreground">
-            Velox charges invoices through your own Stripe account, so money goes straight to you.
+            Hardcount charges invoices through your own Stripe account, so money goes straight to you.
             Showing <span className="font-medium text-foreground">{livemode ? 'live' : 'test'}</span> keys;
             switch with the Test/Live toggle in the sidebar.
           </p>
@@ -1058,7 +1058,7 @@ const STRIPE_WEBHOOK_EVENTS: { name: string; purpose: string }[] = [
   { name: 'setup_intent.setup_failed', purpose: 'logs setup errors' },
   // Refund truth (ADR-063): a credit-note refund is created synchronously
   // but can FAIL later at Stripe (insufficient balance, dispute). Without
-  // these, Velox keeps showing the refund as pending/succeeded forever —
+  // these, Hardcount keeps showing the refund as pending/succeeded forever —
   // and it only breaks in prod (stripe listen forwards ALL events, so dev
   // never reproduces it).
   { name: 'charge.refund.updated', purpose: 'tracks async refund status' },
@@ -1226,7 +1226,7 @@ function StripeCard({ livemode, current, onChanged }: {
 
         <StepRow
           number={2}
-          title="Deliver Stripe events to Velox"
+          title="Deliver Stripe events to Hardcount"
           done={fullyConnected}
           locked={step2Mode === 'locked'}
           summary={
@@ -1271,7 +1271,7 @@ function StripeCard({ livemode, current, onChanged }: {
                 <ReadOnlyRow label="Status" value="Saved" />
               </div>
               <p className="text-xs text-muted-foreground">
-                Velox checks each event Stripe sends against this secret. If Stripe shows failed deliveries to
+                Hardcount checks each event Stripe sends against this secret. If Stripe shows failed deliveries to
                 this URL, check that the secret matches the one in Stripe.
               </p>
               <WebhookUrlRow endpointId={current.id} />
@@ -1412,7 +1412,7 @@ function StepRow({ number, title, done, locked, summary, children }: {
 
 // Secret-key + publishable-key form. Used both for first-time connect and
 // for key rotation (mode switches based on `connected`). Rotations go through
-// a confirmation dialog: Velox switches to the new keys at once, and nothing
+// a confirmation dialog: Hardcount switches to the new keys at once, and nothing
 // checks that they belong to the same Stripe account as the old ones.
 function ApiKeysForm({ livemode, connected, onSuccess }: {
   livemode: boolean
@@ -1524,12 +1524,12 @@ function ApiKeysForm({ livemode, connected, onSuccess }: {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Rotate {livemode ? 'live' : 'test'} mode API keys?</AlertDialogTitle>
-            {/* Velox only saves and checks the new keys (tenantstripe
+            {/* Hardcount only saves and checks the new keys (tenantstripe
                 Connect); it never rolls or revokes a key at Stripe. Saved
                 cards belong to one Stripe account, and Connect does not
                 compare account ids, so the warning is ours to give. */}
             <AlertDialogDescription>
-              Velox charges with the new keys from now on. Your old keys keep working at Stripe until you roll them there.
+              Hardcount charges with the new keys from now on. Your old keys keep working at Stripe until you roll them there.
               Use keys from the same Stripe account, because your customers&rsquo; saved cards belong to it.
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -1550,10 +1550,10 @@ function ApiKeysForm({ livemode, connected, onSuccess }: {
   )
 }
 
-// Step 2 body: shows the Velox webhook URL + event checklist, and a field
+// Step 2 body: shows the Hardcount webhook URL + event checklist, and a field
 // to paste the resulting whsec_ after the tenant registers the endpoint in
 // Stripe. Same component handles rotation from Manage mode (guarded by the
-// confirmation dialog because Velox keeps one secret: once saved, events
+// confirmation dialog because Hardcount keeps one secret: once saved, events
 // signed only with the old one are refused).
 function WebhookSetup({ current, onSuccess }: {
   current: StripeProviderCredentials
@@ -1648,11 +1648,11 @@ function WebhookSetup({ current, onSuccess }: {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Replace signing secret?</AlertDialogTitle>
-            {/* Saving changes nothing at Stripe. Velox stores one secret
+            {/* Saving changes nothing at Stripe. Hardcount stores one secret
                 (tenantstripe SetWebhookSecret overwrites it) and checks each
                 event with it (payment/handler.go ValidatePayload). */}
             <AlertDialogDescription>
-              Velox will accept only Stripe events signed with the new secret. Roll the secret in Stripe first, then
+              Hardcount will accept only Stripe events signed with the new secret. Roll the secret in Stripe first, then
               paste it here; Stripe retries any event refused meanwhile.
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -1697,7 +1697,7 @@ function DisconnectAction({ mode, onDone }: { mode: 'test' | 'live'; onDone: () 
               id, and the webhook URL is /v1/webhooks/stripe/{id}, so the
               URL registered in Stripe stops working. */}
           <AlertDialogDescription>
-            Velox stops charging through this Stripe account and stops accepting its events. Reconnecting gives
+            Hardcount stops charging through this Stripe account and stops accepting its events. Reconnecting gives
             a new webhook URL, so you&rsquo;ll redo step 2.
           </AlertDialogDescription>
         </AlertDialogHeader>

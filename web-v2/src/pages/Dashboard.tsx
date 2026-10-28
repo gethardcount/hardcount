@@ -170,9 +170,9 @@ export default function DashboardPage() {
               <ListChecks size={18} aria-hidden />
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold text-foreground">Welcome to Velox</p>
+              <p className="text-sm font-semibold text-foreground">Welcome to Hardcount</p>
               <p className="mt-1 text-sm text-muted-foreground">
-                Velox counts usage, works out each bill, makes the invoice and charges the card through Stripe.
+                Hardcount counts usage, works out each bill, makes the invoice and charges the card through Stripe.
                 Follow the setup checklist to bill your first {user?.livemode ? 'customer' : 'test customer'}.
               </p>
             </div>

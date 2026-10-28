@@ -46,7 +46,7 @@ func (m *memStore) CreateMeter(_ context.Context, tenantID string, meter domain.
 			return domain.Meter{}, fmt.Errorf("%w: meter event_name %q", errs.ErrAlreadyExists, meter.EventName)
 		}
 	}
-	meter.ID = fmt.Sprintf("vlx_mtr_%d", len(m.meters)+1)
+	meter.ID = fmt.Sprintf("hc_mtr_%d", len(m.meters)+1)
 	meter.TenantID = tenantID
 	m.meters[meter.ID] = meter
 	return meter, nil
@@ -150,7 +150,7 @@ func (m *memStore) createPlan(tenantID string, p domain.Plan) (domain.Plan, erro
 			return domain.Plan{}, fmt.Errorf("%w: plan code %q", errs.ErrAlreadyExists, p.Code)
 		}
 	}
-	p.ID = fmt.Sprintf("vlx_pln_%d", len(m.plans)+1)
+	p.ID = fmt.Sprintf("hc_pln_%d", len(m.plans)+1)
 	p.TenantID = tenantID
 	m.plans[p.ID] = p
 	return p, nil
@@ -214,7 +214,7 @@ func (m *memStore) PlanUsed(_ context.Context, _, planID string) (bool, error) {
 
 func (m *memStore) insertPrice(tenantID, planID string, ch PriceChange) domain.PlanPrice {
 	p := domain.PlanPrice{
-		ID: fmt.Sprintf("vlx_prc_%d", len(m.prices)+1), TenantID: tenantID, PlanID: planID,
+		ID: fmt.Sprintf("hc_prc_%d", len(m.prices)+1), TenantID: tenantID, PlanID: planID,
 		MeterID: ch.MeterID, DimensionMatch: ch.Match, PriceShape: ch.Shape,
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}
@@ -319,7 +319,7 @@ func (m *memStore) WriteOverride(_ context.Context, tenantID string, o domain.Cu
 			m.overrides[id] = existing
 		}
 	}
-	o.ID = fmt.Sprintf("vlx_cpo_%d", len(m.overrides)+1)
+	o.ID = fmt.Sprintf("hc_cpo_%d", len(m.overrides)+1)
 	o.TenantID = tenantID
 	o.Active = true
 	o.CreatedAt = time.Now().UTC()

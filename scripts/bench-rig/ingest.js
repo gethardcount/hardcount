@@ -1,11 +1,11 @@
-// k6 ingest load profile for Velox.
+// k6 ingest load profile for Hardcount.
 //
 // This replaced a hand-rolled Go load generator. The reason is not taste: the
 // hand-rolled pacer had a burst bug that went unnoticed for the whole first
 // round of AWS measurements. Every worker computed its due times from slot 0
 // of a shared schedule, so all of them fired simultaneously and then idled.
 // The MEAN rate was correct, which is why nothing looked wrong, but the
-// self-inflicted queueing was being counted as Velox's latency — fixing it
+// self-inflicted queueing was being counted as Hardcount's latency — fixing it
 // moved the measured median from 24.8ms to 6.1ms. k6's constant-arrival-rate
 // executor is the thing that gets this right by construction, and it is
 // corrected for coordinated omission (it reports dropped iterations rather
@@ -24,14 +24,14 @@
 //               it is a maximum, never a service-level number.
 //
 // Environment:
-//   BASE        base URL of the running velox server (required)
-//   API_KEY     Bearer key from `velox-bench-seed` (required)
-//   CUSTOMERS   number of bench customers velox-bench-seed created (default 200).
+//   BASE        base URL of the running hardcount server (required)
+//   API_KEY     Bearer key from `hardcount-bench-seed` (required)
+//   CUSTOMERS   number of bench customers hardcount-bench-seed created (default 200).
 //               Each REQUEST picks one at random; a batch stays single-customer,
 //               matching the batch handler's own design assumption. The probe
 //               reads a random customer too.
-//   CUSTOMER_PREFIX / CUSTOMER_ID_PREFIX  id prefixes from velox-bench-seed
-//   EVENT       event_name from velox-bench-seed (default bench_tokens)
+//   CUSTOMER_PREFIX / CUSTOMER_ID_PREFIX  id prefixes from hardcount-bench-seed
+//   EVENT       event_name from hardcount-bench-seed (default bench_tokens)
 //   BATCH       events per request; 1 uses the single-event endpoint (default 1)
 //   RATE        offered events/sec in rate mode (default 200)
 //   VUS         concurrency. In rate mode this is a pool, not the load itself.
@@ -39,7 +39,7 @@
 //   P99_MS      pass/fail p99 budget in ms; the run fails the threshold if missed
 //
 // Usage:
-//   k6 run -e BASE=http://localhost:8080 -e API_KEY=vlx_test_… \
+//   k6 run -e BASE=http://localhost:8080 -e API_KEY=hc_test_… \
 //          -e RATE=1000 -e BATCH=10 -e DURATION=10m ingest.js
 
 import http from 'k6/http'
@@ -51,10 +51,10 @@ const BASE = __ENV.BASE
 const API_KEY = __ENV.API_KEY
 const CUSTOMERS = parseInt(__ENV.CUSTOMERS || '200', 10)
 const CUSTOMER_PREFIX = __ENV.CUSTOMER_PREFIX || 'bench-customer-'
-const CUSTOMER_ID_PREFIX = __ENV.CUSTOMER_ID_PREFIX || 'vlx_cus_bench_'
+const CUSTOMER_ID_PREFIX = __ENV.CUSTOMER_ID_PREFIX || 'hc_cus_bench_'
 const EVENT = __ENV.EVENT || 'bench_tokens'
 
-// Numbered ids, zero-padded to 3, matching velox-bench-seed. Picking a customer
+// Numbered ids, zero-padded to 3, matching hardcount-bench-seed. Picking a customer
 // per request rather than using one for the whole run is what makes this a
 // benchmark and not a pathological case: one customer means the resolve cache
 // never misses, the btrees append to a single hot edge, and the probe's
@@ -81,7 +81,7 @@ const PROBE_P99_MS = parseInt(__ENV.PROBE_P99_MS || '500', 10)
 const CUSTOMER_ID = __ENV.CUSTOMER_ID || ''
 
 if (!BASE || !API_KEY) {
-  throw new Error('BASE and API_KEY are required — run cmd/velox-bench-seed to obtain API_KEY')
+  throw new Error('BASE and API_KEY are required — run cmd/hardcount-bench-seed to obtain API_KEY')
 }
 
 // Events per second, not requests per second. A batch of 10 at 100 requests/s
@@ -94,7 +94,7 @@ const REQ_RATE = Math.max(1, Math.ceil(RATE / BATCH))
 // the offered rate is fixed, so a spare VU costs memory and nothing else. Size
 // it too tightly and every request landing in the p99 tail holds a VU long
 // enough to starve the schedule, and k6 reports dropped iterations — which
-// reads as "Velox could not sustain this rate" when the truth is that the
+// reads as "Hardcount could not sustain this rate" when the truth is that the
 // generator could not offer it.
 //
 // That is not hypothetical. This script's first draft used REQ_RATE/10 (a

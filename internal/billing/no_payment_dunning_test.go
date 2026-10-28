@@ -131,7 +131,7 @@ func TestCollector_NoDunningUnlessOwedAndCardless(t *testing.T) {
 
 // A failed read of the customer's payment method is an error, not a skip
 // (CT-F7). The real triggers: a database error, or a missing
-// VELOX_ENCRYPTION_KEY, which fails every customer decrypt. The sweep used to
+// HARDCOUNT_ENCRYPTION_KEY, which fails every customer decrypt. The sweep used to
 // skip the invoice with no log and no count, so collection could stop for
 // every customer while the sweep reported nothing wrong. Now each such invoice
 // returns an error that wraps the cause, which the scheduler logs and counts

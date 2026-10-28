@@ -26,8 +26,8 @@ func TestDueScans_ExcludeAppliesBeforeLimit(t *testing.T) {
 	store := subscription.NewPostgresStore(db)
 	ctx := leadertest.Token(t, testutil.AdminPool(t), postgres.WithLivemode(context.Background(), false), leader.RoleBilling)
 
-	const tenantID = "vlx_ten_dueexcl"
-	const clockID = "vlx_tclk_dueexcl"
+	const tenantID = "hc_ten_dueexcl"
+	const clockID = "hc_tclk_dueexcl"
 	wallNow := time.Now().UTC().Truncate(time.Microsecond)
 	frozen := wallNow.Add(-10 * 24 * time.Hour)
 

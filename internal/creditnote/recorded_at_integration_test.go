@@ -36,7 +36,7 @@ func TestCreditNote_RecordedAt_DualStamp(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	inv, err := invStore.Create(base, tenantID, domain.Invoice{
-		CustomerID: cust.ID, InvoiceNumber: "VLX-REC-1",
+		CustomerID: cust.ID, InvoiceNumber: "HC-REC-1",
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
 		Currency: "USD", SubtotalCents: 5000, TotalAmountCents: 5000, AmountDueCents: 5000,
 		BillingPeriodStart: now.Add(-30 * 24 * time.Hour), BillingPeriodEnd: now,
@@ -47,7 +47,7 @@ func TestCreditNote_RecordedAt_DualStamp(t *testing.T) {
 	}
 
 	frozen := time.Date(2027, 6, 1, 12, 0, 0, 0, time.UTC)
-	simCtx := clock.WithSim(base, clock.Sim{At: frozen, TestClockID: "vlx_tclk_rec"})
+	simCtx := clock.WithSim(base, clock.Sim{At: frozen, TestClockID: "hc_tclk_rec"})
 
 	cn, err := cnStore.Create(simCtx, tenantID, domain.CreditNote{
 		InvoiceID: inv.ID, CustomerID: cust.ID, CreditNoteNumber: "CN-REC-1",

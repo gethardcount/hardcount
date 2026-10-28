@@ -14,7 +14,7 @@ import (
 // billing_intervals — policy-applied item lifetimes recorded at write
 // time. The read side is a dumb interval×window intersection with
 // nothing to interpret. The legacy fact-log interpretation, the shadow
-// comparator, and the VELOX_BILLING_INTERVALS_READER modes were removed
+// comparator, and the HARDCOUNT_BILLING_INTERVALS_READER modes were removed
 // at Phase 4 (2026-07-28) after a clean soak: zero unexplained
 // divergences across the cutover sweep (140/140 subs), the two-mode CI
 // corpus on every PR since, and every dev cycle close in between.

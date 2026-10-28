@@ -41,8 +41,8 @@ func TestRenderPDF(t *testing.T) {
 	periodEnd := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
 
 	inv := domain.Invoice{
-		ID:                 "vlx_inv_test",
-		InvoiceNumber:      "VLX-202604-0001",
+		ID:                 "hc_inv_test",
+		InvoiceNumber:      "HC-202604-0001",
 		Status:             domain.InvoiceFinalized,
 		PaymentStatus:      domain.PaymentPending,
 		Currency:           "USD",
@@ -127,8 +127,8 @@ func TestRenderPDF_ThreeChannelCN_WithTaxReversal(t *testing.T) {
 	periodEnd := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
 
 	inv := domain.Invoice{
-		ID:            "vlx_inv_3ch",
-		InvoiceNumber: "VLX-202604-0042",
+		ID:            "hc_inv_3ch",
+		InvoiceNumber: "HC-202604-0042",
 		Status:        domain.InvoiceFinalized,
 		PaymentStatus: domain.PaymentSucceeded,
 		Currency:      "INR",
@@ -194,8 +194,8 @@ func TestRenderPDF_OutOfBandOnlyCN_IsPostPayment(t *testing.T) {
 	now := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
 	dueAt := now.AddDate(0, 0, 30)
 	inv := domain.Invoice{
-		ID:                 "vlx_inv_oob",
-		InvoiceNumber:      "VLX-OOB-001",
+		ID:                 "hc_inv_oob",
+		InvoiceNumber:      "HC-OOB-001",
 		Status:             domain.InvoiceFinalized,
 		PaymentStatus:      domain.PaymentSucceeded,
 		Currency:           "USD",
@@ -239,8 +239,8 @@ func minimalReverseChargeInvoice() domain.Invoice {
 	periodStart := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
 	periodEnd := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
 	return domain.Invoice{
-		ID:                 "vlx_inv_rc",
-		InvoiceNumber:      "VLX-202604-0099",
+		ID:                 "hc_inv_rc",
+		InvoiceNumber:      "HC-202604-0099",
 		Status:             domain.InvoiceFinalized,
 		PaymentStatus:      domain.PaymentPending,
 		Currency:           "INR",
@@ -270,7 +270,7 @@ func minimalReverseChargeInvoice() domain.Invoice {
 func TestRenderPDF_IndiaSupplierGSTIN(t *testing.T) {
 	inv := minimalReverseChargeInvoice()
 	company := CompanyInfo{
-		Name:      "Velox India Pvt Ltd",
+		Name:      "Hardcount India Pvt Ltd",
 		Country:   "IN",
 		TaxID:     "27AAEPM1234C1Z5",
 		TaxIDType: "gstin",
@@ -295,7 +295,7 @@ func TestRenderPDF_IndiaSupplierGSTIN(t *testing.T) {
 func TestRenderPDF_IndiaReverseChargeLegend(t *testing.T) {
 	inv := minimalReverseChargeInvoice()
 	company := CompanyInfo{
-		Name:      "Velox India Pvt Ltd",
+		Name:      "Hardcount India Pvt Ltd",
 		Country:   "IN",
 		TaxID:     "27AAEPM1234C1Z5",
 		TaxIDType: "gstin",
@@ -327,7 +327,7 @@ func TestRenderPDF_EUReverseChargeLegend_Unchanged(t *testing.T) {
 	inv := minimalReverseChargeInvoice()
 	inv.Currency = "EUR"
 	company := CompanyInfo{
-		Name:      "Velox GmbH",
+		Name:      "Hardcount GmbH",
 		Country:   "DE",
 		TaxID:     "DE123456789",
 		TaxIDType: "vat",
@@ -360,7 +360,7 @@ func TestRenderPDF_EUReverseChargeLegend_Unchanged(t *testing.T) {
 // no-tax-ID render is strictly smaller (= header line was suppressed).
 func TestRenderPDF_NoTaxID_NoGSTINLine(t *testing.T) {
 	inv := minimalReverseChargeInvoice()
-	base := CompanyInfo{Name: "Velox India Pvt Ltd", Country: "IN"}
+	base := CompanyInfo{Name: "Hardcount India Pvt Ltd", Country: "IN"}
 	withGSTIN := base
 	withGSTIN.TaxID = "27AAEPM1234C1Z5"
 	withGSTIN.TaxIDType = "gstin"
@@ -442,7 +442,7 @@ func TestIsIndianContext(t *testing.T) {
 // when neither supplier nor billing country signals India.
 func TestReverseChargeLegend_TaxJurisdictionFallback(t *testing.T) {
 	inv := minimalReverseChargeInvoice()
-	supplier := CompanyInfo{Name: "Velox", Country: "US"}
+	supplier := CompanyInfo{Name: "Hardcount", Country: "US"}
 	billTo := BillToInfo{Name: "Acme", Country: "US"}
 	lineItems := []domain.InvoiceLineItem{
 		{TaxJurisdiction: "IN-MH"},
@@ -575,7 +575,7 @@ func TestRenderPDF_ExemptionLegend_PDFRenders(t *testing.T) {
 	inv := minimalReverseChargeInvoice()
 	inv.TaxReverseCharge = false
 	billTo := BillToInfo{Name: "Acme Inc.", Country: "US"}
-	company := CompanyInfo{Name: "Velox Inc.", Country: "US"}
+	company := CompanyInfo{Name: "Hardcount Inc.", Country: "US"}
 
 	plain := []domain.InvoiceLineItem{
 		{LineType: domain.LineTypeBaseFee, Description: "Plan", Quantity: 1, AmountCents: 1000, TotalAmountCents: 1000, Currency: "USD", TaxabilityReason: "standard_rated"},

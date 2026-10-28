@@ -1,4 +1,4 @@
-; PgBouncer in TRANSACTION mode, the pooler shape Velox must be safe behind
+; PgBouncer in TRANSACTION mode, the pooler shape Hardcount must be safe behind
 ; (ADR-114). scripts/pgbouncer-test.sh renders @DB_HOST@ and runs the
 ; integration suite through port 6432; CI runs the same script.
 ;
@@ -7,8 +7,8 @@
 ; not worked around in the driver, because that is how a production pooler
 ; is configured — the test proves the real shape.
 [databases]
-velox_test = host=@DB_HOST@ port=5432 dbname=velox_test
-velox = host=@DB_HOST@ port=5432 dbname=velox
+hardcount_test = host=@DB_HOST@ port=5432 dbname=hardcount_test
+hardcount = host=@DB_HOST@ port=5432 dbname=hardcount
 
 [pgbouncer]
 listen_addr = 0.0.0.0

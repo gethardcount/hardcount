@@ -142,7 +142,7 @@ export function TeamTab() {
               }
               details={
                 <p>
-                  For whoever runs Velox: set <code className="font-mono">SMTP_HOST</code> and{' '}
+                  For whoever runs Hardcount: set <code className="font-mono">SMTP_HOST</code> and{' '}
                   <code className="font-mono">DASHBOARD_BASE_URL</code> (docs/ops/email-setup.md).
                 </p>
               }

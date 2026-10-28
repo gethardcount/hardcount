@@ -140,7 +140,7 @@ func NewSender(appEnv string) *Sender {
 		port:                 envOr("SMTP_PORT", "587"),
 		username:             strings.TrimSpace(os.Getenv("SMTP_USERNAME")),
 		password:             strings.TrimSpace(os.Getenv("SMTP_PASSWORD")),
-		from:                 envOr("SMTP_FROM", "billing@velox.local"),
+		from:                 envOr("SMTP_FROM", "billing@hardcount.local"),
 		tlsMode:              tlsMode,
 		prodEnv:              prodEnv,
 		hostedInvoiceBaseURL: strings.TrimSpace(os.Getenv("HOSTED_INVOICE_BASE_URL")),
@@ -180,13 +180,13 @@ func (s *Sender) TLSMode() string { return s.tlsMode }
 // Used only by Settings → Email "Send test email", which addresses it to the
 // signed-in member's own email.
 func (s *Sender) SendTestEmail(ctx context.Context, tenantID, to string) error {
-	subject := "Velox test email"
-	body := `This is a test email from Velox.
+	subject := "Hardcount test email"
+	body := `This is a test email from Hardcount.
 
 If you can read it, invoices, receipts, payment reminders, password resets
 and team invites can be delivered from this server.
 
-— Velox
+— Hardcount
 `
 	return s.sendPlain(ctx, tenantID, to, "", subject, body)
 }
@@ -313,7 +313,7 @@ func (e recipientReplyError) Unwrap() error { return e.err }
 //
 // Pre-2026-05-29 every 5xx was treated as a recipient bounce.
 // Surfaced live during Postmark token misconfiguration: a wrong
-// Server Token returned 535 → Velox flagged the recipient as bounced
+// Server Token returned 535 → Hardcount flagged the recipient as bounced
 // → next send to the same recipient was suppression-gated → operator
 // had to manually `UPDATE customers SET email_status='unknown'` to
 // recover. The auth failure was a sender-side error all along.
@@ -679,16 +679,16 @@ func (s *Sender) SendPasswordReset(ctx context.Context, tenantID, to, displayNam
 	if resetURL == "" {
 		return fmt.Errorf("reset_url required: refusing to send password-reset email with no link")
 	}
-	subject := "Reset your Velox password"
+	subject := "Reset your Hardcount password"
 	body := fmt.Sprintf(`Hi %s,
 
-We received a request to reset the password on your Velox account. Use the link below within the next hour to choose a new one:
+We received a request to reset the password on your Hardcount account. Use the link below within the next hour to choose a new one:
 
 %s
 
 If you didn't request this, you can safely ignore this email — your current password keeps working, and nobody can sign in without the link.
 
-— Velox
+— Hardcount
 `, displayName, resetURL)
 	return s.sendPlain(ctx, tenantID, to, "", subject, body)
 }
@@ -700,20 +700,20 @@ func (s *Sender) SendMemberInvite(ctx context.Context, tenantID, to, inviterEmai
 	// The invite service WARNs "falls back to generic" when the tenant-name
 	// lookup fails and hands us "" — this guard IS that fallback (2026-07-19
 	// truth audit: the claim predated the mechanism; a "" interpolation
-	// produced 'invited to  on Velox' in a real customer inbox).
+	// produced 'invited to  on Hardcount' in a real customer inbox).
 	if strings.TrimSpace(tenantName) == "" {
 		tenantName = "your team"
 	}
-	subject := fmt.Sprintf("You've been invited to %s on Velox", tenantName)
+	subject := fmt.Sprintf("You've been invited to %s on Hardcount", tenantName)
 	body := fmt.Sprintf(`Hi,
 
-%s invited you to join %s on Velox. Click the link below within the next 7 days to set up your account:
+%s invited you to join %s on Hardcount. Click the link below within the next 7 days to set up your account:
 
 %s
 
 If you weren't expecting this invitation, you can safely ignore this email.
 
-— Velox
+— Hardcount
 `, inviterEmail, tenantName, acceptURL)
 	return s.sendPlain(ctx, tenantID, to, "", subject, body)
 }
@@ -1114,7 +1114,7 @@ func (s *Sender) buildPlain(ctx context.Context, to, fromName, subject, body str
 	return writeMessage(m)
 }
 
-// newMessage sets the headers every Velox email carries.
+// newMessage sets the headers every Hardcount email carries.
 //
 // Addresses go in as net/mail values, never as "Name <addr>" text to
 // parse: FromFormat would mangle a tenant name holding quotes or

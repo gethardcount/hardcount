@@ -7,28 +7,28 @@
 
 ## Summary
 
-From v0.9.0, Velox applies database migrations with goose
+From v0.9.0, Hardcount applies database migrations with goose
 (`github.com/pressly/goose/v3` v3.27.0) instead of golang-migrate and its
 own runner. The 178 old migration files become one generated baseline at
 version 180, where the old files end. An empty database runs that
 baseline. A database from v0.8.0 or v0.8.1 is taken over with no table
 change. A failed migration leaves nothing to repair, so the dirty state
-and `velox migrate force` go away, and several copies may migrate as they
-start. We switch now because Velox has no customer installs yet: the
+and `hardcount migrate force` go away, and several copies may migrate as they
+start. We switch now because Hardcount has no customer installs yet: the
 first partners start on goose and never need an adopt step.
 
 ## Context
 
 A migration is a versioned SQL file that changes the database schema.
-Velox has 178 of them (0001 to 0180; 0143 and 0166 do not exist), applied
+Hardcount has 178 of them (0001 to 0180; 0143 and 0166 do not exist), applied
 by golang-migrate v4.19.1. golang-migrate keeps one row in
 `schema_migrations`: a version and a `dirty` flag. When a file fails, the
-flag stays set, and Velox refuses to start until someone runs
-`velox migrate force`.
+flag stays set, and Hardcount refuses to start until someone runs
+`hardcount migrate force`.
 
 `CREATE INDEX CONCURRENTLY` builds an index without blocking writes, but
 it cannot run inside a transaction. Three files use it (0062, 0112, 0130).
-For them, Velox wraps the library in its own "hybrid" runner (ADR-073).
+For them, Hardcount wraps the library in its own "hybrid" runner (ADR-073).
 With the repair and lock-timeout code added since (#967, #987), the
 package holds about 1,535 lines of code and 1,694 lines of tests.
 
@@ -41,7 +41,7 @@ install would have to change its version table, with an adopt step.
 
 Three facts change that weighing:
 
-- **No customer runs Velox yet.** The adopt step costs nothing today, and
+- **No customer runs Hardcount yet.** The adopt step costs nothing today, and
   it costs more with every install. If goose ships before the first
   partner installs, partners start on goose and never adopt.
 - **golang-migrate has not fixed its lock.**
@@ -60,7 +60,7 @@ Three facts change that weighing:
 
 The experiments ran on 2026-10-17 on Postgres 16, in CI only, on a branch
 that was never merged
-([CI run 39047170196](https://github.com/getvelox/velox/actions/runs/39047170196)).
+([CI run 39047170196](https://github.com/gethardcount/hardcount/actions/runs/39047170196)).
 An INVALID index is one Postgres keeps but never uses.
 
 | Experiment | Result |
@@ -74,13 +74,13 @@ An INVALID index is one Postgres keeps but never uses.
 
 ## Decision
 
-1. **goose runs migrations.** Velox uses goose's `Provider` API at
+1. **goose runs migrations.** Hardcount uses goose's `Provider` API at
    v3.27.0, with the global registry off. `migrate.Up(dsn)` keeps its
    signature, so its four callers do not change. These are deleted:
    - golang-migrate, the hybrid runner and the lock-timeout clean-up;
-   - `DirtyError` and `velox migrate force` (a stub stays for one release
+   - `DirtyError` and `hardcount migrate force` (a stub stays for one release
      and exits with code 2 and a pointer to v0.8.1's runbook);
-   - `cmd/velox-migrate-safety`, which steps through the old files;
+   - `cmd/hardcount-migrate-safety`, which steps through the old files;
    - the 178 old files. They stay in git at tag `v0.8.1` and in the
      v0.8.1 image.
 2. **One baseline at version 180.**
@@ -100,8 +100,8 @@ An INVALID index is one Postgres keeps but never uses.
    - It appends migration 0174's `leader_leases` seed as written, so each
      token comes from `clock_timestamp()` at install time.
    - It appends migration 0150's
-     `REVOKE UPDATE, DELETE, TRUNCATE ON public.audit_log FROM velox_app`.
-     Where `velox_app` has default privileges (Compose, the managed
+     `REVOKE UPDATE, DELETE, TRUNCATE ON public.audit_log FROM hardcount_app`.
+     Where `hardcount_app` has default privileges (Compose, the managed
      setup), the dump alone would lose that revoke.
 
    New files start at `00181`, named `NNNNN_name.sql`. Version numbers do
@@ -120,7 +120,7 @@ An INVALID index is one Postgres keeps but never uses.
    binary would replay 0001 on a full database. Migration 180's Down
    refuses and says to restore the backup taken before the upgrade.
 4. **A read-only state check runs first.** It runs before every `Up`, in
-   the boot check (`CheckSchemaReady`) and in `velox migrate status`. It
+   the boot check (`CheckSchemaReady`) and in `hardcount migrate status`. It
    reads both version records, takes no lock and creates no table. It
    refuses three states. Each message states the values it found, ends
    "Nothing was changed.", and names the next step.
@@ -129,7 +129,7 @@ An INVALID index is one Postgres keeps but never uses.
    |---|---|
    | A v0.8 record that is not a clean 180: older, dirty, or from a development build | Upgrade with v0.8.1 first, or use an empty database |
    | goose has 180, and `schema_migrations` is unmarked or not at (180, not dirty) | The records disagree. A v0.8.x backup was restored over this database, or a v0.8.x binary ran `migrate`, `rollback` or `force`. Follow the runbook |
-   | Velox's tables resolve outside the `public` schema | Restore the database so its tables are in `public` |
+   | Hardcount's tables resolve outside the `public` schema | Restore the database so its tables are in `public` |
 
    The table comment is what tells a frozen record from one that a
    v0.8.x backup or binary brought back.
@@ -137,8 +137,8 @@ An INVALID index is one Postgres keeps but never uses.
    - goose's session lock polls `pg_try_advisory_lock` (lock id
      4097083626) every 5 seconds, for up to 30 minutes, the same total
      wait as v0.8.1.
-     When the wait runs out, Velox returns a typed error that points at
-     `velox migrate status`.
+     When the wait runs out, Hardcount returns a typed error that points at
+     `hardcount migrate status`.
    - Each command opens its own pool of one connection and closes it on
      return. `MIGRATION_LOCK_TIMEOUT` (default 5 seconds) stays and sets
      `lock_timeout` on that connection. Closing the pool matters, because
@@ -180,16 +180,16 @@ An INVALID index is one Postgres keeps but never uses.
    (`RUN_MIGRATIONS_ON_BOOT=true`). They take turns on the polling lock
    and cannot deadlock against an index build (E3, E4). Old code on a new
    schema is still not covered, so for a release with migrations, the old
-   copies stop before the migration runs. From v0.8.x, run `velox migrate`
+   copies stop before the migration runs. From v0.8.x, run `hardcount migrate`
    with v0.9.0 once. It records 180 and changes no table, so the v0.8.x
    copies keep serving while it runs. Then upgrade the copies one at a
    time.
 8. **CLI.**
-   - `velox migrate status` shows the plan: the database's version, this
+   - `hardcount migrate status` shows the plan: the database's version, this
      release's version, the state, the files still to apply, and whether
      a migration is running now. It reuses the output from #1171, and it
      is read-only.
-   - `velox migrate rollback` runs only when `APP_ENV` is `local`, one
+   - `hardcount migrate rollback` runs only when `APP_ENV` is `local`, one
      step at a time, and never below 180. Anywhere else it refuses: going
      back means restoring the backup taken before the upgrade.
 9. **Proof in CI.** A new `migrations` job runs on every PR:
@@ -200,7 +200,7 @@ An INVALID index is one Postgres keeps but never uses.
      managed (a migrating role that is not a superuser, extensions made in
      advance) and the CI test database.
    - A restore drill backs up a v0.8.1 database, adopts it, and restores
-     the backup over it. The next `velox migrate` must refuse and change
+     the backup over it. The next `hardcount migrate` must refuse and change
      nothing.
    - HEAD applies on Postgres 14. If it fails, the docs stop calling 14
      the oldest version that should work.
@@ -230,7 +230,7 @@ An INVALID index is one Postgres keeps but never uses.
 - **A maintained library does the hard parts**
   (`feedback_prefer_battle_tested_libs`). goose has a per-file
   no-transaction mode and a polling lock, and it writes a normal file's
-  version row in that file's transaction. Velox keeps about 350 lines:
+  version row in that file's transaction. Hardcount keeps about 350 lines:
   the state check, migration 180, the status output and the error
   messages.
 - **One writer and one lock.** Adoption is goose's own migration 180, so
@@ -244,7 +244,7 @@ An INVALID index is one Postgres keeps but never uses.
   drift, because the `migrations` job compares a new install with an
   upgraded one each time.
 - **Almost no other module moves.** goose v3.27.0 raises one module in
-  Velox's Linux build: `prometheus/procfs`, 0.16.1 to 0.19.2, which the
+  Hardcount's Linux build: `prometheus/procfs`, 0.16.1 to 0.19.2, which the
   Prometheus client uses to read process metrics from `/proc` (the first
   count was taken on macOS, where that module is not built; corrected
   2026-10-18 in the cut-over PR). Its provider, lock and Postgres code is
@@ -266,7 +266,7 @@ An INVALID index is one Postgres keeps but never uses.
   needs a rule that no goose call may run before it. Migration 180 does
   the same work inside goose.
 - **D. goose v3.29.0, the latest release.** Rejected for now: it raises
-  18 modules in Velox's build, including pgx (5.9.2 to 5.11.0) and
+  18 modules in Hardcount's build, including pgx (5.9.2 to 5.11.0) and
   shopspring/decimal (1.4.0 to 1.5.0), the money type. Releases 3.27.1
   to 3.29.0 add dependency upgrades, a `goose create` fix and features
   for other databases; their Postgres code is unchanged. A later bump is
@@ -278,7 +278,7 @@ An INVALID index is one Postgres keeps but never uses.
   transaction. A v0.8.x restore with `--clean` also leaves tables that
   files after 180 created. Only a restore into an empty database is
   always right, and the state check refuses the rest.
-- **G. Port `cmd/velox-migrate-safety`.** Rejected: it steps through the
+- **G. Port `cmd/hardcount-migrate-safety`.** Rejected: it steps through the
   old files, which no longer ship. A replacement waits for its trigger
   (below).
 
@@ -302,7 +302,7 @@ An INVALID index is one Postgres keeps but never uses.
   `goose_db_version` and a table comment, and changes no other table.
   Installs older than v0.8.0 upgrade to v0.8.1 first.
 - **With `RUN_MIGRATIONS_ON_BOOT=false`** (the default outside Compose),
-  run `velox migrate` once before starting v0.9.0. Until then v0.9.0
+  run `hardcount migrate` once before starting v0.9.0. Until then v0.9.0
   refuses to start and says one migration is waiting. The release notes
   say so.
 - **A v0.8.x backup restores only into an empty database.** Restored over
@@ -321,15 +321,15 @@ An INVALID index is one Postgres keeps but never uses.
 - **Adoption needs to own `schema_migrations`** to add the comment. If
   v0.9 migrates as a different role than v0.8 did, adoption fails with
   "must be owner" and changes nothing.
-- **The `velox migrate status` output changes.** Scripts that read the old
+- **The `hardcount migrate status` output changes.** Scripts that read the old
   `version: N, dirty: …` line break. None in this repo does.
-- **`velox migrate rollback` is local only**, and the old down files no
+- **`hardcount migrate rollback` is local only**, and the old down files no
   longer ship. The ADR-107 amendment covers migration 0009's rollback.
 - **The `migrations` job pulls the v0.8.1 image** from GHCR by digest. If
   GHCR is down, the job fails loudly.
 - **A role-level `statement_timeout`** on the migrating user cuts off a
   long index build, as it does today.
-- **`velox_app` keeps all rights on `goose_db_version`** where default
+- **`hardcount_app` keeps all rights on `goose_db_version`** where default
   privileges grant them, as it has on `schema_migrations` today.
 - **Old code on a new schema is still not covered.** Deferred work, each
   with its trigger:
@@ -339,7 +339,7 @@ An INVALID index is one Postgres keeps but never uses.
   - A tool that times migrations on populated tables. Trigger: the first
     file after 180 that touches `usage_events`, `invoices`,
     `subscriptions`, `customer_credit_ledger` or `audit_log`.
-  - A replacement for `velox-migrate-safety`. Trigger: the first file
+  - A replacement for `hardcount-migrate-safety`. Trigger: the first file
     after 180 that moves data.
   - At the next baseline: delete migration 180's adopt branch, the table
     comment check and the three refusals, and drop the frozen
@@ -360,7 +360,7 @@ An INVALID index is one Postgres keeps but never uses.
 - Migrations 0062, 0112 and 0130 (`CONCURRENTLY`), 0150 (the only
   `REVOKE`), 0174 (the `leader_leases` seed), 0180 (the last v0.8.1 file)
 - Experiments:
-  [CI run 39047170196](https://github.com/getvelox/velox/actions/runs/39047170196)
+  [CI run 39047170196](https://github.com/gethardcount/hardcount/actions/runs/39047170196)
 - golang-migrate
   [#960](https://github.com/golang-migrate/migrate/issues/960),
   [#962](https://github.com/golang-migrate/migrate/pull/962),

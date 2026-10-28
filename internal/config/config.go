@@ -26,7 +26,7 @@ type Config struct {
 	// limiters fail CLOSED without it (every covered request 429) and a
 	// replica would boot green and serve 1/N of traffic that way, so
 	// production refuses to start without a reachable Redis (validateFatal +
-	// cmd/velox/main.go). Optional elsewhere: limiters fail open, except
+	// cmd/hardcount/main.go). Optional elsewhere: limiters fail open, except
 	// /v1/auth's, which counts in the process.
 	RedisURL string
 	// TrustProxy is the TRUST_PROXY CIDR list the router honours forwarded
@@ -41,7 +41,7 @@ type Config struct {
 	// driven load balancer stops routing to it before in-flight requests are
 	// drained. Env SHUTDOWN_DRAIN_DELAY (Go duration). Default 5s outside
 	// local, 0 in local. It comes before the published 90s three-stage
-	// shutdown budget (cmd/velox/main.go), so the worst case is this delay
+	// shutdown budget (cmd/hardcount/main.go), so the worst case is this delay
 	// plus 90s.
 	ShutdownDrainDelay time.Duration
 
@@ -53,7 +53,7 @@ type Config struct {
 	// 1h, 0 to 72h; 0 closes a period as soon as it is due.
 	InvoiceGracePeriod time.Duration
 
-	// RateLimits are the VELOX_RATE_LIMIT_* request limits (internal/api).
+	// RateLimits are the HARDCOUNT_RATE_LIMIT_* request limits (internal/api).
 	RateLimits RateLimits
 
 	// Bootstrap
@@ -66,26 +66,26 @@ type Config struct {
 // to fall back to the default without a word, so the install ran on a limit
 // nobody chose.
 type RateLimits struct {
-	// GeneralPerMinute is VELOX_RATE_LIMIT_GENERAL_PER_MIN, default 100: the
+	// GeneralPerMinute is HARDCOUNT_RATE_LIMIT_GENERAL_PER_MIN, default 100: the
 	// general API bucket, and the per-address limit on /v1/auth.
 	GeneralPerMinute int
-	// IngestPerSecond is VELOX_RATE_LIMIT_INGEST_PER_SEC, default 1000: usage
+	// IngestPerSecond is HARDCOUNT_RATE_LIMIT_INGEST_PER_SEC, default 1000: usage
 	// events and LiteLLM callbacks.
 	IngestPerSecond int
 }
 
-// DefaultRateLimits are the limits when no VELOX_RATE_LIMIT_* is set.
+// DefaultRateLimits are the limits when no HARDCOUNT_RATE_LIMIT_* is set.
 func DefaultRateLimits() RateLimits {
 	return RateLimits{GeneralPerMinute: 100, IngestPerSecond: 1000}
 }
 
 type DBConfig struct {
 	URL string
-	// AppURL is APP_DATABASE_URL — the least-privilege velox_app role
+	// AppURL is APP_DATABASE_URL — the least-privilege hardcount_app role
 	// the request path runs under (RLS enforced). Used VERBATIM when
-	// set (ADR-073). Empty in local dev = derive velox_app:velox_app
+	// set (ADR-073). Empty in local dev = derive hardcount_app:hardcount_app
 	// from URL; empty in staging/production = the server refuses to
-	// boot (see cmd/velox openAppPool).
+	// boot (see cmd/hardcount openAppPool).
 	AppURL          string
 	MaxOpenConns    int
 	MaxIdleConns    int
@@ -96,7 +96,7 @@ type DBConfig struct {
 }
 
 // AppEnv is APP_ENV, trimmed and lower-cased, and "local" when unset. Load
-// and the `velox migrate rollback` check read it through this one function,
+// and the `hardcount migrate rollback` check read it through this one function,
 // so both see the same environment. Nothing else reads APP_ENV: the server
 // hands Config.Env to the code that depends on it.
 func AppEnv() string {
@@ -134,7 +134,7 @@ func Load() (Config, error) {
 		RedisURL:       strings.TrimSpace(os.Getenv("REDIS_URL")),
 		TrustProxy:     strings.TrimSpace(os.Getenv("TRUST_PROXY")),
 		RateLimits:     rateLimits,
-		BootstrapToken: strings.TrimSpace(os.Getenv("VELOX_BOOTSTRAP_TOKEN")),
+		BootstrapToken: strings.TrimSpace(os.Getenv("HARDCOUNT_BOOTSTRAP_TOKEN")),
 	}
 	drain, err := loadShutdownDrainDelay(env)
 	if err != nil {
@@ -165,7 +165,7 @@ func Load() (Config, error) {
 // conditions where continuing would risk silent data loss, compliance
 // violation, or secret exposure.
 func (c Config) validateFatal() error {
-	encKey := strings.TrimSpace(os.Getenv("VELOX_ENCRYPTION_KEY"))
+	encKey := strings.TrimSpace(os.Getenv("HARDCOUNT_ENCRYPTION_KEY"))
 
 	// The production checks below, and everything the server hands Config.Env
 	// to, test for exactly "production". A near-miss such as "prod" or
@@ -176,7 +176,7 @@ func (c Config) validateFatal() error {
 	}
 
 	if c.Env == "production" && encKey == "" {
-		return fmt.Errorf("VELOX_ENCRYPTION_KEY is required in production — refusing to start with plaintext PII storage")
+		return fmt.Errorf("HARDCOUNT_ENCRYPTION_KEY is required in production — refusing to start with plaintext PII storage")
 	}
 	if c.Env == "production" && c.RedisURL == "" {
 		return fmt.Errorf("REDIS_URL is required in production — the general and hosted-invoice rate limiters fail CLOSED without Redis, so every dashboard, export, bootstrap and hosted-invoice request would answer 429 while /health/ready reports ok; point REDIS_URL at a managed Redis (docs/self-host.md)")
@@ -201,10 +201,10 @@ func (c Config) validateFatal() error {
 
 	if encKey != "" {
 		if len(encKey) != 64 {
-			return fmt.Errorf("VELOX_ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes), got %d", len(encKey))
+			return fmt.Errorf("HARDCOUNT_ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes), got %d", len(encKey))
 		}
 		if _, err := hex.DecodeString(encKey); err != nil {
-			return fmt.Errorf("VELOX_ENCRYPTION_KEY is not valid hex: %w", err)
+			return fmt.Errorf("HARDCOUNT_ENCRYPTION_KEY is not valid hex: %w", err)
 		}
 	}
 
@@ -212,7 +212,7 @@ func (c Config) validateFatal() error {
 	// a guessable one is deployment takeover during the pre-bootstrap
 	// window. Same fail-closed spirit as the encryption key (ADR-073).
 	if c.Env != "local" && c.BootstrapToken != "" && len(c.BootstrapToken) < 16 {
-		return fmt.Errorf("VELOX_BOOTSTRAP_TOKEN is %d chars — require at least 16 outside local dev (it authorizes owner-credential + live-key creation; generate with: openssl rand -hex 32)", len(c.BootstrapToken))
+		return fmt.Errorf("HARDCOUNT_BOOTSTRAP_TOKEN is %d chars — require at least 16 outside local dev (it authorizes owner-credential + live-key creation; generate with: openssl rand -hex 32)", len(c.BootstrapToken))
 	}
 
 	// Stripe credentials live per-tenant in stripe_provider_credentials (see
@@ -222,7 +222,7 @@ func (c Config) validateFatal() error {
 	return nil
 }
 
-// publicAddressSettings are the settings that hold Velox's own public
+// publicAddressSettings are the settings that hold Hardcount's own public
 // addresses: the dashboard, the customer pages and the API. internal/api
 // and internal/email read them; Validate only checks their scheme.
 var publicAddressSettings = []string{
@@ -231,23 +231,23 @@ var publicAddressSettings = []string{
 	"HOSTED_INVOICE_BASE_URL",
 	"PAYMENT_UPDATE_URL",
 	"PAYMENT_UPDATE_RETURN_URL",
-	"VELOX_API_BASE_URL",
+	"HARDCOUNT_API_BASE_URL",
 }
 
 // Validate checks the config for common misconfigurations.
 func (c Config) Validate() []string {
 	var warnings []string
 
-	encKey := strings.TrimSpace(os.Getenv("VELOX_ENCRYPTION_KEY"))
+	encKey := strings.TrimSpace(os.Getenv("HARDCOUNT_ENCRYPTION_KEY"))
 	if encKey == "" {
 		if c.Env == "production" {
-			warnings = append(warnings, "VELOX_ENCRYPTION_KEY is not set — customer PII will be stored in plaintext")
+			warnings = append(warnings, "HARDCOUNT_ENCRYPTION_KEY is not set — customer PII will be stored in plaintext")
 		}
 	} else {
 		if len(encKey) != 64 {
-			warnings = append(warnings, fmt.Sprintf("VELOX_ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes), got %d characters", len(encKey)))
+			warnings = append(warnings, fmt.Sprintf("HARDCOUNT_ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes), got %d characters", len(encKey)))
 		} else if _, err := hex.DecodeString(encKey); err != nil {
-			warnings = append(warnings, "VELOX_ENCRYPTION_KEY is not valid hex")
+			warnings = append(warnings, "HARDCOUNT_ENCRYPTION_KEY is not valid hex")
 		}
 	}
 
@@ -267,13 +267,13 @@ func (c Config) Validate() []string {
 	// Staging and production always mark the sign-in cookie Secure
 	// (session.DefaultCookieConfig), so they are meant to be served over
 	// HTTPS (ADR-095 Phase 0(b)). An address setting that starts with
-	// http:// says one is not. Velox cannot see the browser's scheme at
+	// http:// says one is not. Hardcount cannot see the browser's scheme at
 	// start-up; these settings are what it can see.
 	if c.Env == "production" || c.Env == "staging" {
 		for _, name := range publicAddressSettings {
 			u, err := neturl.Parse(strings.TrimSpace(os.Getenv(name)))
 			if err == nil && strings.EqualFold(u.Scheme, "http") {
-				warnings = append(warnings, fmt.Sprintf("%s is an http:// address, so Velox is served without TLS there. In %s the sign-in cookie is always Secure, and the pages at this address and the links to them are not encrypted. Serve Velox over HTTPS and set %s to its https:// address (docs/production-one-vm.md#3-add-https-with-caddy)", name, c.Env, name))
+				warnings = append(warnings, fmt.Sprintf("%s is an http:// address, so Hardcount is served without TLS there. In %s the sign-in cookie is always Secure, and the pages at this address and the links to them are not encrypted. Serve Hardcount over HTTPS and set %s to its https:// address (docs/production-one-vm.md#3-add-https-with-caddy)", name, c.Env, name))
 			}
 		}
 	}
@@ -479,7 +479,7 @@ func ParseCORSOrigins(spec string) ([]string, error) {
 		}
 	}
 	if len(patterns) > 0 {
-		return origins, fmt.Errorf("CORS_ALLOWED_ORIGINS has entries with a * inside: %s. Velox matches origins exactly, so list each one in full, such as https://billing.example.com", strings.Join(patterns, ", "))
+		return origins, fmt.Errorf("CORS_ALLOWED_ORIGINS has entries with a * inside: %s. Hardcount matches origins exactly, so list each one in full, such as https://billing.example.com", strings.Join(patterns, ", "))
 	}
 	if wildcard && len(origins) > 0 {
 		return origins, fmt.Errorf("CORS_ALLOWED_ORIGINS has * beside other origins. * allows every origin without the sign-in cookie, so the listed ones could not sign in either: list only the origins, or set * on its own")
@@ -507,15 +507,15 @@ func boolEnv(key string, fallback bool) (bool, error) {
 	}
 }
 
-// loadRateLimits reads VELOX_RATE_LIMIT_*: unset → DefaultRateLimits; a
+// loadRateLimits reads HARDCOUNT_RATE_LIMIT_*: unset → DefaultRateLimits; a
 // value that is not a whole number of 1 or more stops start-up.
 func loadRateLimits() (RateLimits, error) {
 	def := DefaultRateLimits()
-	general, err := rateLimitEnv("VELOX_RATE_LIMIT_GENERAL_PER_MIN", def.GeneralPerMinute)
+	general, err := rateLimitEnv("HARDCOUNT_RATE_LIMIT_GENERAL_PER_MIN", def.GeneralPerMinute)
 	if err != nil {
 		return RateLimits{}, err
 	}
-	ingest, err := rateLimitEnv("VELOX_RATE_LIMIT_INGEST_PER_SEC", def.IngestPerSecond)
+	ingest, err := rateLimitEnv("HARDCOUNT_RATE_LIMIT_INGEST_PER_SEC", def.IngestPerSecond)
 	if err != nil {
 		return RateLimits{}, err
 	}

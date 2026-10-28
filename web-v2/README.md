@@ -1,4 +1,4 @@
-# web-v2 — the Velox dashboard
+# web-v2 — the Hardcount dashboard
 
 React + TypeScript + Vite single-page app: the operator dashboard (customers,
 invoices, subscriptions, pricing, dunning, webhooks) plus the customer-facing

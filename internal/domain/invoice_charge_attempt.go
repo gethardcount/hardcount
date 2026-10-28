@@ -43,7 +43,7 @@ const (
 	ChargeTriggerChargeNow ChargeAttemptTrigger = "charge_now"
 	// ChargeTriggerDunningRetry: same chokepoint, dunning-retry purpose.
 	ChargeTriggerDunningRetry ChargeAttemptTrigger = "dunning_retry"
-	// ChargeTriggerExternal: a settle path recorded a PI Velox didn't
+	// ChargeTriggerExternal: a settle path recorded a PI Hardcount didn't
 	// mint inline (hosted-checkout attempts).
 	ChargeTriggerExternal ChargeAttemptTrigger = "external"
 )
@@ -111,8 +111,8 @@ type PaymentFailureReport struct {
 	// recorded only if no other outcome was recorded during the call (P13).
 	// Webhook and reconciler reports leave it nil.
 	ChargedAtSeq *int64
-	// External marks a PaymentIntent created outside Velox's charge paths
-	// (hosted Checkout). Velox never waits on one, so its failure never moves
+	// External marks a PaymentIntent created outside Hardcount's charge paths
+	// (hosted Checkout). Hardcount never waits on one, so its failure never moves
 	// the invoice: it is recorded on its attempt row only.
 	External bool
 }
@@ -130,20 +130,20 @@ type PaymentFailureResult struct {
 }
 
 // AttemptStanding is where a reported PaymentIntent sits in the invoice's
-// own attempt history (invoice_charge_attempts), among the attempts Velox
-// made itself (auto_charge, charge_now, dunning_retry). Velox writes that row when its
+// own attempt history (invoice_charge_attempts), among the attempts Hardcount
+// made itself (auto_charge, charge_now, dunning_retry). Hardcount writes that row when its
 // charge call returns, before it reports the outcome, and its charges are
 // serialized by the charge lease, so the row order is the attempt order.
 type AttemptStanding int
 
 const (
-	// AttemptNotVelox: no Velox-made attempt row names this PaymentIntent —
-	// a hosted Checkout attempt, an attempt whose id Velox never learned (a
+	// AttemptNotHardcount: no Hardcount-made attempt row names this PaymentIntent —
+	// a hosted Checkout attempt, an attempt whose id Hardcount never learned (a
 	// parked one), or one whose row write was lost.
-	AttemptNotVelox AttemptStanding = iota
-	// AttemptNewest: the newest Velox-made attempt on the invoice.
+	AttemptNotHardcount AttemptStanding = iota
+	// AttemptNewest: the newest Hardcount-made attempt on the invoice.
 	AttemptNewest
-	// AttemptSuperseded: Velox has made a newer attempt since.
+	// AttemptSuperseded: Hardcount has made a newer attempt since.
 	AttemptSuperseded
 )
 
@@ -157,16 +157,16 @@ const (
 //   - the invoice already holds this PaymentIntent → yes, whoever created
 //     it (the stale-hold sweep can put a payment it found on a parked
 //     invoice, a hosted one included);
-//   - an External attempt otherwise → never: Velox does not wait on it;
+//   - an External attempt otherwise → never: Hardcount does not wait on it;
 //   - the charge call reporting its own attempt → only if the seq is still
 //     the one it charged with (nothing recorded during the call, P13);
 //   - a webhook or reconciler report about a different PaymentIntent:
-//     never while the invoice waits on an in-flight attempt (no Velox charge
-//     starts from 'processing' or 'unknown'); yes if it is Velox's newest
-//     attempt (its charge call's own report was lost); no if Velox has made a
-//     newer one (a late decline for an older attempt); and with no Velox row
+//     never while the invoice waits on an in-flight attempt (no Hardcount charge
+//     starts from 'processing' or 'unknown'); yes if it is Hardcount's newest
+//     attempt (its charge call's own report was lost); no if Hardcount has made a
+//     newer one (a late decline for an older attempt); and with no Hardcount row
 //     to judge by, only if the invoice holds no PaymentIntent yet (the first
-//     attempt, or a parked attempt whose id Velox never learned).
+//     attempt, or a parked attempt whose id Hardcount never learned).
 func (r PaymentFailureReport) MovesInvoice(status InvoiceStatus, paymentStatus InvoicePaymentStatus, holdsPI string, seq int64, standing AttemptStanding) bool {
 	switch {
 	case status == InvoicePaid || paymentStatus == PaymentSucceeded:

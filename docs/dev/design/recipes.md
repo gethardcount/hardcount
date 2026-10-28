@@ -1,7 +1,7 @@
 # Pricing Recipes — Technical Design
 
 > - **Decided:** one API call sets up a common pricing shape from a built-in template: a meter, its pricing rules, a plan, a payment-retry (dunning) policy and a webhook endpoint. Since 2026-10-26 a recipe creates only meters and a plan with its prices (item 12 below).
-> - **Shipped:** v0.1.0, in [#23](https://github.com/getvelox/velox/pull/23) (migration `0055_recipe_instances`).
+> - **Shipped:** v0.1.0, in [#23](https://github.com/gethardcount/hardcount/pull/23) (migration `0055_recipe_instances`).
 > - **Current docs:** [Ready-made recipes](../../ai-pricing.md#ready-made-recipes) in the AI pricing reference. The decisions made since, and where the body is out of date, are listed below. Where this page and the code disagree, the code wins.
 
 > **Design document from 2026-04-25, kept as written.** The code in `internal/recipe/` is the live behavior.
@@ -13,19 +13,19 @@
 > 3. The apply route is `POST /v1/recipes/{key}/instantiate`. Uninstall (`DELETE /v1/recipes/instances/{id}`) was removed with no replacement. Retire a generated plan by archiving it; the `recipe_instances` record is permanent.
 > 4. `force=true` was removed. A plan-code collision creates a new plan (`<code>_2`, `<code>_3`, …) instead.
 > 5. `seed_sample_data` and the YAML `sample_data` block were never wired to a writer and stay unused.
-> 6. A plan is never adopted by code, so ADR-083's plan conformance gate no longer exists. The shared `tokens` meter is still adopted by `event_name`, and apply is refused with a 409 when its aggregation differs. Rating rules, and their adoption and currency checks, are gone ([ADR-130](../../adr/130-usage-prices-belong-to-the-plan.md), [#1386](https://github.com/getvelox/velox/pull/1386)).
+> 6. A plan is never adopted by code, so ADR-083's plan conformance gate no longer exists. The shared `tokens` meter is still adopted by `event_name`, and apply is refused with a 409 when its aggregation differs. Rating rules, and their adoption and currency checks, are gone ([ADR-130](../../adr/130-usage-prices-belong-to-the-plan.md), [#1386](https://github.com/gethardcount/hardcount/pull/1386)).
 > 7. Re-applying a recipe already installed in the same mode (test or live) is always a no-op that returns the existing instance (`201`, same `id`, same `created_objects`). The install record is per mode (ADR-085, 2026-07-26 amendment), so a test-mode install does not count as a live-mode one.
 > 8. The dunning policy's `final_action` was removed from the recipe format (ADR-112).
 > 9. The dunning policy's schedule is one list of days, `retry_days` (2026-10-23, ADR-036 amendment). It replaced `max_retries` and `intervals_hours`, which the parser now refuses.
 > 10. A recipe meter is named by `event_name`, not `key`, and a price has no `aggregation_mode`: it bills under its meter's aggregation ([ADR-130](../../adr/130-usage-prices-belong-to-the-plan.md) §2). The built-ins are now at 10.0.0 (anthropic), 9.0.0 (openai) and 7.0.0 (replicate), not the `1.0.0` shown.
-> 11. A price's rate is `unit_amount_cents` with `mode: per_unit` (not `flat`/`flat_amount_cents`), and graduated tiers are `tiers` with `up_to: null` on the last ([ADR-130](../../adr/130-usage-prices-belong-to-the-plan.md) §3, [#1381](https://github.com/getvelox/velox/pull/1381)).
-> 12. A recipe file holds only `meters` and `plans`, each plan with its `prices` (`meter`, `dimension_match` and the price shape), and an install creates nothing else ([ADR-130](../../adr/130-usage-prices-belong-to-the-plan.md) §15, [#1389](https://github.com/getvelox/velox/pull/1389)). The `rating_rules`, `pricing_rules`, `dunning` and `webhook` sections below are gone, and a file that has one fails to load. So items 8 and 9 no longer apply, and the preview lists `meters` and `plans` only.
+> 11. A price's rate is `unit_amount_cents` with `mode: per_unit` (not `flat`/`flat_amount_cents`), and graduated tiers are `tiers` with `up_to: null` on the last ([ADR-130](../../adr/130-usage-prices-belong-to-the-plan.md) §3, [#1381](https://github.com/gethardcount/hardcount/pull/1381)).
+> 12. A recipe file holds only `meters` and `plans`, each plan with its `prices` (`meter`, `dimension_match` and the price shape), and an install creates nothing else ([ADR-130](../../adr/130-usage-prices-belong-to-the-plan.md) §15, [#1389](https://github.com/gethardcount/hardcount/pull/1389)). The `rating_rules`, `pricing_rules`, `dunning` and `webhook` sections below are gone, and a file that has one fails to load. So items 8 and 9 no longer apply, and the preview lists `meters` and `plans` only.
 
 ## Motivation
 
 Stripe Billing's onboarding for an AI-native product is a multi-day chore: you create N Meters by hand (one per `model × operation × cached` combination), wire each into a Plan, attach a webhook, configure dunning retry logic (the automated retries after a payment fails), then mock the whole thing for QA. The first invoice is a week away. Buyers leave.
 
-Velox's AI-native wedge — its differentiating, AI-first pitch — includes **pricing recipes**: a single API call, ~30 seconds, walks away with a working `anthropic_style` setup — plans, meters, multi-dim (multi-dimensional) pricing rules, dunning, webhook endpoint, sample data. The picker UI in the dashboard means a non-technical CS rep can do the same thing.
+Hardcount's AI-native wedge — its differentiating, AI-first pitch — includes **pricing recipes**: a single API call, ~30 seconds, walks away with a working `anthropic_style` setup — plans, meters, multi-dim (multi-dimensional) pricing rules, dunning, webhook endpoint, sample data. The picker UI in the dashboard means a non-technical CS rep can do the same thing.
 
 This is the developer-experience flagship that turns the AI-native pillar from a slide into a 5-minute quickstart. Without it, the multi-dim meter machinery is invisible: no prospect builds a 12-rule `anthropic_style` setup by hand to evaluate it. With recipes, evaluation collapses to one POST.
 
@@ -34,7 +34,7 @@ This design depends on multi-dim meters being merged.
 ## Goals
 
 - **One-call instantiation.** `POST /v1/recipes/instantiate` atomically creates the full surface area for a given recipe key (plans, meters, multi-dim pricing rules, dunning policy, webhook endpoint placeholder, optional sample data). All-or-nothing transaction.
-- **Five built-ins shipping in v1:** `anthropic_style`, `openai_style`, `replicate_style`, `b2b_saas_pro`, `marketplace_gmv`. Each represents a real-world pricing pattern Velox-class buyers actually use.
+- **Five built-ins shipping in v1:** `anthropic_style`, `openai_style`, `replicate_style`, `b2b_saas_pro`, `marketplace_gmv`. Each represents a real-world pricing pattern Hardcount-class buyers actually use.
 - **Preview before commit.** `POST /v1/recipes/{key}/preview` returns the full graph of objects that *would* be created, with no DB writes. Powers the "review and instantiate" dialog in the dashboard.
 - **Embedded YAML, no DB recipe table.** Recipes are versioned with the binary (`internal/recipe/recipes/*.yaml`, compiled in via Go's `embed.FS`, the standard library's file-embedding mechanism). Tenants don't author them in v1; built-ins only.
 - **Per-instantiation overrides.** Currency, customer-facing names, base prices accept overrides at instantiate time. Changes must round-trip through preview.
@@ -45,7 +45,7 @@ This design depends on multi-dim meters being merged.
 ## Non-goals (deferred)
 
 - **Tenant-authored recipes.** Defer until a paying tenant asks. The maintenance cost — a tenant-recipe registry, validation, version migration, and a security review (a recipe is arbitrary infra-as-code) — is steep and unwarranted before product/market fit.
-- **Recipe upgrades / migrations across versions.** A recipe is instantiated once. If Velox ships `anthropic_style` v2, instantiating it on an existing tenant either no-ops (idempotency match by key) or overwrites (force flag). No "upgrade my v1 instance to v2" path. Defer until the API stabilizes.
+- **Recipe upgrades / migrations across versions.** A recipe is instantiated once. If Hardcount ships `anthropic_style` v2, instantiating it on an existing tenant either no-ops (idempotency match by key) or overwrites (force flag). No "upgrade my v1 instance to v2" path. Defer until the API stabilizes.
 - **Marketplace / shared recipes from third parties.** Phase 4+. Security model alone (signing, sandboxing) is its own design.
 - **Cross-tenant recipe templates.** Each tenant gets its own copy. No shared plan catalog across tenants by design — RLS (Row-Level Security: Postgres itself filters every tenant-scoped query down to the current tenant's rows) isolation is the whole point.
 - **Recipes that span Stripe configuration** (tax codes per region, payment method preferences). Defer; the tenant's own `tenantstripe` (per-tenant Stripe configuration) settings already cover this.
@@ -72,7 +72,7 @@ This design depends on multi-dim meters being merged.
 --   (b) show the dashboard "anthropic_style instantiated 3 days ago"
 --   (c) clean up an instance via cascade if force-re-instantiated
 CREATE TABLE recipe_instances (
-    id                TEXT PRIMARY KEY DEFAULT 'vlx_rec_' || encode(gen_random_bytes(12), 'hex'),
+    id                TEXT PRIMARY KEY DEFAULT 'hc_rec_' || encode(gen_random_bytes(12), 'hex'),
     tenant_id         TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     recipe_key        TEXT NOT NULL,         -- e.g. 'anthropic_style'
     recipe_version    TEXT NOT NULL,         -- e.g. '1.0.0' (from YAML frontmatter)
@@ -91,7 +91,7 @@ CREATE POLICY recipe_instances_tenant_isolation ON recipe_instances
     USING (tenant_id = current_setting('app.tenant_id', true)
         OR current_setting('app.bypass_rls', true) = 'true');
 
-GRANT ALL ON TABLE recipe_instances TO velox_app;
+GRANT ALL ON TABLE recipe_instances TO hardcount_app;
 ```
 
 Storing only the index and the `created_object_ids` map keeps the design boring. The canonical entities live in their own tables and obey their own constraints. If a tenant deletes a meter that came from a recipe, the recipe instance is unaffected — this is intentional. Cascading recipe deletion is a `force=true` operator flow, not a default.
@@ -130,7 +130,7 @@ Response `200`:
       },
       "overridable": ["currency", "plan_name", "plan_code"],
       "instantiated": {
-        "id": "vlx_rec_abc",
+        "id": "hc_rec_abc",
         "instantiated_at": "2026-04-22T10:00:00Z"
       }
     },
@@ -191,7 +191,7 @@ Response `200`:
     ],
     "plans": [{ "code": "ai_api_pro", "name": "AI API", "currency": "USD", "billing_interval": "monthly", "base_amount_cents": 0, "meter_keys": ["tokens"] }],
     "dunning_policies": [{ "name": "AI default retry", "retry_days": [3, 1, 3, 7] }],
-    "webhook_endpoints": [{ "url": "https://example.com/webhooks/velox", "events": ["invoice.finalized", "invoice.paid", "subscription.updated"], "_placeholder": true }]
+    "webhook_endpoints": [{ "url": "https://example.com/webhooks/hardcount", "events": ["invoice.finalized", "invoice.paid", "subscription.updated"], "_placeholder": true }]
   },
   "warnings": []
 }
@@ -217,18 +217,18 @@ Idempotency-Key: <key>
 Response `201`:
 ```json
 {
-  "id": "vlx_rec_abc",
+  "id": "hc_rec_abc",
   "key": "anthropic_style",
   "version": "1.0.0",
-  "tenant_id": "vlx_ten_...",
+  "tenant_id": "hc_ten_...",
   "created_at": "2026-04-25T12:34:56Z",
   "created_objects": {
-    "meter_ids": ["vlx_mtr_..."],
-    "rating_rule_ids": ["vlx_rrv_..."],
-    "pricing_rule_ids": ["vlx_mpr_...", "..."],
-    "plan_ids": ["vlx_pln_..."],
-    "dunning_policy_id": "vlx_dpc_...",
-    "webhook_endpoint_id": "vlx_whk_..."
+    "meter_ids": ["hc_mtr_..."],
+    "rating_rule_ids": ["hc_rrv_..."],
+    "pricing_rule_ids": ["hc_mpr_...", "..."],
+    "plan_ids": ["hc_pln_..."],
+    "dunning_policy_id": "hc_dpc_...",
+    "webhook_endpoint_id": "hc_whk_..."
   }
 }
 ```
@@ -237,7 +237,7 @@ Response `409` if the recipe is already instantiated and `force=false`:
 ```json
 {
   "error": "recipe_already_instantiated",
-  "instance": { "id": "vlx_rec_abc", "created_at": "..." },
+  "instance": { "id": "hc_rec_abc", "created_at": "..." },
   "hint": "Pass force=true to delete the existing instance and re-instantiate."
 }
 ```
@@ -249,7 +249,7 @@ Response `409` if the recipe is already instantiated and `force=false`:
 ### `DELETE /v1/recipes/instances/{id}` — uninstall
 
 ```http
-DELETE /v1/recipes/instances/vlx_rec_abc
+DELETE /v1/recipes/instances/hc_rec_abc
 Authorization: Bearer <platform_key>
 ```
 
@@ -342,7 +342,7 @@ webhook:
     - invoice.payment_failed
     - subscription.updated
     - subscription.canceled
-  url_placeholder: 'https://example.com/webhooks/velox'
+  url_placeholder: 'https://example.com/webhooks/hardcount'
 
 sample_data:
   customer:
@@ -360,7 +360,7 @@ sample_data:
 
 ### Versioning
 
-`version` field is semver. The version is recorded on `recipe_instances.recipe_version` so an operator can see which iteration their tenant ran. Velox does not migrate existing instances when a recipe's YAML changes — the canonical entities live in their own tables and the operator owns them once they exist.
+`version` field is semver. The version is recorded on `recipe_instances.recipe_version` so an operator can see which iteration their tenant ran. Hardcount does not migrate existing instances when a recipe's YAML changes — the canonical entities live in their own tables and the operator owns them once they exist.
 
 ## Internals
 
@@ -454,8 +454,8 @@ The five v1 recipes are calibrated against real public pricing pages for the wed
 | `anthropic_style` | claude-3.5-sonnet, claude-3-opus, claude-3-sonnet, claude-3-haiku × {input, output} × {cached, uncached} | 12 | LLM API resellers / inference platforms |
 | `openai_style` | gpt-4-turbo, gpt-4o, gpt-3.5-turbo × {input, output, embedding} × {cached, uncached} | 14 | LLM API resellers / inference platforms |
 | `replicate_style` | per-second GPU billing across {a100, a40, t4, cpu} with `last_during_period` for spot duration | 4 | GPU-time platforms |
-| `b2b_saas_pro` | seat-based with `last_ever` aggregation + per-seat overage | 2 | Vanilla SaaS that needs Velox for compliance, not AI |
-| `marketplace_gmv` | percentage-of-volume with min/max, monthly settle | 1 plus `count` for transaction count | Marketplaces using Velox without Connect |
+| `b2b_saas_pro` | seat-based with `last_ever` aggregation + per-seat overage | 2 | Vanilla SaaS that needs Hardcount for compliance, not AI |
+| `marketplace_gmv` | percentage-of-volume with min/max, monthly settle | 1 plus `count` for transaction count | Marketplaces using Hardcount without Connect |
 
 Each recipe gets a one-pager at `/docs/recipes/{key}.md` (Track B's `/docs/recipes` content surface) with copy-pasteable curl, a screenshot of the resulting dashboard, and a pricing page comparison.
 
@@ -478,7 +478,7 @@ Each recipe gets a one-pager at `/docs/recipes/{key}.md` (Track B's `/docs/recip
 
 ### End-to-end test (against the running stack)
 
-`cmd/velox-recipes-e2e/main.go`: instantiate `anthropic_style`, post 1000 usage events through the new meter, run the cycle scan, assert the resulting invoice line items match the recipe's expected line breakdown. Catches contract drift between this design and the multi-dim meter implementation.
+`cmd/hardcount-recipes-e2e/main.go`: instantiate `anthropic_style`, post 1000 usage events through the new meter, run the cycle scan, assert the resulting invoice line items match the recipe's expected line breakdown. Catches contract drift between this design and the multi-dim meter implementation.
 
 ## Migrations
 
@@ -500,7 +500,7 @@ Recipes inherit the `NUMERIC(38, 12)` quantity type from `usage_events`; no reci
 1. **Should `instantiate` accept inline overrides for `pricing_rules.dimension_match` keys?** Proposal: **no** for v1. Recipe authors choose dimension shapes; tenants override prices but not dimension structure. Revisit if a design partner wants `gpt-4-turbo` pricing on the `anthropic_style` recipe.
 2. **Should `seed_sample_data` create a `test_clock`?** Proposal: **no**. Sample sub starts with `trial_days=14` real-time; ops can attach a clock manually if they want to fast-forward. Keeps `seed_sample_data` semantics simple.
 3. **Should `force=true` cascade-delete subscriptions that reference the recipe's plan?** Proposal: **no**. 409 with the dependents list, force the operator to migrate or cancel subscriptions first. Auto-cascade on subscriptions risks losing real billing data.
-4. **Where do recipe webhook endpoints get their real URL?** Proposal: created with `url_placeholder` from YAML (`https://example.com/webhooks/velox`), plus an `is_placeholder=true` flag. Dashboard surfaces a "set webhook URL" prompt next to the instantiated recipe. Endpoint stays inactive (no events dispatched) until URL is updated and `is_placeholder` cleared. **Open:** does inactive-endpoint surface need a new column on `webhook_endpoints`, or do we reuse `enabled=false`? Lean toward `enabled=false` — same observable behavior, no schema delta.
+4. **Where do recipe webhook endpoints get their real URL?** Proposal: created with `url_placeholder` from YAML (`https://example.com/webhooks/hardcount`), plus an `is_placeholder=true` flag. Dashboard surfaces a "set webhook URL" prompt next to the instantiated recipe. Endpoint stays inactive (no events dispatched) until URL is updated and `is_placeholder` cleared. **Open:** does inactive-endpoint surface need a new column on `webhook_endpoints`, or do we reuse `enabled=false`? Lean toward `enabled=false` — same observable behavior, no schema delta.
 5. **Should preview be cacheable?** Proposal: **no for v1**. Reads happen at most a few times per tenant. Cache invalidation across YAML version bumps + override permutations is its own problem.
 6. **Recipe ordering in `GET /v1/recipes` — is there a "featured" notion?** Proposal: **alphabetical, no featuring v1**. The picker UI (Track B) can apply its own ordering; backend doesn't pick favorites.
 7. **Should built-in recipes ship with `webhook.events` set or empty?** Proposal: **set per recipe**. `anthropic_style` and `openai_style` get the AI-relevant events (`invoice.finalized`, `usage.threshold_crossed` once Week 5 ships); `b2b_saas_pro` gets the SaaS-classic ones (`subscription.created`, `subscription.canceled`). Concrete defaults beat empty-and-let-the-tenant-figure-it-out.
@@ -520,7 +520,7 @@ Recipes inherit the `NUMERIC(38, 12)` quantity type from `usage_events`; no reci
 - [x] Per-recipe one-pagers in `docs/recipes/*.md` rendered at `/docs/recipes`
 - [x] Unit tests: YAML parse, override validation, template render
 - [x] Integration tests: instantiate / preview / force / RLS / atomicity rollback
-- [x] End-to-end coverage — delivered as MANUAL_TEST FLOW S2 (recipe instantiate → in_advance plan → LiteLLM ingest → hybrid cycle invoice → public cost dashboard) plus the integration tests above; the `cmd/velox-recipes-e2e` binary this line originally named was never built (no commit ever contained it)
+- [x] End-to-end coverage — delivered as MANUAL_TEST FLOW S2 (recipe instantiate → in_advance plan → LiteLLM ingest → hybrid cycle invoice → public cost dashboard) plus the integration tests above; the `cmd/hardcount-recipes-e2e` binary this line originally named was never built (no commit ever contained it)
 - [x] OpenAPI spec update (`api/openapi.yaml`)
 - [x] CHANGELOG entry + public changelog rollup
 

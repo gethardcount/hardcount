@@ -34,7 +34,7 @@ func TestCreditAudit_SharedFate(t *testing.T) {
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 60*time.Second)
 	defer cancel()
 
-	customerID := "vlx_cus_sharedfate"
+	customerID := "hc_cus_sharedfate"
 	seedTx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		t.Fatalf("begin seed tx: %v", err)

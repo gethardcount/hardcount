@@ -17,7 +17,7 @@ import (
 // A released row is "in an open period" only inside an active or trialing
 // subscription's CURRENT period. Before the subscription started it is
 // outside; in an earlier period whose invoice is built it is outside too
-// (after_close), whatever its plan prices now: Velox never re-times usage
+// (after_close), whatever its plan prices now: Hardcount never re-times usage
 // onto a later invoice (ADR-120). Inside the
 // period it is invoiced only when a price of the plan takes it; it is
 // no_price when the plan prices its meter but no price takes its labels, and
@@ -211,7 +211,7 @@ func TestHoldCall_Validation(t *testing.T) {
 		t.Fatalf("invalid rows reached the store: %+v", store.held)
 	}
 
-	// No time on the payload: the row is stamped with when Velox got it.
+	// No time on the payload: the row is stamped with when Hardcount got it.
 	in := base()
 	in.Events = in.Events[:1]
 	in.Events[0].Timestamp = nil

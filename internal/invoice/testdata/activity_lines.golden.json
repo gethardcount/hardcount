@@ -10,7 +10,7 @@
           {
             "link": {
               "kind": "subscription",
-              "id": "vlx_sub_1",
+              "id": "hc_sub_1",
               "label": "Starter"
             }
           }
@@ -44,7 +44,7 @@
           {
             "link": {
               "kind": "subscription",
-              "id": "vlx_sub_1",
+              "id": "hc_sub_1",
               "label": "Starter"
             }
           }
@@ -78,7 +78,7 @@
           {
             "link": {
               "kind": "subscription",
-              "id": "vlx_sub_1",
+              "id": "hc_sub_1",
               "label": "Starter"
             }
           }
@@ -112,7 +112,7 @@
           {
             "link": {
               "kind": "subscription",
-              "id": "vlx_sub_1",
+              "id": "hc_sub_1",
               "label": "Starter"
             }
           }
@@ -146,7 +146,7 @@
           {
             "link": {
               "kind": "subscription",
-              "id": "vlx_sub_1",
+              "id": "hc_sub_1",
               "label": "Starter"
             }
           }
@@ -180,7 +180,7 @@
           {
             "link": {
               "kind": "subscription",
-              "id": "vlx_sub_1",
+              "id": "hc_sub_1",
               "label": "Starter"
             }
           }
@@ -214,7 +214,7 @@
           {
             "link": {
               "kind": "subscription",
-              "id": "vlx_sub_1",
+              "id": "hc_sub_1",
               "label": "Starter"
             }
           }
@@ -249,7 +249,7 @@
           {
             "link": {
               "kind": "subscription",
-              "id": "vlx_sub_1",
+              "id": "hc_sub_1",
               "label": "Starter"
             }
           }
@@ -284,7 +284,7 @@
           {
             "link": {
               "kind": "subscription",
-              "id": "vlx_sub_1",
+              "id": "hc_sub_1",
               "label": "Starter"
             }
           }
@@ -319,7 +319,7 @@
           {
             "link": {
               "kind": "subscription",
-              "id": "vlx_sub_1",
+              "id": "hc_sub_1",
               "label": "Starter"
             }
           }
@@ -696,7 +696,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-0001"
             }
           }
@@ -729,7 +729,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-0001"
             }
           }
@@ -1452,7 +1452,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -1492,7 +1492,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -1543,7 +1543,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -1594,7 +1594,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -1656,7 +1656,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -1674,7 +1674,7 @@
             }
           },
           {
-            "text": " refunded outside Velox"
+            "text": " refunded outside Hardcount"
           }
         ]
       ],
@@ -1687,7 +1687,7 @@
     },
     "text": [
       "Credit note issued · $3.00",
-      "meta: CN-000012 · Billing error · $3.00 refunded outside Velox · by alice@example.com",
+      "meta: CN-000012 · Billing error · $3.00 refunded outside Hardcount · by alice@example.com",
       "tone: success"
     ]
   },
@@ -1707,7 +1707,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -1736,7 +1736,7 @@
             }
           },
           {
-            "text": " refunded outside Velox"
+            "text": " refunded outside Hardcount"
           }
         ]
       ],
@@ -1750,7 +1750,7 @@
     "text": [
       "Credit note issued · $18.00",
       "problem: Card refund failed.",
-      "meta: CN-000012 · Billing error · $15.00 to card · $3.00 refunded outside Velox · by alice@example.com",
+      "meta: CN-000012 · Billing error · $15.00 to card · $3.00 refunded outside Hardcount · by alice@example.com",
       "tone: failure"
     ]
   },
@@ -1769,7 +1769,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -1798,7 +1798,7 @@
             }
           },
           {
-            "text": " refunded outside Velox"
+            "text": " refunded outside Hardcount"
           }
         ]
       ],
@@ -1811,7 +1811,7 @@
     },
     "text": [
       "Credit note issued · $8.00",
-      "meta: CN-000012 · Billing error · $5.00 to credit balance · $3.00 refunded outside Velox · by alice@example.com",
+      "meta: CN-000012 · Billing error · $5.00 to credit balance · $3.00 refunded outside Hardcount · by alice@example.com",
       "tone: success"
     ]
   },
@@ -1831,7 +1831,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -1871,7 +1871,7 @@
             }
           },
           {
-            "text": " refunded outside Velox"
+            "text": " refunded outside Hardcount"
           }
         ]
       ],
@@ -1885,7 +1885,7 @@
     "text": [
       "Credit note issued · $23.00",
       "problem: Card refund failed.",
-      "meta: CN-000012 · Billing error · $15.00 to card · $5.00 to credit balance · $3.00 refunded outside Velox · by alice@example.com",
+      "meta: CN-000012 · Billing error · $15.00 to card · $5.00 to credit balance · $3.00 refunded outside Hardcount · by alice@example.com",
       "tone: failure"
     ]
   },
@@ -1904,7 +1904,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -1944,7 +1944,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -1995,7 +1995,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -2046,7 +2046,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -2108,7 +2108,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -2126,7 +2126,7 @@
             }
           },
           {
-            "text": " refunded outside Velox"
+            "text": " refunded outside Hardcount"
           }
         ]
       ],
@@ -2139,7 +2139,7 @@
     },
     "text": [
       "Credit note issued · $3.00",
-      "meta: CN-000012 · Billing error · $3.00 refunded outside Velox · by alice@example.com",
+      "meta: CN-000012 · Billing error · $3.00 refunded outside Hardcount · by alice@example.com",
       "tone: success"
     ]
   },
@@ -2159,7 +2159,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -2188,7 +2188,7 @@
             }
           },
           {
-            "text": " refunded outside Velox"
+            "text": " refunded outside Hardcount"
           }
         ]
       ],
@@ -2202,7 +2202,7 @@
     "text": [
       "Credit note issued · $18.00",
       "problem: No refund was sent to the payment provider.",
-      "meta: CN-000012 · Billing error · $15.00 to card · $3.00 refunded outside Velox · by alice@example.com",
+      "meta: CN-000012 · Billing error · $15.00 to card · $3.00 refunded outside Hardcount · by alice@example.com",
       "tone: warning"
     ]
   },
@@ -2221,7 +2221,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -2250,7 +2250,7 @@
             }
           },
           {
-            "text": " refunded outside Velox"
+            "text": " refunded outside Hardcount"
           }
         ]
       ],
@@ -2263,7 +2263,7 @@
     },
     "text": [
       "Credit note issued · $8.00",
-      "meta: CN-000012 · Billing error · $5.00 to credit balance · $3.00 refunded outside Velox · by alice@example.com",
+      "meta: CN-000012 · Billing error · $5.00 to credit balance · $3.00 refunded outside Hardcount · by alice@example.com",
       "tone: success"
     ]
   },
@@ -2283,7 +2283,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -2323,7 +2323,7 @@
             }
           },
           {
-            "text": " refunded outside Velox"
+            "text": " refunded outside Hardcount"
           }
         ]
       ],
@@ -2337,7 +2337,7 @@
     "text": [
       "Credit note issued · $23.00",
       "problem: No refund was sent to the payment provider.",
-      "meta: CN-000012 · Billing error · $15.00 to card · $5.00 to credit balance · $3.00 refunded outside Velox · by alice@example.com",
+      "meta: CN-000012 · Billing error · $15.00 to card · $5.00 to credit balance · $3.00 refunded outside Hardcount · by alice@example.com",
       "tone: warning"
     ]
   },
@@ -2356,7 +2356,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -2396,7 +2396,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -2447,7 +2447,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -2498,7 +2498,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -2560,7 +2560,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -2578,7 +2578,7 @@
             }
           },
           {
-            "text": " refunded outside Velox"
+            "text": " refunded outside Hardcount"
           }
         ]
       ],
@@ -2591,7 +2591,7 @@
     },
     "text": [
       "Credit note issued · $3.00",
-      "meta: CN-000012 · Billing error · $3.00 refunded outside Velox · by alice@example.com",
+      "meta: CN-000012 · Billing error · $3.00 refunded outside Hardcount · by alice@example.com",
       "tone: success"
     ]
   },
@@ -2611,7 +2611,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -2640,7 +2640,7 @@
             }
           },
           {
-            "text": " refunded outside Velox"
+            "text": " refunded outside Hardcount"
           }
         ]
       ],
@@ -2654,7 +2654,7 @@
     "text": [
       "Credit note issued · $18.00",
       "problem: The card refund is waiting on the payment provider.",
-      "meta: CN-000012 · Billing error · $15.00 to card · $3.00 refunded outside Velox · by alice@example.com",
+      "meta: CN-000012 · Billing error · $15.00 to card · $3.00 refunded outside Hardcount · by alice@example.com",
       "tone: warning"
     ]
   },
@@ -2673,7 +2673,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -2702,7 +2702,7 @@
             }
           },
           {
-            "text": " refunded outside Velox"
+            "text": " refunded outside Hardcount"
           }
         ]
       ],
@@ -2715,7 +2715,7 @@
     },
     "text": [
       "Credit note issued · $8.00",
-      "meta: CN-000012 · Billing error · $5.00 to credit balance · $3.00 refunded outside Velox · by alice@example.com",
+      "meta: CN-000012 · Billing error · $5.00 to credit balance · $3.00 refunded outside Hardcount · by alice@example.com",
       "tone: success"
     ]
   },
@@ -2735,7 +2735,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -2775,7 +2775,7 @@
             }
           },
           {
-            "text": " refunded outside Velox"
+            "text": " refunded outside Hardcount"
           }
         ]
       ],
@@ -2789,7 +2789,7 @@
     "text": [
       "Credit note issued · $23.00",
       "problem: The card refund is waiting on the payment provider.",
-      "meta: CN-000012 · Billing error · $15.00 to card · $5.00 to credit balance · $3.00 refunded outside Velox · by alice@example.com",
+      "meta: CN-000012 · Billing error · $15.00 to card · $5.00 to credit balance · $3.00 refunded outside Hardcount · by alice@example.com",
       "tone: warning"
     ]
   },
@@ -2808,7 +2808,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -2847,7 +2847,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -2897,7 +2897,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -2947,7 +2947,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -3008,7 +3008,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -3026,7 +3026,7 @@
             }
           },
           {
-            "text": " refunded outside Velox"
+            "text": " refunded outside Hardcount"
           }
         ]
       ],
@@ -3039,7 +3039,7 @@
     },
     "text": [
       "Credit note issued · $3.00",
-      "meta: CN-000012 · Billing error · $3.00 refunded outside Velox · by alice@example.com",
+      "meta: CN-000012 · Billing error · $3.00 refunded outside Hardcount · by alice@example.com",
       "tone: success"
     ]
   },
@@ -3058,7 +3058,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -3087,7 +3087,7 @@
             }
           },
           {
-            "text": " refunded outside Velox"
+            "text": " refunded outside Hardcount"
           }
         ]
       ],
@@ -3100,7 +3100,7 @@
     },
     "text": [
       "Credit note issued · $18.00",
-      "meta: CN-000012 · Billing error · $15.00 refunded to card · $3.00 refunded outside Velox · by alice@example.com",
+      "meta: CN-000012 · Billing error · $15.00 refunded to card · $3.00 refunded outside Hardcount · by alice@example.com",
       "tone: success"
     ]
   },
@@ -3119,7 +3119,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -3148,7 +3148,7 @@
             }
           },
           {
-            "text": " refunded outside Velox"
+            "text": " refunded outside Hardcount"
           }
         ]
       ],
@@ -3161,7 +3161,7 @@
     },
     "text": [
       "Credit note issued · $8.00",
-      "meta: CN-000012 · Billing error · $5.00 to credit balance · $3.00 refunded outside Velox · by alice@example.com",
+      "meta: CN-000012 · Billing error · $5.00 to credit balance · $3.00 refunded outside Hardcount · by alice@example.com",
       "tone: success"
     ]
   },
@@ -3180,7 +3180,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -3220,7 +3220,7 @@
             }
           },
           {
-            "text": " refunded outside Velox"
+            "text": " refunded outside Hardcount"
           }
         ]
       ],
@@ -3233,7 +3233,7 @@
     },
     "text": [
       "Credit note issued · $23.00",
-      "meta: CN-000012 · Billing error · $15.00 refunded to card · $5.00 to credit balance · $3.00 refunded outside Velox · by alice@example.com",
+      "meta: CN-000012 · Billing error · $15.00 refunded to card · $5.00 to credit balance · $3.00 refunded outside Hardcount · by alice@example.com",
       "tone: success"
     ]
   },
@@ -3252,7 +3252,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -3292,7 +3292,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -3343,7 +3343,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -3394,7 +3394,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -3456,7 +3456,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -3474,7 +3474,7 @@
             }
           },
           {
-            "text": " refunded outside Velox"
+            "text": " refunded outside Hardcount"
           }
         ]
       ],
@@ -3487,7 +3487,7 @@
     },
     "text": [
       "Credit note issued · $3.00",
-      "meta: CN-000012 · Billing error · $3.00 refunded outside Velox · by alice@example.com",
+      "meta: CN-000012 · Billing error · $3.00 refunded outside Hardcount · by alice@example.com",
       "tone: success"
     ]
   },
@@ -3507,7 +3507,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -3536,7 +3536,7 @@
             }
           },
           {
-            "text": " refunded outside Velox"
+            "text": " refunded outside Hardcount"
           }
         ]
       ],
@@ -3550,7 +3550,7 @@
     "text": [
       "Credit note issued · $18.00",
       "problem: The payment provider did not say whether the card refund went through.",
-      "meta: CN-000012 · Billing error · $15.00 to card · $3.00 refunded outside Velox · by alice@example.com",
+      "meta: CN-000012 · Billing error · $15.00 to card · $3.00 refunded outside Hardcount · by alice@example.com",
       "tone: warning"
     ]
   },
@@ -3569,7 +3569,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -3598,7 +3598,7 @@
             }
           },
           {
-            "text": " refunded outside Velox"
+            "text": " refunded outside Hardcount"
           }
         ]
       ],
@@ -3611,7 +3611,7 @@
     },
     "text": [
       "Credit note issued · $8.00",
-      "meta: CN-000012 · Billing error · $5.00 to credit balance · $3.00 refunded outside Velox · by alice@example.com",
+      "meta: CN-000012 · Billing error · $5.00 to credit balance · $3.00 refunded outside Hardcount · by alice@example.com",
       "tone: success"
     ]
   },
@@ -3631,7 +3631,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -3671,7 +3671,7 @@
             }
           },
           {
-            "text": " refunded outside Velox"
+            "text": " refunded outside Hardcount"
           }
         ]
       ],
@@ -3685,7 +3685,7 @@
     "text": [
       "Credit note issued · $23.00",
       "problem: The payment provider did not say whether the card refund went through.",
-      "meta: CN-000012 · Billing error · $15.00 to card · $5.00 to credit balance · $3.00 refunded outside Velox · by alice@example.com",
+      "meta: CN-000012 · Billing error · $15.00 to card · $5.00 to credit balance · $3.00 refunded outside Hardcount · by alice@example.com",
       "tone: warning"
     ]
   },
@@ -3704,7 +3704,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -3753,7 +3753,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -3802,7 +3802,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -3851,7 +3851,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -3900,7 +3900,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -3949,7 +3949,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -3998,7 +3998,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -4047,7 +4047,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -4096,7 +4096,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -4145,7 +4145,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -4194,7 +4194,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -4244,7 +4244,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -7258,7 +7258,7 @@
       "id": "email/send failure/recipient_suppressed",
       "kind": "email.invoice",
       "title": "Invoice email couldn't be sent",
-      "problem": "This address bounced or marked an earlier email as spam, so Velox no longer emails it.",
+      "problem": "This address bounced or marked an earlier email as spam, so Hardcount no longer emails it.",
       "detail": [
         [
           {
@@ -7271,7 +7271,7 @@
     },
     "text": [
       "Invoice email couldn't be sent",
-      "problem: This address bounced or marked an earlier email as spam, so Velox no longer emails it.",
+      "problem: This address bounced or marked an earlier email as spam, so Hardcount no longer emails it.",
       "meta: To billing@acme.test",
       "tone: failure"
     ]
@@ -7311,7 +7311,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -7859,7 +7859,7 @@
           {
             "link": {
               "kind": "subscription",
-              "id": "vlx_sub_1",
+              "id": "hc_sub_1",
               "label": "Starter"
             }
           }
@@ -7895,7 +7895,7 @@
           {
             "link": {
               "kind": "subscription",
-              "id": "vlx_sub_1",
+              "id": "hc_sub_1",
               "label": "Starter"
             }
           }
@@ -7931,7 +7931,7 @@
           {
             "link": {
               "kind": "subscription",
-              "id": "vlx_sub_1",
+              "id": "hc_sub_1",
               "label": "Starter"
             }
           }
@@ -7967,7 +7967,7 @@
           {
             "link": {
               "kind": "subscription",
-              "id": "vlx_sub_1",
+              "id": "hc_sub_1",
               "label": "Starter"
             }
           }
@@ -8003,7 +8003,7 @@
           {
             "link": {
               "kind": "subscription",
-              "id": "vlx_sub_1",
+              "id": "hc_sub_1",
               "label": "Starter"
             }
           }
@@ -8039,7 +8039,7 @@
           {
             "link": {
               "kind": "subscription",
-              "id": "vlx_sub_1",
+              "id": "hc_sub_1",
               "label": "Starter"
             }
           }
@@ -8127,7 +8127,7 @@
           {
             "link": {
               "kind": "subscription",
-              "id": "vlx_sub_1",
+              "id": "hc_sub_1",
               "label": "Starter"
             }
           }
@@ -8163,7 +8163,7 @@
           {
             "link": {
               "kind": "subscription",
-              "id": "vlx_sub_1",
+              "id": "hc_sub_1",
               "label": "Starter"
             }
           }
@@ -8199,7 +8199,7 @@
           {
             "link": {
               "kind": "subscription",
-              "id": "vlx_sub_1",
+              "id": "hc_sub_1",
               "label": "Starter"
             }
           }
@@ -8235,7 +8235,7 @@
           {
             "link": {
               "kind": "subscription",
-              "id": "vlx_sub_1",
+              "id": "hc_sub_1",
               "label": "Starter"
             }
           }
@@ -8271,7 +8271,7 @@
           {
             "link": {
               "kind": "subscription",
-              "id": "vlx_sub_1",
+              "id": "hc_sub_1",
               "label": "Starter"
             }
           }
@@ -8307,7 +8307,7 @@
           {
             "link": {
               "kind": "subscription",
-              "id": "vlx_sub_1",
+              "id": "hc_sub_1",
               "label": "Starter"
             }
           }

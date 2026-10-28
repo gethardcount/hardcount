@@ -27,7 +27,7 @@ func TestHostedInvoiceAdapter_NotConnectedIsTyped(t *testing.T) {
 		sessions: payment.NewCheckoutSessionStore(nil),
 	}
 	ctx := postgres.WithLivemode(context.Background(), false)
-	_, err := a.CreateInvoicePaymentSession(ctx, "t_1", domain.Invoice{ID: "vlx_inv_1", CustomerID: "cus_1"}, "https://s", "https://c")
+	_, err := a.CreateInvoicePaymentSession(ctx, "t_1", domain.Invoice{ID: "hc_inv_1", CustomerID: "cus_1"}, "https://s", "https://c")
 	if errs.Code(err) != errs.CodeStripeNotConnected {
 		t.Fatalf("err = %v (code %q), want %q", err, errs.Code(err), errs.CodeStripeNotConnected)
 	}

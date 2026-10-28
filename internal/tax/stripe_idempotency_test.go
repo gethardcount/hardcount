@@ -65,7 +65,7 @@ func newCapturingProvider() (*StripeTaxProvider, *capturingBackend) {
 // derived from the reversal Reference:
 //
 //   - Reference            = ref            (Stripe enforces account-wide uniqueness)
-//   - IdempotencyKey header = "velox_tax_rev_" + ref
+//   - IdempotencyKey header = "hardcount_tax_rev_" + ref
 //
 // plus, for partial reversals, a NEGATIVE FlatAmount (Stripe requires the
 // reversal amount in negative smallest-currency units). If a refactor silently
@@ -96,8 +96,8 @@ func TestReverse_RequestShape(t *testing.T) {
 		if got := stripe.StringValue(params.Reference); got != "cn_abc123" {
 			t.Errorf("Reference = %q, want cn_abc123 (Stripe-side dedup key)", got)
 		}
-		if got := idemKey(params); got != "velox_tax_rev_cn_abc123" {
-			t.Errorf("IdempotencyKey = %q, want velox_tax_rev_cn_abc123 (retry-dedup; prefix+ref must not drift)", got)
+		if got := idemKey(params); got != "hardcount_tax_rev_cn_abc123" {
+			t.Errorf("IdempotencyKey = %q, want hardcount_tax_rev_cn_abc123 (retry-dedup; prefix+ref must not drift)", got)
 		}
 		if got := stripe.StringValue(params.Mode); got != string(ReversalModeFull) {
 			t.Errorf("Mode = %q, want full", got)
@@ -133,8 +133,8 @@ func TestReverse_RequestShape(t *testing.T) {
 		if *params.FlatAmount != -4499 {
 			t.Errorf("FlatAmount = %d, want -4499 (Stripe requires negative smallest-currency units; sign must not flip)", *params.FlatAmount)
 		}
-		if got := idemKey(params); got != "velox_tax_rev_cn_partial" {
-			t.Errorf("IdempotencyKey = %q, want velox_tax_rev_cn_partial", got)
+		if got := idemKey(params); got != "hardcount_tax_rev_cn_partial" {
+			t.Errorf("IdempotencyKey = %q, want hardcount_tax_rev_cn_partial", got)
 		}
 	})
 
@@ -154,8 +154,8 @@ func TestReverse_RequestShape(t *testing.T) {
 		if got := stripe.StringValue(params.Reference); got != "cn_fallback" {
 			t.Errorf("Reference = %q, want cn_fallback (fallback to CreditNoteID)", got)
 		}
-		if got := idemKey(params); got != "velox_tax_rev_cn_fallback" {
-			t.Errorf("IdempotencyKey = %q, want velox_tax_rev_cn_fallback (key must use the same ref)", got)
+		if got := idemKey(params); got != "hardcount_tax_rev_cn_fallback" {
+			t.Errorf("IdempotencyKey = %q, want hardcount_tax_rev_cn_fallback (key must use the same ref)", got)
 		}
 	})
 }
@@ -165,7 +165,7 @@ func TestReverse_RequestShape(t *testing.T) {
 // tax_transaction. That rests on:
 //
 //   - Reference            = invoiceID                (Stripe-side uniqueness)
-//   - IdempotencyKey header = "velox_tax_commit_" + invoiceID
+//   - IdempotencyKey header = "hardcount_tax_commit_" + invoiceID
 //
 // On a within-window retry Stripe returns the cached original transaction id
 // (lets the reconciler recover a commit whose local persist failed). If a
@@ -174,7 +174,7 @@ func TestReverse_RequestShape(t *testing.T) {
 // green. This test fails before that ships.
 func TestCommit_RequestShape(t *testing.T) {
 	p, be := newCapturingProvider()
-	id, err := p.Commit(context.Background(), "taxcalc_ref", "vlx_inv_123")
+	id, err := p.Commit(context.Background(), "taxcalc_ref", "hc_inv_123")
 	if err != nil {
 		t.Fatalf("Commit: unexpected error: %v", err)
 	}
@@ -191,11 +191,11 @@ func TestCommit_RequestShape(t *testing.T) {
 	if got := stripe.StringValue(params.Calculation); got != "taxcalc_ref" {
 		t.Errorf("Calculation = %q, want taxcalc_ref", got)
 	}
-	if got := stripe.StringValue(params.Reference); got != "vlx_inv_123" {
-		t.Errorf("Reference = %q, want vlx_inv_123 (invoice-keyed Stripe dedup)", got)
+	if got := stripe.StringValue(params.Reference); got != "hc_inv_123" {
+		t.Errorf("Reference = %q, want hc_inv_123 (invoice-keyed Stripe dedup)", got)
 	}
-	if got := idemKey(params); got != "velox_tax_commit_vlx_inv_123" {
-		t.Errorf("IdempotencyKey = %q, want velox_tax_commit_vlx_inv_123 (prefix+invoiceID must not drift)", got)
+	if got := idemKey(params); got != "hardcount_tax_commit_hc_inv_123" {
+		t.Errorf("IdempotencyKey = %q, want hardcount_tax_commit_hc_inv_123 (prefix+invoiceID must not drift)", got)
 	}
 }
 

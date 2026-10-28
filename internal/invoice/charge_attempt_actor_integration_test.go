@@ -49,7 +49,7 @@ func (r *attemptActorRig) invoice() string {
 	r.t.Helper()
 	r.n++
 	inv, err := r.store.Create(r.ctx, r.tenantID, domain.Invoice{
-		CustomerID: r.custID, InvoiceNumber: "VLX-ACTOR-" + string(rune('A'+r.n)), Status: domain.InvoiceFinalized,
+		CustomerID: r.custID, InvoiceNumber: "HC-ACTOR-" + string(rune('A'+r.n)), Status: domain.InvoiceFinalized,
 		PaymentStatus: domain.PaymentPending, Currency: "USD", SubtotalCents: 5000, TotalAmountCents: 5000, AmountDueCents: 5000,
 		BillingPeriodStart: time.Now().UTC().Add(-30 * 24 * time.Hour), BillingPeriodEnd: time.Now().UTC(),
 	})
@@ -114,13 +114,13 @@ func TestRecordChargeAttempt_StampsActor(t *testing.T) {
 		trigger domain.ChargeAttemptTrigger
 		want    [2]string
 	}{
-		{"operator Charge now", auth.WithUserID(r.ctx, "vlx_usr_op"), domain.ChargeTriggerChargeNow, [2]string{"user", "vlx_usr_op"}},
-		{"API collect", auth.WithKeyID(r.ctx, "vlx_key_op"), domain.ChargeTriggerChargeNow, [2]string{"api_key", "vlx_key_op"}},
+		{"operator Charge now", auth.WithUserID(r.ctx, "hc_usr_op"), domain.ChargeTriggerChargeNow, [2]string{"user", "hc_usr_op"}},
+		{"API collect", auth.WithKeyID(r.ctx, "hc_key_op"), domain.ChargeTriggerChargeNow, [2]string{"api_key", "hc_key_op"}},
 		{"engine auto-charge", r.ctx, domain.ChargeTriggerAutoCharge, [2]string{"system", "system"}},
 		// POST /v1/invoices/{id}/finalize collects on the request's ctx, so
 		// its auto_charge names the operator who finalized, as the audit log
 		// does. Not the system: a person's request caused the charge.
-		{"auto-charge from an operator's finalize", auth.WithUserID(r.ctx, "vlx_usr_fin"), domain.ChargeTriggerAutoCharge, [2]string{"user", "vlx_usr_fin"}},
+		{"auto-charge from an operator's finalize", auth.WithUserID(r.ctx, "hc_usr_fin"), domain.ChargeTriggerAutoCharge, [2]string{"user", "hc_usr_fin"}},
 		{"dunning retry", r.ctx, domain.ChargeTriggerDunningRetry, [2]string{"system", "system"}},
 	}
 	for _, tc := range cases {
@@ -140,7 +140,7 @@ func TestRecordChargeAttempt_StampsActor(t *testing.T) {
 // inserted as 'external').
 func TestChargeAttemptActor_SettleReports(t *testing.T) {
 	r := newAttemptActorRig(t)
-	operator := auth.WithUserID(r.ctx, "vlx_usr_op")
+	operator := auth.WithUserID(r.ctx, "hc_usr_op")
 
 	t.Run("a hosted-page payment records no actor", func(t *testing.T) {
 		r.t = t
@@ -165,7 +165,7 @@ func TestChargeAttemptActor_SettleReports(t *testing.T) {
 		}, nil); err != nil {
 			t.Fatalf("report: %v", err)
 		}
-		r.wantActors(inv, [2]string{"user", "vlx_usr_op"})
+		r.wantActors(inv, [2]string{"user", "hc_usr_op"})
 	})
 
 	t.Run("the charge call fills in the actor when its report came first", func(t *testing.T) {
@@ -177,17 +177,17 @@ func TestChargeAttemptActor_SettleReports(t *testing.T) {
 			t.Fatalf("report: %v", err)
 		}
 		r.record(operator, inv, "pi_raced", domain.ChargeTriggerChargeNow, domain.ChargeAttemptFailed)
-		r.wantActors(inv, [2]string{"user", "vlx_usr_op"})
+		r.wantActors(inv, [2]string{"user", "hc_usr_op"})
 	})
 }
 
-// TestChargeNowAttempt_CountsAsVeloxsOwn: splitting Charge now out of
+// TestChargeNowAttempt_CountsAsHardcountsOwn: splitting Charge now out of
 // auto_charge must not change how a late report is judged. A Charge now
-// attempt is one Velox made, so a webhook for an older attempt is superseded
-// by it, exactly as by an automatic one (veloxAttemptStandingTx).
-func TestChargeNowAttempt_CountsAsVeloxsOwn(t *testing.T) {
+// attempt is one Hardcount made, so a webhook for an older attempt is superseded
+// by it, exactly as by an automatic one (hardcountAttemptStandingTx).
+func TestChargeNowAttempt_CountsAsHardcountsOwn(t *testing.T) {
 	r := newAttemptActorRig(t)
-	operator := auth.WithUserID(r.ctx, "vlx_usr_op")
+	operator := auth.WithUserID(r.ctx, "hc_usr_op")
 	for _, trigger := range []domain.ChargeAttemptTrigger{domain.ChargeTriggerAutoCharge, domain.ChargeTriggerChargeNow} {
 		t.Run(string(trigger), func(t *testing.T) {
 			r.t = t

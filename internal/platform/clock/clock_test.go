@@ -259,7 +259,7 @@ func TestBindEffectiveNow(t *testing.T) {
 // invoice, subscription), so this is the common path, not an edge case.
 func TestBindEffectiveNow_NeverDowngradesAnInheritedBinding(t *testing.T) {
 	frozen := time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC)
-	catchup := WithSim(context.Background(), Sim{At: frozen, TestClockID: "vlx_tclk_1"})
+	catchup := WithSim(context.Background(), Sim{At: frozen, TestClockID: "hc_tclk_1"})
 
 	// The resolver's unresolvable-pin fallback, reproduced exactly: the instant
 	// it reads back from ctx IS the simulated one, and the clock id is empty.
@@ -275,8 +275,8 @@ func TestBindEffectiveNow_NeverDowngradesAnInheritedBinding(t *testing.T) {
 	if !bound {
 		t.Fatal("the catchup's clock binding was ERASED by a failed nested resolution — every audit row below this call just fell off the sim axis")
 	}
-	if sim.TestClockID != "vlx_tclk_1" {
-		t.Errorf("clock id = %q, want the inherited vlx_tclk_1", sim.TestClockID)
+	if sim.TestClockID != "hc_tclk_1" {
+		t.Errorf("clock id = %q, want the inherited hc_tclk_1", sim.TestClockID)
 	}
 	if !sim.At.Equal(frozen) {
 		t.Errorf("instant = %s, want the inherited %s", sim.At, frozen)
@@ -285,11 +285,11 @@ func TestBindEffectiveNow_NeverDowngradesAnInheritedBinding(t *testing.T) {
 	// The guard must not become a ratchet: a resolution that DOES carry a clock
 	// still wins, so a nested bind can still refine the domain.
 	other := &stubResolver{subFunc: func() (Sim, error) {
-		return Sim{At: frozen.AddDate(0, 1, 0), TestClockID: "vlx_tclk_2"}, nil
+		return Sim{At: frozen.AddDate(0, 1, 0), TestClockID: "hc_tclk_2"}, nil
 	}}
 	got2, _ := BindEffectiveNow(catchup, other, Pin{TenantID: "t1", SubscriptionID: "sub_other"})
-	if sim2, _ := SimOf(got2); sim2.TestClockID != "vlx_tclk_2" {
-		t.Errorf("a resolution carrying a real clock must win: got %q, want vlx_tclk_2", sim2.TestClockID)
+	if sim2, _ := SimOf(got2); sim2.TestClockID != "hc_tclk_2" {
+		t.Errorf("a resolution carrying a real clock must win: got %q, want hc_tclk_2", sim2.TestClockID)
 	}
 
 	// And on a plain wall-clock request there is nothing to inherit, so an
@@ -331,13 +331,13 @@ func TestBindEffectiveNow_KeepsAContractedInstantOnTheSameClock(t *testing.T) {
 		want     Sim
 	}{
 		{"same clock, contracted instant before frozen: kept",
-			Sim{At: slot, TestClockID: "vlx_tclk_1"}, Sim{At: frozen, TestClockID: "vlx_tclk_1"}, Sim{At: slot, TestClockID: "vlx_tclk_1"}},
+			Sim{At: slot, TestClockID: "hc_tclk_1"}, Sim{At: frozen, TestClockID: "hc_tclk_1"}, Sim{At: slot, TestClockID: "hc_tclk_1"}},
 		{"same clock, same instant: kept",
-			Sim{At: frozen, TestClockID: "vlx_tclk_1"}, Sim{At: frozen, TestClockID: "vlx_tclk_1"}, Sim{At: frozen, TestClockID: "vlx_tclk_1"}},
+			Sim{At: frozen, TestClockID: "hc_tclk_1"}, Sim{At: frozen, TestClockID: "hc_tclk_1"}, Sim{At: frozen, TestClockID: "hc_tclk_1"}},
 		{"same clock, inherited instant after frozen: replaced",
-			Sim{At: frozen.Add(time.Hour), TestClockID: "vlx_tclk_1"}, Sim{At: frozen, TestClockID: "vlx_tclk_1"}, Sim{At: frozen, TestClockID: "vlx_tclk_1"}},
+			Sim{At: frozen.Add(time.Hour), TestClockID: "hc_tclk_1"}, Sim{At: frozen, TestClockID: "hc_tclk_1"}, Sim{At: frozen, TestClockID: "hc_tclk_1"}},
 		{"different clock: the resolution wins",
-			Sim{At: slot, TestClockID: "vlx_tclk_1"}, Sim{At: frozen, TestClockID: "vlx_tclk_2"}, Sim{At: frozen, TestClockID: "vlx_tclk_2"}},
+			Sim{At: slot, TestClockID: "hc_tclk_1"}, Sim{At: frozen, TestClockID: "hc_tclk_2"}, Sim{At: frozen, TestClockID: "hc_tclk_2"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -353,7 +353,7 @@ func TestBindEffectiveNow_KeepsAContractedInstantOnTheSameClock(t *testing.T) {
 	}
 
 	// A bare instant (no clock) is not a contracted one: the resolution wins.
-	got, _ := BindEffectiveNow(WithEffectiveNow(context.Background(), slot), resolvesTo(Sim{At: frozen, TestClockID: "vlx_tclk_1"}), pin)
+	got, _ := BindEffectiveNow(WithEffectiveNow(context.Background(), slot), resolvesTo(Sim{At: frozen, TestClockID: "hc_tclk_1"}), pin)
 	if sim, ok := SimOf(got); !ok || !sim.At.Equal(frozen) {
 		t.Errorf("under a bare WithEffectiveNow: bound %+v (simulated=%v), want the resolved clock at %v", sim, ok, frozen)
 	}

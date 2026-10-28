@@ -9,7 +9,7 @@ import (
 )
 
 // TestNewServer_AppEnvComesFromTheOption: APP_ENV is read once, by
-// config.Load, and cmd/velox hands Config.Env to NewServer. Production turns
+// config.Load, and cmd/hardcount hands Config.Env to NewServer. Production turns
 // on HSTS and closes /metrics when METRICS_TOKEN is unset. With no
 // WithAppEnv the server runs as local, like an unset APP_ENV, even when the
 // process environment says production: nothing below config reads APP_ENV.

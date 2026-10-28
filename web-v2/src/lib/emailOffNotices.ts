@@ -11,7 +11,7 @@ export interface EmailNotice {
   tone: CalloutTone
   title: string
   body: string
-  // The off version carries a Details line for whoever runs Velox (env var
+  // The off version carries a Details line for whoever runs Hardcount (env var
   // names live there, never in the sentence).
   operatorDetails: boolean
 }
@@ -30,7 +30,7 @@ export function inviteFormState(canSendInvites: boolean | undefined): {
     notice: {
       tone: 'amber',
       title: 'Invites are off',
-      body: "This server isn't set up to email invite links. Ask whoever runs Velox to set up email.",
+      body: "This server isn't set up to email invite links. Ask whoever runs Hardcount to set up email.",
       operatorDetails: true,
     },
   }
@@ -49,7 +49,7 @@ export function resetSentNotice(emailDelivery: string | undefined, email: string
     return {
       tone: 'amber',
       title: 'Password reset email is off',
-      body: "This server isn't set up to send reset links, so none was sent. Ask whoever runs Velox to set up email.",
+      body: "This server isn't set up to send reset links, so none was sent. Ask whoever runs Hardcount to set up email.",
       operatorDetails: true,
     }
   }

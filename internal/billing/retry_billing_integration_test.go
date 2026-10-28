@@ -26,7 +26,7 @@ import (
 // because they need the real engine behind the route: the point of the route
 // is that it bills through the scheduler's own attempt.
 
-const retryKeyID = "vlx_key_retry_billing"
+const retryKeyID = "hc_key_retry_billing"
 
 // retryRig mounts the real subscription handler and service over the
 // billing-failure fixture, with the engine as the service's DueBiller.
@@ -205,7 +205,7 @@ func TestRetryBilling_Refusals(t *testing.T) {
 		}
 	})
 	t.Run("unknown subscription", func(t *testing.T) {
-		if code, _, body := r.retry(t, "vlx_sub_missing"); code != http.StatusNotFound {
+		if code, _, body := r.retry(t, "hc_sub_missing"); code != http.StatusNotFound {
 			t.Fatalf("got %d %s, want 404", code, body)
 		}
 	})

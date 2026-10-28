@@ -71,7 +71,7 @@ test('a coded 5xx keeps its own sentence (it explains something)', () => {
 })
 
 test('a 401 shows no toast: the session handler signs the operator in again', () => {
-  const err = new FakeApiError('missing credentials — sign in at /login or send Authorization: Bearer vlx_secret_...', 401)
+  const err = new FakeApiError('missing credentials — sign in at /login or send Authorization: Bearer hc_secret_...', 401)
   assert.equal(classifyError(err), 'session')
   assert.equal(errorToast(err, 'Failed to save').show, false)
   // Wherever it is rendered (a load error), the API-caller text is not.
@@ -133,7 +133,7 @@ test('a load with no response stays a connection problem (nothing could have cha
 
 test('Stripe never answering a charge reads as unknown, with its own sentence and Copy ID', () => {
   const err = new FakeApiError(
-    "Stripe didn't confirm whether the charge went through. Velox will check with Stripe and update the invoice; don't charge again until it does.",
+    "Stripe didn't confirm whether the charge went through. Hardcount will check with Stripe and update the invoice; don't charge again until it does.",
     502,
     { code: 'payment_outcome_unknown', requestId: 'req_7' },
   )

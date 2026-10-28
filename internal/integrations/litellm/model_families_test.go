@@ -215,7 +215,7 @@ var (
 
 // TestCanonicalModel_EndingGrammar tries every Claude family id with each
 // hand-written ending: a snapshot ending keeps the family, any other ending
-// is a model Velox does not know and keeps its raw name (decision 2). So a
+// is a model Hardcount does not know and keeps its raw name (decision 2). So a
 // looser ending rule fails here even if the golden list's script is
 // loosened the same way.
 func TestCanonicalModel_EndingGrammar(t *testing.T) {
@@ -233,7 +233,7 @@ func TestCanonicalModel_EndingGrammar(t *testing.T) {
 		for _, end := range notSnapshotEndings {
 			for _, form := range []string{f.id + end, "anthropic/" + f.id + end, "bedrock/global.anthropic." + f.id + end} {
 				if got := canonicalModel(form); got != "" {
-					t.Errorf("canonicalModel(%q) = %q, want no family: %q is not a snapshot ending, so the name is a model Velox does not know (decision 2)", form, got, end)
+					t.Errorf("canonicalModel(%q) = %q, want no family: %q is not a snapshot ending, so the name is a model Hardcount does not know (decision 2)", form, got, end)
 				}
 			}
 		}

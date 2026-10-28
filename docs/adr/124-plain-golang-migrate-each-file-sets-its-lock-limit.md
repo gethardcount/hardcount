@@ -6,22 +6,22 @@
 
 ## Summary
 
-Superseded by [ADR-125](125-goose-migrations-from-one-v081-baseline.md) on 2026-10-18, before it was built: Velox moves to goose instead. This ADR proposed the following.
+Superseded by [ADR-125](125-goose-migrations-from-one-v081-baseline.md) on 2026-10-18, before it was built: Hardcount moves to goose instead. This ADR proposed the following.
 
-Velox applies database migrations with golang-migrate as it is, with no
-Velox runner around it. Every new migration file starts with
+Hardcount applies database migrations with golang-migrate as it is, with no
+Hardcount runner around it. Every new migration file starts with
 `SET LOCAL lock_timeout = '5s';`. A file that cannot get a table lock in
 5 seconds stops and leaves nothing behind. An index built with
 `CONCURRENTLY` sits alone in its own file with no time limit, so it waits
 for older transactions and finishes valid. One process applies migrations
-at a time: the API container under Compose, or one `velox migrate` step
+at a time: the API container under Compose, or one `hardcount migrate` step
 before several copies start. This replaces the migration runner from
 ADR-073.
 
 ## Context
 
 A migration is a versioned SQL file that changes the database schema.
-Velox has 178 of them (0001 to 0180; 0143 and 0166 do not exist). They are
+Hardcount has 178 of them (0001 to 0180; 0143 and 0166 do not exist). They are
 embedded in the binary and applied by golang-migrate v4.19.1.
 
 golang-migrate sends each file to Postgres as one query string. Postgres
@@ -30,9 +30,9 @@ transaction, so each file is all-or-nothing. `CREATE INDEX CONCURRENTLY`
 cannot run inside a transaction, so it needs different handling.
 
 Three files build or drop such an index: 0062, 0112 and 0130. For them,
-Velox wrapped the library in its own "hybrid" runner (ADR-073). Files with
-a `-- velox:no-transaction` header go through Velox code. The other files
-go through the library one step at a time, under a Velox lock that polls.
+Hardcount wrapped the library in its own "hybrid" runner (ADR-073). Files with
+a `-- hardcount:no-transaction` header go through Hardcount code. The other files
+go through the library one step at a time, under a Hardcount lock that polls.
 The runner runs on every install, because 0062 is always embedded.
 
 With the repair and lock-timeout code added since (#967, #987), the
@@ -70,7 +70,7 @@ What other Postgres-focused Go projects do (read 2026-10-17):
   "pgTxnDriver is a Postgres migration driver that runs all migrations in
   a single transaction", locked with `SELECT pg_advisory_xact_lock($1)`.
   A single transaction cannot run `CONCURRENTLY`, so this shape does not
-  fit Velox.
+  fit Hardcount.
 - **HashiCorp Boundary** lists
   `github.com/golang-migrate/migrate/v4 v4.19.1` in its `go.mod`.
 
@@ -83,7 +83,7 @@ What other Postgres-focused Go projects do (read 2026-10-17):
    `LockKeyMigrateHybrid` and `rollbackHybrid`. `splitSQLStatements`
    moves into the lint's test file, its only user.
 
-   Some helpers are shared with code that stays (5). `velox migrate force`
+   Some helpers are shared with code that stays (5). `hardcount migrate force`
    uses `lookupDBAndSchema`, `generateAdvisoryLockID` and
    `setSchemaVersion`. `DirtyError` uses `postApplyVersion` and the header
    check. They stay only as far as those two still need them.
@@ -93,7 +93,7 @@ What other Postgres-focused Go projects do (read 2026-10-17):
    migration file from 0181 on, up and down, starts with
    `SET LOCAL lock_timeout = '5s';`. The only exception is a CONCURRENTLY
    file. A `-short` test fails a file without the line.
-   `MIGRATION_LOCK_TIMEOUT` is removed. When it is set, Velox logs one
+   `MIGRATION_LOCK_TIMEOUT` is removed. When it is set, Hardcount logs one
    WARN at start-up.
 3. **A CONCURRENTLY file holds exactly one statement.** It has no
    `SET LOCAL`, no `IF NOT EXISTS` on the `CREATE`, and nothing else. A
@@ -105,18 +105,18 @@ What other Postgres-focused Go projects do (read 2026-10-17):
    the single API container with `RUN_MIGRATIONS_ON_BOOT=true`. With
    several copies, the steps are:
    1. Stop the old copies.
-   2. Run `velox migrate` once.
+   2. Run `hardcount migrate` once.
    3. Start the new copies with `RUN_MIGRATIONS_ON_BOOT=false`.
 
    golang-migrate's own lock still serializes any overlap. The rule keeps
    a second migrator from waiting on that lock during an index build (E3).
-5. **Failures.** `DirtyError` and `velox migrate force` stay. Postgres
+5. **Failures.** `DirtyError` and `hardcount migrate force` stay. Postgres
    rolls back the whole file after a lock timeout (SQLSTATE 55P03) in a
-   file without `CONCURRENTLY`. Velox then clears the dirty mark with the
+   file without `CONCURRENTLY`. Hardcount then clears the dirty mark with the
    library's `Force`, back to the version before that file. A retry needs
    no repair, as in v0.8.1. Any other failure keeps the dirty mark.
 
-   `velox migrate force` keeps its no-wait check, as in v0.8.1. It tries
+   `hardcount migrate force` keeps its no-wait check, as in v0.8.1. It tries
    golang-migrate's lock with `pg_try_advisory_lock` and refuses while a
    migration holds it. It does not call the library's `Force` or open a
    library migrator, because both wait on the lock with
@@ -128,7 +128,7 @@ What other Postgres-focused Go projects do (read 2026-10-17):
 
 ## Why this design
 
-- **It keeps every safety property with the least code Velox owns.**
+- **It keeps every safety property with the least code Hardcount owns.**
 
   | Property | Kept by | Proof |
   |---|---|---|
@@ -166,7 +166,7 @@ What other Postgres-focused Go projects do (read 2026-10-17):
     a superuser.
   - All it removes beyond this decision is the dirty mark and `force`,
     and those already come with an error that names the commands.
-- **B. golang-migrate with a Velox polling lock (A′).** A short
+- **B. golang-migrate with a Hardcount polling lock (A′).** A short
   `pg_try_advisory_lock` loop around `Up()` would keep boot-time migration
   from several copies safe (E3, polling lock). Rejected: rule 4 does the
   same with no code, and the HA guidance needs a separate migration step
@@ -202,7 +202,7 @@ What other Postgres-focused Go projects do (read 2026-10-17):
   INVALID index. Trigger to revisit B: an install that needs several
   copies to migrate as they start.
 - **Any failure other than a lock timeout still leaves a dirty mark**
-  (E5), and it needs `velox migrate force`. Trigger to revisit A: an
+  (E5), and it needs `hardcount migrate force`. Trigger to revisit A: an
   upgrade where the right `force` target was hard to choose, or was
   chosen wrong.
 - **`MIGRATION_LOCK_TIMEOUT` is removed one release after it shipped**
@@ -233,7 +233,7 @@ What other Postgres-focused Go projects do (read 2026-10-17):
   claim that Postgres cannot detect the advisory-lock deadlock.
 - #967 (dirty repair), #987 (lock timeout)
 - Migrations 0062, 0112, 0130
-- Experiment: [CI run 39047170196](https://github.com/getvelox/velox/actions/runs/39047170196)
+- Experiment: [CI run 39047170196](https://github.com/gethardcount/hardcount/actions/runs/39047170196)
 - `feedback_prefer_common_choice_not_one_user`,
   `feedback_prefer_battle_tested_libs`, `feedback_no_overengineering`,
   `feedback_design_principles_simple_correct_standard`

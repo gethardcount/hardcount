@@ -162,7 +162,7 @@ func TestAdvance_RejectsBackwardTime(t *testing.T) {
 	}
 }
 
-// TestAdvance_RejectsAdvanceOverOneYear asserts Velox's own per-call
+// TestAdvance_RejectsAdvanceOverOneYear asserts Hardcount's own per-call
 // advance window cap (ADR-028 amendment). Operators chunk
 // longer simulations into successive advances; a single call may
 // not shift frozen_time by more than 1 year.
@@ -467,13 +467,13 @@ func TestAdvance_BillingFailureMarksClockFailed(t *testing.T) {
 }
 
 // TestAdvance_InjectFailureEnv asserts the manual-test injection knob:
-// when VELOX_TEST_CLOCK_INJECT_FAILURE is set, runCatchupLoop fails
+// when HARDCOUNT_TEST_CLOCK_INJECT_FAILURE is set, runCatchupLoop fails
 // with the value as the reason, the clock flips to internal_failure,
 // and the env is cleared so a subsequent retry sees a clean state.
 // Powers the MANUAL_TEST FLOW TC2 catchup-failure UI bullet —
 // reliable reproduction without disconnecting Stripe.
 func TestAdvance_InjectFailureEnv(t *testing.T) {
-	t.Setenv("VELOX_TEST_CLOCK_INJECT_FAILURE", "manual UI test")
+	t.Setenv("HARDCOUNT_TEST_CLOCK_INJECT_FAILURE", "manual UI test")
 
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	store := newMockStore()
@@ -508,7 +508,7 @@ func TestAdvance_InjectFailureEnv(t *testing.T) {
 			store.clocks["c1"].Status)
 	}
 	// One-shot: env cleared so retry would see clean state.
-	if v := os.Getenv("VELOX_TEST_CLOCK_INJECT_FAILURE"); v != "" {
+	if v := os.Getenv("HARDCOUNT_TEST_CLOCK_INJECT_FAILURE"); v != "" {
 		t.Errorf("env should be cleared after one-shot fire, got %q", v)
 	}
 }

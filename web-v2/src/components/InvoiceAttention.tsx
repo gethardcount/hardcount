@@ -117,7 +117,7 @@ export function InvoiceAttention({
               link. Restore the button when they exist. */}
         </>
       ) : undefined}
-      // Details (ADR-025): Velox's own framing (att.detail) as plain text,
+      // Details (ADR-025): Hardcount's own framing (att.detail) as plain text,
       // then the support code. The code used to sit on screen in grey mono
       // under the buttons; it only helps support, so it lives here, where a
       // screenshot of the opened notice still carries it.
@@ -129,7 +129,7 @@ export function InvoiceAttention({
       ) : undefined}
       // "Provider response" is the literal upstream payload from a third
       // party (Stripe etc.), kept in its own disclosure so an operator never
-      // wonders "is this Velox talking or Stripe?". Populated only when we
+      // wonders "is this Hardcount talking or Stripe?". Populated only when we
       // actually called the provider.
       footer={att.provider_response ? (
         <details className="pt-1 text-xs text-muted-foreground">
@@ -310,7 +310,7 @@ function ActionButton({
     case 'mark_uncollectible':
       // A parked invoice's write-off (ADR-107), for a customer who paid
       // another way. Always the secondary style: the usual next step is to
-      // wait, since Velox records the payment if Stripe shows it and charges
+      // wait, since Hardcount records the payment if Stripe shows it and charges
       // again after 24 hours if not. Opens the page's existing write-off
       // confirmation, which states the consequences.
       return (

@@ -143,7 +143,7 @@ func FormatInclusivePeriod(start, end time.Time, loc *time.Location) string {
 // cycle close, honoring billing_time + interval. The semantics:
 //
 //   - Yearly: always anniversary (periodEnd + 1 year). No industry analog
-//     for "calendar yearly stub to Jan 1"; Velox doesn't ship it either.
+//     for "calendar yearly stub to Jan 1"; Hardcount doesn't ship it either.
 //   - Calendar monthly: snap to first-of-next-month in tenant TZ, so the
 //     boundary is always the 1st regardless of the input day-of-month
 //     (anchorDay is unused on this path). A high day-of-month only reaches
@@ -328,7 +328,7 @@ func AddBillingInterval(t time.Time, interval BillingInterval, loc *time.Locatio
 // PauseCollectionBehavior controls what the engine does with the invoice it
 // would normally finalize during a paused-collection cycle. v1 supports
 // only KeepAsDraft; the other Stripe modes (mark_uncollectible, void) need
-// an "uncollectible" invoice status that doesn't exist in Velox yet.
+// an "uncollectible" invoice status that doesn't exist in Hardcount yet.
 type PauseCollectionBehavior string
 
 const (
@@ -496,7 +496,7 @@ type Subscription struct {
 	// false before the boundary fires undoes the schedule.
 	CancelAtPeriodEnd bool `json:"cancel_at_period_end"`
 	// CancelEffectiveAt is the DERIVED, read-only answer to "when does this
-	// subscription actually cancel?" (ADR-069). Velox's
+	// subscription actually cancel?" (ADR-069). Hardcount's
 	// current_billing_period_end on a TRIALING sub is the end of the first
 	// PAID period (unlike Stripe, where period_end == trial_end while
 	// trialing), so every consumer re-deriving the date from the flag needs

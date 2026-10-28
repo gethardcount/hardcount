@@ -161,7 +161,7 @@ func TestOfflinePayment_RacedWithCardChargeAtTheStripeCall(t *testing.T) {
 			}
 			pi, offline := column(t, tenantID, after.ID)
 			if pi != nil {
-				t.Errorf("invoices.stripe_payment_intent_id = %q, want NULL: the charge's answer must not land on an invoice paid outside Velox", *pi)
+				t.Errorf("invoices.stripe_payment_intent_id = %q, want NULL: the charge's answer must not land on an invoice paid outside Hardcount", *pi)
 			}
 			if !offline {
 				t.Error("paid_out_of_band = false, want true")
@@ -192,7 +192,7 @@ func TestOfflinePayment_RacedWithCardChargeAtTheStripeCall(t *testing.T) {
 			tenantID, domain.EventInvoicePaid, got.ID); n != 1 {
 			t.Errorf("invoice.paid rows = %d, want 1", n)
 		}
-		// The webhook says the first payment was made outside Velox: its
+		// The webhook says the first payment was made outside Hardcount: its
 		// recorded PaymentIntent is empty, as for a credits-paid invoice,
 		// and paid_out_of_band tells the two apart.
 		if n := rig.count(t, `SELECT count(*) FROM webhook_outbox WHERE tenant_id=$1 AND event_type=$2 AND payload->'invoice'->>'id'=$3

@@ -1,4 +1,4 @@
-// Package pdffonts embeds the TTF fonts used by Velox's PDF renderers
+// Package pdffonts embeds the TTF fonts used by Hardcount's PDF renderers
 // (invoice, credit note). Centralizing the fonts avoids duplicating the
 // ~1 MB font binaries per domain package and removes the runtime.Caller
 // filesystem trick the first renderer shipped with — the compiled binary

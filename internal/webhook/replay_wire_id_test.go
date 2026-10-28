@@ -60,7 +60,7 @@ func replayFixture(t *testing.T, statuses ...int) (*memStore, *recordingClient, 
 	}); err != nil {
 		t.Fatalf("create endpoint: %v", err)
 	}
-	if err := svc.Dispatch(ctx, "t1", "invoice.paid", map[string]any{"invoice_id": "vlx_inv_1"}); err != nil {
+	if err := svc.Dispatch(ctx, "t1", "invoice.paid", map[string]any{"invoice_id": "hc_inv_1"}); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 	store.events[0].CreatedAt = store.events[0].CreatedAt.Add(-24 * time.Hour)
@@ -181,7 +181,7 @@ func TestDelivery_RedirectIsAFailure(t *testing.T) {
 			}); err != nil {
 				t.Fatalf("create endpoint: %v", err)
 			}
-			if err := svc.Dispatch(ctx, "t1", "invoice.paid", map[string]any{"invoice_id": "vlx_inv_1"}); err != nil {
+			if err := svc.Dispatch(ctx, "t1", "invoice.paid", map[string]any{"invoice_id": "hc_inv_1"}); err != nil {
 				t.Fatalf("dispatch: %v", err)
 			}
 

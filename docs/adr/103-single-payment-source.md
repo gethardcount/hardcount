@@ -42,7 +42,7 @@ Two supports make that safe:
    settle transitions (`MarkPaidCardSettlementTransition`,
    `MarkPaymentFailedReportingTransition`) upsert the attempt in their
    own tx, so the attempt fact and the invoice's state can never
-   disagree. A settle for a PaymentIntent Velox never minted (hosted
+   disagree. A settle for a PaymentIntent Hardcount never minted (hosted
    checkout) INSERTS the row there — that path needs no chokepoint.
    Insert-time identity (`trigger_source`, `sim_effective_at`) is
    preserved by the ON CONFLICT: the chokepoint knows those, a settle

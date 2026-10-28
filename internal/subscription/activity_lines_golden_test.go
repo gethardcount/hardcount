@@ -269,7 +269,7 @@ var (
 	goldenAt     = time.Date(2027, 2, 1, 4, 30, 0, 0, time.UTC)
 	goldenLabels = lineLabels{
 		plans:    map[string]string{"pln_starter": "Starter", "pln_pro": "Pro", "pln_basic": "Basic", "pln_seat": "Seat"},
-		invoices: map[string]string{"vlx_inv_1": "VLX-000123", "vlx_inv_src": "VLX-000120"},
+		invoices: map[string]string{"hc_inv_1": "HC-000123", "hc_inv_src": "HC-000120"},
 	}
 )
 
@@ -308,10 +308,10 @@ func goldenActionCases(t *testing.T) []actionCase {
 	// Proration outcomes a change can carry.
 	prorations := map[string]map[string]any{
 		"none":                {},
-		"invoice":             {"proration_type": "invoice", "proration_amount_cents": float64(1800), "currency": "USD", "proration_invoice_id": "vlx_inv_1"},
-		"invoice gone":        {"proration_type": "invoice", "proration_amount_cents": float64(1800), "currency": "USD", "proration_invoice_id": "vlx_inv_gone"},
+		"invoice":             {"proration_type": "invoice", "proration_amount_cents": float64(1800), "currency": "USD", "proration_invoice_id": "hc_inv_1"},
+		"invoice gone":        {"proration_type": "invoice", "proration_amount_cents": float64(1800), "currency": "USD", "proration_invoice_id": "hc_inv_gone"},
 		"credit":              {"proration_type": "credit", "proration_amount_cents": float64(1980), "currency": "EUR"},
-		"adjustment":          {"proration_type": "adjustment", "proration_amount_cents": float64(5444), "currency": "USD", "adjusted_invoice_id": "vlx_inv_src"},
+		"adjustment":          {"proration_type": "adjustment", "proration_amount_cents": float64(5444), "currency": "USD", "adjusted_invoice_id": "hc_inv_src"},
 		"adjustment legacy":   {"proration_type": "adjustment", "proration_amount_cents": float64(5444), "currency": "USD"},
 		"invoice no currency": {"proration_type": "invoice", "proration_amount_cents": float64(1800)},
 	}
@@ -343,8 +343,8 @@ func goldenActionCases(t *testing.T) []actionCase {
 		case domain.AuditActionSubscriptionPendingChangeApplied:
 			add(action, action, map[string]any{"item_id": "si_1", "old_plan_id": "pln_pro", "new_plan_id": "pln_basic"})
 		case domain.AuditActionSubscriptionThresholdCrossed:
-			add(action+"/linked", action, map[string]any{"invoice_id": "vlx_inv_1", "invoice_number": "VLX-000123", "amount_cents": float64(5000), "currency": "USD"})
-			add(action+"/invoice gone", action, map[string]any{"invoice_id": "vlx_inv_gone", "invoice_number": "VLX-000099", "amount_cents": float64(5000), "currency": "USD"})
+			add(action+"/linked", action, map[string]any{"invoice_id": "hc_inv_1", "invoice_number": "HC-000123", "amount_cents": float64(5000), "currency": "USD"})
+			add(action+"/invoice gone", action, map[string]any{"invoice_id": "hc_inv_gone", "invoice_number": "HC-000099", "amount_cents": float64(5000), "currency": "USD"})
 			add(action+"/no number", action, map[string]any{})
 		case domain.AuditActionSubscriptionThresholdDeferred:
 			add(action, action, map[string]any{"amount_gte": float64(50000), "running_subtotal": float64(51000), "reason": "max_last_meters_bill_at_cycle_close"})
@@ -585,7 +585,7 @@ func TestLegacyDetail(t *testing.T) {
 		{"trailing time", []activity.Segment{{activity.T("Trial now ends "), activity.At(at)}}, "Trial now ends", at.Format(time.RFC3339)},
 		{"time in brackets", []activity.Segment{{activity.T("At the end of the current period ("), activity.At(at), activity.T(")")}}, "At the end of the current period", at.Format(time.RFC3339)},
 		{"text then time", []activity.Segment{activity.Text("Seat"), {activity.T("Resumes "), activity.At(at)}}, "Seat · Resumes", at.Format(time.RFC3339)},
-		{"a link", []activity.Segment{{activity.T("Invoice "), activity.L(activity.LinkInvoice, "vlx_inv_1", "VLX-000123"), activity.T(" issued early")}}, "Invoice VLX-000123 issued early", ""},
+		{"a link", []activity.Segment{{activity.T("Invoice "), activity.L(activity.LinkInvoice, "hc_inv_1", "HC-000123"), activity.T(" issued early")}}, "Invoice HC-000123 issued early", ""},
 	} {
 		got, ts := legacyDetail(activity.Line{Detail: c.detail})
 		if got != c.want || ts != c.wantTS {

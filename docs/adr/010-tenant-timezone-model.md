@@ -15,7 +15,7 @@ Instants are stored as `timestamptz` and sent on the API as UTC RFC 3339 strings
 
 ## Context
 
-Until this commit, every date input on the Velox dashboard interpreted picks
+Until this commit, every date input on the Hardcount dashboard interpreted picks
 in the operator's *browser* timezone, every display rendered in browser local,
 and no rendered timestamp carried a timezone label. This created two real
 problems:
@@ -45,7 +45,7 @@ camps:
   most date inputs respect both. Right shape for CRM-scale tools, overkill
   for a billing engine.
 
-Velox is a developer-facing API + operator dashboard, audience-aligned with
+Hardcount is a developer-facing API + operator dashboard, audience-aligned with
 Stripe and GitHub. The right philosophical anchor is the UTC-everywhere
 camp, with tenant TZ as a *display + civil-date-input* preference.
 
@@ -99,12 +99,12 @@ real IANA zone name on write. Used for:
 `current_billing_period_start/end`, `billing_cycle_anchor` stay UTC.
 "Monthly on the 5th" means *5th in UTC*, not 5th in tenant TZ. This
 matches Stripe's model and avoids the DST + retroactive-shift pitfalls
-that Chargebee documents. Velox's billing engine is already TZ-agnostic
+that Chargebee documents. Hardcount's billing engine is already TZ-agnostic
 absolute and remains so.
 
 ### Per-user timezone — none in v1
 
-Velox has 1 operator and 0 design partners. A per-user TZ override is
+Hardcount has 1 operator and 0 design partners. A per-user TZ override is
 pure speculation and would require a `users.timezone` column, a settings
 page, and rendering plumbing. Defer until a multi-operator design partner
 asks for it. The schema is non-breakingly extensible — adding
@@ -193,7 +193,7 @@ edit-and-test work, no architectural changes.
 - Backend remains UTC-pure; no billing math changes.
 - The schema and infrastructure for per-user TZ (when needed) are
   non-breakingly extensible.
-- Aligns Velox with Stripe's model — the closest conceptual peer for an
+- Aligns Hardcount with Stripe's model — the closest conceptual peer for an
   API-first billing engine.
 
 ### Negative

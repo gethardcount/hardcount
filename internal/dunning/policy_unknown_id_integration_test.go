@@ -26,7 +26,7 @@ func TestPolicyRoutes_UnknownIDIsNotFound(t *testing.T) {
 	svc := dunning.NewService(dunning.NewPostgresStore(db), nil, clock.Real())
 	routes := dunning.NewHandler(svc).Routes()
 
-	const missing = "vlx_dpol_doesnotexist"
+	const missing = "hc_dpol_doesnotexist"
 	validBody := `{"name":"x","enabled":true,"retry_days":[3,3,5]}`
 
 	cases := []struct {

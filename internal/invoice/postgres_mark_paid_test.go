@@ -305,7 +305,7 @@ type recordingOutbox struct{ events []string }
 
 func (r *recordingOutbox) Enqueue(_ context.Context, _ *sql.Tx, _, eventType string, _ map[string]any) (string, error) {
 	r.events = append(r.events, eventType)
-	return "vlx_whob_test", nil
+	return "hc_whob_test", nil
 }
 
 // failingOutbox records enqueues but errors on one target event type — used to
@@ -320,7 +320,7 @@ func (f *failingOutbox) Enqueue(_ context.Context, _ *sql.Tx, _, eventType strin
 		return "", fmt.Errorf("simulated outbox enqueue failure for %s", eventType)
 	}
 	f.events = append(f.events, eventType)
-	return "vlx_whob_test", nil
+	return "hc_whob_test", nil
 }
 
 // seedFinalizedInvoice seeds a finalized, tax-ok invoice with non-zero amounts.

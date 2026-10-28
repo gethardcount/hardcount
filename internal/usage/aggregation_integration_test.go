@@ -292,7 +292,7 @@ func assertRuleAggregations(t *testing.T, got []domain.ClaimedUsage, want map[st
 // buckets come back keyed by.
 func insertTestRatingRule(t *testing.T, _ *postgres.DB, _, key string) string {
 	t.Helper()
-	return "vlx_prc_" + key
+	return "hc_prc_" + key
 }
 
 // insertTestPricingRule is the claim of price priceID on dims. Claims are

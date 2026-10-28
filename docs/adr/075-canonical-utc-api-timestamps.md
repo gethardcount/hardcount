@@ -5,11 +5,11 @@
 
 ## Summary
 
-The `velox` binary sets `time.Local = time.UTC` as the first statement of `main()`, so timestamps read back from Postgres are UTC and every API timestamp is a canonical `…Z` string on any host. Only the text form changed; billing date math never reads `time.Local` because it uses explicit timezones. Invoice and credit-note PDFs, the hosted invoice page and the dunning retry email render dates in the invoice's stored billing timezone, or UTC when none is stored. A CI lint checks that the pin is present ([ADR-076](076-enforcing-the-timezone-invariant.md)), and the test database helper sets it too. Status: active; the billing timezone is now one org setting ([ADR-077](077-org-level-billing-timezone.md)), not the per-subscription zone named below.
+The `hardcount` binary sets `time.Local = time.UTC` as the first statement of `main()`, so timestamps read back from Postgres are UTC and every API timestamp is a canonical `…Z` string on any host. Only the text form changed; billing date math never reads `time.Local` because it uses explicit timezones. Invoice and credit-note PDFs, the hosted invoice page and the dunning retry email render dates in the invoice's stored billing timezone, or UTC when none is stored. A CI lint checks that the pin is present ([ADR-076](076-enforcing-the-timezone-invariant.md)), and the test database helper sets it too. Status: active; the billing timezone is now one org setting ([ADR-077](077-org-level-billing-timezone.md)), not the per-subscription zone named below.
 
 ## Context
 
-Velox serializes `time.Time` fields (`created_at`, `billing_period_start/end`,
+Hardcount serializes `time.Time` fields (`created_at`, `billing_period_start/end`,
 `issued_at`, …) directly to JSON on the API wire. Go's `time.Time.MarshalJSON`
 emits RFC3339 **in whatever timezone the value carries** — and that zone was not
 constant.
@@ -50,7 +50,7 @@ Industry norm is canonical UTC (Stripe uses Unix epochs; most JSON APIs emit
 
 ## Decision
 
-**Pin the process to UTC.** `cmd/velox/main.go` sets `time.Local = time.UTC` as
+**Pin the process to UTC.** `cmd/hardcount/main.go` sets `time.Local = time.UTC` as
 the **first statement of `main()`**, before any DB connection or goroutine (so
 the global assignment cannot race a concurrent `time.Local` read). This makes:
 

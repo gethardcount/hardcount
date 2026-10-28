@@ -65,7 +65,7 @@ func TestE2E_PaymentUpdateLink(t *testing.T) {
 		t.Errorf("page = %v, want %s, invoice %s, finalized, %d %s due", shown, customerName,
 			flowStr(inv, "invoice_number"), flowInt(inv, "amount_due_cents"), flowStr(inv, "currency"))
 	}
-	if res := flowDo(t, ts, "GET", "/v1/public/payment-updates/vlx_pt_not_a_real_link", flowReq{}).want(t, 401, "open a made-up link"); res.errCode() != "invalid_token" {
+	if res := flowDo(t, ts, "GET", "/v1/public/payment-updates/hc_pt_not_a_real_link", flowReq{}).want(t, 401, "open a made-up link"); res.errCode() != "invalid_token" {
 		t.Errorf("made-up link error code %q, want invalid_token", res.errCode())
 	}
 
@@ -98,9 +98,9 @@ func TestE2E_PaymentUpdateLink(t *testing.T) {
 		"customer":    "cus_flow",
 		"success_url": returnURL + "?status=success",
 		"cancel_url":  returnURL + "?status=cancel",
-		"setup_intent_data[metadata][velox_customer_id]": customerID,
-		"setup_intent_data[metadata][velox_invoice_id]":  invoiceID,
-		"setup_intent_data[metadata][velox_purpose]":     "payment_update_token",
+		"setup_intent_data[metadata][hardcount_customer_id]": customerID,
+		"setup_intent_data[metadata][hardcount_invoice_id]":  invoiceID,
+		"setup_intent_data[metadata][hardcount_purpose]":     "payment_update_token",
 	} {
 		if got := form.Get(field); got != want {
 			t.Errorf("checkout session %s = %q, want %q", field, got, want)

@@ -14,7 +14,7 @@ Accepted
 
 ## Summary
 
-Not built yet: this ADR records the direction for when a design partner asks for SSO. Velox will embed OIDC and SAML client libraries in the binary and point each tenant at its own identity provider. The OIDC library is `github.com/zitadel/oidc/v3`. Corrected 2026-10-18: the SAML library named below, `github.com/zitadel/saml`, implements an identity provider, not the service provider Velox would be, so the SAML library is chosen when SSO is built. It will not use a SaaS auth vendor (WorkOS, Auth0, Clerk) or require a separate identity server, because self-hosted and air-gapped installs must work without outside calls. Password login stays homegrown ([ADR-011](011-email-password-auth-and-clean-api-keys.md)), team members have no enforced roles today ([ADR-081](081-minimal-team-invites.md)), and the MFA design is [ADR-095](095-login-security-roadmap-and-mfa.md). Status: active as a direction.
+Not built yet: this ADR records the direction for when a design partner asks for SSO. Hardcount will embed OIDC and SAML client libraries in the binary and point each tenant at its own identity provider. The OIDC library is `github.com/zitadel/oidc/v3`. Corrected 2026-10-18: the SAML library named below, `github.com/zitadel/saml`, implements an identity provider, not the service provider Hardcount would be, so the SAML library is chosen when SSO is built. It will not use a SaaS auth vendor (WorkOS, Auth0, Clerk) or require a separate identity server, because self-hosted and air-gapped installs must work without outside calls. Password login stays homegrown ([ADR-011](011-email-password-auth-and-clean-api-keys.md)), team members have no enforced roles today ([ADR-081](081-minimal-team-invites.md)), and the MFA design is [ADR-095](095-login-security-roadmap-and-mfa.md). Status: active as a direction.
 
 ## Context
 
@@ -52,26 +52,26 @@ the customer already runs**. WorkOS / Auth0 / Clerk / Stytch all
 require an account at their SaaS — disqualifying for any product whose
 positioning is "runs entirely in your VPC."
 
-### Velox-specific constraints
+### Hardcount-specific constraints
 
-- **Self-host is a core wedge.** Velox's positioning is "the open-source
+- **Self-host is a core wedge.** Hardcount's positioning is "the open-source
   billing engine for AI and usage-heavy SaaS — runs in your own VPC."
   Any auth path that requires reaching workos.com / auth0.com /
   clerk.com at runtime breaks that promise. Air-gapped customers exist
   in the target market (regulated tenants, EU GDPR-strict, India RBI
   data localization).
-- **Single binary deployment is a feature.** Velox is one Go binary +
+- **Single binary deployment is a feature.** Hardcount is one Go binary +
   Postgres. Forcing customers to also deploy and operate Keycloak or
   Authentik as a precondition for login would be a regression.
 - **Customer's IdP is variable.** A DP might run Okta, Entra (Azure
   AD), Google Workspace, Keycloak, Authentik, JumpCloud, or
-  PingIdentity. Velox can't pick one vendor. Standards-based OIDC and
+  PingIdentity. Hardcount can't pick one vendor. Standards-based OIDC and
   SAML are the only thing every IdP speaks.
 
 ## Decision
 
 When SSO becomes a real DP requirement (the trigger named in ADR-011 +
-`project_auth_decision`), Velox will:
+`project_auth_decision`), Hardcount will:
 
 1. **Stay homegrown for the password path.** Do not migrate
    `internal/user` to a third-party identity service. The bcrypt +
@@ -83,8 +83,8 @@ When SSO becomes a real DP requirement (the trigger named in ADR-011 +
    server to deploy.
 3. **Wire SSO via per-tenant config**: `tenant_settings.sso_oidc_issuer`,
    `tenant_settings.sso_saml_metadata_url`, etc. The tenant points
-   Velox at their IdP; Velox initiates the OIDC/SAML flow at runtime
-   inside its own process. No SaaS dependency, no Velox-owned IdP.
+   Hardcount at their IdP; Hardcount initiates the OIDC/SAML flow at runtime
+   inside its own process. No SaaS dependency, no Hardcount-owned IdP.
 4. **RBAC stays homegrown.** Roles + permissions in `users.role` /
    `user_tenants.role` (already partially built per ADR-011),
    middleware-enforced. KillBill is the model — embedded RBAC in OSS,
@@ -99,7 +99,7 @@ When SSO becomes a real DP requirement (the trigger named in ADR-011 +
 - **External Keycloak / Authentik as a hard requirement.** Adds an
   operational burden no DP has asked for and breaks the single-binary
   story. Optional integration via OIDC is fine — that's just "your
-  Keycloak is the IdP, Velox is the OIDC client" and falls out of
+  Keycloak is the IdP, Hardcount is the OIDC client" and falls out of
   decision #2 for free.
 - **Paywalling SSO as the enterprise upsell, Lago-style.** This ADR
   doesn't decide pricing; it decides architecture. SSO ships in OSS by
@@ -107,8 +107,8 @@ When SSO becomes a real DP requirement (the trigger named in ADR-011 +
   costs more than not gating them. Paywall decisions, if they ever
   happen, gate higher-tier features (RBAC fine-grain, audit-log
   retention, etc.) rather than the protocol surface.
-- **WorkOS as a hosted-Velox-only optional integration.** Could be
-  reconsidered if hosted Velox ever exists; not on the OSS tier path.
+- **WorkOS as a hosted-Hardcount-only optional integration.** Could be
+  reconsidered if hosted Hardcount ever exists; not on the OSS tier path.
 
 ## Consequences
 
@@ -160,7 +160,7 @@ When SSO becomes a real DP requirement (the trigger named in ADR-011 +
 
 ## Amendment 2026-10-18: the SAML library serves the other side
 
-Decision 2 names `github.com/zitadel/saml`. That library implements a SAML identity provider: its README calls it "a server implementation" of SAML, and its feature table covers only the identity provider. In this design Velox is the service provider. The tenant's identity provider (Okta, Entra and so on) signs an assertion, and Velox checks it and signs the user in. `zitadel/saml` does not do that, so it is withdrawn.
+Decision 2 names `github.com/zitadel/saml`. That library implements a SAML identity provider: its README calls it "a server implementation" of SAML, and its feature table covers only the identity provider. In this design Hardcount is the service provider. The tenant's identity provider (Okta, Entra and so on) signs an assertion, and Hardcount checks it and signs the user in. `zitadel/saml` does not do that, so it is withdrawn.
 
 The SAML library is chosen when SSO is built, by testing each candidate against the identity providers a design partner names. Service-provider libraries to test first:
 

@@ -1,5 +1,5 @@
 // Package scheduler hosts the standard tick-loop runner used by every
-// ticker-driven singleton worker in Velox. There are exactly five, and
+// ticker-driven singleton worker in Hardcount. There are exactly five, and
 // `grep -rn "scheduler.Run("` is the authoritative list: billing (1h prod /
 // 5m local), dunning (same interval), webhook_outbox (2s), email_outbox (5s),
 // webhook_delivery (30s). The test-clock catchup worker is queue-driven, not

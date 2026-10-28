@@ -13,7 +13,7 @@ import (
 // count entries.
 const MaxAdditionalEmails = 10
 
-// ValidateEmail is the one syntax check for every email address Velox
+// ValidateEmail is the one syntax check for every email address Hardcount
 // accepts or sends to. It returns the address net/mail parsed, which
 // callers store and send to.
 //

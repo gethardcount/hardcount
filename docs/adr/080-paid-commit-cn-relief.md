@@ -77,7 +77,7 @@ refund at face (over-refund); charging consumption at face under-refunds.
    out-of-band cash, never a cash CN. A zero-cash slice (deep-discount
    rounding) → 409 rather than a silent credit donation.
 7. **Cap basis.** `GrossPaid = invoice.TotalAmountCents` — full-settle
-   holds because Velox has no partial payments and commit invoices cannot
+   holds because Hardcount has no partial payments and commit invoices cannot
    be credit-paid. If partial capture ever ships, switch to captured cash.
 8. **Wrong-price runbook.** Ratio corrections are FULL relief + reissue a
    corrected commit invoice — every relief preserves GrossPaid/Granted by
@@ -89,7 +89,7 @@ refund at face (over-refund); charging consumption at face under-refunds.
   `commit_retired_cents` on the CN document; auditors reconcile
   `grant.cn_retired_cents == SUM(cn.commit_retired_cents)` and recompute
   every relief from `(GrossPaid, Granted, K)`.
-- Known blind spot (accepted): Velox models no card disputes — a disputed
+- Known blind spot (accepted): Hardcount models no card disputes — a disputed
   commit PI leaves the invoice paid while cash is pulled; the card refund
   leg fails safe at Stripe (loud `refund_status=failed`), the out_of_band
   channel has no backstop. Trigger: first dispute-modeling ask.
@@ -97,7 +97,7 @@ refund at face (over-refund); charging consumption at face under-refunds.
   dispute on a paid commit invoice raises `dispute_lost`, whose message
   states the still-spendable credit and names relief (`retire_all`, the
   amount as `out_of_band_amount_cents`), since an ordinary credit note is
-  refused here. Velox still retires nothing by itself: a loss does not tell
+  refused here. Hardcount still retires nothing by itself: a loss does not tell
   it whether the customer owes the money again, so the operator decides, as
   for every other lost dispute. Relief returns at most f(remaining), so a
   loss on a commit with spent credit leaves the rest to the operator's own

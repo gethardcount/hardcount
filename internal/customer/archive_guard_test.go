@@ -68,10 +68,10 @@ func TestArchiveBlockedMessage(t *testing.T) {
 		subs []NonTerminalSubscription
 		want string
 	}{
-		{"one named", []NonTerminalSubscription{{ID: "vlx_sub_1", Name: "Pro monthly"}},
+		{"one named", []NonTerminalSubscription{{ID: "hc_sub_1", Name: "Pro monthly"}},
 			"This customer has 1 subscription that still bills (Pro monthly). Cancel it first; archiving doesn't stop billing."},
-		{"two, one unnamed", []NonTerminalSubscription{{ID: "vlx_sub_1", Name: "Pro monthly"}, {ID: "vlx_sub_2"}},
-			"This customer has 2 subscriptions that still bill (Pro monthly, vlx_sub_2). Cancel them first; archiving doesn't stop billing."},
+		{"two, one unnamed", []NonTerminalSubscription{{ID: "hc_sub_1", Name: "Pro monthly"}, {ID: "hc_sub_2"}},
+			"This customer has 2 subscriptions that still bill (Pro monthly, hc_sub_2). Cancel them first; archiving doesn't stop billing."},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

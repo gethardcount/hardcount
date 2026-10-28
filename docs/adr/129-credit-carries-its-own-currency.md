@@ -91,7 +91,7 @@ left without a currency. Rejected:
 - **Accepted: stranded credit.** A grant in a currency the customer is not
   billed in, or credit left after the customer moved to another currency,
   stays as its own balance. No invoice draws it. The operator deducts it or
-  refunds it outside Velox. Nothing converts it.
+  refunds it outside Hardcount. Nothing converts it.
 - **Accepted: one low threshold for every currency.** The tenant's
   `credit_balance_low_threshold_cents` applies in each currency's own units
   (1000 is $10 or €10). Every allowed currency has two decimals. A

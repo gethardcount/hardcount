@@ -214,7 +214,7 @@ SET LOCAL default_table_access_method = heap;
 --
 
 CREATE TABLE public.api_keys (
-    id text DEFAULT ('vlx_key_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_key_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     key_prefix text NOT NULL,
     key_hash text NOT NULL,
     key_type text DEFAULT 'secret'::text NOT NULL,
@@ -237,7 +237,7 @@ ALTER TABLE ONLY public.api_keys FORCE ROW LEVEL SECURITY;
 --
 
 CREATE TABLE public.audit_log (
-    id text DEFAULT ('vlx_aud_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_aud_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     tenant_id text NOT NULL,
     actor_type text NOT NULL,
     actor_id text NOT NULL,
@@ -263,7 +263,7 @@ ALTER TABLE ONLY public.audit_log FORCE ROW LEVEL SECURITY;
 --
 
 CREATE TABLE public.billed_entries (
-    id text DEFAULT ('vlx_ble_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_ble_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     tenant_id text NOT NULL,
     customer_id text NOT NULL,
     meter_id text NOT NULL,
@@ -283,7 +283,7 @@ ALTER TABLE ONLY public.billed_entries FORCE ROW LEVEL SECURITY;
 --
 
 CREATE TABLE public.billing_intervals (
-    id text DEFAULT ('vlx_biv_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_biv_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     tenant_id text NOT NULL,
     livemode boolean DEFAULT true NOT NULL,
     subscription_id text NOT NULL,
@@ -305,7 +305,7 @@ ALTER TABLE ONLY public.billing_intervals FORCE ROW LEVEL SECURITY;
 --
 
 CREATE TABLE public.billing_provider_connections (
-    id text DEFAULT ('vlx_bpc_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_bpc_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     tenant_id text NOT NULL,
     provider_type text DEFAULT 'stripe'::text NOT NULL,
     environment text DEFAULT 'production'::text NOT NULL,
@@ -411,7 +411,7 @@ ALTER TABLE ONLY public.coupons FORCE ROW LEVEL SECURITY;
 --
 
 CREATE TABLE public.credit_note_line_items (
-    id text DEFAULT ('vlx_cnli_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_cnli_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     credit_note_id text NOT NULL,
     tenant_id text NOT NULL,
     invoice_line_item_id text,
@@ -431,7 +431,7 @@ ALTER TABLE ONLY public.credit_note_line_items FORCE ROW LEVEL SECURITY;
 --
 
 CREATE TABLE public.credit_notes (
-    id text DEFAULT ('vlx_cn_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_cn_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     tenant_id text NOT NULL,
     invoice_id text NOT NULL,
     customer_id text NOT NULL,
@@ -519,7 +519,7 @@ ALTER TABLE ONLY public.customer_billing_profiles FORCE ROW LEVEL SECURITY;
 --
 
 CREATE TABLE public.customer_credit_ledger (
-    id text DEFAULT ('vlx_ccl_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_ccl_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     tenant_id text NOT NULL,
     customer_id text NOT NULL,
     entry_type text NOT NULL,
@@ -555,7 +555,7 @@ ALTER TABLE ONLY public.customer_credit_ledger FORCE ROW LEVEL SECURITY;
 --
 
 CREATE TABLE public.customer_discounts (
-    id text DEFAULT ('vlx_cud_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_cud_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     tenant_id text NOT NULL,
     customer_id text NOT NULL,
     coupon_id text NOT NULL,
@@ -576,7 +576,7 @@ ALTER TABLE ONLY public.customer_discounts FORCE ROW LEVEL SECURITY;
 --
 
 CREATE TABLE public.customer_portal_magic_links (
-    id text DEFAULT ('vlx_cpml_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_cpml_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     tenant_id text NOT NULL,
     livemode boolean DEFAULT true NOT NULL,
     customer_id text NOT NULL,
@@ -594,7 +594,7 @@ ALTER TABLE ONLY public.customer_portal_magic_links FORCE ROW LEVEL SECURITY;
 --
 
 CREATE TABLE public.customer_portal_sessions (
-    id text DEFAULT ('vlx_cps_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_cps_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     tenant_id text NOT NULL,
     livemode boolean DEFAULT true NOT NULL,
     customer_id text NOT NULL,
@@ -612,7 +612,7 @@ ALTER TABLE ONLY public.customer_portal_sessions FORCE ROW LEVEL SECURITY;
 --
 
 CREATE TABLE public.customer_price_overrides (
-    id text DEFAULT ('vlx_cpo_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_cpo_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     tenant_id text NOT NULL,
     customer_id text NOT NULL,
     rating_rule_version_id text NOT NULL,
@@ -640,7 +640,7 @@ ALTER TABLE ONLY public.customer_price_overrides FORCE ROW LEVEL SECURITY;
 --
 
 CREATE TABLE public.customers (
-    id text DEFAULT ('vlx_cus_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_cus_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     tenant_id text NOT NULL,
     external_id text NOT NULL,
     display_name text NOT NULL,
@@ -669,7 +669,7 @@ ALTER TABLE ONLY public.customers FORCE ROW LEVEL SECURITY;
 -- Name: COLUMN customers.email_bidx; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.customers.email_bidx IS 'HMAC-SHA256(VELOX_EMAIL_BIDX_KEY, lower(email)). Blind index used for magic-link email lookup; encrypted-at-rest email is not directly queryable.';
+COMMENT ON COLUMN public.customers.email_bidx IS 'HMAC-SHA256(HARDCOUNT_EMAIL_BIDX_KEY, lower(email)). Blind index used for magic-link email lookup; encrypted-at-rest email is not directly queryable.';
 
 
 --
@@ -697,7 +697,7 @@ ALTER TABLE ONLY public.dashboard_sessions FORCE ROW LEVEL SECURITY;
 --
 
 CREATE TABLE public.dunning_policies (
-    id text DEFAULT ('vlx_dpol_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_dpol_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     tenant_id text NOT NULL,
     name text NOT NULL,
     enabled boolean DEFAULT true NOT NULL,
@@ -730,7 +730,7 @@ COMMENT ON COLUMN public.dunning_policies.seeded IS 'True for the policy created
 --
 
 CREATE TABLE public.email_outbox (
-    id text DEFAULT ('vlx_emob_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_emob_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     tenant_id text NOT NULL,
     email_type text NOT NULL,
     payload jsonb NOT NULL,
@@ -777,7 +777,7 @@ ALTER TABLE ONLY public.idempotency_keys FORCE ROW LEVEL SECURITY;
 --
 
 CREATE TABLE public.invoice_charge_attempts (
-    id text DEFAULT ('vlx_ica_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_ica_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     tenant_id text NOT NULL,
     livemode boolean DEFAULT true NOT NULL,
     invoice_id text NOT NULL,
@@ -802,7 +802,7 @@ ALTER TABLE ONLY public.invoice_charge_attempts FORCE ROW LEVEL SECURITY;
 --
 
 CREATE TABLE public.invoice_dunning_events (
-    id text DEFAULT ('vlx_devt_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_devt_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     run_id text NOT NULL,
     tenant_id text NOT NULL,
     invoice_id text NOT NULL,
@@ -824,7 +824,7 @@ ALTER TABLE ONLY public.invoice_dunning_events FORCE ROW LEVEL SECURITY;
 --
 
 CREATE TABLE public.invoice_dunning_runs (
-    id text DEFAULT ('vlx_drun_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_drun_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     tenant_id text NOT NULL,
     invoice_id text NOT NULL,
     customer_id text,
@@ -851,7 +851,7 @@ ALTER TABLE ONLY public.invoice_dunning_runs FORCE ROW LEVEL SECURITY;
 --
 
 CREATE TABLE public.invoice_line_items (
-    id text DEFAULT ('vlx_ili_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_ili_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     invoice_id text NOT NULL,
     tenant_id text NOT NULL,
     line_type text NOT NULL,
@@ -892,7 +892,7 @@ ALTER TABLE ONLY public.invoice_line_items FORCE ROW LEVEL SECURITY;
 --
 
 CREATE TABLE public.invoices (
-    id text DEFAULT ('vlx_inv_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_inv_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     tenant_id text NOT NULL,
     customer_id text NOT NULL,
     subscription_id text,
@@ -978,7 +978,7 @@ ALTER TABLE ONLY public.invoices FORCE ROW LEVEL SECURITY;
 -- Name: COLUMN invoices.charge_attempt_seq; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.invoices.charge_attempt_seq IS 'Seeds the Stripe charge idempotency key (velox_inv_<id>_<seq>). Bumped ONLY by writes that record a charge attempt outcome — i.e. every UPDATE that stamps stripe_payment_intent_id. Never bumped by the auto-charge lease, and never by unrelated writers.';
+COMMENT ON COLUMN public.invoices.charge_attempt_seq IS 'Seeds the Stripe charge idempotency key (hardcount_inv_<id>_<seq>). Bumped ONLY by writes that record a charge attempt outcome — i.e. every UPDATE that stamps stripe_payment_intent_id. Never bumped by the auto-charge lease, and never by unrelated writers.';
 
 
 --
@@ -1093,7 +1093,7 @@ ALTER TABLE ONLY public.member_invitations FORCE ROW LEVEL SECURITY;
 --
 
 CREATE TABLE public.meter_pricing_rules (
-    id text DEFAULT ('vlx_mpr_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_mpr_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     tenant_id text NOT NULL,
     meter_id text NOT NULL,
     rating_rule_version_id text NOT NULL,
@@ -1113,7 +1113,7 @@ ALTER TABLE ONLY public.meter_pricing_rules FORCE ROW LEVEL SECURITY;
 --
 
 CREATE TABLE public.meters (
-    id text DEFAULT ('vlx_mtr_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_mtr_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     tenant_id text NOT NULL,
     key text NOT NULL,
     name text NOT NULL,
@@ -1133,7 +1133,7 @@ ALTER TABLE ONLY public.meters FORCE ROW LEVEL SECURITY;
 --
 
 CREATE TABLE public.password_reset_tokens (
-    id text DEFAULT ('vlx_prt_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_prt_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     user_id text NOT NULL,
     token_hash text NOT NULL,
     expires_at timestamp with time zone NOT NULL,
@@ -1147,7 +1147,7 @@ CREATE TABLE public.password_reset_tokens (
 --
 
 CREATE TABLE public.payment_methods (
-    id text DEFAULT ('vlx_pm_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_pm_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     tenant_id text NOT NULL,
     livemode boolean DEFAULT true NOT NULL,
     customer_id text NOT NULL,
@@ -1191,7 +1191,7 @@ ALTER TABLE ONLY public.payment_update_tokens FORCE ROW LEVEL SECURITY;
 --
 
 CREATE TABLE public.plans (
-    id text DEFAULT ('vlx_pln_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_pln_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     tenant_id text NOT NULL,
     code text NOT NULL,
     name text NOT NULL,
@@ -1219,7 +1219,7 @@ ALTER TABLE ONLY public.plans FORCE ROW LEVEL SECURITY;
 --
 
 CREATE TABLE public.provider_cost_rates (
-    id text DEFAULT ('vlx_pcr_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_pcr_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     tenant_id text NOT NULL,
     livemode boolean NOT NULL,
     provider text NOT NULL,
@@ -1240,7 +1240,7 @@ ALTER TABLE ONLY public.provider_cost_rates FORCE ROW LEVEL SECURITY;
 --
 
 CREATE TABLE public.rating_rule_versions (
-    id text DEFAULT ('vlx_rrv_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_rrv_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     tenant_id text NOT NULL,
     rule_key text NOT NULL,
     name text NOT NULL,
@@ -1267,7 +1267,7 @@ ALTER TABLE ONLY public.rating_rule_versions FORCE ROW LEVEL SECURITY;
 --
 
 CREATE TABLE public.recipe_instances (
-    id text DEFAULT ('vlx_rec_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_rec_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     tenant_id text NOT NULL,
     recipe_key text NOT NULL,
     recipe_version text NOT NULL,
@@ -1286,7 +1286,7 @@ ALTER TABLE ONLY public.recipe_instances FORCE ROW LEVEL SECURITY;
 --
 
 CREATE TABLE public.stripe_provider_credentials (
-    id text DEFAULT ('vlx_spc_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_spc_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     tenant_id text NOT NULL,
     livemode boolean NOT NULL,
     stripe_account_id text,
@@ -1320,7 +1320,7 @@ COMMENT ON COLUMN public.stripe_provider_credentials.last_verified_error_kind IS
 --
 
 CREATE TABLE public.stripe_webhook_events (
-    id text DEFAULT ('vlx_swe_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_swe_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     tenant_id text NOT NULL,
     stripe_event_id text NOT NULL,
     event_type text NOT NULL,
@@ -1346,7 +1346,7 @@ ALTER TABLE ONLY public.stripe_webhook_events FORCE ROW LEVEL SECURITY;
 --
 
 CREATE TABLE public.subscription_item_changes (
-    id text DEFAULT ('vlx_sic_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_sic_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     tenant_id text NOT NULL,
     livemode boolean DEFAULT true NOT NULL,
     subscription_id text NOT NULL,
@@ -1386,7 +1386,7 @@ ALTER TABLE ONLY public.subscription_item_thresholds FORCE ROW LEVEL SECURITY;
 --
 
 CREATE TABLE public.subscription_items (
-    id text DEFAULT ('vlx_si_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_si_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     tenant_id text NOT NULL,
     livemode boolean DEFAULT true NOT NULL,
     subscription_id text NOT NULL,
@@ -1411,7 +1411,7 @@ ALTER TABLE ONLY public.subscription_items FORCE ROW LEVEL SECURITY;
 --
 
 CREATE TABLE public.subscriptions (
-    id text DEFAULT ('vlx_sub_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_sub_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     tenant_id text NOT NULL,
     code text NOT NULL,
     display_name text NOT NULL,
@@ -1473,7 +1473,7 @@ COMMENT ON COLUMN public.subscriptions.billing_next_attempt_at IS 'Earliest next
 --
 
 CREATE TABLE public.tax_calculations (
-    id text DEFAULT ('vlx_tcalc_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_tcalc_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     tenant_id text NOT NULL,
     invoice_id text,
     provider text NOT NULL,
@@ -1495,7 +1495,7 @@ CREATE TABLE public.tenant_settings (
     tenant_id text NOT NULL,
     default_currency text DEFAULT 'USD'::text NOT NULL,
     timezone text DEFAULT 'UTC'::text NOT NULL,
-    invoice_prefix text DEFAULT 'VLX'::text NOT NULL,
+    invoice_prefix text DEFAULT 'HC'::text NOT NULL,
     net_payment_terms integer DEFAULT 30 NOT NULL,
     company_name text,
     company_email text,
@@ -1537,7 +1537,7 @@ ALTER TABLE ONLY public.tenant_settings FORCE ROW LEVEL SECURITY;
 --
 
 CREATE TABLE public.tenants (
-    id text DEFAULT ('vlx_ten_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_ten_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     name text NOT NULL,
     status text DEFAULT 'active'::text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
@@ -1551,7 +1551,7 @@ CREATE TABLE public.tenants (
 --
 
 CREATE TABLE public.test_clocks (
-    id text DEFAULT ('vlx_tclk_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_tclk_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     tenant_id text NOT NULL,
     livemode boolean DEFAULT false NOT NULL,
     name text DEFAULT ''::text NOT NULL,
@@ -1573,7 +1573,7 @@ ALTER TABLE ONLY public.test_clocks FORCE ROW LEVEL SECURITY;
 --
 
 CREATE TABLE public.usage_events (
-    id text DEFAULT ('vlx_evt_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_evt_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     tenant_id text NOT NULL,
     customer_id text NOT NULL,
     meter_id text NOT NULL,
@@ -1642,7 +1642,7 @@ ALTER TABLE ONLY public.user_tenants FORCE ROW LEVEL SECURITY;
 --
 
 CREATE TABLE public.users (
-    id text DEFAULT ('vlx_usr_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_usr_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     email public.citext NOT NULL,
     password_hash text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
@@ -1655,7 +1655,7 @@ CREATE TABLE public.users (
 --
 
 CREATE TABLE public.webhook_deliveries (
-    id text DEFAULT ('vlx_whd_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_whd_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     tenant_id text NOT NULL,
     webhook_endpoint_id text NOT NULL,
     webhook_event_id text NOT NULL,
@@ -1679,7 +1679,7 @@ ALTER TABLE ONLY public.webhook_deliveries FORCE ROW LEVEL SECURITY;
 --
 
 CREATE TABLE public.webhook_endpoints (
-    id text DEFAULT ('vlx_whe_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_whe_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     tenant_id text NOT NULL,
     url text NOT NULL,
     description text,
@@ -1704,7 +1704,7 @@ ALTER TABLE ONLY public.webhook_endpoints FORCE ROW LEVEL SECURITY;
 --
 
 CREATE TABLE public.webhook_events (
-    id text DEFAULT ('vlx_whevt_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_whevt_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     tenant_id text NOT NULL,
     event_type text NOT NULL,
     payload jsonb DEFAULT '{}'::jsonb NOT NULL,
@@ -1721,7 +1721,7 @@ ALTER TABLE ONLY public.webhook_events FORCE ROW LEVEL SECURITY;
 --
 
 CREATE TABLE public.webhook_outbox (
-    id text DEFAULT ('vlx_whob_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
+    id text DEFAULT ('hc_whob_'::text || encode(public.gen_random_bytes(12), 'hex'::text)) NOT NULL,
     tenant_id text NOT NULL,
     event_type text NOT NULL,
     payload jsonb NOT NULL,
@@ -4932,336 +4932,336 @@ ALTER TABLE public.webhook_outbox ENABLE ROW LEVEL SECURITY;
 -- Name: FUNCTION leader_fence(p_role text, p_token bigint); Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON FUNCTION public.leader_fence(p_role text, p_token bigint) TO velox_app;
+GRANT ALL ON FUNCTION public.leader_fence(p_role text, p_token bigint) TO hardcount_app;
 
 
 --
 -- Name: FUNCTION leader_pause(p_role text, p_by text, p_reason text); Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON FUNCTION public.leader_pause(p_role text, p_by text, p_reason text) TO velox_app;
+GRANT ALL ON FUNCTION public.leader_pause(p_role text, p_by text, p_reason text) TO hardcount_app;
 
 
 --
 -- Name: FUNCTION leader_unpause(p_role text); Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON FUNCTION public.leader_unpause(p_role text) TO velox_app;
+GRANT ALL ON FUNCTION public.leader_unpause(p_role text) TO hardcount_app;
 
 
 --
 -- Name: TABLE api_keys; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.api_keys TO velox_app;
+GRANT ALL ON TABLE public.api_keys TO hardcount_app;
 
 
 --
 -- Name: TABLE audit_log; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,REFERENCES,TRIGGER ON TABLE public.audit_log TO velox_app;
+GRANT SELECT,INSERT,REFERENCES,TRIGGER ON TABLE public.audit_log TO hardcount_app;
 
 
 --
 -- Name: TABLE billed_entries; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.billed_entries TO velox_app;
+GRANT ALL ON TABLE public.billed_entries TO hardcount_app;
 
 
 --
 -- Name: TABLE billing_intervals; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.billing_intervals TO velox_app;
+GRANT ALL ON TABLE public.billing_intervals TO hardcount_app;
 
 
 --
 -- Name: TABLE billing_provider_connections; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.billing_provider_connections TO velox_app;
+GRANT ALL ON TABLE public.billing_provider_connections TO hardcount_app;
 
 
 --
 -- Name: TABLE coupon_redemptions; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.coupon_redemptions TO velox_app;
+GRANT ALL ON TABLE public.coupon_redemptions TO hardcount_app;
 
 
 --
 -- Name: TABLE coupons; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.coupons TO velox_app;
+GRANT ALL ON TABLE public.coupons TO hardcount_app;
 
 
 --
 -- Name: TABLE credit_note_line_items; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.credit_note_line_items TO velox_app;
+GRANT ALL ON TABLE public.credit_note_line_items TO hardcount_app;
 
 
 --
 -- Name: TABLE credit_notes; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.credit_notes TO velox_app;
+GRANT ALL ON TABLE public.credit_notes TO hardcount_app;
 
 
 --
 -- Name: TABLE customer_billing_profiles; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.customer_billing_profiles TO velox_app;
+GRANT ALL ON TABLE public.customer_billing_profiles TO hardcount_app;
 
 
 --
 -- Name: TABLE customer_credit_ledger; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.customer_credit_ledger TO velox_app;
+GRANT ALL ON TABLE public.customer_credit_ledger TO hardcount_app;
 
 
 --
 -- Name: TABLE customer_portal_magic_links; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.customer_portal_magic_links TO velox_app;
+GRANT ALL ON TABLE public.customer_portal_magic_links TO hardcount_app;
 
 
 --
 -- Name: TABLE customer_portal_sessions; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.customer_portal_sessions TO velox_app;
+GRANT ALL ON TABLE public.customer_portal_sessions TO hardcount_app;
 
 
 --
 -- Name: TABLE customer_price_overrides; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.customer_price_overrides TO velox_app;
+GRANT ALL ON TABLE public.customer_price_overrides TO hardcount_app;
 
 
 --
 -- Name: TABLE customers; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.customers TO velox_app;
+GRANT ALL ON TABLE public.customers TO hardcount_app;
 
 
 --
 -- Name: TABLE dunning_policies; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.dunning_policies TO velox_app;
+GRANT ALL ON TABLE public.dunning_policies TO hardcount_app;
 
 
 --
 -- Name: TABLE idempotency_keys; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.idempotency_keys TO velox_app;
+GRANT ALL ON TABLE public.idempotency_keys TO hardcount_app;
 
 
 --
 -- Name: TABLE invoice_charge_attempts; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.invoice_charge_attempts TO velox_app;
+GRANT ALL ON TABLE public.invoice_charge_attempts TO hardcount_app;
 
 
 --
 -- Name: TABLE invoice_dunning_events; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.invoice_dunning_events TO velox_app;
+GRANT ALL ON TABLE public.invoice_dunning_events TO hardcount_app;
 
 
 --
 -- Name: TABLE invoice_dunning_runs; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.invoice_dunning_runs TO velox_app;
+GRANT ALL ON TABLE public.invoice_dunning_runs TO hardcount_app;
 
 
 --
 -- Name: TABLE invoice_line_items; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.invoice_line_items TO velox_app;
+GRANT ALL ON TABLE public.invoice_line_items TO hardcount_app;
 
 
 --
 -- Name: TABLE invoices; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.invoices TO velox_app;
+GRANT ALL ON TABLE public.invoices TO hardcount_app;
 
 
 --
 -- Name: TABLE leader_leases; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,UPDATE ON TABLE public.leader_leases TO velox_app;
+GRANT SELECT,INSERT,UPDATE ON TABLE public.leader_leases TO hardcount_app;
 
 
 --
 -- Name: TABLE leader_status; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT ON TABLE public.leader_status TO velox_app;
+GRANT SELECT ON TABLE public.leader_status TO hardcount_app;
 
 
 --
 -- Name: TABLE meter_pricing_rules; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.meter_pricing_rules TO velox_app;
+GRANT ALL ON TABLE public.meter_pricing_rules TO hardcount_app;
 
 
 --
 -- Name: TABLE meters; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.meters TO velox_app;
+GRANT ALL ON TABLE public.meters TO hardcount_app;
 
 
 --
 -- Name: TABLE payment_methods; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.payment_methods TO velox_app;
+GRANT ALL ON TABLE public.payment_methods TO hardcount_app;
 
 
 --
 -- Name: TABLE payment_update_tokens; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.payment_update_tokens TO velox_app;
+GRANT ALL ON TABLE public.payment_update_tokens TO hardcount_app;
 
 
 --
 -- Name: TABLE plans; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.plans TO velox_app;
+GRANT ALL ON TABLE public.plans TO hardcount_app;
 
 
 --
 -- Name: TABLE rating_rule_versions; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.rating_rule_versions TO velox_app;
+GRANT ALL ON TABLE public.rating_rule_versions TO hardcount_app;
 
 
 --
 -- Name: TABLE recipe_instances; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.recipe_instances TO velox_app;
+GRANT ALL ON TABLE public.recipe_instances TO hardcount_app;
 
 
 --
 -- Name: TABLE stripe_provider_credentials; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.stripe_provider_credentials TO velox_app;
+GRANT ALL ON TABLE public.stripe_provider_credentials TO hardcount_app;
 
 
 --
 -- Name: TABLE stripe_webhook_events; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.stripe_webhook_events TO velox_app;
+GRANT ALL ON TABLE public.stripe_webhook_events TO hardcount_app;
 
 
 --
 -- Name: TABLE subscription_item_changes; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.subscription_item_changes TO velox_app;
+GRANT ALL ON TABLE public.subscription_item_changes TO hardcount_app;
 
 
 --
 -- Name: TABLE subscription_item_thresholds; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.subscription_item_thresholds TO velox_app;
+GRANT ALL ON TABLE public.subscription_item_thresholds TO hardcount_app;
 
 
 --
 -- Name: TABLE subscription_items; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.subscription_items TO velox_app;
+GRANT ALL ON TABLE public.subscription_items TO hardcount_app;
 
 
 --
 -- Name: TABLE subscriptions; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.subscriptions TO velox_app;
+GRANT ALL ON TABLE public.subscriptions TO hardcount_app;
 
 
 --
 -- Name: TABLE tenant_settings; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.tenant_settings TO velox_app;
+GRANT ALL ON TABLE public.tenant_settings TO hardcount_app;
 
 
 --
 -- Name: TABLE tenants; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.tenants TO velox_app;
+GRANT ALL ON TABLE public.tenants TO hardcount_app;
 
 
 --
 -- Name: TABLE test_clocks; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.test_clocks TO velox_app;
+GRANT ALL ON TABLE public.test_clocks TO hardcount_app;
 
 
 --
 -- Name: TABLE usage_events; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.usage_events TO velox_app;
+GRANT ALL ON TABLE public.usage_events TO hardcount_app;
 
 
 --
 -- Name: TABLE usage_held_events; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.usage_held_events TO velox_app;
+GRANT ALL ON TABLE public.usage_held_events TO hardcount_app;
 
 
 --
 -- Name: TABLE webhook_deliveries; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.webhook_deliveries TO velox_app;
+GRANT ALL ON TABLE public.webhook_deliveries TO hardcount_app;
 
 
 --
 -- Name: TABLE webhook_endpoints; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.webhook_endpoints TO velox_app;
+GRANT ALL ON TABLE public.webhook_endpoints TO hardcount_app;
 
 
 --
 -- Name: TABLE webhook_events; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE public.webhook_events TO velox_app;
+GRANT ALL ON TABLE public.webhook_events TO hardcount_app;
 
 
 --
@@ -5278,8 +5278,8 @@ SELECT r, (extract(epoch FROM clock_timestamp()) * 1000)::bigint
 FROM unnest(ARRAY['billing','dunning','webhook_outbox','email_outbox','webhook_delivery']) AS r;
 
 --
--- Migration 0150's revoke, so installs whose velox_app has default
+-- Migration 0150's revoke, so installs whose hardcount_app has default
 -- privileges end with the same access as the history gives them.
 --
 
-REVOKE UPDATE, DELETE, TRUNCATE ON TABLE public.audit_log FROM velox_app;
+REVOKE UPDATE, DELETE, TRUNCATE ON TABLE public.audit_log FROM hardcount_app;

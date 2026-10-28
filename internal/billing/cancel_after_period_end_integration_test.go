@@ -457,7 +457,7 @@ func TestImmediateCancel_InAdvance_AfterPeriodEnd_KeepsEndedPeriodUsage(t *testi
 func (r *cancelRig) cancelHTTP(t *testing.T, at time.Time) (int, string) {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/"+r.f.subID+"/cancel", nil)
-	req = req.WithContext(auth.WithKeyID(auth.WithTenantID(r.at(at), r.f.tenantID), "vlx_key_cancel_991"))
+	req = req.WithContext(auth.WithKeyID(auth.WithTenantID(r.at(at), r.f.tenantID), "hc_key_cancel_991"))
 	rec := httptest.NewRecorder()
 	subscription.NewHandler(r.f.subSvc).Routes().ServeHTTP(rec, req)
 	return rec.Code, rec.Body.String()
@@ -707,7 +707,7 @@ func TestImmediateCancel_TestClock_AfterPeriodEnd(t *testing.T) {
 	r := newCancelRig(t, "991 cancel on a test clock")
 	p0, p1 := r.f.cycleStart, r.f.cycleEnd
 	frozen := p1.Add(time.Hour)
-	clockID := postgres.NewID("vlx_tclk")
+	clockID := postgres.NewID("hc_tclk")
 	execTx(t, r.f.db, r.base, r.f.tenantID,
 		`INSERT INTO test_clocks (id, tenant_id, livemode, name, frozen_time, status) VALUES ($1, $2, false, '991 clock', $3, 'ready')`,
 		clockID, r.f.tenantID, frozen)

@@ -1,16 +1,16 @@
-# How Velox compares
+# How Hardcount compares
 
-This page compares Velox with four open-source billing engines: Lago, OpenMeter, Flexprice and Kill Bill. Each cell comes from that project's own source or docs, linked under the table. Cells marked ¹ and "None found" are our reading, not the project's own words.
+This page compares Hardcount with four open-source billing engines: Lago, OpenMeter, Flexprice and Kill Bill. Each cell comes from that project's own source or docs, linked under the table. Cells marked ¹ and "None found" are our reading, not the project's own words.
 
 **Checked on 2026-10-12.** Projects change. Re-check any cell you plan to rely on.
 
 **Re-checked on 2026-10-23:** the licence, prepaid-credit, retry, webhook, tenant-isolation and payment-provider cells changed that day. They were read in OpenMeter [`f04b561f`](https://github.com/openmeterio/openmeter/tree/f04b561f8dd2dafd1e77a02fb4258fab0edbef8f), Flexprice [`1c23b81`](https://github.com/flexprice/flexprice/tree/1c23b81dabe900e86c0694da10598ecd6f8d3521) and lago-api [`2e52dfc`](https://github.com/getlago/lago-api/tree/2e52dfc13ad00a2d108a6ab964263dbe24b6bb77), all from 2026-10-22. Other cells are from the commits linked under [Sources](#sources).
 
-Velox is pre-1.0 and has no production users yet. The other four are in production use at other companies. Weigh everything below with that in mind.
+Hardcount is pre-1.0 and has no production users yet. The other four are in production use at other companies. Weigh everything below with that in mind.
 
 ## In short
 
-**Where Velox differs in your favour**
+**Where Hardcount differs in your favour**
 
 - One MIT licence, and every feature is in it.
 - A test clock for each test customer, on your normal deployment.
@@ -21,15 +21,15 @@ Velox is pre-1.0 and has no production users yet. The other four are in producti
 
 **Where another project is ahead**
 
-- Payment providers: Velox supports Stripe cards only. Through Stripe, Lago also takes bank debits such as SEPA, ACH and BACS. OpenMeter's Stripe invoices offer the methods turned on in the Stripe account.
-- SDKs: Velox has none.
-- Invoice preview: Velox's leaves out tax and credits.
+- Payment providers: Hardcount supports Stripe cards only. Through Stripe, Lago also takes bank debits such as SEPA, ACH and BACS. OpenMeter's Stripe invoices offer the methods turned on in the Stripe account.
+- SDKs: Hardcount has none.
+- Invoice preview: Hardcount's leaves out tax and credits.
 - Fewest services to run: Kill Bill's Compose file has three.
 - Previewing a plan change: Flexprice and Kill Bill both do it, and Lago does with a premium licence.
 
 ## The comparison
 
-| | Velox | Lago | OpenMeter | Flexprice | Kill Bill |
+| | Hardcount | Lago | OpenMeter | Flexprice | Kill Bill |
 |---|---|---|---|---|---|
 | **Licence** | MIT, one edition | AGPL-3.0. A licence key unlocks premium features. | Apache-2.0. No operator UI in the open-source distribution. | AGPL-3.0 at the root. Every service, from event ingest to invoices and wallets, is in `internal/ee`. That code's licence allows production use only with a Flexprice Enterprise licence. The README calls 99% of the code AGPL. | Apache-2.0. A commercial plugin, Aviate, adds raw-event metering (aggregation), wallets and coupons. The open-source core bills usage you have already added up. |
 | **Services in the Compose file** | 5, including a front proxy that the others' files do not have | 8, one of them a one-off migration step | 11, described as "not a production topology" | 9 by default, plus a separate dashboard | 3 |
@@ -56,12 +56,12 @@ Velox is pre-1.0 and has no production users yet. The other four are in producti
 
 Links to other projects are pinned to the commit that was read.
 
-**Velox**
+**Hardcount**
 
 - Licence: [`LICENSE`](../LICENSE). Services: [`deploy/compose/docker-compose.yml`](../deploy/compose/docker-compose.yml).
-- Pricing by dimension: [AI pricing](ai-pricing.md#how-velox-picks-the-price-for-an-event). Prepaid commits: [ADR-078](adr/078-prepaid-commits-phase-1.md).
+- Pricing by dimension: [AI pricing](ai-pricing.md#how-hardcount-picks-the-price-for-an-event). Prepaid commits: [ADR-078](adr/078-prepaid-commits-phase-1.md).
 - Webhooks: [`webhooks.md`](webhooks.md). Throughput: [`benchmarks/sustained-throughput.md`](benchmarks/sustained-throughput.md).
-- Invoice preview: [The Velox API](api-surface.md#invoices-and-billing). Card-only checkout: [`internal/paymentmethods/stripe_adapter.go`](../internal/paymentmethods/stripe_adapter.go).
+- Invoice preview: [The Hardcount API](api-surface.md#invoices-and-billing). Card-only checkout: [`internal/paymentmethods/stripe_adapter.go`](../internal/paymentmethods/stripe_adapter.go).
 - Tenant isolation, and what runs outside row-level security: [Architecture](architecture.md#design-rules).
 
 **Lago**
@@ -117,4 +117,4 @@ Links to other projects are pinned to the commit that was read.
 
 ## Not compared here
 
-Stripe Billing, Orb and Metronome are hosted products with no source to read. For where Velox sits against them, see [Why Velox exists](why-velox.md).
+Stripe Billing, Orb and Metronome are hosted products with no source to read. For where Hardcount sits against them, see [Why Hardcount exists](why-hardcount.md).

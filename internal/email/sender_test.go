@@ -22,7 +22,7 @@ func TestSender_NotConfigured(t *testing.T) {
 	// SMTP_HOST is unset. Silent stdout fallback was removed so
 	// misconfiguration is an operator-visible failure, not invisible
 	// drops.
-	err := s.SendInvoice(context.Background(), "t1", "test@example.com", nil, "Test Customer", "VLX-000001", 19900, "USD", []byte("%PDF"), "")
+	err := s.SendInvoice(context.Background(), "t1", "test@example.com", nil, "Test Customer", "HC-000001", 19900, "USD", []byte("%PDF"), "")
 	if !errors.Is(err, ErrSMTPNotConfigured) {
 		t.Errorf("unconfigured sender should return ErrSMTPNotConfigured, got: %v", err)
 	}
@@ -33,7 +33,7 @@ func TestSender_NotConfigured(t *testing.T) {
 }
 
 func TestSender_Configured(t *testing.T) {
-	s := &Sender{host: "smtp.example.com", port: "587", from: "billing@velox.dev"}
+	s := &Sender{host: "smtp.example.com", port: "587", from: "billing@hardcount.dev"}
 	if !s.IsConfigured() {
 		t.Error("should be configured with host")
 	}
@@ -64,7 +64,7 @@ func TestFormatAmount(t *testing.T) {
 // of during a live send. The full HTML isn't byte-matched — we check the
 // key substrings industry-standard verifiers look for.
 func TestRenderInvoiceHTML(t *testing.T) {
-	subject, content, ctaURL, ctaLabel := renderInvoiceHTML("Acme Corp", "INV-42", "USD 199.00", "https://app.velox.dev/invoice/vlx_pinv_abc", false)
+	subject, content, ctaURL, ctaLabel := renderInvoiceHTML("Acme Corp", "INV-42", "USD 199.00", "https://app.hardcount.dev/invoice/hc_pinv_abc", false)
 	if subject != "Invoice INV-42 — USD 199.00" {
 		t.Errorf("subject = %q", subject)
 	}
@@ -86,10 +86,10 @@ func TestRenderInvoiceHTML(t *testing.T) {
 		"#1f6feb",                          // brand color accent
 		"INV-42",                           // invoice number
 		"USD 199.00",                       // amount
-		"vlx_pinv_abc",                     // hosted token in CTA URL
+		"hc_pinv_abc",                      // hosted token in CTA URL
 		"View &amp; pay invoice",           // CTA label (html-escaped "&")
 		"Acme Corp",                        // customer name interpolated in content
-		"Powered by Velox Billing",         // footer credit
+		"Powered by Hardcount Billing",     // footer credit
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("rendered HTML missing %q", want)
@@ -142,7 +142,7 @@ func TestIsPermanentSMTPBounce(t *testing.T) {
 		// Sender/server-side 5xx — must NOT classify as bounce (the
 		// recipient is fine; OUR side has a problem). Pre-fix every
 		// 5xx mapped to bounce; surfaced 2026-05-29 when a wrong
-		// Postmark Server Token returned 535 and Velox flagged
+		// Postmark Server Token returned 535 and Hardcount flagged
 		// every recipient as bounced as a result.
 		{"535 auth failed (Postmark token mismatch)", smtpReply(535, "5.7.8 Error: authentication failed"), false},
 		{"530 access denied", smtpReply(530, "5.7.0 authentication required"), false},
@@ -159,7 +159,7 @@ func TestIsPermanentSMTPBounce(t *testing.T) {
 		// A reply to any step but RCPT TO is about the sender or the
 		// message, whatever its code.
 		{"550 after the message: SendGrid refusing an unverified sender", smtpStepReply("smtp data close", 550, "The from address does not match a verified Sender Identity. Mail cannot be sent until this error is resolved."), false},
-		{"553 5.1.8 to MAIL FROM: the sender's domain does not exist", smtpStepReply("smtp mail from", 553, "5.1.8 <billing@velox.test>... Domain of sender address billing@velox.test does not exist"), false},
+		{"553 5.1.8 to MAIL FROM: the sender's domain does not exist", smtpStepReply("smtp mail from", 553, "5.1.8 <billing@hardcount.test>... Domain of sender address billing@hardcount.test does not exist"), false},
 		{"a reply to another step, unwrapped", &textproto.Error{Code: 550, Msg: "mailbox unavailable"}, false},
 		// Transient replies — not bounces, whatever their text quotes
 		{"421 transient", smtpReply(421, "try again later"), false},
@@ -198,10 +198,10 @@ func TestHostedInvoiceURL(t *testing.T) {
 		token    string
 		expected string
 	}{
-		{"empty base", "", "vlx_pinv_abc", ""},
+		{"empty base", "", "hc_pinv_abc", ""},
 		{"empty token", "https://app.example.com", "", ""},
-		{"trailing slash trimmed", "https://app.example.com/", "vlx_pinv_abc", "https://app.example.com/invoice/vlx_pinv_abc"},
-		{"no trailing slash", "https://app.example.com", "vlx_pinv_abc", "https://app.example.com/invoice/vlx_pinv_abc"},
+		{"trailing slash trimmed", "https://app.example.com/", "hc_pinv_abc", "https://app.example.com/invoice/hc_pinv_abc"},
+		{"no trailing slash", "https://app.example.com", "hc_pinv_abc", "https://app.example.com/invoice/hc_pinv_abc"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

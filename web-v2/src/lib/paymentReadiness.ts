@@ -1,7 +1,7 @@
 import type { Subscription, CustomerPaymentMethod } from '@/lib/api'
 
 // A customer "needs a payment method" when they have no card on file yet
-// have a subscription that will try to auto-charge one. Velox has no
+// have a subscription that will try to auto-charge one. Hardcount has no
 // collection_method concept — every active/trialing, non-paused
 // subscription is auto-charge by definition — so this is simply "a
 // subscription that will attempt a charge against a card that isn't there".

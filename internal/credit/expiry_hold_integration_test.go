@@ -56,7 +56,7 @@ func holdCustomer(t *testing.T, ctx context.Context, db *postgres.DB, tenantID, 
 // ("" for wall clock). The hold reads only the status and the due instant.
 func seedSub(t *testing.T, db *postgres.DB, ctx context.Context, tenantID, customerID, status string, next time.Time, clockID string) string {
 	t.Helper()
-	id := postgres.NewID("vlx_sub")
+	id := postgres.NewID("hc_sub")
 	bypassExec(t, db, ctx, `INSERT INTO subscriptions (
 			id, tenant_id, code, display_name, customer_id, status, billing_time,
 			current_billing_period_start, current_billing_period_end, next_billing_at,
@@ -260,7 +260,7 @@ func TestExpireCreditsForClock_HoldsAGrantAFailedCloseNeeds(t *testing.T) {
 	db, ctx, tenantID, cust, _, svc, _ := expirySetup(t, "expiry_hold_clock")
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	frozen := now.Add(-10 * 24 * time.Hour)
-	clockID := postgres.NewID("vlx_tclk")
+	clockID := postgres.NewID("hc_tclk")
 	bypassExec(t, db, ctx, `INSERT INTO test_clocks (id, tenant_id, name, frozen_time, status, livemode)
 		VALUES ($1, $2, 'g8', $3, 'ready', false)`, clockID, tenantID, frozen)
 	bypassExec(t, db, ctx, `UPDATE customers SET test_clock_id = $1 WHERE id = $2`, clockID, cust.ID)
@@ -444,7 +444,7 @@ func TestLivenessAtTheExpiryInstant_DrainSpendableExposureAgree(t *testing.T) {
 	after := expires.Add(time.Microsecond)
 
 	grant := seedExpiredGrant(t, db, ctx, svc, tenantID, cust.ID, 2000, expires)
-	fundingID := "vlx_inv_boundary_fund"
+	fundingID := "hc_inv_boundary_fund"
 	bypassExec(t, db, ctx, `UPDATE customer_credit_ledger SET grant_kind = 'commit', source_invoice_id = $1 WHERE id = $2`, fundingID, grant)
 
 	spendable := func(at time.Time) int64 {

@@ -23,7 +23,7 @@ func (f fixedSettings) Get(context.Context, string) (domain.TenantSettings, erro
 	return f.ts, nil
 }
 
-// TestWireFormat_EverySendPath sends every email Velox writes through a
+// TestWireFormat_EverySendPath sends every email Hardcount writes through a
 // real SMTP exchange and checks the bytes the server received against the
 // mail standards a receiving server or spam filter applies:
 //
@@ -43,7 +43,7 @@ func TestWireFormat_EverySendPath(t *testing.T) {
 	s.SetSettingsGetter(fixedSettings{ts: domain.TenantSettings{
 		CompanyName: `Müller "Großhandel" \ Logistik GmbH & Co. KG — Kreditorenbuchhaltung Abteilung Süd`,
 	}})
-	const outboxID = "vlx_emob_00112233445566778899aabb"
+	const outboxID = "hc_emob_00112233445566778899aabb"
 	ctx := WithCorrelation(context.Background(), outboxID)
 
 	cust := "Müller Großhandel und Logistik GmbH & Co. KG — Kreditorenbuchhaltung Abteilung Süd, Werk 3"
@@ -89,13 +89,13 @@ func TestWireFormat_EverySendPath(t *testing.T) {
 		}, []string{cust, "CN-0001"}},
 		{"password-reset", func() error {
 			return s.SendPasswordReset(ctx, "", "ap@acme.test", "Jürgen", "https://app.example.com/reset?t=abc")
-		}, []string{"Jürgen", "https://app.example.com/reset?t=abc", "— Velox"}},
+		}, []string{"Jürgen", "https://app.example.com/reset?t=abc", "— Hardcount"}},
 		{"member-invite", func() error {
 			return s.SendMemberInvite(ctx, "", "ap@acme.test", "owner@acme.test", "Müller GmbH", "https://app.example.com/invite?t=abc")
 		}, []string{"Müller GmbH", "https://app.example.com/invite?t=abc"}},
 		{"test-email", func() error {
 			return s.SendTestEmail(ctx, "", "ap@acme.test")
-		}, []string{"This is a test email from Velox.", "— Velox"}},
+		}, []string{"This is a test email from Hardcount.", "— Hardcount"}},
 	}
 
 	for _, tc := range cases {
@@ -104,7 +104,7 @@ func TestWireFormat_EverySendPath(t *testing.T) {
 				t.Fatalf("send: %v", err)
 			}
 			raw := srv.lastData()
-			checkWireFormat(t, raw, "velox.test", outboxID, tc.wantText)
+			checkWireFormat(t, raw, "hardcount.test", outboxID, tc.wantText)
 		})
 	}
 }

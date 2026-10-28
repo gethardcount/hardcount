@@ -9,7 +9,7 @@ import (
 )
 
 // The bank's request that the customer confirm a payment
-// (authentication_required) reaches Velox only through the
+// (authentication_required) reaches Hardcount only through the
 // payment_intent.payment_failed webhook: the charge call's own report was
 // lost. Stripe sends it in two shapes, with the decline code set and with
 // only the error code (https://docs.stripe.com/error-codes, entry
@@ -32,7 +32,7 @@ func TestNeedsConfirmation_WebhookReportStopsTheRetry_RealStore(t *testing.T) {
 			body := `{"id": "evt_sca_1", "object": "event", "type": "payment_intent.payment_failed",
 			  "data": {"object": {"id": "pi_sca_1", "object": "payment_intent", "amount": 5000, "currency": "usd",
 			    "last_payment_error": ` + tc.lastPaymentError + `,
-			    "metadata": {"velox_invoice_id": "` + inv.ID + `", "velox_tenant_id": "` + r.tenantID + `"},
+			    "metadata": {"hardcount_invoice_id": "` + inv.ID + `", "hardcount_tenant_id": "` + r.tenantID + `"},
 			    "payment_method": null, "status": "requires_payment_method"}}}`
 			if err := r.charger.HandleWebhook(r.ctx, r.tenantID, domain.StripeWebhookEvent{
 				StripeEventID: "evt_sca_1", EventType: "payment_intent.payment_failed", PaymentIntentID: "pi_sca_1",

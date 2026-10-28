@@ -12,7 +12,7 @@
             }
           ],
           "code": "payment.no_payment_method",
-          "detail": "To let Velox email setup links, set up email sending (SMTP) and the payment-update page address (PAYMENT_UPDATE_URL).",
+          "detail": "To let Hardcount email setup links, set up email sending (SMTP) and the payment-update page address (PAYMENT_UPDATE_URL).",
           "due_by": "2026-05-10T14:30:00Z",
           "message": "This invoice is charged automatically once the customer adds a card.\nThis server can't email setup links, so none was sent; copy one from the customer page instead.",
           "reason": "no_payment_method",
@@ -36,7 +36,7 @@
         "discount_cents": 0,
         "due_at": "2026-05-10T14:30:00Z",
         "id": "<id 8>",
-        "invoice_number": "VLX-000001",
+        "invoice_number": "HC-000001",
         "is_simulated": false,
         "issued_at": "2026-04-10T14:30:00Z",
         "net_payment_term_days": 30,

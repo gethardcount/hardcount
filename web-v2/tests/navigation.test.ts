@@ -47,8 +47,8 @@ test('labels are sentence case and icons are not shared', () => {
 
 test('detail pages keep their section highlighted', () => {
   const pricing = allNavItems(true).find(i => i.to === '/pricing')!
-  assert.ok(isNavActive(pricing, '/plans/vlx_pln_1'))
-  assert.ok(isNavActive(pricing, '/meters/vlx_mtr_1'))
+  assert.ok(isNavActive(pricing, '/plans/hc_pln_1'))
+  assert.ok(isNavActive(pricing, '/meters/hc_mtr_1'))
   const home = allNavItems(true).find(i => i.to === '/')!
   assert.ok(isNavActive(home, '/'))
   assert.ok(!isNavActive(home, '/customers'))

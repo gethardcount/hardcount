@@ -1,6 +1,6 @@
 # Roadmap
 
-What Velox is building now, what comes next, what waits for a reason, and
+What Hardcount is building now, what comes next, what waits for a reason, and
 what it will not build. Plans can change; when they do, this page changes
 first. Every shipped change, with its date, is in the
 [CHANGELOG](../CHANGELOG.md).
@@ -9,7 +9,7 @@ first. Every shipped change, with its date, is in the
 
 **v0.9.0**, not released yet:
 
-- **Done:** migrations run with goose, and `velox migrate force` is gone.
+- **Done:** migrations run with goose, and `hardcount migrate force` is gone.
   There is no upgrade from v0.8.x: install fresh.
 - **Done:** a card payment the customer's bank wants them to confirm (3-D
   Secure) is no longer treated as a declined card.
@@ -48,7 +48,7 @@ first. Every shipped change, with its date, is in the
 - **Done:** a recipe file holds only meters and plans with their
   prices, and an install creates nothing else: no dunning policy and no
   webhook endpoint.
-- **Done:** the answer to a usage event says when Velox, as it stored
+- **Done:** the answer to a usage event says when Hardcount, as it stored
   the event, found a reason it is not billed: no price of the plan takes
   it, the plan does not price its meter, no subscription covers its time,
   or its period was already invoiced. A batch answer gives each event's status
@@ -70,20 +70,20 @@ Also now, in v0.9.0 or right after it:
 **v0.10.0**, planned after v0.9.0:
 
 - **Spend alerts.** A spend threshold on each subscription, checked
-  against live usage, with an optional repeat. When usage crosses it, Velox
+  against live usage, with an optional repeat. When usage crosses it, Hardcount
   sends a webhook and an email. Cutting a customer off stays in your app
   ([how](stop-usage-when-credit-runs-out.md)).
 - **Generated SDKs for Go and TypeScript,** built from
   [`api/openapi.yaml`](../api/openapi.yaml), once the per-plan pricing API
   has settled.
 - **Billed or not, on each usage event.** The Usage page shows whether an
-  invoice billed each event and, if not, why, with a filter. Velox records
+  invoice billed each event and, if not, why, with a filter. Hardcount records
   it when it invoices the period, so it says what the invoice did. Today
-  only the answer to the event says what Velox found when it arrived.
+  only the answer to the event says what Hardcount found when it arrived.
 
 ## Later
 
-Each item waits until someone using Velox needs it:
+Each item waits until someone using Hardcount needs it:
 
 - Several subscriptions for one customer on one meter, such as one per
   project.
@@ -114,15 +114,15 @@ Each item waits until someone using Velox needs it:
 
 ## Not building
 
-- Kafka, ClickHouse, Temporal or a fleet of workers. Velox stays one server
+- Kafka, ClickHouse, Temporal or a fleet of workers. Hardcount stays one server
   program on Postgres, plus Redis in production. Past one table's limits,
   the plan is to split the Postgres table by month.
 - Stripe Billing or Stripe Invoicing as a second record of each invoice.
-- A licence key or an enterprise edition. Velox stays MIT, with one
+- A licence key or an enterprise edition. Hardcount stays MIT, with one
   edition.
-- Entitlements (feature gating) and hard usage caps inside Velox. Your app
+- Entitlements (feature gating) and hard usage caps inside Hardcount. Your app
   enforces limits. This is looked at again if two or more teams using
-  Velox ask for feature gating.
+  Hardcount ask for feature gating.
 - A plugin system.
 - Plan phases, plan versions, an XML catalog, several API versions side by
   side, or GraphQL beside REST. Once prices are set per plan, keeping
@@ -138,11 +138,11 @@ Each item waits until someone using Velox needs it:
 
 October 2026 (v0.5.0 to v0.8.2):
 
-- **Try it with one script.** `deploy/compose/quickstart.sh` starts Velox from the published images and prints a login, and `./quickstart.sh demo` runs AI token usage through to an invoice.
+- **Try it with one script.** `deploy/compose/quickstart.sh` starts Hardcount from the published images and prints a login, and `./quickstart.sh demo` runs AI token usage through to an invoice.
 - **Late usage is billed.** An invoice is built an hour after its period ends (`INVOICE_GRACE_PERIOD`), so usage that arrives a little late still counts.
 - **New accounts retry failed payments.** Each new account starts with a "Default retries" policy.
 - **Live credit balance.** `GET /v1/credits/balance/{customer_id}/live` and the public cost page show how much prepaid credit a customer has left, including usage not yet invoiced.
-- **LiteLLM usage for a customer that does not exist yet is kept.** Velox holds it and shows it on the Usage page. Create the customer, then release it once.
+- **LiteLLM usage for a customer that does not exist yet is kept.** Hardcount holds it and shows it on the Usage page. Create the customer, then release it once.
 - **Issued invoices do not change.** An invoice or credit note keeps the customer and company details it was issued with.
 - **Release images for ARM and Intel/AMD**, signed with cosign.
 
@@ -153,6 +153,6 @@ July to September 2026:
 - Team invites.
 - Safer handling of card charges whose outcome is unclear, and of unpaid invoices.
 - An automated check that runs 30 money consistency rules in CI.
-- Running several copies of Velox at once, with background jobs handed over in seconds when one stops.
+- Running several copies of Hardcount at once, with background jobs handed over in seconds when one stops.
 
 **Next:** try it on your computer with the [quick start](quick-start.md).

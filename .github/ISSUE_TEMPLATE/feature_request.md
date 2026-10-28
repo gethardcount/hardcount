@@ -1,6 +1,6 @@
 ---
 name: Feature Request
-about: Suggest a feature for Velox
+about: Suggest a feature for Hardcount
 title: "[Feature] "
 labels: enhancement
 ---

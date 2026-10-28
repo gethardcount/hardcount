@@ -9,7 +9,7 @@ Invoice and usage screens show the per-unit price at full decimal precision, so 
 
 ## Context
 
-A usage invoice line for a sub-cent rate rendered **Unit Price $0.00** while the **Amount** was correct (e.g. 1,000 units billed $3.00 — a $0.003/unit rate). The line amount is computed from the full-precision decimal rate (ADR-045) and is exact; but the invoice line stores the per-unit price only as `unit_amount_cents` (int64 whole cents), **back-derived** from the rounded amount: `round(300 ÷ 1000) = round(0.3) = 0`. Both the dashboard and the PDF then print that `0` at two decimals → `$0.00`. The result looks internally inconsistent (1,000 × $0.00 ≠ $3.00) and is wrong for the AI-token / usage case Velox targets, where sub-cent rates are the norm.
+A usage invoice line for a sub-cent rate rendered **Unit Price $0.00** while the **Amount** was correct (e.g. 1,000 units billed $3.00 — a $0.003/unit rate). The line amount is computed from the full-precision decimal rate (ADR-045) and is exact; but the invoice line stores the per-unit price only as `unit_amount_cents` (int64 whole cents), **back-derived** from the rounded amount: `round(300 ÷ 1000) = round(0.3) = 0`. Both the dashboard and the PDF then print that `0` at two decimals → `$0.00`. The result looks internally inconsistent (1,000 × $0.00 ≠ $3.00) and is wrong for the AI-token / usage case Hardcount targets, where sub-cent rates are the norm.
 
 Verified industry behavior (research, 2026-06-17) is a **two-track precision model**: the per-unit price is shown at full/native decimal precision, and rounding to currency precision (whole cents) is applied **only** to the derived line amount and totals — never to the displayed unit price.
 

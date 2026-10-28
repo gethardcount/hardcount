@@ -1,5 +1,5 @@
 """Writes litellm-1.83.9-claude-model-ids.tsv: every Claude model name a
-LiteLLM spend log can carry, and the model family Velox must map it to.
+LiteLLM spend log can carry, and the model family Hardcount must map it to.
 
 Usage:
     python3 -I list_claude_model_ids.py \

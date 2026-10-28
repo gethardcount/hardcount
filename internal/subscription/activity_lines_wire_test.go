@@ -70,7 +70,7 @@ func TestActivityLines_SubscriptionWire(t *testing.T) {
 		{"aud_proration_failed", "subscription.proration_failed", "user", "alice@example.com", map[string]any{
 			"change_type": "add", "plan_id": "plan_b", "error": "pq: deadlock detected in proration insert"}},
 		{"aud_crossed", "subscription.threshold_crossed", "system", "", map[string]any{
-			"invoice_id": "vlx_inv_1", "invoice_number": "VLX-000123", "amount_cents": float64(5000), "currency": "USD"}},
+			"invoice_id": "hc_inv_1", "invoice_number": "HC-000123", "amount_cents": float64(5000), "currency": "USD"}},
 		{"aud_below_zero", "subscription.net_negative_usage", "system", "", map[string]any{
 			"meters": []any{map[string]any{"meter_id": "mtr_1", "event_name": "api_calls", "meter_name": "API calls", "quantity": "-120"}}}},
 		{"aud_canceled", domain.AuditActionCancel, "system", "", map[string]any{
@@ -79,7 +79,7 @@ func TestActivityLines_SubscriptionWire(t *testing.T) {
 			"action": "trial_end_cancel", "triggered_by": "schedule"}},
 		{"aud_item_added", domain.AuditActionUpdate, "user", "alice@example.com", map[string]any{
 			"action": "item_added", "plan_id": "plan_b", "quantity": float64(3), "proration_type": "invoice",
-			"proration_amount_cents": float64(1800), "currency": "USD", "proration_invoice_id": "vlx_inv_gone"}},
+			"proration_amount_cents": float64(1800), "currency": "USD", "proration_invoice_id": "hc_inv_gone"}},
 		{"aud_unknown", "subscription.some_future_action", "system", "", map[string]any{}},
 		{"aud_on_clock", domain.AuditActionUpdate, "user", "alice@example.com", map[string]any{
 			"action": "cancel_cleared", "sim_effective_at": sim.Format(time.RFC3339), "test_clock_id": "clk_1"}},
@@ -98,7 +98,7 @@ func TestActivityLines_SubscriptionWire(t *testing.T) {
 	h.SetAuditLogger(&auditRecorderMock{entries: entries, total: len(entries)})
 	// The threshold's invoice still exists; the proration invoice does not,
 	// so only the first is linked (rule 8).
-	h.SetInvoiceLabeler(invoiceLabelsFake{"vlx_inv_1": "VLX-000123"})
+	h.SetInvoiceLabeler(invoiceLabelsFake{"hc_inv_1": "HC-000123"})
 	rr := httptest.NewRecorder()
 	h.activityTimeline(rr, timelineRequest(context.WithValue(context.Background(), auth.TestTenantIDKey(), tenantID), subID))
 	if rr.Code != http.StatusOK {
@@ -143,9 +143,9 @@ func TestActivityLines_SubscriptionWire(t *testing.T) {
 			detailTS: periodEnd.Format(time.RFC3339), actor: "person/alice@example.com"},
 		"aud_plan_applied": {title: "Scheduled plan change applied", status: "neutral", detail: "plan_a → plan_b", actor: "automatic/"},
 		"aud_proration_failed": {title: "Proration not applied", status: "warning", detail: "plan_b",
-			problem: "The item was added, but its prorated charge was not billed. Velox will not retry it; bill it with a one-off invoice.",
+			problem: "The item was added, but its prorated charge was not billed. Hardcount will not retry it; bill it with a one-off invoice.",
 			actor:   "person/alice@example.com"},
-		"aud_crossed": {title: "Spend threshold crossed", status: "neutral", detail: "Invoice VLX-000123 issued early · $50.00", actor: "automatic/"},
+		"aud_crossed": {title: "Spend threshold crossed", status: "neutral", detail: "Invoice HC-000123 issued early · $50.00", actor: "automatic/"},
 		"aud_below_zero": {title: "Usage below zero billed as zero", status: "warning", detail: "API calls -120",
 			problem: "Usage corrections were larger than the usage they offset. If an earlier invoice billed that usage, issue a credit note on it.",
 			actor:   "automatic/"},
@@ -196,7 +196,7 @@ func TestActivityLines_SubscriptionWire(t *testing.T) {
 	}
 	// The spend threshold crossing links its invoice.
 	crossed := byID["aud_crossed"]["line"].(map[string]any)
-	if got := mustJSONString(t, crossed["detail"]); !strings.Contains(got, `{"link":{"id":"vlx_inv_1","kind":"invoice","label":"VLX-000123"}}`) {
+	if got := mustJSONString(t, crossed["detail"]); !strings.Contains(got, `{"link":{"id":"hc_inv_1","kind":"invoice","label":"HC-000123"}}`) {
 		t.Errorf("threshold crossing does not link its invoice: %s", got)
 	}
 

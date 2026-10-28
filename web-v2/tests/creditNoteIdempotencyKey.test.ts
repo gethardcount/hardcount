@@ -13,7 +13,7 @@ type CreditNoteBody = Parameters<typeof api.createCreditNote>[0]
 const issueCreditNote: (body: CreditNoteBody, idempotencyKey: string) => Promise<CreditNote> = api.createCreditNote
 
 const body: CreditNoteBody = {
-  invoice_id: 'vlx_inv_test',
+  invoice_id: 'hc_inv_test',
   reason: 'Billing error',
   refund_amount_cents: 1000,
   credit_amount_cents: 0,
@@ -33,7 +33,7 @@ test('a retry after a lost answer sends the same Idempotency-Key as the first tr
     // The first answer never arrives, as when a slow refund outlasts the
     // browser's wait. The server made the note all the same.
     if (sentKeys.length === 1) throw new TypeError('Failed to fetch')
-    return new Response(JSON.stringify({ id: 'vlx_cn_test' }), {
+    return new Response(JSON.stringify({ id: 'hc_cn_test' }), {
       status: 201,
       headers: { 'Content-Type': 'application/json', 'Idempotent-Replayed': 'true' },
     })

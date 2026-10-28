@@ -35,7 +35,7 @@ func readyHandler(t *testing.T, token string, ready bool, mutate func(*domain.In
 	stripe := &fakeCheckout{}
 	h := New(Deps{
 		Invoices: fi, Customers: fc, Settings: fs, CreditNotes: fakeCreditNotes{},
-		Stripe: stripe, StripeReady: &fakeReady{ready: ready}, BaseURL: "https://app.velox.dev",
+		Stripe: stripe, StripeReady: &fakeReady{ready: ready}, BaseURL: "https://app.hardcount.dev",
 	})
 	return h, stripe, fi
 }
@@ -58,8 +58,8 @@ func viewPayload(t *testing.T, h *Handler, token string) HostedInvoicePayload {
 // says why; the customer used to press Pay and read "failed to create
 // checkout session".
 func TestViewInvoice_NoStripeKeys_PayDisabledWithReason(t *testing.T) {
-	h, _, _ := readyHandler(t, "vlx_pinv_nokeys", false, nil)
-	resp := viewPayload(t, h, "vlx_pinv_nokeys")
+	h, _, _ := readyHandler(t, "hc_pinv_nokeys", false, nil)
+	resp := viewPayload(t, h, "hc_pinv_nokeys")
 	if resp.PayEnabled {
 		t.Error("pay_enabled = true without Stripe keys")
 	}
@@ -69,8 +69,8 @@ func TestViewInvoice_NoStripeKeys_PayDisabledWithReason(t *testing.T) {
 }
 
 func TestViewInvoice_StripeKeys_PayEnabled(t *testing.T) {
-	h, _, _ := readyHandler(t, "vlx_pinv_keys", true, nil)
-	resp := viewPayload(t, h, "vlx_pinv_keys")
+	h, _, _ := readyHandler(t, "hc_pinv_keys", true, nil)
+	resp := viewPayload(t, h, "hc_pinv_keys")
 	if !resp.PayEnabled || resp.PayUnavailableReason != "" {
 		t.Errorf("pay_enabled=%v reason=%q, want true and empty", resp.PayEnabled, resp.PayUnavailableReason)
 	}
@@ -78,11 +78,11 @@ func TestViewInvoice_StripeKeys_PayEnabled(t *testing.T) {
 
 // Nothing owed (paid): no reason, the page shows its Paid state.
 func TestViewInvoice_Paid_NoReason(t *testing.T) {
-	h, _, _ := readyHandler(t, "vlx_pinv_paid_nokeys", false, func(inv *domain.Invoice) {
+	h, _, _ := readyHandler(t, "hc_pinv_paid_nokeys", false, func(inv *domain.Invoice) {
 		inv.Status = domain.InvoicePaid
 		inv.AmountDueCents = 0
 	})
-	resp := viewPayload(t, h, "vlx_pinv_paid_nokeys")
+	resp := viewPayload(t, h, "hc_pinv_paid_nokeys")
 	if resp.PayEnabled || resp.PayUnavailableReason != "" {
 		t.Errorf("pay_enabled=%v reason=%q, want false and empty", resp.PayEnabled, resp.PayUnavailableReason)
 	}
@@ -91,9 +91,9 @@ func TestViewInvoice_Paid_NoReason(t *testing.T) {
 // A direct POST without keys is a 409 the page can explain, and Stripe is
 // never called.
 func TestCheckout_NoStripeKeys_Conflict(t *testing.T) {
-	h, stripe, _ := readyHandler(t, "vlx_pinv_post_nokeys", false, nil)
+	h, stripe, _ := readyHandler(t, "hc_pinv_post_nokeys", false, nil)
 	w := httptest.NewRecorder()
-	mountRouter(h).ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/vlx_pinv_post_nokeys/checkout", nil))
+	mountRouter(h).ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/hc_pinv_post_nokeys/checkout", nil))
 	if w.Code != http.StatusConflict {
 		t.Fatalf("got %d, want 409, body=%s", w.Code, w.Body.String())
 	}
@@ -120,14 +120,14 @@ func TestHostedInvoice_BelowMinimum_NoPay(t *testing.T) {
 		inv.AmountDueCents = 30
 		inv.BelowMinimumAt = &at
 	}
-	h, stripe, _ := readyHandler(t, "vlx_pinv_min", true, refused)
-	resp := viewPayload(t, h, "vlx_pinv_min")
+	h, stripe, _ := readyHandler(t, "hc_pinv_min", true, refused)
+	resp := viewPayload(t, h, "hc_pinv_min")
 	if resp.PayEnabled || resp.PayUnavailableReason != PayUnavailableBelowMinimum {
 		t.Errorf("pay_enabled=%v reason=%q, want false and %q", resp.PayEnabled, resp.PayUnavailableReason, PayUnavailableBelowMinimum)
 	}
 
 	w := httptest.NewRecorder()
-	mountRouter(h).ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/vlx_pinv_min/checkout", nil))
+	mountRouter(h).ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/hc_pinv_min/checkout", nil))
 	var body struct {
 		Error struct {
 			Code string `json:"code"`
@@ -146,10 +146,10 @@ func TestHostedInvoice_BelowMinimum_NoPay(t *testing.T) {
 // answers stripe_not_connected. The customer gets the same 409 as the check
 // gives, not the operator's code or its "Connect it under Settings" sentence.
 func TestCheckout_DisconnectedDuringCreate_Conflict(t *testing.T) {
-	h, stripe, _ := readyHandler(t, "vlx_pinv_race_nokeys", true, nil)
+	h, stripe, _ := readyHandler(t, "hc_pinv_race_nokeys", true, nil)
 	stripe.err = fmt.Errorf("ensure stripe customer: %w", errs.StripeNotConnected())
 	w := httptest.NewRecorder()
-	mountRouter(h).ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/vlx_pinv_race_nokeys/checkout", nil))
+	mountRouter(h).ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/hc_pinv_race_nokeys/checkout", nil))
 	if w.Code != http.StatusConflict {
 		t.Fatalf("got %d, want 409, body=%s", w.Code, w.Body.String())
 	}

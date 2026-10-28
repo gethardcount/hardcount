@@ -14,7 +14,7 @@ import (
 // charged. (Until migration 00203 it stamped a synthetic "out_of_band:<ts>"
 // marker into the PI field instead, which is how the bug below happened.)
 //
-// Found by walking FLOW C2 (2026-08-02) on VLX-000068 — $53.62 settled entirely
+// Found by walking FLOW C2 (2026-08-02) on HC-000068 — $53.62 settled entirely
 // by bank transfer. Every site that moved refund money tested only `!= ""`, so
 // the dialog offered "Refund to card — max $53.62", Create accepted a card
 // allocation, Issue handed the synthetic marker to Stripe as a PaymentIntent
@@ -206,7 +206,7 @@ func TestRetryRefund_OfflinePaid_FailsCleanlyInsteadOfForever(t *testing.T) {
 	svc.SetNumberGenerator(&fakeCNNumbers{})
 
 	legacy := domain.CreditNote{
-		ID: "vlx_cn_legacy", TenantID: "t1", InvoiceID: inv.ID, CustomerID: "cus_1",
+		ID: "hc_cn_legacy", TenantID: "t1", InvoiceID: inv.ID, CustomerID: "cus_1",
 		Status: domain.CreditNoteIssued, Currency: "USD",
 		RefundAmountCents: 1000, RefundStatus: domain.RefundFailed,
 	}

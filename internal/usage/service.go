@@ -297,7 +297,7 @@ func (s *Service) markWritten(ctx context.Context, event *domain.UsageEvent, cla
 // its invoice": an event one minute after its invoice was built is not
 // counted, and a 25h-old event in a period that is still open is. The exact
 // per-event signal is billing_status "after_close" and
-// velox_usage_unbilled_total{reason="after_close"} (open_period.go); a
+// hardcount_usage_unbilled_total{reason="after_close"} (open_period.go); a
 // per-customer list of those events is deferred (ADR-120). Backfill-origin events are
 // excluded: an operator posting history on purpose is not the silent leak
 // this counter exists to surface.
@@ -305,7 +305,7 @@ var lateUsageEvents *prometheus.CounterVec
 
 func init() {
 	c := prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "velox_usage_late_event_total",
+		Name: "hardcount_usage_late_event_total",
 		Help: "Live-origin usage events ingested with a timestamp >24h in the past — may fall in an already-finalized (unbillable) period.",
 	}, []string{"origin"})
 	if err := prometheus.DefaultRegisterer.Register(c); err != nil {
@@ -401,7 +401,7 @@ func (s *Service) build(ctx context.Context, tenantID string, input IngestInput,
 		ts = input.Timestamp.UTC()
 	}
 
-	// KNOWN BEHAVIOR, the late-usage policy (ADR-120). Velox accepts an
+	// KNOWN BEHAVIOR, the late-usage policy (ADR-120). Hardcount accepts an
 	// event with any past timestamp; there is no lower bound. The event
 	// counts toward the period its timestamp falls in, and the billing run
 	// builds that period's invoice INVOICE_GRACE_PERIOD (default 1h) after
@@ -409,7 +409,7 @@ func (s *Service) build(ctx context.Context, tenantID string, input IngestInput,
 	// Once the invoice is built it does not change and nothing
 	// re-aggregates the period: a later event for it is stored but billed
 	// on no invoice, now or later. The operator bills it with a one-off
-	// invoice. Velox does not refuse late events (refusing would break
+	// invoice. Hardcount does not refuse late events (refusing would break
 	// retries and stream pipelines) and does not move them onto a later
 	// invoice; it flags them (billing_status "after_close", open_period.go).
 	// The late flag below feeds a counter that is a proxy (see

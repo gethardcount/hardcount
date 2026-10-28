@@ -58,8 +58,8 @@ func TestE2E_FullBillingCycle(t *testing.T) {
 		if body["status"] != "ok" {
 			t.Errorf("health: got %v", body)
 		}
-		if resp.Header.Get("Velox-Version") == "" {
-			t.Error("missing Velox-Version header")
+		if resp.Header.Get("Hardcount-Version") == "" {
+			t.Error("missing Hardcount-Version header")
 		}
 	})
 
@@ -307,11 +307,11 @@ func createTestAPIKey(t *testing.T, db *postgres.DB, tenantID string) string {
 	secret := make([]byte, 32)
 	_, _ = rand.Read(secret)
 	secretHex := hex.EncodeToString(secret)
-	rawKey := "vlx_secret_" + secretHex
-	prefix := "vlx_secret_" + secretHex[:12]
+	rawKey := "hc_secret_" + secretHex
+	prefix := "hc_secret_" + secretHex[:12]
 	hash := sha256.Sum256([]byte(rawKey))
 	hashHex := hex.EncodeToString(hash[:])
-	keyID := "vlx_key_e2e_" + secretHex[:8]
+	keyID := "hc_key_e2e_" + secretHex[:8]
 
 	tx, err := db.BeginTx(context.Background(), postgres.TxBypass, "")
 	if err != nil {

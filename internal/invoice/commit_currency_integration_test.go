@@ -32,7 +32,7 @@ func TestCommitRelief_RetireCarriesTheGrantCurrency(t *testing.T) {
 	}
 	payOffline(t, h, ctx, inv.ID)
 	target, err := invoice.NewPostgresStore(h.db).Create(ctx, h.tenantID, domain.Invoice{
-		CustomerID: h.custID, InvoiceNumber: "VLX-RELIEF-EUR-DRAIN",
+		CustomerID: h.custID, InvoiceNumber: "HC-RELIEF-EUR-DRAIN",
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
 		Currency: "EUR", SubtotalCents: 4000, TotalAmountCents: 4000, AmountDueCents: 4000,
 		BillingPeriodStart: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),

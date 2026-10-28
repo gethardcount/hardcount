@@ -13,7 +13,7 @@ import (
 
 // The reason the payment-failed email shows the customer is Stripe's message
 // for a card error, which Stripe says can be shown to the customer
-// (https://docs.stripe.com/api/errors, "message"). Velox's own text for the
+// (https://docs.stripe.com/api/errors, "message"). Hardcount's own text for the
 // invoice ("reconciled: requires_payment_method", the default "payment
 // failed") and Stripe's developer text for other error types are not
 // shown: the email then has no reason line.

@@ -9,7 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// A body that is not valid JSON is a 400 on every route Velox defines the
+// A body that is not valid JSON is a 400 on every route Hardcount defines the
 // body of (respond.DecodeStrict; TestStrictBodies_EveryJSONRouteRefusesAnUnknownKey
 // sends one to each). The reference must say so under 400: a client that
 // reads it under 422 expects its Idempotency-Key to be freed, but a 400 is

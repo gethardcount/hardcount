@@ -184,7 +184,7 @@ func (lf *liveFixture) insertUsage(t *testing.T, meterID string, qty int64, ts t
 	lf.exec(t, `
 		INSERT INTO usage_events (id, tenant_id, customer_id, meter_id, quantity, timestamp, livemode)
 		VALUES ($1, $2, $3, $4, $5, $6, false)
-	`, postgres.NewID("vlx_ue"), lf.tenantID, lf.customerID, meterID, qty, ts.UTC().Truncate(time.Microsecond))
+	`, postgres.NewID("hc_ue"), lf.tenantID, lf.customerID, meterID, qty, ts.UTC().Truncate(time.Microsecond))
 }
 
 func (lf *liveFixture) exec(t *testing.T, query string, args ...any) {
@@ -210,8 +210,8 @@ func (lf *liveFixture) exec(t *testing.T, query string, args ...any) {
 // (rejectMeterOverlap), so the shared-meter case can only be built this way.
 func (lf *liveFixture) addSub(t *testing.T, planID string, start, end time.Time) string {
 	t.Helper()
-	subID := postgres.NewID("vlx_sub")
-	itemID := postgres.NewID("vlx_si")
+	subID := postgres.NewID("hc_sub")
+	itemID := postgres.NewID("hc_si")
 	now := time.Now().UTC()
 	lf.exec(t, `
 		INSERT INTO subscriptions (

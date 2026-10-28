@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-Use GitHub's **[private vulnerability reporting](https://github.com/getvelox/velox/security/advisories/new)** (Security tab → Report a vulnerability) — reports reach the maintainer privately, with no email required. If you prefer email: **sagar@sagarwaidande.org**.
+Use GitHub's **[private vulnerability reporting](https://github.com/gethardcount/hardcount/security/advisories/new)** (Security tab → Report a vulnerability) — reports reach the maintainer privately, with no email required. If you prefer email: **sagar@sagarwaidande.org**.
 
 Please do **not** open public GitHub issues for suspected vulnerabilities.
 
@@ -17,7 +17,7 @@ We commit to:
 
 ## Supported versions
 
-Velox is pre-1.0. Only the latest release gets security fixes.
+Hardcount is pre-1.0. Only the latest release gets security fixes.
 
 - A fix lands in `main` and ships in the next release, a patch or a minor release.
 - Older releases get no backported fixes. To get a fix, upgrade to the latest release.
@@ -26,7 +26,7 @@ Velox is pre-1.0. Only the latest release gets security fixes.
 
 ## In scope
 
-- The Velox Go binary (`cmd/velox`, `cmd/velox-bootstrap`, `cmd/velox-bench-seed`, `cmd/velox-doctor`)
+- The Hardcount Go binary (`cmd/hardcount`, `cmd/hardcount-bootstrap`, `cmd/hardcount-bench-seed`, `cmd/hardcount-doctor`)
 - Code under `internal/` and `pkg/`
 - The migration runner and schema in `internal/platform/migrate/`
 - The web-v2 dashboard (`web-v2/`)
@@ -36,20 +36,20 @@ Velox is pre-1.0. Only the latest release gets security fixes.
 ## Out of scope
 
 - Vulnerabilities in the operator's deployment environment (Kubernetes cluster, managed Postgres, load balancer, secrets store, IAM)
-- Vulnerabilities in third-party services that Velox integrates with (Stripe, cloud providers, email providers, S3, KMS) — report those to the vendor
-- Configuration mistakes by the operator (e.g., running with `VELOX_ENCRYPTION_KEY` unset in a non-production env, or exposing the dashboard without TLS termination)
-- DoS via traffic flooding (a property of the operator's load balancer + WAF, not Velox)
+- Vulnerabilities in third-party services that Hardcount integrates with (Stripe, cloud providers, email providers, S3, KMS) — report those to the vendor
+- Configuration mistakes by the operator (e.g., running with `HARDCOUNT_ENCRYPTION_KEY` unset in a non-production env, or exposing the dashboard without TLS termination)
+- DoS via traffic flooding (a property of the operator's load balancer + WAF, not Hardcount)
 - Self-XSS, social engineering, physical attacks
-- Reports against forks or vendored copies of Velox — please reproduce on the canonical `main` branch first
+- Reports against forks or vendored copies of Hardcount — please reproduce on the canonical `main` branch first
 
 ## Hardening status
 
-Velox is **pre-launch** and pre-audit. Encryption-at-rest, RLS on most API requests (the exceptions are listed in [Architecture](docs/architecture.md#design-rules)), audit log immutability, HMAC webhook signing, bcrypt (cost 12) passwords, SHA-256 session/API-key/token hashing, security headers, GCRA rate limiting (a leaky-bucket-style algorithm), and TLS-only intent (secure cookies + HSTS; TLS termination itself is left to the operator's proxy) are all implemented. (A SOC 2 control mapping waits until a design partner requires it: see [Later](docs/roadmap.md#later) in the roadmap.)
+Hardcount is **pre-launch** and pre-audit. Encryption-at-rest, RLS on most API requests (the exceptions are listed in [Architecture](docs/architecture.md#design-rules)), audit log immutability, HMAC webhook signing, bcrypt (cost 12) passwords, SHA-256 session/API-key/token hashing, security headers, GCRA rate limiting (a leaky-bucket-style algorithm), and TLS-only intent (secure cookies + HSTS; TLS termination itself is left to the operator's proxy) are all implemented. (A SOC 2 control mapping waits until a design partner requires it: see [Later](docs/roadmap.md#later) in the roadmap.)
 
 Known gaps, documented openly:
 
-- No built-in mechanism to rotate `VELOX_ENCRYPTION_KEY` or `VELOX_EMAIL_BIDX_KEY` (a rebuild on envelope encryption — data keys wrapped under a rotatable master key — is planned)
-- No MFA on dashboard login (no MFA in v1; SSO direction is embedded OIDC/SAML per ADR-014 — Velox will not depend on a SaaS auth vendor)
+- No built-in mechanism to rotate `HARDCOUNT_ENCRYPTION_KEY` or `HARDCOUNT_EMAIL_BIDX_KEY` (a rebuild on envelope encryption — data keys wrapped under a rotatable master key — is planned)
+- No MFA on dashboard login (no MFA in v1; SSO direction is embedded OIDC/SAML per ADR-014 — Hardcount will not depend on a SaaS auth vendor)
 - No SAST (static application security testing) in CI (Semgrep / CodeQL planned)
 - No threat model document (STRIDE / LINDDUN, two threat-modeling frameworks, planned)
 - No external penetration test on record yet

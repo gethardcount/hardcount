@@ -5,8 +5,8 @@
     "card_exp_year": 2030,
     "card_last4": "4242",
     "created_at": "2026-10-01T12:00:00Z",
-    "customer_id": "vlx_cus_golden",
-    "id": "vlx_pm_golden",
+    "customer_id": "hc_cus_golden",
+    "id": "hc_pm_golden",
     "is_default": true,
     "type": "card"
   },

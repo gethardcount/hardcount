@@ -272,7 +272,7 @@ func (s *OutboxStore) Enqueue(ctx context.Context, tx *sql.Tx, tenantID, emailTy
 		return "", fmt.Errorf("email outbox: marshal payload: %w", err)
 	}
 
-	id := postgres.NewID("vlx_emob")
+	id := postgres.NewID("hc_emob")
 	// Billing-axis anchor (ADR-104): record WHICH simulated instant caused
 	// this send, read from the bound ctx at the only moment the fact exists.
 	// Every invoice-caused enqueue site already binds (settle → receipt,

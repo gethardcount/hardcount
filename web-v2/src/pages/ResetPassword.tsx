@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Loader2, Eye, EyeOff } from 'lucide-react'
-import { VeloxLogo } from '@/components/VeloxLogo'
+import { HardcountLogo } from '@/components/HardcountLogo'
 
 // ResetPasswordPage is the dashboard's confirm step for password
 // reset. Reads the one-time token from ?token= in the URL (planted
@@ -74,7 +74,7 @@ export default function ResetPasswordPage() {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-4 bg-background">
       <div className="flex flex-col items-center mb-8">
-        <VeloxLogo size="lg" />
+        <HardcountLogo size="lg" />
         <p className="text-sm text-muted-foreground mt-2">Choose a new password</p>
       </div>
 

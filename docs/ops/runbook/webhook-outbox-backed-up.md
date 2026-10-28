@@ -1,6 +1,6 @@
 # Webhook outbox backed up
 
-Velox queues every webhook event in the `webhook_outbox` table. A
+Hardcount queues every webhook event in the `webhook_outbox` table. A
 background job turns each row into an event and one delivery per matching endpoint,
 before anything is sent. An endpoint that keeps failing does not grow it: see
 [A webhook endpoint keeps failing](webhook-endpoint-failing.md). Back to the
@@ -8,13 +8,13 @@ before anything is sent. An endpoint that keeps failing does not grow it: see
 
 ## Symptom
 
-- `velox_webhook_outbox_oldest_pending_age_seconds{mode="live"}` is above
+- `hardcount_webhook_outbox_oldest_pending_age_seconds{mode="live"}` is above
   1800. A row queued 30 minutes ago has no event yet.
-- `velox_webhook_outbox_dead_lettered_total` rises. Rows were given up on
+- `hardcount_webhook_outbox_dead_lettered_total` rises. Rows were given up on
   after 15 tries over about 72 hours. Their events were never written, so
   no endpoint gets them.
-- `velox_webhook_outbox_pending` is above 1000.
-- `velox_webhook_outbox_enqueue_failures_total` rises. An event could not
+- `hardcount_webhook_outbox_pending` is above 1000.
+- `hardcount_webhook_outbox_enqueue_failures_total` rises. An event could not
   be queued at all, so it has no row in `webhook_outbox` and no endpoint
   gets it. The ERROR log "failed to enqueue webhook event" names its
   `event_type` and `tenant_id`. The cause is the same as a failed write
@@ -66,5 +66,5 @@ that moment.
 
 ## Verify
 
-`velox_webhook_outbox_oldest_pending_age_seconds` falls back near 0, and
-`velox_webhook_outbox_dead_lettered_total` stops rising.
+`hardcount_webhook_outbox_oldest_pending_age_seconds` falls back near 0, and
+`hardcount_webhook_outbox_dead_lettered_total` stops rising.

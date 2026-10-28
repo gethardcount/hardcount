@@ -177,7 +177,7 @@ invoice.
   record with a count of zero and a second meaning for the next-attempt
   column. Those subscriptions lose nothing by staying unsaved. They are
   attempted on every run and stay visible in the due gauges, as before.
-- **Timeouts count.** Velox sets no statement timeout of its own. A timeout is
+- **Timeouts count.** Hardcount sets no statement timeout of its own. A timeout is
   the only way a subscription whose own query is too slow ever shows up.
   Treating it as transient would retry that subscription forever, which is the
   original problem.
@@ -209,7 +209,7 @@ invoice.
   audit row.
 - **D. Push `next_billing_at` forward to implement the wait.** Rejected:
   `next_billing_at` is the compare-and-swap watermark, the instant stamped on
-  the invoice, and a consistency check in velox-doctor.
+  the invoice, and a consistency check in hardcount-doctor.
 - **E. Reuse the tax-retry ladder.** Rejected: tuning tax policy would then
   change time-to-park for billing, and no billing test would notice.
 
@@ -219,7 +219,7 @@ invoice.
 
 - A failing subscription is visible: `billing_failure` on every subscription
   read, `GET /v1/subscriptions?billing=failing`, and the
-  `velox_billing_failing_subscriptions{mode,state}` gauge.
+  `hardcount_billing_failing_subscriptions{mode,state}` gauge.
 - A failing subscription stops being attempted every tick, and stops
   altogether after eight failures.
 - A leadership change no longer re-attempts every failing subscription.

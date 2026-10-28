@@ -14,7 +14,7 @@ import (
 // TestListDeliveries_NamesTheEndpoint_EvenAfterDeletion pins the operator
 // contract behind the Delivery Timeline: every delivery row names its
 // receiver in human terms (URL + the operator's own description), not just
-// an opaque vlx_whe_ id — and keeps naming it AFTER the endpoint is deleted,
+// an opaque hc_whe_ id — and keeps naming it AFTER the endpoint is deleted,
 // because deliveries are history and the endpoints page never displays ids
 // to cross-reference against.
 //
@@ -35,7 +35,7 @@ func TestListDeliveries_NamesTheEndpoint_EvenAfterDeletion(t *testing.T) {
 	store := webhook.NewPostgresStore(db)
 
 	ep, err := store.CreateEndpoint(ctx, tenantID, domain.WebhookEndpoint{
-		URL: "https://acme.test/hooks/velox", Description: "Acme prod receiver",
+		URL: "https://acme.test/hooks/hardcount", Description: "Acme prod receiver",
 		Events: []string{"*"}, Active: true, Secret: "whsec_test",
 	})
 	if err != nil {
@@ -63,7 +63,7 @@ func TestListDeliveries_NamesTheEndpoint_EvenAfterDeletion(t *testing.T) {
 		if len(got) != 1 {
 			t.Fatalf("%s: deliveries = %d, want 1", when, len(got))
 		}
-		if got[0].EndpointURL != "https://acme.test/hooks/velox" {
+		if got[0].EndpointURL != "https://acme.test/hooks/hardcount" {
 			t.Errorf("%s: EndpointURL = %q, want the receiver's URL — the timeline is back to showing operators an opaque id", when, got[0].EndpointURL)
 		}
 		if got[0].EndpointDescription != "Acme prod receiver" {

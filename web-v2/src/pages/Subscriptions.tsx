@@ -198,7 +198,7 @@ export default function SubscriptionsPage() {
       <div className="flex flex-wrap justify-between items-center gap-3">
         <div className="min-w-0 flex-1 basis-72">
           <h1 className="text-2xl font-semibold text-foreground">Subscriptions</h1>
-          <p className="text-sm text-muted-foreground mt-1">A subscription puts a customer on a plan, and Velox bills them for it every period{total > 0 ? ` · ${total} total` : ''}</p>
+          <p className="text-sm text-muted-foreground mt-1">A subscription puts a customer on a plan, and Hardcount bills them for it every period{total > 0 ? ` · ${total} total` : ''}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {total > 0 && (

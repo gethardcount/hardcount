@@ -297,7 +297,7 @@ func TestCheckedMath_OnCreateSubtotalPastInt64(t *testing.T) {
 		if err != nil {
 			t.Fatalf("create plan %d: %v", i, err)
 		}
-		itemID := postgres.NewID("vlx_si")
+		itemID := postgres.NewID("hc_si")
 		lf.exec(t, `INSERT INTO subscription_items (id, tenant_id, subscription_id, plan_id, quantity, metadata, created_at, updated_at, livemode)
 			VALUES ($1, $2, $3, $4, 1, '{}'::jsonb, now(), now(), false)`, itemID, lf.tenantID, lf.subID, p.ID)
 	}

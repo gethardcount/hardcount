@@ -228,7 +228,7 @@ func TestLiftedPause_AResumeCallAnnouncesTheLift(t *testing.T) {
 	// The operator's request writes the resume's row, so the row names the
 	// request's actor, as every audit row does (audit.ResolveActor). Its
 	// cause is the payment (triggered_by), as for a test-clock cancel.
-	opCtx := auth.WithKeyID(r.ctx, "vlx_key_operator")
+	opCtx := auth.WithKeyID(r.ctx, "hc_key_operator")
 	sub, resumed, err := svc.ResumeCollection(opCtx, r.tenantID, r.subID)
 	if err != nil {
 		t.Fatalf("resume call: %v", err)
@@ -242,8 +242,8 @@ func TestLiftedPause_AResumeCallAnnouncesTheLift(t *testing.T) {
 	evs := r.wantPauseEvents(pausedDunning, resumedPayment)
 	rows := r.wantPauseAudit(logger, auditPausedDunning, auditResumedPayment)
 	wantResumedAt(t, evs[1], rows[1], paid)
-	if got := rows[1].ActorType + "/" + rows[1].ActorID; got != "api_key/vlx_key_operator" {
-		t.Errorf("resume row actor = %s, want api_key/vlx_key_operator: the request that wrote it", got)
+	if got := rows[1].ActorType + "/" + rows[1].ActorID; got != "api_key/hc_key_operator" {
+		t.Errorf("resume row actor = %s, want api_key/hc_key_operator: the request that wrote it", got)
 	}
 }
 

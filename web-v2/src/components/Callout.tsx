@@ -39,7 +39,7 @@ export function Callout({
   details?: ReactNode
   detailsLabel?: string
   // A second, separately labelled disclosure under Details (the invoice
-  // notice's "Provider response": Stripe's words, kept apart from Velox's).
+  // notice's "Provider response": Stripe's words, kept apart from Hardcount's).
   footer?: ReactNode
   className?: string
   role?: 'alert' | 'status'

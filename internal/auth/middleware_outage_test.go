@@ -35,7 +35,7 @@ func TestMiddleware_StoreOutageIs503NotInvalidKey(t *testing.T) {
 	}))
 
 	req := httptest.NewRequest("GET", "/", nil)
-	req.Header.Set("Authorization", "Bearer vlx_secret_test_0000000000000000000000000000000000000000000000000000000000000000")
+	req.Header.Set("Authorization", "Bearer hc_secret_test_0000000000000000000000000000000000000000000000000000000000000000")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -66,7 +66,7 @@ func TestMiddleware_UnknownKeyStays401(t *testing.T) {
 	}))
 
 	req := httptest.NewRequest("GET", "/", nil)
-	req.Header.Set("Authorization", "Bearer vlx_secret_test_0000000000000000000000000000000000000000000000000000000000000000")
+	req.Header.Set("Authorization", "Bearer hc_secret_test_0000000000000000000000000000000000000000000000000000000000000000")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 

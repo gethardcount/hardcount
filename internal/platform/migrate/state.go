@@ -15,21 +15,21 @@ import (
 // readState reads it, and whether a tenants table exists, read-only: no
 // lock, and it creates nothing (goose's own Status, HasPending and
 // GetVersions all create goose_db_version). decide turns what it read into
-// an action. Up, Down, CheckSchemaReady and `velox migrate status` all use
+// an action. Up, Down, CheckSchemaReady and `hardcount migrate status` all use
 // the same pair.
 //
-// Nothing reads public.schema_migrations, the record of Velox 0.8.x. A
+// Nothing reads public.schema_migrations, the record of Hardcount 0.8.x. A
 // database that moved to goose may still have it; it is left alone.
 
 // state is what readState found.
 type state struct {
-	// veloxTables: a tenants table exists in public, or in a schema on the
+	// hardcountTables: a tenants table exists in public, or in a schema on the
 	// connection's search_path. The baseline creates public.tenants. v0.8.x
 	// created its tables unqualified, so an install could keep them in
 	// another schema, such as the admin user's own, which the default
 	// search_path ("$user", public) lists first.
-	veloxTables bool
-	gooseTable  bool
+	hardcountTables bool
+	gooseTable      bool
 	// applied lists the versions in goose_db_version, ascending, without
 	// row 0.
 	applied []int64
@@ -87,7 +87,7 @@ func readState(ctx context.Context, db *sql.DB) (state, error) {
 	if err := tx.QueryRowContext(ctx, `
 		SELECT EXISTS (SELECT 1 FROM pg_tables WHERE tablename = 'tenants'
 		  AND (schemaname = 'public' OR schemaname = ANY (current_schemas(false))))`,
-	).Scan(&st.veloxTables); err != nil {
+	).Scan(&st.hardcountTables); err != nil {
 		return st, err
 	}
 	st.gooseTable, err = store.TableExists(ctx, tx)
@@ -115,25 +115,25 @@ type action int
 
 const (
 	actNormal   action = iota + 1 // goose has 180: run goose as usual
-	actBaseline                   // no Velox tables: migration 180 runs the baseline
-	actRefuse                     // Velox tables, no 180: no command migrates it
+	actBaseline                   // no Hardcount tables: migration 180 runs the baseline
+	actRefuse                     // Hardcount tables, no 180: no command migrates it
 )
 
 // decide is pure:
 //
 //	goose has 180               ->  run goose
-//	Velox tables, no 180        ->  refuse (ErrNoMigrationRecord)
+//	Hardcount tables, no 180        ->  refuse (ErrNoMigrationRecord)
 //	otherwise                   ->  migration 180 runs the baseline
 //
-// "Refuse" covers a Velox 0.8.x database and a backup restored without its
-// migration table: Velox cannot tell which version the tables are at.
+// "Refuse" covers a Hardcount 0.8.x database and a backup restored without its
+// migration table: Hardcount cannot tell which version the tables are at.
 // "Otherwise" covers no goose table and one holding only row 0, which a
 // rolled-back migration 180 leaves behind.
 func decide(s state) action {
 	switch {
 	case s.has(baselineVersion):
 		return actNormal
-	case s.veloxTables:
+	case s.hardcountTables:
 		return actRefuse
 	}
 	return actBaseline

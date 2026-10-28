@@ -20,7 +20,7 @@ const offlinePaymentVersion = 203
 // refuse the prefix. Down puts the marker back for the code before it, and
 // Up runs again.
 func TestOfflinePayment_MarkerBecomesPaidOutOfBand(t *testing.T) {
-	dsn, db := scratchDB(t, "velox_test_oob_b_migrate")
+	dsn, db := scratchDB(t, "hardcount_test_oob_b_migrate")
 	ctx := context.Background()
 	if err := up(ctx, dsn, filesBefore(t, offlinePaymentVersion)); err != nil {
 		t.Fatalf("Up to before %d: %v", offlinePaymentVersion, err)

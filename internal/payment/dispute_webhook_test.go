@@ -75,18 +75,18 @@ func disputeRaw(t *testing.T, obj map[string]any) string {
 }
 
 // TestEndpointAuthoritativeEvent_Disputes: a Dispute carries its own (empty)
-// metadata, so the three dispute events Velox handles must be admitted on the
-// endpoint's tenant alone, or every dispute is skipped as "no velox metadata".
+// metadata, so the three dispute events Hardcount handles must be admitted on the
+// endpoint's tenant alone, or every dispute is skipped as "no hardcount metadata".
 // The funds events are not handled, so they stay out.
 func TestEndpointAuthoritativeEvent_Disputes(t *testing.T) {
 	for _, typ := range []string{"charge.dispute.created", "charge.dispute.updated", "charge.dispute.closed"} {
 		if !endpointAuthoritativeEvent(typ) {
-			t.Errorf("%s must be admitted without velox_tenant_id metadata", typ)
+			t.Errorf("%s must be admitted without hardcount_tenant_id metadata", typ)
 		}
 	}
 	for _, typ := range []string{"charge.dispute.funds_withdrawn", "charge.dispute.funds_reinstated", "payment_intent.succeeded"} {
 		if endpointAuthoritativeEvent(typ) {
-			t.Errorf("%s must still require velox_tenant_id metadata", typ)
+			t.Errorf("%s must still require hardcount_tenant_id metadata", typ)
 		}
 	}
 }
@@ -102,7 +102,7 @@ func TestStripeWebhook_DisputeWithoutMetadataIsRecorded(t *testing.T) {
 	adapter.SetDisputeRecorder(rec)
 	const secret = "whsec_dispute_test"
 	handler := NewHandler(adapter, &stubResolver{rows: map[string]tenantstripe.EndpointLookup{
-		"vlx_spc_dsp": {ID: "vlx_spc_dsp", TenantID: "t1", Livemode: true, WebhookSecret: secret},
+		"hc_spc_dsp": {ID: "hc_spc_dsp", TenantID: "t1", Livemode: true, WebhookSecret: secret},
 	}})
 
 	created := time.Date(2026, 10, 2, 8, 0, 0, 0, time.UTC)
@@ -111,7 +111,7 @@ func TestStripeWebhook_DisputeWithoutMetadataIsRecorded(t *testing.T) {
 		"created": created.Unix(), "livemode": true,
 		"data": map[string]any{"object": disputeObject("needs_response", "pi_disputed")},
 	})
-	req := httptest.NewRequest("POST", "/stripe/vlx_spc_dsp", strings.NewReader(string(body)))
+	req := httptest.NewRequest("POST", "/stripe/hc_spc_dsp", strings.NewReader(string(body)))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Stripe-Signature", signStripePayload(body, secret))
 	w := httptest.NewRecorder()
@@ -148,8 +148,8 @@ func TestStripeWebhook_DisputeWithoutMetadataIsRecorded(t *testing.T) {
 }
 
 // TestHandleDispute_Outcomes pins how each result reaches Stripe: recorded
-// and ack'd; not a Velox payment → ack'd with its audit row; a store failure
-// or a status Velox does not know → an error, so Stripe redelivers and no
+// and ack'd; not a Hardcount payment → ack'd with its audit row; a store failure
+// or a status Hardcount does not know → an error, so Stripe redelivers and no
 // dedup row is written; an expanded payment_intent object is read the same
 // as a bare id.
 func TestHandleDispute_Outcomes(t *testing.T) {
@@ -163,10 +163,10 @@ func TestHandleDispute_Outcomes(t *testing.T) {
 	}{
 		{"recorded", disputeObject("lost", "pi_x"), nil, false, 1, true},
 		{"expanded payment intent", disputeObject("won", map[string]any{"id": "pi_x", "object": "payment_intent"}), nil, false, 1, true},
-		{"no Velox invoice holds the payment", disputeObject("needs_response", "pi_foreign"), errs.ErrNotFound, false, 1, true},
+		{"no Hardcount invoice holds the payment", disputeObject("needs_response", "pi_foreign"), errs.ErrNotFound, false, 1, true},
 		{"no payment intent at all", disputeObject("needs_response", nil), nil, false, 0, true},
 		{"store failure", disputeObject("lost", "pi_x"), errors.New("db down"), true, 1, false},
-		{"status Velox does not know", disputeObject("under_arbitration", "pi_x"), nil, true, 0, false},
+		{"status Hardcount does not know", disputeObject("under_arbitration", "pi_x"), nil, true, 0, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -197,13 +197,13 @@ func TestHandleDispute_Outcomes(t *testing.T) {
 }
 
 // TestHandleDispute_YoungDisputeOnAnUnknownPaymentIsRedelivered: a dispute
-// can reach Velox before Velox has recorded the payment it disputes (a
+// can reach Hardcount before Hardcount has recorded the payment it disputes (a
 // hosted-page payment whose settle has not committed, an off-session charge
 // whose attempt row is written after Stripe answers; Stripe's test dispute
 // cards open the dispute right after the charge). A dispute created within
 // the race window that no invoice holds yet fails the delivery, so Stripe
 // sends it again, and writes no dedup row. An older one is acknowledged as
-// not Velox's, as before.
+// not Hardcount's, as before.
 func TestHandleDispute_YoungDisputeOnAnUnknownPaymentIsRedelivered(t *testing.T) {
 	cases := []struct {
 		name       string

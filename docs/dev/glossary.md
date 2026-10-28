@@ -1,7 +1,7 @@
 # Contributor glossary
 
 Words from the code, the database and the operations docs. You do not need
-them to use Velox.
+them to use Hardcount.
 
 ### Database access
 
@@ -27,7 +27,7 @@ them to use Velox.
   - a test clock's time: `frozen_time`.
   - clock-pinned invoices and credit notes: `is_simulated` is set.
 
-### Running Velox
+### Running Hardcount
 
 - **outbox**: A database table of messages waiting to be sent
   (`webhook_outbox`, `email_outbox`). Most webhook events, and the four
@@ -36,7 +36,7 @@ them to use Velox.
   are queued right after it commits. A background dispatcher then delivers
   each row, with retries. [More](../adr/040-outbox-always-on.md)
 - **leader lease**: A row in the `leader_leases` table that lets exactly
-  one copy of Velox run one tick of a job that must run once across all
+  one copy of Hardcount run one tick of a job that must run once across all
   copies (billing, dunning, both outbox dispatchers, webhook delivery). It
   is renewed during the tick and released after it. It expires 10 seconds
   after the last renewal.
@@ -46,7 +46,7 @@ them to use Velox.
   queries that claim due work check it with `leader_fence`, so a former
   leader that stalled claims nothing.
   [More](../adr/114-leader-leases-tick-scoped-fencing.md#fencing-boundary-the-five-claim-funnels)
-- **velox-doctor**: A read-only command that scans a Velox database for
+- **hardcount-doctor**: A read-only command that scans a Hardcount database for
   states no correct code could produce, such as invoice totals that do not
   add up. It exits 1 when it finds a problem, or 2 if a check cannot run. It
   runs in CI and needs a database role that can see every row.

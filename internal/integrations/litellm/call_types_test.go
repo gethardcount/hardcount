@@ -46,7 +46,7 @@ func proxyRecord(t *testing.T, name string) StandardLoggingPayload {
 
 // inventory is testdata/litellm-1.83.9-call-types.tsv: every call_type
 // string LiteLLM 1.83.9 can put on a record (testdata/list_call_types.py),
-// with Velox's verdict.
+// with Hardcount's verdict.
 func inventory(t *testing.T) map[string]string {
 	t.Helper()
 	f, err := os.Open("testdata/litellm-1.83.9-call-types.tsv")
@@ -245,7 +245,7 @@ func TestMapPayload_VertexLiveSkipped(t *testing.T) {
 // TestMapPayload_KeyShape pins the idempotency keys: <id>:<role>, the id
 // being LiteLLM's call id, which is also the request_id its own spend log
 // keys on. So a record rebuilt from that spend log, whose times keep only
-// milliseconds, gets the keys of the record Velox already stored, and the
+// milliseconds, gets the keys of the record Hardcount already stored, and the
 // replay in docs/ops/runbook/litellm-spend-gap.md fills only the gap. For a
 // call type billed only since 2026-10-22, an id too long for the
 // 255-character key limit is replaced by its SHA-256.
@@ -294,7 +294,7 @@ func TestMapPayload_KeyShape(t *testing.T) {
 	t.Run("two streamed calls with the same client-chosen id share keys (decision D6: never bill twice)", func(t *testing.T) {
 		// LiteLLM 1.83.9 gives both records the client's x-litellm-call-id.
 		// Its own spend log keeps only the first (request_id is its primary
-		// key). Velox does the same: the second deduplicates.
+		// key). Hardcount does the same: the second deduplicates.
 		recs := proxyRecords(t, "messages-same-call-id")
 		if len(recs) != 2 || recs[0].ID != recs[1].ID {
 			t.Fatalf("fixture: want two records with one id")
@@ -426,7 +426,7 @@ func TestMapPayload_ProxyFixtures(t *testing.T) {
 				}
 			}
 			if tc.unsplitReason == UnsplitNoCount {
-				// LiteLLM's input cost covers writes Velox cannot see; the
+				// LiteLLM's input cost covers writes Hardcount cannot see; the
 				// input event falls to the rate table.
 				if c := byRole(t, m.Events)[TokenTypeInput].ObservedCostMicros; c != nil {
 					t.Errorf("input observed cost %d, want none (the rate table prices it)", *c)
@@ -487,7 +487,7 @@ func TestSpend_SkippedRecordWithTokensIsLogged(t *testing.T) {
 		t.Fatalf("response %+v, want 5 accepted and 1 skipped", r)
 	}
 	out := logs.String()
-	if !strings.Contains(out, "call_type=aimage_generation") || !strings.Contains(out, "velox_litellm_skipped_with_tokens_total") {
+	if !strings.Contains(out, "call_type=aimage_generation") || !strings.Contains(out, "hardcount_litellm_skipped_with_tokens_total") {
 		t.Fatalf("no WARN naming the skipped call type; log:\n%s", out)
 	}
 }
@@ -495,7 +495,7 @@ func TestSpend_SkippedRecordWithTokensIsLogged(t *testing.T) {
 // TestMapPayload_ClaudeOnNewCallTypes: Claude Code on Google Cloud sends
 // /v1/messages with model names such as vertex_ai/claude-opus-4-5@20251101.
 // Each must reach its own model, never an older one (Opus 4 is 3 times the
-// Opus 4.5 price), and a version Velox does not know keeps its raw name and
+// Opus 4.5 price), and a version Hardcount does not know keeps its raw name and
 // is unpriced (decision 2 of 2026-10-22). The expected values agree with
 // #1351's golden list (testdata/litellm-1.83.9-claude-model-ids.tsv there).
 func TestMapPayload_ClaudeOnNewCallTypes(t *testing.T) {

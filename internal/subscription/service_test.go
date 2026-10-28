@@ -43,7 +43,7 @@ func (m *memStore) Create(ctx context.Context, tenantID string, s domain.Subscri
 			return domain.Subscription{}, fmt.Errorf("%w: subscription code %q", errs.ErrAlreadyExists, s.Code)
 		}
 	}
-	s.ID = fmt.Sprintf("vlx_sub_%d", len(m.subs)+1)
+	s.ID = fmt.Sprintf("hc_sub_%d", len(m.subs)+1)
 	s.TenantID = tenantID
 	now := clock.Now(ctx)
 	s.CreatedAt = now
@@ -90,7 +90,7 @@ func (m *memStore) CreateWithBill(ctx context.Context, tenantID string, s domain
 // segment-aware billing see the same audit log shape as production.
 func (m *memStore) recordChange(it domain.SubscriptionItem, changeType, fromPlanID, toPlanID string, fromQty, toQty int64, at time.Time) {
 	m.itemChanges = append(m.itemChanges, domain.SubscriptionItemChange{
-		ID:                 fmt.Sprintf("vlx_sic_%d", len(m.itemChanges)+1),
+		ID:                 fmt.Sprintf("hc_sic_%d", len(m.itemChanges)+1),
 		TenantID:           it.TenantID,
 		SubscriptionID:     it.SubscriptionID,
 		SubscriptionItemID: it.ID,
@@ -1657,7 +1657,7 @@ func TestActivateAndCancel(t *testing.T) {
 
 // TestCancel_NonTerminalStatuses locks in the industry-aligned cancel
 // state machine (Stripe / Lago / Recurly / Chargebee parity): cancel
-// works from every non-terminal status. Pre-fix, Velox rejected cancel
+// works from every non-terminal status. Pre-fix, Hardcount rejected cancel
 // from draft and trialing — the trialing case is the dominant cancel
 // path (customer abandons during trial), so the rejection silently
 // trapped operators in the dashboard.
@@ -2832,7 +2832,7 @@ func TestPeriodAnchoring(t *testing.T) {
 	t.Run("Create rejects mixed monthly + yearly items (Stripe parity)", func(t *testing.T) {
 		// Stripe / Lago / Chargebee all reject mixed intervals on the
 		// same sub because the period anchor is per-sub and a monthly +
-		// yearly mix has no coherent cycle. Velox should too.
+		// yearly mix has no coherent cycle. Hardcount should too.
 		svc := NewService(newMemStore(), clock.NewFake(now))
 		svc.SetPlanReader(&fakePlanReader{plans: map[string]domain.Plan{
 			"p_monthly": {ID: "p_monthly", BillingInterval: domain.BillingMonthly},
@@ -2926,7 +2926,7 @@ func TestPeriodAnchoring(t *testing.T) {
 	t.Run("Create rejects mixed in_arrears + in_advance items", func(t *testing.T) {
 		// Bill-timing mix on the same sub would emit inconsistent
 		// invoice lines (arrears-close + advance-open under different
-		// rules). Velox's hybrid invoice shape assumes a uniform
+		// rules). Hardcount's hybrid invoice shape assumes a uniform
 		// bill_timing across items, so reject at request time.
 		svc := NewService(newMemStore(), clock.NewFake(now))
 		svc.SetPlanReader(&fakePlanReader{plans: map[string]domain.Plan{
@@ -2978,7 +2978,7 @@ func TestPeriodAnchoring(t *testing.T) {
 		// Lago / Orb / Chargebee / Recurly / Metronome found no
 		// documented support for swapping a customer between a prepaid
 		// plan and a postpaid plan as an in-place operation. Lago — the
-		// closest model to Velox — documents same-cadence transitions
+		// closest model to Hardcount — documents same-cadence transitions
 		// only. Operator path: cancel + recreate.
 		svc := NewService(newMemStore(), clock.NewFake(now))
 		svc.SetPlanReader(&fakePlanReader{plans: map[string]domain.Plan{
@@ -3232,7 +3232,7 @@ func TestUpdateItemTx_CrossIntervalAtomic(t *testing.T) {
 	}
 
 	t.Run("in_advance swap bills new period in-tx, defers refund + finalize", func(t *testing.T) {
-		fb := &fakeBiller{createTxOK: true, createTxInv: domain.Invoice{ID: "vlx_inv_swap"}}
+		fb := &fakeBiller{createTxOK: true, createTxInv: domain.Invoice{ID: "hc_inv_swap"}}
 		svc, sub := newSvc(fb)
 
 		res, err := svc.UpdateItemTx(ctx, nil, "t1", sub.ID, sub.Items[0].ID, UpdateItemInput{
@@ -3265,7 +3265,7 @@ func TestUpdateItemTx_CrossIntervalAtomic(t *testing.T) {
 		if fb.swapAfterCommitCalls != 0 {
 			t.Errorf("the swap bill's afterCommit ran %d times before commit, want 0", fb.swapAfterCommitCalls)
 		}
-		if res.crossAxisNewInvoice == nil || res.crossAxisNewInvoice.ID != "vlx_inv_swap" {
+		if res.crossAxisNewInvoice == nil || res.crossAxisNewInvoice.ID != "hc_inv_swap" {
 			t.Errorf("crossAxisNewInvoice should carry the new invoice for post-commit finalize; got %+v", res.crossAxisNewInvoice)
 		}
 		// The refund is WRITTEN in the tx; its legs and the finalize run
@@ -3366,7 +3366,7 @@ func TestUpdateItemTx_CrossIntervalAtomic(t *testing.T) {
 		subBefore, _ := svc.store.Get(ctx, "t1", sub.ID)
 		svc.FinalizeCrossIntervalSwap(ctx, "t1", subBefore, ItemChangeResult{
 			EffectiveAt:         now,
-			crossAxisNewInvoice: &domain.Invoice{ID: "vlx_inv_swap"},
+			crossAxisNewInvoice: &domain.Invoice{ID: "hc_inv_swap"},
 			swapRelief:          domain.Relief{DraftIDs: []string{"cn_swap"}},
 		})
 		if fb.finishCalls != 1 || len(fb.finishedDrafts) != 1 || fb.finishedDrafts[0] != "cn_swap" {
@@ -3422,7 +3422,7 @@ func TestSetBillingThresholds(t *testing.T) {
 
 	t.Run("rejects unknown subscription", func(t *testing.T) {
 		svc, _ := newSubFixture(t)
-		_, err := svc.SetBillingThresholds(ctx, "t1", "vlx_sub_does_not_exist", BillingThresholdsInput{
+		_, err := svc.SetBillingThresholds(ctx, "t1", "hc_sub_does_not_exist", BillingThresholdsInput{
 			AmountGTE: 500000,
 		})
 		if err == nil {
@@ -3475,7 +3475,7 @@ func TestSetBillingThresholds(t *testing.T) {
 		svc, sub := newSubFixture(t)
 		_, err := svc.SetBillingThresholds(ctx, "t1", sub.ID, BillingThresholdsInput{
 			ItemThresholds: []ItemThresholdInput{
-				{SubscriptionItemID: "vlx_subitem_foreign", UsageGTE: "1000"},
+				{SubscriptionItemID: "hc_subitem_foreign", UsageGTE: "1000"},
 			},
 		})
 		if err == nil {
@@ -3718,13 +3718,13 @@ func TestSubMutators_StampSimTimeOnClockPinnedSub(t *testing.T) {
 
 	// Helper: build a fresh service + clock-pinned sub for each case.
 	// The resolver looks up by sub id; subID is the same string the
-	// mem store mints (vlx_sub_1) so the resolver always resolves.
+	// mem store mints (hc_sub_1) so the resolver always resolves.
 	newPinned := func(t *testing.T, status domain.SubscriptionStatus) (*Service, domain.Subscription) {
 		t.Helper()
 		store := newMemStore()
 		svc := NewService(store, nil)
 		svc.SetResolver(&stubClockResolver{
-			bySub: map[string]time.Time{"vlx_sub_1": frozen},
+			bySub: map[string]time.Time{"hc_sub_1": frozen},
 		})
 		// Seed a sub directly via the store so we sidestep Create's
 		// own (correctly-bound) path — the goal is to exercise the

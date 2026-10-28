@@ -44,10 +44,10 @@ func TestBuildListWhere_AllFiltersAlignPlaceholders(t *testing.T) {
 	// the ones not covered here.
 	where, args, nextIdx := buildListWhere("t-1", true, QueryFilter{
 		ResourceType: "invoice",
-		ResourceID:   "vlx_inv_1",
+		ResourceID:   "hc_inv_1",
 		Action:       "invoice.finalize",
-		ActorID:      "vlx_usr_1",
-		TestClockID:  "vlx_tclk_1",
+		ActorID:      "hc_usr_1",
+		TestClockID:  "hc_tclk_1",
 		SimFrom:      simFrom,
 		SimTo:        simTo,
 		DateFrom:     from,
@@ -75,8 +75,8 @@ func TestBuildListWhere_AllFiltersAlignPlaceholders(t *testing.T) {
 	// Arg ordering must match placeholder order, position by position — this is
 	// what catches a filter inserted in the SQL but appended in the wrong place.
 	for i, want := range []any{
-		"t-1", true, "vlx_tclk_1", simFrom, simTo,
-		"invoice", "vlx_inv_1", "invoice.finalize", "vlx_usr_1",
+		"t-1", true, "hc_tclk_1", simFrom, simTo,
+		"invoice", "hc_inv_1", "invoice.finalize", "hc_usr_1",
 		from, to,
 	} {
 		if args[i] != want {

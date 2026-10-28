@@ -73,7 +73,7 @@ func TestPaymentBlocksAction_Matrix(t *testing.T) {
 			// shows is recorded, and with none after 24 hours the invoice is
 			// charged again. "Will not resolve on its own" is no longer true.
 			if strings.Contains(msg, "will not resolve on its own") || !strings.Contains(msg, "24 hours") {
-				t.Errorf("%s refusal does not say what Velox does next (records a payment that appears, charges again after 24 hours): %q", a, msg)
+				t.Errorf("%s refusal does not say what Hardcount does next (records a payment that appears, charges again after 24 hours): %q", a, msg)
 			}
 		}
 	})
@@ -146,7 +146,7 @@ func TestNoHandWrittenPaymentInFlightRefusals(t *testing.T) {
 			return nil
 		}
 		// Scope the scan to REFUSAL constructs. A banner that DESCRIBES an
-		// in-flight payment ("Velox confirms it automatically") is legitimate
+		// in-flight payment ("Hardcount confirms it automatically") is legitimate
 		// and true for a resolving charge — it is only the hand-written
 		// refusals that must derive from the single source. The constructor and
 		// its message often sit on different lines, so look ahead a little.

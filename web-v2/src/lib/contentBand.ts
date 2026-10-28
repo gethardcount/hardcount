@@ -23,7 +23,7 @@
  */
 // 1600, not 1280. The 1280 (max-w-7xl) arrived with the scaffold rather than
 // from a decision, and it is a PROSE constant — Primer documents it as keeping
-// "paragraphs with too many words per line". Velox's widest surfaces are
+// "paragraphs with too many words per line". Hardcount's widest surfaces are
 // ledgers, not paragraphs. 1600 is the nearest round number to Carbon's
 // published 1584px grid cap, the one primary source above 1280 for dense
 // content.

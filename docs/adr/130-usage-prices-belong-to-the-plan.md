@@ -1,7 +1,7 @@
 # ADR-130: Usage prices belong to the plan, and a price edit applies from each subscriber's next period
 
 **Date:** 2026-10-23
-**Status:** Accepted (product owner, 2026-10-23). PR-0b (#1367) shipped the plan step of the lock order (section 8). PR-1 (#1373) shipped the one rater. PR-2 (#1376) shipped section 2, one aggregation per meter; #1379 amended it on 2026-10-24 (held rows do not fix the aggregation). PR-3 (#1381) shipped section 3, price shapes and units. PR-4 (#1386) shipped sections 1, 4 to 11 and 14 to 16: prices on the plan, the edit rule for usage prices, overrides, test clocks, the rest of the lock order, windows, customer usage, currency, `base_bill_timing` and the API; recipes installed through a parser that turned the old YAML into plan prices. PR-4b (#1388) amended section 4 step 3 on 2026-10-26: each plan of a period is priced where the subscription first joined it in the period. PR-5 (#1389) shipped the recipe part of section 15: a recipe file holds only meters and plans with their prices, and an install creates no dunning policy or webhook endpoint. PR-6 (#1390) shipped section 12, with D07 folded in: the answer that writes an event carries a `billing_status` when Velox finds a reason the event is not billed, what Velox found then and not a promise (ADR-120 amendment 2026-10-27), and one unbilled counter. PR-7, the base fee next-period rule, was cut from v0.9.0 on 2026-10-27 (section 5): the base fee stays locked while a live subscription uses the plan. Not built yet: the polish of PR-8, before the v0.9.0 tag. Each rule below names the PR that brings it.
+**Status:** Accepted (product owner, 2026-10-23). PR-0b (#1367) shipped the plan step of the lock order (section 8). PR-1 (#1373) shipped the one rater. PR-2 (#1376) shipped section 2, one aggregation per meter; #1379 amended it on 2026-10-24 (held rows do not fix the aggregation). PR-3 (#1381) shipped section 3, price shapes and units. PR-4 (#1386) shipped sections 1, 4 to 11 and 14 to 16: prices on the plan, the edit rule for usage prices, overrides, test clocks, the rest of the lock order, windows, customer usage, currency, `base_bill_timing` and the API; recipes installed through a parser that turned the old YAML into plan prices. PR-4b (#1388) amended section 4 step 3 on 2026-10-26: each plan of a period is priced where the subscription first joined it in the period. PR-5 (#1389) shipped the recipe part of section 15: a recipe file holds only meters and plans with their prices, and an install creates no dunning policy or webhook endpoint. PR-6 (#1390) shipped section 12, with D07 folded in: the answer that writes an event carries a `billing_status` when Hardcount finds a reason the event is not billed, what Hardcount found then and not a promise (ADR-120 amendment 2026-10-27), and one unbilled counter. PR-7, the base fee next-period rule, was cut from v0.9.0 on 2026-10-27 (section 5): the base fee stays locked while a live subscription uses the plan. Not built yet: the polish of PR-8, before the v0.9.0 tag. Each rule below names the PR that brings it.
 
 ## Summary
 
@@ -36,7 +36,7 @@ settings.
 
 | Word | Meaning |
 |---|---|
-| meter | What Velox counts from usage events, such as `tokens`, and how: sum, count, max or last value. |
+| meter | What Hardcount counts from usage events, such as `tokens`, and how: sum, count, max or last value. |
 | plan | What a customer subscribes to: a currency, a billing interval, a base fee and, after this ADR, its usage prices. |
 | price | One row on a plan: a meter, a `dimension_match` and a rate. It has a stable id. |
 | `dimension_match` | The labels an event must carry for a price to take it, such as `{"model": "claude-opus-4.5", "token_type": "input"}`. Labels are an event's dimensions. Values are strings. `{}` matches every event of the meter. |
@@ -45,7 +45,7 @@ settings.
 | pin | The instant a plan's prices are read at for one subscription's billing period: the period's start, or the first instant in it the subscription was on the plan (section 4 step 3). |
 | window | A stretch of a billing period during which a subscription was on one plan. A mid-period plan change splits the period into two windows. |
 | used plan | A plan that a subscription has ever referenced, canceled ones included. |
-| version | Velox's internal record of a price's content from one instant on. A removal is a version that says "removed from here on" (a tombstone). Versions never appear in the API. |
+| version | Hardcount's internal record of a price's content from one instant on. A removal is a version that says "removed from here on" (a tombstone). Versions never appear in the API. |
 | test clock | A pretend clock for test customers. Its time is simulated time; real time is wall time. |
 | override | A negotiated price for one customer. It replaces the rate of one plan price for that customer. |
 
@@ -96,9 +96,9 @@ checked, a plan owns its usage prices (code read 2026-10-22):
   `catalog/src/main/java/org/killbill/billing/catalog/DefaultPlanPhase.java:70-72`).
 
 **Why now.** The strategy amendment of 2026-10-23 moved this change into
-v0.9.0, before the first tag, because Velox has no known users or partners.
+v0.9.0, before the first tag, because Hardcount has no known users or partners.
 Changing the pricing contract now costs almost nothing; after the tag it
-is a break. v0.9.0 is also a clean break: there is no upgrade from Velox
+is a break. v0.9.0 is also a clean break: there is no upgrade from Hardcount
 0.8.x (decided 2026-10-22).
 
 ## Decision
@@ -549,13 +549,13 @@ pin), G5 to G8 and ADR-129 stay.
 Built in #1390 (notes of 2026-10-27, from the code):
 
 - **The contract changed** (main session, 2026-10-27). `billing_status` is
-  what Velox found when the event arrived. A status that is present was
+  what Hardcount found when the event arrived. A status that is present was
   true then; no status is not a promise that the event will be billed.
   This replaces "omitted when an open period will bill the event" below.
 - `not_on_plan` and `outside_subscription` shipped with it (D07). The
   contract and why, the rule, the precedence and where a present status
   can be wrong are in the
-  [ADR-120 amendment of 2026-10-27](120-invoice-grace-period-for-late-usage.md#amendment-2026-10-27-an-events-answer-says-what-velox-found-adr-130-pr-6-d07).
+  [ADR-120 amendment of 2026-10-27](120-invoice-grace-period-for-late-usage.md#amendment-2026-10-27-an-events-answer-says-what-hardcount-found-adr-130-pr-6-d07).
 - An open-period event is checked against the plan stretches the close
   bills by, not only the current items' plans: a plan swapped away from
   and an item removed in the period keep their stretches. So ingest reads
@@ -591,8 +591,8 @@ Built in #1390 (notes of 2026-10-27, from the code):
     no price matches the event's dimensions. New here.
 - `/batch` and the LiteLLM callback count each status. Held-usage release
   gains `no_price` beside `not_on_plan`.
-- One counter, `velox_usage_unbilled_total{reason, origin}`, counts every
-  status. It replaces ADR-120's `velox_usage_after_close_total{origin}`,
+- One counter, `hardcount_usage_unbilled_total{reason, origin}`, counts every
+  status. It replaces ADR-120's `hardcount_usage_after_close_total{origin}`,
   which becomes `reason="after_close"`.
 - Ingest pins at the open period's start, and at its end for an event in
   the grace after it. (Amended 2026-10-26, section 4: an event in the open
@@ -667,7 +667,7 @@ in_arrears.
 
 ### 17. No data migration
 
-There is no upgrade from Velox 0.8.x, so this ADR moves no data, replays no
+There is no upgrade from Hardcount 0.8.x, so this ADR moves no data, replays no
 old invoices and keeps no list of old rows to refuse. Each migration is
 plain DDL with a working Down. One that drops an old pricing table first
 checks it is empty, and stops with "install fresh" if not. PR-1's new rater
@@ -707,7 +707,7 @@ meter PATCH.
   price's ID, then update the old price to be inactive"
   ([manage prices](https://docs.stripe.com/products-prices/manage-prices),
   read 2026-10-23). That is: Stripe never edits a price, and moving
-  subscriptions to the new price is the integrator's job. Velox moves
+  subscriptions to the new price is the integrator's job. Hardcount moves
   every subscriber at their next period by itself, so copying Stripe's
   identity rule would not give Stripe's behaviour. Rejected: two
   identities and a replace verb buy no money safety beyond internal
@@ -752,7 +752,7 @@ part breaks:
   with its own 409, derived `replaced_by` fields and a new subscription
   column.
 - **Two edit rules.** The base fee stayed locked while usage prices moved
-  next period. Velox has this today too, since PR-7 was cut (section 5).
+  next period. Hardcount has this today too, since PR-7 was cut (section 5).
 
 **Parts of plan-rows that were dropped:**
 
@@ -891,14 +891,14 @@ it.
 | [085](085-recipe-idempotent-apply.md) | Rule adoption, the rule conformance check, the currency taken from adopted rules and the 2026-10-23 amendment go (PR-4); recipes no longer create a dunning policy or webhook endpoint (PR-5). |
 | [096](096-unpriced-meter-plan-attach-guard.md) | The plan-attach guard and the meter-in-use guard that replaced the last-price guard go: a plan's meters are its prices' meters (PR-4). The WARN and counter stay; ingest adds `no_price` (PR-6). |
 | [100](100-currency-coherence-guard-ring.md) | G1, G2, G2b, the override currency clause and G4's recipe probe go; prices take the plan's currency (PR-4). |
-| [120](120-invoice-grace-period-for-late-usage.md) | The after_close rule reads the meter's aggregation instead of rule buckets and drops the `last_ever` case (PR-2, PR-4). `no_price` adds a stated exception to "a flag is never false" (PR-6). The after_close counter becomes `velox_usage_unbilled_total{reason="after_close"}` (PR-6). |
+| [120](120-invoice-grace-period-for-late-usage.md) | The after_close rule reads the meter's aggregation instead of rule buckets and drops the `last_ever` case (PR-2, PR-4). `no_price` adds a stated exception to "a flag is never false" (PR-6). The after_close counter becomes `hardcount_usage_unbilled_total{reason="after_close"}` (PR-6). |
 | [123](123-new-accounts-start-with-a-default-dunning-policy.md) | A recipe no longer creates a dunning policy, so only an operator's first enabled policy takes over the seeded default (PR-5). |
 
 ## References
 
 - ADR-031, ADR-034, ADR-044, ADR-045, ADR-066, ADR-070, ADR-085,
   ADR-086, ADR-096, ADR-100, ADR-101, ADR-115, ADR-120, ADR-123, ADR-129.
-- PR-0b: getvelox/velox#1367, merged as `c234a364` (the lock order).
+- PR-0b: gethardcount/hardcount#1367, merged as `c234a364` (the lock order).
 - Migrations: PR-2 is `00208_meter_one_aggregation.sql` with its CHECK
   validated in `00209`; PR-3 is `00210_price_shapes.sql` with its CHECKs
   validated in `00211`; one each for PR-4 and PR-7, numbered when each PR

@@ -552,7 +552,7 @@ func insertPriceTx(ctx context.Context, tx *sql.Tx, tenantID, planID, meterID st
 		INSERT INTO plan_prices (id, tenant_id, plan_id, meter_id, dimension_match, created_at)
 		VALUES ($1, $2, $3, $4, $5, clock_timestamp())
 		RETURNING id, created_at`,
-		postgres.NewID("vlx_prc"), tenantID, planID, meterID, raw).Scan(&p.ID, &p.CreatedAt)
+		postgres.NewID("hc_prc"), tenantID, planID, meterID, raw).Scan(&p.ID, &p.CreatedAt)
 	if err != nil {
 		if postgres.IsUniqueViolation(err) {
 			return domain.PlanPrice{}, errs.AlreadyExists("dimension_match", "This plan already prices this meter with the same dimension_match.").WithCode(errs.CodePriceExists)
@@ -612,7 +612,7 @@ type writtenVersion struct {
 // one would leave a later one winning every future pin. On a used plan it
 // appends a version from now, and a stamp for every clock in clocks.
 func writeVersionTx(ctx context.Context, tx *sql.Tx, tenantID, planID, priceID string, used, removed bool, shape domain.PriceShape, clocks []testClock) (writtenVersion, error) {
-	v := writtenVersion{id: postgres.NewID("vlx_ppv")}
+	v := writtenVersion{id: postgres.NewID("hc_ppv")}
 	if !used {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM plan_price_versions WHERE price_id = $1`, priceID); err != nil {
 			return writtenVersion{}, fmt.Errorf("replace versions of price %s: %w", priceID, err)

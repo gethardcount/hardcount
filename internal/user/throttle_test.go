@@ -154,7 +154,7 @@ func TestDeviceToken(t *testing.T) {
 	}{
 		{good, good},
 		{"", ""},
-		{strings.Repeat("0A", 32), ""}, // upper case: not a value Velox sets
+		{strings.Repeat("0A", 32), ""}, // upper case: not a value Hardcount sets
 		{strings.Repeat("0g", 32), ""},
 		{good + "00", ""},
 	} {

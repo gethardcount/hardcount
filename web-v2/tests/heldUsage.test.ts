@@ -1,5 +1,5 @@
 // Held usage notice (#1044): one line per external ID that says what is held
-// and why, and a release summary that says what Velox found for the rows and
+// and why, and a release summary that says what Hardcount found for the rows and
 // promises nothing about the invoice.
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
@@ -37,7 +37,7 @@ test('the line names the missing customer, or the missing meter', () => {
   assert.equal(heldLine(missingCustomer), "1 usage row held: customer 'acme' does not exist yet")
   assert.match(heldNextStep(missingCustomer), /Create a customer with external ID 'acme'/)
 
-  const [missingMeter] = groupHeldByCustomer([g({ customer_id: 'vlx_cus_1', meter_exists: false, reason: 'meter_not_found' })])
+  const [missingMeter] = groupHeldByCustomer([g({ customer_id: 'hc_cus_1', meter_exists: false, reason: 'meter_not_found' })])
   assert.equal(heldLine(missingMeter), "3 usage rows held for customer 'acme': meter 'tokens' does not exist yet")
   assert.match(heldNextStep(missingMeter), /missing meter/)
 })
@@ -45,9 +45,9 @@ test('the line names the missing customer, or the missing meter', () => {
 test('release is offered only once the customer and a meter exist', () => {
   const noCustomer = [g({})]
   assert.equal(canRelease(groupHeldByCustomer(noCustomer)[0], noCustomer), false)
-  const noMeter = [g({ customer_id: 'vlx_cus_1', meter_exists: false })]
+  const noMeter = [g({ customer_id: 'hc_cus_1', meter_exists: false })]
   assert.equal(canRelease(groupHeldByCustomer(noMeter)[0], noMeter), false)
-  const ready = [g({ customer_id: 'vlx_cus_1' })]
+  const ready = [g({ customer_id: 'hc_cus_1' })]
   assert.equal(canRelease(groupHeldByCustomer(ready)[0], ready), true)
 })
 
@@ -59,9 +59,9 @@ test('the release summary does not promise rows in a period not invoiced yet are
   assert.doesNotMatch(s.description, /will be invoiced|charges them/)
 })
 
-// The counts are what Velox found at the release; the toast says that and
+// The counts are what Hardcount found at the release; the toast says that and
 // makes no promise about any invoice.
-test('the release summary says what Velox found for rows no subscription bills', () => {
+test('the release summary says what Hardcount found for rows no subscription bills', () => {
   const s = releaseSummary({ customer_id: 'c', released: 3, deduplicated: 1, still_held: 0, more_to_release: 0, in_open_period: 1, no_price: 0, not_on_plan: 0, pending_threshold_invoice: 0, outside_open_period: 2 })
   assert.equal(s.title, 'Released 4 usage rows')
   assert.match(s.description, /1 fall in a billing period not invoiced yet\./)

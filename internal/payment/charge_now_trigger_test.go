@@ -45,8 +45,8 @@ func TestChargeInvoiceNow_RecordsChargeNowTrigger(t *testing.T) {
 			if want := ChargeIdempotencyKey("inv_1", 0, ""); p.IdempotencyKey != want {
 				t.Errorf("idempotency key %q, want the automatic charge's %q", p.IdempotencyKey, want)
 			}
-			if purpose, ok := p.Metadata["velox_purpose"]; ok {
-				t.Errorf("PaymentIntent carries velox_purpose=%q; an automatic charge carries none", purpose)
+			if purpose, ok := p.Metadata["hardcount_purpose"]; ok {
+				t.Errorf("PaymentIntent carries hardcount_purpose=%q; an automatic charge carries none", purpose)
 			}
 		})
 	}

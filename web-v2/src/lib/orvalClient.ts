@@ -4,9 +4,9 @@
 //
 // - Session cookies ride automatically (credentials: 'include').
 // - Error responses parse through humanizeError + ApiError.
-// - The Velox-Request-Id header is captured into setLastRequestId so
+// - The Hardcount-Request-Id header is captured into setLastRequestId so
 //   "Report an issue" carries the most recent trace handle.
-// - Generated code never has to know about the Velox API base path
+// - Generated code never has to know about the Hardcount API base path
 //   (/v1) — the wrapper prepends it.
 //
 // orval's fetch-flavoured mutators are invoked with a positional

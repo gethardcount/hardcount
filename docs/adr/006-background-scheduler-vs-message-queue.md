@@ -11,15 +11,15 @@ Accepted
 
 ## Summary
 
-Background work (billing cycles, dunning, outbox delivery) runs in-process on a ticker in the `velox` binary, with no message queue or workflow engine, so jobs need no service beyond PostgreSQL. Each of these loops runs on one replica at a time under a leader lease row ([ADR-114](114-leader-leases-tick-scoped-fencing.md)), so a second replica adds availability, not billing throughput. Amended 2026-10-10: a billing run bills every due subscription, page by page, instead of stopping at a per-tick cap. Amended 2026-10-12: a subscription whose billing fails waits on a retry ladder and parks after eight failures until an operator retries it ([ADR-119](119-billing-failure-record-keyed-to-the-due-instant.md)). Status: active, amended.
+Background work (billing cycles, dunning, outbox delivery) runs in-process on a ticker in the `hardcount` binary, with no message queue or workflow engine, so jobs need no service beyond PostgreSQL. Each of these loops runs on one replica at a time under a leader lease row ([ADR-114](114-leader-leases-tick-scoped-fencing.md)), so a second replica adds availability, not billing throughput. Amended 2026-10-10: a billing run bills every due subscription, page by page, instead of stopping at a per-tick cap. Amended 2026-10-12: a subscription whose billing fails waits on a retry ladder and parks after eight failures until an operator retries it ([ADR-119](119-billing-failure-record-keyed-to-the-due-instant.md)). Status: active, amended.
 
 ## Context
-Velox needs to run periodic background work: billing cycle execution (find due subscriptions, generate invoices, charge payments), dunning retry processing (retry failed payments on schedule), and outbound webhook delivery (retry failed deliveries). These workloads are periodic, not event-driven — they poll for work on a timer.
+Hardcount needs to run periodic background work: billing cycle execution (find due subscriptions, generate invoices, charge payments), dunning retry processing (retry failed payments on schedule), and outbound webhook delivery (retry failed deliveries). These workloads are periodic, not event-driven — they poll for work on a timer.
 
 The standard enterprise answer is a message queue (RabbitMQ, SQS) or a workflow engine (Temporal). These provide durability, retry semantics, dead-letter queues, and horizontal scaling. They also add operational dependencies, deployment complexity, and infrastructure cost that may not be justified for a v1 product.
 
 ## Decision
-Velox v1 uses a simple `billing.Scheduler` — a goroutine with a `time.Ticker` that runs in the same process as the API server. Every tick, it calls `Engine.RunCycle()` for billing and `DunningService.ProcessDueRuns()` for each tenant.
+Hardcount v1 uses a simple `billing.Scheduler` — a goroutine with a `time.Ticker` that runs in the same process as the API server. Every tick, it calls `Engine.RunCycle()` for billing and `DunningService.ProcessDueRuns()` for each tenant.
 
 Work distribution and concurrency safety come from PostgreSQL, not the scheduler:
 
@@ -44,7 +44,7 @@ The scheduler is stateless. If the process crashes, the next tick picks up where
 - No fan-out: a single slow subscription blocks the rest of the batch within that tick
 
 ### Trade-offs
-- We trade scalability ceiling for operational simplicity. A single Velox instance processing 50 subscriptions per tick at 5-minute intervals handles ~600 invoices/hour — sufficient for thousands of customers. When this becomes a bottleneck, adding a second replica with SKIP LOCKED doubles throughput without architecture changes.
+- We trade scalability ceiling for operational simplicity. A single Hardcount instance processing 50 subscriptions per tick at 5-minute intervals handles ~600 invoices/hour — sufficient for thousands of customers. When this becomes a bottleneck, adding a second replica with SKIP LOCKED doubles throughput without architecture changes.
 
 ## Alternatives Considered
 - **Temporal**: Provides durable workflows, automatic retries, and visibility. But it requires a Temporal server cluster (3+ pods), adds ~500ms latency per workflow step, and introduces a significant operational dependency. Rejected for v1 — the complexity is not justified when PostgreSQL SKIP LOCKED provides the core guarantee we need.
@@ -64,12 +64,12 @@ Two claims above were false.
 
 - The rest of the billing tick waits for the drain: reconcilers, charge retries and the test-mode pass. The dunning loop is a separate role and keeps running.
 - The lease does not expire, because ADR-114 heartbeats every 3 s for the whole tick.
-- The replica's liveness stamp (`/health/ready`, `velox_scheduler_last_run_timestamp_seconds`) normally fires only between ticks. The drain now stamps it after every page. Without that, a drain longer than 2× the interval reads as a stalled scheduler. A tick wedged inside one subscription completes no page, so it still goes stale. *(Amended 2026-10-13: when this was written a stale stamp also made `/health/ready` answer 503, which on a single replica took the API out of the load balancer. A stale stamp now shows in the `/health/ready` body and in the metric only; the status code stays 200.)*
-- `velox_leader_last_tick_age_seconds{role="billing"}` grows during a long drain, the same as for a wedged tick. `velox_billing_due_subscriptions{mode}` tells the two apart: it falls during a drain and stays flat when the tick is wedged.
+- The replica's liveness stamp (`/health/ready`, `hardcount_scheduler_last_run_timestamp_seconds`) normally fires only between ticks. The drain now stamps it after every page. Without that, a drain longer than 2× the interval reads as a stalled scheduler. A tick wedged inside one subscription completes no page, so it still goes stale. *(Amended 2026-10-13: when this was written a stale stamp also made `/health/ready` answer 503, which on a single replica took the API out of the load balancer. A stale stamp now shows in the `/health/ready` body and in the metric only; the status code stays 200.)*
+- `hardcount_leader_last_tick_age_seconds{role="billing"}` grows during a long drain, the same as for a wedged tick. `hardcount_billing_due_subscriptions{mode}` tells the two apart: it falls during a drain and stays flat when the tick is wedged.
 
 **No circuit breaker.** A drain does not stop after N consecutive failures. A breaker would bring back the head-of-line block this change removes: a run of failing subscriptions at the front would end the tick before the healthy ones. The broad failures that could make a whole-set drain expensive are already handled. A tax provider outage defers the invoice's tax (`tax_status=pending`) instead of failing the subscription. A database outage fails the page fetch, which ends the drain.
 
-**Deferred: billing subscriptions in parallel.** The drain is serial, and each subscription's close includes its inline charge (a Stripe round trip). Drain time therefore grows with the number of subscriptions due at once. Trigger to revisit: `velox_billing_cycle_duration_seconds` p95 approaching the billing interval.
+**Deferred: billing subscriptions in parallel.** The drain is serial, and each subscription's close includes its inline charge (a Stripe round trip). Drain time therefore grows with the number of subscriptions due at once. Trigger to revisit: `hardcount_billing_cycle_duration_seconds` p95 approaching the billing interval.
 
 ## Amendment 2026-10-12 (ADR-119): a failing subscription waits, then parks
 
@@ -94,9 +94,9 @@ operator calls `POST /v1/subscriptions/{id}/retry-billing`.
 - `POST /v1/billing/run` follows the same rule. It skips waiting and parked
   subscriptions, so it no longer "bills everything due" for a tenant that has
   a failing subscription.
-- `velox_billing_due_subscriptions` and
-  `velox_billing_oldest_due_age_seconds` leave out subscriptions with a saved
-  failure. Those are counted by `velox_billing_failing_subscriptions`.
+- `hardcount_billing_due_subscriptions` and
+  `hardcount_billing_oldest_due_age_seconds` leave out subscriptions with a saved
+  failure. Those are counted by `hardcount_billing_failing_subscriptions`.
 - **"No circuit breaker" still holds for the run.** A run does not stop after
   N consecutive failures. The bound is per subscription: eight failed attempts
   on one piece of due work. A broad fault parks nothing before 3 days 17 hours.

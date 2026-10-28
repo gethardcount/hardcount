@@ -12,7 +12,7 @@
       }
     ]
   },
-  "description": "Velox billing engine — operator-grade observability. Imports against any Prometheus datasource scraping /metrics. Panels grouped by concern: HTTP, Billing engine, Payments, Dunning, Outboxes, System.",
+  "description": "Hardcount billing engine — operator-grade observability. Imports against any Prometheus datasource scraping /metrics. Panels grouped by concern: HTTP, Billing engine, Payments, Dunning, Outboxes, System.",
   "editable": true,
   "graphTooltip": 1,
   "panels": [
@@ -31,7 +31,7 @@
       "id": 1,
       "targets": [
         {
-          "expr": "sum by (path, status) (rate(velox_http_requests_total[5m]))",
+          "expr": "sum by (path, status) (rate(hardcount_http_requests_total[5m]))",
           "legendFormat": "{{path}} {{status}}",
           "refId": "A"
         }
@@ -45,17 +45,17 @@
       "id": 2,
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum by (le, path) (rate(velox_http_request_duration_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.50, sum by (le, path) (rate(hardcount_http_request_duration_seconds_bucket[5m])))",
           "legendFormat": "p50 {{path}}",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(velox_http_request_duration_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(hardcount_http_request_duration_seconds_bucket[5m])))",
           "legendFormat": "p95",
           "refId": "B"
         },
         {
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(velox_http_request_duration_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(hardcount_http_request_duration_seconds_bucket[5m])))",
           "legendFormat": "p99",
           "refId": "C"
         }
@@ -69,7 +69,7 @@
       "id": 3,
       "targets": [
         {
-          "expr": "velox_http_requests_in_flight",
+          "expr": "hardcount_http_requests_in_flight",
           "legendFormat": "in flight",
           "refId": "A"
         }
@@ -90,7 +90,7 @@
       "id": 4,
       "targets": [
         {
-          "expr": "sum(rate(velox_billing_cycles_total[1m])) * 60",
+          "expr": "sum(rate(hardcount_billing_cycles_total[1m])) * 60",
           "legendFormat": "cycles/min",
           "refId": "A"
         }
@@ -104,12 +104,12 @@
       "id": 5,
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(velox_billing_cycle_duration_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(hardcount_billing_cycle_duration_seconds_bucket[5m])))",
           "legendFormat": "p50",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(velox_billing_cycle_duration_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(hardcount_billing_cycle_duration_seconds_bucket[5m])))",
           "legendFormat": "p95",
           "refId": "B"
         }
@@ -123,7 +123,7 @@
       "id": 6,
       "targets": [
         {
-          "expr": "sum(rate(velox_billing_cycle_errors_total[5m]))",
+          "expr": "sum(rate(hardcount_billing_cycle_errors_total[5m]))",
           "legendFormat": "errors/sec",
           "refId": "A"
         }
@@ -150,7 +150,7 @@
       "id": 7,
       "targets": [
         {
-          "expr": "sum(rate(velox_invoices_generated_total[5m])) * 60",
+          "expr": "sum(rate(hardcount_invoices_generated_total[5m])) * 60",
           "legendFormat": "invoices/min",
           "refId": "A"
         }
@@ -171,7 +171,7 @@
       "id": 8,
       "targets": [
         {
-          "expr": "sum by (result) (rate(velox_payment_charges_total[5m])) * 60",
+          "expr": "sum by (result) (rate(hardcount_payment_charges_total[5m])) * 60",
           "legendFormat": "{{result}}/min",
           "refId": "A"
         }
@@ -185,7 +185,7 @@
       "id": 9,
       "targets": [
         {
-          "expr": "sum by (result) (rate(velox_auto_charge_retries_total[5m])) * 60",
+          "expr": "sum by (result) (rate(hardcount_auto_charge_retries_total[5m])) * 60",
           "legendFormat": "{{result}}/min",
           "refId": "A"
         }
@@ -199,7 +199,7 @@
       "id": 10,
       "targets": [
         {
-          "expr": "velox_stripe_breaker_state",
+          "expr": "hardcount_stripe_breaker_state",
           "legendFormat": "state",
           "refId": "A"
         }
@@ -213,7 +213,7 @@
       "id": 11,
       "targets": [
         {
-          "expr": "sum by (outcome, reason) (rate(velox_tax_outcome_total[5m])) * 60",
+          "expr": "sum by (outcome, reason) (rate(hardcount_tax_outcome_total[5m])) * 60",
           "legendFormat": "{{outcome}}/{{reason}}",
           "refId": "A"
         }
@@ -234,7 +234,7 @@
       "id": 12,
       "targets": [
         {
-          "expr": "sum by (outcome) (rate(velox_dunning_runs_processed_total[5m])) * 60",
+          "expr": "sum by (outcome) (rate(hardcount_dunning_runs_processed_total[5m])) * 60",
           "legendFormat": "{{outcome}}/min",
           "refId": "A"
         }
@@ -248,7 +248,7 @@
       "id": 13,
       "targets": [
         {
-          "expr": "velox_dunning_active_runs",
+          "expr": "hardcount_dunning_active_runs",
           "legendFormat": "active",
           "refId": "A"
         }
@@ -270,7 +270,7 @@
       "id": 14,
       "targets": [
         {
-          "expr": "sum by (status) (rate(velox_webhook_deliveries_total[5m])) * 60",
+          "expr": "sum by (status) (rate(hardcount_webhook_deliveries_total[5m])) * 60",
           "legendFormat": "{{status}}/min",
           "refId": "A"
         }
@@ -284,12 +284,12 @@
       "id": 15,
       "targets": [
         {
-          "expr": "velox_email_outbox_pending",
+          "expr": "hardcount_email_outbox_pending",
           "legendFormat": "email pending",
           "refId": "A"
         },
         {
-          "expr": "velox_webhook_outbox_pending",
+          "expr": "hardcount_webhook_outbox_pending",
           "legendFormat": "webhook pending",
           "refId": "B"
         }
@@ -311,7 +311,7 @@
       "id": 16,
       "targets": [
         {
-          "expr": "sum(rate(velox_audit_write_errors_total[5m]))",
+          "expr": "sum(rate(hardcount_audit_write_errors_total[5m]))",
           "legendFormat": "audit errors/sec",
           "refId": "A"
         }
@@ -337,7 +337,7 @@
       "id": 17,
       "targets": [
         {
-          "expr": "sum(rate(velox_usage_events_ingested_total[5m])) * 60",
+          "expr": "sum(rate(hardcount_usage_events_ingested_total[5m])) * 60",
           "legendFormat": "events/min",
           "refId": "A"
         }
@@ -351,7 +351,7 @@
       "id": 18,
       "targets": [
         {
-          "expr": "sum by (type) (rate(velox_credit_operations_total[5m])) * 60",
+          "expr": "sum by (type) (rate(hardcount_credit_operations_total[5m])) * 60",
           "legendFormat": "{{type}}/min",
           "refId": "A"
         }
@@ -360,12 +360,12 @@
   ],
   "schemaVersion": 38,
   "style": "dark",
-  "tags": ["velox", "billing"],
+  "tags": ["hardcount", "billing"],
   "templating": { "list": [] },
   "time": { "from": "now-6h", "to": "now" },
   "timepicker": {},
   "timezone": "",
-  "title": "Velox — Billing engine ops",
-  "uid": "velox-ops",
+  "title": "Hardcount — Billing engine ops",
+  "uid": "hardcount-ops",
   "version": 1
 }

@@ -8,15 +8,15 @@ shipped between Week 4 and Week 8.
 
 ## Summary
 
-Coupons are removed: the `internal/coupon` package, its API endpoints, its billing-engine hooks and its dashboard pages were deleted. Velox targets AI and usage-based billing, where peers use credits rather than promo codes, and the credit ledger already covers every discount need seen so far. The `coupons`, `coupon_redemptions` and `customer_discounts` tables stay, so a rebuild can start from them if a signed design partner needs promo codes. Status: active.
+Coupons are removed: the `internal/coupon` package, its API endpoints, its billing-engine hooks and its dashboard pages were deleted. Hardcount targets AI and usage-based billing, where peers use credits rather than promo codes, and the credit ledger already covers every discount need seen so far. The `coupons`, `coupon_redemptions` and `customer_discounts` tables stay, so a rebuild can start from them if a signed design partner needs promo codes. Status: active.
 
 ## Context
 
-Velox positions as an **AI-native billing engine you can self-host**.
+Hardcount positions as an **AI-native billing engine you can self-host**.
 First-design-partner target is AI infra Series A-B — token-meter,
 cost-table, LLM-provider-ingestion, embeddable cost dashboards,
 commits-and-draw-down territory. Per `project_positioning_wedge`,
-Velox is explicitly NOT competing as a generic OSS Stripe Billing
+Hardcount is explicitly NOT competing as a generic OSS Stripe Billing
 clone — Lago owns that lane.
 
 The coupon surface (`/v1/coupons`, customer-scope assignment,
@@ -26,7 +26,7 @@ parity sprint. It was added because the SaaS-shaped peer set ships
 it, not because a DP asked for it.
 
 Two rounds of industry research on 2026-05-29 confirmed coupons are
-vestigial for Velox's positioning:
+vestigial for Hardcount's positioning:
 
 **Traditional SaaS peers (Stripe Billing / Chargebee / Recurly / Lago)**:
 ship coupons as table-stakes; zero load-bearing customer evidence in
@@ -52,7 +52,7 @@ engagement to discount future invoices."* Their AI billing pages
 recommend *"prepaid credits, which customers can purchase and
 consume over time"* — coupons absent.
 
-Velox already ships the better primitive: the event-sourced credit
+Hardcount already ships the better primitive: the event-sourced credit
 ledger (`internal/credit`) supports prepaid allowances, manual
 grants, three-channel allocation on credit notes, and atomic
 apply-to-invoice. Coupons duplicate the discount-intent surface
@@ -76,7 +76,7 @@ without adding capability the credit ledger lacks.
   `ApplyCouponDialog` block on `InvoiceDetail.tsx`, the
   `/coupons` nav entry and command-palette entry, all coupon
   endpoints from `lib/api.ts`, all `Coupon*` TypeScript types.
-- Remove `RecordCouponRedemption` metric + `velox_coupon_redemptions_total`
+- Remove `RecordCouponRedemption` metric + `hardcount_coupon_redemptions_total`
   counter.
 - Remove `AuditActionApplyCoupon` constant + 8 `EventCoupon*` /
   `EventCustomerCoupon*` / `EventInvoiceCouponApplied` webhook event

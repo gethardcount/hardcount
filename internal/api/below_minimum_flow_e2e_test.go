@@ -152,7 +152,7 @@ func (s *minChargeStripe) count(call string) int {
 //     answer, and the hosted page offers Pay again (F).
 func TestE2E_BelowStripeMinimum_NotADecline(t *testing.T) {
 	db := testutil.SetupTestDB(t)
-	// A configured server queues customer emails, so an email Velox wrongly
+	// A configured server queues customer emails, so an email Hardcount wrongly
 	// sends shows up in the outbox.
 	t.Setenv("SMTP_HOST", "smtp.min-charge.invalid")
 	ts := httptest.NewServer(NewServer(db, clock.Real(), nil))
@@ -197,7 +197,7 @@ func TestE2E_BelowStripeMinimum_NotADecline(t *testing.T) {
 			"created": time.Now().Unix(), "livemode": false,
 			"data": map[string]any{"object": map[string]any{
 				"id": "seti_" + pm, "object": "setup_intent", "status": "succeeded", "payment_method": pm,
-				"metadata": map[string]any{"velox_customer_id": customerID},
+				"metadata": map[string]any{"hardcount_customer_id": customerID},
 			}},
 		})
 		flowDo(t, ts, "POST", endpoint, flowReq{header: map[string]string{"Stripe-Signature": sig}, body: payload}).want(t, 200, "setup_intent.succeeded")
@@ -337,9 +337,9 @@ func TestE2E_BelowStripeMinimum_NotADecline(t *testing.T) {
 		t.Errorf("charges sent after Collect with credit: %d, want 2 (the credit paid it)", n)
 	}
 
-	// B: a customer with no card. Velox has never charged the invoice, so
+	// B: a customer with no card. Hardcount has never charged the invoice, so
 	// only the hosted Pay click learns the amount is too small. Stripe
-	// refuses the session, and Velox records the refusal as it does for a
+	// refuses the session, and Hardcount records the refusal as it does for a
 	// charge: the claim is released, the invoice reads as below the minimum,
 	// the page has no Pay button, and the payment recovery the card-less
 	// finalize started ends, so no reminder or final action follows. A

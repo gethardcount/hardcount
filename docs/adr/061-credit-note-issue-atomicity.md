@@ -51,7 +51,7 @@ Make `Issue()` first-practice end-to-end, by kind of effect.
 
 The CAS and the internal side effect commit together in a **coordinator
 `*sql.Tx`** threaded through the creditnote, credit, and invoice stores —
-the ADR-056 pattern Velox already uses for proration. The CAS provides both
+the ADR-056 pattern Hardcount already uses for proration. The CAS provides both
 concurrency safety (exactly one caller proceeds) **and** atomicity: a grant
 or `amount_due` failure rolls the issue back, the note stays `draft`, and
 the caller retries cleanly. The issued-but-ungranted orphan **cannot
@@ -179,7 +179,7 @@ recorded ways (per `feedback_amend_decisions_when_course_changes`):
    (`dispatcher → svc.Dispatch → matchesEvent` against `'*'`/prefix
    subscriptions), so an `internal.*` obligation row would **leak to customer
    endpoints**. Instead PR2 keeps the reversal post-commit with its existing per-CN
-   `velox_tax_rev_<cn.ID>` key and makes it recoverable: a durable
+   `hardcount_tax_rev_<cn.ID>` key and makes it recoverable: a durable
    `credit_notes.tax_reversal_pending` marker (migration 0123), a CN-scoped
    scheduler sweep (`RetryPendingCreditNoteTaxReversal`) that re-drives with the
    same key, and the inline failure raised `WARN→ERROR`. The sweep's eligibility
@@ -211,7 +211,7 @@ recorded ways (per `feedback_amend_decisions_when_course_changes`):
    Temporal (its enqueue is an RPC to a separate datastore → reintroduces the
    dual-write; a cluster/SaaS breaks the self-host wedge; workflows are the wrong
    abstraction for single-step idempotent jobs) and AGAINST River-for-now (its
-   `InsertTx` needs a pgx-native `pgx.Tx`; Velox is on `database/sql`, so its in-tx
+   `InsertTx` needs a pgx-native `pgx.Tx`; Hardcount is on `database/sql`, so its in-tx
    enqueue wouldn't compose with our coordinator `*sql.Tx` without migrating the
    whole data layer — 60 files / 385 query sites / the RLS core — *premise false
    since River v0.10.0; corrected in ADR-062's 2026-08-30 Amendment, decision
@@ -224,7 +224,7 @@ recorded ways (per `feedback_amend_decisions_when_course_changes`):
 ### North stars / do-not-build (recorded, with triggers)
 
 - **Generic durable obligation queue** (PR3 above) — trigger: a durable async
-  obligation that is not webhook-notification-shaped, or a `cmd/velox-worker`
+  obligation that is not webhook-notification-shaped, or a `cmd/hardcount-worker`
   process split (ADR-040 anticipates it).
 - **`amount_due` as a derived ledger** (+ its `(tenant, source)` dedup first
   brick) — trigger: a **second** independent `amount_due` mutator (e.g.

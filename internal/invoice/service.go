@@ -1254,7 +1254,7 @@ func (s *Service) readAttentionFacts(ctx context.Context, tenantID string, page 
 		f.paused = paused
 	}
 
-	// A live hosted payment page holds every Velox charge (ADR-068). Only a
+	// A live hosted payment page holds every Hardcount charge (ADR-068). Only a
 	// finalized, unpaid invoice can have one that matters. A read error leaves
 	// it false: the banner then offers Retry, which a live page refuses with a
 	// clear message.
@@ -1722,7 +1722,7 @@ func (s *Service) reverseInvoiceTax(ctx context.Context, tenantID string, inv do
 		// Leave tax_reversed_at NULL: RetryPendingTaxReversal (the scheduler
 		// sweep, symmetric sibling of #267's RetryPendingTaxCommit) re-drives
 		// this on the next tick. The re-drive converges via the request's
-		// Idempotency-Key (velox_tax_rev_<ref>): within Stripe's cache window a
+		// Idempotency-Key (hardcount_tax_rev_<ref>): within Stripe's cache window a
 		// retry returns the original reversal (a true no-op), and the stable
 		// `inv_taxrev_<id>` Reference prevents a duplicate reversal from ever
 		// being created. (A retry after the idempotency cache expires for a
@@ -1948,14 +1948,14 @@ func (s *Service) voidEffectsTx(ctx context.Context, tx *sql.Tx, tenantID string
 //     sessions, then cancel its PaymentIntent. Money first.
 //  2. Send invoice.voided, with the row the void committed. It goes before
 //     the tax leg, which stamps tax_reversed_at, so the event shows the
-//     row as it was when Velox created the event (ADR-131).
+//     row as it was when Hardcount created the event (ADR-131).
 //  3. Reverse the upstream tax.
 //  4. Resolve the invoice's active dunning run as invoice_voided. A caller
 //     that resolves the run itself afterwards (the dunning handler) loses
 //     the resolve CAS and gets the resolved row back.
 //
 // Each leg is best-effort, and a crash before one loses nothing durable:
-// the void's own transaction closed Velox's checkout claims, a Checkout
+// the void's own transaction closed Hardcount's checkout claims, a Checkout
 // session expires within an hour at Stripe, and a payment that still lands
 // raises the paid-on-voided anomaly (ADR-068); RetryPendingTaxReversal
 // re-drives the reversal (tax_reversed_at stays NULL); dunning's next tick
@@ -2076,7 +2076,7 @@ func (s *Service) MarkUncollectible(ctx context.Context, tenantID, id string) (d
 	// write-off time, not the one that arrives later.
 	//
 	// Recovering tax remitted on an uncollected debt is BAD-DEBT RELIEF: a
-	// separate claim conditioned on facts Velox does not hold (UK: 6 months
+	// separate claim conditioned on facts Hardcount does not hold (UK: 6 months
 	// overdue AND written off to a separate bad-debt account; CA/NY/TX: charged
 	// off for federal income tax purposes). Claiming it at write-off time is
 	// premature by construction. It is the tenant's claim to make.
@@ -2104,7 +2104,7 @@ func (s *Service) MarkUncollectible(ctx context.Context, tenantID, id string) (d
 	}
 
 	// Stop the invoice being payable on a Checkout page the customer still has
-	// open: the flip above closed Velox's claims in its transaction, and this
+	// open: the flip above closed Hardcount's claims in its transaction, and this
 	// expires the sessions at Stripe, the same call and handling a void uses
 	// (AfterVoid). Best-effort: a session whose expiry fails ends at its
 	// ExpiresAt (at most an hour after it opened); a payment through it
@@ -2740,7 +2740,7 @@ func (s *Service) RetryPendingTax(ctx context.Context, batch int) (int, []error)
 // Stripe tax_transaction at finalize but the local tax_transaction_id write
 // failed (or the process crashed between the two). Those invoices are
 // finalized + tax_status=ok with a calculation id but no transaction id — tax
-// was charged and reported upstream, but Velox can't reverse it on a later void
+// was charged and reported upstream, but Hardcount can't reverse it on a later void
 // (the reversal guard keys on tax_transaction_id). Re-committing is safe:
 // CommitTax's idempotency key makes Stripe return the ORIGINAL transaction
 // (never a duplicate), and CommitTax persists it. Self-healing — a re-commit

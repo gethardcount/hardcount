@@ -5,7 +5,7 @@
 
 ## Summary
 
-Paying on the hosted invoice page saves the card for later off-session charges. The Stripe Checkout session names the customer's Stripe customer (created on first use) and sets `setup_future_usage=off_session`, so future invoices can charge the card without the customer present. Amended 2026-10-11: Velox also records that card in its own `payment_methods`, through `Stripe.RecordCheckoutCard`, from the webhook or the reconciler's hosted sweep. The card becomes the default only when the customer had no card on file. Amended 2026-10-18 (ADR-126): it also replaces a default the bank refused for good. Amended 2026-10-22: a card saved through a Velox setup or update link always becomes the default; a card paid on the hosted page keeps the rule above. Status: active, amended.
+Paying on the hosted invoice page saves the card for later off-session charges. The Stripe Checkout session names the customer's Stripe customer (created on first use) and sets `setup_future_usage=off_session`, so future invoices can charge the card without the customer present. Amended 2026-10-11: Hardcount also records that card in its own `payment_methods`, through `Stripe.RecordCheckoutCard`, from the webhook or the reconciler's hosted sweep. The card becomes the default only when the customer had no card on file. Amended 2026-10-18 (ADR-126): it also replaces a default the bank refused for good. Amended 2026-10-22: a card saved through a Hardcount setup or update link always becomes the default; a card paid on the hosted page keeps the rule above. Status: active, amended.
 
 ## Context
 
@@ -16,7 +16,7 @@ during that Checkout flow.
 
 Operator-reported bug: customer paid an invoice via the hosted page,
 ticked the save-card box, the payment succeeded — but the customer's
-detail page in Velox kept showing "no payment method on file" and
+detail page in Hardcount kept showing "no payment method on file" and
 later invoices fell into dunning instead of auto-charging.
 
 Root cause was in `internal/api/adapters.go::CreateInvoicePaymentSession`.
@@ -51,7 +51,7 @@ Pay-flow Checkout sessions now pass:
 2. `PaymentIntentData.SetupFutureUsage: "off_session"` — the canonical
    Stripe pattern from
    [Save card during payment](https://docs.stripe.com/payments/save-during-payment).
-   The `off_session` value (vs. `on_session`) means Velox can charge
+   The `off_session` value (vs. `on_session`) means Hardcount can charge
    this card later without the customer present, which is what dunning
    auto-retry needs.
 
@@ -83,9 +83,9 @@ customer and:
   email/Update-Payment-Method round-trip needed).
 
 **A Stripe customer is minted on first hosted-invoice payment** for
-any Velox customer that doesn't already have one. The current
+any Hardcount customer that doesn't already have one. The current
 `EnsureStripeCustomer` mints a bare customer (only `metadata`, no
-`email`/`name`). A separate cleanup should pass through the Velox
+`email`/`name`). A separate cleanup should pass through the Hardcount
 customer's email + display name so the Stripe dashboard shows useful
 identity — tracked as a follow-up, not blocking on this fix because
 the bare customer is functionally correct (PM attaches, charges work,
@@ -107,8 +107,8 @@ Stripe's own Billing product uses `off_session` for the same reason.
   net more code, not less. `mode=payment` with
   `setup_future_usage` is the Stripe-recommended one-step flow for
   this scenario.
-- **Always create the Stripe customer at Velox-customer-creation
-  time.** Cleaner data model, but every Velox customer would have a
+- **Always create the Stripe customer at Hardcount-customer-creation
+  time.** Cleaner data model, but every Hardcount customer would have a
   Stripe customer record even if they're never charged via Stripe
   (offline invoicing, manual reconciliation, etc.). Lazy mint on first
   Stripe-bound action keeps dormant tenants from polluting the
@@ -116,7 +116,7 @@ Stripe's own Billing product uses `off_session` for the same reason.
 
 ## Amendment 2026-10-11: the saved card was never recorded after migration 0097
 
-This ADR's promise held at Stripe but not in Velox. Migration 0097 moved
+This ADR's promise held at Stripe but not in Hardcount. Migration 0097 moved
 cards from `customer_payment_setups` to `payment_methods`, and made the setup
 upsert in `checkout.session.completed` write only the customer↔Stripe
 mapping. Cards are written by the attach path, which only
@@ -125,9 +125,9 @@ with `setup_future_usage`, so no SetupIntent event comes and the card was
 never recorded.
 
 `FetchCardDetails` still made the new card Stripe's default, so Stripe and
-Velox disagreed, and Velox charges the card in `payment_methods`. Found
+Hardcount disagreed, and Hardcount charges the card in `payment_methods`. Found
 walking FLOW I10: Stripe held two saved 4242 cards for a customer whose
-Velox record had only the declining 0341. A customer with no card on file
+Hardcount record had only the declining 0341. A customer with no card on file
 stayed card-less, and the next invoice went to card-less dunning, asking for
 a card they had just given.
 
@@ -172,10 +172,10 @@ An end-to-end Stripe sandbox walk (2026-10-22) found the rule above wrong for
 setup flows. After an ordinary decline, the customer saved a new card through
 the payment-update link. The success page said "we'll use it for upcoming
 invoices automatically", and `FetchCardDetails` made it Stripe's default. But
-Velox kept the declining card as its default, and every dunning retry charged
+Hardcount kept the declining card as its default, and every dunning retry charged
 that card again. The same held for the operator's **Add payment method** link.
 
-A setup or update link exists for one reason: to give Velox the card to
+A setup or update link exists for one reason: to give Hardcount the card to
 charge. Stripe Billing's retries charge the customer's default payment
 method (`customer.invoice_settings.default_payment_method`, when the
 subscription names none). Stripe also says: "When you update payment methods
@@ -183,12 +183,12 @@ after a failed payment attempt, update the field where the previous payment
 failed"
 ([Automate payment retries, payment method ordering](https://docs.stripe.com/billing/revenue-recovery/smart-retries#payment-method-ordering), read 2026-10-22).
 
-**Decision.** A card saved by a SetupIntent Velox created becomes the
-customer's default. Velox's Checkout setup sessions stamp
-`velox_customer_id` on the SetupIntent (`setup_intent_data.metadata`): the
+**Decision.** A card saved by a SetupIntent Hardcount created becomes the
+customer's default. Hardcount's Checkout setup sessions stamp
+`hardcount_customer_id` on the SetupIntent (`setup_intent_data.metadata`): the
 operator's **Add payment method** link (email or copy) and the customer's
 payment-update link. (A third, legacy `POST /v1/checkout/setup`, was removed
-on 2026-10-23, [#1368](https://github.com/getvelox/velox/pull/1368).) The
+on 2026-10-23, [#1368](https://github.com/gethardcount/hardcount/pull/1368).) The
 `setup_intent.succeeded` handler reads that before any other lookup and asks
 the attach to make the card the default. The store clears the old default
 and sets the new one in the attach's transaction, on its insert path and on
@@ -204,15 +204,15 @@ bank refused for good, becomes the default; any other is added beside):
   card the default; the session's `setup_intent.succeeded`, which names the
   exact card, does. Whether a hosted payment's card should replace a working
   default is still open.
-- **A SetupIntent Velox did not create**, matched only by its Stripe
+- **A SetupIntent Hardcount did not create**, matched only by its Stripe
   customer.
 
-**Stripe's default follows Velox's.** `FetchCardDetails` no longer sets the
+**Stripe's default follows Hardcount's.** `FetchCardDetails` no longer sets the
 newest card as Stripe's default. The attach sets Stripe's
-`invoice_settings.default_payment_method` whenever the saved card is Velox's
+`invoice_settings.default_payment_method` whenever the saved card is Hardcount's
 default (first card, refused-card replacement, setup flow). It runs after the
 commit, best-effort, as **Set as default** does. A failure logs
-and lands as `stripe_sync_error` on the audit row (ADR-053: Velox charges
+and lands as `stripe_sync_error` on the audit row (ADR-053: Hardcount charges
 the card it names; Stripe's copy changes only what the Stripe dashboard
 shows).
 

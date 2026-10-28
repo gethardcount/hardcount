@@ -18,15 +18,15 @@ import (
 
 const (
 	// Superuser URL — used for migrations and cleanup (bypasses RLS).
-	// Points to velox_test database so tests never touch dev data.
-	defaultAdminDBURL = "postgres://velox:velox@localhost:5432/velox_test?sslmode=disable"
+	// Points to hardcount_test database so tests never touch dev data.
+	defaultAdminDBURL = "postgres://hardcount:hardcount@localhost:5432/hardcount_test?sslmode=disable"
 	// App user URL — used for queries (RLS enforced).
-	defaultAppDBURL = "postgres://velox_test_app:velox_test_app@localhost:5432/velox_test?sslmode=disable"
+	defaultAppDBURL = "postgres://hardcount_test_app:hardcount_test_app@localhost:5432/hardcount_test?sslmode=disable"
 )
 
 // SetupTestDB runs migrations as superuser, cleans data, and returns an
 // app-user connection where RLS is enforced.
-// utcOnce pins the test process to UTC exactly like cmd/velox/main (ADR-075),
+// utcOnce pins the test process to UTC exactly like cmd/hardcount/main (ADR-075),
 // so integration tests observe the same canonical-UTC timestamp behavior as
 // production regardless of the host timezone (a dev box on IST would otherwise
 // scan timestamptz back in +05:30 and diverge from CI/prod). sync.Once keeps the
@@ -53,7 +53,7 @@ func SetupTestDB(t *testing.T) *postgres.DB {
 	// truncate in t.Cleanup bought nothing and doubled the ACCESS EXCLUSIVE
 	// lock churn (700 truncates per integration run where 350 will do).
 	// Consequence to know: the LAST test in a process leaves its rows
-	// behind — the CI velox-doctor sweep after the integration job examines
+	// behind — the CI hardcount-doctor sweep after the integration job examines
 	// whatever the alphabetically-last DB package left.
 	cleanDB(t, adminPool)
 
@@ -181,7 +181,7 @@ func cleanDBErr(pool *sql.DB) error {
 func CreateTestTenant(t *testing.T, db *postgres.DB, name string) string {
 	t.Helper()
 
-	id := postgres.NewID("vlx_ten")
+	id := postgres.NewID("hc_ten")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 

@@ -199,7 +199,7 @@ func (s *PostgresStore) appendEntryInTx(ctx context.Context, tx *sql.Tx, tenantI
 		return domain.CreditLedgerEntry{}, fmt.Errorf("credit balance after entry: %w", serr)
 	}
 	entry.BalanceAfter = balanceAfter
-	entry.ID = postgres.NewID("vlx_ccl")
+	entry.ID = postgres.NewID("hc_ccl")
 
 	metaJSON, _ := json.Marshal(entry.Metadata)
 	if entry.Metadata == nil {
@@ -398,7 +398,7 @@ func (s *PostgresStore) ExpireGrantAtomic(ctx context.Context, tenantID, custome
 		EntryType:   domain.CreditExpiry,
 		Currency:    currency, // the grant's own (ADR-129)
 		AmountCents: -remaining,
-		// velox-doctor's expired_grant_headroom_reopened check and
+		// hardcount-doctor's expired_grant_headroom_reopened check and
 		// ListGrantSummaries' expired_cents JOIN on this exact string
 		// ('Expired grant ' || grant id) to pair expiry entries with their
 		// grants — change the format and both go silently blind. Change
@@ -525,7 +525,7 @@ func (s *PostgresStore) AdjustAtomicAudited(
 	}
 
 	entry := domain.CreditLedgerEntry{
-		ID:           postgres.NewID("vlx_ccl"),
+		ID:           postgres.NewID("hc_ccl"),
 		TenantID:     tenantID,
 		CustomerID:   customerID,
 		EntryType:    domain.CreditAdjustment,
@@ -887,7 +887,7 @@ func (s *PostgresStore) ApplyToInvoiceAtomic(ctx context.Context, tenantID, cust
 		return 0, nil
 	}
 
-	entryID := postgres.NewID("vlx_ccl")
+	entryID := postgres.NewID("hc_ccl")
 	balanceAfter := currentBalance - deduct
 
 	if _, err := tx.ExecContext(ctx, `
@@ -1716,7 +1716,7 @@ func (s *PostgresStore) ListGrantSummaries(ctx context.Context, tenantID, custom
 	// paired with their grant in one grouped pass over this customer's
 	// ledger:
 	//   - expiry entries by the exact description ExpireGrantAtomic writes
-	//     ('Expired grant ' || grant id), the same pairing velox-doctor and
+	//     ('Expired grant ' || grant id), the same pairing hardcount-doctor and
 	//     migration 0127 use. ExpireGrantAtomic is the only writer of expiry
 	//     entries, so the pairing is exact.
 	//   - commit retire entries by metadata grant_id. retireCommitSliceTx is

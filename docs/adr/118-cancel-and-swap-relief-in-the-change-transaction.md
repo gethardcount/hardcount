@@ -12,7 +12,7 @@
 ## Summary
 
 A mid-period cancel or immediate cross-interval plan swap owes the customer
-relief for the unused, prepaid part of the period. Velox now writes all of it
+relief for the unused, prepaid part of the period. Hardcount now writes all of it
 in the same transaction as the cancel or swap. There are three kinds:
 - a credit note that credits the customer's balance, for a paid invoice;
 - a credit note that reduces the amount due, for an unpaid invoice that was

@@ -16,20 +16,20 @@ import (
 
 // BootstrapHandler provides a one-time setup endpoint for creating the
 // first tenant + owner user + API keys. Protected by the
-// VELOX_BOOTSTRAP_TOKEN env var; only works while no tenants exist.
+// HARDCOUNT_BOOTSTRAP_TOKEN env var; only works while no tenants exist.
 // The actual provisioning is tenant.RunBootstrap — the single writer
-// shared with cmd/velox-bootstrap (ADR-073).
+// shared with cmd/hardcount-bootstrap (ADR-073).
 type BootstrapHandler struct {
 	db    *postgres.DB
 	deps  BootstrapDeps
-	token string // Required token from VELOX_BOOTSTRAP_TOKEN env var; empty = disabled
+	token string // Required token from HARDCOUNT_BOOTSTRAP_TOKEN env var; empty = disabled
 }
 
 func NewBootstrapHandler(db *postgres.DB, deps BootstrapDeps) *BootstrapHandler {
 	return &BootstrapHandler{
 		db:    db,
 		deps:  deps,
-		token: strings.TrimSpace(os.Getenv("VELOX_BOOTSTRAP_TOKEN")),
+		token: strings.TrimSpace(os.Getenv("HARDCOUNT_BOOTSTRAP_TOKEN")),
 	}
 }
 
@@ -94,7 +94,7 @@ func (h *BootstrapHandler) bootstrap(w http.ResponseWriter, r *http.Request) {
 
 	if h.token == "" {
 		respond.Error(w, r, http.StatusForbidden, "authentication_error", "forbidden",
-			"bootstrap disabled — set VELOX_BOOTSTRAP_TOKEN env var to enable")
+			"bootstrap disabled — set HARDCOUNT_BOOTSTRAP_TOKEN env var to enable")
 		return
 	}
 

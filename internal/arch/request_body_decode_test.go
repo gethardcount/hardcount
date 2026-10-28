@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-// A request body Velox defines is read by internal/api/respond, which
+// A request body Hardcount defines is read by internal/api/respond, which
 // refuses a key the request type does not declare (422, param = the key) and
 // a body that is not one JSON value (400). encoding/json on its own drops an
 // unknown key, so a misspelled field answered 200 and changed nothing.
@@ -26,7 +26,7 @@ var requestBodyReaders = map[string]string{
 	// handler decodes them.
 	"internal/api/middleware/idempotency.go Idempotency": "replay fingerprint",
 
-	// Senders Velox does not control. They add fields when they like, so
+	// Senders Hardcount does not control. They add fields when they like, so
 	// these read only what they need and ignore the rest.
 	"internal/payment/handler.go Handler.handleStripeWebhook":          "Stripe webhook",
 	"internal/email/postmark_handler.go PostmarkHandler.HandleWebhook": "Postmark webhook",
@@ -227,7 +227,7 @@ func TestNoRequestBodyDecodeOutsideRespond(t *testing.T) {
 	sort.Strings(stale)
 	for _, k := range missing {
 		t.Errorf("%s reads a request body itself. Decode it with respond.DecodeStrict (or respond.DecodeBody), "+
-			"which refuses unknown keys. Only a body whose sender Velox does not control may be read here; "+
+			"which refuses unknown keys. Only a body whose sender Hardcount does not control may be read here; "+
 			"add it to requestBodyReaders with the reason.", k)
 	}
 	for _, k := range stale {

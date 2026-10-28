@@ -2,13 +2,13 @@
 
 The short version:
 
-1. Ask Velox for the customer's live credit balance on an interval.
+1. Ask Hardcount for the customer's live credit balance on an interval.
 2. Keep the answer in your own cache.
 3. Check your cache before you serve a request.
 
-## Velox records usage. It never refuses it.
+## Hardcount records usage. It never refuses it.
 
-Velox accepts every usage event you send, including for a customer who has
+Hardcount accepts every usage event you send, including for a customer who has
 no credit left. It does not block, throttle or reject usage. The decision to
 stop serving a customer is always yours, and it runs in your code.
 
@@ -24,7 +24,7 @@ Authorization: Bearer <secret key>
 
 ```json
 {
-  "customer_id": "vlx_cus_…",
+  "customer_id": "hc_cus_…",
   "balances": [
     {
       "currency": "USD",
@@ -49,7 +49,7 @@ credit in it.
 | `balance_cents` | The credit the customer can spend now in this currency: what is left after every invoice issued so far. A grant that is past its expiry date is not counted. |
 | `unbilled_usage_cents` | What the usage of the current period will cost when it is invoiced in this currency. |
 | `estimated_remaining_cents` | The first minus the second, never below zero. Gate on this. |
-| `computed_at` | When Velox worked the figures out. |
+| `computed_at` | When Hardcount worked the figures out. |
 
 A customer id that is not in your tenant and mode answers `404`.
 
@@ -73,7 +73,7 @@ So treat it as a background read:
   again.
 - Store `estimated_remaining_cents` in your own cache (Redis, memory, your
   database), with no expiry time.
-- Before you serve a request, read your cache. Never call Velox in the
+- Before you serve a request, read your cache. Never call Hardcount in the
   request path.
 
 A stored zero must stay until a later read replaces it. If the entry expires,
@@ -89,7 +89,7 @@ customer who is close to zero if that matters to you.
 # Runs on a timer, once a minute.
 for customer_id in customers_active_since_last_poll() | customers_refused():
     try:
-        live = velox.get(f"/v1/credits/balance/{customer_id}/live", timeout=30)
+        live = hardcount.get(f"/v1/credits/balance/{customer_id}/live", timeout=30)
     except Exception as err:
         alert(customer_id, err)   # keep the last figure, go on to the next customer
         continue
@@ -110,7 +110,7 @@ def may_serve(customer_id):
 
 ## When the read fails
 
-The read answers `500` when Velox cannot work the figure out. It never
+The read answers `500` when Hardcount cannot work the figure out. It never
 returns part of a figure.
 
 - Keep the last figure you stored for that customer. Do not clear it.
@@ -120,7 +120,7 @@ returns part of a figure.
 
 ## A top-up shows at once
 
-Velox stores nothing for this read. It works the figure out again on every
+Hardcount stores nothing for this read. It works the figure out again on every
 call. When you grant credit, the next read already includes it, so poll that
 customer again straight after a top-up and update your cache.
 
@@ -149,8 +149,8 @@ has left, because these are not subtracted:
   period closes and the invoice is issued.
 - **Unpaid invoices.** An invoice that is issued but not yet settled can
   still draw on the credit.
-- **Usage sent after a period has ended and before Velox has closed it.**
-  Velox closes a period on the first billing run after
+- **Usage sent after a period has ended and before Hardcount has closed it.**
+  Hardcount closes a period on the first billing run after
   `INVOICE_GRACE_PERIOD` has passed, so this gap lasts 1 to 2 hours by
   default ([ADR-120](adr/120-invoice-grace-period-for-late-usage.md)).
 - **Credit that expires before the period ends.** It counts as spendable

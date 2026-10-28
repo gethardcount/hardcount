@@ -330,7 +330,7 @@ func TestLateClose_ScheduledResume_TestClock_AdvancePastResume(t *testing.T) {
 	r.pauseUntil(t, &resumesAt)
 
 	frozen := p1.Add(45 * time.Minute)
-	clockID := postgres.NewID("vlx_tclk")
+	clockID := postgres.NewID("hc_tclk")
 	execTx(t, r.f.db, r.base, r.f.tenantID,
 		`INSERT INTO test_clocks (id, tenant_id, livemode, name, frozen_time, status) VALUES ($1, $2, false, 'resume lag clock', $3, 'advancing')`,
 		clockID, r.f.tenantID, frozen)
@@ -524,7 +524,7 @@ func TestTrialFlipAfterResume_TestClock(t *testing.T) {
 	r.trialFlipRig(t, trialEnd, trialEnd.Add(30*time.Minute))
 
 	frozen := trialEnd.Add(45 * time.Minute)
-	clockID := postgres.NewID("vlx_tclk")
+	clockID := postgres.NewID("hc_tclk")
 	execTx(t, r.f.db, r.base, r.f.tenantID,
 		`INSERT INTO test_clocks (id, tenant_id, livemode, name, frozen_time, status) VALUES ($1, $2, false, 'trial flip clock', $3, 'advancing')`,
 		clockID, r.f.tenantID, frozen)

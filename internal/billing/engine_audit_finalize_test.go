@@ -73,7 +73,7 @@ func (erroringEngineAudit) LogInTx(context.Context, *sql.Tx, audit.Entry) error 
 func TestFinalizeAuditEmission(t *testing.T) {
 	now := time.Date(2027, 6, 1, 0, 0, 0, 0, time.UTC)
 	inv := domain.Invoice{
-		ID: "vlx_inv_1", InvoiceNumber: "VLX-000042", CustomerID: "cus_1",
+		ID: "hc_inv_1", InvoiceNumber: "HC-000042", CustomerID: "cus_1",
 		Status: domain.InvoiceFinalized, TotalAmountCents: 12345, Currency: "USD",
 		BillingReason: domain.BillingReasonSubscriptionCycle,
 	}
@@ -91,8 +91,8 @@ func TestFinalizeAuditEmission(t *testing.T) {
 			t.Error("finalize row emitted via post-commit Log, not LogInTx — ADR-090 shared fate regressed")
 		}
 		r := aud.rows[0]
-		if r.entry.Action != string(domain.AuditActionFinalize) || r.entry.ResourceType != "invoice" || r.entry.ResourceID != "vlx_inv_1" {
-			t.Errorf("entry = %+v, want finalize/invoice/vlx_inv_1", r.entry)
+		if r.entry.Action != string(domain.AuditActionFinalize) || r.entry.ResourceType != "invoice" || r.entry.ResourceID != "hc_inv_1" {
+			t.Errorf("entry = %+v, want finalize/invoice/hc_inv_1", r.entry)
 		}
 		if r.entry.Metadata["triggered_by"] != string(domain.BillingReasonSubscriptionCycle) {
 			t.Errorf("triggered_by: got %v, want subscription_cycle", r.entry.Metadata["triggered_by"])

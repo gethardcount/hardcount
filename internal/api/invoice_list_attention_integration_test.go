@@ -76,7 +76,7 @@ func TestInvoiceList_AttentionCostIsPerPage_RealStore(t *testing.T) {
 				t.Fatalf("stripe id: %v", err)
 			}
 			exec(`INSERT INTO payment_methods (id, tenant_id, customer_id, stripe_payment_method_id, type, is_default)
-				VALUES ($1, $2, $3, $4, 'card', true)`, "vlx_pm_"+key, tenantID, c.ID, "pm_"+key)
+				VALUES ($1, $2, $3, $4, 'card', true)`, "hc_pm_"+key, tenantID, c.ID, "pm_"+key)
 		}
 		return c.ID
 	}
@@ -105,8 +105,8 @@ func TestInvoiceList_AttentionCostIsPerPage_RealStore(t *testing.T) {
 
 	pausedCust := newCustomer("paused", "paused@acme.test", true)
 	exec(`INSERT INTO subscriptions (id, tenant_id, code, display_name, customer_id, status, billing_time, pause_collection_behavior)
-		VALUES ('vlx_sub_paused', $1, 'paused', 'paused', $2, 'active', 'anniversary', 'keep_as_draft')`, tenantID, pausedCust)
-	paused := newInvoice("paused", pausedCust, "vlx_sub_paused", domain.InvoiceFinalized, domain.PaymentPending)
+		VALUES ('hc_sub_paused', $1, 'paused', 'paused', $2, 'active', 'anniversary', 'keep_as_draft')`, tenantID, pausedCust)
+	paused := newInvoice("paused", pausedCust, "hc_sub_paused", domain.InvoiceFinalized, domain.PaymentPending)
 	if err := seedInv.SetAutoChargePending(ctx, tenantID, paused, true); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
@@ -116,13 +116,13 @@ func TestInvoiceList_AttentionCostIsPerPage_RealStore(t *testing.T) {
 
 	escalatedCust := newCustomer("escalated", "esc@acme.test", false)
 	escalated := newInvoice("escalated", escalatedCust, "", domain.InvoiceFinalized, domain.PaymentPending)
-	exec(`INSERT INTO dunning_policies (id, tenant_id, name, retry_days) VALUES ('vlx_dpol_1142', $1, 'p', '[3, 3, 3]')`, tenantID)
+	exec(`INSERT INTO dunning_policies (id, tenant_id, name, retry_days) VALUES ('hc_dpol_1142', $1, 'p', '[3, 3, 3]')`, tenantID)
 	exec(`INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, policy_id, state, attempt_count, last_attempt_at, resolved_at, resolution)
-		VALUES ('vlx_drun_1142', $1, $2, $3, 'vlx_dpol_1142', 'escalated', 3, now(), now(), 'retries_exhausted')`, tenantID, escalated, escalatedCust)
+		VALUES ('hc_drun_1142', $1, $2, $3, 'hc_dpol_1142', 'escalated', 3, now(), now(), 'retries_exhausted')`, tenantID, escalated, escalatedCust)
 
 	pageOpen := newInvoice("page", newCustomer("page", "page@acme.test", false), "", domain.InvoiceFinalized, domain.PaymentPending)
 	exec(`INSERT INTO checkout_sessions (id, tenant_id, invoice_id, livemode, amount_cents, currency, status)
-		VALUES ($1, $2, $3, false, 5000, 'USD', 'open')`, postgres.NewID("vlx_cks"), tenantID, pageOpen)
+		VALUES ($1, $2, $3, false, 5000, 'USD', 'open')`, postgres.NewID("hc_cks"), tenantID, pageOpen)
 
 	paid := newInvoice("paid", newCustomer("paid", "paid@acme.test", true), "", domain.InvoicePaid, domain.PaymentSucceeded)
 

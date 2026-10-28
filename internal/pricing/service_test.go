@@ -202,7 +202,7 @@ func TestAddPrice_ZeroRatesAllowedNegativeRefused(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			store := newMemStore()
 			plan, _ := seedPlanWithPrice(store, "t")
-			meterID := store.prices["vlx_prc_1"].MeterID
+			meterID := store.prices["hc_prc_1"].MeterID
 			before := len(store.writes)
 			_, err := NewService(store).AddPrice(ctx, "t", plan.ID, PriceInput{MeterID: meterID, DimensionMatch: map[string]string{"model": "a"}, PriceShape: tc.shape})
 			if (err == nil) != tc.ok {

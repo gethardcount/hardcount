@@ -14,11 +14,11 @@ Tax rates are stored as `tax_rate NUMERIC(7,4)`, four decimal places as Stripe T
 
 The 2026-05-31 financial-precision audit (research-backed against
 Stripe Tax / Lago / Chargebee / Recurly schemas) found two industry-
-standard gaps in Velox's money-handling code.
+standard gaps in Hardcount's money-handling code.
 
 ### Gap 1 — Tax rate stored as integer basis points (1 bp = 0.01%)
 
-Velox stored every tax rate as `bigint` basis points. Peers all use
+Hardcount stored every tax rate as `bigint` basis points. Peers all use
 higher precision:
 
 | Platform | Format | Precision |
@@ -28,7 +28,7 @@ higher precision:
 | Lago | BigDecimal | Unlimited |
 | Chargebee | Numeric | Up to 20 places |
 | Recurly | Float | 3 places |
-| Velox (pre-ADR-042) | Integer bp | 2 places (0.01%) |
+| Hardcount (pre-ADR-042) | Integer bp | 2 places (0.01%) |
 
 Real-world rates that lose precision under bp:
 
@@ -45,7 +45,7 @@ auditor's "8.88% × $99 = $8.79? but $8.79 / $99 = 8.879…" cross-
 check failure.
 
 Additionally, Stripe Tax explicitly returns `percentage_decimal` as
-a STRING precisely to avoid lossy float round-trip. Velox's
+a STRING precisely to avoid lossy float round-trip. Hardcount's
 ingestion did `strconv.ParseFloat(pct, 64)` → `int64(v * 100)`,
 truncating toward zero (losing 0.005% on 8.875% — stored 887 instead
 of banker's-rounded 888). The integer bp storage compounded the
@@ -64,7 +64,7 @@ non-deterministic across architectures. Industry peers (Stripe
 Billing, Lago, Orb) all use integer day-ratio math:
 `amount × remaining_days / total_days` with banker's rounding.
 
-Velox's engine path (`internal/billing/engine.go:655`) already used
+Hardcount's engine path (`internal/billing/engine.go:655`) already used
 this pattern via `money.RoundHalfToEven`. The subscription handler
 path had drifted.
 
@@ -102,7 +102,7 @@ path had drifted.
   `tax_rate = tax_rate_bp::numeric / 100` at the SQL boundary
   (operator UI unchanged; precision win on the Stripe ingestion
   path is the headline).
-- `velox_tax_outcome_total` Prometheus metric and the existing
+- `hardcount_tax_outcome_total` Prometheus metric and the existing
   audit-row tax fields are unchanged.
 
 ### Proration (gap 2)
@@ -126,7 +126,7 @@ path had drifted.
 ## Consequences
 
 - **Precision on Stripe ingestion:** NYC 8.875%, Quebec 9.975%,
-  Hawaii 4.7120% all round-trip exactly through Velox's storage
+  Hawaii 4.7120% all round-trip exactly through Hardcount's storage
   and display layer.
 - **Audit cross-checks:** rate × subtotal = tax_amount holds at
   the 4-decimal precision level for Stripe-provided rates.
@@ -143,7 +143,7 @@ path had drifted.
 - **Migration safety:** the `tax_rate` columns are populated on
   apply via UPDATE-from-bp; no manual data fix needed. Down migration
   drops the new columns; existing readers fall back to bp.
-- **Metric:** `velox_tax_outcome_total` already drops the legacy
+- **Metric:** `hardcount_tax_outcome_total` already drops the legacy
   `outcome=fallback` label per ADR-041; this ADR adds no new metric.
 
 ## Industry references

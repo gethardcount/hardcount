@@ -562,7 +562,7 @@ func (h *Handler) finalize(w http.ResponseWriter, r *http.Request) {
 	// endpoint AND the tax-retry auto-finalize. Pre-fix the webhook fired
 	// from here only, so the tax-retry path silently skipped it.
 
-	// No automatic "here's your invoice" email on finalize. Velox
+	// No automatic "here's your invoice" email on finalize. Hardcount
 	// auto-charges the saved card (Stripe charge_automatically model), so
 	// the customer's touchpoint is the payment receipt on success (fired
 	// from the Stripe webhook) or the "set up payment method" email below
@@ -1150,7 +1150,7 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 
 	// Bound to the invoice's clock, as finalize binds its collect: on a
 	// clock-pinned invoice the charge records its simulated instant (the PI's
-	// velox_anchor_at), which dates paid_at and a decline's first dunning
+	// hardcount_anchor_at), which dates paid_at and a decline's first dunning
 	// retry. Unbound, a Collect on a later Advance dated the retry from the
 	// issue instant, in the past. A wall-clock invoice binds nothing.
 	charged, err := h.charger.ChargeInvoiceNow(h.svc.bindForInvoice(r.Context(), tenantID, id), tenantID, inv, hold, ps.StripeCustomerID, ps.StripePaymentMethodID)
@@ -1718,7 +1718,7 @@ func brandDisplayName(brand string) string {
 	default:
 		// Unknown brand — title-case each underscore-separated
 		// segment so a future-Stripe value renders legibly without
-		// requiring a Velox release.
+		// requiring a Hardcount release.
 		return titleCaseSnake(brand)
 	}
 }

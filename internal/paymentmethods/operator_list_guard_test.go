@@ -33,8 +33,8 @@ func TestOperatorList_UnknownCustomer404s(t *testing.T) {
 	r := chi.NewRouter()
 	r.Mount("/customers/{customer_id}/payment-methods", h.OperatorRoutes())
 
-	req := httptest.NewRequest("GET", "/customers/vlx_cus_nope/payment-methods/", nil).
-		WithContext(auth.WithTenantID(context.Background(), "vlx_ten_t1"))
+	req := httptest.NewRequest("GET", "/customers/hc_cus_nope/payment-methods/", nil).
+		WithContext(auth.WithTenantID(context.Background(), "hc_ten_t1"))
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 

@@ -734,7 +734,7 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 	// too (the engine resolves it to a clock-less Sim at now). Keying on that
 	// bool made every production run look simulated, so anchorInstant's
 	// downtime clamp never ran and a late retry left every later retry in the
-	// past, fired one per tick (found walking FLOW I10, 2026-10-11: VLX-000081
+	// past, fired one per tick (found walking FLOW I10, 2026-10-11: HC-000081
 	// retried "Oct 4" then "Oct 7" on consecutive ticks on Oct 11).
 	_, simulated := clock.SimOf(ctx)
 

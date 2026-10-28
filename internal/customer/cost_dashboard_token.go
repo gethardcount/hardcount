@@ -9,10 +9,10 @@ import (
 
 // costDashboardTokenPrefix — visible in logs, distinguishes the public
 // embeddable cost-dashboard credential from the magic-link
-// (vlx_cpml_), portal session (vlx_cps_), and API keys (vlx_secret_,
-// vlx_publishable_). 32 bytes of entropy → 64 hex chars after the
+// (hc_cpml_), portal session (hc_cps_), and API keys (hc_secret_,
+// hc_publishable_). 32 bytes of entropy → 64 hex chars after the
 // prefix, matching the hosted-invoice public token shape.
-const costDashboardTokenPrefix = "vlx_pcd_"
+const costDashboardTokenPrefix = "hc_pcd_"
 
 // NewCostDashboardToken mints a fresh public cost-dashboard token.
 // Uniqueness is enforced at the DB layer via the partial UNIQUE index

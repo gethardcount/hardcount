@@ -16,7 +16,7 @@ import (
 //
 // This is the single place log enrichment happens, so handlers and services
 // don't need to remember to stamp request_id on every call site. A design
-// partner hits a bug → they report the request_id from the Velox-Request-Id
+// partner hits a bug → they report the request_id from the Hardcount-Request-Id
 // response header → one grep over structured JSON logs shows the full trace.
 type ContextHandler struct {
 	slog.Handler

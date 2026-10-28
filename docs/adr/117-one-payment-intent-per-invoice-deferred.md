@@ -6,10 +6,10 @@
 ## Summary
 
 Stripe Billing gives each invoice one PaymentIntent, created at finalize,
-and every way of paying confirms that same one. Velox creates a new
+and every way of paying confirms that same one. Hardcount creates a new
 PaymentIntent for every charge attempt and another for each hosted Checkout
 session. One PaymentIntent per invoice would make "at most one payment
-succeeds" a property of Stripe rather than of Velox's code. We are not
+succeeds" a property of Stripe rather than of Hardcount's code. We are not
 adopting it now: the problems it would remove are already closed by narrower
 fixes, and the move would rebuild the hosted page, the idempotency model and
 the reconcilers. This ADR records the option, its cost, and the signals that
@@ -17,7 +17,7 @@ should reopen it.
 
 ## Context
 
-**What Velox does.** Each off-session charge (auto-charge, dunning retry,
+**What Hardcount does.** Each off-session charge (auto-charge, dunning retry,
 operator Collect) creates a PaymentIntent whose idempotency key is seeded by
 `invoices.charge_attempt_seq` (ADR-105), so each genuine retry gets a new
 PaymentIntent. The hosted Pay page opens a Stripe Checkout Session in
@@ -28,7 +28,7 @@ one could succeed.
 **What that has cost.** Several decisions exist only because several
 PaymentIntents can report on one invoice:
 
-- A hosted payment and a Velox charge could both take money. This is closed
+- A hosted payment and a Hardcount charge could both take money. This is closed
   by the "one payer at a time" claim exclusion (ADR-068 amendment, #929).
 - A late decline from an older attempt could overwrite a newer one. This is
   closed by the failure-ordering rule `PaymentFailureReport.MovesInvoice`
@@ -45,14 +45,14 @@ PaymentIntents can report on one invoice:
   and finalization](https://docs.stripe.com/invoicing/integration/workflow-transitions)).
   Automatic collection and the hosted invoice page both complete that
   PaymentIntent.
-- **Lago: one PaymentIntent per payment record**, the same model as Velox:
+- **Lago: one PaymentIntent per payment record**, the same model as Hardcount:
   `::Stripe::PaymentIntent.create(payload, { …, idempotency_key: "payment-#{payment.id}" })`
   ([lago-api create_service.rb](https://github.com/getlago/lago-api/blob/main/app/services/payment_providers/stripe/payments/create_service.rb)).
   **Correction (2026-10-23):** the shape matches, but Lago treats an unclear
   result as failed and retries under a new key. On a Stripe server error
   Lago marks the payment failed with no PaymentIntent id. The next attempt
   creates a new payment record, so its key (`payment-<new id>`) is new, and
-  a double charge is possible. Velox marks such a charge `unknown` and asks
+  a double charge is possible. Hardcount marks such a charge `unknown` and asks
   Stripe. Checked in lago-api `2e52dfc` (2026-10-22):
   `app/services/payment_providers/stripe/payments/create_service.rb:37-56,122-131,258-272`,
   `app/services/invoices/payments/create_service.rb:38-48`.
@@ -68,7 +68,7 @@ narrower mechanisms listed in Context are the answer.
 
 ## Why this design
 
-Velox already enforces the invariant that matters: two payment channels
+Hardcount already enforces the invariant that matters: two payment channels
 never take money for one invoice at the same time. Each known failure has a
 targeted fix, a real-Postgres test, and a walk against real Stripe.
 
@@ -79,7 +79,7 @@ and none of them is needed today:
 - **The hosted page.** A Checkout Session cannot attach to an existing
   PaymentIntent; it always creates its own. The page would move to Stripe's
   Payment Element confirming the invoice's PaymentIntent with its client
-  secret. That means Velox owns the payment UI, 3D Secure handling and
+  secret. That means Hardcount owns the payment UI, 3D Secure handling and
   wallet display that Checkout gives for free.
 - **Amount changes.** A credit note or credit application that changes the
   amount due must update the PaymentIntent's amount before any
@@ -92,7 +92,7 @@ and none of them is needed today:
   PaymentIntents per invoice and would be rewritten.
 
 Peers do not settle the question either. Lago and Kill Bill run the
-per-attempt model in production, as Velox does.
+per-attempt model in production, as Hardcount does.
 
 ## Alternatives considered
 

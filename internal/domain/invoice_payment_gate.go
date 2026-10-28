@@ -63,10 +63,10 @@ type PaymentBlock struct {
 //     (paid/voided/draft) still apply and are deliberately NOT folded in, since
 //     those genuinely differ per action.
 //   - PARKED (ADR-107: 'unknown' with no PaymentIntent id) — Stripe's answer
-//     was unclear and named no payment. Velox finds out from Stripe's list of
+//     was unclear and named no payment. Hardcount finds out from Stripe's list of
 //     the customer's payments within a day (ADR-127 amendment 2026-10-20).
 //     Mark-uncollectible is ALLOWED here, for a customer who paid another way;
-//     everything else is refused and says what Velox does next.
+//     everything else is refused and says what Hardcount does next.
 //   - IN FLIGHT with a known PaymentIntent — genuinely resolving, so waiting is
 //     the correct advice.
 //
@@ -114,7 +114,7 @@ func PaymentBlocksAction(inv Invoice, action InvoiceAction) PaymentBlock {
 		return PaymentBlock{}
 	}
 
-	// Parked: Stripe's answer was unclear and named no payment. Velox finds
+	// Parked: Stripe's answer was unclear and named no payment. Hardcount finds
 	// out from Stripe's list of the customer's payments, within a day.
 	if inv.Parked() {
 		if action == ActionMarkUncollectible {
@@ -152,7 +152,7 @@ func PaymentBlocksAction(inv Invoice, action InvoiceAction) PaymentBlock {
 // invoice; an offline payment makes the customer pay twice.
 //
 // A STALE hold refuses too (ADR-127): its charge may have been sent and its
-// result lost, so Stripe may hold a payment Velox has not recorded. It stays
+// result lost, so Stripe may hold a payment Hardcount has not recorded. It stays
 // set until the stale-hold sweep has asked Stripe, within about an hour (a
 // parked invoice's within a day, but 'unknown' is decided above).
 // Write-off is the one action a stale hold allows: it moves no money, a
@@ -195,7 +195,7 @@ func PaymentBlocksActionHeld(inv Invoice, action InvoiceAction, hold ChargeHoldS
 const ChargeHoldRefusalMessage = "A charge on this invoice is being confirmed with Stripe. Try again in a few minutes; an interrupted charge is confirmed within about an hour."
 
 // parkedMessage says why the action is refused while Stripe may still
-// complete the charge, what Velox does next on its own (ADR-127 amendment
+// complete the charge, what Hardcount does next on its own (ADR-127 amendment
 // 2026-10-20: records a payment that appears, and charges again as usual when
 // none has appeared 24 hours after the attempt), and ends by naming
 // mark-uncollectible: the one action allowed meanwhile, for a customer who paid
@@ -205,9 +205,9 @@ const ChargeHoldRefusalMessage = "A charge on this invoice is being confirmed wi
 func parkedMessage(action InvoiceAction, alreadyWrittenOff bool) string {
 	const why = "Stripe didn't confirm this invoice's last charge and may still complete it"
 	if alreadyWrittenOff {
-		return why + ". The invoice is already written off, so Velox will not charge it again. If Stripe completes the charge, the payment is recorded here"
+		return why + ". The invoice is already written off, so Hardcount will not charge it again. If Stripe completes the charge, the payment is recorded here"
 	}
-	const next = ". Velox checks Stripe every hour and records the payment if it appears; if none appears within 24 hours, the invoice is charged again as usual. If the customer paid another way, mark the invoice uncollectible instead"
+	const next = ". Hardcount checks Stripe every hour and records the payment if it appears; if none appears within 24 hours, the invoice is charged again as usual. If the customer paid another way, mark the invoice uncollectible instead"
 	switch action {
 	case ActionVoid:
 		return why + ", and voiding it could annul an invoice that is in fact paid" + next
@@ -262,7 +262,7 @@ func inFlightMessage(action InvoiceAction) string {
 // stale state. Industry evidence killed the feature, not the gates: 1 of 6
 // verified platforms (Stripe alone) charges the written-off object; the
 // majority reverse the write-off artifact or have no such state, and
-// recovery runs on NORMAL rails. Velox's shape for that is a fresh recovery
+// recovery runs on NORMAL rails. Hardcount's shape for that is a fresh recovery
 // invoice, which has none of the three hazards. RecoveryWarnsOnOfflinePayment
 // below SURVIVES: recording money that already arrived is never refused, but
 // the operator is told when it will not reconcile.
@@ -273,7 +273,7 @@ func inFlightMessage(action InvoiceAction) string {
 //	refuse to CREATE a bad money event; never refuse to RECORD one that
 //	already happened.
 //
-// A card charge is Velox choosing to move money, so those conditions BLOCK. An
+// A card charge is Hardcount choosing to move money, so those conditions BLOCK. An
 // offline payment means the wire already landed — refusing to record it would
 // only make the books wrong too, on top of a payment that exists either way.
 //

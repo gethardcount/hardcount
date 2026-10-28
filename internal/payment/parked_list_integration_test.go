@@ -51,7 +51,7 @@ var (
 	// looks like.
 	parkDeadline = parkCause{name: "the caller's deadline ended the call", mode: fakeHang, deadline: true}
 	// Stripe answered 500 just before the caller's deadline, and the
-	// deadline passed while Velox saved that answer. Slow answers are what
+	// deadline passed while Hardcount saved that answer. Slow answers are what
 	// an incident looks like, so this is the same 500 as park500 and must
 	// get the same 24 hours, not the ~75-minute path of a lost result.
 	park500AtDeadline = parkCause{name: "Stripe answered 500 just before the caller's deadline", mode: fakeSave500, deadline: true, slowSave: true}
@@ -183,7 +183,7 @@ func TestParked_StripeShowsNothing_WaitsADayThenChargedOnce(t *testing.T) {
 				t.Error("hold kept after the park was finished")
 			}
 			if n := r.attempts(inv.ID, domain.ChargeAttemptUnknown); n != 0 {
-				t.Errorf("%d attempt rows still unknown, want 0: Velox now knows the attempt took nothing", n)
+				t.Errorf("%d attempt rows still unknown, want 0: Hardcount now knows the attempt took nothing", n)
 			}
 			if n := r.attempts(inv.ID, domain.ChargeAttemptFailed); n != 1 {
 				t.Errorf("%d failed attempt rows, want 1 (the parked attempt)", n)

@@ -1,6 +1,6 @@
 # Browser tests (Playwright)
 
-These tests open the dashboard in Chromium against a real Velox API and real
+These tests open the dashboard in Chromium against a real Hardcount API and real
 data. They check what only a browser can see: that pages load cleanly and fit
 the screen, and that the main things an operator does work end to end.
 
@@ -70,31 +70,31 @@ the screen, and that the main things an operator does work end to end.
 
 ## Run them locally
 
-You need a Velox API with a bootstrapped tenant, and the dashboard built and
+You need a Hardcount API with a bootstrapped tenant, and the dashboard built and
 served by `vite preview`, which forwards `/v1` to the API. Use your own
 database so the tests never touch your dev data.
 
 ```bash
-export PGPASSWORD=velox
+export PGPASSWORD=hardcount
 # 1. A database of your own (the docker compose Postgres on :5432). The
-#    velox_app role the API runs as is created by docker/init.sql.
-psql -h localhost -U velox -d postgres -c 'CREATE DATABASE velox_e2e OWNER velox'
-psql -h localhost -U velox -d velox_e2e -c 'GRANT ALL ON SCHEMA public TO velox_app'
-psql -h localhost -U velox -d velox_e2e -c 'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO velox_app'
-psql -h localhost -U velox -d velox_e2e -c 'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO velox_app'
-export DATABASE_URL='postgres://velox:velox@localhost:5432/velox_e2e?sslmode=disable'
+#    hardcount_app role the API runs as is created by docker/init.sql.
+psql -h localhost -U hardcount -d postgres -c 'CREATE DATABASE hardcount_e2e OWNER hardcount'
+psql -h localhost -U hardcount -d hardcount_e2e -c 'GRANT ALL ON SCHEMA public TO hardcount_app'
+psql -h localhost -U hardcount -d hardcount_e2e -c 'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO hardcount_app'
+psql -h localhost -U hardcount -d hardcount_e2e -c 'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO hardcount_app'
+export DATABASE_URL='postgres://hardcount:hardcount@localhost:5432/hardcount_e2e?sslmode=disable'
 
-# 2. Bootstrap a tenant (prints the vlx_secret_test_ key) and start the API
-VELOX_BOOTSTRAP_EMAIL=e2e@example.com VELOX_BOOTSTRAP_PASSWORD=e2e-password \
-  go run ./cmd/velox-bootstrap
-PORT=8190 go run ./cmd/velox
+# 2. Bootstrap a tenant (prints the hc_secret_test_ key) and start the API
+HARDCOUNT_BOOTSTRAP_EMAIL=e2e@example.com HARDCOUNT_BOOTSTRAP_PASSWORD=e2e-password \
+  go run ./cmd/hardcount-bootstrap
+PORT=8190 go run ./cmd/hardcount
 
 # 3. In web-v2/: build, serve, and run the tests
 npm run build
-VELOX_API_TARGET=http://127.0.0.1:8190 npx vite preview --host 127.0.0.1 --port 4190
+HARDCOUNT_API_TARGET=http://127.0.0.1:8190 npx vite preview --host 127.0.0.1 --port 4190
 npx playwright install chromium   # once
 E2E_BASE_URL=http://127.0.0.1:4190 E2E_API_URL=http://127.0.0.1:8190 \
-E2E_API_KEY=vlx_secret_test_... E2E_EMAIL=e2e@example.com E2E_PASSWORD=e2e-password \
+E2E_API_KEY=hc_secret_test_... E2E_EMAIL=e2e@example.com E2E_PASSWORD=e2e-password \
   npm run test:e2e
 ```
 

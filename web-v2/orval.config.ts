@@ -19,14 +19,14 @@
 // existing apiRequest fetch wrapper in src/lib/api.ts — so generated
 // hooks reuse the dashboard's auth posture (session cookies,
 // credentials: 'include'), error envelope parsing, and
-// Velox-Request-Id header handling without duplicating any of that
+// Hardcount-Request-Id header handling without duplicating any of that
 // into orval's default Axios client. Same trade-off Stripe makes in
 // stripe-node — the SDK is generated from the spec but the transport
 // is hand-written and reused.
 import { defineConfig } from 'orval'
 
 export default defineConfig({
-  velox: {
+  hardcount: {
     input: {
       target: './public/openapi.yaml',
     },

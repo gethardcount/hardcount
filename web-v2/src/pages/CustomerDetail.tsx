@@ -2278,7 +2278,7 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, onClose, onC
 
 // PublicCostDashboardCard surfaces the rotate-and-share flow for the
 // public cost-dashboard token (ADR-031). Rotation mints a fresh
-// `vlx_pcd_…` token that the operator can paste into an iframe src /
+// `hc_pcd_…` token that the operator can paste into an iframe src /
 // fetch call from the customer's app — no API key needed. Rotating
 // invalidates the previous token immediately (read-only surface; the
 // rotate intent is "stop the previous URL right now").
@@ -2326,9 +2326,9 @@ function PublicCostDashboardCard({ customerId, readOnly = false }: { customerId:
             </div>
             <code className="block text-[11px] font-mono break-all text-foreground">{latest.public_url}</code>
             <p className="text-[11px] text-amber-700 dark:text-amber-400">
-              Save this URL now — Velox doesn't show it again after navigation. Re-rotate to mint a new one.
+              Save this URL now — Hardcount doesn't show it again after navigation. Re-rotate to mint a new one.
             </p>
-            {/* The server composes an absolute URL only when VELOX_API_BASE_URL
+            {/* The server composes an absolute URL only when HARDCOUNT_API_BASE_URL
                 is set; unset, public_url is a bare path and the thing the
                 operator copies cannot be opened by their customer. The server
                 warns about this at boot, but boot logs are not where the person
@@ -2340,7 +2340,7 @@ function PublicCostDashboardCard({ customerId, readOnly = false }: { customerId:
             {!/^https?:\/\//i.test(latest.public_url) && (
               <p className="text-[11px] text-amber-700 dark:text-amber-400">
                 This is a path, not a full URL — your customer can't open it as-is. Set{' '}
-                <code className="font-mono">VELOX_API_BASE_URL</code> to your public API origin and
+                <code className="font-mono">HARDCOUNT_API_BASE_URL</code> to your public API origin and
                 re-generate, or prefix the path with that origin yourself.
               </p>
             )}

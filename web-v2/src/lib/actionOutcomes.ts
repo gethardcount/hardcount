@@ -39,7 +39,7 @@ export function collectOutcome(inv: {
     case 'failed':
       return { tone: 'error', title: `${n} payment failed`, description: 'The reason is shown on this invoice.' }
     case 'unknown':
-      return { tone: 'warning', title: 'Payment status unknown', description: "Velox couldn't confirm the result with Stripe. See the notice on this invoice." }
+      return { tone: 'warning', title: 'Payment status unknown', description: "Hardcount couldn't confirm the result with Stripe. See the notice on this invoice." }
     default:
       return { tone: 'info', title: `${n} not charged`, description: 'No payment was made. Refresh to see the latest status.' }
   }

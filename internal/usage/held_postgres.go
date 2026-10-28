@@ -783,7 +783,7 @@ func insertHeldTx(ctx context.Context, tx *sql.Tx, tenantID string, ev domain.He
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		ON CONFLICT (tenant_id, livemode, idempotency_key) DO NOTHING
 		RETURNING id
-	`, postgres.NewID("vlx_hue"), tenantID, ev.Source, ev.ExternalCustomerID,
+	`, postgres.NewID("hc_hue"), tenantID, ev.Source, ev.ExternalCustomerID,
 		ev.EventName, ev.Quantity, props, ev.IdempotencyKey, ev.EventAt,
 		ev.ObservedCostMicros, string(ev.Reason),
 	).Scan(&id)

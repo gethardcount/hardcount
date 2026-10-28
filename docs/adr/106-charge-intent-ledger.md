@@ -17,9 +17,9 @@ facts), ADR-105 (attempt-counter key seed).
 ## Summary
 
 This ADR proposed a `charge_intents` table that records each charge attempt,
-with its exact Stripe idempotency key and request parameters, before Velox calls
+with its exact Stripe idempotency key and request parameters, before Hardcount calls
 `CreatePaymentIntent`. The reason: after a timeout or a crash, Stripe can hold a
-PaymentIntent that Velox never learned about, and a later retry could open a
+PaymentIntent that Hardcount never learned about, and a later retry could open a
 second one and charge the customer twice. A recovery sweep would replay the
 stored request, and Stripe would return the original PaymentIntent. Replay is
 only safe while Stripe still keeps the key, so the design stops replaying after
@@ -35,7 +35,7 @@ ADR-108's search has had a chance to resolve the case.
 ADR-105 fixed *which* idempotency key we send. One residual survived it, and no
 key scheme can fix it, because the problem is not the key:
 
-> Stripe can create a PaymentIntent that Velox never learns the name of.
+> Stripe can create a PaymentIntent that Hardcount never learns the name of.
 
 Two ways in, neither exotic:
 
@@ -154,7 +154,7 @@ Stripe's dashboard is searchable by it.
 
 **An operator exit already exists**, verified rather than assumed: re-sending
 the event from the Stripe dashboard settles the invoice, because
-`handlePaymentSucceeded` falls back to `metadata["velox_invoice_id"]`. The
+`handlePaymentSucceeded` falls back to `metadata["hardcount_invoice_id"]`. The
 sweep's adoption step then closes the intent with no API call.
 
 **Replay is time-bounded.** Stripe retains keys "at least 24 hours"; replaying
@@ -247,7 +247,7 @@ improvement, not a safety one.
 Its marginal coverage is narrower than it first appears. A lost response alone is
 already handled without it — the `payment_intent.*` webhook names the
 PaymentIntent and the ordinary settle path runs (the handler can find the invoice
-from `metadata.velox_invoice_id` even when no id was stored). So this ledger is
+from `metadata.hardcount_invoice_id` even when no id was stored). So this ledger is
 really **insurance against webhook failure**: lost response AND webhook lost,
 misconfigured, or delayed past patience. Stripe retries webhooks with backoff for
 about three days, which makes that band genuinely narrow.
@@ -296,7 +296,7 @@ something a better implementation would avoid.
 
 - **Stripe cached a non-2xx for the key** — replay is inert forever and can
   never name the PaymentIntent. Ends at `needs_review`. Closing it needs a
-  `PaymentIntents.List` tier filtered on `metadata.velox_invoice_id`, exact
+  `PaymentIntents.List` tier filtered on `metadata.hardcount_invoice_id`, exact
   rather than heuristic because at most one attempt per invoice is unresolved.
   *Trigger: the first `needs_review` row, or production cutover.*
 - **Attempts older than the replay TTL** are never auto-recovered, by
@@ -312,7 +312,7 @@ something a better implementation would avoid.
   residual claimed refunds "pass an empty idempotency key, so stripe-go
   generates a random one per attempt", making them the same orphan class.
   Reading the call sites disproved it, and the correction is recorded here
-  rather than quietly deleted: both callers pass `velox_cn_<credit_note_id>`,
+  rather than quietly deleted: both callers pass `hardcount_cn_<credit_note_id>`,
   which is stable across every retry, so a lost response replays to the ORIGINAL
   refund. A double refund was never possible there — the credit-note row already
   is the durable pre-call record that the charge path lacked.
@@ -449,7 +449,7 @@ round. It is REFUTED, twice over:
 
 **Where the recoverability question actually landed:** [ADR-108]
 (108-parked-invoices-search-and-adopt.md). Stripe's PaymentIntent Search API can
-find an unnamed PI by the `velox_invoice_id` metadata every engine PI has always
+find an unnamed PI by the `hardcount_invoice_id` metadata every engine PI has always
 carried — a READ, so it cannot double-charge. Its found-PI arms survived the
 same attack round; its give-up arms did not and were deleted from the design.
 That delivers the automatic-recovery delta this ledger promised for the common

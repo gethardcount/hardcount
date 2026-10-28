@@ -18,25 +18,25 @@ import (
 	"github.com/sagarsuperuser/velox/internal/testutil"
 )
 
-// runtimeRoleURL is the PRODUCTION runtime role (velox_app) — the role
-// cmd/velox connects as via APP_DATABASE_URL, and the role migration 0150
+// runtimeRoleURL is the PRODUCTION runtime role (hardcount_app) — the role
+// cmd/hardcount connects as via APP_DATABASE_URL, and the role migration 0150
 // revokes the audit_log write grants from. Since v0.9.0, 0150 is part of
 // the baseline: the baseline's GRANT lines carry the result, and the
-// baseline ends with 0150's REVOKE so installs whose velox_app has default
+// baseline ends with 0150's REVOKE so installs whose hardcount_app has default
 // privileges end the same way (ADR-125).
 //
-// Note this is deliberately NOT testutil's TEST_DATABASE_URL (velox_test_app).
-// velox_test_app is test-only scaffolding (docker/init.sql + ci.yml) that picks
+// Note this is deliberately NOT testutil's TEST_DATABASE_URL (hardcount_test_app).
+// hardcount_test_app is test-only scaffolding (docker/init.sql + ci.yml) that picks
 // up ALL on every table through ALTER DEFAULT PRIVILEGES, so it is NOT affected
 // by 0150 — which is exactly what makes it useful below as the "still holds the
 // grants" role that proves the triggers are an independent second layer.
-const defaultRuntimeRoleURL = "postgres://velox_app:velox_app@localhost:5432/velox_test?sslmode=disable"
+const defaultRuntimeRoleURL = "postgres://hardcount_app:hardcount_app@localhost:5432/hardcount_test?sslmode=disable"
 
-// runtimeRoleURL resolves the velox_app (runtime-role) connection string.
+// runtimeRoleURL resolves the hardcount_app (runtime-role) connection string.
 //
 // It DERIVES from the suite's own TEST_DATABASE_URL rather than hardcoding a
 // database name: the suite can be pointed at a throwaway database (parallel
-// agents, CI matrices), and a hardcoded "velox_test" would then assert against
+// agents, CI matrices), and a hardcoded "hardcount_test" would then assert against
 // the WRONG database — passing while the database under test kept its grants.
 // Only the role is swapped; host, database and params are inherited.
 func runtimeRoleURL() string {
@@ -51,7 +51,7 @@ func runtimeRoleURL() string {
 	if err != nil {
 		return defaultRuntimeRoleURL
 	}
-	u.User = url.UserPassword("velox_app", "velox_app")
+	u.User = url.UserPassword("hardcount_app", "hardcount_app")
 	return u.String()
 }
 
@@ -59,13 +59,13 @@ func runtimeRoleURL() string {
 // posture migration 0150 establishes for the append-only audit log.
 //
 // Before 0150 the BEFORE UPDATE/DELETE (0011) and BEFORE TRUNCATE (0115)
-// triggers were the ONLY barrier: velox_app still held UPDATE/DELETE/TRUNCATE
+// triggers were the ONLY barrier: hardcount_app still held UPDATE/DELETE/TRUNCATE
 // from 0001's blanket `GRANT ALL`, so disabling or dropping a trigger would
 // have left the tamper-evidence log writable by the role that serves customer
 // traffic. Now there are two INDEPENDENT layers, and this test asserts the
 // error each one raises so a regression in either is distinguishable:
 //
-//	Layer 1 — privileges: velox_app is refused at the PERMISSION check
+//	Layer 1 — privileges: hardcount_app is refused at the PERMISSION check
 //	          (SQLSTATE 42501), before any trigger runs.
 //	Layer 2 — triggers:   a role that STILL holds the write grants is refused
 //	          by the trigger (SQLSTATE P0001, "append-only").
@@ -84,7 +84,7 @@ func TestAuditLog_AppendOnlyIsTwoIndependentLayers(t *testing.T) {
 	// layer-2 assertion against a WHERE that matches nothing would pass
 	// vacuously (no rows → no trigger → no error).
 	logger := audit.NewLogger(db)
-	if err := logger.Log(ctx, tenantID, "invoice.finalize", "invoice", "vlx_inv_grants", "", nil); err != nil {
+	if err := logger.Log(ctx, tenantID, "invoice.finalize", "invoice", "hc_inv_grants", "", nil); err != nil {
 		t.Fatalf("seed audit row: %v", err)
 	}
 
@@ -116,21 +116,21 @@ func TestAuditLog_AppendOnlyIsTwoIndependentLayers(t *testing.T) {
 
 	// ---- Layer 1: the runtime role has no write privilege at all. ----------
 	//
-	// Connect as velox_app itself. A permission check precedes both RLS and the
-	// triggers, so this fails even though velox_app cannot see the row under
+	// Connect as hardcount_app itself. A permission check precedes both RLS and the
+	// triggers, so this fails even though hardcount_app cannot see the row under
 	// RLS (no app.tenant_id GUC set) — the statement never gets that far.
-	t.Run("layer 1: velox_app is refused at the permission check", func(t *testing.T) {
+	t.Run("layer 1: hardcount_app is refused at the permission check", func(t *testing.T) {
 		runtimeURL := runtimeRoleURL()
 		pool, err := sql.Open("pgx", runtimeURL)
 		if err != nil {
-			t.Fatalf("open velox_app pool: %v", err)
+			t.Fatalf("open hardcount_app pool: %v", err)
 		}
 		defer func() { _ = pool.Close() }()
 		if err := pool.PingContext(ctx); err != nil {
 			// Never skip: a silent skip would retire the security assertion the
 			// moment the local role drifts, which is how the original GRANT ALL
 			// survived unnoticed for 114 migrations.
-			t.Fatalf("velox_app must exist and be able to connect (see docker/init.sql / ci.yml): %v", err)
+			t.Fatalf("hardcount_app must exist and be able to connect (see docker/init.sql / ci.yml): %v", err)
 		}
 
 		for _, w := range writes {
@@ -146,7 +146,7 @@ func TestAuditLog_AppendOnlyIsTwoIndependentLayers(t *testing.T) {
 
 				_, err = tx.ExecContext(ctx, w.sql, w.args...)
 				if err == nil {
-					t.Fatalf("velox_app was allowed to %s audit_log — migration 0150's REVOKE is not in effect", w.name)
+					t.Fatalf("hardcount_app was allowed to %s audit_log — migration 0150's REVOKE is not in effect", w.name)
 				}
 				var pgErr *pgconn.PgError
 				if !errors.As(err, &pgErr) {
@@ -167,7 +167,7 @@ func TestAuditLog_AppendOnlyIsTwoIndependentLayers(t *testing.T) {
 
 	// ---- Layer 2: the triggers still hold for a role that HAS the grants. --
 	//
-	// velox_test_app retains ALL on audit_log (ALTER DEFAULT PRIVILEGES, not
+	// hardcount_test_app retains ALL on audit_log (ALTER DEFAULT PRIVILEGES, not
 	// touched by 0150) and TxBypass turns off RLS, so this role can see and
 	// match the row. It is refused anyway — by the trigger. That is what makes
 	// the trigger an INDEPENDENT layer rather than a consequence of the REVOKE:

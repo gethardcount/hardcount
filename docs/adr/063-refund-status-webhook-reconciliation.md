@@ -5,7 +5,7 @@
 
 ## Summary
 
-Stripe webhooks decide a refund's final status, because Stripe refunds settle later and a `pending` refund can still fail. Velox records the status Stripe returns at creation, and the refund webhooks then move it to `succeeded` or `failed`; Stripe's `canceled` counts as `failed`. A late `pending` never overwrites a final status, and the dashboard flags a refund that failed or has been pending over 72 hours. Amended 2026-08-04: because Stripe idempotency keys expire after about 24 hours, a retry first looks the refund up at Stripe and creates a new one only when none is live. Status: active, amended 2026-08-04; refunds are retried only by the operator.
+Stripe webhooks decide a refund's final status, because Stripe refunds settle later and a `pending` refund can still fail. Hardcount records the status Stripe returns at creation, and the refund webhooks then move it to `succeeded` or `failed`; Stripe's `canceled` counts as `failed`. A late `pending` never overwrites a final status, and the dashboard flags a refund that failed or has been pending over 72 hours. Amended 2026-08-04: because Stripe idempotency keys expire after about 24 hours, a retry first looks the refund up at Stripe and creates a new one only when none is live. Status: active, amended 2026-08-04; refunds are retried only by the operator.
 
 ## Context
 
@@ -17,7 +17,7 @@ confirming event). A `pending` refund can flip to **`failed`** (bank reject /
 insufficient platform balance → money returns to the *platform* balance, the
 customer gets **nothing**).
 
-Velox recorded refund status **optimistically from the create-call**:
+Hardcount recorded refund status **optimistically from the create-call**:
 `StripeRefunder.CreateRefund` dropped `ref.Status` and `creditnote.Issue()` /
 `RetryRefund` hard-coded `refund_status = succeeded` on any non-error create.
 The webhook switch handled **no** refund events. So a refund recorded
@@ -31,14 +31,14 @@ was *rare* (only "no refunder/no PI at issue").
 ## Decision
 
 1. **Record the create-time status faithfully.** `CreateRefund` returns Stripe's
-   actual status (mapped to a Velox `refund_status`); `Issue()` and `RetryRefund`
+   actual status (mapped to a Hardcount `refund_status`); `Issue()` and `RetryRefund`
    record `pending` when Stripe says pending, not a blanket `succeeded`. (The
    common healthy card refund still returns `succeeded` synchronously.)
 
 2. **The webhook is the source of truth for the async outcome.** Handle
    `charge.refund.updated`, `refund.updated`, and `refund.failed` (all carry a
    Refund object; one status-driven handler) — admitted via
-   `endpointAuthoritativeEvent` (refunds carry no `velox_*` metadata; the
+   `endpointAuthoritativeEvent` (refunds carry no `hardcount_*` metadata; the
    per-tenant endpoint + HMAC is authoritative). Match webhook→credit-note by
    `stripe_refund_id`; apply **monotonically** (terminal wins; a stale
    out-of-order `pending` never clobbers a terminal). Reuse the existing
@@ -48,7 +48,7 @@ was *rare* (only "no refunder/no PI at issue").
    the rare create→webhook race.
 
 3. **Status mapping (lossy, no migration).** Stripe's 5 states collapse into
-   Velox's 4-value `refund_status` CHECK: `succeeded→succeeded`,
+   Hardcount's 4-value `refund_status` CHECK: `succeeded→succeeded`,
    `failed→failed`, **`canceled→failed`** (money returned to platform — the
    operator-actionable bucket), `pending→pending`, `requires_action→pending`.
    The `canceled→failed` collapse is the re-litigable call here.
@@ -84,7 +84,7 @@ was *rare* (only "no refunder/no PI at issue").
 ## Amendment (2026-08-04): retry convergence cannot rest on the idempotency key
 
 An adversarial architecture review of the refund model found the original
-retry contract — "same `velox_cn_<id>` key as Issue(), Stripe dedups, so a
+retry contract — "same `hardcount_cn_<id>` key as Issue(), Stripe dedups, so a
 retry converges on the original refund" — resting on a premise Stripe does
 not provide: **v1 idempotency keys expire after ~24 hours**, while this ADR's
 own needs-attention window tells the operator to act at **72 hours**. Two
@@ -102,7 +102,7 @@ shipped defects followed:
 
 **The amended contract — reconcile, adopt, only then create:**
 
-- Every refund create stamps **metadata `velox_cn_id`**. Durable convergence
+- Every refund create stamps **metadata `hardcount_cn_id`**. Durable convergence
   is the metadata, not the key: a refund whose response was lost is always
   findable again.
 - `RetryRefund` with a stored id calls **`GetRefund`** first — a read, which
@@ -115,7 +115,7 @@ shipped defects followed:
   metadata (excluding the dead id) and **adopts** a live match instead of
   creating — ADR-108's search-and-adopt, applied to money-out.
 - The create key scopes to the CN's **state generation**
-  (`velox_cn_<id>_r_<hash(refund_id|status)>`): concurrent retries share a
+  (`hardcount_cn_<id>_r_<hash(refund_id|status)>`): concurrent retries share a
   snapshot and collapse into one refund at Stripe, while a retry after a
   persisted identity/status change gets a fresh key instead of replaying a
   dead attempt's saved response. `updated_at` is deliberately NOT in the
@@ -152,7 +152,7 @@ lookup indexes (migration 0169 — `invoice_id`, partial `stripe_refund_id`);
 the webhook match was previously a tenant-wide scan.
 
 Transition note: refunds created before this amendment carry no
-`velox_cn_id` metadata, so the adoption search cannot see them. No
+`hardcount_cn_id` metadata, so the adoption search cannot see them. No
 environment holds such a row with a live lost refund (verified: the two
 pre-amendment failed CNs are walk fixtures with no provider refund at all),
 but a self-hosted upgrader with a stuck pre-amendment refund should

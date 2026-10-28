@@ -28,15 +28,15 @@ func TestResolveActor(t *testing.T) {
 		},
 		{
 			name:      "api key → api_key",
-			ctx:       auth.WithKeyID(context.Background(), "vlx_secret_abc"),
+			ctx:       auth.WithKeyID(context.Background(), "hc_secret_abc"),
 			wantType:  "api_key",
-			wantActor: "vlx_secret_abc",
+			wantActor: "hc_secret_abc",
 		},
 		{
 			name:      "customer token → customer",
-			ctx:       auth.WithCustomerActor(context.Background(), "vlx_cus_9"),
+			ctx:       auth.WithCustomerActor(context.Background(), "hc_cus_9"),
 			wantType:  "customer",
-			wantActor: "vlx_cus_9",
+			wantActor: "hc_cus_9",
 		},
 		{
 			name:      "background worker → system",
@@ -46,13 +46,13 @@ func TestResolveActor(t *testing.T) {
 		},
 		{
 			name:      "customer beats user beats key",
-			ctx:       auth.WithCustomerActor(auth.WithKeyID(auth.WithUserID(context.Background(), "usr_1"), "vlx_key"), "vlx_cus_1"),
+			ctx:       auth.WithCustomerActor(auth.WithKeyID(auth.WithUserID(context.Background(), "usr_1"), "hc_key"), "hc_cus_1"),
 			wantType:  "customer",
-			wantActor: "vlx_cus_1",
+			wantActor: "hc_cus_1",
 		},
 		{
 			name:      "user beats key when both present",
-			ctx:       auth.WithKeyID(auth.WithUserID(context.Background(), "usr_2"), "vlx_key_2"),
+			ctx:       auth.WithKeyID(auth.WithUserID(context.Background(), "usr_2"), "hc_key_2"),
 			wantType:  "user",
 			wantActor: "usr_2",
 		},

@@ -61,7 +61,7 @@ def census(d, tag):
     vac_comps = []
     for lf in glob.glob(os.path.join(d, f"{tag}.postgres.log")):
         txt = open(lf, errors="replace").read()
-        for m in re.finditer(r"(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) UTC.*?automatic vacuum of table \"velox\.public\.usage_events\"", txt):
+        for m in re.finditer(r"(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) UTC.*?automatic vacuum of table \"hardcount\.public\.usage_events\"", txt):
             ts = calendar.timegm(time.strptime(m.group(1), "%Y-%m-%d %H:%M:%S"))
             seg = txt[m.end():m.end()+2000]; dm = re.search(r"([\d]+) dirtied", seg)
             vac_comps.append((ts, int(dm.group(1)) if dm else 0))

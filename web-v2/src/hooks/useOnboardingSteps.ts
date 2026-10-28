@@ -15,7 +15,7 @@ export interface OnboardingStep {
 
 // Per-tenant so a user admin-ing multiple tenants doesn't mute the launcher
 // globally. The account menu's "Show setup checklist" un-dismisses.
-const dismissStorageKey = (tenantID: string) => `velox:getstarted-dismissed:${tenantID}`
+const dismissStorageKey = (tenantID: string) => `hardcount:getstarted-dismissed:${tenantID}`
 
 function readDismissed(tenantID: string): boolean {
   try {
@@ -29,7 +29,7 @@ function readDismissed(tenantID: string): boolean {
 // Hiding and showing the checklist happen in different components (the
 // panel's X, the account menu's "Show setup checklist"), each with its own
 // copy of this hook. A change event tells every copy to re-read storage.
-const DISMISS_EVENT = 'velox:getstarted-dismissed'
+const DISMISS_EVENT = 'hardcount:getstarted-dismissed'
 
 function subscribeDismissed(onChange: () => void): () => void {
   window.addEventListener(DISMISS_EVENT, onChange)
@@ -42,7 +42,7 @@ function subscribeDismissed(onChange: () => void): () => void {
 
 // The checklist panel is rendered once by Layout; the sidebar row and the
 // Home welcome card open it with this event.
-const OPEN_EVENT = 'velox:open-setup-checklist'
+const OPEN_EVENT = 'hardcount:open-setup-checklist'
 
 export function openSetupChecklist() {
   window.dispatchEvent(new Event(OPEN_EVENT))
@@ -57,7 +57,7 @@ export function onOpenSetupChecklist(handler: () => void): () => void {
 // account (no subscriptions yet) lands there. Once is remembered in this
 // browser. When storage can't be read we say "already shown": a checklist
 // that pops open on every visit is worse than one that never does.
-const autoOpenedKey = (userID: string) => `velox:setup-checklist-auto-opened:${userID}`
+const autoOpenedKey = (userID: string) => `hardcount:setup-checklist-auto-opened:${userID}`
 
 export function claimChecklistAutoOpen(userID: string): boolean {
   try {
@@ -186,7 +186,7 @@ export function useOnboardingSteps() {
     {
       key: 'usage',
       label: 'Send a usage event',
-      desc: 'Your app reports what each customer used; Velox prices it.',
+      desc: 'Your app reports what each customer used; Hardcount prices it.',
       to: '/usage',
       cta: 'Go to Usage',
       done: hasUsage,

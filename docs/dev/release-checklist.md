@@ -19,7 +19,7 @@ clean.
 
 - `cp .env.example .env`, then `make up` (Postgres, Redis, Mailpit), `make bootstrap` (prints the sign-in and the test keys), `make dev` (API on :8080) and `cd web-v2 && npm run dev` (dashboard on :5173).
 - The `.env.example` defaults send email to Mailpit and point email links at the dashboard on :5173. Read mail at http://localhost:8025.
-- Settings → Payments: paste the Stripe test keys. Run `stripe listen --forward-to localhost:8080/v1/webhooks/stripe/<vlx_spc_id>` and paste its `whsec_…` back.
+- Settings → Payments: paste the Stripe test keys. Run `stripe listen --forward-to localhost:8080/v1/webhooks/stripe/<hc_spc_id>` and paste its `whsec_…` back.
 - Stripe test cards:
 
   | Card | Result |
@@ -34,18 +34,18 @@ clean.
 ## Stripe
 
 - [ ] Wrong keys are refused: a made-up `sk_test_` key shows "Stripe didn't accept these keys".
-- [ ] Charge: the first invoice of a subscription whose base fee bills in advance is charged to `4242`, Velox shows it paid, and the Stripe dashboard shows the same amount.
+- [ ] Charge: the first invoice of a subscription whose base fee bills in advance is charged to `4242`, Hardcount shows it paid, and the Stripe dashboard shows the same amount.
 - [ ] Webhook: `stripe listen` shows `payment_intent.succeeded` answered with 200.
 - [ ] Hosted invoice page: Pay with `4242` → "Paid" banner within seconds, and the card appears on the customer.
-- [ ] Hosted invoice currency: first make sure the test can fail. Use a US test account with Adaptive Pricing **on** (Dashboard → Settings → Adaptive Pricing), and check that a plain session for a `+location_IN` email offers INR: `stripe checkout sessions create -d mode=payment -d success_url=https://example.com -d customer_email=test+location_IN@example.com -d "line_items[0][quantity]=1" -d "line_items[0][price_data][currency]=usd" -d "line_items[0][price_data][unit_amount]=1000" -d "line_items[0][price_data][product_data][name]=control"` → open its `url`. If INR is not offered, this step proves nothing on this account. Then, for a Velox customer whose email has `+location_IN`, open the hosted invoice page and Pay → the session has `adaptive_pricing.enabled=false` and Checkout shows only the invoice's currency. After paying with `4242`, the PaymentIntent shows the invoice's amount and currency and has no `presentment_details`.
-- [ ] Hosted invoice Pay on an Indian account: on a test account registered in India (Stripe doesn't offer Adaptive Pricing there), Pay on a hosted invoice → Checkout opens. Velox sends `adaptive_pricing[enabled]=false` on every hosted Pay session, so a Stripe error here breaks Pay for every invoice of such a tenant.
+- [ ] Hosted invoice currency: first make sure the test can fail. Use a US test account with Adaptive Pricing **on** (Dashboard → Settings → Adaptive Pricing), and check that a plain session for a `+location_IN` email offers INR: `stripe checkout sessions create -d mode=payment -d success_url=https://example.com -d customer_email=test+location_IN@example.com -d "line_items[0][quantity]=1" -d "line_items[0][price_data][currency]=usd" -d "line_items[0][price_data][unit_amount]=1000" -d "line_items[0][price_data][product_data][name]=control"` → open its `url`. If INR is not offered, this step proves nothing on this account. Then, for a Hardcount customer whose email has `+location_IN`, open the hosted invoice page and Pay → the session has `adaptive_pricing.enabled=false` and Checkout shows only the invoice's currency. After paying with `4242`, the PaymentIntent shows the invoice's amount and currency and has no `presentment_details`.
+- [ ] Hosted invoice Pay on an Indian account: on a test account registered in India (Stripe doesn't offer Adaptive Pricing there), Pay on a hosted invoice → Checkout opens. Hardcount sends `adaptive_pricing[enabled]=false` on every hosted Pay session, so a Stripe error here breaks Pay for every invoice of such a tenant.
 - [ ] 3-D Secure: Pay with `4000 0027 6000 3184`, fail the challenge → the invoice stays unpaid; pass it → paid.
 - [ ] 3-D Secure off-session: save `4000 0027 6000 3184` through **Add payment method**, then finalize a one-off invoice → Stripe answers `authentication_required`; the notice reads "Customer must confirm payment" with only **Email payment link**; Mailpit has "Action required — confirm your payment for invoice …" with no word of a decline. Pay on the hosted page and pass the challenge → paid.
 - [ ] Refund: a credit note with "Refund to card" → `refund_status=succeeded`, and the refund shows in the Stripe dashboard.
-- [ ] Key in use: start two `stripe payment_intents create -d amount=2000 -d currency=usd -d payment_method=pm_card_visa -d "payment_method_types[]=card" -d confirm=true -i <key>` at once with one new key. Repeat with a fresh key until one answers HTTP 409 with code `idempotency_key_in_use` (identical replies are a replay) → write its error `type` in the comment on `stripe409KeyInUse` in `internal/payment/stripe_409_test.go`. Velox treats every 409 as unclear, whatever the type ([#976](https://github.com/getvelox/velox/issues/976)).
-- [ ] List after create: create a PaymentIntent for a test customer with metadata `velox_invoice_id=inv_x`, then at once `stripe payment_intents list --customer <cus> -d "expand[]=data.latest_charge"` → it is listed, with `latest_charge.refunded`. The stale-hold sweep reads "not listed" as "Stripe never got the charge" ([ADR-127](../adr/127-a-lost-charge-result-is-resolved-by-asking-stripe.md)).
+- [ ] Key in use: start two `stripe payment_intents create -d amount=2000 -d currency=usd -d payment_method=pm_card_visa -d "payment_method_types[]=card" -d confirm=true -i <key>` at once with one new key. Repeat with a fresh key until one answers HTTP 409 with code `idempotency_key_in_use` (identical replies are a replay) → write its error `type` in the comment on `stripe409KeyInUse` in `internal/payment/stripe_409_test.go`. Hardcount treats every 409 as unclear, whatever the type ([#976](https://github.com/gethardcount/hardcount/issues/976)).
+- [ ] List after create: create a PaymentIntent for a test customer with metadata `hardcount_invoice_id=inv_x`, then at once `stripe payment_intents list --customer <cus> -d "expand[]=data.latest_charge"` → it is listed, with `latest_charge.refunded`. The stale-hold sweep reads "not listed" as "Stripe never got the charge" ([ADR-127](../adr/127-a-lost-charge-result-is-resolved-by-asking-stripe.md)).
 - [ ] List for a customer this account does not have: `stripe payment_intents list --customer cus_doesnotexist` → write down whether Stripe answers an empty list or a `resource_missing` error. On an error the sweep keeps the hold and logs "can't confirm an earlier charge with Stripe"; on an empty list it clears it.
-- [ ] Interrupted charge: hold Stripe's response in a TCP proxy, start **Collect payment** on a test invoice, and SIGKILL Velox once Stripe has the request. After restart the invoice refuses **Collect payment** with "being confirmed with Stripe"; the first reconciler run after the hold is 10 minutes old marks it paid, with one PaymentIntent in the Stripe dashboard.
+- [ ] Interrupted charge: hold Stripe's response in a TCP proxy, start **Collect payment** on a test invoice, and SIGKILL Hardcount once Stripe has the request. After restart the invoice refuses **Collect payment** with "being confirmed with Stripe"; the first reconciler run after the hold is 10 minutes old marks it paid, with one PaymentIntent in the Stripe dashboard.
 - [ ] India: on a test account registered in India, the same list call works (Search is not offered there).
 - [ ] Stripe Tax: with a US state registration in the Stripe test account, tax provider "Stripe Tax", customer with a full US address → the invoice has a tax line that matches Stripe's calculation.
 
@@ -67,7 +67,7 @@ A dunning run is the automatic retries after a failed payment.
 - [ ] Invoice → Email: the message arrives in Mailpit; open it, read it, and check the amount and the links.
 - [ ] The emailed PDF opens, and its total, lines, tax and buyer address match the invoice page.
 - [ ] Run a real LiteLLM proxy with the callback from [the LiteLLM guide](../integrations/litellm.md) → one completion creates one `input` and one `output` usage event on the customer (plus `cache_read` if the prompt was cached).
-- [ ] With the same proxy, send one completion on a model the customer's plan has no price for → `velox_usage_unbilled_total{reason="no_price"}` on `/metrics` goes up by the call's events, and the customer page shows them in its "not billed" row.
+- [ ] With the same proxy, send one completion on a model the customer's plan has no price for → `hardcount_usage_unbilled_total{reason="no_price"}` on `/metrics` goes up by the call's events, and the customer page shows them in its "not billed" row.
 - [ ] Open [Anthropic's pricing page](https://platform.claude.com/docs/en/about-claude/pricing) and the models overview. Update `anthropicListPrices` and `anthropicPricesChecked` in `internal/recipe/anthropic_prices_test.go`. If a price moved, fix `anthropic_style.yaml`, bump its version, and add a CHANGELOG line telling existing installs to update that price. If a model was added, also:
   - Add its id to `modelFamilies` in `internal/integrations/litellm/mapper.go`. If its price depends on the prompt's length, add it to `promptTiers` too.
   - Add its prices to the plan in `anthropic_style.yaml`, bump the version, and add a CHANGELOG line telling existing installs to add its prices.
@@ -87,12 +87,12 @@ A dunning run is the automatic retries after a failed payment.
 
 ## Fresh install and upgrade
 
-These prove that the images the quick start pulls work, and that an existing install can move to them. Use a machine that has Docker but no Velox containers or volumes, for example a new VM.
+These prove that the images the quick start pulls work, and that an existing install can move to them. Use a machine that has Docker but no Hardcount containers or volumes, for example a new VM.
 
 ### Fresh install
 
-- [ ] Clone the release tag, then run `./quickstart.sh` in `deploy/compose`. The output names the new release ("Starting Velox v0.X.Y from the published images.") and ends with a login and a test key.
-- [ ] `docker compose exec velox-api /usr/local/bin/velox version` prints the new release.
+- [ ] Clone the release tag, then run `./quickstart.sh` in `deploy/compose`. The output names the new release ("Starting Hardcount v0.X.Y from the published images.") and ends with a login and a test key.
+- [ ] `docker compose exec hardcount-api /usr/local/bin/hardcount version` prints the new release.
 - [ ] `./quickstart.sh demo` ends with links to a finalized invoice and its customer, and both open in the dashboard.
 
 ### Upgrade drill
@@ -101,12 +101,12 @@ Skip it for v0.9.0: its previous release, v0.8.2, has no upgrade path. On a v0.8
 
 1. Run `./quickstart.sh destroy` to start from an empty install. Check out the previous release tag and run `./quickstart.sh`, then `./quickstart.sh demo`.
    **You see:** the demo's invoice link. Open it and note the invoice number, total and line amounts. Download its PDF.
-2. Check out the new release tag. In `deploy/compose/.env`, change the tag on the `VELOX_IMAGE` and `VELOX_DASHBOARD_IMAGE` lines to the new release. Run `docker compose pull`, then `docker compose run --rm velox-api migrate status`.
+2. Check out the new release tag. In `deploy/compose/.env`, change the tag on the `HARDCOUNT_IMAGE` and `HARDCOUNT_DASHBOARD_IMAGE` lines to the new release. Run `docker compose pull`, then `docker compose run --rm hardcount-api migrate status`.
    **You see:** the plan, with `running now:  no`. The state is `behind`, listing the release's new migrations.
 3. Run `docker compose up -d --no-build`.
-   **You see:** `velox-api` is recreated, and `velox version` prints the new release.
-4. Check the migrations: `docker compose logs velox-api | grep migration`.
-   **You see:** one `migration applied` line per migration, then `migrations applied`, with `version` set to the new release's last migration number, and no error. `velox migrate status` now says `up to date`.
+   **You see:** `hardcount-api` is recreated, and `hardcount version` prints the new release.
+4. Check the migrations: `docker compose logs hardcount-api | grep migration`.
+   **You see:** one `migration applied` line per migration, then `migrations applied`, with `version` set to the new release's last migration number, and no error. `hardcount migrate status` now says `up to date`.
 5. Open the invoice from step 1.
    **You see:** the same number, total and line amounts. Its PDF has the same lines and amounts as the one you downloaded. The "Generated on" time at the bottom differs, because each PDF is made when you open it. A release that changes what the PDF prints says so in its notes.
 6. Open the Dunning policies page.
@@ -117,4 +117,4 @@ Skip it for v0.9.0: its previous release, v0.8.2, has no upgrade path. On a v0.8
 
 ## First invoice tutorial
 
-- [ ] Run [docs/first-invoice.md](../first-invoice.md) end to end against the quick-start stack from the fresh install. Every command works as written, and each output matches the one under its "You see:". CI runs the same commands on every pull request, against a build from source, not the release images. When a step differs, fix the page on `main` before you publish the release notes. The page links its own version for the release that `quickstart.sh` starts. When you change `VELOX_VERSION` there, change the page's link and version too: `TestFirstInvoicePageNamesTheQuickStartRelease` fails until you do.
+- [ ] Run [docs/first-invoice.md](../first-invoice.md) end to end against the quick-start stack from the fresh install. Every command works as written, and each output matches the one under its "You see:". CI runs the same commands on every pull request, against a build from source, not the release images. When a step differs, fix the page on `main` before you publish the release notes. The page links its own version for the release that `quickstart.sh` starts. When you change `HARDCOUNT_VERSION` there, change the page's link and version too: `TestFirstInvoicePageNamesTheQuickStartRelease` fails until you do.

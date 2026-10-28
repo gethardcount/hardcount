@@ -178,7 +178,7 @@ count; no reminder email was ever dispatched. Both the cron hook
 `PostgresStore` queries were deleted.
 
 Rationale: a proactive **pre-due** payment-reminder email to the
-customer is a B2C/SMB pattern, not the B2B/AI-infra norm Velox targets —
+customer is a B2C/SMB pattern, not the B2B/AI-infra norm Hardcount targets —
 where operators own collection and **dunning** (Phase 5, post-due) is the
 real money-protection path. Carrying inert scaffolding for an unbuilt,
 off-wedge feature is the kind of doc/code-that-lies this codebase
@@ -287,7 +287,7 @@ boundary stays per-phase (current shape).
 
 Known defect, deferred: its cool-off compares wall `now` with `updated_at`, which is simulated on a clock-pinned invoice. After a clock moves past the real date, such an invoice is not picked up until wall time catches up. If this is fixed, measure the cool-off from a wall-time stamp rather than moving it into Advance. Stripe resolves in real time, so a per-clock phase would still need the same real wait.
 
-**Which test-clock defects get fixed now.** The core of this design is sound: one pin per customer (ADR-027), disjoint flows (ADR-028, this ADR), one effective "now". Most defects found since come from the seam where Stripe, webhooks and email run in real time while Velox simulates. That seam can absorb unbounded work, so:
+**Which test-clock defects get fixed now.** The core of this design is sound: one pin per customer (ADR-027), disjoint flows (ADR-028, this ADR), one effective "now". Most defects found since come from the seam where Stripe, webhooks and email run in real time while Hardcount simulates. That seam can absorb unbounded work, so:
 
 - **Fix now** when a normal simulation gives a wrong result: a wrong amount, a wrong state, or a run that gets stuck under ordinary use.
 - **Register with a trigger** when the defect needs an unusual combination (for example an async payment method, a lost webhook and a clock together) or only makes a timestamp look inconsistent.
@@ -296,7 +296,7 @@ Registered under this rule on 2026-10-10, in the velox-ops DP-readiness register
 
 - the reconciler cool-off above;
 - a clock invoice that failed without a dunning run is never enrolled, because the backfill excludes simulated invoices;
-- `velox_anchor_at` in the idempotent PaymentIntent params (plausible, not reproduced).
+- `hardcount_anchor_at` in the idempotent PaymentIntent params (plausible, not reproduced).
 
 ## Amendment 2026-10-20: credit expiry runs after dunning
 

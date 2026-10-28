@@ -120,7 +120,7 @@ const (
 // LiteLLM callback, which must answer 200 for a row it cannot ingest.
 const HeldUsageSourceLiteLLM = "litellm"
 
-// HeldUsageEvent is a usage row Velox received but could not ingest yet,
+// HeldUsageEvent is a usage row Hardcount received but could not ingest yet,
 // because its customer or meter did not exist (#1044, ADR-122). It keeps
 // the idempotency key the row would have had in usage_events, so a release
 // writes it at most once.

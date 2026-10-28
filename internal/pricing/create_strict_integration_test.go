@@ -167,7 +167,7 @@ func TestPriceAndOverrideCreate_RefuseUnknownField(t *testing.T) {
 	}{
 		{"price flat_amount", pricePath, `{"meter_id":"` + meter.ID + `","dimension_match":{"m":"a"},"mode":"per_unit","flat_amount":2}`, "flat_amount", plans},
 		{"price tier unit_amount", pricePath, `{"meter_id":"` + meter.ID + `","dimension_match":{"m":"b"},"mode":"graduated","tiers":[{"up_to":null,"unit_amount":"5"}]}`, "unit_amount", plans},
-		{"override unit_amount_decimal", "/", `{"customer_id":"vlx_cus_x","price_id":"` + prices[0].ID + `","mode":"per_unit","unit_amount_decimal":"1.5"}`, "unit_amount_decimal", overrides},
+		{"override unit_amount_decimal", "/", `{"customer_id":"hc_cus_x","price_id":"` + prices[0].ID + `","mode":"per_unit","unit_amount_decimal":"1.5"}`, "unit_amount_decimal", overrides},
 	}
 	for _, tc := range refusals {
 		rr := do(tc.srv, tc.path, tc.body)

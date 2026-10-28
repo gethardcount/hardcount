@@ -48,7 +48,7 @@ rate.
 A separate, related question — "should we show per-line tax on the invoice?" —
 was checked against the same sources: **no**. Stripe aggregates tax into a
 single invoice-level line `per tax rate`; per-line tax rates exist only in
-exports/reporting, not the rendered invoice. Velox's existing shape (one
+exports/reporting, not the rendered invoice. Hardcount's existing shape (one
 aggregate tax line + a per-jurisdiction breakdown only when lines span >1
 jurisdiction) already matches this; **unchanged** by this ADR.
 

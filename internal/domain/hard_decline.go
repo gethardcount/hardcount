@@ -5,7 +5,7 @@ import (
 	"sort"
 )
 
-// hardDeclineCodes are the Stripe decline codes after which Velox does not
+// hardDeclineCodes are the Stripe decline codes after which Hardcount does not
 // charge the same card again for the same invoice (#966, ADR-126).
 //
 // The list is Stripe Billing's own: "Stripe can't automatically retry a
@@ -25,14 +25,14 @@ import (
 //     reason for blocking a charge (the charge's outcome.reason, with
 //     network_status not_sent_to_network:
 //     https://docs.stripe.com/declines#blocked-payments), so no bank refused
-//     the card and Velox never sees it as a decline code.
+//     the card and Hardcount never sees it as a decline code.
 //
 // Not on the list, so still retried on schedule: fraudulent and
 // merchant_blacklist (Stripe Radar's decisions, not the bank's),
 // restricted_card, stop_payment_order, expired_card and every other code.
 // Stripe's retry rule does not treat them as final either.
 //
-// incorrect_number reaches Velox in two shapes: as the bank's decline code,
+// incorrect_number reaches Hardcount in two shapes: as the bank's decline code,
 // or as Stripe's error code with no decline code. The payment package reads
 // both (payment.declineCodeOf).
 var hardDeclineCodes = map[string]bool{

@@ -172,7 +172,7 @@ func TestBillOnePeriod_DeferredMaxBucket_BilledExactlyOnceAtClose(t *testing.T) 
 	periodStart := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
 	fireAt := time.Date(2026, 4, 10, 0, 0, 0, 0, time.UTC)
 	invoices.invoices = append(invoices.invoices, domain.Invoice{
-		ID: "vlx_inv_fire", SubscriptionID: "sub_1", TenantID: "t1",
+		ID: "hc_inv_fire", SubscriptionID: "sub_1", TenantID: "t1",
 		Status: domain.InvoicePaid, PaymentStatus: domain.PaymentSucceeded,
 		TaxFacts:           domain.TaxFacts{TaxStatus: domain.InvoiceTaxOK},
 		BillingReason:      domain.BillingReasonThreshold,
@@ -180,7 +180,7 @@ func TestBillOnePeriod_DeferredMaxBucket_BilledExactlyOnceAtClose(t *testing.T) 
 		BillingPeriodEnd:   fireAt,
 	})
 	invoices.lineItems = append(invoices.lineItems, domain.InvoiceLineItem{
-		InvoiceID: "vlx_inv_fire", LineType: domain.LineTypeUsage,
+		InvoiceID: "hc_inv_fire", LineType: domain.LineTypeUsage,
 		MeterID: "mtr_api", PriceID: "prc_api", AmountCents: 40000,
 	})
 

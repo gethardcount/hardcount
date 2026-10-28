@@ -9,7 +9,7 @@
 // the browser respects that, so we don't need to set `download` on
 // the anchor — but we do for older browsers that ignore the header.
 export async function downloadServerCSV(path: string, defaultFilename: string): Promise<void> {
-  const API_BASE = (window as { __VELOX_API_BASE?: string }).__VELOX_API_BASE || ''
+  const API_BASE = (window as { __HARDCOUNT_API_BASE?: string }).__HARDCOUNT_API_BASE || ''
   const url = `${API_BASE}${path}`
   const res = await fetch(url, { credentials: 'include' })
   if (!res.ok) {

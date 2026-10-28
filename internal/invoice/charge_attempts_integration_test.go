@@ -58,7 +58,7 @@ func TestRecordChargeAttempt_UpsertContract(t *testing.T) {
 	due := ps.AddDate(0, 0, 30)
 	inv, err := store.Create(ctx, tenantID, domain.Invoice{
 		CustomerID: cust.ID, SubscriptionID: sub.ID,
-		InvoiceNumber: "VLX-ATTEMPT-001",
+		InvoiceNumber: "HC-ATTEMPT-001",
 		Status:        domain.InvoiceDraft, PaymentStatus: domain.PaymentPending, Currency: "USD",
 		BillingPeriodStart: ps, BillingPeriodEnd: pe,
 		IssuedAt: &ps, DueAt: &due, NetPaymentTermDays: 30,
@@ -201,7 +201,7 @@ func TestChargeAttempt_SettleTransitionsResolveOutcomeAtomically(t *testing.T) {
 	// FAILED report on a PI no chokepoint ever recorded (hosted checkout):
 	// the transition itself must create the row — it is the only record of a
 	// hosted attempt, which never moves the invoice.
-	failed := mk("VLX-ATOMIC-FAIL")
+	failed := mk("HC-ATOMIC-FAIL")
 	if _, _, err := store.MarkPaymentFailedReportingTransition(ctx, tenantID, failed.ID,
 		domain.PaymentFailureReport{PaymentIntentID: "pi_atomic_fail", Message: "Your card was declined.", External: true}, nil); err != nil {
 		t.Fatalf("mark failed: %v", err)
@@ -220,7 +220,7 @@ func TestChargeAttempt_SettleTransitionsResolveOutcomeAtomically(t *testing.T) {
 
 	// SUCCEEDED settle resolves an existing chokepoint row in place —
 	// insert-time identity (trigger, sim anchor) must survive.
-	paid := mk("VLX-ATOMIC-PAID")
+	paid := mk("HC-ATOMIC-PAID")
 	simAt := ps.AddDate(0, 0, 3)
 	if err := store.RecordChargeAttempt(ctx, tenantID, domain.InvoiceChargeAttempt{
 		InvoiceID: paid.ID, StripePaymentIntentID: "pi_atomic_ok",

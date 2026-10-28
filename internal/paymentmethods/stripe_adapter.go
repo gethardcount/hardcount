@@ -57,8 +57,8 @@ func (a *StripeAdapter) client(ctx context.Context) (*stripe.Client, error) {
 }
 
 // EnsureStripeCustomer resolves (or lazily creates) the Stripe customer
-// for this Velox customer. Single source of truth: customers.stripe_customer_id
-// (migration 0096). A Velox customer without a Stripe Customer record
+// for this Hardcount customer. Single source of truth: customers.stripe_customer_id
+// (migration 0096). A Hardcount customer without a Stripe Customer record
 // gets one created here on first PM action; subsequent calls
 // short-circuit on the persisted ID.
 //
@@ -88,12 +88,12 @@ func (a *StripeAdapter) EnsureStripeCustomer(ctx context.Context, tenantID, cust
 		return "", fmt.Errorf("read Stripe credentials for tenant=%s livemode=%v: %w", tenantID, livemode, err)
 	}
 	if sc == nil {
-		// Typed for the same reason as client(): a customer Velox has not yet
+		// Typed for the same reason as client(): a customer Hardcount has not yet
 		// sent to Stripe reached this first, and answered 500.
 		return "", errs.StripeNotConnected()
 	}
 
-	// Pre-populate the Stripe Customer with the Velox-side fields
+	// Pre-populate the Stripe Customer with the Hardcount-side fields
 	// (email + display name + billing profile if present) at create
 	// time. Pre-2026-05-29 this created the row with metadata only,
 	// leaving email/name/address null on Stripe — Checkout couldn't
@@ -106,8 +106,8 @@ func (a *StripeAdapter) EnsureStripeCustomer(ctx context.Context, tenantID, cust
 	params := &stripe.CustomerCreateParams{
 		Params: stripe.Params{
 			Metadata: map[string]string{
-				"velox_tenant_id":   tenantID,
-				"velox_customer_id": customerID,
+				"hardcount_tenant_id":   tenantID,
+				"hardcount_customer_id": customerID,
 			},
 		},
 	}
@@ -169,7 +169,7 @@ func (a *StripeAdapter) EnsureStripeCustomer(ctx context.Context, tenantID, cust
 
 	// Persist on the customer row so future calls short-circuit. The
 	// returned id must be the RECORDED one: a card saved on a Stripe
-	// customer Velox has not recorded can never be charged. If the write
+	// customer Hardcount has not recorded can never be charged. If the write
 	// fails, re-read — a concurrent first-PM action may have recorded its
 	// own customer, and that winner is the one to use; otherwise fail.
 	if err := a.customerLink.SetStripeCustomerID(ctx, tenantID, customerID, stripeCust.ID); err != nil {
@@ -199,10 +199,10 @@ func (a *StripeAdapter) CreateSetupCheckoutSession(ctx context.Context, stripeCu
 		CancelURL:          stripe.String(cancelURL),
 		// Propagate metadata to BOTH the Checkout Session AND the
 		// underlying SetupIntent. The setup_intent.succeeded webhook
-		// reads velox_customer_id off the SetupIntent's metadata —
+		// reads hardcount_customer_id off the SetupIntent's metadata —
 		// without SetupIntentData here, that field is empty and the
 		// PM attach silently skips (handler logs "missing
-		// velox_customer_id" and returns nil, leaving the customer
+		// hardcount_customer_id" and returns nil, leaving the customer
 		// with a card on Stripe's side but no payment_methods row
 		// locally — the exact symptom that surfaced 2026-05-26).
 		// Stripe does not auto-copy Session metadata to SetupIntent.
@@ -238,13 +238,13 @@ func (a *StripeAdapter) DetachPaymentMethod(ctx context.Context, stripePaymentMe
 // the Stripe Customer ID via the customerLink — the local PM row was
 // already updated, the Stripe Customer must already exist (the PM
 // couldn't have been attached otherwise). Returns errs.ErrNotFound if
-// the Velox customer has no linked Stripe customer (out-of-band data
+// the Hardcount customer has no linked Stripe customer (out-of-band data
 // drift); the Service treats that as a soft skip + audit row entry,
 // not a fail, because the local default is still authoritative.
 func (a *StripeAdapter) SetDefaultPaymentMethod(ctx context.Context, tenantID, customerID, stripePaymentMethodID string) error {
 	cust, err := a.customerLink.Get(ctx, tenantID, customerID)
 	if err != nil {
-		return fmt.Errorf("lookup velox customer: %w", err)
+		return fmt.Errorf("lookup hardcount customer: %w", err)
 	}
 	if cust.StripeCustomerID == "" {
 		return errs.ErrNotFound

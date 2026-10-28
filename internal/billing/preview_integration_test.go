@@ -115,7 +115,7 @@ func (f *previewFixture) seedSubscription(
 		t.Fatalf("create plan: %v", err)
 	}
 
-	subID = postgres.NewID("vlx_sub")
+	subID = postgres.NewID("hc_sub")
 	tx, err := f.db.BeginTx(ctx, postgres.TxTenant, f.tenantID)
 	if err != nil {
 		t.Fatalf("begin sub tx: %v", err)
@@ -135,7 +135,7 @@ func (f *previewFixture) seedSubscription(
 		t.Fatalf("insert sub: %v", err)
 	}
 
-	itemID := postgres.NewID("vlx_si")
+	itemID := postgres.NewID("hc_si")
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO subscription_items (id, tenant_id, subscription_id, plan_id, quantity, metadata, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, 1, '{}'::jsonb, $5, $5)

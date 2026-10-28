@@ -144,7 +144,7 @@ func (a *compositePaymentSetupStore) UpsertPaymentSetupAudited(ctx context.Conte
 
 // stripeCustomerResolverAdapter implements payment.CustomerByStripeIDResolver
 // over the customer store. Lets the setup_intent.succeeded webhook map a
-// SetupIntent's `customer` (a Stripe Customer ID) back to the Velox customer
+// SetupIntent's `customer` (a Stripe Customer ID) back to the Hardcount customer
 // without payment/ importing customer/ — same composition-root pattern as the
 // other adapters here.
 type stripeCustomerResolverAdapter struct {
@@ -496,7 +496,7 @@ func (a *paymentRetrierAdapter) retryPayment(ctx context.Context, tenantID, invo
 	chargeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	// Dedicated retry-charge method tags the PI as velox_purpose=
+	// Dedicated retry-charge method tags the PI as hardcount_purpose=
 	// dunning_retry so the decline's report — from this call's own
 	// response or from the payment_intent.payment_failed webhook —
 	// skips the generic payment-failed email; dunning fires its own
@@ -1163,7 +1163,7 @@ func (a *suppressionCheckerAdapter) IsSuppressed(ctx context.Context, tenantID, 
 }
 
 // stripeCustomerEnsurer resolves-or-creates the Stripe customer for a
-// Velox customer + persists the mapping. Satisfied by
+// Hardcount customer + persists the mapping. Satisfied by
 // *paymentmethods.StripeAdapter — kept as a one-method interface here
 // so api/adapters.go doesn't need to import paymentmethods directly.
 type stripeCustomerEnsurer interface {
@@ -1176,11 +1176,11 @@ type stripeCustomerEnsurer interface {
 // (pinned by hostedinvoice.resolveInvoice from the GetByPublicToken
 // row), then we pick the matching Stripe key and build a Checkout
 // Session in payment mode with a single pre-totaled line item.
-// Velox owns the tax computation, so Stripe's automatic_tax is
+// Hardcount owns the tax computation, so Stripe's automatic_tax is
 // intentionally off — the UnitAmount already includes tax from the
 // invoice row.
 //
-// Metadata stamps velox_purpose=hosted_invoice_pay so the existing
+// Metadata stamps hardcount_purpose=hosted_invoice_pay so the existing
 // payment-intent webhook path can route successful charges to
 // Invoice.RecordPayment via invoice_id lookup, instead of mis-identifying
 // these as subscription-billing charges.
@@ -1188,7 +1188,7 @@ type stripeCustomerEnsurer interface {
 // `ensurer` resolves or mints the Stripe customer so the Checkout
 // session can attach the saved card to it; without `customer` +
 // `setup_future_usage=off_session` Stripe takes the card but never
-// links it to the Velox customer's Stripe customer record, so the
+// links it to the Hardcount customer's Stripe customer record, so the
 // "save card" tick on the hosted page would be a no-op.
 type hostedInvoiceStripeAdapter struct {
 	clients *payment.StripeClients
@@ -1204,7 +1204,7 @@ type hostedInvoiceStripeAdapter struct {
 	audit *audit.Logger
 	// belowMinimum records Stripe refusing the session as below its minimum
 	// charge, as a charge's refusal is recorded (payment.Stripe). For a
-	// customer with no card the Pay click is the only place Velox learns it.
+	// customer with no card the Pay click is the only place Hardcount learns it.
 	belowMinimum checkoutBelowMinimumRecorder
 }
 
@@ -1362,15 +1362,15 @@ func hostedInvoiceCheckoutParams(
 	// Session-level metadata only lives on the checkout_session object;
 	// Stripe does NOT automatically copy it to the underlying PaymentIntent.
 	// Our webhook path routes payment_intent.succeeded → Invoice.MarkPaid
-	// by reading velox_invoice_id off the PI's metadata (payment/handler.go
+	// by reading hardcount_invoice_id off the PI's metadata (payment/handler.go
 	// line 195), so PaymentIntentData.Metadata is the one that actually
 	// matters. The session copy is kept for operator visibility when
 	// inspecting a checkout session directly in Stripe dashboard.
 	meta := map[string]string{
-		"velox_invoice_id":  inv.ID,
-		"velox_tenant_id":   claim.TenantID,
-		"velox_customer_id": inv.CustomerID,
-		"velox_purpose":     payment.PurposeHostedInvoicePay,
+		"hardcount_invoice_id":  inv.ID,
+		"hardcount_tenant_id":   claim.TenantID,
+		"hardcount_customer_id": inv.CustomerID,
+		"hardcount_purpose":     payment.PurposeHostedInvoicePay,
 	}
 	// `customer` + `setup_future_usage=off_session` is the canonical
 	// Stripe pattern for "charge now, save the card for auto-charge of
@@ -1469,7 +1469,7 @@ func (a *hostedInvoiceStripeAdapter) mintForClaim(
 	expiresAt := time.Unix(sess.ExpiresAt, 0).UTC()
 	status, fErr := a.sessions.FillSession(ctx, claim.TenantID, claim.ID, sess.ID, sess.URL, expiresAt)
 	if fErr != nil {
-		// Never hand out a session Velox has not recorded: the reconciler and
+		// Never hand out a session Hardcount has not recorded: the reconciler and
 		// the expire sweeps find sessions by their recorded id, so an
 		// unrecorded one could be paid with nothing ever looking at it. The
 		// customer retries; the re-drive replays the same session and fills.

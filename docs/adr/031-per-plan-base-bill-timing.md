@@ -12,7 +12,7 @@ Each plan has a `base_bill_timing`: `in_arrears` (the default) bills the base fe
 
 ## Context
 
-Velox today bills exclusively **in-arrears**: a subscription's base fee is generated as an invoice at the END of each billing period, alongside the period's usage. The model assumes the recurring fee can wait — fine for usage-only AI inference, broken for the standard B2B SaaS shape where the platform fee is charged at the START of the period and usage is settled at the END.
+Hardcount today bills exclusively **in-arrears**: a subscription's base fee is generated as an invoice at the END of each billing period, alongside the period's usage. The model assumes the recurring fee can wait — fine for usage-only AI inference, broken for the standard B2B SaaS shape where the platform fee is charged at the START of the period and usage is settled at the END.
 
 This is the gap the bundle closes. Without it, the very first DP demo collapses on "did they get charged on day one?".
 
@@ -23,7 +23,7 @@ This is the gap the bundle closes. Without it, the very first DP demo collapses 
 | Stripe Billing | per-price (default `in_advance` for recurring; `in_arrears` for metered) | always `in_arrears` (metered prices forced) | yes — both line types on one invoice |
 | Lago | per-price (`in_advance` \| `in_arrears`) on `charges`, `pay_in_advance` flag on subscriptions | per-charge | yes |
 | Orb | per-price (`fixed_fee_quantity_schedule` + `cadence`) | per-price | yes |
-| Velox today | n/a — single arrears engine | always in_arrears | no — every line is end-of-period |
+| Hardcount today | n/a — single arrears engine | always in_arrears | no — every line is end-of-period |
 
 **Correction (2026-10-23):** Lago's `pay_in_advance` flag is on the plan (for the base fee) and on each charge, not on subscriptions. Checked in lago-api `2e52dfc` (2026-10-22): `app/models/plan.rb:60`, and the `plans` and `charges` tables in `db/structure.sql`.
 
@@ -43,7 +43,7 @@ Add a single column to `plans` — `base_bill_timing TEXT NOT NULL DEFAULT 'in_a
 
 ### Why plan-level, not price-level
 
-Velox's pricing model doesn't have a first-class "Price" entity per se. A plan has:
+Hardcount's pricing model doesn't have a first-class "Price" entity per se. A plan has:
 - One `base_amount_cents` (the recurring fee)
 - N meter IDs (usage)
 
@@ -58,7 +58,7 @@ Considered: `billing_mode IN ('arrears_only', 'advance_base_arrears_usage', 'adv
 ## Consequences
 
 **Positive:**
-- Velox can demo the **hybrid B2B SaaS shape** (in_advance base + in_arrears usage on one invoice) — the 60%+ pattern in self-serve and mid-market deals.
+- Hardcount can demo the **hybrid B2B SaaS shape** (in_advance base + in_arrears usage on one invoice) — the 60%+ pattern in self-serve and mid-market deals.
 - One Stripe-parity gap closed without taking Lago/Orb's full per-price schema cost.
 - Forward-compatible: if per-price granularity is later required, the existing column becomes the value for the canonical base row.
 
@@ -80,7 +80,7 @@ This ADR's "Negative" list flagged "dunning interaction when the in_advance invo
 
 **Problem.** `BillOnCancel` only grants the unused-portion credit when the source in_advance invoice was *paid* (correct — you don't gift a customer balance they never funded). But when the invoice was **unpaid**, it did nothing: the full-period invoice stayed open and rode the dunning path. A customer who cancels on day 3 of a 30-day prebilled period was still chased for all 30 days.
 
-**Industry research (2026-06-01).** Verified across Stripe, Orb, Lago, Chargebee, Recurly, Metronome. Convergent rule (4 high-confidence platforms — Stripe, Orb, Lago, Chargebee): on cancel of an unpaid prebill, **settle the invoice down to the consumed portion** — never chase the full amount, never issue an unfunded credit. Two mechanizations: reduce-to-consumed via an adjustment credit note (Chargebee/Orb/Lago) or void-and-reissue (Stripe). AI-native peers (Orb, Lago) reinforce reduce-to-consumed and gate the credit-note type on payment status — the same gate Velox already had at the credit-grant level. The prior leave-in-dunning behavior matched no platform.
+**Industry research (2026-06-01).** Verified across Stripe, Orb, Lago, Chargebee, Recurly, Metronome. Convergent rule (4 high-confidence platforms — Stripe, Orb, Lago, Chargebee): on cancel of an unpaid prebill, **settle the invoice down to the consumed portion** — never chase the full amount, never issue an unfunded credit. Two mechanizations: reduce-to-consumed via an adjustment credit note (Chargebee/Orb/Lago) or void-and-reissue (Stripe). AI-native peers (Orb, Lago) reinforce reduce-to-consumed and gate the credit-note type on payment status — the same gate Hardcount already had at the credit-grant level. The prior leave-in-dunning behavior matched no platform.
 
 **Decision.** Extend `BillOnCancel`'s unpaid branch to act on the invoice itself:
 - **Paid** → unchanged: grant the unused amount to the customer's credit balance.

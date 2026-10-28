@@ -191,7 +191,7 @@ func TestStampChargeOutcome_OutcomeRecordedDuringTheCallWins(t *testing.T) {
 	})
 
 	t.Run("missing invoice is ErrNotFound", func(t *testing.T) {
-		_, _, err := store.StampChargeOutcome(ctx, tenantID, "vlx_inv_does_not_exist", 0, domain.PaymentUnknown, "pi_X", "")
+		_, _, err := store.StampChargeOutcome(ctx, tenantID, "hc_inv_does_not_exist", 0, domain.PaymentUnknown, "pi_X", "")
 		if !errors.Is(err, errs.ErrNotFound) {
 			t.Fatalf("err = %v, want ErrNotFound", err)
 		}

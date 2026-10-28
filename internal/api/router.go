@@ -108,7 +108,7 @@ type Server struct {
 	EmailOutboxStore *email.OutboxStore
 	EmailSender      *email.Sender
 	// EmailSettledChecker feeds the email dispatcher's staleness gate
-	// (cmd/velox wires it via SetSettledChecker): action-required emails
+	// (cmd/hardcount wires it via SetSettledChecker): action-required emails
 	// whose invoice settled while queued are skipped, not delivered.
 	EmailSettledChecker email.InvoiceSettledChecker
 	CreditSvc           *credit.Service
@@ -130,7 +130,7 @@ type Server struct {
 }
 
 // ServerOption sets a boot-time value NewServer threads into the services it
-// builds. cmd/velox passes the ones config.Load read; tests pass what they
+// builds. cmd/hardcount passes the ones config.Load read; tests pass what they
 // exercise and otherwise run as an install with none of them set.
 type ServerOption func(*serverOptions)
 
@@ -147,7 +147,7 @@ func WithAppEnv(env string) ServerOption {
 	return func(o *serverOptions) { o.appEnv = env }
 }
 
-// WithRateLimits sets the VELOX_RATE_LIMIT_* limits config.Load parsed.
+// WithRateLimits sets the HARDCOUNT_RATE_LIMIT_* limits config.Load parsed.
 // Without it NewServer uses config.DefaultRateLimits.
 func WithRateLimits(rl config.RateLimits) ServerOption {
 	return func(o *serverOptions) { o.rateLimits = rl }
@@ -186,16 +186,16 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	tenantH := tenant.NewHandler(tenantSvc)
 	customerStore := customer.NewPostgresStore(db)
 
-	// PII + webhook-secret encryption at rest — AES-256-GCM via VELOX_ENCRYPTION_KEY.
+	// PII + webhook-secret encryption at rest — AES-256-GCM via HARDCOUNT_ENCRYPTION_KEY.
 	// Customer PII (email, names, phone, tax IDs), webhook signing secrets,
 	// and per-tenant Stripe credentials all share the same encryptor so a
 	// key rotation flows through uniformly. Without a key, they fall back
 	// to plaintext — config.go already requires the key in production.
 	var sharedEnc *crypto.Encryptor
-	if encKey := strings.TrimSpace(os.Getenv("VELOX_ENCRYPTION_KEY")); encKey != "" {
+	if encKey := strings.TrimSpace(os.Getenv("HARDCOUNT_ENCRYPTION_KEY")); encKey != "" {
 		enc, err := crypto.NewEncryptor(encKey)
 		if err != nil {
-			slog.Error("invalid VELOX_ENCRYPTION_KEY, encryption at rest disabled", "error", err)
+			slog.Error("invalid HARDCOUNT_ENCRYPTION_KEY, encryption at rest disabled", "error", err)
 		} else {
 			sharedEnc = enc
 			customerStore.SetEncryptor(enc)
@@ -206,13 +206,13 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 			slog.Info("encryption at rest enabled for customer PII, webhook secrets, Stripe credentials, and hosted-invoice tokens on invoices; an unsent email in email_outbox holds its link token unencrypted until it is sent")
 		}
 	} else {
-		slog.Warn("VELOX_ENCRYPTION_KEY not set — customer PII, webhook secrets, Stripe credentials, and hosted-invoice tokens stored in plaintext")
+		slog.Warn("HARDCOUNT_ENCRYPTION_KEY not set — customer PII, webhook secrets, Stripe credentials, and hosted-invoice tokens stored in plaintext")
 	}
 
 	// Per-tenant Stripe credentials. Each tenant connects their own Stripe
 	// account via POST /v1/settings/stripe; the service looks up the right
 	// keys per request. There are no platform-level STRIPE_SECRET_KEY env
-	// vars anymore — Velox is a billing engine, not a merchant of record.
+	// vars anymore — Hardcount is a billing engine, not a merchant of record.
 	tenantStripeStore := tenantstripe.NewStore(db)
 	if sharedEnc != nil {
 		tenantStripeStore.SetEncryptor(sharedEnc)
@@ -323,9 +323,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 
 	// Transactional outbox for outbound events (RES-1). Producers persist an
 	// event intent to webhook_outbox inside the business-op transaction; the
-	// dispatcher worker (cmd/velox/main.go) drains the queue and calls
+	// dispatcher worker (cmd/hardcount/main.go) drains the queue and calls
 	// Service.Dispatch for each row. Always-on per ADR-040 — the legacy
-	// direct-dispatch fallback (VELOX_WEBHOOK_OUTBOX_ENABLED=false) was cut
+	// direct-dispatch fallback (HARDCOUNT_WEBHOOK_OUTBOX_ENABLED=false) was cut
 	// 2026-05-30 since it voided every retry guarantee and was unreachable
 	// by any operator pressure.
 	outboxStore := webhook.NewOutboxStore(db)
@@ -377,7 +377,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// is encrypted at rest — so without this, every customer-actor row (a
 	// hosted-invoice Pay click, a payment-update link) rendered its Actor as
 	// CIPHERTEXT in production: on the dashboard and in the CSV handed to an
-	// auditor. Nil-safe; a no-op when VELOX_ENCRYPTION_KEY is unset.
+	// auditor. Nil-safe; a no-op when HARDCOUNT_ENCRYPTION_KEY is unset.
 	auditLogger.SetEncryptor(sharedEnc)
 	auditH := audit.NewHandler(auditLogger)
 	// Wire audit logging on the customer handler — currently used to
@@ -397,10 +397,10 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// hands them something a customer cannot open. Composing an origin
 	// from the request would be a guess — the API origin is not the
 	// dashboard origin — so the config stays explicit and the gap stays loud.
-	if base := strings.TrimSpace(os.Getenv("VELOX_API_BASE_URL")); base != "" {
+	if base := strings.TrimSpace(os.Getenv("HARDCOUNT_API_BASE_URL")); base != "" {
 		customerH.SetAPIBaseURL(base)
 	} else {
-		slog.Warn("VELOX_API_BASE_URL NOT SET — the public cost-dashboard URL operators copy will be a relative path, not a shareable link. Set this to your public API origin (e.g. https://api.example.com).")
+		slog.Warn("HARDCOUNT_API_BASE_URL NOT SET — the public cost-dashboard URL operators copy will be a relative path, not a shareable link. Set this to your public API origin (e.g. https://api.example.com).")
 	}
 	settingsH := tenant.NewSettingsHandler(settingsStore)
 	// Field-level settings-change audit (which fields, before/after). This is the
@@ -432,7 +432,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// (5xx/timeout/network), every caller backs off together so we don't
 	// pile retries onto a struggling dependency. Opens after 5 consecutive
 	// Unknown failures, probes after 30s, and emits state transitions to
-	// the velox_stripe_breaker_state gauge so operators can alert on it.
+	// the hardcount_stripe_breaker_state gauge so operators can alert on it.
 	stripeBreaker := breaker.New(breaker.Config{
 		FailureThreshold: 5,
 		Cooldown:         30 * time.Second,
@@ -564,7 +564,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		strings.TrimSpace(os.Getenv("PAYMENT_UPDATE_RETURN_URL")))
 
 	// paymentmethods.StripeAdapter constructed early so the hosted-invoice
-	// Pay flow can use it to ensure a Stripe customer exists for the Velox
+	// Pay flow can use it to ensure a Stripe customer exists for the Hardcount
 	// customer before creating the Checkout session — required for
 	// `customer` + `setup_future_usage=off_session` to actually save the
 	// PM to the customer's Stripe record (otherwise it's a guest checkout
@@ -597,17 +597,17 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	})
 
 	// Email sender. Producers always enqueue into email_outbox via
-	// OutboxSender; the dispatcher worker (cmd/velox/main.go) drains the
+	// OutboxSender; the dispatcher worker (cmd/hardcount/main.go) drains the
 	// queue and invokes the direct *email.Sender below for the actual
 	// SMTP round-trip. This makes email delivery durable across crashes
 	// and transient SMTP failures, and gives operators a DLQ to inspect.
-	// The legacy direct-SMTP-from-producer path (VELOX_EMAIL_OUTBOX_ENABLED
+	// The legacy direct-SMTP-from-producer path (HARDCOUNT_EMAIL_OUTBOX_ENABLED
 	// =false) was cut 2026-05-30 per ADR-040 — same shape as the webhook
 	// outbox cut above.
 	emailSender := email.NewSender(o.appEnv)
 	// Wire tenant settings so customer-facing emails pull per-tenant
 	// branding (logo, brand color, company name, support URL). Cold-start
-	// tenants without settings gracefully fall back to Velox defaults.
+	// tenants without settings gracefully fall back to Hardcount defaults.
 	emailSender.SetSettingsGetter(settingsStore)
 	// Loud startup log so operators don't run prod without SMTP and
 	// only discover it when a customer never receives their invoice.
@@ -632,7 +632,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	}
 	// bounceReporterAdapter wires Sender SMTP 5xx errors to
 	// customer.MarkEmailBounced. Requires an email blinder (configured
-	// later from VELOX_EMAIL_BIDX_KEY); if the blinder is missing, the
+	// later from HARDCOUNT_EMAIL_BIDX_KEY); if the blinder is missing, the
 	// adapter short-circuits and the partner stays on pre-T0-20 behavior
 	// (bounces logged, customer.email_status stays 'unknown').
 	// Attached inside the blinder branch below once emailBlinder exists.
@@ -969,7 +969,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// Prepaid-commit exposure for the attention classifier: credit already
 	// spendable against an invoice nobody paid (ADR-078 D3 fast-follow).
 	invoiceSvc.SetCommitGrantReader(creditStore)
-	// Live hosted payment page for the attention banner: Velox holds its own
+	// Live hosted payment page for the attention banner: Hardcount holds its own
 	// charges while one is open (ADR-068), so the banner must not offer Retry.
 	invoiceSvc.SetPaymentPageReader(invoiceStore)
 	// A card the bank refused for good (#966) turns the decline notice into
@@ -1168,13 +1168,13 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 
 	analyticsH := analytics.NewHandler(db)
 
-	// Email blind index (separate HMAC key from VELOX_ENCRYPTION_KEY so one
+	// Email blind index (separate HMAC key from HARDCOUNT_ENCRYPTION_KEY so one
 	// compromise doesn't reveal the other) powers bounce reporting + the
 	// recipient-suppression gate. Without it those fail closed.
-	if bidxKey := strings.TrimSpace(os.Getenv("VELOX_EMAIL_BIDX_KEY")); bidxKey != "" {
+	if bidxKey := strings.TrimSpace(os.Getenv("HARDCOUNT_EMAIL_BIDX_KEY")); bidxKey != "" {
 		b, err := crypto.NewBlinder(bidxKey)
 		if err != nil {
-			slog.Error("invalid VELOX_EMAIL_BIDX_KEY — bounce-report and suppression lookups will fail closed", "error", err)
+			slog.Error("invalid HARDCOUNT_EMAIL_BIDX_KEY — bounce-report and suppression lookups will fail closed", "error", err)
 		} else {
 			customerStore.SetBlinder(b)
 			// Wire bounce reporting now that we have the blinder. The
@@ -1201,7 +1201,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 			slog.Info("email blind index enabled for bounce reporting + recipient suppression gate")
 		}
 	} else {
-		slog.Warn("VELOX_EMAIL_BIDX_KEY not set — bounce reporting + suppression will fail closed (no customers findable by email)")
+		slog.Warn("HARDCOUNT_EMAIL_BIDX_KEY not set — bounce reporting + suppression will fail closed (no customers findable by email)")
 	}
 	// Operator-side payment-method management — handler-only wiring
 	// here; the store + service were constructed earlier (next to
@@ -1224,9 +1224,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// name is AttachForWebhook so the two AttachFromSetupIntent callers
 	// (tests, webhook) keep their own signatures.
 	stripeAdapter.SetPaymentMethodAttacher(paymentMethodsSvc)
-	// Authoritative fallback when a SetupIntent carries no velox_customer_id
+	// Authoritative fallback when a SetupIntent carries no hardcount_customer_id
 	// metadata (hosted "update payment" / operator add-card Checkout flows
-	// don't set setup_intent_data.metadata): resolve the velox customer from
+	// don't set setup_intent_data.metadata): resolve the hardcount customer from
 	// the SetupIntent's `customer` field so the saved card still persists.
 	stripeAdapter.SetCustomerResolver(&stripeCustomerResolverAdapter{customers: customerStore})
 
@@ -1279,11 +1279,11 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 
 	// The sign-in throttle (ADR-094, amended 2026-10-18): Postgres-only, so it
 	// works without Redis and every replica shares one count. Its HMAC key is
-	// derived from VELOX_ENCRYPTION_KEY, which production requires and config
+	// derived from HARDCOUNT_ENCRYPTION_KEY, which production requires and config
 	// validates; with no key (local development) it uses a fixed one.
-	throttleKey, err := user.ThrottleKey(strings.TrimSpace(os.Getenv("VELOX_ENCRYPTION_KEY")))
+	throttleKey, err := user.ThrottleKey(strings.TrimSpace(os.Getenv("HARDCOUNT_ENCRYPTION_KEY")))
 	if err != nil {
-		slog.Error("invalid VELOX_ENCRYPTION_KEY: the sign-in throttle uses the local development key", "error", err)
+		slog.Error("invalid HARDCOUNT_ENCRYPTION_KEY: the sign-in throttle uses the local development key", "error", err)
 		throttleKey, _ = user.ThrottleKey("")
 	}
 	loginThrottle := user.NewLoginThrottle(db, throttleKey, session.DefaultCookieConfig(o.appEnv))
@@ -1373,7 +1373,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	}
 
 	// Redis for distributed rate limiting. The client is opened and
-	// verified in cmd/velox/main.go (mw.OpenRedis): production REFUSES to
+	// verified in cmd/hardcount/main.go (mw.OpenRedis): production REFUSES to
 	// boot without a reachable Redis (config.validateFatal covers "unset",
 	// main.go covers "unreachable/invalid"), because the general and
 	// hosted-invoice limiters fail CLOSED without it and a replica would
@@ -1428,7 +1428,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// permanently unbilled event. Peer
 	// anchor: Stripe meter events allow 1,000 calls/s live; Orb's TEST mode
 	// alone allows 2,000 events/min. Default 1000 req/s per key, override
-	// via VELOX_RATE_LIMIT_INGEST_PER_SEC.
+	// via HARDCOUNT_RATE_LIMIT_INGEST_PER_SEC.
 	//
 	// Deliberately NEVER fail-closed, even in production: the surface is
 	// authenticated (secret key required), and failing closed would turn a
@@ -1498,7 +1498,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// Audit-coverage detector (ADR-090). A PURE OBSERVER: it reports any
 	// mutating 2xx that produced no audit row and is not declared exempt in the
 	// route-audit registry (audit_routes.go) — slog.Error + the
-	// velox_audit_uncovered_mutation_total counter. It never touches the
+	// hardcount_audit_uncovered_mutation_total counter. It never touches the
 	// response and never buffers the body.
 	//
 	// Mounted at the ROOT, not on /v1: the catch-all it replaces only ever saw
@@ -1872,7 +1872,7 @@ func handleDeepHealth(db *postgres.DB) http.HandlerFunc {
 		checks := map[string]string{"api": "ok"}
 
 		// Draining: the replica is shutting down. Readiness-first so the
-		// balancer drains us before the listener closes (cmd/velox/main.go).
+		// balancer drains us before the listener closes (cmd/hardcount/main.go).
 		if draining.Load() {
 			checks["api"] = "draining"
 			respond.JSON(w, r, http.StatusServiceUnavailable, map[string]any{
@@ -1899,8 +1899,8 @@ func handleDeepHealth(db *postgres.DB) http.HandlerFunc {
 		// Reported in the body only: a stale tick leaves the status code at
 		// 200, because pulling this replica from the balancer does not restart
 		// the tick and on a single replica it would take the API down too.
-		// Alert on velox_scheduler_last_run_timestamp_seconds and
-		// velox_leader_last_tick_age_seconds instead (docs/ops/runbook/monitoring.md).
+		// Alert on hardcount_scheduler_last_run_timestamp_seconds and
+		// hardcount_leader_last_tick_age_seconds instead (docs/ops/runbook/monitoring.md).
 		schedulerMu.RLock()
 		lastRun := schedulerLastRun
 		interval := schedulerInterval

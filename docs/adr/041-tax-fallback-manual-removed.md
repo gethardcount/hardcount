@@ -7,7 +7,7 @@ by migration 0039 (`internal/platform/migrate/sql/0039_tax_block_retry.up.sql`).
 
 ## Summary
 
-If tax calculation fails, the invoice stays a draft until the tax retry job ([ADR-017](017-tax-retry-and-auto-finalize.md)) or the operator resolves it; Velox never substitutes another rate. The `tax_on_failure=fallback_manual` option was removed, because it silently charged zero tax wherever no manual rate was set. Migration 0103 moved every tenant to `block`, the only value its CHECK constraint allows. Choosing `tax_provider=stripe_tax` without a Stripe client is an explicit error, and an operator who wants manual tax sets `tax_provider=manual`. Status: active.
+If tax calculation fails, the invoice stays a draft until the tax retry job ([ADR-017](017-tax-retry-and-auto-finalize.md)) or the operator resolves it; Hardcount never substitutes another rate. The `tax_on_failure=fallback_manual` option was removed, because it silently charged zero tax wherever no manual rate was set. Migration 0103 moved every tenant to `block`, the only value its CHECK constraint allows. Choosing `tax_provider=stripe_tax` without a Stripe client is an explicit error, and an operator who wants manual tax sets `tax_provider=manual`. Status: active.
 
 ## Context
 
@@ -80,7 +80,7 @@ The 2026-05-30 design-debt audit identified this as residual debt:
   block is updated to reflect the post-ADR-041 contract.
 - `internal/tax/providers_test.go` `stripe_tax_without_clients_falls_back_to_manual`
   test case rewritten to assert the new error-loud behavior.
-- Prometheus metric `velox_tax_outcome_total` no longer emits the
+- Prometheus metric `hardcount_tax_outcome_total` no longer emits the
   `outcome="fallback"` label value (only `deferred` remains for the
   failure-mode signal).
 
@@ -97,7 +97,7 @@ The 2026-05-30 design-debt audit identified this as residual debt:
 - **One less branch in the failure path.** `handleFailure` collapses
   to a single defer + metric increment.
 - **No code in production was using `fallback_manual` consciously.**
-  Velox is pre-launch (zero customers). Migration 0039 had set every
+  Hardcount is pre-launch (zero customers). Migration 0039 had set every
   existing tenant including the test tenant; no operator chose this.
 - **Schema retained.** The `tax_on_failure` column stays (forward-compat
   for future failure-handling shapes). Only the CHECK constraint and

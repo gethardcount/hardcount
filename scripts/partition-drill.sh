@@ -17,11 +17,11 @@
 # never run against a database an app replica is using.
 set -euo pipefail
 
-PG_CONTAINER="${PG_CONTAINER:-velox-bench-pg}"
+PG_CONTAINER="${PG_CONTAINER:-hardcount-bench-pg}"
 PG_PORT="${PG_PORT:-55432}"
-PG_DB="${PG_DB:-velox}"
-NET="velox-partition-drill"
-HOLDER="velox-partition-holder"
+PG_DB="${PG_DB:-hardcount}"
+NET="hardcount-partition-drill"
+HOLDER="hardcount-partition-holder"
 ROLE="${ROLE:-webhook_delivery}"
 TTL_S=10        # leader.LeaseTTL
 BEAT_S=3        # leader.HeartbeatEvery
@@ -33,7 +33,7 @@ cleanup() {
   docker network rm "$NET" >/dev/null 2>&1 || true
   q "UPDATE leader_leases SET holder_id = NULL, acquired_at = NULL, heartbeat_at = NULL, expires_at = NULL WHERE role = '${ROLE}' AND holder_id = 'drill'" >/dev/null 2>&1 || true
 }
-q() { PGPASSWORD=velox psql -h localhost -p "$PG_PORT" -U velox -d "$PG_DB" -A -t -c "$1" 2>/dev/null; }
+q() { PGPASSWORD=hardcount psql -h localhost -p "$PG_PORT" -U hardcount -d "$PG_DB" -A -t -c "$1" 2>/dev/null; }
 trap cleanup EXIT
 
 docker network create "$NET" >/dev/null 2>&1 || true
@@ -48,7 +48,7 @@ docker network connect "$NET" "$PG_CONTAINER" >/dev/null 2>&1 || true
 ACQ="UPDATE leader_leases SET holder_id='drill', holder_token=holder_token+1, acquired_at=now(), heartbeat_at=now(), expires_at=now()+interval '${TTL_S} seconds' WHERE role='${ROLE}' AND (expires_at IS NULL OR expires_at < now()) AND paused_at IS NULL RETURNING holder_token"
 BEAT="UPDATE leader_leases SET heartbeat_at=now(), expires_at=now()+interval '${TTL_S} seconds' WHERE role='${ROLE}' AND holder_id='drill'"
 docker run -d --name "$HOLDER" --network "$NET" postgres:16-alpine \
-  sh -c "U='postgres://velox:velox@${PG_CONTAINER}:5432/${PG_DB}'; psql \"\$U\" -A -t -c \"${ACQ}\" || exit 1; while :; do sleep ${BEAT_S}; psql \"\$U\" -A -t -c \"${BEAT}\" >/dev/null || echo 'renew failed'; done" >/dev/null
+  sh -c "U='postgres://hardcount:hardcount@${PG_CONTAINER}:5432/${PG_DB}'; psql \"\$U\" -A -t -c \"${ACQ}\" || exit 1; while :; do sleep ${BEAT_S}; psql \"\$U\" -A -t -c \"${BEAT}\" >/dev/null || echo 'renew failed'; done" >/dev/null
 
 for _ in $(seq 1 30); do
   held=$(q "SELECT held FROM leader_status WHERE role='${ROLE}' AND holder_id='drill'")

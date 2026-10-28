@@ -13,7 +13,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/testutil"
 )
 
-// outboxDeadLettered reads velox_webhook_outbox_dead_lettered_total for
+// outboxDeadLettered reads hardcount_webhook_outbox_dead_lettered_total for
 // max_attempts in test mode; 0 when the series does not exist.
 func outboxDeadLettered(t *testing.T) float64 {
 	t.Helper()
@@ -22,7 +22,7 @@ func outboxDeadLettered(t *testing.T) float64 {
 		t.Fatalf("gather: %v", err)
 	}
 	for _, f := range families {
-		if f.GetName() != "velox_webhook_outbox_dead_lettered_total" {
+		if f.GetName() != "hardcount_webhook_outbox_dead_lettered_total" {
 			continue
 		}
 	metrics:

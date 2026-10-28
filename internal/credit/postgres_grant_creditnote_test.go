@@ -39,7 +39,7 @@ func TestGrantForCreditNoteTx_IdempotentNoDoubleCredit(t *testing.T) {
 	}
 
 	// Same shape creditnote.Issue() uses for a credit-type CN.
-	const creditNoteID = "vlx_cn_grant_idem"
+	const creditNoteID = "hc_cn_grant_idem"
 	input := credit.GrantInput{
 		Currency:    "USD",
 		CustomerID:  cust.ID,

@@ -684,7 +684,7 @@ func TestE2E_PlanPrices_OldContractRefused(t *testing.T) {
 		}
 	}
 	if code, out, raw := r.do(time.Time{}, http.MethodPost, "/v1/meters", map[string]any{
-		"event_name": "other", "name": "other", "rating_rule_version_id": "vlx_rrv_x",
+		"event_name": "other", "name": "other", "rating_rule_version_id": "hc_rrv_x",
 	}); code != http.StatusUnprocessableEntity || flowStr(out, "error", "param") != "rating_rule_version_id" {
 		t.Errorf("meter with a default price: %d %s, want 422 unknown field", code, raw)
 	}

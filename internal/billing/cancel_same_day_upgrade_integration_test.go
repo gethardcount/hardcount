@@ -95,7 +95,7 @@ func TestImmediateCancel_SameDayAsUnpaidUpgrade_VoidsUpgradeInvoice(t *testing.T
 	h.SetTenantLocator(r.f.engine)
 	h.SetNetTermsReader(r.f.engine)
 	req := httptest.NewRequest(http.MethodPatch, "/"+r.f.subID+"/items/"+r.f.itemID, strings.NewReader(`{"quantity":2,"immediate":true}`))
-	req = req.WithContext(auth.WithKeyID(auth.WithTenantID(r.at(changeAt), r.f.tenantID), "vlx_key_cancel_991"))
+	req = req.WithContext(auth.WithKeyID(auth.WithTenantID(r.at(changeAt), r.f.tenantID), "hc_key_cancel_991"))
 	rec := httptest.NewRecorder()
 	h.Routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {

@@ -78,7 +78,7 @@ func TestWatermarkFor(t *testing.T) {
 }
 
 // The PDF never invents a seller: an unset company name prints nothing
-// (it used to print "Velox").
+// (it used to print "Hardcount").
 func TestSellerName_NeverAPlaceholder(t *testing.T) {
 	if got := sellerName(); got != "" {
 		t.Errorf("no company: got %q, want empty", got)
@@ -95,7 +95,7 @@ func TestSellerName_NeverAPlaceholder(t *testing.T) {
 func TestRenderPDF_DraftWithoutSeller(t *testing.T) {
 	now := time.Date(2026, 10, 16, 0, 0, 0, 0, time.UTC)
 	inv := domain.Invoice{
-		ID: "vlx_inv_draft", InvoiceNumber: "VLX-000007", Status: domain.InvoiceDraft,
+		ID: "hc_inv_draft", InvoiceNumber: "HC-000007", Status: domain.InvoiceDraft,
 		Currency: "USD", SubtotalCents: 9900, TotalAmountCents: 9900, AmountDueCents: 9900,
 		IssuedAt: &now, Memo: "Draft add-on",
 	}

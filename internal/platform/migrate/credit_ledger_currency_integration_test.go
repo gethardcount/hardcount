@@ -15,7 +15,7 @@ const creditLedgerCurrencyVersion = 199
 // CHECK and makes the column NOT NULL; NULL, lowercase and short codes are
 // refused afterwards; Down then Up works.
 func TestCreditLedgerCurrency_BackfillValidateAndRollback(t *testing.T) {
-	dsn, db := scratchDB(t, "velox_test_ccyb_b_migrate")
+	dsn, db := scratchDB(t, "hardcount_test_ccyb_b_migrate")
 	ctx := context.Background()
 	if err := up(ctx, dsn, filesBefore(t, creditLedgerCurrencyVersion)); err != nil {
 		t.Fatalf("Up to before %d: %v", creditLedgerCurrencyVersion, err)

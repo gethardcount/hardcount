@@ -75,7 +75,7 @@ export function HeldUsageNotice({ className, onReleased }: { className?: string;
         title="Usage held, not billed"
         details={
           <p>
-            LiteLLM sent these rows for a customer or meter that did not exist. Velox kept them with their
+            LiteLLM sent these rows for a customer or meter that did not exist. Hardcount kept them with their
             idempotency keys, so releasing them records each row once. A row counts toward the billing period its
             time falls in only if that period&apos;s invoice has not been built yet.
           </p>
@@ -131,7 +131,7 @@ export function HeldUsageNotice({ className, onReleased }: { className?: string;
             <AlertDialogTitle>Discard held usage</AlertDialogTitle>
             <AlertDialogDescription>
               {discardTarget
-                ? `Discard ${discardTarget.rows.toLocaleString('en-US')} held usage rows for '${discardTarget.externalId}'? They will never be billed. Velox keeps them as a record.`
+                ? `Discard ${discardTarget.rows.toLocaleString('en-US')} held usage rows for '${discardTarget.externalId}'? They will never be billed. Hardcount keeps them as a record.`
                 : ''}
             </AlertDialogDescription>
           </AlertDialogHeader>

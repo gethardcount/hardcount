@@ -259,7 +259,7 @@ func seedDraftInvoice(t *testing.T, db *postgres.DB, tenantID string) string {
 	dueAt := periodStart.AddDate(0, 0, 30)
 	inv, err := invoice.NewPostgresStore(db).Create(ctx, tenantID, domain.Invoice{
 		CustomerID: cust.ID, SubscriptionID: sub.ID,
-		InvoiceNumber:      "VLX-LINEITEM-001",
+		InvoiceNumber:      "HC-LINEITEM-001",
 		Status:             domain.InvoiceDraft,
 		PaymentStatus:      domain.PaymentPending,
 		Currency:           "USD",
