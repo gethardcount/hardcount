@@ -65,7 +65,7 @@ A dunning run is the automatic retries after a failed payment.
 
 - [ ] Settings → Email → Send test email: the page says "Sent to" your address and the message arrives in Mailpit. With a wrong `SMTP_PORT`, the page shows the mail server's error instead.
 - [ ] Invoice → Email: the message arrives in Mailpit; open it, read it, and check the amount and the links.
-- [ ] The emailed PDF opens, and its total, lines, tax and buyer address match the invoice page.
+- [ ] The emailed PDF opens, and its total, lines and tax match the invoice page. Its buyer address matches the hosted invoice page (the email's link); the dashboard invoice page shows no address.
 - [ ] Run a real LiteLLM proxy with the callback from [the LiteLLM guide](../integrations/litellm.md) → one completion creates one `input` and one `output` usage event on the customer (plus `cache_read` if the prompt was cached).
 - [ ] With the same proxy, send one completion on a model the customer's plan has no price for → `hardcount_usage_unbilled_total{reason="no_price"}` on `/metrics` goes up by the call's events, and the customer page shows them in its "not billed" row.
 - [ ] Open [Anthropic's pricing page](https://platform.claude.com/docs/en/about-claude/pricing) and the models overview. Update `anthropicListPrices` and `anthropicPricesChecked` in `internal/recipe/anthropic_prices_test.go`. If a price moved, fix `anthropic_style.yaml`, bump its version, and add a CHANGELOG line telling existing installs to update that price. If a model was added, also:
