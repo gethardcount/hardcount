@@ -10,7 +10,9 @@ first. Every shipped change, with its date, is in the
 **v0.9.0**, not released yet:
 
 - **Done:** Velox is now Hardcount: the binaries, settings, key and id
-  prefixes, image, metrics and headers carry the new name.
+  prefixes, image, metrics, headers and session cookie carry the new name
+  ([#1409](https://github.com/gethardcount/hardcount/pull/1409)). Code that
+  calls the API or checks webhook signatures must change.
 - **Done:** migrations run with goose, and `hardcount migrate force` is gone.
   There is no upgrade from Velox (v0.8.x or a build of `main`): install
   fresh.
@@ -33,10 +35,6 @@ first. Every shipped change, with its date, is in the
 - **Done:** a dunning policy's schedule is one list of days, `retry_days`:
   the days to wait before each retry. It replaces three fields that had to
   agree.
-- **Done:** public names changed once, before the release: API key
-  prefixes, header names, environment variables and the session cookie
-  ([#1409](https://github.com/gethardcount/hardcount/pull/1409)). Code that
-  calls the API or checks webhook signatures must change.
 - **Done:** publishable API keys are removed, and so are the values kept
   only for data an earlier version wrote: the `manually_resolved`
   resolution, the `discount` and `tax` line types, an invoice's

@@ -82,8 +82,8 @@ func recoveryRows(in recoveryRowsInput) []TimelineEvent {
 				// Gated on the invoice's own transition FIELDS — never the
 				// event's reason string, which each resolver spells
 				// differently. A run that closed while its invoice never
-				// transitioned (the legacy "Closed unpaid") sets none of the
-				// fields, so its row stays as the only record.
+				// transitioned (such as retries_exhausted with a pause) sets
+				// none of the fields, so its row stays as the only record.
 				if evt.EventType == domain.DunningEventResolved &&
 					(inv.PaidAt != nil || inv.UncollectibleAt != nil || inv.VoidedAt != nil) {
 					continue

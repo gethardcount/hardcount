@@ -1,7 +1,7 @@
 # ADR-073: Self-host boot contract — one bootstrap writer, honored APP_DATABASE_URL, serialized hybrid migrations
 
 **Date:** 2026-07-03
-**Status:** Accepted (shipped in P7; design amended by a 2-lens adversarial panel — both SHIP-WITH-FIXES; amended 2026-08-30, 2026-10-17 and 2026-10-18). Decision 3, the migration runner, is replaced by [ADR-125](125-goose-migrations-from-one-v081-baseline.md) (goose, from v0.9.0), which superseded ADR-124.
+**Status:** Accepted (shipped in P7; design amended by a 2-lens adversarial panel — both SHIP-WITH-FIXES; amended 2026-08-30, 2026-10-17, 2026-10-18 and 2026-10-28). Decision 3, the migration runner, is replaced by [ADR-125](125-goose-migrations-from-one-v081-baseline.md) (goose, from v0.9.0), which superseded ADR-124.
 
 ## Summary
 
@@ -52,8 +52,9 @@ Three self-host roots from the 2026-07-02 audit:
    handler are thin callers. It runs **everything in ONE bypass tx** —
    `pg_advisory_xact_lock(LockKeyBootstrap)`, the exists/uniqueness
    guards re-checked under the lock, tenant insert, `tenant_settings`
-   seed, three keys (`hc_secret_test_`, `hc_secret_live_`,
-   `hc_pub_test_`; livemode pinned per insert against the 0021
+   seed, two keys (`hc_secret_test_`, `hc_secret_live_`; the
+   publishable key was dropped by
+   [#1415](https://github.com/gethardcount/hardcount/pull/1415); livemode pinned per insert against the 0021
    trigger), owner user + tenant attach via an injected tx-scoped
    `deps.CreateUserTx` (tenant must not import its peer `user`).
    All inputs validate BEFORE the first write (email shape; password

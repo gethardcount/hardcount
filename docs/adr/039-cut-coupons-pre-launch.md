@@ -1,6 +1,6 @@
 # ADR-039: Cut coupons pre-launch
 
-**Status:** Accepted
+**Status:** Accepted (amended 2026-10-28: migration 00217 drops the `coupons`, `coupon_redemptions` and `customer_discounts` tables, [#1415](https://github.com/gethardcount/hardcount/pull/1415); v0.9.0 installs fresh, so no data is lost. The text below is the original decision.)
 **Date:** 2026-05-30
 **Supersedes:** none. Coupon feature (`internal/coupon`, dashboard
 `Coupons.tsx` / `CouponDetail.tsx`, migrations 0025 / 0042-0046)
