@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/auth"
+	"github.com/gethardcount/hardcount/internal/auth"
 )
 
 // TestListHandler_StatusAndCollectionParams: ?status= and ?collection= are

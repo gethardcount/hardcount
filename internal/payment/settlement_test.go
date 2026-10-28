@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // recordingDunningResolver records ResolveByInvoice calls (and can inject an error)

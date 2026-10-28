@@ -10,8 +10,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/api/respond"
-	"github.com/sagarsuperuser/velox/internal/auth"
+	"github.com/gethardcount/hardcount/internal/api/respond"
+	"github.com/gethardcount/hardcount/internal/auth"
 )
 
 // streamEvents serves the live-tail SSE feed for a tenant's webhook

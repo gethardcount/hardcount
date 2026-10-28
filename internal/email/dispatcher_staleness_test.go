@@ -3,10 +3,10 @@ package email
 import (
 	"context"
 	"errors"
-	"github.com/sagarsuperuser/velox/internal/platform/leader"
+	"github.com/gethardcount/hardcount/internal/platform/leader"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // recordingDeliverer counts sends per type; every send succeeds.

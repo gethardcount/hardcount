@@ -1,4 +1,4 @@
-module github.com/sagarsuperuser/velox
+module github.com/gethardcount/hardcount
 
 go 1.26.10
 

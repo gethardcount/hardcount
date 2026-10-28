@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/tax"
+	"github.com/gethardcount/hardcount/internal/tax"
 )
 
 // TestMustValidate_NamesEveryNilCollaborator pins the boot-fail-closed

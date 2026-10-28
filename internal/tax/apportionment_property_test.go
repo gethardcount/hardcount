@@ -5,7 +5,7 @@ import (
 	"math/rand/v2"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/platform/money"
+	"github.com/gethardcount/hardcount/internal/platform/money"
 )
 
 // Property tests for tax calculation and penny apportionment.

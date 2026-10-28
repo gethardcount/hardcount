@@ -3,7 +3,7 @@ package billing
 import (
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/tax"
+	"github.com/gethardcount/hardcount/internal/tax"
 )
 
 // TestDisplayTaxRate pins the rule that the invoice-level invoices.tax_rate is

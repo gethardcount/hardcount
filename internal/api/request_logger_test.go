@@ -10,8 +10,8 @@ import (
 
 	chimw "github.com/go-chi/chi/v5/middleware"
 
-	"github.com/sagarsuperuser/velox/internal/audit"
-	"github.com/sagarsuperuser/velox/internal/auth"
+	"github.com/gethardcount/hardcount/internal/audit"
+	"github.com/gethardcount/hardcount/internal/auth"
 )
 
 // capture collects the attributes of the one "request" record requestLogger emits.

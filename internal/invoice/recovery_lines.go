@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/platform/activity"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/activity"
 )
 
 // Payment-recovery (dunning) rows are told on two pages: the invoice's

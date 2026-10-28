@@ -9,11 +9,11 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/platform/leader"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
-	"github.com/sagarsuperuser/velox/internal/testutil"
+	"github.com/gethardcount/hardcount/internal/platform/leader"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/testutil"
 
-	"github.com/sagarsuperuser/velox/internal/platform/scheduler"
+	"github.com/gethardcount/hardcount/internal/platform/scheduler"
 )
 
 // roleGate is a leader.Gate double that leads exactly the roles in lead and

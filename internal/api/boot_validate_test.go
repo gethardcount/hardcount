@@ -3,8 +3,8 @@ package api
 import (
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/platform/clock"
-	"github.com/sagarsuperuser/velox/internal/testutil"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 // TestNewServer_BootWiresEveryEngineCollaborator is the boot proof for

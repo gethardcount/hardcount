@@ -10,10 +10,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	mw "github.com/sagarsuperuser/velox/internal/api/middleware"
-	"github.com/sagarsuperuser/velox/internal/audit"
-	"github.com/sagarsuperuser/velox/internal/dashmembers"
-	"github.com/sagarsuperuser/velox/internal/session"
+	mw "github.com/gethardcount/hardcount/internal/api/middleware"
+	"github.com/gethardcount/hardcount/internal/audit"
+	"github.com/gethardcount/hardcount/internal/dashmembers"
+	"github.com/gethardcount/hardcount/internal/session"
 )
 
 // ipAuditRecorder keeps the client IP each audit write carried.

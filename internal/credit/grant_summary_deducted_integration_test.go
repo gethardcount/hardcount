@@ -3,8 +3,8 @@ package credit_test
 import (
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/credit"
-	"github.com/sagarsuperuser/velox/internal/testutil"
+	"github.com/gethardcount/hardcount/internal/credit"
+	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 // TestGrantSummary_SplitsDeductedFromUsed: an operator deduction (a negative

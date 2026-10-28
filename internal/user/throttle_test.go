@@ -13,9 +13,9 @@ import (
 	promtest "github.com/prometheus/client_golang/prometheus/testutil"
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
-	"github.com/sagarsuperuser/velox/internal/session"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/session"
 )
 
 // TestDecide walks the throttle rule one attempt at a time: when a wait

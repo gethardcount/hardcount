@@ -3,8 +3,8 @@ package billing
 import (
 	"github.com/shopspring/decimal"
 
-	mw "github.com/sagarsuperuser/velox/internal/api/middleware"
-	"github.com/sagarsuperuser/velox/internal/domain"
+	mw "github.com/gethardcount/hardcount/internal/api/middleware"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // Unpriced usage (#981, ADR-096 amendment): usage that matches no price of

@@ -11,7 +11,7 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 // TestIngest_EdgeQuantitiesAndEmptyProperties sends, through the full router

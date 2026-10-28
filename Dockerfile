@@ -25,7 +25,7 @@ ARG VERSION=dev
 ARG TARGETOS=linux
 ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
-    -ldflags="-s -w -X github.com/sagarsuperuser/velox/internal/version.Version=${VERSION}" \
+    -ldflags="-s -w -X github.com/gethardcount/hardcount/internal/version.Version=${VERSION}" \
     -o /hardcount ./cmd/hardcount
 
 # Runtime stage — distroless has no shell, no package manager, minimal CVE surface

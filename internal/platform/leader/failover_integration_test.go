@@ -12,8 +12,8 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
-	"github.com/sagarsuperuser/velox/internal/platform/leader"
-	"github.com/sagarsuperuser/velox/internal/testutil"
+	"github.com/gethardcount/hardcount/internal/platform/leader"
+	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 // TestLeaseFailover_SIGKILLedHolderReplacedWithinTTL measures the number

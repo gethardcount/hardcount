@@ -10,7 +10,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	dto "github.com/prometheus/client_model/go"
 
-	"github.com/sagarsuperuser/velox/internal/audit"
+	"github.com/gethardcount/hardcount/internal/audit"
 )
 
 // auditUncoveredMutations counts mutating requests that succeeded (2xx) but left

@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/errs"
-	"github.com/sagarsuperuser/velox/internal/user/breachedpw"
+	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/user/breachedpw"
 )
 
 // The reset-password and accept-invite pages show these reasons after the

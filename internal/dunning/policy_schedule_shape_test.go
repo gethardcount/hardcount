@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/auth"
+	"github.com/gethardcount/hardcount/internal/auth"
 )
 
 // postPolicy sends body to POST /policies on a handler over the in-memory

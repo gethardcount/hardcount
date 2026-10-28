@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/auth"
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/payment/breaker"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/auth"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/payment/breaker"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 // Stripe refuses a charge below its minimum (USD 0.50) with this reply, seen

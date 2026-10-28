@@ -3,7 +3,7 @@ package invoice
 import (
 	"context"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // BuildPDFContext assembles everything RenderPDF needs beyond the

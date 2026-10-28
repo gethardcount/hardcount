@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // Store is the persistence boundary for user accounts, the user↔tenant

@@ -1,7 +1,7 @@
 // Package version carries the build-time version stamp. Version is
 // injected at build via
 //
-//	-ldflags "-X github.com/sagarsuperuser/velox/internal/version.Version=v0.x.y"
+//	-ldflags "-X github.com/gethardcount/hardcount/internal/version.Version=v0.x.y"
 //
 // (Dockerfile ARG VERSION → the CI release job passes the git tag). The
 // "dev" default means an unstamped local build says so honestly —

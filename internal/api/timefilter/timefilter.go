@@ -36,7 +36,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/errs"
+	"github.com/gethardcount/hardcount/internal/errs"
 )
 
 // ParseRange reads two named query params from the request and returns

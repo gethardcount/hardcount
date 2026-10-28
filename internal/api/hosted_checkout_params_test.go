@@ -7,8 +7,8 @@ import (
 
 	"github.com/stripe/stripe-go/v82/form"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/payment"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/payment"
 )
 
 func hostedCheckoutTestInputs() (payment.CheckoutClaim, domain.Invoice) {

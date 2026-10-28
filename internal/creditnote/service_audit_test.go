@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // TestIssue_ReDerivesAllocationWhenInvoicePaidAfterCreate is the regression

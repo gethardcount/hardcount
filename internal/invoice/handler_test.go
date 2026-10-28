@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/platform/activity"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/activity"
 )
 
 // TestRenderChargeAttempts locks the ADR-103 single-source rule: payment

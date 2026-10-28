@@ -2,14 +2,14 @@ package email
 
 import (
 	"context"
-	"github.com/sagarsuperuser/velox/internal/platform/leader"
-	"github.com/sagarsuperuser/velox/internal/platform/leader/leadertest"
+	"github.com/gethardcount/hardcount/internal/platform/leader"
+	"github.com/gethardcount/hardcount/internal/platform/leader/leadertest"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
-	"github.com/sagarsuperuser/velox/internal/testutil"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 func skewRowState(t *testing.T, db *postgres.DB, id string) (status string, attempts int, lastErr string, dueInFuture bool) {

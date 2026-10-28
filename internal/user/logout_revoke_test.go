@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/session"
+	"github.com/gethardcount/hardcount/internal/session"
 )
 
 // fakeSessions lets the test do the thing the concrete *session.Service made

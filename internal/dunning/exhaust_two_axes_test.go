@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // stubSubState is the skip-if-done read. `terminated` flips to true once

@@ -108,7 +108,7 @@ func domainImports(t *testing.T, internal, dom string, isDomain func(string) boo
 		}
 		for _, imp := range f.Imports {
 			ipath := strings.Trim(imp.Path.Value, `"`)
-			const pfx = "github.com/sagarsuperuser/velox/internal/"
+			const pfx = "github.com/gethardcount/hardcount/internal/"
 			if !strings.HasPrefix(ipath, pfx) {
 				continue
 			}

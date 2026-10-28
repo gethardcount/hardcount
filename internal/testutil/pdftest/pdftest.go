@@ -22,7 +22,7 @@ import (
 	"github.com/ledongthuc/pdf"
 	"github.com/signintech/gopdf"
 
-	"github.com/sagarsuperuser/velox/internal/pdffonts"
+	"github.com/gethardcount/hardcount/internal/pdffonts"
 )
 
 // Run is the text of one text-drawing operation. X and Y are in points from

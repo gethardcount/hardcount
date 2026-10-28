@@ -22,7 +22,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
-	"github.com/sagarsuperuser/velox/internal/doctor"
+	"github.com/gethardcount/hardcount/internal/doctor"
 )
 
 func main() {

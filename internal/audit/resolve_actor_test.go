@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/audit"
-	"github.com/sagarsuperuser/velox/internal/auth"
+	"github.com/gethardcount/hardcount/internal/audit"
+	"github.com/gethardcount/hardcount/internal/auth"
 )
 
 // TestResolveActor pins the actor-attribution priority that makes the audit log

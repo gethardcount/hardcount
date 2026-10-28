@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/auth"
+	"github.com/gethardcount/hardcount/internal/auth"
 )
 
 func TestIdempotency_NoCaching_WithoutKey(t *testing.T) {

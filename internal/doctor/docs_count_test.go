@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/doctor"
+	"github.com/gethardcount/hardcount/internal/doctor"
 )
 
 // The docs that state how many checks hardcount-doctor has must state the real

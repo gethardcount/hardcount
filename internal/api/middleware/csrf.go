@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/sagarsuperuser/velox/internal/api/respond"
-	"github.com/sagarsuperuser/velox/internal/session"
+	"github.com/gethardcount/hardcount/internal/api/respond"
+	"github.com/gethardcount/hardcount/internal/session"
 )
 
 // CSRFGuard is the server-side CSRF defense for the cookie-authenticated

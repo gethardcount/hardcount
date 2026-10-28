@@ -16,18 +16,18 @@ import (
 
 	neturl "net/url"
 
-	"github.com/sagarsuperuser/velox/internal/api"
-	mw "github.com/sagarsuperuser/velox/internal/api/middleware"
-	"github.com/sagarsuperuser/velox/internal/billing"
-	"github.com/sagarsuperuser/velox/internal/config"
-	"github.com/sagarsuperuser/velox/internal/email"
-	"github.com/sagarsuperuser/velox/internal/platform/leader"
-	"github.com/sagarsuperuser/velox/internal/platform/migrate"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
-	"github.com/sagarsuperuser/velox/internal/platform/telemetry"
-	"github.com/sagarsuperuser/velox/internal/testclock"
-	"github.com/sagarsuperuser/velox/internal/version"
-	"github.com/sagarsuperuser/velox/internal/webhook"
+	"github.com/gethardcount/hardcount/internal/api"
+	mw "github.com/gethardcount/hardcount/internal/api/middleware"
+	"github.com/gethardcount/hardcount/internal/billing"
+	"github.com/gethardcount/hardcount/internal/config"
+	"github.com/gethardcount/hardcount/internal/email"
+	"github.com/gethardcount/hardcount/internal/platform/leader"
+	"github.com/gethardcount/hardcount/internal/platform/migrate"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/telemetry"
+	"github.com/gethardcount/hardcount/internal/testclock"
+	"github.com/gethardcount/hardcount/internal/version"
+	"github.com/gethardcount/hardcount/internal/webhook"
 )
 
 func main() {

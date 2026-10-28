@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/sagarsuperuser/velox/internal/api/respond"
+	"github.com/gethardcount/hardcount/internal/api/respond"
 )
 
 // SecurityHeaders adds standard security headers to all responses.

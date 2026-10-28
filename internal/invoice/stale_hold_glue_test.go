@@ -3,8 +3,8 @@ package invoice_test
 import (
 	"context"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/invoice"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/invoice"
 )
 
 // The seams the charge-hold tests in this package reach production through.

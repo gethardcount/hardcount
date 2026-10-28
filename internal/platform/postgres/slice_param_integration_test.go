@@ -9,7 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/sagarsuperuser/velox/internal/testutil"
+	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 // TestSliceParam_PgxEncodesStringSlice pins what the stores rely on when they

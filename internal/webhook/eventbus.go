@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // StreamFrame is the SSE-shaped projection of a webhook event. We use a

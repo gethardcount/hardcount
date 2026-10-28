@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // panickingRetrier panics on one invoice's retry, standing in for a nil

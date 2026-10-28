@@ -1,6 +1,6 @@
 package domain
 
-import "github.com/sagarsuperuser/velox/internal/errs"
+import "github.com/gethardcount/hardcount/internal/errs"
 
 // BelowMinimumCode names one fact everywhere it shows: Stripe refused to
 // charge an invoice because its amount is below Stripe's minimum charge

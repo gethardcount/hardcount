@@ -19,8 +19,8 @@ import (
 
 	gomail "github.com/wneessen/go-mail"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/errs"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/errs"
 )
 
 // ErrSMTPNotConfigured is returned by every send path when SMTP_HOST

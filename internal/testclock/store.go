@@ -12,7 +12,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // Store is the persistence contract for TestClock rows. Kept narrow: create,

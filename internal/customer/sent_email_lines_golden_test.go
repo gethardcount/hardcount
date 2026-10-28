@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/platform/activity"
+	"github.com/gethardcount/hardcount/internal/platform/activity"
 )
 
 // update regenerates testdata/sent_email_lines.golden.json:

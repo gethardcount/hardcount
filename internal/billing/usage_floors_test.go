@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // usageFloors.start: the window [s, e) opens at the latest of s, the trial end

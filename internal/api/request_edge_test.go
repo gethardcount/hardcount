@@ -12,7 +12,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
-	"github.com/sagarsuperuser/velox/internal/audit"
+	"github.com/gethardcount/hardcount/internal/audit"
 )
 
 // A 64-hex capability token, the shape the public invoice and

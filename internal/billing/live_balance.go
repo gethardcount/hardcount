@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/subscription"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/subscription"
 )
 
 // CreditBalanceReader reads the credit a customer can spend right now, per

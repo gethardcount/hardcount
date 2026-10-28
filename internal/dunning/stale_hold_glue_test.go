@@ -3,7 +3,7 @@ package dunning_test
 import (
 	"context"
 
-	"github.com/sagarsuperuser/velox/internal/invoice"
+	"github.com/gethardcount/hardcount/internal/invoice"
 )
 
 // The seams the dunning charge-hold tests reach production through. The only

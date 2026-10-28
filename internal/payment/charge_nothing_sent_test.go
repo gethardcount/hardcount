@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/auth"
-	"github.com/sagarsuperuser/velox/internal/payment/breaker"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/auth"
+	"github.com/gethardcount/hardcount/internal/payment/breaker"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 // A charge that sends nothing to Stripe releases its hold (ADR-127). The

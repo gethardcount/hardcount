@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 )
 
 // A 14-day trial created 2026-03-01 23:30 EST in an America/New_York tenant

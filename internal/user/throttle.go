@@ -15,9 +15,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/audit"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
-	"github.com/sagarsuperuser/velox/internal/session"
+	"github.com/gethardcount/hardcount/internal/audit"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/session"
 )
 
 // The sign-in throttle (ADR-094, amended 2026-10-18). It slows repeated

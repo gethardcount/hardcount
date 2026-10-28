@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // fakeRefunder records refund calls so tests can assert the Stripe leg ran

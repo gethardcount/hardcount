@@ -3,7 +3,7 @@ package webhook
 import (
 	"context"
 
-	mw "github.com/sagarsuperuser/velox/internal/api/middleware"
+	mw "github.com/gethardcount/hardcount/internal/api/middleware"
 )
 
 // OutboxDispatcher satisfies domain.EventDispatcher by persisting each event

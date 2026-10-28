@@ -6,7 +6,7 @@ import (
 	"html/template"
 	"strings"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // Branding is the per-tenant visual identity a sender pulls from

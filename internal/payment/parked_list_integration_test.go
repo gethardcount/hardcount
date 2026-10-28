@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/platform/activity"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/activity"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 // Parked invoices on a real database (REC-5, ADR-127 amendment 2026-10-20).

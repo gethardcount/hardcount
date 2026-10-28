@@ -13,7 +13,7 @@ import (
 
 	"golang.org/x/tools/go/packages"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // Every outbound webhook Hardcount sends must be one an endpoint can subscribe
@@ -57,7 +57,7 @@ func TestWebhookEmitSitesSendACatalogEvent(t *testing.T) {
 		}
 	}
 
-	const webhookPkg = "github.com/sagarsuperuser/velox/internal/webhook"
+	const webhookPkg = "github.com/gethardcount/hardcount/internal/webhook"
 
 	// sinks maps a function (or interface method) to the indexes of its
 	// parameters that carry an event type into the webhook package.

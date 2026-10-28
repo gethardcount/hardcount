@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/auth"
+	"github.com/gethardcount/hardcount/internal/auth"
 )
 
 // TestCreateCommitRelief_TopLevelSplitRefused: the relief's cash split lives

@@ -5,8 +5,8 @@ import (
 	"math"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/platform/money"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/money"
 )
 
 // fullBillingCycleDays is the whole-day length of ONE full billing interval

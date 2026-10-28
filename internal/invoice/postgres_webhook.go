@@ -4,9 +4,9 @@ import (
 	"context"
 	"database/sql"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/errs"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 func (s *PostgresStore) GetByStripePaymentIntentID(ctx context.Context, tenantID, stripePI string) (domain.Invoice, error) {

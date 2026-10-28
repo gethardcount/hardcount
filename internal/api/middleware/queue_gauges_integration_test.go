@@ -10,10 +10,10 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	mw "github.com/sagarsuperuser/velox/internal/api/middleware"
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
-	vtestutil "github.com/sagarsuperuser/velox/internal/testutil"
+	mw "github.com/gethardcount/hardcount/internal/api/middleware"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	vtestutil "github.com/gethardcount/hardcount/internal/testutil"
 )
 
 // The gauges register on the default Prometheus registry, which refuses a

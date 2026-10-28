@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/sagarsuperuser/velox/internal/platform/money"
+	"github.com/gethardcount/hardcount/internal/platform/money"
 )
 
 // MulCents and AddCents are overflow-checked arithmetic for non-negative

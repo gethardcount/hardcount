@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // Store is the persistence boundary for recipe_instances. The cross-domain

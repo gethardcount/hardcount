@@ -8,7 +8,7 @@ import (
 
 	chimw "github.com/go-chi/chi/v5/middleware"
 
-	"github.com/sagarsuperuser/velox/internal/version"
+	"github.com/gethardcount/hardcount/internal/version"
 )
 
 // apiVersion feeds the Hardcount-Version response header — the build-time

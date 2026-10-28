@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // fakeSettingsReader returns a fixed tenant net-term default, or err.

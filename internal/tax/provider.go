@@ -13,7 +13,7 @@ package tax
 import (
 	"context"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // Provider is the tenant-scoped tax calculation strategy.

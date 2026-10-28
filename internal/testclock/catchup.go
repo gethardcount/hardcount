@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 // CatchupJob is the unit of work the async worker processes — one

@@ -23,7 +23,7 @@ import (
 	"runtime/debug"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/platform/leader"
+	"github.com/gethardcount/hardcount/internal/platform/leader"
 )
 
 // heartbeatThreshold marks the boundary between "slow" roles (that log at

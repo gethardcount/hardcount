@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/credit"
+	"github.com/gethardcount/hardcount/internal/credit"
 )
 
 // TestGrantSummary_SplitsExpiredFromUsed: the expiry sweep sets a grant's

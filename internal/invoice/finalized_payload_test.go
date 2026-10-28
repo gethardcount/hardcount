@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // Finalizing a draft sends invoice.finalized carrying the finalized invoice

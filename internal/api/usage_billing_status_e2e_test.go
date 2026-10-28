@@ -8,7 +8,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/sagarsuperuser/velox/internal/api/generated"
+	"github.com/gethardcount/hardcount/internal/api/generated"
 )
 
 // A billing_status is what Hardcount found when the event arrived (D07, ADR-130

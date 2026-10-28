@@ -5,7 +5,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // TestNetMRR_OnlyTheNetMustFit: a step past int64 is fine when the net fits;

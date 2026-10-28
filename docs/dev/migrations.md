@@ -58,7 +58,7 @@ Step 3 needs the local Postgres from
    **You see:**
 
    ```text
-   ok  	github.com/sagarsuperuser/velox/internal/platform/migrate	0.031s
+   ok  	github.com/gethardcount/hardcount/internal/platform/migrate	0.031s
    ```
 
    A file that breaks a rule fails with its name and the reason. Before you

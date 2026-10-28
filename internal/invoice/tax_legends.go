@@ -3,7 +3,7 @@ package invoice
 import (
 	"strings"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // exemptionLegend returns one to three lines of legend text triggered by

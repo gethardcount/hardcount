@@ -3,7 +3,7 @@ package creditnote
 import (
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // TestUnreliefedClawbackPredicate pins the predicate that decides whether an

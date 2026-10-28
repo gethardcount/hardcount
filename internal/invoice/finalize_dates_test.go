@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 )
 
 // A manual invoice's issued_at and due_at anchor to the FINALIZE moment, not

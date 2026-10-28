@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // Sweep A2 review (PR #1323): dunning's `pause` final action pauses
