@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 // cardFor resolves a chargeable card only for the listed customers; everyone

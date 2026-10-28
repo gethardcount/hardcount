@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // Issue #1272: after a cancel or cross-interval swap commits, the relief's

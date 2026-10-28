@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // ADR-101 Phase 4: the single segment source.

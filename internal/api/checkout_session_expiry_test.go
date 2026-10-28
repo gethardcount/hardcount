@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/payment"
+	"github.com/gethardcount/hardcount/internal/payment"
 )
 
 // TestCheckoutSessionExpiry_FixedAtClaimCreation: every re-drive of a claim

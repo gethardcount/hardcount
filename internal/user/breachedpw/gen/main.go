@@ -14,7 +14,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/sagarsuperuser/velox/internal/user/breachedpw"
+	"github.com/gethardcount/hardcount/internal/user/breachedpw"
 )
 
 // replaced is the hand-picked list ValidatePassword used before the

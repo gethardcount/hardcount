@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // TestGetPlan_LiveSubscriptionCount: GET /v1/plans/{id} carries the count

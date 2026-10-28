@@ -12,8 +12,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
 
-	"github.com/sagarsuperuser/velox/internal/platform/migrate"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/migrate"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 const (

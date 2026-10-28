@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // A draft is a preview: the PDF prints "Draft — not issued" in place of the

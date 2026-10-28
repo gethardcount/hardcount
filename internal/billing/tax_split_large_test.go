@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/tax"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/tax"
 )
 
 // A stored proration pair (a credit line and the charge that absorbs it) is

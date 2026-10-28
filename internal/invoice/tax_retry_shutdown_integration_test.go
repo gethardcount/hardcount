@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/platform/clock"
-	"github.com/sagarsuperuser/velox/internal/pricing"
-	"github.com/sagarsuperuser/velox/internal/subscription"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/pricing"
+	"github.com/gethardcount/hardcount/internal/subscription"
 )
 
 // G7: a SIGTERM or a lost lease cancels the tax_retry sweep's tick ctx

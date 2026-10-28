@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // outageStore simulates a store whose backing DB is unreachable: every

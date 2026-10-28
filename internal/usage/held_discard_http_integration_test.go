@@ -9,9 +9,9 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	"github.com/sagarsuperuser/velox/internal/auth"
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/usage"
+	"github.com/gethardcount/hardcount/internal/auth"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/usage"
 )
 
 // Review finding (PR #1376, round 1): the discard body's `meter_key` was

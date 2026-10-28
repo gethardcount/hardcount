@@ -3,7 +3,7 @@ package customer
 import (
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // profile_status is a verdict about the stored data, not a caller

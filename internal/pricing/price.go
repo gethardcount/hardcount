@@ -10,9 +10,9 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	"github.com/sagarsuperuser/velox/internal/audit"
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/errs"
+	"github.com/gethardcount/hardcount/internal/audit"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/errs"
 )
 
 // Plan prices (ADR-130). A price is a row on a plan: a meter, the events it

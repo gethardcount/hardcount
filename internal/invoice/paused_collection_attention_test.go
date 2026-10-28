@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 // Sweep A2 (2026-10-21): pausing collection does not stop a dunning run that

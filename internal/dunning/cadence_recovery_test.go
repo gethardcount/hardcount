@@ -2,11 +2,11 @@ package dunning
 
 import (
 	"context"
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 )
 
 // TestProcessDueRuns_WallClockCadenceAfterDowntime covers the medium-severity

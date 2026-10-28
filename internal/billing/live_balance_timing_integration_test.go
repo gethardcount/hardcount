@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/usage"
+	"github.com/gethardcount/hardcount/internal/usage"
 )
 
 // TestLiveBalance_ReadLatency times the live credit read for one customer

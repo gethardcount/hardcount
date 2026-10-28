@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // recordingRetrier counts RetryPayment calls so a test can prove whether the

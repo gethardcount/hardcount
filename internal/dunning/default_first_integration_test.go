@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/dunning"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
-	"github.com/sagarsuperuser/velox/internal/testutil"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/dunning"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 // TestUpsertPolicy_AutoDefaultFirst is the write-side root fix for Finding 2

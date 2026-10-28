@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // EndpointStats holds delivery statistics for a single webhook endpoint.

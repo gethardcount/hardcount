@@ -11,9 +11,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/sagarsuperuser/velox/internal/api/respond"
-	"github.com/sagarsuperuser/velox/internal/errs"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/api/respond"
+	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 // PostmarkHandler ingests Postmark's outbound-message webhooks (ADR-098):

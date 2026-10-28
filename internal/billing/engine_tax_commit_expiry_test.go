@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/errs"
-	"github.com/sagarsuperuser/velox/internal/platform/clock"
-	"github.com/sagarsuperuser/velox/internal/tax"
+	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/tax"
 )
 
 // fakeCalcStore is a minimal TaxCalculationWriter that returns a fixed

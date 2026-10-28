@@ -6,11 +6,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/auth"
-	"github.com/sagarsuperuser/velox/internal/customer"
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
-	"github.com/sagarsuperuser/velox/internal/testutil"
+	"github.com/gethardcount/hardcount/internal/auth"
+	"github.com/gethardcount/hardcount/internal/customer"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 // T10 (ADR-129): the dashboard's credit liability is one figure per currency,

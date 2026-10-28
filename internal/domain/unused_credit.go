@@ -4,7 +4,7 @@ import (
 	"math"
 	"sort"
 
-	"github.com/sagarsuperuser/velox/internal/platform/money"
+	"github.com/gethardcount/hardcount/internal/platform/money"
 )
 
 // CreditShare is one invoice's part of the credit for unused, prepaid time:

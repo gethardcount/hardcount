@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/platform/scheduler"
+	"github.com/gethardcount/hardcount/internal/platform/scheduler"
 )
 
 // fakeSweep returns canned (advanced, errs) and records call count.

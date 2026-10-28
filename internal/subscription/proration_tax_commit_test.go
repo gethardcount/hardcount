@@ -7,8 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/auth"
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/auth"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 func prorationTaxCommitHandler(t *testing.T, taxMock *prorationTaxApplierMock) (*Handler, *invoicesMock, string, string) {

@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/subscription"
-	"github.com/sagarsuperuser/velox/internal/testutil"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/subscription"
+	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 // fakeTokenLookup resolves the cost-dashboard token to a fixed customer.

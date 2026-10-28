@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/dunning"
-	"github.com/sagarsuperuser/velox/internal/invoice"
-	"github.com/sagarsuperuser/velox/internal/payment"
+	"github.com/gethardcount/hardcount/internal/dunning"
+	"github.com/gethardcount/hardcount/internal/invoice"
+	"github.com/gethardcount/hardcount/internal/payment"
 )
 
 // TestOutboxSender_SatisfiesAllInterfaces is a compile-time guarantee that

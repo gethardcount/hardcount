@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/testutil/pdftest"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/testutil/pdftest"
 )
 
 type cnStaticSettings struct{ ts domain.TenantSettings }

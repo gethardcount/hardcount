@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // TestSortInvoiceTimeline_CausalTies locks the 2026-07-19 audit findings:

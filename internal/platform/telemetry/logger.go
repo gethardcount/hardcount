@@ -6,7 +6,7 @@ import (
 
 	chimw "github.com/go-chi/chi/v5/middleware"
 
-	"github.com/sagarsuperuser/velox/internal/auth"
+	"github.com/gethardcount/hardcount/internal/auth"
 )
 
 // ContextHandler wraps a slog.Handler and injects request_id and tenant_id

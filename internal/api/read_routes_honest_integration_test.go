@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/platform/clock"
-	"github.com/sagarsuperuser/velox/internal/testutil"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 // TestReadRoutesHonest drives the read routes from the 2026-10-21 sweep

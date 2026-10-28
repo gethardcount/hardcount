@@ -13,8 +13,8 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/errs"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/errs"
 )
 
 // One rater (ADR-130 PR-1). Every path that prices a subscription period's

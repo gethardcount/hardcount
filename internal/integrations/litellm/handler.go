@@ -11,11 +11,11 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/sagarsuperuser/velox/internal/api/respond"
-	"github.com/sagarsuperuser/velox/internal/auth"
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/errs"
-	"github.com/sagarsuperuser/velox/internal/usage"
+	"github.com/gethardcount/hardcount/internal/api/respond"
+	"github.com/gethardcount/hardcount/internal/auth"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/usage"
 )
 
 // CustomerLookup is the narrow surface the adapter uses to resolve

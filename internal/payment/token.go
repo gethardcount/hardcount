@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 type TokenService struct {

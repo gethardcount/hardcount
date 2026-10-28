@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/testutil"
+	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 // A panic on one unusual row (the real trigger: a nil dereference, as in

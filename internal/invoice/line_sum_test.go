@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/errs"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/errs"
 )
 
 // A manual invoice's lines are each checked (quantity × unit amount must

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 func newTestServer() *Server {

@@ -9,9 +9,9 @@ import (
 
 	"github.com/stripe/stripe-go/v82"
 
-	"github.com/sagarsuperuser/velox/internal/auth"
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/auth"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 // Review of #1225: Stripe sends incorrect_number in two shapes. As the bank's

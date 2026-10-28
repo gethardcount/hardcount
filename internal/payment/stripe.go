@@ -12,14 +12,14 @@ import (
 
 	chimw "github.com/go-chi/chi/v5/middleware"
 
-	mw "github.com/sagarsuperuser/velox/internal/api/middleware"
-	"github.com/sagarsuperuser/velox/internal/audit"
-	hardcountauth "github.com/sagarsuperuser/velox/internal/auth"
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/errs"
-	"github.com/sagarsuperuser/velox/internal/payment/breaker"
-	"github.com/sagarsuperuser/velox/internal/platform/clock"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	mw "github.com/gethardcount/hardcount/internal/api/middleware"
+	"github.com/gethardcount/hardcount/internal/audit"
+	hardcountauth "github.com/gethardcount/hardcount/internal/auth"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/payment/breaker"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 // DunningStarter starts dunning for failed payments.

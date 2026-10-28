@@ -9,7 +9,7 @@ import (
 	"github.com/shopspring/decimal"
 	"gopkg.in/yaml.v3"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // rawRecipe is the shape recipes/*.yaml deserializes into. It mirrors the

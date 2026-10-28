@@ -2,17 +2,17 @@ package dunning_test
 
 import (
 	"context"
-	"github.com/sagarsuperuser/velox/internal/platform/leader"
-	"github.com/sagarsuperuser/velox/internal/platform/leader/leadertest"
+	"github.com/gethardcount/hardcount/internal/platform/leader"
+	"github.com/gethardcount/hardcount/internal/platform/leader/leadertest"
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/customer"
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/dunning"
-	"github.com/sagarsuperuser/velox/internal/invoice"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
-	"github.com/sagarsuperuser/velox/internal/testutil"
+	"github.com/gethardcount/hardcount/internal/customer"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/dunning"
+	"github.com/gethardcount/hardcount/internal/invoice"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 // Two pins from the 2026-08-02 ADR-108 walk, recorded with their honest

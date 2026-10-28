@@ -4,14 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 	"log/slog"
 	"math/big"
 	"net/http"
 
-	"github.com/sagarsuperuser/velox/internal/api/respond"
-	"github.com/sagarsuperuser/velox/internal/auth"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/api/respond"
+	"github.com/gethardcount/hardcount/internal/auth"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 // OverviewResponse aggregates the headline billing metrics for a tenant over

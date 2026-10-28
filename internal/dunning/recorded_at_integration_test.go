@@ -5,13 +5,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/customer"
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/dunning"
-	"github.com/sagarsuperuser/velox/internal/invoice"
-	"github.com/sagarsuperuser/velox/internal/platform/clock"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
-	"github.com/sagarsuperuser/velox/internal/testutil"
+	"github.com/gethardcount/hardcount/internal/customer"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/dunning"
+	"github.com/gethardcount/hardcount/internal/invoice"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 // TestDunningEvent_RecordedAt_DualStamp is the invoice_dunning_events half

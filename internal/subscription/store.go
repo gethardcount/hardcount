@@ -6,7 +6,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // SubPlanCurrency is one (subscription, plan currency) pair from the

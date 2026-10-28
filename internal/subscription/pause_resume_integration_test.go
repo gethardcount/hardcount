@@ -6,12 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/audit"
-	"github.com/sagarsuperuser/velox/internal/auth"
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/platform/clock"
-	"github.com/sagarsuperuser/velox/internal/testutil"
-	"github.com/sagarsuperuser/velox/internal/webhook"
+	"github.com/gethardcount/hardcount/internal/audit"
+	"github.com/gethardcount/hardcount/internal/auth"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/testutil"
+	"github.com/gethardcount/hardcount/internal/webhook"
 )
 
 // A lifted pause is one whose resumes_at has passed: an operator's timed

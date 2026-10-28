@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/billing"
-	"github.com/sagarsuperuser/velox/internal/testutil"
+	"github.com/gethardcount/hardcount/internal/billing"
+	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 // tickStep is a scheduler step double (trial expiry, pause resume, credit

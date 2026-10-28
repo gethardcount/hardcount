@@ -8,11 +8,11 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	mw "github.com/sagarsuperuser/velox/internal/api/middleware"
-	"github.com/sagarsuperuser/velox/internal/api/respond"
-	"github.com/sagarsuperuser/velox/internal/auth"
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/errs"
+	mw "github.com/gethardcount/hardcount/internal/api/middleware"
+	"github.com/gethardcount/hardcount/internal/api/respond"
+	"github.com/gethardcount/hardcount/internal/auth"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/errs"
 )
 
 type Handler struct {

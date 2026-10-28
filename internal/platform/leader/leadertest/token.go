@@ -8,7 +8,7 @@ import (
 	"database/sql"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/platform/leader"
+	"github.com/gethardcount/hardcount/internal/platform/leader"
 )
 
 // Token acquires each role for one hour on admin (bypassing cadence and

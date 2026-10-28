@@ -43,12 +43,12 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/sagarsuperuser/velox/internal/api/respond"
-	"github.com/sagarsuperuser/velox/internal/auth"
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/errs"
-	"github.com/sagarsuperuser/velox/internal/invoice"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/api/respond"
+	"github.com/gethardcount/hardcount/internal/auth"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/invoice"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 // InvoiceResolver covers the invoice reads the hosted page needs.

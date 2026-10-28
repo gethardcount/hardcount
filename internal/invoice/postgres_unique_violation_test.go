@@ -7,8 +7,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/errs"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/errs"
 )
 
 // TestMapInvoiceUniqueViolation_RoutesByConstraint locks in the

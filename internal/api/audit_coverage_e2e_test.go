@@ -6,7 +6,7 @@ import (
 	"sort"
 	"testing"
 
-	mw "github.com/sagarsuperuser/velox/internal/api/middleware"
+	mw "github.com/gethardcount/hardcount/internal/api/middleware"
 )
 
 // TestMain asserts that the WHOLE package-api test suite — every e2e test that

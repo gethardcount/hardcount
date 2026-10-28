@@ -6,7 +6,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/errs"
+	"github.com/gethardcount/hardcount/internal/errs"
 )
 
 // A paid invoice's credit note is allocated across refund, credit and

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // unreadableGuardCommitter is a TaxCommitter whose expiry guard cannot read

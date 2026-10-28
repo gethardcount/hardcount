@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // blipFirstGet fails the first invoice read only — the gate's — so create()'s

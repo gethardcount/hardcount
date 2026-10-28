@@ -4,20 +4,20 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"github.com/sagarsuperuser/velox/internal/errs"
+	"github.com/gethardcount/hardcount/internal/errs"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/customer"
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
-	"github.com/sagarsuperuser/velox/internal/pricing"
-	"github.com/sagarsuperuser/velox/internal/subscription"
-	"github.com/sagarsuperuser/velox/internal/subscription/subscriptiontest"
-	"github.com/sagarsuperuser/velox/internal/testutil"
+	"github.com/gethardcount/hardcount/internal/customer"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/pricing"
+	"github.com/gethardcount/hardcount/internal/subscription"
+	"github.com/gethardcount/hardcount/internal/subscription/subscriptiontest"
+	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 // TestCancelAtomic_OneWinnerUnderContention is the regression test for COR-4c:

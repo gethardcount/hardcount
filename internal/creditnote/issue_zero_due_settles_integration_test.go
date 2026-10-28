@@ -6,16 +6,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/credit"
-	"github.com/sagarsuperuser/velox/internal/creditnote"
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/errs"
-	"github.com/sagarsuperuser/velox/internal/invoice"
-	"github.com/sagarsuperuser/velox/internal/platform/clock"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
-	"github.com/sagarsuperuser/velox/internal/tenant"
-	"github.com/sagarsuperuser/velox/internal/testutil"
-	"github.com/sagarsuperuser/velox/internal/webhook"
+	"github.com/gethardcount/hardcount/internal/credit"
+	"github.com/gethardcount/hardcount/internal/creditnote"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/invoice"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/tenant"
+	"github.com/gethardcount/hardcount/internal/testutil"
+	"github.com/gethardcount/hardcount/internal/webhook"
 )
 
 // A credit note that leaves an unpaid invoice with nothing due marks it paid

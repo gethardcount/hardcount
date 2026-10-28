@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/errs"
+	"github.com/gethardcount/hardcount/internal/errs"
 )
 
 // Every key below is an obviously fake string that carries only the real

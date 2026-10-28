@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/sagarsuperuser/velox/internal/platform/leader"
+	"github.com/gethardcount/hardcount/internal/platform/leader"
 	"log/slog"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
-	"github.com/sagarsuperuser/velox/internal/platform/scheduler"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/scheduler"
 )
 
 // DispatcherConfig controls the outbox dispatcher loop.

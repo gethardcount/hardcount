@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // AggregationMemo remembers AggregateClaims results for the length of one

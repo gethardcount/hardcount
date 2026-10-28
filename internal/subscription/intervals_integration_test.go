@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/customer"
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/platform/clock"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
-	"github.com/sagarsuperuser/velox/internal/pricing"
-	"github.com/sagarsuperuser/velox/internal/testutil"
+	"github.com/gethardcount/hardcount/internal/customer"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/pricing"
+	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 // ADR-101 Phase 1 integration tests: every item-mutation writer must

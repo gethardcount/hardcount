@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 // TestIngest_IdempotencyKeyHeaderIsIgnored sends two different events under

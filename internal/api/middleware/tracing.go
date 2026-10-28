@@ -8,7 +8,7 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.27.0"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/sagarsuperuser/velox/internal/audit"
+	"github.com/gethardcount/hardcount/internal/audit"
 )
 
 // Tracing returns middleware that creates OpenTelemetry spans for each HTTP request.

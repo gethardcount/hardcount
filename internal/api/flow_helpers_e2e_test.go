@@ -18,7 +18,7 @@ import (
 	"github.com/stripe/stripe-go/v82/webhook"
 	"gopkg.in/yaml.v3"
 
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 // Helpers shared by the flow journeys (*_flow_e2e_test.go). Each journey

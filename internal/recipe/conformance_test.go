@@ -3,7 +3,7 @@ package recipe
 import (
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // The recipe adopts an existing meter by key only when its AGGREGATION matches

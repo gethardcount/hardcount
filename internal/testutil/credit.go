@@ -1,6 +1,6 @@
 package testutil
 
-import "github.com/sagarsuperuser/velox/internal/domain"
+import "github.com/gethardcount/hardcount/internal/domain"
 
 // BalanceUSD picks the USD row out of a credit GetBalance result, which
 // holds one balance per currency (ADR-129). A customer with no USD credit

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // TestEmitBaseSegmentLine_DenominatorFromPeriodAnchor pins the FLOW B21

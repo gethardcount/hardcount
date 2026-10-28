@@ -11,7 +11,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // recipeFS holds the bundled YAML definitions. Each *.yaml file under

@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 )
 
 // SB-1 / SB-2 (2026-10-08): an exhaustion interrupted after the final retry

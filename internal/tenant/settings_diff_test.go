@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // TestDiffSettings pins the field-level settings audit diff: changed fields

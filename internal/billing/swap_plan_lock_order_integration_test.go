@@ -8,17 +8,17 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	"github.com/sagarsuperuser/velox/internal/creditnote"
-	"github.com/sagarsuperuser/velox/internal/customer"
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/invoice"
-	"github.com/sagarsuperuser/velox/internal/platform/clock"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
-	"github.com/sagarsuperuser/velox/internal/pricing"
-	"github.com/sagarsuperuser/velox/internal/subscription"
-	"github.com/sagarsuperuser/velox/internal/subscription/subscriptiontest"
-	"github.com/sagarsuperuser/velox/internal/tenant"
-	"github.com/sagarsuperuser/velox/internal/testutil"
+	"github.com/gethardcount/hardcount/internal/creditnote"
+	"github.com/gethardcount/hardcount/internal/customer"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/invoice"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/pricing"
+	"github.com/gethardcount/hardcount/internal/subscription"
+	"github.com/gethardcount/hardcount/internal/subscription/subscriptiontest"
+	"github.com/gethardcount/hardcount/internal/tenant"
+	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 // C10, the cross-interval swap (D08 §4.21). The swap writes its refund credit

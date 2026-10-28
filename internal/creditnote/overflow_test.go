@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // An absurd line (3e9 × 4e9 cents) used to wrap int64 to a NEGATIVE total

@@ -8,7 +8,7 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	"github.com/sagarsuperuser/velox/internal/errs"
+	"github.com/gethardcount/hardcount/internal/errs"
 )
 
 // Every decimal a request sends (a usage quantity, a rate, a provider cost, a

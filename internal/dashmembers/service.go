@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/errs"
-	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 )
 
 // InviteTTL: 7 days — long enough for a colleague on PTO, short enough

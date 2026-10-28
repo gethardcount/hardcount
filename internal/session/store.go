@@ -6,7 +6,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 // Store is the persistence interface for dashboard_sessions rows.

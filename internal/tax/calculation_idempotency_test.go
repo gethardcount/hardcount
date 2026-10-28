@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 // A scoped calculation carries an idempotency key derived from the scope and

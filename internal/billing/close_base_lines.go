@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/platform/money"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/money"
 )
 
 // closeBaseLine is one base-fee line a cycle close emits, with the plan it

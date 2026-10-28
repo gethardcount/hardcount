@@ -7,7 +7,7 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // renderRecipe applies overrides to every template-bearing string in r and

@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/invoice"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/invoice"
 )
 
 // failureReport is a webhook- or reconciler-shaped report: no ChargedAtSeq.

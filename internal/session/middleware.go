@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/sagarsuperuser/velox/internal/api/respond"
-	"github.com/sagarsuperuser/velox/internal/auth"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/api/respond"
+	"github.com/gethardcount/hardcount/internal/auth"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 // Middleware accepts a `hardcount_session` httpOnly cookie. On hit it

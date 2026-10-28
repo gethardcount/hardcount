@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/sagarsuperuser/velox/internal/audit"
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/audit"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // DunningSeedFunc writes the dunning policies a new account starts with:

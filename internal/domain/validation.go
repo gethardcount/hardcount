@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/sagarsuperuser/velox/internal/errs"
+	"github.com/gethardcount/hardcount/internal/errs"
 )
 
 // MaxLen validates a field doesn't exceed max length. Returns an errs.Invalid

@@ -6,7 +6,7 @@ import (
 	"math/rand/v2"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/testutil"
+	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 // TestTakes_AgreesWithPostgresContainment checks the Go matcher ingest

@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/testutil"
+	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 // TestReadiness_DrainingIs503LivenessStays200 pins the readiness-first

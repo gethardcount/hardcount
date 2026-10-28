@@ -4,8 +4,8 @@ import (
 	"context"
 	"log/slog"
 
-	mw "github.com/sagarsuperuser/velox/internal/api/middleware"
-	"github.com/sagarsuperuser/velox/internal/platform/scheduler"
+	mw "github.com/gethardcount/hardcount/internal/api/middleware"
+	"github.com/gethardcount/hardcount/internal/platform/scheduler"
 )
 
 // Reconciler is one recovery sweep: it scans for stuck/failed post-commit

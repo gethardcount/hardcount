@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // The seams the stale-hold tests (#976, ADR-127) reach production through:

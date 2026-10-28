@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/billing"
-	"github.com/sagarsuperuser/velox/internal/customer"
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
-	"github.com/sagarsuperuser/velox/internal/pricing"
-	"github.com/sagarsuperuser/velox/internal/subscription"
+	"github.com/gethardcount/hardcount/internal/billing"
+	"github.com/gethardcount/hardcount/internal/customer"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/pricing"
+	"github.com/gethardcount/hardcount/internal/subscription"
 )
 
 // Amounts this large (near 9.2 × 10^18 cents, about $92 quadrillion) are not

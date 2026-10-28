@@ -19,8 +19,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/errs"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 // PostgresStore persists invitations and reads memberships. Queries run

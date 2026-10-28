@@ -6,8 +6,8 @@ import (
 	"math"
 	"sort"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/platform/money"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/money"
 )
 
 // ManualProvider applies a single tenant-configured tax rate (basis points)

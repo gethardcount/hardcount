@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gethardcount/hardcount/internal/auth"
+	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/go-chi/chi/v5"
-	"github.com/sagarsuperuser/velox/internal/auth"
-	"github.com/sagarsuperuser/velox/internal/domain"
 )
 
 type recordingVoider struct {

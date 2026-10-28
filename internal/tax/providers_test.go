@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // TestNoneProvider verifies the zero-tax backend: names itself, returns one

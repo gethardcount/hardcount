@@ -8,7 +8,7 @@ import (
 
 	"go.opentelemetry.io/otel"
 
-	"github.com/sagarsuperuser/velox/internal/platform/telemetry"
+	"github.com/gethardcount/hardcount/internal/platform/telemetry"
 )
 
 // TestInit_SucceedsWhenEndpointConfigured is the regression guard for a

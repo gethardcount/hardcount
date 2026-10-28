@@ -14,7 +14,7 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	"github.com/sagarsuperuser/velox/internal/usage"
+	"github.com/gethardcount/hardcount/internal/usage"
 )
 
 // EventNameTokens is the single canonical meter every provider mapper writes

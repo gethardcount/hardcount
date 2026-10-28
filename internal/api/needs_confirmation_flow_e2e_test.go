@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/platform/clock"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
-	"github.com/sagarsuperuser/velox/internal/tenantstripe"
-	"github.com/sagarsuperuser/velox/internal/testutil"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/tenantstripe"
+	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 // Stripe's answer to an off-session charge the customer's bank wants them to

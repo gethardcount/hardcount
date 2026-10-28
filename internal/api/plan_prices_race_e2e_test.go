@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/testutil"
+	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 // Races of the plan price writes (ADR-130 §4-§8, design §4.17 C3, C4, C9,

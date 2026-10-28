@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/integrations/litellm"
-	"github.com/sagarsuperuser/velox/internal/usage"
+	"github.com/gethardcount/hardcount/internal/integrations/litellm"
+	"github.com/gethardcount/hardcount/internal/usage"
 )
 
 // The page CI runs parses, and every block in it is a command or an output.

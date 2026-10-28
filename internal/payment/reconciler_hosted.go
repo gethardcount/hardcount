@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/auth"
-	"github.com/sagarsuperuser/velox/internal/platform/scheduler"
+	"github.com/gethardcount/hardcount/internal/auth"
+	"github.com/gethardcount/hardcount/internal/platform/scheduler"
 )
 
 // HostedSessionLedger is the slice of the checkout-session ledger the hosted

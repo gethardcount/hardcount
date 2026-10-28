@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // Customer usage, the public cost dashboard and the margin report read a

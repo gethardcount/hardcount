@@ -8,13 +8,13 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/gethardcount/hardcount/internal/auth"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/platform/crypto"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/sagarsuperuser/velox/internal/auth"
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/platform/clock"
-	"github.com/sagarsuperuser/velox/internal/platform/crypto"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 var auditWriteErrors *prometheus.CounterVec

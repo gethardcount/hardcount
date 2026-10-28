@@ -6,8 +6,8 @@ import (
 
 	"github.com/stripe/stripe-go/v82"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/tax"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/tax"
 )
 
 // StripeBillingSync syncs billing profile data to Stripe customer objects.

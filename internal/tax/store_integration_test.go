@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
-	"github.com/sagarsuperuser/velox/internal/tax"
-	"github.com/sagarsuperuser/velox/internal/testutil"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/tax"
+	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 // TestPostgresStore_Record inserts one row via the convenience Record method

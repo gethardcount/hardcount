@@ -10,7 +10,7 @@ import (
 
 	chimw "github.com/go-chi/chi/v5/middleware"
 
-	"github.com/sagarsuperuser/velox/internal/api/respond"
+	"github.com/gethardcount/hardcount/internal/api/respond"
 )
 
 // Recoverer turns a handler panic into the JSON 500 every other internal

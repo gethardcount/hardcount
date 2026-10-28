@@ -11,13 +11,13 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
-	"github.com/sagarsuperuser/velox/internal/audit"
-	"github.com/sagarsuperuser/velox/internal/config"
-	"github.com/sagarsuperuser/velox/internal/dunning"
-	"github.com/sagarsuperuser/velox/internal/platform/migrate"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
-	"github.com/sagarsuperuser/velox/internal/tenant"
-	"github.com/sagarsuperuser/velox/internal/user"
+	"github.com/gethardcount/hardcount/internal/audit"
+	"github.com/gethardcount/hardcount/internal/config"
+	"github.com/gethardcount/hardcount/internal/dunning"
+	"github.com/gethardcount/hardcount/internal/platform/migrate"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/tenant"
+	"github.com/gethardcount/hardcount/internal/user"
 )
 
 func main() {

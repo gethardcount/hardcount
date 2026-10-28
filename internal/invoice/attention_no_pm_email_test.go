@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // spyCustomerReader returns a fixed customer (or an error) and counts lookups,

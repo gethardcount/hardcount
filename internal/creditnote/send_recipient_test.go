@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // TestCreditNoteSend_RefusesNonBareRecipient: the "email" field of

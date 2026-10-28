@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // TestIssue_IdempotentNoDoubleApply covers the medium-severity audit finding:

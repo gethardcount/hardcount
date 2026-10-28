@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
-	"github.com/sagarsuperuser/velox/internal/testutil"
-	"github.com/sagarsuperuser/velox/internal/user"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/testutil"
+	"github.com/gethardcount/hardcount/internal/user"
 )
 
 // The per-account password-reset send cap lives in password_reset_tokens

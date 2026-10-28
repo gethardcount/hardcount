@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/auth"
+	"github.com/gethardcount/hardcount/internal/auth"
 )
 
 // Handler-layer 4xx coverage (code-quality audit gap #3): the usage

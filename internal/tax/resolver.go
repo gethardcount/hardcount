@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // Resolver maps a tenant's configured tax_provider to a concrete Provider

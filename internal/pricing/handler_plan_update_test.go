@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // TestUpdatePlan_OmittedDescriptionAndTaxCodeAreKept: PATCH /v1/plans/{id}

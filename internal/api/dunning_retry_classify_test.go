@@ -8,9 +8,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/dunning"
-	"github.com/sagarsuperuser/velox/internal/payment"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/dunning"
+	"github.com/gethardcount/hardcount/internal/payment"
 )
 
 // TestClassifyDunningRetryResult locks which retry results use up a dunning

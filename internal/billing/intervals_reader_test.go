@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // Unit tests for the ADR-101 segment-source seam's pure pieces:

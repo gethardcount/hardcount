@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/doctor"
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/invoice"
-	"github.com/sagarsuperuser/velox/internal/testutil"
+	"github.com/gethardcount/hardcount/internal/doctor"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/invoice"
+	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 // A written-off spend-threshold invoice keeps its window billed; only a void

@@ -8,10 +8,10 @@ import (
 	"sort"
 	"time"
 
-	mw "github.com/sagarsuperuser/velox/internal/api/middleware"
-	"github.com/sagarsuperuser/velox/internal/auth"
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/platform/scheduler"
+	mw "github.com/gethardcount/hardcount/internal/api/middleware"
+	"github.com/gethardcount/hardcount/internal/auth"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/scheduler"
 )
 
 // StaleChargeHoldStore is what the stale-hold sweep needs from the invoice

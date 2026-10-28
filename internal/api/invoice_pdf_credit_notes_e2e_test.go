@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/testutil/pdftest"
+	"github.com/gethardcount/hardcount/internal/testutil/pdftest"
 )
 
 // The invoice PDF is a customer document, so it prints every issued credit

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // TestReconcile_PanickingRow_RotatesAndTheRestGoesOn: the unknown and

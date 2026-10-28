@@ -4,7 +4,7 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // Tax-retry policy for the background reconciler (ADR-017).

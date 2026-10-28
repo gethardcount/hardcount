@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/platform/money"
-	"github.com/sagarsuperuser/velox/internal/tax"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/money"
+	"github.com/gethardcount/hardcount/internal/tax"
 )
 
 // Tax providers must never see a negative line amount: Stripe Tax's

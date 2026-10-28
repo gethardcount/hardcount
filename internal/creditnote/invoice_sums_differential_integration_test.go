@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/creditnote"
-	"github.com/sagarsuperuser/velox/internal/customer"
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/creditnote"
+	"github.com/gethardcount/hardcount/internal/customer"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 // defaultPage is how many notes the store list returns when asked for no

@@ -10,9 +10,9 @@ import (
 
 	"github.com/signintech/gopdf"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/pdffonts"
-	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/pdffonts"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 )
 
 // CompanyInfo holds the seller's registered-business details printed at

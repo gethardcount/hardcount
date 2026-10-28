@@ -31,7 +31,7 @@ original text.
 - Headers: `Hardcount-Signature`, `Hardcount-Event-Type`, `Hardcount-Request-Id`, `Hardcount-Version`; Postmark metadata `hc-outbox-id`.
 - Cookies: `hardcount_session`, `hardcount_device`.
 - Stripe metadata keys and idempotency keys: `hardcount_*`, such as `hardcount_invoice_id`.
-- Repository: `github.com/gethardcount/hardcount`. The Go module path stays `github.com/sagarsuperuser/velox` for now.
+- Repository and Go module path: `github.com/gethardcount/hardcount`. Go code that imported `github.com/sagarsuperuser/velox` imports `github.com/gethardcount/hardcount` now.
 
 **v0.9.0 needs a fresh database ([#1354](https://github.com/gethardcount/hardcount/pull/1354), [#1409](https://github.com/gethardcount/hardcount/pull/1409)).** A database made by Velox is refused, and nothing in it changes. From a build of `main` since the switch to goose ([#1198](https://github.com/gethardcount/hardcount/pull/1198)), `hardcount migrate` and start-up stop with `this database was made by Velox`; from v0.8.x or an older build of `main`, with `no migration record`.
 

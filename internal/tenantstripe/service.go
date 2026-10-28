@@ -11,10 +11,10 @@ import (
 
 	"github.com/stripe/stripe-go/v82"
 
-	hardcountauth "github.com/sagarsuperuser/velox/internal/auth"
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/errs"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	hardcountauth "github.com/gethardcount/hardcount/internal/auth"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 // ProviderConfigErrorRetrier is the narrow contract Connect uses

@@ -8,7 +8,7 @@ import (
 
 	chimw "github.com/go-chi/chi/v5/middleware"
 
-	mw "github.com/sagarsuperuser/velox/internal/api/middleware"
+	mw "github.com/gethardcount/hardcount/internal/api/middleware"
 )
 
 // serve runs h behind mw.RequestID and returns the request id the handler

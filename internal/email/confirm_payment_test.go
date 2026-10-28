@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/platform/leader"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/leader"
 )
 
 // P4 of the Stripe card-flow review (2026-10-22): when the bank asks the

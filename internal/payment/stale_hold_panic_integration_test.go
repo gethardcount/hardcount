@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // TestStaleHold_PanickingCheck_RestOfTheRunGoesOn: a stale-hold check that

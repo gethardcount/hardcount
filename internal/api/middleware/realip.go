@@ -6,7 +6,7 @@ import (
 
 	chimw "github.com/go-chi/chi/v5/middleware"
 
-	"github.com/sagarsuperuser/velox/internal/config"
+	"github.com/gethardcount/hardcount/internal/config"
 )
 
 // ParseTrustedProxies parses a comma-separated TRUST_PROXY spec of CIDRs and/or

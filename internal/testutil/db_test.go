@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/platform/migrate"
+	"github.com/gethardcount/hardcount/internal/platform/migrate"
 )
 
 // These pin the harness's own contract against the real test database.

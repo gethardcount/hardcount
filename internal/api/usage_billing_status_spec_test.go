@@ -9,9 +9,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/sagarsuperuser/velox/internal/api/generated"
-	"github.com/sagarsuperuser/velox/internal/integrations/litellm"
-	"github.com/sagarsuperuser/velox/internal/usage"
+	"github.com/gethardcount/hardcount/internal/api/generated"
+	"github.com/gethardcount/hardcount/internal/integrations/litellm"
+	"github.com/gethardcount/hardcount/internal/usage"
 )
 
 // specSchema is one component schema of api/openapi.yaml: its required keys,

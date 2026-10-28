@@ -4,11 +4,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/credit"
-	"github.com/sagarsuperuser/velox/internal/creditnote"
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/invoice"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/credit"
+	"github.com/gethardcount/hardcount/internal/creditnote"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/invoice"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 // T5 (commit relief): the relief retire row and its credit.commit_retired

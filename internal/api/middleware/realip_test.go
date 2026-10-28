@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/audit"
+	"github.com/gethardcount/hardcount/internal/audit"
 )
 
 // TestTrustedClientIP: the client IP comes from chi's ClientIPFrom*

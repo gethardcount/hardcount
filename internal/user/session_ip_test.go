@@ -9,10 +9,10 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	mw "github.com/sagarsuperuser/velox/internal/api/middleware"
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/platform/clock"
-	"github.com/sagarsuperuser/velox/internal/session"
+	mw "github.com/gethardcount/hardcount/internal/api/middleware"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/session"
 )
 
 // TestLogin_SessionIPIsTheTrustedClientIP: the session row a login writes

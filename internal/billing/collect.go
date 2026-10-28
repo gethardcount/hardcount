@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/payment"
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/payment"
 )
 
 // Labels for the no-payment-method email, read back by the invoice email

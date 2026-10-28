@@ -6,7 +6,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // The manual provider works in int64 cents. Its products (amount × rate in

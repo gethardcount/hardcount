@@ -3,7 +3,7 @@ package billing
 import (
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // TestDomesticReverseCharge locks the domestic-reverse-charge signal, including

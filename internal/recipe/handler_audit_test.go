@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/audit"
+	"github.com/gethardcount/hardcount/internal/audit"
 )
 
 // TestRecipePreview_OptsOutOfAudit pins that POST /v1/recipes/{key}/preview —

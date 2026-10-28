@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
-	"github.com/sagarsuperuser/velox/internal/testutil"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 // TestSettings_CreditNotePrefix (C2): the credit note prefix is set through

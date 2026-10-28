@@ -12,7 +12,7 @@ package paymentmethods
 import (
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // PaymentMethod mirrors one row in payment_methods.

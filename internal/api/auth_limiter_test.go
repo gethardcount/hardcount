@@ -9,8 +9,8 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"github.com/sagarsuperuser/velox/internal/config"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/config"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 // TestAuthLimiter_KeepsLimitingWithoutRedis covers the only login throttle:
