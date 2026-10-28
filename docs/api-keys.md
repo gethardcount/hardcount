@@ -12,11 +12,11 @@ printed a test key and saved it in
 
 To make a new key in the dashboard:
 
-1. Open **API keys** and click **Create API Key**.
+1. Open **API keys** and click **Create API key**.
    **You see:** a dialog with a name field, the key type **Secret**, and an
    expiry choice.
 2. Give the key a name, such as `Production server`, and click **Create
-   Key**.
+   key**.
    **You see:** the full key, with "Save this key now. It won't be shown
    again." Copy it into your secret store.
 

@@ -218,7 +218,7 @@ export default function ApiKeysPage() {
                         <p className="text-xs text-muted-foreground mt-1.5">
                           {k.key_type === 'secret'
                             ? 'Full access. Keep it on your server; never put it in browser or mobile app code.'
-                            : "Identifies your account only. It can't read or change any data, so it's safe to use in a browser."}
+                            : 'Manages accounts across this Hardcount server. Keep it on your server.'}
                         </p>
                       </div>
                     </div>
