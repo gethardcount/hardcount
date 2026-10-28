@@ -131,7 +131,7 @@ Adopt Stripe's model end-to-end:
    `payment.Stripe` writes `paid_at` via `clock.Now(ctx)` (which is
    simulated when the invoice is clock-pinned), but the Stripe
    PaymentIntent / Charge resources Stripe itself owns remain
-   wall-clock — that's outside Velox's database. Mirrors Stripe.
+   wall-clock — that's outside Hardcount's database. Mirrors Stripe.
 
 ## The line we're drawing
 
@@ -204,21 +204,21 @@ wrong, and the linter (Phase 7, deferred — see below) catches it.
 
 - **Per-cause test_clock webhook events** (`test_clock.created`,
   `.advancing`, `.ready`, `.internal_failure`, `.deleted`): Stripe
-  exposes these; Velox doesn't yet. Add when first design partner
+  exposes these; Hardcount doesn't yet. Add when first design partner
   asks for clock-state change notifications.
 - **`status_details.advancing.target_frozen_time` field on the test
   clock JSON**: Stripe surfaces this; lets dashboards render advance
-  progress. Velox stores the target internally but doesn't expose it.
+  progress. Hardcount stores the target internally but doesn't expose it.
 - **Auto-delete after 30 days** + per-clock entity caps (3 customers,
   3 subs/customer, 10 quotes): pre-launch we don't have a sprawl
   problem. Documented as future-enforce.
 - **Advance cap** (≤2 intervals from shortest sub or ≤2 years if no
-  sub): Stripe caps to prevent runaway catchup loops. Velox already
+  sub): Stripe caps to prevent runaway catchup loops. Hardcount already
   caps at +1 year per call (FLOW TC4); could tighten to match Stripe
   per-sub interval count.
 - **List-API filtering** (default-hide test-clock objects from
   `GET /v1/customers` etc., require `?test_clock=...` to surface):
-  Stripe does this; Velox today returns mixed results. Defer until a
+  Stripe does this; Hardcount today returns mixed results. Defer until a
   customer asks.
 - **Linter rule** that flags bare `time.Now()` in `internal/{service,
   store,api}` packages. Locks in the architecture against
@@ -312,7 +312,7 @@ test-clock advance use the simulated `created` from the advance.
 Chargebee / Orb / Lago / Recurly all use single-timestamp-per-row but
 the timestamp is the effect-time of the event, not the audit-actor
 click time. The convergence is "one timestamp per row," not "always
-simulated." Velox's choice — wall-clock primary on audit rows, sim
+simulated." Hardcount's choice — wall-clock primary on audit rows, sim
 effect-time as metadata — preserves both the forensics answer and the
 sim-effect answer without conflating them.
 
@@ -436,7 +436,7 @@ clock-pinned invoices — Stripe's own test clocks draw the same line — and
 the catchup worker deliberately has no payment-sync phase, so gating the
 wall sweep would strand an ambiguous simulated charge in
 `unknown`/`processing` with no resolver (a liveness sink). The settle path
-re-binds simulated time (`BindEffectiveNow`, `velox_anchor_at`), so a
+re-binds simulated time (`BindEffectiveNow`, `hardcount_anchor_at`), so a
 wall-tick recovery still stamps outcomes at the simulated instant; the one
 disjointness bruise — a failed settle enrolling dunning at the wall tick —
 is bounded, because the created run only ever ADVANCES during a clock

@@ -61,7 +61,7 @@ const CatchupTimeout = 10 * time.Minute
 var ErrQueueFull = errors.New("test-clock catchup queue is full")
 
 // chanCatchupQueue is a bounded, in-process channel-backed queue.
-// Single-process — fine for Velox's single-binary deployment shape.
+// Single-process — fine for Hardcount's single-binary deployment shape.
 // When/if multi-replica self-hosters arrive, swap for a Redis or
 // Postgres LISTEN/NOTIFY queue without touching service code.
 type chanCatchupQueue struct {

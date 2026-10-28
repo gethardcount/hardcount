@@ -143,7 +143,7 @@ export default function ApiKeysPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0 flex-1 basis-72">
           <h1 className="text-2xl font-semibold text-foreground">API keys</h1>
-          <p className="text-sm text-muted-foreground mt-1">Keys your app uses to call the Velox API{activeKeys.length > 0 ? ` · ${activeKeys.length} active` : ''}</p>
+          <p className="text-sm text-muted-foreground mt-1">Keys your app uses to call the Hardcount API{activeKeys.length > 0 ? ` · ${activeKeys.length} active` : ''}</p>
         </div>
         <Button size="sm" onClick={() => setShowCreate(true)}>
           <Plus size={16} className="mr-2" />
@@ -167,7 +167,7 @@ export default function ApiKeysPage() {
             <EmptyState
               icon={Key}
               title="No API keys yet"
-              description="Create an API key to start using the Velox API from your backend or CLI."
+              description="Create an API key to start using the Hardcount API from your backend or CLI."
               action={{
                 label: 'Create API key',
                 icon: Plus,

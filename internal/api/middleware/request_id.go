@@ -40,7 +40,7 @@ const requestIDPrefix = "req_"
 //     and promised zero hits, which stopped being true the moment the regression
 //     test landed. Do not re-add a claim about grep output; state the property.)
 //     Historically the reason was: grep across the repo, web-v2 and
-//     docs: there are no hits. Velox's published contract is the Velox-Request-Id
+//     docs: there are no hits. Hardcount's published contract is the Hardcount-Request-Id
 //     RESPONSE header (respond.go), which the dashboard captures (web-v2
 //     lib/api.ts) and the docs point support at. That contract is unchanged.
 //   - Cross-service trace continuity belongs to W3C Trace Context, which
@@ -49,7 +49,7 @@ const requestIDPrefix = "req_"
 //     is set (internal/platform/telemetry), so on a default deployment there is
 //     no cross-service correlation channel at all. That is a real, if small,
 //     ACCEPTED LOSS: a caller that wants to correlate its own request with a
-//     Velox audit row must now read the Velox-Request-Id response header rather
+//     Hardcount audit row must now read the Hardcount-Request-Id response header rather
 //     than dictate the id up front. We take that trade because an inbound
 //     X-Request-Id would be a second, weaker, UNAUTHENTICATED channel — and it is
 //     the one that lands in the compliance log. Closure trigger: a caller with a
@@ -76,7 +76,7 @@ func RequestID(next http.Handler) http.Handler {
 		// (an unparseable envelope) was exactly the case that lacked it.
 		// Set before next.ServeHTTP so it is in place whoever writes the
 		// status; respond.JSON re-Sets the same value, which is a no-op.
-		w.Header().Set("Velox-Request-Id", id)
+		w.Header().Set("Hardcount-Request-Id", id)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

@@ -56,14 +56,14 @@ func TestE2E_AuditRequestIDIsServerMinted(t *testing.T) {
 		t.Fatalf("create customer: status %d, want 201", resp.StatusCode)
 	}
 
-	// The response header is Velox's published correlation contract — it must
+	// The response header is Hardcount's published correlation contract — it must
 	// hand back the SERVER's id, not echo the client's.
-	headerID := resp.Header.Get("Velox-Request-Id")
+	headerID := resp.Header.Get("Hardcount-Request-Id")
 	if headerID == forged {
-		t.Errorf("Velox-Request-Id echoed the client's forged value: %q", headerID)
+		t.Errorf("Hardcount-Request-Id echoed the client's forged value: %q", headerID)
 	}
 	if !strings.HasPrefix(headerID, "req_") {
-		t.Errorf("Velox-Request-Id %q is not server-minted (want req_ prefix)", headerID)
+		t.Errorf("Hardcount-Request-Id %q is not server-minted (want req_ prefix)", headerID)
 	}
 
 	// Now the row itself — the thing an auditor would rely on.
@@ -96,6 +96,6 @@ func TestE2E_AuditRequestIDIsServerMinted(t *testing.T) {
 	// The row and the response must name the SAME request, or support cannot
 	// join a customer's report to the log at all.
 	if rowRequestID != headerID {
-		t.Errorf("audit row request_id %q != Velox-Request-Id header %q — correlation is broken", rowRequestID, headerID)
+		t.Errorf("audit row request_id %q != Hardcount-Request-Id header %q — correlation is broken", rowRequestID, headerID)
 	}
 }

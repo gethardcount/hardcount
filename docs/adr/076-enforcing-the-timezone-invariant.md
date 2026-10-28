@@ -5,7 +5,7 @@
 
 ## Summary
 
-Every calendar date shown to a person, such as an invoice date or a billing period, must be rendered in a named timezone. Code review alone let about eight wrong-day bugs through, so automatic checks enforce the rule. In Go, the `internal/arch` test `TestCivilDayFormat_UsesExplicitZone` fails CI on a date-only `.Format` call with no `.In(loc)`; a genuine UTC or filename case carries a `//tz:ok` comment. In the dashboard, `formatCivilDate` and `formatCivilPeriod` require a timezone argument, so TypeScript rejects a call that leaves it out. Status: active; on 2026-10-16 the `make lint-tz` script described below became this Go test, and a second test checks the UTC pin in `cmd/velox/main.go`.
+Every calendar date shown to a person, such as an invoice date or a billing period, must be rendered in a named timezone. Code review alone let about eight wrong-day bugs through, so automatic checks enforce the rule. In Go, the `internal/arch` test `TestCivilDayFormat_UsesExplicitZone` fails CI on a date-only `.Format` call with no `.In(loc)`; a genuine UTC or filename case carries a `//tz:ok` comment. In the dashboard, `formatCivilDate` and `formatCivilPeriod` require a timezone argument, so TypeScript rejects a call that leaves it out. Status: active; on 2026-10-16 the `make lint-tz` script described below became this Go test, and a second test checks the UTC pin in `cmd/hardcount/main.go`.
 
 ## Context
 
@@ -47,7 +47,7 @@ type system** — matching how this repo already guards invariants (grep-based
    found. **A genuine UTC/instant/filename case carries a same-line `//tz:ok`
    waiver** (currently one site: the CSV download-filename stamp). The gate also
    asserts the ADR-075 process-UTC pin (`time.Local = time.UTC`) is present in
-   `cmd/velox/main.go` — the one piece of the arc that was previously guarded only
+   `cmd/hardcount/main.go` — the one piece of the arc that was previously guarded only
    by code review. Wired into the CI lint job (no extra runner).
 
    A green `lint-tz` is a **machine-checked proof** that every civil-day render in

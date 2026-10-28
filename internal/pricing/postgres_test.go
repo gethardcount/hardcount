@@ -96,7 +96,7 @@ func TestPostgresStore_Plans(t *testing.T) {
 	if updated.Name != "Pro Plus" || updated.BaseAmountCents != 5900 {
 		t.Errorf("updated: got %+v", updated)
 	}
-	if _, err := store.UpdatePlan(ctx, tenantID, "vlx_pln_missing", func(p domain.Plan, _ bool) (domain.Plan, error) { return p, nil }); err != errs.ErrNotFound {
+	if _, err := store.UpdatePlan(ctx, tenantID, "hc_pln_missing", func(p domain.Plan, _ bool) (domain.Plan, error) { return p, nil }); err != errs.ErrNotFound {
 		t.Errorf("unknown plan: got %v, want ErrNotFound", err)
 	}
 }

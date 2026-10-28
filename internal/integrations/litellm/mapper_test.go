@@ -253,14 +253,14 @@ func TestMapPayload_CostBreakdownSurfaced(t *testing.T) {
 	if len(out) != 2 {
 		t.Fatalf("expected 2 events, got %d", len(out))
 	}
-	if got := out[0].Metadata["velox.litellm_cost_usd"]; got != 0.012 {
+	if got := out[0].Metadata["hardcount.litellm_cost_usd"]; got != 0.012 {
 		t.Errorf("input event input_cost: got %v, want 0.012", got)
 	}
-	if got := out[1].Metadata["velox.litellm_cost_usd"]; got != 0.045 {
+	if got := out[1].Metadata["hardcount.litellm_cost_usd"]; got != 0.045 {
 		t.Errorf("output event output_cost: got %v, want 0.045", got)
 	}
-	if got := out[0].Metadata["velox.source"]; got != "litellm" {
-		t.Errorf("velox.source: got %v", got)
+	if got := out[0].Metadata["hardcount.source"]; got != "litellm" {
+		t.Errorf("hardcount.source: got %v", got)
 	}
 }
 

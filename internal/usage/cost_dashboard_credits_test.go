@@ -44,7 +44,7 @@ func (f *fakeLive) LiveCreditBalance(ctx context.Context, tenantID, customerID s
 // response carries the customer's credit balance and remaining prepaid
 // commit, so a customer-facing page can show them without a secret key.
 func TestCostDashboard_CarriesCreditBalance(t *testing.T) {
-	lookup := fakeTokenLookup{cust: domain.Customer{ID: "vlx_cus_1", TenantID: "vlx_ten_1", Livemode: false}}
+	lookup := fakeTokenLookup{cust: domain.Customer{ID: "hc_cus_1", TenantID: "hc_ten_1", Livemode: false}}
 
 	t.Run("a customer with no subscription still sees the balance", func(t *testing.T) {
 		credits := &fakeCredits{summary: []CostDashboardCredits{{Currency: "USD", BalanceCents: 7500, CommitRemainingCents: 5000, PromotionalRemainingCents: 2500}}}
@@ -53,7 +53,7 @@ func TestCostDashboard_CarriesCreditBalance(t *testing.T) {
 			{Currency: "USD", BalanceCents: 7500, EstimatedRemainingCents: 7500},
 		}}})
 
-		got, err := a.GetByToken(context.Background(), "vlx_pcd_x")
+		got, err := a.GetByToken(context.Background(), "hc_pcd_x")
 		if err != nil {
 			t.Fatalf("GetByToken: %v", err)
 		}
@@ -64,7 +64,7 @@ func TestCostDashboard_CarriesCreditBalance(t *testing.T) {
 		if c := proj.Credits[0]; c.Currency != "USD" || c.BalanceCents != 7500 || c.CommitRemainingCents != 5000 || c.PromotionalRemainingCents != 2500 {
 			t.Errorf("credits = %+v, want USD balance 7500, commit 5000, promotional 2500", c)
 		}
-		if credits.gotTenant != "vlx_ten_1" || credits.gotCustomer != "vlx_cus_1" {
+		if credits.gotTenant != "hc_ten_1" || credits.gotCustomer != "hc_cus_1" {
 			t.Errorf("asked for tenant %q customer %q, want the token's own", credits.gotTenant, credits.gotCustomer)
 		}
 		if credits.gotLivemode {
@@ -77,7 +77,7 @@ func TestCostDashboard_CarriesCreditBalance(t *testing.T) {
 		a := NewCostDashboardAssembler(lookup, nil, &recordingLister{}, &fakeCredits{err: boom})
 		a.SetLiveBalanceReader(&fakeLive{})
 
-		_, err := a.GetByToken(context.Background(), "vlx_pcd_x")
+		_, err := a.GetByToken(context.Background(), "hc_pcd_x")
 		if !errors.Is(err, boom) {
 			t.Fatalf("err = %v, want the credit read error (a $0.00 balance would be a lie)", err)
 		}
@@ -91,7 +91,7 @@ func TestCostDashboard_CarriesCreditBalance(t *testing.T) {
 // different quantity), or the page and GET /v1/credits/balance/{id}/live
 // could disagree.
 func TestCostDashboard_LiveFiguresComeFromTheLiveRead(t *testing.T) {
-	lookup := fakeTokenLookup{cust: domain.Customer{ID: "vlx_cus_1", TenantID: "vlx_ten_1", Livemode: false}}
+	lookup := fakeTokenLookup{cust: domain.Customer{ID: "hc_cus_1", TenantID: "hc_ten_1", Livemode: false}}
 
 	t.Run("the three live fields are the live read's", func(t *testing.T) {
 		// The credit summary's own balance (9999) is stale on purpose: the
@@ -104,7 +104,7 @@ func TestCostDashboard_LiveFiguresComeFromTheLiveRead(t *testing.T) {
 		a := NewCostDashboardAssembler(lookup, nil, &recordingLister{}, credits)
 		a.SetLiveBalanceReader(live)
 
-		got, err := a.GetByToken(context.Background(), "vlx_pcd_x")
+		got, err := a.GetByToken(context.Background(), "hc_pcd_x")
 		if err != nil {
 			t.Fatalf("GetByToken: %v", err)
 		}
@@ -124,7 +124,7 @@ func TestCostDashboard_LiveFiguresComeFromTheLiveRead(t *testing.T) {
 		if c.CommitRemainingCents != 5000 {
 			t.Errorf("commit remaining = %d, want 5000 from the credit summary", c.CommitRemainingCents)
 		}
-		if live.gotTenant != "vlx_ten_1" || live.gotCustomer != "vlx_cus_1" || live.gotLivemode {
+		if live.gotTenant != "hc_ten_1" || live.gotCustomer != "hc_cus_1" || live.gotLivemode {
 			t.Errorf("live read asked for tenant %q customer %q livemode %v, want the token's own in test mode", live.gotTenant, live.gotCustomer, live.gotLivemode)
 		}
 	})
@@ -134,7 +134,7 @@ func TestCostDashboard_LiveFiguresComeFromTheLiveRead(t *testing.T) {
 		a := NewCostDashboardAssembler(lookup, nil, &recordingLister{}, &fakeCredits{})
 		a.SetLiveBalanceReader(&fakeLive{err: boom})
 
-		if _, err := a.GetByToken(context.Background(), "vlx_pcd_x"); !errors.Is(err, boom) {
+		if _, err := a.GetByToken(context.Background(), "hc_pcd_x"); !errors.Is(err, boom) {
 			t.Fatalf("err = %v, want the live read error", err)
 		}
 	})
@@ -142,7 +142,7 @@ func TestCostDashboard_LiveFiguresComeFromTheLiveRead(t *testing.T) {
 	t.Run("an unwired live read fails the response", func(t *testing.T) {
 		a := NewCostDashboardAssembler(lookup, nil, &recordingLister{}, &fakeCredits{})
 
-		if _, err := a.GetByToken(context.Background(), "vlx_pcd_x"); err == nil {
+		if _, err := a.GetByToken(context.Background(), "hc_pcd_x"); err == nil {
 			t.Fatal("want an error when no live reader is wired, got a response")
 		}
 	})

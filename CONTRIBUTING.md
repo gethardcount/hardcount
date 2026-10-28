@@ -1,11 +1,11 @@
-# Contributing to Velox
+# Contributing to Hardcount
 
-Velox is a billing system you run yourself, written in Go on PostgreSQL. It
+Hardcount is a billing system you run yourself, written in Go on PostgreSQL. It
 counts what your customers use, works out each bill, makes the invoice, and
 charges the card through Stripe.
 
 This page takes you from a fresh clone to a pull request that passes CI. It
-shows how to run Velox from source, where the code goes, and which checks CI
+shows how to run Hardcount from source, where the code goes, and which checks CI
 runs on your change.
 
 ## Development setup
@@ -14,8 +14,8 @@ You need Go 1.26 or newer and Docker. Node 22 or newer is needed only for
 dashboard work, and `jq` only for `scripts/demo.sh`.
 
 ```bash
-git clone https://github.com/getvelox/velox.git
-cd velox
+git clone https://github.com/gethardcount/hardcount.git
+cd hardcount
 cp .env.example .env
 ```
 
@@ -35,11 +35,11 @@ cp .env.example .env
    make bootstrap
    ```
 
-   **You see:** a "Velox Bootstrap Complete" box with the dashboard sign-in
-   (email `admin@velox.local` unless you set `VELOX_BOOTSTRAP_EMAIL`), a
+   **You see:** a "Hardcount Bootstrap Complete" box with the dashboard sign-in
+   (email `admin@hardcount.local` unless you set `HARDCOUNT_BOOTSTRAP_EMAIL`), a
    generated password, and three API keys. Save the password: it is shown
    only once. Copy the key under "Secret Key — TEST mode"
-   (`vlx_secret_test_…`).
+   (`hc_secret_test_…`).
 
 3. **Start the API.** `make dev` reads `.env`, which points at the local
    Postgres and runs migrations on boot.
@@ -68,7 +68,7 @@ cp .env.example .env
    to a finished invoice.
 
    ```bash
-   ./scripts/demo.sh vlx_secret_test_...   # the key from step 2
+   ./scripts/demo.sh hc_secret_test_...   # the key from step 2
    ```
 
    **You see:** nine numbered steps, each with a green `✓` line, then
@@ -92,32 +92,32 @@ use on your machine:
 
 | Service | Where | Notes |
 |---|---|---|
-| Postgres | `:5432` | Password `velox`. Data is kept in a Docker volume. |
+| Postgres | `:5432` | Password `hardcount`. Data is kept in a Docker volume. |
 | Redis | `:6379` | Used for rate limiting. Optional outside production: without it, only sign-in (`/v1/auth`) is rate-limited. |
-| Mailpit | `:1025` (SMTP), `:8025` (web) | Catches every email Velox sends, so nothing leaves your machine. |
+| Mailpit | `:1025` (SMTP), `:8025` (web) | Catches every email Hardcount sends, so nothing leaves your machine. |
 | The API | `:8080` | Started by `make dev`. Not a container. |
 
 `make bootstrap` takes an optional owner email and password:
-`VELOX_BOOTSTRAP_EMAIL=you@example.com VELOX_BOOTSTRAP_PASSWORD=change-me-please1 make bootstrap`.
-A password needs at least 12 characters, and Velox refuses common passwords
+`HARDCOUNT_BOOTSTRAP_EMAIL=you@example.com HARDCOUNT_BOOTSTRAP_PASSWORD=change-me-please1 make bootstrap`.
+A password needs at least 12 characters, and Hardcount refuses common passwords
 from leaked-password lists.
 
 ### Add a second account
 
-One Velox server can hold many accounts (tenants), each with its own data,
+One Hardcount server can hold many accounts (tenants), each with its own data,
 dashboard users and API keys. To add another one, run the bootstrap tool
 again with a different owner email:
 
 ```bash
-make bootstrap VELOX_BOOTSTRAP_EMAIL=tenant-b@velox.local \
-  VELOX_BOOTSTRAP_PASSWORD='choose-a-password' \
-  VELOX_BOOTSTRAP_TENANT='Tenant B'
+make bootstrap HARDCOUNT_BOOTSTRAP_EMAIL=tenant-b@hardcount.local \
+  HARDCOUNT_BOOTSTRAP_PASSWORD='choose-a-password' \
+  HARDCOUNT_BOOTSTRAP_TENANT='Tenant B'
 ```
 
 The tool runs from source, so it needs Go and this repository. It is not in
 the Docker image. There is no button for this in the dashboard, and a
 secret key cannot do it: only a platform key can manage accounts, and a
-standard Velox server issues none.
+standard Hardcount server issues none.
 
 ### Several worktrees
 
@@ -133,14 +133,14 @@ command line:
 
 ```bash
 docker compose up -d postgres
-DATABASE_URL="postgres://velox:velox@localhost:5432/velox?sslmode=disable" go run ./cmd/velox-bootstrap
-DATABASE_URL="postgres://velox:velox@localhost:5432/velox?sslmode=disable" RUN_MIGRATIONS_ON_BOOT=true go run ./cmd/velox
+DATABASE_URL="postgres://hardcount:hardcount@localhost:5432/hardcount?sslmode=disable" go run ./cmd/hardcount-bootstrap
+DATABASE_URL="postgres://hardcount:hardcount@localhost:5432/hardcount?sslmode=disable" RUN_MIGRATIONS_ON_BOOT=true go run ./cmd/hardcount
 ```
 
 To run only the migrations:
 
 ```bash
-DATABASE_URL="postgres://velox:velox@localhost:5432/velox?sslmode=disable" go run ./cmd/velox migrate
+DATABASE_URL="postgres://hardcount:hardcount@localhost:5432/hardcount?sslmode=disable" go run ./cmd/hardcount migrate
 ```
 
 ### Run your change in the Compose stack
@@ -149,21 +149,21 @@ This builds the API image from your checkout and runs it in the same stack
 as a [one-VM install](deploy/compose/README.md):
 
 ```bash
-docker build -t velox:local .        # from the repo root
+docker build -t hardcount:local .        # from the repo root
 cd deploy/compose
 cp .env.example .env
-$EDITOR .env   # set POSTGRES_PASSWORD, VELOX_APP_DB_PASSWORD, VELOX_ENCRYPTION_KEY, VELOX_BOOTSTRAP_TOKEN
-VELOX_IMAGE=velox:local docker compose up -d
+$EDITOR .env   # set POSTGRES_PASSWORD, HARDCOUNT_APP_DB_PASSWORD, HARDCOUNT_ENCRYPTION_KEY, HARDCOUNT_BOOTSTRAP_TOKEN
+HARDCOUNT_IMAGE=hardcount:local docker compose up -d
 ```
 
-**You see:** `docker compose logs -f velox-api` prints a log line with
+**You see:** `docker compose logs -f hardcount-api` prints a log line with
 `"msg":"listening"` and `"addr":":8080"` when the API is ready.
 
 To build the image and run it on its own, against a Postgres you already have:
 
 ```bash
-docker build -t velox:latest .
-docker run --rm -e DATABASE_URL="..." -p 8080:8080 velox:latest
+docker build -t hardcount:latest .
+docker run --rm -e DATABASE_URL="..." -p 8080:8080 hardcount:latest
 ```
 
 ## Project structure
@@ -221,7 +221,7 @@ internal/{domain}/
 - Errors use `errs.DomainError` for domain-specific errors or `fmt.Errorf`
   for validation.
 - JSON field names are `snake_case`.
-- ID format: `vlx_{type}_{random_hex}` (for example `vlx_cus_abc123`).
+- ID format: `hc_{type}_{random_hex}` (for example `hc_cus_abc123`).
 
 ## Frontend (web-v2)
 
@@ -247,7 +247,7 @@ secrets.
 | `unit` | Unit tests with the race detector, then `go vet`. Includes the source-rule tests in `internal/arch` | `go test ./... -race -short -count=1` |
 | `test` | Build, module checksums, and the integration tests against a real Postgres | `go test -p 1 ./... -count=1 -short=false` (needs `docker compose up -d postgres`; test databases are created for you) |
 | `test-pgbouncer` | The same suite through PgBouncer, a connection pooler, in transaction mode | `scripts/pgbouncer-test.sh` (needs Docker) |
-| `golden-path` | Boots a real server, runs `scripts/demo.sh` from prices to a finished invoice, then runs velox-doctor over the rows it wrote | Steps 2 to 5 of [Development setup](#development-setup), then `go run ./cmd/velox-doctor` |
+| `golden-path` | Boots a real server, runs `scripts/demo.sh` from prices to a finished invoice, then runs hardcount-doctor over the rows it wrote | Steps 2 to 5 of [Development setup](#development-setup), then `go run ./cmd/hardcount-doctor` |
 | `lint` | golangci-lint (`.golangci.yml`), the Go version in `go.mod` against the `Dockerfile`, the quickstart release against the Compose template, and `govulncheck` | `make lint`, then `govulncheck ./...` |
 | `codegen-drift` | Generated Go and TypeScript match `api/openapi.yaml` | `make gen && git diff --exit-code` |
 | `frontend` | Dashboard build (`tsc -b` and Vite), unit tests, eslint, and knip (unused files, exports and dependencies) | `cd web-v2 && npm run build && npm test && npm run lint` |
@@ -262,7 +262,7 @@ secrets.
 
 Notes on three of them:
 
-- **velox-doctor** is a read-only command that scans a database for states
+- **hardcount-doctor** is a read-only command that scans a database for states
   no correct code could produce, such as invoice totals that do not add up.
   Point `DATABASE_URL` at the owner connection: under the app's RLS role it
   sees no rows and reports clean.

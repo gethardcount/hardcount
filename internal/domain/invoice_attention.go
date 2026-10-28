@@ -72,7 +72,7 @@ const (
 	// AttentionReasonPaymentUnconfirmed: charge attempt returned an
 	// ambiguous error (5xx, timeout) — the reconciler resolves it once
 	// Stripe reports a terminal outcome (in-flight PIs are skipped).
-	// Velox-specific (no direct industry parity); shipped because the
+	// Hardcount-specific (no direct industry parity); shipped because the
 	// PaymentIntent + reconciler architecture creates this state and
 	// operators benefit from a quiet "the system has it" signal rather
 	// than silence.
@@ -175,9 +175,9 @@ const (
 
 	// AttentionReasonDisputeLost: the customer disputed a payment on this
 	// invoice with their bank and the dispute closed as lost, so the bank
-	// took the money back (#979). Velox leaves the invoice paid and moves no
+	// took the money back (#979). Hardcount leaves the invoice paid and moves no
 	// money; the operator decides what the loss means for the invoice (a
-	// credit note for money returned outside Velox, or a write-off in their
+	// credit note for money returned outside Hardcount, or a write-off in their
 	// own books). Critical, and surfaced on paid invoices, which is where
 	// every dispute lands. Lago parity.
 	AttentionReasonDisputeLost AttentionReason = "dispute_lost"
@@ -279,7 +279,7 @@ type AttentionActionItem struct {
 // Wire shape mirrors Stripe's last_finalization_error /
 // last_payment_error envelope (`code`, `message`, `doc_url`, `param`)
 // for parity with what design partners already integrate against, plus
-// three Velox additions:
+// three Hardcount additions:
 //
 //   - reason   — closed enum the dashboard switches on
 //   - severity — closed three-value enum for sort/filter
@@ -319,8 +319,8 @@ type Attention struct {
 	// the resolution isn't field-scoped.
 	Param string `json:"param,omitempty"`
 
-	// Detail is Velox's own explanation behind Message — always operator-
-	// safe and always our framing: why the state holds, what Velox does on
+	// Detail is Hardcount's own explanation behind Message — always operator-
+	// safe and always our framing: why the state holds, what Hardcount does on
 	// its own, and ids support may ask for. The dashboard shows it in the
 	// notice's collapsed Details, so nothing the operator must act on lives
 	// only here. NOT a place for upstream provider payloads — those go in
@@ -337,7 +337,7 @@ type Attention struct {
 	//
 	// The UI labels this as "Provider response" in a collapsible
 	// section, so the operator knows the bytes literally came from
-	// the upstream service, not from Velox. Stripe's own API
+	// the upstream service, not from Hardcount. Stripe's own API
 	// distinguishes error.message (their classification) from
 	// error.payment_intent.last_payment_error (the upstream
 	// provider's response); this field mirrors that contract.
@@ -482,8 +482,8 @@ type AttentionContext struct {
 	Now time.Time
 
 	// PaymentPageOpen: the customer has a hosted payment page that may still
-	// take their money, or a hosted payment Velox has not recorded yet
-	// (HostedCheckoutLiveSQL). While it holds, every Velox charge refuses to
+	// take their money, or a hosted payment Hardcount has not recorded yet
+	// (HostedCheckoutLiveSQL). While it holds, every Hardcount charge refuses to
 	// start (ADR-068 "one payer at a time"), so a banner offering Retry would
 	// offer a button that is refused. The invoice service reads it for
 	// finalized, unpaid invoices only.
@@ -638,7 +638,7 @@ func classifyAttentionCause(inv Invoice, atc AttentionContext) *Attention {
 	}
 	switch {
 	// Before the failure and pending states: while the customer's payment page
-	// is open no Velox charge can start, so their banners' Retry / Charge now
+	// is open no Hardcount charge can start, so their banners' Retry / Charge now
 	// would be refused, and a dunning retry date reads as overdue when it is
 	// held.
 	case inv.Status == InvoiceFinalized && atc.PaymentPageOpen:
@@ -697,10 +697,10 @@ func classifyAmountBelowMinimum(inv Invoice) *Attention {
 		Severity: AttentionSeverityWarning,
 		Reason:   AttentionReasonAmountBelowMinimum,
 		Code:     "payment.amount_too_small",
-		Message:  "This amount is below Stripe's minimum charge, so Velox won't charge it; void the invoice or record a payment made another way.",
+		Message:  "This amount is below Stripe's minimum charge, so Hardcount won't charge it; void the invoice or record a payment made another way.",
 		Detail: "Stripe won't charge this amount because it is below Stripe's minimum, which depends on the currency your Stripe account settles in; " +
 			"Stripe's reply under Provider response names it. Nothing was charged. " +
-			"Velox doesn't retry it on its own, ends any payment recovery on it, and doesn't email the customer about it. " +
+			"Hardcount doesn't retry it on its own, ends any payment recovery on it, and doesn't email the customer about it. " +
 			"Collect payment applies the customer's credit balance and pays the invoice if that covers it; otherwise it asks Stripe again. " +
 			"To collect it later, add the amount to the customer's next invoice by hand, then void this one. Record offline payment is in the ⋯ menu.",
 		DocURL:           docURL("amount-below-minimum"),
@@ -759,7 +759,7 @@ func attentionSeverityRank(s AttentionSeverity) int {
 //
 //   - A commit invoice is unpaid-with-live-credit from finalize until payment.
 //     On Net-30 that is thirty days of the deal working exactly as agreed. A
-//     reason that fired there would cry wolf on every commit sale Velox makes.
+//     reason that fired there would cry wolf on every commit sale Hardcount makes.
 //   - The chain returns the FIRST match. Winning it would have replaced
 //     "the customer's card was declined" — the actionable answer — with a
 //     restatement of the deal terms, on precisely the invoices that most need
@@ -885,7 +885,7 @@ func hasAttentionAction(actions []AttentionActionItem, code AttentionAction) boo
 //
 // Provenance routing per typed code (ADR-025):
 //   - provider_not_configured: pre-flight failure, we never called the
-//     provider. tax_pending_reason holds Velox's own string ("no client
+//     provider. tax_pending_reason holds Hardcount's own string ("no client
 //     configured for livemode=…"). Both Detail and ProviderResponse
 //     stay empty — the headline + code + Connect Stripe action are the
 //     whole UI; surfacing the internal string under "Provider response"
@@ -896,7 +896,7 @@ func hasAttentionAction(actions []AttentionActionItem, code AttentionAction) boo
 //     envelope, prefixed with "stripe_tax: "). Goes into
 //     ProviderResponse.
 //   - unknown: routes to ProviderResponse — the safer slot for
-//     unclassified content. If it turns out to be Velox-internal, we'd
+//     unclassified content. If it turns out to be Hardcount-internal, we'd
 //     just be mis-labelling it as a provider response, which is the
 //     same as today's behaviour for known cases.
 //
@@ -993,7 +993,7 @@ func classifyTaxAttention(inv Invoice, atc AttentionContext) *Attention {
 		if exhausted {
 			att.Message = "The tax provider stayed unreachable through every automatic retry, so retry tax once it's back."
 		} else {
-			att.Message = fmt.Sprintf("The tax provider can't be reached right now, and Velox retries automatically (%d of %d attempts used).", inv.TaxRetryCount, MaxTaxRetryAttempts)
+			att.Message = fmt.Sprintf("The tax provider can't be reached right now, and Hardcount retries automatically (%d of %d attempts used).", inv.TaxRetryCount, MaxTaxRetryAttempts)
 		}
 		att.DocURL = docURL("tax-provider-outage")
 		att.Actions = []AttentionActionItem{
@@ -1044,7 +1044,7 @@ func classifyTaxAttention(inv Invoice, atc AttentionContext) *Attention {
 		if exhausted {
 			att.Message = "Tax calculation kept failing for an unknown reason and automatic retries have stopped, so retry tax to try again."
 		} else {
-			att.Message = fmt.Sprintf("Tax calculation failed for an unknown reason, and Velox retries automatically (%d of %d attempts used).", inv.TaxRetryCount, MaxTaxRetryAttempts)
+			att.Message = fmt.Sprintf("Tax calculation failed for an unknown reason, and Hardcount retries automatically (%d of %d attempts used).", inv.TaxRetryCount, MaxTaxRetryAttempts)
 		}
 		att.DocURL = docURL("tax-calculation-failed")
 		att.Actions = []AttentionActionItem{
@@ -1074,7 +1074,7 @@ func attentionSince(inv Invoice) time.Time {
 func classifyPaymentFailure(inv Invoice, atc AttentionContext) *Attention {
 	// Operator voice, not provider voice: LastPaymentError is Stripe's
 	// CARDHOLDER-facing sentence ("Your card was declined") — promoted
-	// verbatim to the banner it read as Velox addressing the operator,
+	// verbatim to the banner it read as Hardcount addressing the operator,
 	// whose card was not declined. The banner states the fact in the
 	// operator's frame; the provider's exact wording stays one
 	// disclosure away (ProviderResponse below) and in Diagnostic
@@ -1100,7 +1100,7 @@ func classifyPaymentFailure(inv Invoice, atc AttentionContext) *Attention {
 	// operator wants to re-attempt without changing the card.
 	//
 	// LastPaymentError is the Stripe last_payment_error message —
-	// upstream payload from Stripe, not Velox's classification —
+	// upstream payload from Stripe, not Hardcount's classification —
 	// so it goes in ProviderResponse (ADR-025). The headline already
 	// renders the truncated form; ProviderResponse holds the full
 	// string for the disclosure.
@@ -1224,7 +1224,7 @@ func classifyPaymentUnconfirmed(inv Invoice) *Attention {
 			Reason:   AttentionReasonPaymentUnconfirmed,
 			Code:     "payment.unidentifiable",
 			Message: "Stripe didn't confirm this charge and may still complete it.\n" +
-				"Velox checks Stripe every hour and records the payment if it appears.\n" +
+				"Hardcount checks Stripe every hour and records the payment if it appears.\n" +
 				"If none appears within 24 hours, the invoice is charged again as usual.",
 			Detail: "No new charge is made before then. " +
 				"If the customer paid another way, mark the invoice uncollectible so it is not charged again. " +
@@ -1256,7 +1256,7 @@ func classifyPaymentUnconfirmed(inv Invoice) *Attention {
 		// never reaching this banner. A live requires_action PaymentIntent comes from
 		// the hosted checkout, where the customer is present and mid-3DS, and
 		// that one expires with its session inside the hour.
-		Message: "Stripe hasn't confirmed this charge yet, and Velox re-checks automatically until it does.",
+		Message: "Stripe hasn't confirmed this charge yet, and Hardcount re-checks automatically until it does.",
 		Detail: "If it stays here for hours, the charge may be waiting on the customer (for example 3-D Secure). " +
 			"Check the payment in Stripe, then cancel or retry it there.",
 		DocURL: docURL("payment-unconfirmed"),
@@ -1264,7 +1264,7 @@ func classifyPaymentUnconfirmed(inv Invoice) *Attention {
 	}
 }
 
-// classifyPaymentProcessing surfaces the in-flight charge state. Velox now
+// classifyPaymentProcessing surfaces the in-flight charge state. Hardcount now
 // confirms it automatically — inline from the synchronous charge response
 // (ADR-049 Phase 3) or via the reconciler backstop if the provider callback is
 // delayed/dropped (Phase 2) — so the healthy state needs no operator action.
@@ -1303,8 +1303,8 @@ func classifyPaymentProcessing(inv Invoice, atc AttentionContext) *Attention {
 }
 
 // classifyPaymentPageOpen: the customer is paying on the hosted payment page,
-// or has just paid there and Velox is recording it. Nothing is wrong and the
-// operator has nothing to do: Velox holds its own charges and dunning retries
+// or has just paid there and Hardcount is recording it. Nothing is wrong and the
+// operator has nothing to do: Hardcount holds its own charges and dunning retries
 // until the page closes (ADR-068), so no actions are offered — Collect and
 // Retry would be refused. Reuses payment_processing (the closed reason enum is
 // a public contract): a payment may be in progress, and the Code carries the
@@ -1314,7 +1314,7 @@ func classifyPaymentPageOpen() *Attention {
 		Severity: AttentionSeverityInfo,
 		Reason:   AttentionReasonPaymentProcessing,
 		Code:     "payment.page_open",
-		Message:  "The customer has the payment page open or just paid on it, so Velox holds charges until that finishes, usually within an hour.",
+		Message:  "The customer has the payment page open or just paid on it, so Hardcount holds charges until that finishes, usually within an hour.",
 		DocURL:   docURL("payment-processing"),
 	}
 }
@@ -1331,7 +1331,7 @@ func classifyPaymentScheduled(inv Invoice) *Attention {
 	// sweep will pick it up on its next run. We don't surface a precise
 	// next_attempt_at; "usually within an hour" is honest because the
 	// sweep runs on the billing tick, hourly by default (every 5 minutes in
-	// local dev, cmd/velox/main.go).
+	// local dev, cmd/hardcount/main.go).
 	//
 	// A clock-pinned (simulated) invoice is the exception: the wall-clock
 	// sweep EXCLUDES it (ADR-028/029 disjoint flows — ListAutoChargePending
@@ -1403,7 +1403,7 @@ func classifyCollectionPaused(inv Invoice, retrying bool) *Attention {
 // two paths: trigger the charge themselves, or send the customer a
 // reminder email.
 //
-// This is NOT a steady state Velox has a collection mode for — every
+// This is NOT a steady state Hardcount has a collection mode for — every
 // finalize write queues the invoice (auto_charge_pending, ADR-116),
 // which routes to payment_scheduled instead. Reaching here means a row
 // written before that change. It is operator-recoverable via Charge now,
@@ -1490,13 +1490,13 @@ func classifyNoPaymentMethod(inv Invoice, atc AttentionContext) *Attention {
 	switch {
 	case !atc.CustomerHasEmail:
 		// False also when the customer read failed, so the sentence states
-		// Velox's rule rather than this customer's state: honest either way,
+		// Hardcount's rule rather than this customer's state: honest either way,
 		// and the customer page shows the real address.
 		emailLine = "Setup links are emailed only to customers with an email address, so copy one from the customer page and send it."
-		emailDetail = "Adding an email address on the customer page lets Velox send the link."
+		emailDetail = "Adding an email address on the customer page lets Hardcount send the link."
 	case atc.SetupLinkEmailOff:
 		emailLine = "This server can't email setup links, so none was sent; copy one from the customer page instead."
-		emailDetail = "To let Velox email setup links, set up email sending (SMTP) and the payment-update page address (PAYMENT_UPDATE_URL)."
+		emailDetail = "To let Hardcount email setup links, set up email sending (SMTP) and the payment-update page address (PAYMENT_UPDATE_URL)."
 	default:
 		emailLine = "A setup link is emailed to the customer once; use Resend setup link to send it again."
 		emailDetail = "The invoice's activity shows whether the email was sent. The customer page can also copy the link to share directly."
@@ -1581,9 +1581,9 @@ func classifyPaymentAnomaly(inv Invoice) *Attention {
 		if inv.StripePaymentIntentID != "" {
 			detail += " Original payment: " + inv.StripePaymentIntentID + "."
 		} else if inv.PaidOutOfBand {
-			detail += " Original payment: recorded as paid outside Velox."
+			detail += " Original payment: recorded as paid outside Hardcount."
 		}
-		detail += " The extra charge exists only in Stripe; Velox records one payment."
+		detail += " The extra charge exists only in Stripe; Hardcount records one payment."
 	case EventPaymentAmountMismatch:
 		// Formatted, not raw minor units: this sentence used to read "Stripe
 		// captured 9652 (minor units) … booked 10000", handing an operator two
@@ -1599,7 +1599,7 @@ func classifyPaymentAnomaly(inv Invoice) *Attention {
 		msg = "A payment was charged in a different currency than this invoice, so review it in Stripe and refund or correct it."
 		detail = "Payment: " + pi + ". The amounts were not converted."
 	default:
-		msg = "Velox found a payment on this invoice that doesn't match its records, so review it in Stripe."
+		msg = "Hardcount found a payment on this invoice that doesn't match its records, so review it in Stripe."
 		detail = "Kind: " + inv.PaymentAnomalyKind + ". Payment: " + pi + "."
 	}
 	att := &Attention{
@@ -1618,7 +1618,7 @@ func classifyPaymentAnomaly(inv Invoice) *Attention {
 }
 
 // classifyDisputeLost reports a payment the customer's bank took back after a
-// lost dispute (#979). Velox records the loss and changes nothing else, so the
+// lost dispute (#979). Hardcount records the loss and changes nothing else, so the
 // invoice still reads paid and its books overstate what was collected until
 // the operator acts. No action button: the decision is the operator's (a
 // credit note, or a write-off in their own books), and none of the existing
@@ -1642,7 +1642,7 @@ func classifyDisputeLost(inv Invoice, d InvoiceDispute, atc AttentionContext) *A
 	if d.Reason != "" {
 		detail += "; the customer's reason was " + d.Reason
 	}
-	detail += ". Velox leaves the invoice paid and moves no money."
+	detail += ". Hardcount leaves the invoice paid and moves no money."
 	message := "The customer's bank took back " + taken +
 		" after a lost dispute, so record it with a credit note or write it off in your books."
 
@@ -1651,7 +1651,7 @@ func classifyDisputeLost(inv Invoice, d InvoiceDispute, atc AttentionContext) *A
 	case inv.Status == InvoicePaid && drawable > 0:
 		message = "The customer's bank took back " + taken + " after a lost dispute, and the customer can still spend " +
 			FormatMoneyMinor(drawable, inv.Currency) + " of this invoice's prepaid credit." +
-			"\nRetire that credit with commit relief, recorded as money returned outside Velox."
+			"\nRetire that credit with commit relief, recorded as money returned outside Hardcount."
 		detail += " The prepaid credit stays spendable until you retire it. An ordinary credit note is refused on an invoice that bought prepaid credit: " +
 			"use POST /v1/credit-notes with commit_relief {\"retire_all\": true, \"out_of_band_amount_cents\": <amount>}, the amount inside commit_relief and never as a card refund, because the bank already returned the money. " +
 			"If the amount you send differs, the answer names the right one. " +
@@ -1661,7 +1661,7 @@ func classifyDisputeLost(inv Invoice, d InvoiceDispute, atc AttentionContext) *A
 			" after a lost dispute, so bill the customer again or write it off in your books."
 		detail += " The customer already spent all the credit this invoice bought, so there is none to retire, and an ordinary credit note is refused on an invoice that bought prepaid credit."
 	default:
-		detail += " To record the loss, issue a credit note with the amount as money returned outside Velox, not as a card refund: the bank already returned it."
+		detail += " To record the loss, issue a credit note with the amount as money returned outside Hardcount, not as a card refund: the bank already returned it."
 	}
 	return &Attention{
 		Severity: AttentionSeverityCritical,
@@ -1694,7 +1694,7 @@ func withLostDispute(att *Attention, d InvoiceDispute) *Attention {
 		"Stripe dispute "+d.StripeDisputeID+" on payment "+d.StripePaymentIntentID+
 			" closed as lost: the customer already has that money back, and Stripe refuses a refund of it. "+
 			"A refund of another payment on this invoice can return the same money twice.",
-		"Velox also flagged a payment on this invoice. "+att.Detail)
+		"Hardcount also flagged a payment on this invoice. "+att.Detail)
 	return att
 }
 

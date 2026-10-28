@@ -125,8 +125,8 @@ func newThresholdFixture(t *testing.T, name string) *thresholdFixture {
 	cycleStart := time.Now().UTC().Truncate(time.Hour).Add(-72 * time.Hour)
 	cycleEnd := cycleStart.Add(30 * 24 * time.Hour)
 
-	subID := postgres.NewID("vlx_sub")
-	itemID := postgres.NewID("vlx_si")
+	subID := postgres.NewID("hc_sub")
+	itemID := postgres.NewID("hc_si")
 	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		t.Fatalf("begin sub tx: %v", err)
@@ -680,8 +680,8 @@ func (f *thresholdFixture) seedThresholdFleet(t *testing.T, ctx context.Context,
 	now := time.Now().UTC()
 	ids := make([]string, 0, n)
 	for i := 0; i < n; i++ {
-		subID := fmt.Sprintf("vlx_sub_fleet_%04d", i)
-		itemID := fmt.Sprintf("vlx_si_fleet_%04d", i)
+		subID := fmt.Sprintf("hc_sub_fleet_%04d", i)
+		itemID := fmt.Sprintf("hc_si_fleet_%04d", i)
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO subscriptions (
 				id, tenant_id, code, display_name, customer_id, status, billing_time,
@@ -1040,7 +1040,7 @@ func TestThresholdCycle_DeferredMax_FullWindowOnce(t *testing.T) {
 		if err != nil {
 			t.Fatalf("create customer %d: %v", i, err)
 		}
-		subID := fmt.Sprintf("vlx_sub_dmax_%d", i)
+		subID := fmt.Sprintf("hc_sub_dmax_%d", i)
 		tx, err := f.db.BeginTx(ctx, postgres.TxTenant, f.tenantID)
 		if err != nil {
 			t.Fatalf("begin: %v", err)
@@ -1058,13 +1058,13 @@ func TestThresholdCycle_DeferredMax_FullWindowOnce(t *testing.T) {
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO subscription_items (id, tenant_id, subscription_id, plan_id, quantity, metadata, created_at, updated_at)
 			VALUES ($1, $2, $3, $4, 1, '{}'::jsonb, $5, $5)
-		`, fmt.Sprintf("vlx_si_dmax_%d", i), f.tenantID, subID, plan.ID, f.cycleStart); err != nil {
+		`, fmt.Sprintf("hc_si_dmax_%d", i), f.tenantID, subID, plan.ID, f.cycleStart); err != nil {
 			t.Fatalf("insert item %d: %v", i, err)
 		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO billing_intervals (tenant_id, subscription_id, subscription_item_id, plan_id, quantity, starts_at, source)
 			VALUES ($1, $2, $3, $4, 1, $5, 'create')
-		`, f.tenantID, subID, fmt.Sprintf("vlx_si_dmax_%d", i), plan.ID, f.cycleStart); err != nil {
+		`, f.tenantID, subID, fmt.Sprintf("hc_si_dmax_%d", i), plan.ID, f.cycleStart); err != nil {
 			t.Fatalf("insert interval %d: %v", i, err)
 		}
 		if err := tx.Commit(); err != nil {
@@ -1217,7 +1217,7 @@ func TestImmediateCancel_AfterThresholdFire_NoDoubleBill(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create customer: %v", err)
 	}
-	subID := "vlx_sub_cancel_fire"
+	subID := "hc_sub_cancel_fire"
 	now := time.Now().UTC()
 	tx, err := f.db.BeginTx(ctx, postgres.TxTenant, f.tenantID)
 	if err != nil {
@@ -1235,13 +1235,13 @@ func TestImmediateCancel_AfterThresholdFire_NoDoubleBill(t *testing.T) {
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO subscription_items (id, tenant_id, subscription_id, plan_id, quantity, metadata, created_at, updated_at)
-		VALUES ('vlx_si_cancel_fire', $1, $2, $3, 1, '{}'::jsonb, $4, $4)
+		VALUES ('hc_si_cancel_fire', $1, $2, $3, 1, '{}'::jsonb, $4, $4)
 	`, f.tenantID, subID, plan.ID, f.cycleStart); err != nil {
 		t.Fatalf("insert item: %v", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO billing_intervals (tenant_id, subscription_id, subscription_item_id, plan_id, quantity, starts_at, source)
-		VALUES ($1, $2, 'vlx_si_cancel_fire', $3, 1, $4, 'create')
+		VALUES ($1, $2, 'hc_si_cancel_fire', $3, 1, $4, 'create')
 	`, f.tenantID, subID, plan.ID, f.cycleStart); err != nil {
 		t.Fatalf("insert interval: %v", err)
 	}

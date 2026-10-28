@@ -99,7 +99,7 @@ func TestReadiness_StatusCodeAndBody(t *testing.T) {
 
 	t.Run("failed database ping is 503 with no error text", func(t *testing.T) {
 		setScheduler(t, time.Time{}, 0)
-		const detail = "failed to connect to `user=velox_app database=velox`: 10.0.0.7:5432: connection refused"
+		const detail = "failed to connect to `user=hardcount_app database=hardcount`: 10.0.0.7:5432: connection refused"
 
 		code, raw, body := get(t, pingConnector{err: errors.New(detail)})
 		if code != http.StatusServiceUnavailable {
@@ -109,7 +109,7 @@ func TestReadiness_StatusCodeAndBody(t *testing.T) {
 		if checks["database"] != "error" {
 			t.Fatalf("checks.database = %v, want the fixed word \"error\"", checks["database"])
 		}
-		for _, leak := range []string{"velox_app", "10.0.0.7", "connection refused"} {
+		for _, leak := range []string{"hardcount_app", "10.0.0.7", "connection refused"} {
 			if strings.Contains(raw, leak) {
 				t.Fatalf("body carries database error detail %q: %s", leak, raw)
 			}

@@ -11,7 +11,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/version"
 )
 
-// apiVersion feeds the Velox-Version response header — the build-time
+// apiVersion feeds the Hardcount-Version response header — the build-time
 // stamp (git tag in released images, "dev" locally), not a hardcoded date
 // that went stale within weeks.
 var apiVersion = version.Version
@@ -199,9 +199,9 @@ type ErrorDetail struct {
 
 func setHeaders(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Velox-Version", apiVersion)
+	w.Header().Set("Hardcount-Version", apiVersion)
 	if id := requestID(r); id != "" {
-		w.Header().Set("Velox-Request-Id", id)
+		w.Header().Set("Hardcount-Request-Id", id)
 	}
 }
 

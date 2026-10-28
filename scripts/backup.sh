@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Velox Database Backup Script
+# Hardcount Database Backup Script
 #
 # Creates a logical backup using pg_dump, optionally uploads to S3,
 # and rotates old local backups.
 #
 # Usage:
-#   DATABASE_URL="postgres://velox:velox@localhost:5432/velox?sslmode=disable" ./scripts/backup.sh
+#   DATABASE_URL="postgres://hardcount:hardcount@localhost:5432/hardcount?sslmode=disable" ./scripts/backup.sh
 #
 # Optional environment variables:
-#   BACKUP_DIR          Local directory for backups (default: /var/backups/velox)
+#   BACKUP_DIR          Local directory for backups (default: /var/backups/hardcount)
 #   BACKUP_S3_BUCKET    S3 bucket name for remote upload (skipped if unset)
 #   BACKUP_S3_PREFIX    S3 key prefix (default: logical-backups)
 #   BACKUP_RETENTION_DAYS  Days to keep local backups (default: 30)
@@ -28,11 +28,11 @@ set -euo pipefail
 
 if [ -z "${DATABASE_URL:-}" ]; then
   echo "ERROR: DATABASE_URL environment variable is required." >&2
-  echo "Example: DATABASE_URL='postgres://velox:velox@localhost:5432/velox?sslmode=disable'" >&2
+  echo "Example: DATABASE_URL='postgres://hardcount:hardcount@localhost:5432/hardcount?sslmode=disable'" >&2
   exit 1
 fi
 
-BACKUP_DIR="${BACKUP_DIR:-/var/backups/velox}"
+BACKUP_DIR="${BACKUP_DIR:-/var/backups/hardcount}"
 BACKUP_S3_BUCKET="${BACKUP_S3_BUCKET:-}"
 BACKUP_S3_PREFIX="${BACKUP_S3_PREFIX:-logical-backups}"
 BACKUP_RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-30}"
@@ -41,7 +41,7 @@ BACKUP_RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-30}"
 # Handles: postgres://user:pass@host:port/dbname?params
 DB_NAME=$(echo "$DATABASE_URL" | sed -E 's|.*://[^/]*/([^?]*).*|\1|')
 if [ -z "$DB_NAME" ]; then
-  DB_NAME="velox"
+  DB_NAME="hardcount"
 fi
 
 TIMESTAMP=$(date -u +"%Y%m%d_%H%M%S")
@@ -91,13 +91,13 @@ mkdir -p "$BACKUP_DIR" || die "Cannot create backup directory: $BACKUP_DIR" 1
 # into your own fleet is not a backup — fail loudly at dump time, when the
 # operator can still fix it, not at restore time, when they cannot.
 # Override (e.g. deliberately migrating majors via dump/restore):
-# VELOX_BACKUP_TOOL_MISMATCH_OK=yes
+# HARDCOUNT_BACKUP_TOOL_MISMATCH_OK=yes
 TOOL_MAJOR=$($PG_DUMP --version | sed -E 's/.* ([0-9]+)(\.[0-9]+)?.*/\1/')
 if command -v psql >/dev/null 2>&1; then
   SERVER_MAJOR=$(psql "$DATABASE_URL" -tAc "SHOW server_version" 2>/dev/null | sed -E 's/^([0-9]+).*/\1/')
   if [ -n "$SERVER_MAJOR" ] && [ -n "$TOOL_MAJOR" ] && [ "$TOOL_MAJOR" -gt "$SERVER_MAJOR" ] \
-     && [ "${VELOX_BACKUP_TOOL_MISMATCH_OK:-no}" != "yes" ]; then
-    die "pg_dump major ($TOOL_MAJOR) is newer than the server major ($SERVER_MAJOR): the archive may not restore into postgres $SERVER_MAJOR. Use matching tools (e.g. PG_DUMP=\"docker run --rm -i --network host postgres:${SERVER_MAJOR}-alpine pg_dump\") or set VELOX_BACKUP_TOOL_MISMATCH_OK=yes if the mismatch is deliberate." 1
+     && [ "${HARDCOUNT_BACKUP_TOOL_MISMATCH_OK:-no}" != "yes" ]; then
+    die "pg_dump major ($TOOL_MAJOR) is newer than the server major ($SERVER_MAJOR): the archive may not restore into postgres $SERVER_MAJOR. Use matching tools (e.g. PG_DUMP=\"docker run --rm -i --network host postgres:${SERVER_MAJOR}-alpine pg_dump\") or set HARDCOUNT_BACKUP_TOOL_MISMATCH_OK=yes if the mismatch is deliberate." 1
   fi
 fi
 

@@ -43,8 +43,8 @@ func longInvoice(n int, status domain.InvoiceStatus) (domain.Invoice, []domain.I
 		sub += amount
 	}
 	inv := domain.Invoice{
-		ID:                 "vlx_inv_long",
-		InvoiceNumber:      "VLX-202604-0042",
+		ID:                 "hc_inv_long",
+		InvoiceNumber:      "HC-202604-0042",
 		Status:             status,
 		PaymentStatus:      domain.PaymentPending,
 		Currency:           "USD",
@@ -207,7 +207,7 @@ func checkPages(t *testing.T, pages []pdftest.Page, items []domain.InvoiceLineIt
 		if fmt.Sprint(numbers) != fmt.Sprint(want) {
 			t.Errorf("page %d: page numbers %q, want %q", pi+1, numbers, want)
 		}
-		if pi > 0 && !p.Has("Invoice VLX-202604-0042 (continued)") {
+		if pi > 0 && !p.Has("Invoice HC-202604-0042 (continued)") {
 			t.Errorf("page %d: no continued marker", pi+1)
 		}
 	}

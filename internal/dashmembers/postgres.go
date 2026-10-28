@@ -85,7 +85,7 @@ func (s *PostgresStore) CreateInvitation(ctx context.Context, inv Invitation) (I
 	}
 	defer postgres.Rollback(tx)
 
-	id := postgres.NewID("vlx_minv")
+	id := postgres.NewID("hc_minv")
 	err = tx.QueryRowContext(ctx, `
 		WITH ins AS (
 			INSERT INTO member_invitations (id, tenant_id, email, token_hash, invited_by_user_id, role, expires_at)

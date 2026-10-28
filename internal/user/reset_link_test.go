@@ -10,12 +10,12 @@ import "testing"
 // DASHBOARD_BASE_URL — so header poisoning is structurally impossible.
 func TestBuildResetLink(t *testing.T) {
 	t.Run("uses configured base url", func(t *testing.T) {
-		h := &Handler{dashboardBaseURL: "https://app.velox.dev"}
+		h := &Handler{dashboardBaseURL: "https://app.hardcount.dev"}
 		link, ok := h.buildResetLink("tok_abc")
 		if !ok {
 			t.Fatal("expected ok=true when base url is set")
 		}
-		if link != "https://app.velox.dev/reset-password?token=tok_abc" {
+		if link != "https://app.hardcount.dev/reset-password?token=tok_abc" {
 			t.Errorf("unexpected link: %q", link)
 		}
 	})

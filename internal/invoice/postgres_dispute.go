@@ -28,10 +28,10 @@ func scanDisputeDest(d *domain.InvoiceDispute) []any {
 // RecordStripeDispute records one charge.dispute.* snapshot against the
 // invoice whose payment was disputed (#979), in one transaction:
 //
-//   - the invoice is found from the dispute's own row when Velox already
+//   - the invoice is found from the dispute's own row when Hardcount already
 //     recorded it, otherwise from the disputed PaymentIntent (the invoice's
 //     charge attempts, then the invoice's own payment and anomaly columns).
-//     No invoice holds it: errs.ErrNotFound, the charge was not Velox's;
+//     No invoice holds it: errs.ErrNotFound, the charge was not Hardcount's;
 //   - the invoice row is locked first, then the dispute row (lock order rule,
 //     playbook §5.6), so two events for one dispute serialize;
 //   - the snapshot is written only when it is newer than the row

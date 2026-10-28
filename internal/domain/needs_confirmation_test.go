@@ -68,7 +68,7 @@ func TestNeedsConfirmationAttention(t *testing.T) {
 			t.Errorf("retrying=%v: severity %s, want warning", retrying, att.Severity)
 		}
 		// Stripe's developer text stays labelled as the provider's, never
-		// Velox's own words.
+		// Hardcount's own words.
 		if att.ProviderResponse != failed.LastPaymentError || strings.Contains(att.Detail, "off session") {
 			t.Errorf("retrying=%v: provider response %q / detail %q", retrying, att.ProviderResponse, att.Detail)
 		}

@@ -38,27 +38,27 @@ const (
 type KeyType string
 
 const (
-	KeyTypePlatform    KeyType = "platform"    // vlx_platform_ — tenant management
-	KeyTypeSecret      KeyType = "secret"      // vlx_secret_   — full tenant access
-	KeyTypePublishable KeyType = "publishable" // vlx_pub_      — restricted tenant access
+	KeyTypePlatform    KeyType = "platform"    // hc_platform_ — tenant management
+	KeyTypeSecret      KeyType = "secret"      // hc_secret_   — full tenant access
+	KeyTypePublishable KeyType = "publishable" // hc_pub_      — restricted tenant access
 	KeyTypeSession     KeyType = "session"     // dashboard cookie session — role-scoped access
 )
 
-// TypePrefix returns the type-only prefix (e.g. "vlx_secret_"). Used when
+// TypePrefix returns the type-only prefix (e.g. "hc_secret_"). Used when
 // parsing a raw key to identify its type before the mode infix.
 func (kt KeyType) TypePrefix() string {
 	switch kt {
 	case KeyTypePlatform:
-		return "vlx_platform_"
+		return "hc_platform_"
 	case KeyTypePublishable:
-		return "vlx_pub_"
+		return "hc_pub_"
 	default:
-		return "vlx_secret_"
+		return "hc_secret_"
 	}
 }
 
-// KeyPrefix returns the full "vlx_{type}_{mode}_" prefix used on new keys.
-// Stripe-style: vlx_secret_live_..., vlx_secret_test_..., etc. A visible mode
+// KeyPrefix returns the full "hc_{type}_{mode}_" prefix used on new keys.
+// Stripe-style: hc_secret_live_..., hc_secret_test_..., etc. A visible mode
 // infix lets operators spot "test key in prod config" misrouting without
 // decoding the key.
 func KeyPrefix(kt KeyType, livemode bool) string {
@@ -91,14 +91,14 @@ var keyPermissions = map[KeyType]map[Permission]bool{
 		PermAPIKeyWrite:       true,
 		PermTestClockWrite:    true,
 	},
-	// Publishable keys are browser-embeddable (vlx_pub_live_… ships in JS
+	// Publishable keys are browser-embeddable (hc_pub_live_… ships in JS
 	// SDKs), so they get NO tenant-wide scopes at all — not even reads. An
 	// earlier pass removed the write scopes (a visitor could create customers /
 	// fake usage); the reads were left, but they are the same exposure class:
-	// vlx_pub_ + customer:read lets any visitor to any embedding page list
+	// hc_pub_ + customer:read lets any visitor to any embedding page list
 	// every customer's PII, pull every invoice PDF, read tenant revenue via
 	// /analytics, and bulk-export CSVs. Stripe's pk_ equivalents deliberately
-	// cannot list customers or read revenue. Velox has no current browser flow
+	// cannot list customers or read revenue. Hardcount has no current browser flow
 	// that needs these reads (the cost dashboard and hosted/payment pages
 	// authenticate with their own per-resource tokens, not publishable keys),
 	// so the safe default is an empty scope set: a publishable key authenticates

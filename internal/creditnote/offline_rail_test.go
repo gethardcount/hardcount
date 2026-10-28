@@ -206,7 +206,7 @@ func TestRetryRefund_OfflinePaid_FailsCleanlyInsteadOfForever(t *testing.T) {
 	svc.SetNumberGenerator(&fakeCNNumbers{})
 
 	legacy := domain.CreditNote{
-		ID: "vlx_cn_legacy", TenantID: "t1", InvoiceID: inv.ID, CustomerID: "cus_1",
+		ID: "hc_cn_legacy", TenantID: "t1", InvoiceID: inv.ID, CustomerID: "cus_1",
 		Status: domain.CreditNoteIssued, Currency: "USD",
 		RefundAmountCents: 1000, RefundStatus: domain.RefundFailed,
 	}

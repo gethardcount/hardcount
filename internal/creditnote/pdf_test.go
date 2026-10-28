@@ -17,9 +17,9 @@ func TestRenderPDF_Basic(t *testing.T) {
 	invIssued := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
 
 	cn := domain.CreditNote{
-		ID:                "vlx_cn_test",
+		ID:                "hc_cn_test",
 		CreditNoteNumber:  "CN-202604-0001",
-		InvoiceID:         "vlx_inv_test",
+		InvoiceID:         "hc_inv_test",
 		CustomerID:        "cus_1",
 		Status:            domain.CreditNoteIssued,
 		Reason:            "Service outage credit for incident 2026-04-10",
@@ -36,7 +36,7 @@ func TestRenderPDF_Basic(t *testing.T) {
 		{Description: "Partial refund — outage credit", Quantity: 1, UnitAmountCents: 5900, AmountCents: 5900},
 	}
 	orig := OriginalInvoiceInfo{
-		Number:     "VLX-202604-0001",
+		Number:     "HC-202604-0001",
 		IssuedAt:   &invIssued,
 		Currency:   "USD",
 		TaxCountry: "US",
@@ -54,8 +54,8 @@ func TestRenderPDF_Basic(t *testing.T) {
 		TaxID:        "US-EIN-12-3456789",
 	}
 	company := CompanyInfo{
-		Name:    "Velox Inc.",
-		Email:   "billing@velox.dev",
+		Name:    "Hardcount Inc.",
+		Email:   "billing@hardcount.dev",
 		TaxID:   "US-EIN-98-7654321",
 		Country: "US",
 	}
@@ -86,9 +86,9 @@ func TestRenderPDF_ReverseCharge(t *testing.T) {
 	issued := time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC)
 
 	cn := domain.CreditNote{
-		ID:                "vlx_cn_rc",
+		ID:                "hc_cn_rc",
 		CreditNoteNumber:  "CN-202604-0002",
-		InvoiceID:         "vlx_inv_rc",
+		InvoiceID:         "hc_inv_rc",
 		CustomerID:        "cus_eu_1",
 		Status:            domain.CreditNoteIssued,
 		Reason:            "Contract cancellation — EU B2B reverse charge",
@@ -103,13 +103,13 @@ func TestRenderPDF_ReverseCharge(t *testing.T) {
 		{Description: "Cancellation credit", Quantity: 1, UnitAmountCents: 10000, AmountCents: 10000},
 	}
 	orig := OriginalInvoiceInfo{
-		Number:        "VLX-202604-0099",
+		Number:        "HC-202604-0099",
 		Currency:      "EUR",
 		TaxCountry:    "DE",
 		ReverseCharge: true,
 	}
 	bt := BillToInfo{Name: "Beispiel GmbH", Country: "DE", TaxID: "DE123456789"}
-	company := CompanyInfo{Name: "Velox Ltd", Country: "IE", TaxID: "IE1234567T"}
+	company := CompanyInfo{Name: "Hardcount Ltd", Country: "IE", TaxID: "IE1234567T"}
 
 	out, err := RenderPDF(context.Background(), cn, items, orig, bt, company)
 	if err != nil {
@@ -126,9 +126,9 @@ func TestRenderPDF_VoidedWatermark(t *testing.T) {
 	t.Parallel()
 	voided := time.Date(2026, 4, 20, 0, 0, 0, 0, time.UTC)
 	cn := domain.CreditNote{
-		ID:               "vlx_cn_voided",
+		ID:               "hc_cn_voided",
 		CreditNoteNumber: "CN-202604-0003",
-		InvoiceID:        "vlx_inv_v",
+		InvoiceID:        "hc_inv_v",
 		CustomerID:       "cus_2",
 		Status:           domain.CreditNoteVoided,
 		Reason:           "Issued in error",
@@ -193,7 +193,7 @@ func TestSettlementLines(t *testing.T) {
 		{
 			// An out-of-band-only CN used to fall through to the
 			// "applied to reduce the amount due" line — false: OOB means
-			// the money was handled entirely outside Velox and the
+			// the money was handled entirely outside Hardcount and the
 			// invoice's amount due was never touched (2026-08-04 census).
 			name:    "out-of-band only says outside, not amount-due",
 			cn:      domain.CreditNote{OutOfBandAmountCents: 1000, TotalCents: 1000, Currency: "USD"},

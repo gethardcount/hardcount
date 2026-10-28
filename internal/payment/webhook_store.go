@@ -68,7 +68,7 @@ func (s *PostgresWebhookStore) IngestEvent(ctx context.Context, tenantID string,
 	}
 	defer postgres.Rollback(tx)
 
-	id := postgres.NewID("vlx_swe")
+	id := postgres.NewID("hc_swe")
 	now := time.Now().UTC()
 	payloadJSON, _ := json.Marshal(event.Payload)
 	if event.Payload == nil {

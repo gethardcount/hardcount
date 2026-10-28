@@ -131,11 +131,11 @@ func TestCivilDayFormat_UsesExplicitZone(t *testing.T) {
 // The process runs in UTC (ADR-075). Without the pin, pgx decodes timestamptz
 // in the host zone and the API leaks a host offset.
 func TestServerPinsProcessToUTC(t *testing.T) {
-	src, err := os.ReadFile(filepath.Join(repoRoot(t), "cmd", "velox", "main.go"))
+	src, err := os.ReadFile(filepath.Join(repoRoot(t), "cmd", "hardcount", "main.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(src), "time.Local = time.UTC") {
-		t.Error("cmd/velox/main.go must pin the process to UTC (time.Local = time.UTC), ADR-075")
+		t.Error("cmd/hardcount/main.go must pin the process to UTC (time.Local = time.UTC), ADR-075")
 	}
 }

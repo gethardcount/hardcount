@@ -5,7 +5,7 @@
 
 ## Summary
 
-`respond.FromError` is the one place that turns a service error into an HTTP response, so raw SDK, database and runtime errors never reach a response body. Typed Velox errors pass through with their status, and errors that implement `SafeMessageError` show only their `OperatorSafeMessage()`, such as "Card was declined: Insufficient funds.". Any other error becomes a generic 500 and is logged in full with the request ID. One legacy fallback remains: an untyped error worded like validation ("invalid …") gets a 422 with its text. Amended 2026-07-20: when the auth lookup cannot reach a verdict, for example because the database is down, the auth middleware returns `503 authentication_unavailable` instead of a misleading 401. Status: active, amended.
+`respond.FromError` is the one place that turns a service error into an HTTP response, so raw SDK, database and runtime errors never reach a response body. Typed Hardcount errors pass through with their status, and errors that implement `SafeMessageError` show only their `OperatorSafeMessage()`, such as "Card was declined: Insufficient funds.". Any other error becomes a generic 500 and is logged in full with the request ID. One legacy fallback remains: an untyped error worded like validation ("invalid …") gets a 422 with its text. Amended 2026-07-20: when the auth lookup cannot reach a verdict, for example because the database is down, the auth middleware returns `503 authentication_unavailable` instead of a misleading 401. Status: active, amended.
 
 ## Context
 
@@ -14,7 +14,7 @@ string verbatim:
 
 > Keys for idempotent requests can only be used with the same parameters
 > they were first used with. Try using a key other than
-> 'velox_inv_vlx_inv_d7s5753majdik74k71l0_pm_1TTRjFGcT3wmy5fZkgFV3Ozx'
+> 'hardcount_inv_hc_inv_d7s5753majdik74k71l0_pm_1TTRjFGcT3wmy5fZkgFV3Ozx'
 
 That bug had two layers:
 1. The actual idempotency-key collision (fixed in a separate commit by
@@ -29,7 +29,7 @@ becomes:
 - The text on a SPA toast,
 - The body of a JSON error response,
 - A potential leak of Stripe SDK strings, Postgres error messages,
-  internal Velox identifiers (tenant_id, livemode, idempotency keys),
+  internal Hardcount identifiers (tenant_id, livemode, idempotency keys),
   Go runtime errors, etc.
 
 Industry comparison (Stripe / Vercel / Linear / Twilio): all of them
@@ -46,7 +46,7 @@ A single-boundary sanitization contract:
    `respond.Validation(..., err.Error())` — and equivalents — are
    bug-prone and removed from the high-impact paths.
 
-2. **Typed Velox errors pass through.** `errs.ErrNotFound`,
+2. **Typed Hardcount errors pass through.** `errs.ErrNotFound`,
    `errs.ErrAlreadyExists`, `errs.ErrValidation`, `errs.ErrConflict`,
    `errs.ErrInvalidState`, `errs.ErrPreconditionFailed`, plus any
    `*DomainError` with an explicit code — these are operator-safe by

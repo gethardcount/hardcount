@@ -11,7 +11,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/api/generated"
 )
 
-// A billing_status is what Velox found when the event arrived (D07, ADR-130
+// A billing_status is what Hardcount found when the event arrived (D07, ADR-130
 // §10 and PR-6, ADR-120 amendment 2026-10-27): outside_subscription,
 // not_on_plan, no_price or after_close. A present status was true then; no
 // status promises nothing. Each test that flags an event also closes the
@@ -22,9 +22,9 @@ import (
 // The rig is the close-lag rig (close_lag_e2e_test.go): the real server over
 // HTTP, April is P0 = [Apr 1, May 1) and B = May 1.
 
-const unbilledMetric = "velox_usage_unbilled_total"
+const unbilledMetric = "hardcount_usage_unbilled_total"
 
-// unbilledCount reads velox_usage_unbilled_total{reason, origin}.
+// unbilledCount reads hardcount_usage_unbilled_total{reason, origin}.
 func unbilledCount(t *testing.T, reason, origin string) float64 {
 	t.Helper()
 	mfs, err := prometheus.DefaultGatherer.Gather()
@@ -60,7 +60,7 @@ func (r *lagRig) labelled(meter, key string, ts time.Time, qty int64, dims map[s
 	return ev
 }
 
-// postLabelled posts one labelled event reaching Velox at arrival, wants 201
+// postLabelled posts one labelled event reaching Hardcount at arrival, wants 201
 // and returns the answer.
 func (r *lagRig) postLabelled(meter, key string, ts, arrival time.Time, qty int64, dims map[string]any) map[string]any {
 	r.t.Helper()

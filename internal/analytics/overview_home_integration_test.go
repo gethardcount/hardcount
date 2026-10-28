@@ -61,7 +61,7 @@ func TestOverview_HomeCountsAndBaselines(t *testing.T) {
 				started_at, activated_at, canceled_at, test_clock_id,
 				current_billing_period_start, current_billing_period_end, next_billing_at, created_at, updated_at)
 			VALUES ($1, $2, false, $3, $3, $4, $5, 'anniversary', $6, $7, $8, NULLIF($9, ''), $10, $11, $11, $10, $10)`,
-			postgres.NewID("vlx_sub"), tenantID, code, custID, status,
+			postgres.NewID("hc_sub"), tenantID, code, custID, status,
 			startedAt, activatedAt, canceledAt, clockID, daysAgo(60), now.Add(24*time.Hour))
 	}
 	p := func(t time.Time) *time.Time { return &t }

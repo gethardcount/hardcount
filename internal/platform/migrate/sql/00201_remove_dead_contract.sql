@@ -1,5 +1,5 @@
 -- +goose Up
--- Removes values and a table that no Velox code writes:
+-- Removes values and a table that no Hardcount code writes:
 --   - subscription status archived;
 --   - plan status draft (a plan is created active; its default becomes
 --     active);
@@ -25,8 +25,8 @@
 --
 -- A draft plan becomes active: it was already sold and billed like an
 -- active one, so nothing about it changes but the label. Nothing else is
--- rewritten. No Velox version wrote the other removed values, so a row that
--- holds one was written outside Velox. If there is such a row, the upgrade
+-- rewritten. No Hardcount version wrote the other removed values, so a row that
+-- holds one was written outside Hardcount. If there is such a row, the upgrade
 -- stops here before changing anything, and the error lists them.
 --
 -- These tables force row-level security, and the user that runs migrations
@@ -54,8 +54,8 @@ BEGIN
     SELECT count(*) INTO n FROM billed_entries;
     IF n > 0 THEN found := found || format(E'\n  %s row(s) in billed_entries', n); END IF;
     IF found <> '' THEN
-        RAISE EXCEPTION 'migration 00201 removes values that no Velox code writes, and this database has rows that hold them:%', found
-            USING HINT = 'No Velox version wrote these values, so these rows were written outside Velox. Change or delete those rows, then run the upgrade again: docs/ops/runbook/migration-failed-midway.md#00201-found-rows-no-velox-version-wrote';
+        RAISE EXCEPTION 'migration 00201 removes values that no Hardcount code writes, and this database has rows that hold them:%', found
+            USING HINT = 'No Hardcount version wrote these values, so these rows were written outside Hardcount. Change or delete those rows, then run the upgrade again: docs/ops/runbook/migration-failed-midway.md#00201-found-rows-no-hardcount-version-wrote';
     END IF;
 END
 $$;
@@ -111,7 +111,7 @@ ALTER TABLE subscriptions ADD CONSTRAINT subscriptions_status_check
     CHECK (status IN ('draft', 'trialing', 'active', 'canceled', 'archived'));
 
 CREATE TABLE billed_entries (
-    id TEXT DEFAULT ('vlx_ble_' || encode(gen_random_bytes(12), 'hex')) NOT NULL,
+    id TEXT DEFAULT ('hc_ble_' || encode(gen_random_bytes(12), 'hex')) NOT NULL,
     tenant_id TEXT NOT NULL,
     customer_id TEXT NOT NULL,
     meter_id TEXT NOT NULL,
@@ -131,4 +131,4 @@ CREATE TRIGGER set_livemode BEFORE INSERT ON billed_entries FOR EACH ROW EXECUTE
 ALTER TABLE billed_entries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE billed_entries FORCE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation ON billed_entries USING (((current_setting('app.bypass_rls', true) = 'on') OR ((tenant_id = current_setting('app.tenant_id', true)) AND (livemode = (current_setting('app.livemode', true) IS DISTINCT FROM 'off')))));
-GRANT ALL ON TABLE billed_entries TO velox_app;
+GRANT ALL ON TABLE billed_entries TO hardcount_app;

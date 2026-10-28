@@ -95,8 +95,8 @@ export default function ProviderCostsPage() {
         <div>
           <h1 className="text-2xl font-semibold text-foreground">Provider costs</h1>
           <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
-            Enter what each AI provider charges you per 1M tokens, and Velox shows your
-            margin on each customer. Add rates before you send usage: Velox works
+            Enter what each AI provider charges you per 1M tokens, and Hardcount shows your
+            margin on each customer. Add rates before you send usage: Hardcount works
             out each event's cost when it arrives and never goes back to older events.
           </p>
         </div>

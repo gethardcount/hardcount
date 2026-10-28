@@ -83,17 +83,17 @@ func TestProrationInvoiceIndexes(t *testing.T) {
 	// 1. Two prorations, same period, DIFFERENT items → BOTH persist. If the
 	//    billing-idempotency index did NOT exempt proration, the second would
 	//    collide on (tenant, sub, period).
-	if _, err := invStore.Create(ctx, tenantID, prorate("VLX-PRO-A", itemA)); err != nil {
+	if _, err := invStore.Create(ctx, tenantID, prorate("HC-PRO-A", itemA)); err != nil {
 		t.Fatalf("proration A: %v", err)
 	}
-	if _, err := invStore.Create(ctx, tenantID, prorate("VLX-PRO-B", itemB)); err != nil {
+	if _, err := invStore.Create(ctx, tenantID, prorate("HC-PRO-B", itemB)); err != nil {
 		t.Fatalf("proration B (different item, SAME period) must NOT collide — billing-idempotency exempts proration: %v", err)
 	}
 
 	// 2. The SAME (item, change-type, change-instant) tuple again → deduped by
 	//    idx_invoices_proration_dedup (distinct invoice number, so it is the
 	//    proration-source index that fires, not the invoice-number one).
-	_, err = invStore.Create(ctx, tenantID, prorate("VLX-PRO-A-DUP", itemA))
+	_, err = invStore.Create(ctx, tenantID, prorate("HC-PRO-A-DUP", itemA))
 	if err == nil {
 		t.Fatal("duplicate proration for the same item+change should be rejected by idx_invoices_proration_dedup")
 	}

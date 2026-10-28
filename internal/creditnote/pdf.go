@@ -219,7 +219,7 @@ func RenderPDF(
 
 	// ── Header: company (left), "CREDIT NOTE" label (right) ──
 	// Only what the tenant entered: an unset company name prints no name,
-	// never a made-up "Velox" seller (same rule as the invoice PDF).
+	// never a made-up "Hardcount" seller (same rule as the invoice PDF).
 	companyName := strings.TrimSpace(company.Name)
 	var companyAddrLines []string
 	companyContact := ""
@@ -575,7 +575,7 @@ func RenderPDF(
 
 		// ── Refund destination ──
 		// Tells the reader where the money went. Three cases map to the three
-		// ways Velox settles a CN (see service.go Issue()):
+		// ways Hardcount settles a CN (see service.go Issue()):
 		//   - refund_amount > 0:  Stripe refund back to the original payment
 		//   - credit_amount > 0:  Added to the customer's prepaid balance
 		//   - both zero:          Applied to an unpaid invoice's amount_due
@@ -699,7 +699,7 @@ func stampPageNumbers(pdf *gopdf.GoPdf, x, width, y float64) error {
 // made a mixed CN describe only its card leg (the credit/out-of-band money
 // silently unexplained), and an out-of-band-only CN fell through to the
 // "applied to reduce the amount due" fallback — false, since out-of-band
-// means the money was handled entirely outside Velox and the invoice's
+// means the money was handled entirely outside Hardcount and the invoice's
 // amount due was never touched. The fallback is now reachable only by a
 // true adjustment CN (all three channels zero). Refund copy stays explicit
 // about status so a failed leg never reads as settled.

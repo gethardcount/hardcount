@@ -7,7 +7,7 @@
 
 ## Summary
 
-Velox marks simulated data (dates from a test clock) once per scope, with the word "Simulated" and a flask icon. A detail page for one clock-pinned customer, subscription or invoice says it once, in its page banner; in a list where rows can differ, each simulated row gets a chip. One flag per scope avoids both failures seen before: simulated dates that read as real, and repeated flags that operators learn to ignore. Amended 2026-10-15: the banner is a single neutral line with the clock time and a View clock link, and its explanation sits in a collapsed Details. Status: active, amended 2026-10-15; it partly supersedes [ADR-030](030-simulated-time-everywhere-on-clock-pinned-entities.md) by removing the per-row Activity chip.
+Hardcount marks simulated data (dates from a test clock) once per scope, with the word "Simulated" and a flask icon. A detail page for one clock-pinned customer, subscription or invoice says it once, in its page banner; in a list where rows can differ, each simulated row gets a chip. One flag per scope avoids both failures seen before: simulated dates that read as real, and repeated flags that operators learn to ignore. Amended 2026-10-15: the banner is a single neutral line with the clock time and a View clock link, and its explanation sits in a collapsed Details. Status: active, amended 2026-10-15; it partly supersedes [ADR-030](030-simulated-time-everywhere-on-clock-pinned-entities.md) by removing the per-row Activity chip.
 
 ## Context
 
@@ -64,7 +64,7 @@ below it. The word is "Simulated". The banner teaches; the chip flags.**
   audit log's per-row chip (wall-primary forensic list — the chip carries
   the simulated instant there).
 - `TestClockBadge` / `SimulatedBadge` share the one-word vocabulary; the
-  "Pinned to test clock vlx_tclk_…" tooltip phrasing is gone.
+  "Pinned to test clock hc_tclk_…" tooltip phrasing is gone.
 - MANUAL_TEST assertions that pinned the removed duplicates (B7's
   invoice-header badge leg) are truthed to the policy in the same PR.
 - Trade-off accepted: a screenshot of *only* an invoice header no longer

@@ -13,8 +13,8 @@ var envExampleSetting = regexp.MustCompile(`^#? ?([A-Z][A-Z0-9_]*)=`)
 // Every setting deploy/compose/.env.example offers must reach a container
 // through deploy/compose/docker-compose.yml. Compose only passes the names its
 // file lists, so a setting missing there is silently dropped: the operator sets
-// it in .env and Velox never sees it (#1150: POSTMARK_WEBHOOK_USER/PASS and
-// VELOX_API_BASE_URL).
+// it in .env and Hardcount never sees it (#1150: POSTMARK_WEBHOOK_USER/PASS and
+// HARDCOUNT_API_BASE_URL).
 func TestComposeEnvExample_EverySettingReachesCompose(t *testing.T) {
 	root := repoRoot(t)
 	example, err := os.ReadFile(filepath.Join(root, "deploy", "compose", ".env.example"))

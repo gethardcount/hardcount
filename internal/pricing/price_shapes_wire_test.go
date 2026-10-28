@@ -41,7 +41,7 @@ var shapeDoors = []shapeDoor{
 			store := newMemStore()
 			_, seeded := seedPlanWithPrice(store, "tnt_test")
 			h := NewHandler(NewService(store))
-			return doJSON(t, h.createOverride, http.MethodPost, "/", `{"customer_id":"vlx_cus_1","price_id":"`+seeded.ID+`",`+price+`}`, nil)
+			return doJSON(t, h.createOverride, http.MethodPost, "/", `{"customer_id":"hc_cus_1","price_id":"`+seeded.ID+`",`+price+`}`, nil)
 		},
 	},
 }

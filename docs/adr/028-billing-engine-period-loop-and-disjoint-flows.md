@@ -61,7 +61,7 @@ subs). Three follow-on smells:
 Stripe Test Clocks have NO background cron touching clock-pinned
 customers. Advance is the SOLE path for clock-pinned billing. Their
 billing engine vectorises period generation per sub during advance —
-no per-period outer loop needed by the caller. Velox was an outlier on
+no per-period outer loop needed by the caller. Hardcount was an outlier on
 both axes.
 
 ## Decision
@@ -277,9 +277,9 @@ you can only advance up to two months at a time. If you haven't set any
 subscriptions or subscription schedules, you can advance up to two years
 from the initial frozen time"
 ([API and advanced usage](https://docs.stripe.com/billing/testing/test-clocks/api-advanced-usage),
-read 2026-10-20). The 1-year cap stays as Velox's own, for the three
+read 2026-10-20). The 1-year cap stays as Hardcount's own, for the three
 reasons under "Why a cap". The error no longer ends with
-"(Stripe parity)", and the code comments say Velox's own cap.
+"(Stripe parity)", and the code comments say Hardcount's own cap.
 
 ## Compatibility
 

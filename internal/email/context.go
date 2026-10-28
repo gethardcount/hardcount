@@ -24,7 +24,7 @@ func WithCorrelation(ctx context.Context, outboxID string) context.Context {
 // Postmark's metadata docs only demonstrate hyphenated key names, and the
 // key must survive the header→metadata→webhook round-trip verbatim.
 // 13 chars — within Postmark's 20-char key cap.
-const CorrelationMetadataKey = "vlx-outbox-id"
+const CorrelationMetadataKey = "hc-outbox-id"
 
 // correlationHeaderName is the outbound MIME header Postmark strips before
 // delivery and echoes back (string-valued) under
@@ -37,7 +37,7 @@ const correlationHeaderName = "X-PM-Metadata-" + CorrelationMetadataKey
 // correlationID returns the ctx's outbox id for the correlation header,
 // or "" when the ctx carries none (direct Sender use outside the
 // dispatcher); the header is then absent, never empty-valued. The value is
-// our own generated 'vlx_emob_'+hex id, but it is validated anyway:
+// our own generated 'hc_emob_'+hex id, but it is validated anyway:
 // anything outside the id alphabet (which can never contain CR/LF) or over
 // Postmark's 80-char value cap drops the header rather than risk header
 // injection or silent provider-side truncation.

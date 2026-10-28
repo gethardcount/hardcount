@@ -69,7 +69,7 @@ func (e *PaymentError) OperatorSafeMessage() string {
 		return "Card was declined: " + declineCodeToOperatorMessage(string(e.DeclineCode))
 	}
 	if e.Unknown {
-		return "Stripe didn't confirm whether the charge went through. Velox will check with Stripe and update the invoice; don't charge again until it does."
+		return "Stripe didn't confirm whether the charge went through. Hardcount will check with Stripe and update the invoice; don't charge again until it does."
 	}
 	return "Payment provider rejected the request. Please retry; if the problem persists, contact support."
 }
@@ -145,7 +145,7 @@ type StripeKeyError struct {
 }
 
 // Reasons of a StripeKeyError; also the label of
-// velox_stripe_key_unusable_total.
+// hardcount_stripe_key_unusable_total.
 const (
 	StripeKeyRejected      = "rejected"
 	StripeKeyNotConfigured = "not_configured"
@@ -176,7 +176,7 @@ func (e *StripeKeyError) OperatorErrorCode() string { return "stripe_key_unusabl
 // 2026-10-22: "Amount must be at least $0.50 usd"). Stripe makes no
 // PaymentIntent and no session, so nothing was charged, and asking again
 // gets the same answer with any card. domain.ErrBelowMinimumCharge says what
-// Velox does with it.
+// Hardcount does with it.
 //
 // It must not be or wrap a *PaymentError, for the reason StripeKeyError
 // gives: the auto-charge sweep, the dunning retry and Collect all read a
@@ -445,13 +445,13 @@ func (c *LiveStripeClient) CreatePaymentIntent(ctx context.Context, params Payme
 		metadata[k] = v
 	}
 
-	// Charge the exact PaymentMethod the caller resolved from Velox's
+	// Charge the exact PaymentMethod the caller resolved from Hardcount's
 	// payment_methods table (the single source of truth for the customer's
 	// default card). We deliberately do NOT consult Stripe's
 	// invoice_settings.default_payment_method or fall back to "most recent
 	// card" — those are independent selectors that can disagree with
-	// Velox's default and previously let an off-session charge hit a
-	// different card than the one Velox gated on. No PM id → loud failure,
+	// Hardcount's default and previously let an off-session charge hit a
+	// different card than the one Hardcount gated on. No PM id → loud failure,
 	// never a silent guess.
 	if params.PaymentMethodID == "" {
 		return PaymentIntentResult{}, &PaymentError{Message: "customer has no payment method on file"}
@@ -533,9 +533,9 @@ func (c *LiveStripeClient) FetchCardDetails(ctx context.Context, stripeCustomerI
 	}
 
 	// Read only. This used to set the newest card as Stripe's default,
-	// ignoring errors, which split Stripe's copy from Velox's default (the
-	// card Velox charges). Stripe's default now follows Velox's, set by the
-	// payment-methods service whenever Velox's default changes (ADR-053).
+	// ignoring errors, which split Stripe's copy from Hardcount's default (the
+	// card Hardcount charges). Stripe's default now follows Hardcount's, set by the
+	// payment-methods service whenever Hardcount's default changes (ADR-053).
 	return CardDetails{
 		PaymentMethodID: latest.ID,
 		Brand:           string(latest.Card.Brand),
@@ -623,8 +623,8 @@ func paymentIntentResult(pi *stripe.PaymentIntent) PaymentIntentResult {
 		Status:              string(pi.Status),
 		ClientSecret:        pi.ClientSecret,
 		CreatedAt:           pi.Created,
-		Purpose:             pi.Metadata["velox_purpose"],
-		InvoiceID:           pi.Metadata["velox_invoice_id"],
+		Purpose:             pi.Metadata["hardcount_purpose"],
+		InvoiceID:           pi.Metadata["hardcount_invoice_id"],
 		AmountReceivedCents: pi.AmountReceived,
 		AnchorAt:            anchorFromPIMetadata(pi.Metadata),
 	}
@@ -649,7 +649,7 @@ func paymentIntentResult(pi *stripe.PaymentIntent) PaymentIntentResult {
 // ignored by the caller: a malformed anchor must degrade to the pin binding,
 // never block a settlement.
 func anchorFromPIMetadata(meta map[string]string) time.Time {
-	raw := meta["velox_anchor_at"]
+	raw := meta["hardcount_anchor_at"]
 	if raw == "" {
 		return time.Time{}
 	}
@@ -662,7 +662,7 @@ func anchorFromPIMetadata(meta map[string]string) time.Time {
 
 // ListPaymentIntentsForCustomer is the stale-hold sweep's read (ADR-127):
 // every PaymentIntent of the Stripe customer created at or after createdGTE,
-// each with its velox_invoice_id, status, captured amount and whether its
+// each with its hardcount_invoice_id, status, captured amount and whether its
 // latest charge was refunded in full (expand[]=data.latest_charge).
 //
 // Why List and not Search (Stripe's docs, fetched 2026-10-19): List is the

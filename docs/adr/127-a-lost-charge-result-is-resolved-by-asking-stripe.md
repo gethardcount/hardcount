@@ -116,7 +116,7 @@ Stripe calls are cut at 45 seconds (stripe-go alone allows about 90 s a page
 while Stripe is unreachable). For each hold, it lists the Stripe customer's PaymentIntents
 created since an hour before the hold, through List, never Search, and
 directly, never through the charge breaker. It keeps the ones whose
-`velox_invoice_id` is this invoice, then:
+`hardcount_invoice_id` is this invoice, then:
 
 | Found | Does |
 |---|---|
@@ -125,7 +125,7 @@ directly, never through the charge breaker. It keeps the ones whose
 | processing, invoice open | stamps the newest on the invoice (`processing`), so the webhook and the processing sweep take over; clears |
 | processing, and the invoice is already processing or `unknown` with that same PaymentIntent | clears: the processing or unknown sweep follows it |
 | processing, any other (the invoice written off, voided or paid meanwhile; a second one) | keeps the hold, stamped, until it ends: a later check settles it or flags it. Cleared, nothing would record it if its webhook were lost |
-| Velox off-session `requires_*` not already the invoice's in-flight payment | cancels it at Stripe; keeps the hold for the next check |
+| Hardcount off-session `requires_*` not already the invoice's in-flight payment | cancels it at Stripe; keeps the hold for the next check |
 | nothing else, invoice open | clears and moves the counter (a fresh key for the next charge) |
 | nothing else, any other status | clears |
 | no Stripe customer on file | as "nothing": no charge can have been sent |
@@ -148,7 +148,7 @@ new record.
 - List is consistent;
 - no request for the attempt can start after its hold ends;
 - the sweep waits 10 more minutes;
-- every Velox PaymentIntent carries `velox_invoice_id` and the invoice's
+- every Hardcount PaymentIntent carries `hardcount_invoice_id` and the invoice's
   Stripe customer;
 - that customer id is set once (`customer.SetStripeCustomerID` refuses to
   overwrite a different one).
@@ -170,7 +170,7 @@ this deploy, and works for the hosted page's PaymentIntents.
   puts Stripe calls in request paths, wires the invoice service to the
   payment check across domains, and gives every caller a "credits after the
   check" rule. Rejected for one resolver.
-- **C. Search by `velox_invoice_id`** (ADR-108's API). Not offered in India,
+- **C. Search by `hardcount_invoice_id`** (ADR-108's API). Not offered in India,
   and eventually consistent, so an empty answer proves nothing. Rejected.
 - **D. Keep "an expired hold is free".** That is #976.
 
@@ -229,7 +229,7 @@ this deploy, and works for the hosted page's PaymentIntents.
 - A kept hold is stamped (`provider_synced_at`) and checked again after 30
   minutes (`staleHoldRecheckAfter`), not the hour ADR-108's search waits, so a
   stamp taken during one hourly tick does not hide the row from the next. The
-  stamp means "Velox last asked Stripe", whether or not Stripe answered. An
+  stamp means "Hardcount last asked Stripe", whether or not Stripe answered. An
   `unknown` invoice that names its PaymentIntent is never stamped by this
   sweep: the column is the unknown sweep's rotation key, and that sweep stamps
   it. A parked invoice is stamped here since the 2026-10-20 amendment (it
@@ -283,7 +283,7 @@ release it), so this sweep already listed it. It now finishes it.
 |---|---|---|
 | succeeded, not refunded in full | settles, oldest first; clears (as before) | same (`uncollectible` → paid) |
 | processing | puts the newest on the invoice (`processing`, its id, the counter moves); clears. The webhook and the processing sweep follow it | keeps the hold until it ends (as before) |
-| Velox off-session `requires_*` | cancels it at Stripe; keeps the hold (as before) | same |
+| Hardcount off-session `requires_*` | cancels it at Stripe; keeps the hold (as before) | same |
 | nothing, or only failed, canceled or refunded in full, less than 24 hours after the hold | keeps the hold, stamps the row (`waiting`) | same |
 | the same, 24 hours or more after the hold | `UnparkAfterNoPayment` (`released`) | same; nothing charges a written-off invoice (ADR-113), so this only ends the park |
 | no Stripe customer on file | as "nothing" | same |
@@ -318,8 +318,8 @@ fetched 2026-10-19:
   and use webhook events to reconcile the outcome. If you can't establish
   what happened, contact Stripe support before repeating the operation."
 
-Velox retrieves: it lists the customer's payments every tick. When
-the list still shows none for the invoice 24 hours after the hold, Velox
+Hardcount retrieves: it lists the customer's payments every tick. When
+the list still shows none for the invoice 24 hours after the hold, Hardcount
 charges again under a new key, without contacting Stripe support. That last
 step is a deliberate departure from Stripe's text, decided by Sagar; R10 is
 its price. A payment the list shows is acted on at the first check. The gate
@@ -334,7 +334,7 @@ row and its park, on a context detached from the caller, unless the caller
 was cancelled. So a timed-out call gets the 24 hours. So does a 500 that
 arrives just before the deadline, when the deadline passes while it is
 saved. A cancellation (a shutdown, a lost lease, a closed **Collect
-payment** tab) or a crash is Velox interrupting itself, so nothing is saved.
+payment** tab) or a crash is Hardcount interrupting itself, so nothing is saved.
 Its stale hold is checked about 75 minutes after the claim, as before.
 
 **Why the next charge does not reuse the parked attempt's key.** Stripe
@@ -351,7 +351,7 @@ rotates instead of heading the list every tick.
 `SearchPaymentIntentsByInvoiceID` (the one call to Stripe Search),
 `ListParkedSearchable`, `AdoptPaymentIntentIfParked`, `CountParkedInvoices`,
 the latch for accounts without Search, and the metric
-`velox_parked_search_errors_total`.
+`hardcount_parked_search_errors_total`.
 
 **Upgrade.** Parks made by v0.8.x keep their claim's hold, so the sweep
 finishes them at the first tick after the upgrade. A payment found is
@@ -367,12 +367,12 @@ gives each such park a hold at its newest parked attempt's `created_at`
 was lost. Where no park lacks a hold it changes nothing.
 
 **Product copy.** The `payment.unidentifiable` notice is a Warning: "Stripe
-didn't confirm this charge and may still complete it. Velox checks Stripe
+didn't confirm this charge and may still complete it. Hardcount checks Stripe
 every hour and records the payment if it appears. If none appears within 24
 hours, the invoice is charged again as usual." Write-off stays as a secondary
 action, for a customer who paid another way.
 
-**Monitoring.** `velox_parked_invoices` counts only the parks the sweep has
+**Monitoring.** `hardcount_parked_invoices` counts only the parks the sweep has
 not ended on schedule. Those are parks still parked 26 hours after the hold,
 or with no hold. The 26 hours are the 24, the hourly tick that ends the
 park, and an hour for a late tick. A count of every park would stay above 0 for as long as parks kept
@@ -400,7 +400,7 @@ not be read about for a day, or one with no hold (R13).
   parked until a webhook or a write-off; the gauge counts it at once, since
   it has no hold.
 - **R14.** A network error before the request left: nothing reached Stripe,
-  but Velox cannot tell that from a 500, so it waits 24 hours. Follow-up B
+  but Hardcount cannot tell that from a 500, so it waits 24 hours. Follow-up B
   below shortens it. Trigger: the first partner invoice that waits a day on a
   park from a network error.
 - **R15.** A cancellation while Stripe is slow (a shutdown, a closed tab
@@ -409,7 +409,7 @@ not be read about for a day, or one with no hold (R13).
   cannot be known.
 - **R16.** Two parks on one invoice, when Stripe answers 500 to creates for
   more than a day. A late decline of the first park's payment can record the
-  second park as failed: Velox cannot tell two unnamed attempts apart. The
+  second park as failed: Hardcount cannot tell two unnamed attempts apart. The
   sweep then clears that hold at about 75 minutes, without the 24 hours.
 - **R17.** A customer deleted in Stripe: the list is refused, so the park
   stays, with an ERROR every check, until someone writes it off. Not checked

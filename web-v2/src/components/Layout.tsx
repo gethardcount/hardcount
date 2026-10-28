@@ -24,7 +24,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { CommandPalette } from '@/components/CommandPalette'
 import { isNavActive, isTestMode, SETTINGS_NAV, visibleNav } from '@/lib/navigation'
-import { VeloxLogo } from '@/components/VeloxLogo'
+import { HardcountLogo } from '@/components/HardcountLogo'
 import { OnboardingLauncher, SetupChecklistPanel } from '@/components/OnboardingLauncher'
 import { useOnboardingSteps } from '@/hooks/useOnboardingSteps'
 import { ScrollPane } from '@/components/ui/scroll-pane'
@@ -303,7 +303,7 @@ export function Layout({ children }: { children: ReactNode }) {
     <>
       {/* Header */}
       <div className="p-4 border-b border-border flex items-center justify-between">
-        <VeloxLogo size="sm" />
+        <HardcountLogo size="sm" />
         <button
           onClick={closeSidebar}
           aria-label="Close menu"
@@ -420,7 +420,7 @@ export function Layout({ children }: { children: ReactNode }) {
                     `user_agent: ${navigator.userAgent}\n` +
                     (requestId ? `request_id: ${requestId}\n` : '')
                   window.open(
-                    `https://github.com/getvelox/velox/issues/new?body=${encodeURIComponent(body)}`,
+                    `https://github.com/gethardcount/hardcount/issues/new?body=${encodeURIComponent(body)}`,
                     '_blank',
                     'noopener,noreferrer',
                   )
@@ -449,7 +449,7 @@ export function Layout({ children }: { children: ReactNode }) {
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <div className="px-2 py-1.5 text-[10px] text-muted-foreground/60 tracking-wide">
-                Velox v2.0
+                Hardcount
               </div>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -557,7 +557,7 @@ export function Layout({ children }: { children: ReactNode }) {
               >
                 <Menu size={22} />
               </button>
-              <VeloxLogo size="sm" />
+              <HardcountLogo size="sm" />
             </div>
           </div>
         </div>

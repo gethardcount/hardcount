@@ -26,18 +26,18 @@ ARG TARGETOS=linux
 ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
     -ldflags="-s -w -X github.com/sagarsuperuser/velox/internal/version.Version=${VERSION}" \
-    -o /velox ./cmd/velox
+    -o /hardcount ./cmd/hardcount
 
 # Runtime stage — distroless has no shell, no package manager, minimal CVE surface
 FROM gcr.io/distroless/static-debian12:nonroot
 
-LABEL org.opencontainers.image.source="https://github.com/getvelox/velox"
-LABEL org.opencontainers.image.description="Velox — usage-based billing engine"
+LABEL org.opencontainers.image.source="https://github.com/gethardcount/hardcount"
+LABEL org.opencontainers.image.description="Hardcount — usage-based billing engine"
 LABEL org.opencontainers.image.licenses="MIT"
 
-COPY --from=builder /velox /usr/local/bin/velox
+COPY --from=builder /hardcount /usr/local/bin/hardcount
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
 EXPOSE 8080
 
-ENTRYPOINT ["velox"]
+ENTRYPOINT ["hardcount"]

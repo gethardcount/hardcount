@@ -1,17 +1,17 @@
 # Writing a database migration
 
-A migration is a numbered SQL file that changes Velox's database schema.
+A migration is a numbered SQL file that changes Hardcount's database schema.
 This page is for contributors. It shows how to add one in three steps, the
 two shapes a file can take, and the rules CI checks before any database is
 involved.
 
-Velox applies migrations with [goose](https://github.com/pressly/goose).
+Hardcount applies migrations with [goose](https://github.com/pressly/goose).
 Migration 180 is the starting schema in one file,
 [`baseline/00180_baseline.sql`](../../internal/platform/migrate/baseline/00180_baseline.sql).
 It runs only on an empty database. New files go in
 `internal/platform/migrate/sql/` and start at `00181`.
 
-Upgrading from Velox 0.8.x is not supported; install fresh.
+Hardcount was called Velox before v0.9.0. v0.9.0 installs fresh only: it refuses a database made by Velox, a 0.8.x release or a build of `main` ([why](../ops/runbook/migration-failed-midway.md#the-database-was-made-by-velox)).
 
 ## Add a migration in three steps
 
@@ -72,38 +72,38 @@ Step 3 needs the local Postgres from
    This proves the Down undoes the Up.
 
    ```bash
-   export DATABASE_URL="postgres://velox:velox@localhost:5432/velox?sslmode=disable"
-   go run ./cmd/velox migrate status
-   go run ./cmd/velox migrate
-   go run ./cmd/velox migrate rollback
-   go run ./cmd/velox migrate
+   export DATABASE_URL="postgres://hardcount:hardcount@localhost:5432/hardcount?sslmode=disable"
+   go run ./cmd/hardcount migrate status
+   go run ./cmd/hardcount migrate
+   go run ./cmd/hardcount migrate rollback
+   go run ./cmd/hardcount migrate
    ```
 
    **You see** (on an empty database, so the baseline runs first):
 
    ```text
-   $ go run ./cmd/velox migrate status
+   $ go run ./cmd/hardcount migrate status
    database:     empty
-   this release: 181 (velox dev)
+   this release: 181 (hardcount dev)
    state:        empty, 2 migrations to apply
      00180 baseline
      00181_add_invoice_purchase_order.sql
    running now:  no
-   next: take a backup, then run "velox migrate". A server started with RUN_MIGRATIONS_ON_BOOT=true runs it as it starts.
-   $ go run ./cmd/velox migrate
+   next: take a backup, then run "hardcount migrate". A server started with RUN_MIGRATIONS_ON_BOOT=true runs it as it starts.
+   $ go run ./cmd/hardcount migrate
    2026/10/18 01:00:33 INFO migration applied migration="00180 baseline" version=180 duration_ms=493
    2026/10/18 01:00:33 INFO migration applied migration=00181_add_invoice_purchase_order.sql version=181 duration_ms=4
    2026/10/18 01:00:33 INFO migrations applied version=181 applied=2 duration_ms=507
    migrations applied successfully
-   $ go run ./cmd/velox migrate rollback
+   $ go run ./cmd/hardcount migrate rollback
    rolled back to version 180
-   $ go run ./cmd/velox migrate
+   $ go run ./cmd/hardcount migrate
    2026/10/18 01:00:33 INFO migration applied migration=00181_add_invoice_purchase_order.sql version=181 duration_ms=2
    2026/10/18 01:00:33 INFO migrations applied version=181 applied=1 duration_ms=5
    migrations applied successfully
    ```
 
-   `velox migrate rollback` undoes one migration at a time, and only when
+   `hardcount migrate rollback` undoes one migration at a time, and only when
    `APP_ENV` is `local` (the default when it is unset). It never goes below
    180.
 
@@ -123,7 +123,7 @@ file and nothing is recorded: fix the cause and run it again.
   `SAVEPOINT` or `END`. A `COMMIT` would make part of the file permanent
   with no record of it.
 - **`SET LOCAL`, never `SET`.** goose runs every file of one
-  `velox migrate` on the same database connection. A plain `SET`, a `RESET`
+  `hardcount migrate` on the same database connection. A plain `SET`, a `RESET`
   or `set_config(..., false)` would carry into the files after this one.
   `SET LOCAL` ends with the file's transaction.
 - **Put a multi-line `$$` body between two annotation lines**, as below.
@@ -173,7 +173,7 @@ together would run in a transaction.
 Why each line is there:
 
 - **The DROP before the build.** goose records a file without a
-  transaction only after the whole file has run. If Velox stops between the
+  transaction only after the whole file has run. If Hardcount stops between the
   build and that record, the index exists but the file is not recorded. The
   next run drops the index and builds it again, so running the file again
   is always safe. This is also why the name must be new: the DROP would
@@ -193,7 +193,7 @@ A file that only drops an index swaps the two sections: its Up is
 ## Common changes
 
 Every migration must work on a table that already holds millions of rows,
-while Velox keeps serving: installs upgrade with their data in place.
+while Hardcount keeps serving: installs upgrade with their data in place.
 
 - **Add a column.** `ADD COLUMN purchase_order TEXT`, or
   `NOT NULL DEFAULT` with a constant or `now()`. Both are instant: Postgres
@@ -255,7 +255,7 @@ new installs. Write a new file instead.
 |---|---|
 | The name is `NNNNN_name.sql`: five digits, an underscore, lowercase letters, digits and underscores, directly in `sql/` | goose skips many other names without a word, so the file would never run |
 | Numbers go up by one from `00181`, with no gap or duplicate | A file merged since your branch started shows up here as a duplicate when you rebase, so you renumber before merging |
-| Exactly one `-- +goose Up` line, then one `-- +goose Down` line, each followed by at least one statement | The Down is what `velox migrate rollback` runs while you develop the file |
+| Exactly one `-- +goose Up` line, then one `-- +goose Down` line, each followed by at least one statement | The Down is what `hardcount migrate rollback` runs while you develop the file |
 | Annotations are only `Up`, `Down`, `StatementBegin`, `StatementEnd` and `NO TRANSACTION` | `ENVSUB` would make the SQL depend on the environment of whoever runs it |
 | Every statement ends with `;`, and a multi-line `$$` body sits between `StatementBegin` and `StatementEnd` | goose cuts statements at lines that end in `;` |
 | A normal file has no transaction control and uses only `SET LOCAL` | See [A normal file](#a-normal-file) |
@@ -267,11 +267,11 @@ When blocking is safe, for example on a table known to stay small, say so
 in the file. The reason must be at least 15 characters:
 
 ```sql
--- velox:blocking-ddl-ok: fx_rates has under 200 rows on every install
+-- hardcount:blocking-ddl-ok: fx_rates has under 200 rows on every install
 ```
 
 ## Related
 
 [ADR-125](../adr/125-goose-migrations-from-one-v081-baseline.md) records
-why Velox uses goose with one baseline. Operators whose upgrade stopped
+why Hardcount uses goose with one baseline. Operators whose upgrade stopped
 start at the [runbook](../ops/runbook/migration-failed-midway.md).

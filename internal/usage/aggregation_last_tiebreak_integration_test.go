@@ -42,8 +42,8 @@ func TestAggregateLast_TimestampTieBreaksByID(t *testing.T) {
 		customerID = insertTestCustomer(t, db, tenantID, "cus_tie")
 		meterID = insertTestMeter(t, db, tenantID, "Gauge", "gauge_tie")
 		tenantExec(t, db, tenantID, `UPDATE meters SET aggregation = 'last' WHERE id = $1`, meterID)
-		// Lower id first: 7 at vlx_evt_tie_a, then 9 at vlx_evt_tie_b, same instant.
-		for _, ev := range []struct{ id, qty string }{{"vlx_evt_tie_a", "7"}, {"vlx_evt_tie_b", "9"}} {
+		// Lower id first: 7 at hc_evt_tie_a, then 9 at hc_evt_tie_b, same instant.
+		for _, ev := range []struct{ id, qty string }{{"hc_evt_tie_a", "7"}, {"hc_evt_tie_b", "9"}} {
 			tenantExec(t, db, tenantID, `
 				INSERT INTO usage_events (id, tenant_id, customer_id, meter_id, quantity, properties, timestamp)
 				VALUES ($1, $2, $3, $4, $5, '{"model": "a"}', $6)`,

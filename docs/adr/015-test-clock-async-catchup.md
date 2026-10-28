@@ -9,7 +9,7 @@ Advancing a test clock (a pretend clock for test customers) returns at once with
 
 ## Context
 
-Velox test clocks let an operator fast-forward simulated time on a
+Hardcount test clocks let an operator fast-forward simulated time on a
 group of subscriptions. When the clock advances, the billing engine
 must "catch up" — process every billing cycle that closed during the
 jump and emit the corresponding invoices. This is the entire point

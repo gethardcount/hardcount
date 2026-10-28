@@ -1105,7 +1105,7 @@ func TestBillingFailure_SavedTextIsCuratedOrGeneric(t *testing.T) {
 func (env *billFailureEnv) clockSub(t *testing.T, code string, plan domain.Plan) (sub domain.Subscription, clockID string) {
 	t.Helper()
 	sub = env.dueSub(t, code, plan, env.periodEnd)
-	clockID = postgres.NewID("vlx_tclk")
+	clockID = postgres.NewID("hc_tclk")
 	admin := env.admin
 	if _, err := admin.ExecContext(env.ctx, `INSERT INTO test_clocks (id, tenant_id, livemode, name, frozen_time, status)
 		VALUES ($1, $2, false, 'billing failure', $3, 'ready')`, clockID, env.tenantID, env.clock.Now(env.ctx)); err != nil {

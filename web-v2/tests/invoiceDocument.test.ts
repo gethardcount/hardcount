@@ -1,5 +1,5 @@
 // The invoice page never invents a seller and never shows a draft as issued
-// (it used to show "VELOX" / "Your Company" and "Issued Oct 16" on a draft).
+// (it used to show "HARDCOUNT" / "Your Company" and "Issued Oct 16" on a draft).
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { issueDates, sellerBlock, sellerMissing } from '../src/lib/invoiceDocument.ts'

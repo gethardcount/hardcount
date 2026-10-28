@@ -177,10 +177,10 @@ func (s *Service) CreateSetupSession(ctx context.Context, tenantID, customerID, 
 	successURL := appendQuery(returnURL, "status=success")
 	cancelURL := appendQuery(returnURL, "status=cancel")
 	metadata := map[string]string{
-		"velox_tenant_id":   tenantID,
-		"velox_customer_id": customerID,
-		"velox_livemode":    livemodeLabel(live),
-		"velox_purpose":     "portal_add_payment_method",
+		"hardcount_tenant_id":   tenantID,
+		"hardcount_customer_id": customerID,
+		"hardcount_livemode":    livemodeLabel(live),
+		"hardcount_purpose":     "portal_add_payment_method",
 	}
 	checkoutURL, sessionID, err = s.stripe.CreateSetupCheckoutSession(ctx, stripeCustomerID, successURL, cancelURL, metadata)
 	if err != nil {
@@ -319,7 +319,7 @@ func (s *Service) Detach(ctx context.Context, tenantID, customerID, pmID string)
 
 	// Sync the auto-promoted default to Stripe's
 	// invoice_settings.default_payment_method. Best-effort + cosmetic: the
-	// charge path reads Velox's default directly (ADR-053), so this no
+	// charge path reads Hardcount's default directly (ADR-053), so this no
 	// longer decides which card is charged — it keeps Stripe-hosted
 	// surfaces (dashboard, Checkout) showing the same default the operator
 	// sees. A failure logs + audits a stripe_sync_error; the detach +
@@ -372,16 +372,16 @@ func (s *Service) AttachForWebhook(ctx context.Context, tenantID, customerID, st
 // persist the row here. Called with an RLS ctx already staged to the
 // right tenant+livemode by the webhook handler.
 //
-// makeDefault is set for a card saved through a Velox setup flow (the
+// makeDefault is set for a card saved through a Hardcount setup flow (the
 // operator's Add payment method link, the customer's payment-update link):
-// that card becomes the default, the card Velox charges next (ADR-021).
+// that card becomes the default, the card Hardcount charges next (ADR-021).
 // Without it the store's rule applies: the first card, or a card replacing
 // a default the bank refused for good, becomes the default; any other is
 // added beside it.
 //
 // When the saved card is the default, Stripe's copy
 // (invoice_settings.default_payment_method) is set to it after the commit.
-// Best-effort and cosmetic, as in SetDefault: charges read Velox's default
+// Best-effort and cosmetic, as in SetDefault: charges read Hardcount's default
 // (ADR-053), so a Stripe failure logs, lands as stripe_sync_error on the
 // audit row, and never fails the attach (or the webhook behind it).
 //

@@ -53,7 +53,7 @@ Two structural problems surfaced during the 2026-05 dogfood pass:
    | **Recurly** | Named **Dunning Campaigns**. | Assign a campaign per Plan or Account. |
 
    All four converge on **named templates** + **assign-to-customer** (or
-   rule-match). Velox's partial-field override is a one-off shape with
+   rule-match). Hardcount's partial-field override is a one-off shape with
    no precedent.
 
    **Correction (2026-10-23):** Lago's campaigns run automatically only with
@@ -143,7 +143,7 @@ Dropped: `GET/PUT /v1/dunning/policy` (singleton),
 
 - **Industry convergence.** All four reference platforms verified
   during 2026-05-16 research use the same named-templates pattern.
-  Velox follows that shape rather than inventing a Velox-specific
+  Hardcount follows that shape rather than inventing a Hardcount-specific
   one.
 
 - **No silent fallback.** The runtime "reuse last interval" branch is
@@ -167,7 +167,7 @@ Dropped: `GET/PUT /v1/dunning/policy` (singleton),
 ## Alternatives considered
 
 1. **Extend `CustomerDunningOverride` with `retry_schedule []string`.**
-   Pure Velox extension; closes the partial-override gap but ships a
+   Pure Hardcount extension; closes the partial-override gap but ships a
    shape no industry platform uses. Rejected — `feedback_stripe_parity_framing`
    says match the converging industry pattern.
 
@@ -180,7 +180,7 @@ Dropped: `GET/PUT /v1/dunning/policy` (singleton),
 3. **Orb-style rules engine.** Customer matching by `plan_ids`,
    `payment_method_types`, `exclusion_lists` with rule priority
    ordering. More flexible than direct assignment but adds a rules
-   evaluation layer Velox doesn't need today. Deferred — when a
+   evaluation layer Hardcount doesn't need today. Deferred — when a
    design partner asks for "assign by plan tier" we can layer
    rule-based assignment on top of the campaigns model without
    schema churn.
@@ -195,7 +195,7 @@ Dropped: `GET/PUT /v1/dunning/policy` (singleton),
 
 ### Risks / open items
 - **Schema migration is destructive** for `customer_dunning_overrides`
-  rows. Velox is pre-launch so no real data lost; down-migration
+  rows. Hardcount is pre-launch so no real data lost; down-migration
   re-creates the table empty.
 - **In-flight run persistence** assumes `dunning_policies` rows are
   never hard-deleted while a run references them. Application-layer
@@ -233,12 +233,12 @@ Sources:
 
 ### Decision
 
-Velox supports all four actions; semantics aligned with Stripe.
+Hardcount supports all four actions; semantics aligned with Stripe.
 
 *(Superseded by ADR-112 — these are no longer four alternatives on one column
 but two independent choices. The behaviours described are unchanged.)*
 
-| Velox enum (2026-05-16 amendment; column split by ADR-112) | Behavior |
+| Hardcount enum (2026-05-16 amendment; column split by ADR-112) | Behavior |
 |---|---|
 | `manual_review` | Run lands state=escalated. No sub/invoice mutation. Operator handles via dashboard. Maps to Stripe "Keep active." |
 | `pause` | **Calls `subscription.Service.PauseCollection(behavior=keep_as_draft)`** — not the pre-amendment hard `PauseAtomic`. Cycle keeps drafting invoices; invoices drafted during the pause are not charged and start no dunning, and they stay drafts after collection resumes (only later cycles finalize). Collection resumes when the operator resumes it or, for a pause dunning set, when the invoice whose dunning set it is paid (amendment 2026-10-22, "a dunning pause lifts when its invoice is paid"). Runs already open on earlier invoices keep retrying (amendment 2026-10-22, "a collection pause does not stop open runs"). Matches Stripe's `pause_collection.behavior=keep_as_draft`. The hard-pause path silently skipped invoice generation for the affected periods (per ADR-035 analysis) — non-Stripe and destructive. |
@@ -276,12 +276,12 @@ the migration (semantics-identical, industry-standard spelling).
   has an audit trail.
 
 - **Add `cancel_subscription`**: 3 of 4 platforms support it; Stripe
-  defaults to it. Velox required a manual operator step post-escalation
+  defaults to it. Hardcount required a manual operator step post-escalation
   before this amendment — non-standard.
 
 - **Rename `write_off_later → mark_uncollectible`**: same intent, but
   `mark_uncollectible` is the Stripe-standard term. `write_off_later`
-  is a Velox-only spelling with no industry analog.
+  is a Hardcount-only spelling with no industry analog.
 
 - **Add `InvoiceStatusUncollectible`**: enables true Stripe-parity for
   the mark-uncollectible action. Pre-amendment the status didn't exist
@@ -455,7 +455,7 @@ paying the invoice whose dunning paused collection resumes it.
    subscription and then relieves the invoice cannot deadlock with the
    payment.
 4. The release does not clear the pause. It sets `resumes_at` to the time
-   Velox records the payment, and the scheduled resumer does the rest, as
+   Hardcount records the payment, and the scheduled resumer does the rest, as
    for an operator's timed pause:
    - a period that ended under the pause still closes as a draft;
    - the resumer's compare-and-clear announces the resume once;
@@ -538,7 +538,7 @@ give it no other meaning, and the invoice grace of ADR-120 (late usage
 before a period closes) is a different thing that shared the word.
 
 **Days, not hours.** Every peer above counts in days. The seed, the recipes
-and the dashboard's defaults all wrote whole days; no Velox writer asks for
+and the dashboard's defaults all wrote whole days; no Hardcount writer asks for
 a shorter wait. A day is 24 hours, as `grace_period_days` was. Each
 wait is 1 to 30 days and a policy has 1 to 15 retries. Before, only the
 first wait had an upper bound (30 days); a later wait over 30 days is now

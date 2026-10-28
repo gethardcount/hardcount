@@ -8,7 +8,7 @@ import (
 // TestParkedInvoiceAttentionTellsTheTruth pins the banner for an invoice whose
 // charge got an unclear answer from Stripe that named no payment (ADR-107).
 //
-// Since REC-5 (ADR-127 amendment, 2026-10-20) Velox finishes such an invoice
+// Since REC-5 (ADR-127 amendment, 2026-10-20) Hardcount finishes such an invoice
 // itself: each billing tick lists the customer's payments at Stripe, records
 // one that appears, and with none 24 hours after the attempt charges the
 // invoice again as usual. The banner says exactly that, as a Warning, in the
@@ -28,16 +28,16 @@ func TestParkedInvoiceAttentionTellsTheTruth(t *testing.T) {
 		t.Fatal("a parked invoice must raise an attention")
 	}
 	if att.Severity != AttentionSeverityWarning {
-		t.Errorf("severity = %v, want warning: Velox resolves it within a day, and a payment may still arrive", att.Severity)
+		t.Errorf("severity = %v, want warning: Hardcount resolves it within a day, and a payment may still arrive", att.Severity)
 	}
 	const want = "Stripe didn't confirm this charge and may still complete it.\n" +
-		"Velox checks Stripe every hour and records the payment if it appears.\n" +
+		"Hardcount checks Stripe every hour and records the payment if it appears.\n" +
 		"If none appears within 24 hours, the invoice is charged again as usual."
 	if att.Message != want {
 		t.Errorf("message = %q, want the approved copy %q", att.Message, want)
 	}
 	all := att.Message + " " + att.Detail
-	// "never charged twice" is false since REC-5: after 24 hours Velox charges
+	// "never charged twice" is false since REC-5: after 24 hours Hardcount charges
 	// again, and if Stripe creates the original payment after that (ADR-127
 	// R10) the customer has paid twice; the second payment is flagged
 	// (payment.duplicate_charge), not prevented.

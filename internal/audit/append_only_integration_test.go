@@ -23,7 +23,7 @@ func TestAuditLog_AppendOnly(t *testing.T) {
 	defer cancel()
 
 	logger := audit.NewLogger(db)
-	if err := logger.Log(ctx, tenantID, "invoice.finalize", "invoice", "vlx_inv_test", "", nil); err != nil {
+	if err := logger.Log(ctx, tenantID, "invoice.finalize", "invoice", "hc_inv_test", "", nil); err != nil {
 		t.Fatalf("seed audit row: %v", err)
 	}
 

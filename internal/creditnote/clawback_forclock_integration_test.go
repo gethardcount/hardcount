@@ -132,7 +132,7 @@ func cnIDs(cns []domain.CreditNote) []string {
 
 func seedClockRow(t *testing.T, db *postgres.DB, tenantID string) string {
 	t.Helper()
-	id := postgres.NewID("vlx_tclk")
+	id := postgres.NewID("hc_tclk")
 	execBypassCN(t, db, `INSERT INTO test_clocks (id, tenant_id, frozen_time) VALUES ($1, $2, now())`, id, tenantID)
 	return id
 }

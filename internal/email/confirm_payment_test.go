@@ -86,7 +86,7 @@ func (a *askDeliverer) SendPaymentFailed(_ context.Context, _, _ string, _ []str
 // queued with: decline_ask, or for a row an older binary queued,
 // card_needs_replacing. A payment-failed email's reason is read from reason,
 // where the settle transaction writes the customer's reason. The previous
-// release wrote failure_reason there, unfiltered (Velox's own text, such as
+// release wrote failure_reason there, unfiltered (Hardcount's own text, such as
 // "reconciled: requires_payment_method"), and it is not shown.
 func TestDispatcher_SendsTheQueuedCopyAndReason(t *testing.T) {
 	cases := []struct {

@@ -28,7 +28,7 @@ func ahead(d time.Duration) *time.Duration { return &d }
 
 func seedHostedRow(t *testing.T, db *postgres.DB, ctx context.Context, tenantID, invoiceID string, r hostedRow) string {
 	t.Helper()
-	id := postgres.NewID("vlx_cks")
+	id := postgres.NewID("hc_cks")
 	var sessID sql.NullString
 	if r.recorded {
 		sessID = sql.NullString{String: "cs_" + id, Valid: true}
@@ -73,7 +73,7 @@ func execTenant(t *testing.T, db *postgres.DB, ctx context.Context, tenantID, q 
 }
 
 // TestChargeClaims_SkipInvoiceWithLiveHostedPage pins "one payer at a time"
-// on every Velox charge initiator: while the customer may be paying on the
+// on every Hardcount charge initiator: while the customer may be paying on the
 // hosted page, or has paid there and the payment is not recorded yet, no
 // charge claim succeeds. The rows that must NOT block are the negative
 // controls: a lapsed unfilled claim, a session the sweep already resolved, a
@@ -135,11 +135,11 @@ func TestChargeClaims_SkipInvoiceWithLiveHostedPage(t *testing.T) {
 	}
 }
 
-// TestClaimOpen_RefusedWhileVeloxChargesOrAfterAnUnrecordedPayment is the
-// other direction: no hosted page while a Velox charge holds the lease
+// TestClaimOpen_RefusedWhileHardcountChargesOrAfterAnUnrecordedPayment is the
+// other direction: no hosted page while a Hardcount charge holds the lease
 // (payment_status is still pending until the call returns), and no second
 // page once the customer has paid one whose payment is not recorded.
-func TestClaimOpen_RefusedWhileVeloxChargesOrAfterAnUnrecordedPayment(t *testing.T) {
+func TestClaimOpen_RefusedWhileHardcountChargesOrAfterAnUnrecordedPayment(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration: skipped in -short mode")
 	}
@@ -224,7 +224,7 @@ func TestChargeClaim_SeesHostedClaimCommittedWhileItWaited(t *testing.T) {
 	if _, err := hosted.ExecContext(ctx, `
 		INSERT INTO checkout_sessions (id, tenant_id, invoice_id, livemode, amount_cents, currency, status)
 		VALUES ($1, $2, $3, false, 5000, 'USD', 'open')
-	`, postgres.NewID("vlx_cks"), tenantID, invID); err != nil {
+	`, postgres.NewID("hc_cks"), tenantID, invID); err != nil {
 		t.Fatalf("insert: %v", err)
 	}
 
@@ -257,7 +257,7 @@ func TestChargeClaim_SeesHostedClaimCommittedWhileItWaited(t *testing.T) {
 }
 
 // TestListHostedToReconcile_Selection: the sweep looks at sessions whose
-// outcome Velox has not recorded, once the webhook has had 5 minutes to
+// outcome Hardcount has not recorded, once the webhook has had 5 minutes to
 // record it first; completed sessions only while their invoice is still
 // unpaid.
 func TestListHostedToReconcile_Selection(t *testing.T) {

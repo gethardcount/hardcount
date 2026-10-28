@@ -72,7 +72,7 @@ Two product decisions gated P4 and P10:
    forward) resolve coherently because sim time runs ahead of the
    wall-clock stamps; a clock frozen in the PAST would resolve
    publishes made "during" the simulation as future — accepted, since
-   Velox clocks, like Stripe's, only advance forward from creation.
+   Hardcount clocks, like Stripe's, only advance forward from creation.
 5. **An override freezes PRICE, not rule semantics.** `ToRatingRule` is
    replaced by patch-the-resolved-rule: the resolved version's `ID`,
    `RuleKey`, `Currency`, `Name` survive; only pricing fields

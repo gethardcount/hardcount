@@ -44,7 +44,7 @@ func TestResendSetupLink_DoesNotClaimAFinalizeThatNeverRan(t *testing.T) {
 	notifier := &outcomeNoPMNotifier{outcome: domain.NotifySent}
 	h := &Handler{noPMNotifier: notifier}
 
-	inv := domain.Invoice{ID: "vlx_inv_1", TenantID: "t1", InvoiceNumber: "INV-1", CustomerID: "cus_1"}
+	inv := domain.Invoice{ID: "hc_inv_1", TenantID: "t1", InvoiceNumber: "INV-1", CustomerID: "cus_1"}
 	if _, err := h.noPMNotifier.NotifyNoPaymentMethod(context.Background(), "t1", inv, "operator_resend"); err != nil {
 		t.Fatalf("notify: %v", err)
 	}

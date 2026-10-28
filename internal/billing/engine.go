@@ -440,7 +440,7 @@ type BillingProfileReader interface {
 // param) plus the Stripe PaymentMethod id of the customer's active
 // default card (empty when there's no chargeable default). The same
 // resolved PM id is threaded into the charge so the card we gate on is
-// the exact card charged — Velox is the single source of truth for PM
+// the exact card charged — Hardcount is the single source of truth for PM
 // selection (we never let Stripe pick). Reads customers.stripe_customer_id
 // for the mapping and the default payment_methods row canonically.
 type PaymentReadiness interface {
@@ -450,7 +450,7 @@ type PaymentReadiness interface {
 // InvoiceCharger creates a Stripe PaymentIntent for a finalized invoice.
 // Narrow interface — default-mode charge only. Callers that need to
 // tag the PI for special routing (the dunning retrier marks PIs with
-// velox_purpose=dunning_retry so the webhook suppresses the duplicate
+// hardcount_purpose=dunning_retry so the webhook suppresses the duplicate
 // payment-failed email) access *payment.Stripe directly and use the
 // dedicated typed method (ChargeInvoiceForDunningRetry). Keeps engine
 // package free of payment-options surface.
@@ -894,7 +894,7 @@ func (e *Engine) CheckTaxCalculationUsable(ctx context.Context, tenantID, invoic
 	if lookupErr == nil {
 		// REAL wall-clock on BOTH sides — never clock.Now(ctx). The
 		// calc's 24h TTL lives at Stripe, which knows nothing about a
-		// Velox test clock; the row's created_at is stamped by the DB
+		// Hardcount test clock; the row's created_at is stamped by the DB
 		// (now(), real time). Using the ctx-bound simulated clock here
 		// conflated the two: a customer pinned to a test clock advanced
 		// >23h past real wall-clock (e.g. a mid-period proration after
@@ -989,7 +989,7 @@ func (e *Engine) SetScheduledCancelExecutor(x ScheduledCancelExecutor) {
 	e.cancelExecutor = x
 }
 
-// SetInvoiceGrace sets INVOICE_GRACE_PERIOD (ADR-120). Usage reaches Velox
+// SetInvoiceGrace sets INVOICE_GRACE_PERIOD (ADR-120). Usage reaches Hardcount
 // some time after it happens, so the two wall-clock billing runs (the
 // scheduler's RunCycle and the operator's POST /v1/billing/run) close a
 // period only once the grace has passed after its end, or after a
@@ -1806,7 +1806,7 @@ func (e *Engine) ApplyTaxToLineItems(ctx context.Context, tenantID, customerID, 
 	// tenant_id on the request ctx.
 	ctx = auth.WithTenantID(ctx, tenantID)
 
-	// SettingsStore.Get synthesizes Velox defaults on miss
+	// SettingsStore.Get synthesizes Hardcount defaults on miss
 	// (tenant.DefaultSettings) — this Get returns a real error
 	// only on a true DB failure, never on missing-row. Bootstrap
 	// always creates the settings row, so missing-row is itself
@@ -2294,7 +2294,7 @@ func (e *Engine) RunCycleForTenant(ctx context.Context, tenantID string, batchSi
 //
 // "Due" leaves out a sub whose billing is failing and is either waiting for
 // its next attempt or parked (ADR-119). Those are counted by
-// velox_billing_failing_subscriptions, not attempted here.
+// hardcount_billing_failing_subscriptions, not attempted here.
 //
 // "Due" also waits for the invoice grace (ADR-120): a period is closed once
 // INVOICE_GRACE_PERIOD has passed after its end (or after a mid-period
@@ -5039,7 +5039,7 @@ func (e *Engine) processAutoCharge(ctx context.Context, pending []domain.Invoice
 		stripeCusID, stripePMID, err := e.paymentSetups.ResolveForCharge(ctx, inv.TenantID, inv.CustomerID)
 		if err != nil {
 			// A failed read (a database error, or a missing
-			// VELOX_ENCRYPTION_KEY that fails every customer decrypt) is not
+			// HARDCOUNT_ENCRYPTION_KEY that fails every customer decrypt) is not
 			// "no card": an error, so the sweep logs and counts it. No card
 			// resolves to ("", "", nil). Nothing was sent; the release below
 			// frees the hold and the invoice stays queued.

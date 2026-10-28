@@ -87,7 +87,7 @@ func (p *p21Fire) seedAfterFire(t *testing.T, qty int64, shrinkTo *time.Time) {
 	if _, err := tx.Exec(`
 		INSERT INTO usage_events (id, tenant_id, customer_id, meter_id, quantity, timestamp, livemode)
 		VALUES ($1, $2, $3, $4, $5, $6, false)
-	`, postgres.NewID("vlx_ue"), p.f.tenantID, p.f.customerID, p.f.meterID, qty, p.fireUpper.Add(time.Second).Truncate(time.Microsecond)); err != nil {
+	`, postgres.NewID("hc_ue"), p.f.tenantID, p.f.customerID, p.f.meterID, qty, p.fireUpper.Add(time.Second).Truncate(time.Microsecond)); err != nil {
 		t.Fatalf("seed residual usage: %v", err)
 	}
 	if shrinkTo != nil {

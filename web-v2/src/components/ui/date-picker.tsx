@@ -260,7 +260,7 @@ export function DatePicker({ value, onChange, placeholder = 'Pick a date', class
               // forward to reach the first selectable date.
               defaultMonth={selectedDate ?? minDate}
               showOutsideDays
-              className="velox-cal"
+              className="hardcount-cal"
               disabled={minDate ? { before: minDate } : undefined}
               // captionLayout="dropdown" gives month + year dropdowns
               // next to the prev/next arrows (Stripe / Linear / Vercel
@@ -279,43 +279,43 @@ export function DatePicker({ value, onChange, placeholder = 'Pick a date', class
               endMonth={new Date(new Date().getFullYear() + 10, 11)}
             />
             <style>{`
-              .velox-cal { --accent: var(--primary); }
-              .velox-cal .rdp-month_caption { display:flex; align-items:center; justify-content:center; padding:0 0 8px; }
-              .velox-cal .rdp-caption_label { font-size:14px; font-weight:600; color:var(--foreground); }
+              .hardcount-cal { --accent: var(--primary); }
+              .hardcount-cal .rdp-month_caption { display:flex; align-items:center; justify-content:center; padding:0 0 8px; }
+              .hardcount-cal .rdp-caption_label { font-size:14px; font-weight:600; color:var(--foreground); }
               /* Dropdown caption (captionLayout="dropdown"). Native <select>
                  theming differs across browsers; we strip the OS chrome and
                  style a compact pill that matches the rest of the popover.
                  .rdp-dropdowns is the flex row holding both selects; each
                  select is wrapped in a .rdp-dropdown_root span by the lib. */
-              .velox-cal .rdp-dropdowns { display:flex; gap:6px; align-items:center; }
-              .velox-cal .rdp-dropdown_root { position:relative; }
-              .velox-cal .rdp-dropdown { appearance:none; -webkit-appearance:none; background:transparent; border:1px solid var(--border); border-radius:6px; padding:4px 22px 4px 8px; font-size:13px; font-weight:600; color:var(--foreground); cursor:pointer; outline:none; }
-              .velox-cal .rdp-dropdown:hover { border-color:var(--ring); }
-              .velox-cal .rdp-dropdown:focus-visible { border-color:var(--ring); box-shadow:0 0 0 3px color-mix(in oklab, var(--ring) 50%, transparent); }
-              .velox-cal .rdp-dropdown_root::after { content:''; position:absolute; right:8px; top:50%; transform:translateY(-25%); width:0; height:0; border-left:4px solid transparent; border-right:4px solid transparent; border-top:4px solid var(--muted-foreground); pointer-events:none; }
-              .velox-cal .rdp-caption_label[aria-hidden='true'] { display:none; }
-              .velox-cal .rdp-button_previous, .velox-cal .rdp-button_next { position:absolute; top:12px; padding:6px; border-radius:6px; color:var(--muted-foreground); cursor:pointer; border:none; background:none; display:flex; }
-              .velox-cal .rdp-button_previous:hover, .velox-cal .rdp-button_next:hover { background:var(--accent); color:var(--primary-foreground); }
-              .velox-cal .rdp-button_previous { left:12px; }
-              .velox-cal .rdp-button_next { right:12px; }
-              .velox-cal .rdp-weekday { width:36px; text-align:center; font-size:11px; font-weight:600; color:var(--muted-foreground); padding:4px 0; text-transform:uppercase; letter-spacing:0.05em; }
-              .velox-cal .rdp-day { width:36px; height:36px; display:flex; align-items:center; justify-content:center; }
-              .velox-cal .rdp-day_button { width:100%; height:100%; display:flex; align-items:center; justify-content:center; border-radius:8px; cursor:pointer; transition:all 0.15s; border:none; background:none; color:var(--foreground); font-size:13px; }
+              .hardcount-cal .rdp-dropdowns { display:flex; gap:6px; align-items:center; }
+              .hardcount-cal .rdp-dropdown_root { position:relative; }
+              .hardcount-cal .rdp-dropdown { appearance:none; -webkit-appearance:none; background:transparent; border:1px solid var(--border); border-radius:6px; padding:4px 22px 4px 8px; font-size:13px; font-weight:600; color:var(--foreground); cursor:pointer; outline:none; }
+              .hardcount-cal .rdp-dropdown:hover { border-color:var(--ring); }
+              .hardcount-cal .rdp-dropdown:focus-visible { border-color:var(--ring); box-shadow:0 0 0 3px color-mix(in oklab, var(--ring) 50%, transparent); }
+              .hardcount-cal .rdp-dropdown_root::after { content:''; position:absolute; right:8px; top:50%; transform:translateY(-25%); width:0; height:0; border-left:4px solid transparent; border-right:4px solid transparent; border-top:4px solid var(--muted-foreground); pointer-events:none; }
+              .hardcount-cal .rdp-caption_label[aria-hidden='true'] { display:none; }
+              .hardcount-cal .rdp-button_previous, .hardcount-cal .rdp-button_next { position:absolute; top:12px; padding:6px; border-radius:6px; color:var(--muted-foreground); cursor:pointer; border:none; background:none; display:flex; }
+              .hardcount-cal .rdp-button_previous:hover, .hardcount-cal .rdp-button_next:hover { background:var(--accent); color:var(--primary-foreground); }
+              .hardcount-cal .rdp-button_previous { left:12px; }
+              .hardcount-cal .rdp-button_next { right:12px; }
+              .hardcount-cal .rdp-weekday { width:36px; text-align:center; font-size:11px; font-weight:600; color:var(--muted-foreground); padding:4px 0; text-transform:uppercase; letter-spacing:0.05em; }
+              .hardcount-cal .rdp-day { width:36px; height:36px; display:flex; align-items:center; justify-content:center; }
+              .hardcount-cal .rdp-day_button { width:100%; height:100%; display:flex; align-items:center; justify-content:center; border-radius:8px; cursor:pointer; transition:all 0.15s; border:none; background:none; color:var(--foreground); font-size:13px; }
               /* Hover is a SUBTLE tint so the solid-primary selected day stays
                  unmistakable — previously hover reused --accent (= --primary),
                  making a hovered cell look identical to the selected one. */
-              .velox-cal .rdp-day_button:hover { background: color-mix(in oklab, var(--primary) 16%, var(--popover)); color: var(--popover-foreground); }
-              .velox-cal .rdp-selected .rdp-day_button { background:var(--primary); color:var(--primary-foreground); font-weight:700; box-shadow:0 0 0 2px var(--popover), 0 0 0 3px color-mix(in oklab, var(--primary) 45%, transparent); }
-              .velox-cal .rdp-selected .rdp-day_button:hover { background:var(--primary); color:var(--primary-foreground); opacity:0.92; }
-              .velox-cal .rdp-today .rdp-day_button { font-weight:700; position:relative; }
-              .velox-cal .rdp-today .rdp-day_button::after { content:''; position:absolute; bottom:3px; left:50%; transform:translateX(-50%); width:4px; height:4px; border-radius:50%; background:var(--primary); }
-              .velox-cal .rdp-selected.rdp-today .rdp-day_button::after { background:var(--primary-foreground); }
-              .velox-cal .rdp-outside .rdp-day_button { color:var(--muted-foreground); opacity:0.4; }
-              .velox-cal .rdp-disabled .rdp-day_button { opacity:0.25; cursor:not-allowed; }
-              .velox-cal .rdp-nav { display:flex; gap:4px; }
-              .velox-cal .rdp-months { display:flex; gap:16px; }
-              .velox-cal .rdp-weekdays { display:flex; }
-              .velox-cal .rdp-week { display:flex; }
+              .hardcount-cal .rdp-day_button:hover { background: color-mix(in oklab, var(--primary) 16%, var(--popover)); color: var(--popover-foreground); }
+              .hardcount-cal .rdp-selected .rdp-day_button { background:var(--primary); color:var(--primary-foreground); font-weight:700; box-shadow:0 0 0 2px var(--popover), 0 0 0 3px color-mix(in oklab, var(--primary) 45%, transparent); }
+              .hardcount-cal .rdp-selected .rdp-day_button:hover { background:var(--primary); color:var(--primary-foreground); opacity:0.92; }
+              .hardcount-cal .rdp-today .rdp-day_button { font-weight:700; position:relative; }
+              .hardcount-cal .rdp-today .rdp-day_button::after { content:''; position:absolute; bottom:3px; left:50%; transform:translateX(-50%); width:4px; height:4px; border-radius:50%; background:var(--primary); }
+              .hardcount-cal .rdp-selected.rdp-today .rdp-day_button::after { background:var(--primary-foreground); }
+              .hardcount-cal .rdp-outside .rdp-day_button { color:var(--muted-foreground); opacity:0.4; }
+              .hardcount-cal .rdp-disabled .rdp-day_button { opacity:0.25; cursor:not-allowed; }
+              .hardcount-cal .rdp-nav { display:flex; gap:4px; }
+              .hardcount-cal .rdp-months { display:flex; gap:16px; }
+              .hardcount-cal .rdp-weekdays { display:flex; }
+              .hardcount-cal .rdp-week { display:flex; }
             `}</style>
             {/* Quick-select Today shortcut. Honour minDate by greying
                 out the button when today < minDate — the day-grid above

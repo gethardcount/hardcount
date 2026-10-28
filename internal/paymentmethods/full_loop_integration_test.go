@@ -395,7 +395,7 @@ func (r *setupDefaultRig) assertStillRemoved(rowID string) {
 // leaves it removed. Stripe does not let a detached PaymentMethod be used
 // or attached again, so bringing the row back, let alone as the default,
 // would point every retry at a card Stripe refuses while the working card
-// sits unused. Velox's own dedupe-by-fingerprint replaces an older copy of
+// sits unused. Hardcount's own dedupe-by-fingerprint replaces an older copy of
 // the same card; a late webhook for that copy leaves the newer one in place.
 func TestUpsert_LateAttachOfARemovedCard_RealStore(t *testing.T) {
 	r := newSetupDefaultRig(t, "Late Attach Removed Card")

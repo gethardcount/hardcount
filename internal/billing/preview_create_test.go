@@ -243,29 +243,29 @@ func TestPickPrimarySubscription(t *testing.T) {
 
 func TestPreviewService_ResolveSubscription(t *testing.T) {
 	subActive := domain.Subscription{
-		ID:                        "vlx_sub_active",
-		CustomerID:                "vlx_cus_abc",
+		ID:                        "hc_sub_active",
+		CustomerID:                "hc_cus_abc",
 		Status:                    domain.SubscriptionActive,
 		CurrentBillingPeriodStart: timePtr(time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)),
 		CurrentBillingPeriodEnd:   timePtr(time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)),
 	}
 	subForOtherCustomer := domain.Subscription{
-		ID:         "vlx_sub_active",
-		CustomerID: "vlx_cus_other",
+		ID:         "hc_sub_active",
+		CustomerID: "hc_cus_other",
 		Status:     domain.SubscriptionActive,
 	}
 
 	t.Run("explicit ID happy path", func(t *testing.T) {
 		svc := &PreviewService{
 			subscriptions: &stubSubscriptions{
-				byID: map[string]domain.Subscription{"vlx_sub_active": subActive},
+				byID: map[string]domain.Subscription{"hc_sub_active": subActive},
 			},
 		}
-		sub, err := svc.resolveSubscription(context.Background(), "t1", "vlx_cus_abc", "vlx_sub_active")
+		sub, err := svc.resolveSubscription(context.Background(), "t1", "hc_cus_abc", "hc_sub_active")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if sub.ID != "vlx_sub_active" {
+		if sub.ID != "hc_sub_active" {
 			t.Errorf("ID: got %q", sub.ID)
 		}
 	})
@@ -273,10 +273,10 @@ func TestPreviewService_ResolveSubscription(t *testing.T) {
 	t.Run("explicit ID belongs to wrong customer", func(t *testing.T) {
 		svc := &PreviewService{
 			subscriptions: &stubSubscriptions{
-				byID: map[string]domain.Subscription{"vlx_sub_active": subForOtherCustomer},
+				byID: map[string]domain.Subscription{"hc_sub_active": subForOtherCustomer},
 			},
 		}
-		_, err := svc.resolveSubscription(context.Background(), "t1", "vlx_cus_abc", "vlx_sub_active")
+		_, err := svc.resolveSubscription(context.Background(), "t1", "hc_cus_abc", "hc_sub_active")
 		if err == nil {
 			t.Fatal("expected validation error, got nil")
 		}
@@ -291,7 +291,7 @@ func TestPreviewService_ResolveSubscription(t *testing.T) {
 				byID: map[string]domain.Subscription{},
 			},
 		}
-		_, err := svc.resolveSubscription(context.Background(), "t1", "vlx_cus_abc", "vlx_sub_missing")
+		_, err := svc.resolveSubscription(context.Background(), "t1", "hc_cus_abc", "hc_sub_missing")
 		if err == nil {
 			t.Fatal("expected error")
 		}
@@ -308,14 +308,14 @@ func TestPreviewService_ResolveSubscription(t *testing.T) {
 		svc := &PreviewService{
 			subscriptions: &stubSubscriptions{
 				byCustomerID: map[string][]domain.Subscription{
-					"vlx_cus_abc": {
-						{ID: "old", CustomerID: "vlx_cus_abc", Status: domain.SubscriptionActive, CurrentBillingPeriodStart: timePtr(earlyStart), CurrentBillingPeriodEnd: timePtr(earlyEnd)},
-						{ID: "new", CustomerID: "vlx_cus_abc", Status: domain.SubscriptionActive, CurrentBillingPeriodStart: timePtr(lateStart), CurrentBillingPeriodEnd: timePtr(lateEnd)},
+					"hc_cus_abc": {
+						{ID: "old", CustomerID: "hc_cus_abc", Status: domain.SubscriptionActive, CurrentBillingPeriodStart: timePtr(earlyStart), CurrentBillingPeriodEnd: timePtr(earlyEnd)},
+						{ID: "new", CustomerID: "hc_cus_abc", Status: domain.SubscriptionActive, CurrentBillingPeriodStart: timePtr(lateStart), CurrentBillingPeriodEnd: timePtr(lateEnd)},
 					},
 				},
 			},
 		}
-		sub, err := svc.resolveSubscription(context.Background(), "t1", "vlx_cus_abc", "")
+		sub, err := svc.resolveSubscription(context.Background(), "t1", "hc_cus_abc", "")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -330,7 +330,7 @@ func TestPreviewService_ResolveSubscription(t *testing.T) {
 				byCustomerID: map[string][]domain.Subscription{},
 			},
 		}
-		_, err := svc.resolveSubscription(context.Background(), "t1", "vlx_cus_abc", "")
+		_, err := svc.resolveSubscription(context.Background(), "t1", "hc_cus_abc", "")
 		if err == nil {
 			t.Fatal("expected error")
 		}
@@ -365,7 +365,7 @@ func TestCreatePreview_CustomerNotFound(t *testing.T) {
 		customers:     &stubCustomers{known: map[string]domain.Customer{}},
 		subscriptions: &stubSubscriptions{},
 	}
-	_, err := svc.CreatePreview(context.Background(), "t1", CreatePreviewRequest{CustomerID: "vlx_cus_other"})
+	_, err := svc.CreatePreview(context.Background(), "t1", CreatePreviewRequest{CustomerID: "hc_cus_other"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -387,13 +387,13 @@ func TestDecodeCreatePreviewRequest(t *testing.T) {
 		wantSID string
 	}{
 		{name: "empty body", body: "", wantErr: false},
-		{name: "minimal valid", body: `{"customer_id":"vlx_cus_abc"}`, wantCID: "vlx_cus_abc"},
-		{name: "with subscription", body: `{"customer_id":"vlx_cus_abc","subscription_id":"vlx_sub_xyz"}`, wantCID: "vlx_cus_abc", wantSID: "vlx_sub_xyz"},
-		{name: "with full period", body: `{"customer_id":"vlx_cus_abc","period":{"from":"2026-04-01T00:00:00Z","to":"2026-05-01T00:00:00Z"}}`, wantCID: "vlx_cus_abc"},
+		{name: "minimal valid", body: `{"customer_id":"hc_cus_abc"}`, wantCID: "hc_cus_abc"},
+		{name: "with subscription", body: `{"customer_id":"hc_cus_abc","subscription_id":"hc_sub_xyz"}`, wantCID: "hc_cus_abc", wantSID: "hc_sub_xyz"},
+		{name: "with full period", body: `{"customer_id":"hc_cus_abc","period":{"from":"2026-04-01T00:00:00Z","to":"2026-05-01T00:00:00Z"}}`, wantCID: "hc_cus_abc"},
 		{name: "malformed json", body: `{`, wantErr: true},
-		{name: "unknown key", body: `{"customer_id":"vlx_cus_abc","subscription":"vlx_sub_xyz"}`, wantErr: true},
-		{name: "unparseable from", body: `{"customer_id":"vlx_cus_abc","period":{"from":"yesterday","to":"2026-05-01T00:00:00Z"}}`, wantErr: true},
-		{name: "unparseable to", body: `{"customer_id":"vlx_cus_abc","period":{"from":"2026-04-01T00:00:00Z","to":"tomorrow"}}`, wantErr: true},
+		{name: "unknown key", body: `{"customer_id":"hc_cus_abc","subscription":"hc_sub_xyz"}`, wantErr: true},
+		{name: "unparseable from", body: `{"customer_id":"hc_cus_abc","period":{"from":"yesterday","to":"2026-05-01T00:00:00Z"}}`, wantErr: true},
+		{name: "unparseable to", body: `{"customer_id":"hc_cus_abc","period":{"from":"2026-04-01T00:00:00Z","to":"tomorrow"}}`, wantErr: true},
 	}
 
 	for _, tc := range cases {

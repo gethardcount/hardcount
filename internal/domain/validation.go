@@ -20,7 +20,7 @@ func MaxLen(field, value string, max int) error {
 // ValidateCurrency checks for common ISO 4217 currency codes.
 //
 // Zero-decimal currencies (JPY, KRW, VND, CLP — currencies with no minor
-// unit) are DELIBERATELY absent (ADR-100): every Velox amount is minor-unit
+// unit) are DELIBERATELY absent (ADR-100): every Hardcount amount is minor-unit
 // cents divided by 100 at render, and Stripe reads zero-decimal amounts as
 // WHOLE units — accepting them would 100x-overcharge at the PaymentIntent.
 // They return a loud not-yet-supported error instead of a silent wrong
@@ -51,7 +51,7 @@ func ValidateCurrency(currency string) error {
 		return errs.Required("currency")
 	}
 	if zeroDecimalCurrencies[upper] {
-		return errs.Invalid("currency", upper+" is not supported yet: it has no minor unit, and Velox amounts are minor-unit cents — charging would be off by 100x. Zero-decimal currency support is tracked; use a decimal currency for now")
+		return errs.Invalid("currency", upper+" is not supported yet: it has no minor unit, and Hardcount amounts are minor-unit cents — charging would be off by 100x. Zero-decimal currency support is tracked; use a decimal currency for now")
 	}
 	if !validCurrencies[upper] {
 		return errs.Invalid("currency", "invalid currency code: "+upper)

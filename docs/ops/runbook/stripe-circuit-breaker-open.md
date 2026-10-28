@@ -1,12 +1,12 @@
 # Stripe circuit breaker open
 
 A circuit breaker stops calling a service that keeps failing, until it
-recovers. Velox has one for Stripe calls. This page also covers payment
+recovers. Hardcount has one for Stripe calls. This page also covers payment
 retries skipped for another reason. Back to the [runbook index](index.md).
 
 ## Symptom
 
-- `velox_stripe_breaker_state == 2` (open; 1 = half-open, testing whether
+- `hardcount_stripe_breaker_state == 2` (open; 1 = half-open, testing whether
   Stripe has recovered).
 - Dunning retries (the automatic retries of failed payments) are skipped.
   A skipped retry does not use up an attempt, adds no row to the invoice
@@ -20,7 +20,7 @@ retries skipped for another reason. Back to the [runbook index](index.md).
   dropped connection), and the breaker tripped to protect the retry budget.
   Declines and other definite errors do not count, and neither does a
   rejected API key.
-- The breaker is one per Velox process, shared by every tenant. One
+- The breaker is one per Hardcount process, shared by every tenant. One
   tenant's calls can open it for all of them on that replica.
 - Stripe is rate limiting, or a tenant's Stripe credentials could not be
   read. These skip retries without tripping the breaker.
@@ -45,5 +45,5 @@ Stripe; a connection or `SQLSTATE` error points to the database.
 
 ## Verify
 
-`velox_stripe_breaker_state` returns to 0 (closed), and new
+`hardcount_stripe_breaker_state` returns to 0 (closed), and new
 `skipping this attempt` lines stop.

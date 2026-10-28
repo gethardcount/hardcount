@@ -7,7 +7,7 @@
 
 Stripe Checkout started from the operator's `/checkout/setup` returns to the page the operator came from, not a fixed URL. The dashboard sends that page as `return_url`, and the server adds `?payment=success` or `?payment=cancel` so the page can show the result. `STRIPE_CHECKOUT_SUCCESS_URL` and `STRIPE_CHECKOUT_CANCEL_URL` were removed, so every Checkout flow now uses a contextual return URL. The webhook, not the redirect, records the saved card. Status: active.
 
-**2026-10-23:** `POST /v1/checkout/setup` was removed ([#1368](https://github.com/getvelox/velox/pull/1368)), and with it the `?payment=success` / `?payment=cancel` return. The operator's setup session (`POST /v1/customers/{id}/payment-methods/setup-session`) still takes a `return_url`; without one, it returns to `/payment-method-added` on `CUSTOMER_PORTAL_URL` (`http://localhost:5173` when that is unset). The payment-update link takes no `return_url`: it returns to `PAYMENT_UPDATE_RETURN_URL`, or to `http://localhost:5173/payment-method-added` when that is unset. Both add `?status=success` or `?status=cancel`.
+**2026-10-23:** `POST /v1/checkout/setup` was removed ([#1368](https://github.com/gethardcount/hardcount/pull/1368)), and with it the `?payment=success` / `?payment=cancel` return. The operator's setup session (`POST /v1/customers/{id}/payment-methods/setup-session`) still takes a `return_url`; without one, it returns to `/payment-method-added` on `CUSTOMER_PORTAL_URL` (`http://localhost:5173` when that is unset). The payment-update link takes no `return_url`: it returns to `PAYMENT_UPDATE_RETURN_URL`, or to `http://localhost:5173/payment-method-added` when that is unset. Both add `?status=success` or `?status=cancel`.
 
 ## Context
 

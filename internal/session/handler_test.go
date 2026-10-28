@@ -24,7 +24,7 @@ func TestCookieFlagsPerEnvironment(t *testing.T) {
 		{"qa", false}, // unrecognised: starts with a warning, treated as not production
 	} {
 		t.Run("APP_ENV="+tc.appEnv, func(t *testing.T) {
-			t.Setenv("VELOX_COOKIE_DOMAIN", "")
+			t.Setenv("HARDCOUNT_COOKIE_DOMAIN", "")
 			c := DefaultCookieConfig(tc.appEnv)
 
 			for name, set := range map[string]func(http.ResponseWriter){

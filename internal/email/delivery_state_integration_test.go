@@ -55,7 +55,7 @@ func TestDeliveryState_MonotonicConvergence(t *testing.T) {
 	if row.TenantID != tenantID || row.Payload["to"] != "a@b.test" || row.DeliveryState != email.DeliveryUnknown {
 		t.Fatalf("GetByID row: %+v", row)
 	}
-	if _, err := store.GetByID(ctx, "vlx_emob_ffffffffffffffffffffffff"); !errors.Is(err, sql.ErrNoRows) {
+	if _, err := store.GetByID(ctx, "hc_emob_ffffffffffffffffffffffff"); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("GetByID missing: want sql.ErrNoRows, got %v", err)
 	}
 

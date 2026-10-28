@@ -18,12 +18,12 @@ Per-unit price rates (`flat_amount_cents`, graduated-tier `unit_amount_cents`, `
 
 ADR-044 made the AI wedge a one-meter / N-rule model: a `tokens` meter
 priced per `{model, token_type}`. Wiring that end-to-end (the headline
-demo: point a LiteLLM proxy at Velox and the AI plan bills automatically)
+demo: point a LiteLLM proxy at Hardcount and the AI plan bills automatically)
 surfaced two defects that meant the wedge **could not actually bill**.
 
 ### Gap 1 — per-unit rates were integer cents, so sub-cent prices were inexpressible
 
-Velox stored every per-unit rate as `int64` cents and `flat` mode prices
+Hardcount stored every per-unit rate as `int64` cents and `flat` mode prices
 `quantity × flat_amount_cents`. AI token pricing is sub-cent-per-unit:
 $3.00 per **1,000,000** tokens = 0.0003 cents/token. Integer cents cannot
 represent that. The shipped `anthropic_style` recipe authored
@@ -37,7 +37,7 @@ Peers price sub-cent usage with **decimal unit prices**, not integers:
 | Stripe | `unit_amount_decimal` — decimal string, up to 12 decimal places (verified) |
 | Lago (open source) | `BigDecimal` amounts (verified) |
 | Orb / Metronome | usage-based AI billers (tokens/compute); decimal-precision internals are sales-gated / not publicly documented |
-| Velox (pre-ADR-045) | `int64` cents — whole-cent floor |
+| Hardcount (pre-ADR-045) | `int64` cents — whole-cent floor |
 
 Stripe is the load-bearing anchor and the closest fit: its docs state
 `unit_amount_decimal` is for sub-cent usage rates (e.g. "0.05 cents per MB")
@@ -67,7 +67,7 @@ threshold scan used the pricing-rules path — `preview.go` even *claimed*
    `rating_rule_versions` and `customer_price_overrides` go `BIGINT →
    NUMERIC` (migration 0108); `graduated_tiers` is JSONB and needs no DDL.
    JSON wire form is a **string** (`"0.0003"`) — shopspring/decimal's
-   native marshaling, matching how Velox already serializes decimal
+   native marshaling, matching how Hardcount already serializes decimal
    quantities (`usage_gte`, usage quantities).
 
 2. **Fixed fees stay `int64` cents.** `base_amount_cents`,
@@ -120,4 +120,4 @@ The block usage cap is cut (#973), so decision 3's cap-scaling of rule buckets, 
 
 ## Amendment 2026-10-24
 
-Rates are no longer arbitrary precision ([#1378](https://github.com/getvelox/velox/pull/1378)). Every rate field above, on rating rules, price overrides and recipes, is checked when it is written: 0 or more, under 10^18 cents, and at most 12 decimal places (Stripe's `unit_amount_decimal` precision). Through the API, a rate outside these limits is a 422 naming the field. The check is on write only, with no migration: a rate stored before it is kept, returned and billed as stored. Publishing a new version of such a rule needs rates inside the limits. A rate under 10^18 cents prices one unit inside int64 cents. What a rate bills is checked separately: a line (rate × quantity), an invoice's sum of lines, or its total with tax that does not fit int64 cents fails the invoice with an overflow error instead of wrapping.
+Rates are no longer arbitrary precision ([#1378](https://github.com/gethardcount/hardcount/pull/1378)). Every rate field above, on rating rules, price overrides and recipes, is checked when it is written: 0 or more, under 10^18 cents, and at most 12 decimal places (Stripe's `unit_amount_decimal` precision). Through the API, a rate outside these limits is a 422 naming the field. The check is on write only, with no migration: a rate stored before it is kept, returned and billed as stored. Publishing a new version of such a rule needs rates inside the limits. A rate under 10^18 cents prices one unit inside int64 cents. What a rate bills is checked separately: a line (rate × quantity), an invoice's sum of lines, or its total with tax that does not fit int64 cents fails the invoice with an overflow error instead of wrapping.

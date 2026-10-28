@@ -25,7 +25,7 @@ import (
 // a declared-explicit route whose emission silently stopped firing.)
 var auditUncoveredMutations = promauto.NewCounterVec(
 	prometheus.CounterOpts{
-		Name: "velox_audit_uncovered_mutation_total",
+		Name: "hardcount_audit_uncovered_mutation_total",
 		Help: "Successful mutating requests that produced no audit row and are not declared exempt, by route pattern. Any value > 0 is a compliance gap.",
 	},
 	[]string{"route"},

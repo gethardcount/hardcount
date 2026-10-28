@@ -72,14 +72,14 @@ func (f meterEditFixture) plan(t *testing.T, code string, meterIDs ...string) do
 // current period started at periodStart, and one item on planID, on tx.
 func (f meterEditFixture) insertSub(t *testing.T, tx *sql.Tx, planID, status string, periodStart time.Time) string {
 	t.Helper()
-	custID := postgres.NewID("vlx_cus")
+	custID := postgres.NewID("hc_cus")
 	if _, err := tx.ExecContext(f.ctx, `
 		INSERT INTO customers (id, tenant_id, external_id, display_name, created_at, updated_at)
 		VALUES ($1, $2, $3, $3, $4, $4)
 	`, custID, f.tenantID, "ext_"+custID, periodStart); err != nil {
 		t.Fatal(fmt.Errorf("insert customer: %w", err))
 	}
-	subID := postgres.NewID("vlx_sub")
+	subID := postgres.NewID("hc_sub")
 	if _, err := tx.ExecContext(f.ctx, `
 		INSERT INTO subscriptions (
 			id, tenant_id, code, display_name, customer_id, status, billing_time,
@@ -92,7 +92,7 @@ func (f meterEditFixture) insertSub(t *testing.T, tx *sql.Tx, planID, status str
 	if _, err := tx.ExecContext(f.ctx, `
 		INSERT INTO subscription_items (id, tenant_id, subscription_id, plan_id, quantity, metadata, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, 1, '{}'::jsonb, $5, $5)
-	`, postgres.NewID("vlx_si"), f.tenantID, subID, planID, periodStart); err != nil {
+	`, postgres.NewID("hc_si"), f.tenantID, subID, planID, periodStart); err != nil {
 		t.Fatal(fmt.Errorf("insert item: %w", err))
 	}
 	return subID

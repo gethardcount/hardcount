@@ -1,12 +1,12 @@
 # A webhook endpoint keeps failing
 
-Velox retries on the [schedule in Webhooks](../../webhooks.md#retries),
+Hardcount retries on the [schedule in Webhooks](../../webhooks.md#retries),
 then marks the delivery failed. Each attempt is a row in
 `webhook_deliveries`. Back to the [runbook index](index.md).
 
 ## Symptom
 
-- `velox_webhook_deliveries_total{status="failed"}` rises. It counts
+- `hardcount_webhook_deliveries_total{status="failed"}` rises. It counts
   deliveries marked failed after their last retry.
 - The dashboard shows failed deliveries and a falling success rate for one
   endpoint.
@@ -14,7 +14,7 @@ then marks the delivery failed. Each attempt is a row in
 ## Why
 
 - The endpoint is down, or does not answer with a `2xx` within 10 seconds.
-- The endpoint answers with a redirect (`3xx`). Velox does not follow
+- The endpoint answers with a redirect (`3xx`). Hardcount does not follow
   redirects, so a redirect is a failed delivery.
 - The HMAC signature does not match: the shared-secret signature on each
   delivery no longer verifies. The customer checks against an old secret.

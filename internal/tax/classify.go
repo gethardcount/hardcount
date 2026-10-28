@@ -107,7 +107,7 @@ func Classify(err error) ErrorCode {
 	low := strings.ToLower(msg)
 
 	// Not configured: provider was never connected for the active
-	// mode. Velox's own wrapper (tax/stripe.go) produces "no Stripe
+	// mode. Hardcount's own wrapper (tax/stripe.go) produces "no Stripe
 	// credentials connected for livemode=…" on Calculate and "no client
 	// for context (livemode=…)" on reverse. This match must run BEFORE
 	// provider_auth because "credentials" can co-occur with "key" /

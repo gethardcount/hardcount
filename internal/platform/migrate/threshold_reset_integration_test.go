@@ -43,7 +43,7 @@ INSERT INTO invoices (id, tenant_id, customer_id, subscription_id, invoice_numbe
 //
 // Mutation: an up that keeps the column turns this red.
 func TestThresholdResetColumnDropped(t *testing.T) {
-	dsn, db := scratchDB(t, "velox_test_noreset_b_migrate")
+	dsn, db := scratchDB(t, "hardcount_test_noreset_b_migrate")
 	ctx := context.Background()
 	if err := up(ctx, dsn, filesBefore(t, thresholdResetVersion)); err != nil {
 		t.Fatalf("up to before %d: %v", thresholdResetVersion, err)

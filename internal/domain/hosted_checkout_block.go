@@ -2,8 +2,8 @@ package domain
 
 // HostedCheckoutLiveSQL is the "one payer at a time" rule as a SQL boolean:
 // true while the invoice has a hosted Checkout page that may still take the
-// customer's money, or a hosted payment Velox has not recorded yet. While it
-// holds, no Velox charge may start (the charge claims in invoice/postgres.go)
+// customer's money, or a hosted payment Hardcount has not recorded yet. While it
+// holds, no Hardcount charge may start (the charge claims in invoice/postgres.go)
 // and the dunning due-run scans skip the run, since its claim cannot succeed
 // (dunning/postgres.go). One fragment, so the claims and the scans cannot
 // disagree about when a charge is allowed. invoiceID is the SQL expression

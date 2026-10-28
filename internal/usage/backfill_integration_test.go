@@ -99,7 +99,7 @@ func verifyOriginSurvivesSelect(t *testing.T, db *postgres.DB, tenantID, eventID
 func insertTestCustomer(t *testing.T, db *postgres.DB, tenantID, externalID string) string {
 	t.Helper()
 
-	id := postgres.NewID("vlx_cus")
+	id := postgres.NewID("hc_cus")
 	tx, err := db.BeginTx(postgres.WithLivemode(context.Background(), false), postgres.TxTenant, tenantID)
 	if err != nil {
 		t.Fatalf("begin cust: %v", err)
@@ -122,7 +122,7 @@ func insertTestCustomer(t *testing.T, db *postgres.DB, tenantID, externalID stri
 func insertTestMeter(t *testing.T, db *postgres.DB, tenantID, name, key string) string {
 	t.Helper()
 
-	id := postgres.NewID("vlx_mtr")
+	id := postgres.NewID("hc_mtr")
 	tx, err := db.BeginTx(postgres.WithLivemode(context.Background(), false), postgres.TxTenant, tenantID)
 	if err != nil {
 		t.Fatalf("begin meter: %v", err)

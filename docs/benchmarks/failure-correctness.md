@@ -4,7 +4,7 @@
 > [ADR-115](../adr/115-one-closer-for-the-billing-period.md) (2026-08-30), every
 > period close also locks the subscription row and checks its period first, so the
 > unique index below is now the second guard, not the only one. The negative
-> control has not been re-run on that code. `velox-doctor` now has 32 checks, not 28.
+> control has not been re-run on that code. `hardcount-doctor` now has 32 checks, not 28.
 
 What happens to your invoices when the billing process dies mid-run.
 
@@ -128,7 +128,7 @@ whether the crash left some *other* invariant broken. Examples are an orphaned
 line item, a ledger entry without its counterpart, or a subscription whose
 period bounds no longer agree with its invoices.
 
-`velox-doctor` (Velox's invariant-checking CLI) sweeps **28 money invariants**
+`hardcount-doctor` (Hardcount's invariant-checking CLI) sweeps **28 money invariants**
 as read-only SQL. After every scenario above:
 
 ```

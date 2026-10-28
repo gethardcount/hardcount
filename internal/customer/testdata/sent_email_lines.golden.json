@@ -2,7 +2,7 @@
   {
     "case": "type/credit_note",
     "line": {
-      "id": "email:vlx_emob_1",
+      "id": "email:hc_emob_1",
       "kind": "email.credit_note",
       "title": "Credit note email delivered",
       "detail": [
@@ -10,8 +10,8 @@
           {
             "link": {
               "kind": "invoice",
-              "id": "vlx_inv_1",
-              "label": "VLX-000123"
+              "id": "hc_inv_1",
+              "label": "HC-000123"
             }
           }
         ],
@@ -26,14 +26,14 @@
     },
     "text": [
       "Credit note email delivered",
-      "meta: VLX-000123 · To billing@acme.test",
+      "meta: HC-000123 · To billing@acme.test",
       "tone: neutral"
     ]
   },
   {
     "case": "type/dunning_escalation",
     "line": {
-      "id": "email:vlx_emob_1",
+      "id": "email:hc_emob_1",
       "kind": "email.dunning_escalation",
       "title": "Final notice delivered",
       "detail": [
@@ -41,8 +41,8 @@
           {
             "link": {
               "kind": "invoice",
-              "id": "vlx_inv_1",
-              "label": "VLX-000123"
+              "id": "hc_inv_1",
+              "label": "HC-000123"
             }
           }
         ],
@@ -60,14 +60,14 @@
     },
     "text": [
       "Final notice delivered",
-      "meta: VLX-000123 · To billing@acme.test · Automatic",
+      "meta: HC-000123 · To billing@acme.test · Automatic",
       "tone: neutral"
     ]
   },
   {
     "case": "type/dunning_warning",
     "line": {
-      "id": "email:vlx_emob_1",
+      "id": "email:hc_emob_1",
       "kind": "email.dunning_warning",
       "title": "Payment reminder email delivered",
       "detail": [
@@ -75,8 +75,8 @@
           {
             "link": {
               "kind": "invoice",
-              "id": "vlx_inv_1",
-              "label": "VLX-000123"
+              "id": "hc_inv_1",
+              "label": "HC-000123"
             }
           }
         ],
@@ -94,14 +94,14 @@
     },
     "text": [
       "Payment reminder email delivered",
-      "meta: VLX-000123 · To billing@acme.test · Automatic",
+      "meta: HC-000123 · To billing@acme.test · Automatic",
       "tone: neutral"
     ]
   },
   {
     "case": "type/invoice",
     "line": {
-      "id": "email:vlx_emob_1",
+      "id": "email:hc_emob_1",
       "kind": "email.invoice",
       "title": "Invoice email delivered",
       "detail": [
@@ -109,8 +109,8 @@
           {
             "link": {
               "kind": "invoice",
-              "id": "vlx_inv_1",
-              "label": "VLX-000123"
+              "id": "hc_inv_1",
+              "label": "HC-000123"
             }
           }
         ],
@@ -125,14 +125,14 @@
     },
     "text": [
       "Invoice email delivered",
-      "meta: VLX-000123 · To billing@acme.test",
+      "meta: HC-000123 · To billing@acme.test",
       "tone: neutral"
     ]
   },
   {
     "case": "type/payment_failed",
     "line": {
-      "id": "email:vlx_emob_1",
+      "id": "email:hc_emob_1",
       "kind": "email.payment_failed",
       "title": "Failed payment notice delivered",
       "detail": [
@@ -140,8 +140,8 @@
           {
             "link": {
               "kind": "invoice",
-              "id": "vlx_inv_1",
-              "label": "VLX-000123"
+              "id": "hc_inv_1",
+              "label": "HC-000123"
             }
           }
         ],
@@ -159,14 +159,14 @@
     },
     "text": [
       "Failed payment notice delivered",
-      "meta: VLX-000123 · To billing@acme.test · Automatic",
+      "meta: HC-000123 · To billing@acme.test · Automatic",
       "tone: neutral"
     ]
   },
   {
     "case": "type/payment_receipt",
     "line": {
-      "id": "email:vlx_emob_1",
+      "id": "email:hc_emob_1",
       "kind": "email.payment_receipt",
       "title": "Receipt email delivered",
       "detail": [
@@ -174,8 +174,8 @@
           {
             "link": {
               "kind": "invoice",
-              "id": "vlx_inv_1",
-              "label": "VLX-000123"
+              "id": "hc_inv_1",
+              "label": "HC-000123"
             }
           }
         ],
@@ -193,14 +193,14 @@
     },
     "text": [
       "Receipt email delivered",
-      "meta: VLX-000123 · To billing@acme.test · Automatic",
+      "meta: HC-000123 · To billing@acme.test · Automatic",
       "tone: neutral"
     ]
   },
   {
     "case": "type/payment_setup_request",
     "line": {
-      "id": "email:vlx_emob_1",
+      "id": "email:hc_emob_1",
       "kind": "email.payment_setup_request",
       "title": "Payment setup email delivered",
       "detail": [
@@ -208,8 +208,8 @@
           {
             "link": {
               "kind": "invoice",
-              "id": "vlx_inv_1",
-              "label": "VLX-000123"
+              "id": "hc_inv_1",
+              "label": "HC-000123"
             }
           }
         ],
@@ -224,14 +224,14 @@
     },
     "text": [
       "Payment setup email delivered",
-      "meta: VLX-000123 · To billing@acme.test",
+      "meta: HC-000123 · To billing@acme.test",
       "tone: neutral"
     ]
   },
   {
     "case": "skipped because/gone",
     "line": {
-      "id": "email:vlx_emob_1",
+      "id": "email:hc_emob_1",
       "kind": "email.dunning_warning",
       "title": "Payment reminder email not sent",
       "detail": [
@@ -244,8 +244,8 @@
           {
             "link": {
               "kind": "invoice",
-              "id": "vlx_inv_1",
-              "label": "VLX-000123"
+              "id": "hc_inv_1",
+              "label": "HC-000123"
             }
           }
         ],
@@ -263,14 +263,14 @@
     },
     "text": [
       "Payment reminder email not sent",
-      "meta: The invoice no longer exists · VLX-000123 · To billing@acme.test · Automatic",
+      "meta: The invoice no longer exists · HC-000123 · To billing@acme.test · Automatic",
       "tone: neutral"
     ]
   },
   {
     "case": "skipped because/paid",
     "line": {
-      "id": "email:vlx_emob_1",
+      "id": "email:hc_emob_1",
       "kind": "email.dunning_warning",
       "title": "Payment reminder email not sent",
       "detail": [
@@ -283,8 +283,8 @@
           {
             "link": {
               "kind": "invoice",
-              "id": "vlx_inv_1",
-              "label": "VLX-000123"
+              "id": "hc_inv_1",
+              "label": "HC-000123"
             }
           }
         ],
@@ -302,14 +302,14 @@
     },
     "text": [
       "Payment reminder email not sent",
-      "meta: The invoice was already paid · VLX-000123 · To billing@acme.test · Automatic",
+      "meta: The invoice was already paid · HC-000123 · To billing@acme.test · Automatic",
       "tone: neutral"
     ]
   },
   {
     "case": "skipped because/uncollectible",
     "line": {
-      "id": "email:vlx_emob_1",
+      "id": "email:hc_emob_1",
       "kind": "email.dunning_warning",
       "title": "Payment reminder email not sent",
       "detail": [
@@ -322,8 +322,8 @@
           {
             "link": {
               "kind": "invoice",
-              "id": "vlx_inv_1",
-              "label": "VLX-000123"
+              "id": "hc_inv_1",
+              "label": "HC-000123"
             }
           }
         ],
@@ -341,14 +341,14 @@
     },
     "text": [
       "Payment reminder email not sent",
-      "meta: The invoice was already marked uncollectible · VLX-000123 · To billing@acme.test · Automatic",
+      "meta: The invoice was already marked uncollectible · HC-000123 · To billing@acme.test · Automatic",
       "tone: neutral"
     ]
   },
   {
     "case": "skipped because/voided",
     "line": {
-      "id": "email:vlx_emob_1",
+      "id": "email:hc_emob_1",
       "kind": "email.dunning_warning",
       "title": "Payment reminder email not sent",
       "detail": [
@@ -361,8 +361,8 @@
           {
             "link": {
               "kind": "invoice",
-              "id": "vlx_inv_1",
-              "label": "VLX-000123"
+              "id": "hc_inv_1",
+              "label": "HC-000123"
             }
           }
         ],
@@ -380,14 +380,14 @@
     },
     "text": [
       "Payment reminder email not sent",
-      "meta: The invoice was already voided · VLX-000123 · To billing@acme.test · Automatic",
+      "meta: The invoice was already voided · HC-000123 · To billing@acme.test · Automatic",
       "tone: neutral"
     ]
   },
   {
     "case": "skipped because/(not recorded)",
     "line": {
-      "id": "email:vlx_emob_1",
+      "id": "email:hc_emob_1",
       "kind": "email.dunning_warning",
       "title": "Payment reminder email not sent",
       "detail": [
@@ -400,8 +400,8 @@
           {
             "link": {
               "kind": "invoice",
-              "id": "vlx_inv_1",
-              "label": "VLX-000123"
+              "id": "hc_inv_1",
+              "label": "HC-000123"
             }
           }
         ],
@@ -419,14 +419,14 @@
     },
     "text": [
       "Payment reminder email not sent",
-      "meta: The invoice was already closed · VLX-000123 · To billing@acme.test · Automatic",
+      "meta: The invoice was already closed · HC-000123 · To billing@acme.test · Automatic",
       "tone: neutral"
     ]
   },
   {
     "case": "couldn't be sent/smtp_not_configured",
     "line": {
-      "id": "email:vlx_emob_1",
+      "id": "email:hc_emob_1",
       "kind": "email.invoice",
       "title": "Invoice email couldn't be sent",
       "problem": "Email sending is not set up on this server.",
@@ -435,8 +435,8 @@
           {
             "link": {
               "kind": "invoice",
-              "id": "vlx_inv_1",
-              "label": "VLX-000123"
+              "id": "hc_inv_1",
+              "label": "HC-000123"
             }
           }
         ],
@@ -452,24 +452,24 @@
     "text": [
       "Invoice email couldn't be sent",
       "problem: Email sending is not set up on this server.",
-      "meta: VLX-000123 · To billing@acme.test",
+      "meta: HC-000123 · To billing@acme.test",
       "tone: failure"
     ]
   },
   {
     "case": "couldn't be sent/recipient_suppressed",
     "line": {
-      "id": "email:vlx_emob_1",
+      "id": "email:hc_emob_1",
       "kind": "email.invoice",
       "title": "Invoice email couldn't be sent",
-      "problem": "This address bounced or marked an earlier email as spam, so Velox no longer emails it.",
+      "problem": "This address bounced or marked an earlier email as spam, so Hardcount no longer emails it.",
       "detail": [
         [
           {
             "link": {
               "kind": "invoice",
-              "id": "vlx_inv_1",
-              "label": "VLX-000123"
+              "id": "hc_inv_1",
+              "label": "HC-000123"
             }
           }
         ],
@@ -484,15 +484,15 @@
     },
     "text": [
       "Invoice email couldn't be sent",
-      "problem: This address bounced or marked an earlier email as spam, so Velox no longer emails it.",
-      "meta: VLX-000123 · To billing@acme.test",
+      "problem: This address bounced or marked an earlier email as spam, so Hardcount no longer emails it.",
+      "meta: HC-000123 · To billing@acme.test",
       "tone: failure"
     ]
   },
   {
     "case": "couldn't be sent/invalid_recipient",
     "line": {
-      "id": "email:vlx_emob_1",
+      "id": "email:hc_emob_1",
       "kind": "email.invoice",
       "title": "Invoice email couldn't be sent",
       "problem": "The customer's email address is not valid.",
@@ -501,8 +501,8 @@
           {
             "link": {
               "kind": "invoice",
-              "id": "vlx_inv_1",
-              "label": "VLX-000123"
+              "id": "hc_inv_1",
+              "label": "HC-000123"
             }
           }
         ],
@@ -518,14 +518,14 @@
     "text": [
       "Invoice email couldn't be sent",
       "problem: The customer's email address is not valid.",
-      "meta: VLX-000123 · To billing@acme.test",
+      "meta: HC-000123 · To billing@acme.test",
       "tone: failure"
     ]
   },
   {
     "case": "couldn't be sent/(no plain-words name)",
     "line": {
-      "id": "email:vlx_emob_1",
+      "id": "email:hc_emob_1",
       "kind": "email.invoice",
       "title": "Invoice email couldn't be sent",
       "problem": "The customer did not get this email.",
@@ -534,8 +534,8 @@
           {
             "link": {
               "kind": "invoice",
-              "id": "vlx_inv_1",
-              "label": "VLX-000123"
+              "id": "hc_inv_1",
+              "label": "HC-000123"
             }
           }
         ],
@@ -551,14 +551,14 @@
     "text": [
       "Invoice email couldn't be sent",
       "problem: The customer did not get this email.",
-      "meta: VLX-000123 · To billing@acme.test",
+      "meta: HC-000123 · To billing@acme.test",
       "tone: failure"
     ]
   },
   {
     "case": "setup email/finalize_no_pm",
     "line": {
-      "id": "email:vlx_emob_1",
+      "id": "email:hc_emob_1",
       "kind": "email.payment_setup_request",
       "title": "Payment setup email delivered",
       "detail": [
@@ -571,8 +571,8 @@
           {
             "link": {
               "kind": "invoice",
-              "id": "vlx_inv_1",
-              "label": "VLX-000123"
+              "id": "hc_inv_1",
+              "label": "HC-000123"
             }
           }
         ],
@@ -590,14 +590,14 @@
     },
     "text": [
       "Payment setup email delivered",
-      "meta: No payment method when the invoice was finalized · VLX-000123 · To billing@acme.test · Automatic",
+      "meta: No payment method when the invoice was finalized · HC-000123 · To billing@acme.test · Automatic",
       "tone: neutral"
     ]
   },
   {
     "case": "setup email/auto_charge_retry_no_pm",
     "line": {
-      "id": "email:vlx_emob_1",
+      "id": "email:hc_emob_1",
       "kind": "email.payment_setup_request",
       "title": "Payment setup email delivered",
       "detail": [
@@ -610,8 +610,8 @@
           {
             "link": {
               "kind": "invoice",
-              "id": "vlx_inv_1",
-              "label": "VLX-000123"
+              "id": "hc_inv_1",
+              "label": "HC-000123"
             }
           }
         ],
@@ -629,14 +629,14 @@
     },
     "text": [
       "Payment setup email delivered",
-      "meta: A charge found no payment method · VLX-000123 · To billing@acme.test · Automatic",
+      "meta: A charge found no payment method · HC-000123 · To billing@acme.test · Automatic",
       "tone: neutral"
     ]
   },
   {
     "case": "setup email/operator_resend",
     "line": {
-      "id": "email:vlx_emob_1",
+      "id": "email:hc_emob_1",
       "kind": "email.payment_setup_request",
       "title": "Payment setup email delivered",
       "detail": [
@@ -649,8 +649,8 @@
           {
             "link": {
               "kind": "invoice",
-              "id": "vlx_inv_1",
-              "label": "VLX-000123"
+              "id": "hc_inv_1",
+              "label": "HC-000123"
             }
           }
         ],
@@ -665,14 +665,14 @@
     },
     "text": [
       "Payment setup email delivered",
-      "meta: Resent · VLX-000123 · To billing@acme.test",
+      "meta: Resent · HC-000123 · To billing@acme.test",
       "tone: neutral"
     ]
   },
   {
     "case": "credit note email/note exists",
     "line": {
-      "id": "email:vlx_emob_1",
+      "id": "email:hc_emob_1",
       "kind": "email.credit_note",
       "title": "Credit note email delivered",
       "detail": [
@@ -680,8 +680,8 @@
           {
             "link": {
               "kind": "invoice",
-              "id": "vlx_inv_1",
-              "label": "VLX-000123"
+              "id": "hc_inv_1",
+              "label": "HC-000123"
             }
           }
         ],
@@ -689,7 +689,7 @@
           {
             "link": {
               "kind": "credit_note",
-              "id": "vlx_cn_1",
+              "id": "hc_cn_1",
               "label": "CN-000012"
             }
           }
@@ -705,14 +705,14 @@
     },
     "text": [
       "Credit note email delivered",
-      "meta: VLX-000123 · CN-000012 · To billing@acme.test",
+      "meta: HC-000123 · CN-000012 · To billing@acme.test",
       "tone: neutral"
     ]
   },
   {
     "case": "credit note email/note gone",
     "line": {
-      "id": "email:vlx_emob_1",
+      "id": "email:hc_emob_1",
       "kind": "email.credit_note",
       "title": "Credit note email delivered",
       "detail": [
@@ -720,8 +720,8 @@
           {
             "link": {
               "kind": "invoice",
-              "id": "vlx_inv_1",
-              "label": "VLX-000123"
+              "id": "hc_inv_1",
+              "label": "HC-000123"
             }
           }
         ],
@@ -741,20 +741,20 @@
     },
     "text": [
       "Credit note email delivered",
-      "meta: VLX-000123 · CN-000012 · To billing@acme.test",
+      "meta: HC-000123 · CN-000012 · To billing@acme.test",
       "tone: neutral"
     ]
   },
   {
     "case": "invoice not linked without its id",
     "line": {
-      "id": "email:vlx_emob_1",
+      "id": "email:hc_emob_1",
       "kind": "email.invoice",
       "title": "Invoice email delivered",
       "detail": [
         [
           {
-            "text": "VLX-000123"
+            "text": "HC-000123"
           }
         ],
         [
@@ -768,14 +768,14 @@
     },
     "text": [
       "Invoice email delivered",
-      "meta: VLX-000123 · To billing@acme.test",
+      "meta: HC-000123 · To billing@acme.test",
       "tone: neutral"
     ]
   },
   {
     "case": "test clock",
     "line": {
-      "id": "email:vlx_emob_1",
+      "id": "email:hc_emob_1",
       "kind": "email.payment_receipt",
       "title": "Receipt email delivered",
       "detail": [
@@ -783,8 +783,8 @@
           {
             "link": {
               "kind": "invoice",
-              "id": "vlx_inv_1",
-              "label": "VLX-000123"
+              "id": "hc_inv_1",
+              "label": "HC-000123"
             }
           }
         ],
@@ -803,7 +803,7 @@
     },
     "text": [
       "Receipt email delivered",
-      "meta: VLX-000123 · To billing@acme.test · Automatic",
+      "meta: HC-000123 · To billing@acme.test · Automatic",
       "tone: neutral"
     ]
   }

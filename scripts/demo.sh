@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Velox demo: one month of AI token billing for a demo customer, end to end.
+# Hardcount demo: one month of AI token billing for a demo customer, end to end.
 #
 #   ready-made token prices → a demo customer on a test clock (a pretend
 #   clock for test customers) → token usage sent the way a LiteLLM proxy
@@ -9,12 +9,12 @@
 # What each step does, and what to open in the dashboard: docs/quick-start.md
 #
 # Usage:
-#   Started Velox with the quick start (deploy/compose/quickstart.sh)?
+#   Started Hardcount with the quick start (deploy/compose/quickstart.sh)?
 #     ./quickstart.sh demo          # in deploy/compose; it passes the key for you
-#   Working on Velox itself?
+#   Working on Hardcount itself?
 #     make bootstrap                # prints the test secret key this script needs
 #     make dev                      # API on :8080 (separate terminal)
-#     ./scripts/demo.sh <vlx_secret_test_...>
+#     ./scripts/demo.sh <hc_secret_test_...>
 #
 # Every call is checked — the script fails loudly at the first API
 # mismatch instead of printing a success banner over broken output.
@@ -22,15 +22,15 @@
 set -euo pipefail
 
 API_KEY="${1:-}"
-BASE="${VELOX_BASE:-http://localhost:8080}"
+BASE="${HARDCOUNT_BASE:-http://localhost:8080}"
 
 if [ -z "$API_KEY" ]; then
-  echo "Usage: ./scripts/demo.sh <vlx_secret_test_...>"
+  echo "Usage: ./scripts/demo.sh <hc_secret_test_...>"
   echo ""
-  echo "This needs a test secret key (it starts with vlx_secret_test_)."
-  echo "  Started Velox with the quick start? Run './quickstart.sh demo' in"
+  echo "This needs a test secret key (it starts with hc_secret_test_)."
+  echo "  Started Hardcount with the quick start? Run './quickstart.sh demo' in"
   echo "  deploy/compose instead. It finds the key for you."
-  echo "  Working on Velox itself? 'make bootstrap' prints the key."
+  echo "  Working on Hardcount itself? 'make bootstrap' prints the key."
   exit 1
 fi
 
@@ -65,15 +65,15 @@ req() {
   echo "$out"
 }
 
-step "1. Check that Velox is running"
+step "1. Check that Hardcount is running"
 curl -sf "$BASE/health" >/dev/null || {
-  echo "✗ Velox is not reachable at $BASE."
-  echo "  Started Velox with the quick start? Run ./quickstart.sh in deploy/compose,"
+  echo "✗ Hardcount is not reachable at $BASE."
+  echo "  Started Hardcount with the quick start? Run ./quickstart.sh in deploy/compose,"
   echo "  then ./quickstart.sh demo."
-  echo "  Working on Velox itself? Run 'make dev' first."
+  echo "  Working on Hardcount itself? Run 'make dev' first."
   exit 1
 }
-green "✓ Velox is up at ${VELOX_PUBLIC_URL:-$BASE}"
+green "✓ Hardcount is up at ${HARDCOUNT_PUBLIC_URL:-$BASE}"
 
 step "2. Load ready-made prices for Claude tokens (one call)"
 # One recipe = the tokens meter + a per-{model, token_type} price matrix
@@ -134,11 +134,11 @@ for rate in \
   '{"provider": "anthropic", "model": "claude-haiku-4.5",  "token_type": "output",     "unit_cost_cents": "0.0004"}' ; do
   req PUT "/v1/provider-costs" "$rate" >/dev/null
 done
-green "✓ Saved 5 costs for two models. Velox now records your cost on each new usage event."
+green "✓ Saved 5 costs for two models. Hardcount now records your cost on each new usage event."
 
 step "6. Send token usage, the way a LiteLLM proxy sends it"
 # One LiteLLM StandardLoggingPayload = one API call by ACME's end user.
-# Velox splits it into input / cache_read / output token events with
+# Hardcount splits it into input / cache_read / output token events with
 # {model, token_type} dimensions and dedupes replays by call id.
 # Five calls to Claude Sonnet 4.5, with part of each prompt read from the cache:
 for i in 1 2 3 4 5; do
@@ -184,7 +184,7 @@ for i in $(seq 1 30); do
   sleep 1
 done
 [ "$STATUS" = "ready" ] || { echo "✗ clock stuck in status '$STATUS'"; exit 1; }
-green "✓ The clock now reads $ADV_TO. Velox billed ACME Corp's month while the clock moved."
+green "✓ The clock now reads $ADV_TO. Hardcount billed ACME Corp's month while the clock moved."
 
 step "8. The invoice ACME Corp receives"
 INVOICES=$(req GET "/v1/invoices?customer_id=$CUST_ID")
@@ -229,11 +229,11 @@ blue "━━━ Done: every step above ran and was checked ━━━"
 echo ""
 echo "  ✓ One call loaded a price for each model and token type"
 echo "  ✓ LiteLLM-shaped calls to two models became usage events, with no SDK"
-echo "  ✓ Velox recorded what each usage event cost you"
-echo "  ✓ A test clock moved one month, and Velox made the invoice and its PDF"
+echo "  ✓ Hardcount recorded what each usage event cost you"
+echo "  ✓ A test clock moved one month, and Hardcount made the invoice and its PDF"
 echo "  ✓ Your margin on this customer, by model"
 echo ""
-DASH="${VELOX_DASHBOARD_URL:-http://localhost:5173}"
+DASH="${HARDCOUNT_DASHBOARD_URL:-http://localhost:5173}"
 echo "  Open these links to see it in the dashboard (sign in first; it opens"
 echo "  in test mode, where the demo ran):"
 echo "    Invoice:  $DASH/invoices/$INV_ID"

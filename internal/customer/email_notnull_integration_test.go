@@ -49,7 +49,7 @@ func TestCustomersEmail_NotNull(t *testing.T) {
 
 	_, err = tx.ExecContext(ctx,
 		`INSERT INTO customers (id, tenant_id, external_id, display_name, email, status)
-		 VALUES ('vlx_cus_nulltest', $1, 'cus_null_email', 'Null Email Co', NULL, 'active')`,
+		 VALUES ('hc_cus_nulltest', $1, 'cus_null_email', 'Null Email Co', NULL, 'active')`,
 		tenantID,
 	)
 	if err == nil {

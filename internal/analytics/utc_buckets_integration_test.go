@@ -26,7 +26,7 @@ func openNewYorkDB(t *testing.T) *postgres.DB {
 	t.Helper()
 	url := os.Getenv("TEST_DATABASE_URL")
 	if url == "" {
-		url = "postgres://velox_test_app:velox_test_app@localhost:5432/velox_test?sslmode=disable"
+		url = "postgres://hardcount_test_app:hardcount_test_app@localhost:5432/hardcount_test?sslmode=disable"
 	}
 	pool, err := sql.Open("pgx", url)
 	if err != nil {
@@ -82,7 +82,7 @@ func TestAnalyticsBuckets_AreUTCWhateverTheSessionTimeZone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
 	}
-	subID := postgres.NewID("vlx_sub")
+	subID := postgres.NewID("hc_sub")
 	execInTenantTx(t, db, tenantID, `
 		INSERT INTO subscriptions (id, tenant_id, code, display_name, customer_id, status, billing_time,
 			activated_at, current_billing_period_start, current_billing_period_end, next_billing_at, created_at, updated_at)
@@ -91,7 +91,7 @@ func TestAnalyticsBuckets_AreUTCWhateverTheSessionTimeZone(t *testing.T) {
 	execInTenantTx(t, db, tenantID, `
 		INSERT INTO subscription_items (id, tenant_id, subscription_id, plan_id, quantity, metadata, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, 1, '{}'::jsonb, $5, $5)
-	`, postgres.NewID("vlx_si"), tenantID, subID, plan.ID, at)
+	`, postgres.NewID("hc_si"), tenantID, subID, plan.ID, at)
 
 	nyDB := openNewYorkDB(t)
 	// Control: the handler's own tx really runs on a New York session.

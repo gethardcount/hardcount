@@ -44,7 +44,7 @@ func newMemStore() *memStore {
 }
 
 func (m *memStore) Create(_ context.Context, tenantID string, inv domain.Invoice) (domain.Invoice, error) {
-	inv.ID = fmt.Sprintf("vlx_inv_%d", len(m.invoices)+1)
+	inv.ID = fmt.Sprintf("hc_inv_%d", len(m.invoices)+1)
 	inv.TenantID = tenantID
 	now := time.Now().UTC()
 	inv.CreatedAt = now
@@ -335,7 +335,7 @@ func (m *memStore) MarkPaymentFailedReportingTransition(_ context.Context, tenan
 	if !ok || inv.TenantID != tenantID {
 		return domain.Invoice{}, domain.PaymentFailureResult{}, errs.ErrNotFound
 	}
-	if !report.MovesInvoice(inv.Status, inv.PaymentStatus, inv.StripePaymentIntentID, inv.ChargeAttemptSeq, domain.AttemptNotVelox) {
+	if !report.MovesInvoice(inv.Status, inv.PaymentStatus, inv.StripePaymentIntentID, inv.ChargeAttemptSeq, domain.AttemptNotHardcount) {
 		return inv, domain.PaymentFailureResult{}, nil
 	}
 	if m.failNotedPI == nil {
@@ -405,7 +405,7 @@ func (m *memStore) ApplyCreditNote(_ context.Context, tenantID, id string, amoun
 }
 
 func (m *memStore) CreateLineItem(_ context.Context, tenantID string, item domain.InvoiceLineItem) (domain.InvoiceLineItem, error) {
-	item.ID = fmt.Sprintf("vlx_ili_%d", len(m.lineItems[item.InvoiceID])+1)
+	item.ID = fmt.Sprintf("hc_ili_%d", len(m.lineItems[item.InvoiceID])+1)
 	item.TenantID = tenantID
 	m.lineItems[item.InvoiceID] = append(m.lineItems[item.InvoiceID], item)
 	return item, nil
@@ -428,7 +428,7 @@ func (m *memStore) AddLineItemAtomic(_ context.Context, tenantID, invoiceID stri
 	item.InvoiceID = invoiceID
 	item.TenantID = tenantID
 	item.Currency = inv.Currency
-	item.ID = fmt.Sprintf("vlx_ili_%d", len(m.lineItems[invoiceID])+1)
+	item.ID = fmt.Sprintf("hc_ili_%d", len(m.lineItems[invoiceID])+1)
 	m.lineItems[invoiceID] = append(m.lineItems[invoiceID], item)
 
 	var subtotal int64
@@ -750,7 +750,7 @@ func (m *memStore) CreateWithLineItems(_ context.Context, tenantID string, inv d
 		}
 	}
 
-	inv.ID = fmt.Sprintf("vlx_inv_%d", len(m.invoices)+1)
+	inv.ID = fmt.Sprintf("hc_inv_%d", len(m.invoices)+1)
 	inv.TenantID = tenantID
 	now := time.Now().UTC()
 	inv.CreatedAt = now
@@ -852,7 +852,7 @@ func (m *memStore) ListAutoChargePending(_ context.Context, _ domain.InvoiceKeys
 }
 
 // memNumberer is a deterministic in-memory InvoiceNumberer for tests.
-// Hands out VLX-000001, VLX-000002, ... so assertions on invoice numbers
+// Hands out HC-000001, HC-000002, ... so assertions on invoice numbers
 // don't depend on clock or DB state.
 type memNumberer struct {
 	next int
@@ -862,14 +862,14 @@ func newMemNumberer() *memNumberer { return &memNumberer{} }
 
 func (m *memNumberer) NextInvoiceNumber(_ context.Context, _ string) (string, error) {
 	m.next++
-	return fmt.Sprintf("VLX-%06d", m.next), nil
+	return fmt.Sprintf("HC-%06d", m.next), nil
 }
 
 // NextInvoiceNumberTx mirrors NextInvoiceNumber for tx-aware callers.
 // The fake ignores the tx since it's in-memory.
 func (m *memNumberer) NextInvoiceNumberTx(_ context.Context, _ *sql.Tx, _ string) (string, error) {
 	m.next++
-	return fmt.Sprintf("VLX-%06d", m.next), nil
+	return fmt.Sprintf("HC-%06d", m.next), nil
 }
 
 func TestCreate(t *testing.T) {
@@ -1013,7 +1013,7 @@ func TestFinalizeAndVoid(t *testing.T) {
 			CustomerID: "c", SubscriptionID: "s3",
 			BillingPeriodStart: time.Now(), BillingPeriodEnd: time.Now().AddDate(0, 1, 0),
 		})
-		err := svc.SetPublicToken(ctx, "t1", draft.ID, "vlx_pinv_abc")
+		err := svc.SetPublicToken(ctx, "t1", draft.ID, "hc_pinv_abc")
 		if !errors.Is(err, errs.ErrNotFound) {
 			t.Errorf("expected ErrNotFound on draft rotate, got %v", err)
 		}
@@ -1566,7 +1566,7 @@ func TestRecordOfflinePayment(t *testing.T) {
 	t.Run("audit + event carry the booked amount, not zero", func(t *testing.T) {
 		store := newMemStore()
 		store.invoices["inv_amt"] = domain.Invoice{
-			ID: "inv_amt", TenantID: "t1", CustomerID: "c", InvoiceNumber: "VLX-42",
+			ID: "inv_amt", TenantID: "t1", CustomerID: "c", InvoiceNumber: "HC-42",
 			Status: domain.InvoiceFinalized, AmountDueCents: 4200, Currency: "USD",
 		}
 		svc := NewService(store, nil, newMemNumberer())

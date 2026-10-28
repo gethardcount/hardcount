@@ -14,7 +14,7 @@ import (
 // ADR-107's entire guarantee, and it is the reason that ADR can be one deletion
 // instead of a subsystem.
 //
-// An ambiguous charge can leave a PaymentIntent live at Stripe that Velox never
+// An ambiguous charge can leave a PaymentIntent live at Stripe that Hardcount never
 // learned the name of. Rather than settle such an invoice failed — which bumps
 // charge_attempt_seq, rotating the idempotency key, and returns the invoice to
 // a claimable state so the next retry opens a SECOND PaymentIntent — it is left

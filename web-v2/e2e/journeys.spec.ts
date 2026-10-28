@@ -40,7 +40,7 @@ test.describe('signed out', () => {
   })
 
   test('a bad hosted invoice link reads as an invalid link', async ({ page }) => {
-    await page.goto('/invoice/vlx_pinv_does_not_exist')
+    await page.goto('/invoice/hc_pinv_does_not_exist')
     await expect(page.getByRole('heading', { level: 1, name: 'This link isn’t valid' })).toBeVisible()
     await expect(page.getByText('invoice not found')).toHaveCount(0)
   })
@@ -62,7 +62,7 @@ test.describe('signed out', () => {
   })
 
   test('a dead update-payment link asks for a new one, in plain words', async ({ page }) => {
-    await page.goto('/update-payment?token=vlx_put_does_not_exist')
+    await page.goto('/update-payment?token=hc_put_does_not_exist')
     await expect(page.getByText('This link has expired or was already used', { exact: true })).toBeVisible()
     await expect(page.getByText('Ask the company that sent you this link for a new one.')).toBeVisible()
     await expect(page.getByText(/token|billing provider/i)).toHaveCount(0)
@@ -72,7 +72,7 @@ test.describe('signed out', () => {
     const answer = (path: RegExp) => page.waitForResponse(r => path.test(new URL(r.url()).pathname))
 
     const checking = answer(/^\/v1\/auth\/password-reset\/check$/)
-    await page.goto('/reset-password?token=vlx_prt_does_not_exist')
+    await page.goto('/reset-password?token=hc_prt_does_not_exist')
     const check = await checking
     expect(check.status()).toBe(422)
     expect((await check.json()).error).toMatchObject({ type: 'invalid_request_error', code: 'invalid_or_expired', param: 'token' })
@@ -83,7 +83,7 @@ test.describe('signed out', () => {
     await expect(page.getByLabel('Email')).toBeVisible()
 
     const previewing = answer(/^\/v1\/auth\/invite\//)
-    await page.goto('/accept-invite?token=vlx_inv_does_not_exist')
+    await page.goto('/accept-invite?token=hc_inv_does_not_exist')
     const preview = await previewing
     expect(preview.status()).toBe(422)
     await expect(page.getByText('This invitation link is no longer valid.', { exact: false })).toBeVisible()
@@ -114,7 +114,7 @@ test.describe('signed out', () => {
 
   test('sign-in follows dark mode; the hosted invoice stays light', async ({ page }) => {
     const { invoice } = JSON.parse(fs.readFileSync(seedFile, 'utf8')) as Seed
-    await page.addInitScript(() => localStorage.setItem('velox-theme', 'dark'))
+    await page.addInitScript(() => localStorage.setItem('hardcount-theme', 'dark'))
     await page.goto('/login')
     await expect(page.locator('html')).toHaveClass(/\bdark\b/)
     await page.goto(`/invoice/${invoice.public_token}`)
@@ -883,7 +883,7 @@ test('a new account: Home welcomes the operator and the setup checklist opens on
   )
   await page.goto('/')
   const welcome = page.getByRole('region', { name: 'Welcome' })
-  await expect(welcome).toContainText('Velox counts usage, works out each bill, makes the invoice and charges the card through Stripe.')
+  await expect(welcome).toContainText('Hardcount counts usage, works out each bill, makes the invoice and charges the card through Stripe.')
   await expect(welcome).toContainText('Follow the setup checklist to bill your first test customer.')
 
   // First visit: the checklist opens by itself, every step with its line.
@@ -891,7 +891,7 @@ test('a new account: Home welcomes the operator and the setup checklist opens on
   await expect(checklist).toBeVisible()
   await expect(checklist).toContainText("You're in test mode, so nothing here charges real money.")
   await expect(checklist.getByText('Send a usage event', { exact: true })).toBeVisible()
-  await expect(checklist.getByText('Your app reports what each customer used; Velox prices it.')).toBeVisible()
+  await expect(checklist.getByText('Your app reports what each customer used; Hardcount prices it.')).toBeVisible()
   await expect(checklist.getByText('Let your app hear about invoices and subscriptions')).toBeVisible()
 
   // Only once: after closing it, the next visit leaves it closed until asked.
@@ -921,8 +921,8 @@ test('a promotional grant explains commit and promotional credit', async ({ page
 test('list pages say what each one is for', async ({ page }) => {
   const pages: [string, string][] = [
     ['/credit-notes', 'A credit note takes money off an invoice.'],
-    ['/webhooks', 'Velox calls a URL in your app when something happens'],
-    ['/api-keys', 'Keys your app uses to call the Velox API'],
+    ['/webhooks', 'Hardcount calls a URL in your app when something happens'],
+    ['/api-keys', 'Keys your app uses to call the Hardcount API'],
     ['/settings', 'Your business details, invoice defaults, tax and payment setup'],
   ]
   for (const [path, text] of pages) {

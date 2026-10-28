@@ -1,6 +1,6 @@
 .PHONY: build run test lint migrate migration dev clean gen gen-go gen-ts
 
-# .env (cp .env.example .env) configures the targets that start Velox or
+# .env (cp .env.example .env) configures the targets that start Hardcount or
 # its tools: run, dev, migrate, migrate-status and bootstrap. Only those
 # load it, so the test targets see the same environment CI does.
 ifneq ($(filter run dev migrate migrate-status bootstrap,$(MAKECMDGOALS)),)
@@ -8,17 +8,17 @@ ifneq ($(filter run dev migrate migrate-status bootstrap,$(MAKECMDGOALS)),)
 export
 endif
 
-# Build the velox binary
+# Build the hardcount binary
 build:
-	go build -o bin/velox ./cmd/velox
+	go build -o bin/hardcount ./cmd/hardcount
 
 # Run the server locally
 run: build
-	./bin/velox
+	./bin/hardcount
 
 # Run the server from source
 dev:
-	go run ./cmd/velox
+	go run ./cmd/hardcount
 
 # Run all tests.
 #
@@ -34,7 +34,7 @@ test:
 test-unit:
 	go test ./... -short -count=1
 
-# Run linter. Velox code rules live in .golangci.yml (forbidigo: wall-clock
+# Run linter. Hardcount code rules live in .golangci.yml (forbidigo: wall-clock
 # time in clock-pinned packages, single-invoice period lookups) and in Go tests
 # under internal/arch (civil-day dates need an explicit zone).
 lint:
@@ -50,10 +50,10 @@ tidy:
 
 # Migration management
 migrate:
-	go run ./cmd/velox migrate
+	go run ./cmd/hardcount migrate
 
 migrate-status:
-	go run ./cmd/velox migrate status
+	go run ./cmd/hardcount migrate status
 
 # Write the next migration file in internal/platform/migrate/sql/, numbered
 # after the highest one in any worktree or on any branch. Rules and steps:
@@ -69,8 +69,8 @@ clean:
 
 # Bootstrap: create demo tenant + API keys
 bootstrap:
-	DATABASE_URL="postgres://velox:velox@localhost:5432/velox?sslmode=disable" \
-	go run ./cmd/velox-bootstrap
+	DATABASE_URL="postgres://hardcount:hardcount@localhost:5432/hardcount?sslmode=disable" \
+	go run ./cmd/hardcount-bootstrap
 
 # Run demo script (requires: make up, make bootstrap, make dev)
 demo:
@@ -121,7 +121,7 @@ down:
 
 # Project stats
 stats:
-	@echo "━━━ Velox Project Stats ━━━"
+	@echo "━━━ Hardcount Project Stats ━━━"
 	@echo ""
 	@printf "  Go files:     %s\n" "$$(find . -name '*.go' -not -path './vendor/*' | wc -l | tr -d ' ')"
 	@printf "  Go lines:     %s\n" "$$(find . -name '*.go' -not -path './vendor/*' -exec cat {} + | wc -l | tr -d ' ')"

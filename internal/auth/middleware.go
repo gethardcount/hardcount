@@ -30,7 +30,7 @@ func Middleware(svc *Service) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			rawKey := extractBearerToken(r)
 			if rawKey == "" {
-				respond.Unauthorized(w, r, "missing credentials — use Authorization: Bearer vlx_secret_...")
+				respond.Unauthorized(w, r, "missing credentials — use Authorization: Bearer hc_secret_...")
 				return
 			}
 
@@ -223,7 +223,7 @@ func extractBearerToken(r *http.Request) string {
 
 // LivemodeFromRawKey peeks at a raw API key's prefix to recover the mode it
 // was minted for, without touching the DB. Returns ok=false for strings that
-// don't look like Velox API keys so callers can skip the check silently.
+// don't look like Hardcount API keys so callers can skip the check silently.
 func LivemodeFromRawKey(raw string) (live, ok bool) {
 	switch {
 	case strings.Contains(raw, "_live_"):

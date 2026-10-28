@@ -97,7 +97,7 @@ func seedThresholdInvoiceLines(inv *mockInvoices, status domain.InvoiceStatus, w
 	}
 	inv.invoices = append(inv.invoices, domain.Invoice{
 		ID: "inv_thr", TenantID: "t1", CustomerID: "cus_1", SubscriptionID: "sub_1",
-		InvoiceNumber: "VLX-THR-1", BillingReason: domain.BillingReasonThreshold,
+		InvoiceNumber: "HC-THR-1", BillingReason: domain.BillingReasonThreshold,
 		Status: status, PaymentStatus: domain.PaymentSucceeded,
 		BillingPeriodStart: start,
 		BillingPeriodEnd:   end,

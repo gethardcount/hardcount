@@ -301,7 +301,7 @@ func TestLiteLLM_ModelRawPriceNeedsOneMoreLabel(t *testing.T) {
 		_, err := pricing.NewPostgresStore(db).WritePrice(rt.ctx, rt.tenantID, rt.planID, pricing.PriceChange{
 			Op: pricing.PriceAdd, MeterID: rt.meterID, Match: map[string]string{"model_raw": raw, "token_type": "input"}, Shape: perUnitShape("0.0007"),
 		}, nil)
-		if errs.Code(err) != errs.CodePriceConflict || !strings.Contains(err.Error(), "vlx_prc_") {
+		if errs.Code(err) != errs.CodePriceConflict || !strings.Contains(err.Error(), "hc_prc_") {
 			t.Fatalf("a {model_raw, token_type} price beside {model, token_type}: got %v, want price_conflict naming the other price", err)
 		}
 		subtotal, lines := rt.close()
@@ -455,7 +455,7 @@ func TestLiteLLM_RawNamesOnAFreshInstall(t *testing.T) {
 		Match: map[string]string{"model": "claude-haiku-5.5", "model_raw": bedrockHaiku55, "token_type": "input"},
 		Shape: perUnitShape("0.00002"),
 	}, nil)
-	if errs.Code(err) != errs.CodePriceConflict || !strings.Contains(err.Error(), "vlx_prc_") {
+	if errs.Code(err) != errs.CodePriceConflict || !strings.Contains(err.Error(), "hc_prc_") {
 		t.Errorf("a three-label Haiku 5.5 model_raw price: got %v, want price_conflict naming the recipe's price", err)
 	}
 

@@ -16,7 +16,7 @@ func unpricedSeries(t *testing.T, meterID, mode string) float64 {
 		t.Fatalf("gather metrics: %v", err)
 	}
 	for _, mf := range mfs {
-		if mf.GetName() != "velox_usage_unpriced_quantity_total" {
+		if mf.GetName() != "hardcount_usage_unpriced_quantity_total" {
 			continue
 		}
 		for _, m := range mf.GetMetric() {

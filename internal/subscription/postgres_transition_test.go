@@ -98,7 +98,7 @@ func TestTransitionAtomic_NotFoundVsWrongState(t *testing.T) {
 
 	// Cancel a nonexistent subscription — must be ErrNotFound, not a
 	// status-mismatch message that would leak the schema to callers.
-	_, _, err := svc.Cancel(ctx, tenantID, "vlx_sub_does_not_exist")
+	_, _, err := svc.Cancel(ctx, tenantID, "hc_sub_does_not_exist")
 	if err == nil {
 		t.Fatal("expected ErrNotFound for unknown id")
 	}

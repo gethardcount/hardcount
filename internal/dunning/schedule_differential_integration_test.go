@@ -126,7 +126,7 @@ func runScheduleCase(t *testing.T, tc scheduleCase, arm string) {
 	var resolver clock.Resolver
 	clocks := testclock.NewPostgresStore(db)
 	if onClock {
-		clockID = postgres.NewID("vlx_tclk")
+		clockID = postgres.NewID("hc_tclk")
 		if _, err := admin.Exec(`INSERT INTO test_clocks (id, tenant_id, livemode, name, frozen_time, status)
 			VALUES ($1, $2, false, 'schedule differential', $3, 'advancing')`, clockID, tenantID, diffFailedAt); err != nil {
 			t.Fatalf("insert clock: %v", err)

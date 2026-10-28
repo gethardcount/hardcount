@@ -76,7 +76,7 @@ func collectFailureNext(err error) string {
 	case errors.As(err, &pe) && !pe.Unknown:
 		return "Stripe refused the charge, so the invoice is marked failed and out of the auto-charge queue; payment recovery retries it if the account has it on"
 	case errors.As(err, &pe):
-		return "Stripe's answer was unclear, so Velox asks Stripe what happened before anything charges the invoice again"
+		return "Stripe's answer was unclear, so Hardcount asks Stripe what happened before anything charges the invoice again"
 	default:
 		return "the invoice is still queued, and the auto-charge sweep will retry"
 	}

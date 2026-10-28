@@ -31,7 +31,7 @@ A 6-platform primary-doc survey (2026-07-14) confirmed the universal invariant:
 Recurly document it verbatim (UTC/instant anchor + separate mutable display
 zone); Orb reaches it by making its single zone immutable; Lago is the cautionary
 counter-case whose mutable single zone re-times billing with an undocumented
-transition — which is exactly the bug Velox had.
+transition — which is exactly the bug Hardcount had.
 
 ## Decision
 
@@ -88,7 +88,7 @@ never a which-entity choice, so ADR-074's ambiguity cannot recur.
   display stamp) is deferred as cosmetic polish on a rare admin action.
 - **Grain stays org-level, not per-customer/per-subscription.** Every surveyed
   leader anchors finer (subscription: Stripe/Chargebee/Metronome; per-customer TZ:
-  Orb/Lago). That grain is a *multi-timezone-customer* capability; Velox is
+  Orb/Lago). That grain is a *multi-timezone-customer* capability; Hardcount is
   B2B-not-B2B2C, single-org-zone US market, 0 customers — no operator can even
   express "bill this customer in a different zone." **Trigger to revisit:** the
   first design partner needing per-customer billing zones (the additive path is

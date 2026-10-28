@@ -32,7 +32,7 @@ func TestEmailOutbox_EnqueueStandalone_Persists(t *testing.T) {
 	id, err := store.EnqueueStandalone(ctx, tenantID, email.TypeInvoice, map[string]any{
 		"to":             "customer@example.com",
 		"customer_name":  "Ada Lovelace",
-		"invoice_number": "VLX-000001",
+		"invoice_number": "HC-000001",
 		"amount_cents":   12345,
 		"currency":       "USD",
 	})
@@ -268,7 +268,7 @@ func TestEmailOutbox_OutboxSender_RoundTrip(t *testing.T) {
 	sender := email.NewOutboxSender(store)
 
 	pdf := []byte("%PDF-fake")
-	if err := sender.SendInvoice(ctx, tenantID, "ada@example.com", []string{"finance@example.com"}, "Ada", "VLX-7", 25_000, "USD", pdf, "vlx_pinv_roundtrip"); err != nil {
+	if err := sender.SendInvoice(ctx, tenantID, "ada@example.com", []string{"finance@example.com"}, "Ada", "HC-7", 25_000, "USD", pdf, "hc_pinv_roundtrip"); err != nil {
 		t.Fatalf("enqueue SendInvoice: %v", err)
 	}
 
@@ -326,13 +326,13 @@ func TestEmailOutbox_CreditNote_RoundTrip(t *testing.T) {
 
 	pdf := []byte("%PDF-cn")
 	if err := sender.SendCreditNote(ctx, tenantID, "ada@example.com", []string{"finance@example.com"},
-		"Ada", "CN-0001", "VLX-7", 5_400, "USD", pdf); err != nil {
+		"Ada", "CN-0001", "HC-7", 5_400, "USD", pdf); err != nil {
 		t.Fatalf("enqueue SendCreditNote: %v", err)
 	}
 	// Legacy-shape row: no cc key at all (written by an older binary).
 	if _, err := store.EnqueueStandalone(ctx, tenantID, email.TypeCreditNote, map[string]any{
 		"to": "old@example.com", "customer_name": "Old", "credit_note_number": "CN-0002",
-		"invoice_number": "VLX-8", "amount_cents": 100, "currency": "USD",
+		"invoice_number": "HC-8", "amount_cents": 100, "currency": "USD",
 	}); err != nil {
 		t.Fatalf("enqueue legacy row: %v", err)
 	}
@@ -663,9 +663,9 @@ func TestEmailOutbox_Enqueue_StampsBillingAnchor(t *testing.T) {
 	}
 
 	t.Run("bound ctx → anchor recorded", func(t *testing.T) {
-		ctx := clock.WithSim(baseCtx, clock.Sim{At: frozen, TestClockID: "vlx_tclk_anchor"})
+		ctx := clock.WithSim(baseCtx, clock.Sim{At: frozen, TestClockID: "hc_tclk_anchor"})
 		id, err := store.EnqueueStandalone(ctx, tenantID, email.TypePaymentReceipt, map[string]any{
-			"to": "c@example.com", "invoice_number": "VLX-000042",
+			"to": "c@example.com", "invoice_number": "HC-000042",
 		})
 		if err != nil {
 			t.Fatalf("enqueue: %v", err)
@@ -674,14 +674,14 @@ func TestEmailOutbox_Enqueue_StampsBillingAnchor(t *testing.T) {
 		if !simAt.Valid || !simAt.Time.Equal(frozen) {
 			t.Errorf("sim_effective_at = %v, want the frozen instant %s", simAt, frozen)
 		}
-		if !clockID.Valid || clockID.String != "vlx_tclk_anchor" {
-			t.Errorf("test_clock_id = %v, want vlx_tclk_anchor", clockID)
+		if !clockID.Valid || clockID.String != "hc_tclk_anchor" {
+			t.Errorf("test_clock_id = %v, want hc_tclk_anchor", clockID)
 		}
 	})
 
 	t.Run("unbound ctx → both NULL (live-mode mail)", func(t *testing.T) {
 		id, err := store.EnqueueStandalone(baseCtx, tenantID, email.TypePaymentReceipt, map[string]any{
-			"to": "c@example.com", "invoice_number": "VLX-000043",
+			"to": "c@example.com", "invoice_number": "HC-000043",
 		})
 		if err != nil {
 			t.Fatalf("enqueue: %v", err)
@@ -693,7 +693,7 @@ func TestEmailOutbox_Enqueue_StampsBillingAnchor(t *testing.T) {
 	})
 
 	t.Run("ListByInvoice surfaces the anchor", func(t *testing.T) {
-		rows, err := store.ListByInvoice(baseCtx, tenantID, "VLX-000042")
+		rows, err := store.ListByInvoice(baseCtx, tenantID, "HC-000042")
 		if err != nil {
 			t.Fatalf("list: %v", err)
 		}
@@ -703,8 +703,8 @@ func TestEmailOutbox_Enqueue_StampsBillingAnchor(t *testing.T) {
 		if rows[0].SimEffectiveAt == nil || !rows[0].SimEffectiveAt.Equal(frozen) {
 			t.Errorf("SimEffectiveAt = %v, want %s", rows[0].SimEffectiveAt, frozen)
 		}
-		if rows[0].TestClockID != "vlx_tclk_anchor" {
-			t.Errorf("TestClockID = %q, want vlx_tclk_anchor", rows[0].TestClockID)
+		if rows[0].TestClockID != "hc_tclk_anchor" {
+			t.Errorf("TestClockID = %q, want hc_tclk_anchor", rows[0].TestClockID)
 		}
 	})
 }

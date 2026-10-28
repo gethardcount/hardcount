@@ -53,7 +53,7 @@ func TestFinalize_WebhookShowsTheRowAtTheEvent(t *testing.T) {
 	svc.SetEventDispatcher(events)
 
 	inv, err := store.Create(ctx, tenantID, domain.Invoice{
-		CustomerID: cust.ID, InvoiceNumber: "VLX-FIN-TAX-1",
+		CustomerID: cust.ID, InvoiceNumber: "HC-FIN-TAX-1",
 		Status: domain.InvoiceDraft, PaymentStatus: domain.PaymentPending,
 		Currency: "USD", SubtotalCents: 10000, TotalAmountCents: 10800, AmountDueCents: 10800,
 		TaxFacts:           domain.TaxFacts{TaxAmountCents: 800, TaxProvider: "stripe_tax", TaxCalculationID: "taxcalc_fin_1"},

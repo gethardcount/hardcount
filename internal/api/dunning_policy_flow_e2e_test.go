@@ -103,7 +103,7 @@ func TestE2E_DunningPolicyDelete(t *testing.T) {
 // database refused the delete and the API answered 500.
 //
 // The run is made the way it happens for real: a customer on the policy with
-// no card is billed, and Velox starts payment retries on the unpaid invoice.
+// no card is billed, and Hardcount starts payment retries on the unpaid invoice.
 func TestE2E_DunningPolicyDelete_RefusedOnceItHasRun(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ts := httptest.NewServer(NewServer(db, clock.Real(), nil))

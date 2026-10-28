@@ -85,7 +85,7 @@ func TestCancelAudit_SharedFate(t *testing.T) {
 
 	t.Run("cancel commits the canceled status and its audit row together", func(t *testing.T) {
 		// An API-key actor: cancelActorLabel maps api_key → "operator".
-		ctx := auth.WithKeyID(baseCtx, "vlx_key_cancel_audit")
+		ctx := auth.WithKeyID(baseCtx, "hc_key_cancel_audit")
 		sub := seedCancelAuditSub(t, ctx, db, tenantID, "ok")
 
 		svc := NewService(store, nil)
@@ -131,7 +131,7 @@ func TestCancelAudit_SharedFate(t *testing.T) {
 	})
 
 	t.Run("a failed emission rolls the cancel back and leaves no audit row", func(t *testing.T) {
-		ctx := auth.WithKeyID(baseCtx, "vlx_key_cancel_audit")
+		ctx := auth.WithKeyID(baseCtx, "hc_key_cancel_audit")
 		sub := seedCancelAuditSub(t, ctx, db, tenantID, "fail")
 
 		svc := NewService(store, nil)
@@ -185,7 +185,7 @@ func TestCancelAudit_SharedFate(t *testing.T) {
 				// made with an API key: the cancel is still dunning's.
 				name: "dunning origin wins over the request's API key",
 				ctx: func(c context.Context) context.Context {
-					return WithCancelOrigin(auth.WithKeyID(c, "vlx_key_clock_advance"), "dunning")
+					return WithCancelOrigin(auth.WithKeyID(c, "hc_key_clock_advance"), "dunning")
 				},
 				want: "dunning",
 			},

@@ -1,5 +1,5 @@
 -- +goose Up
--- A queued email that Velox did not send records why: the final state its
+-- A queued email that Hardcount did not send records why: the final state its
 -- invoice reached while it waited (paid, voided, uncollectible, or gone when
 -- a test clock's teardown deleted the invoice). Until now that state was
 -- only inside last_error's text, so the activity lines could say no more

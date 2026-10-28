@@ -171,7 +171,7 @@ func keyUnusableTotal(t *testing.T, reason string) float64 {
 		t.Fatalf("gather metrics: %v", err)
 	}
 	for _, mf := range mfs {
-		if mf.GetName() != "velox_stripe_key_unusable_total" {
+		if mf.GetName() != "hardcount_stripe_key_unusable_total" {
 			continue
 		}
 		for _, m := range mf.GetMetric() {
@@ -217,7 +217,7 @@ func TestChargeInvoice_RefusedKey_RealPostgres(t *testing.T) {
 			t.Errorf("Settings mark found=%v kind %q msg %q, want rejected with Stripe's sentence", found, kind, msg)
 		}
 		if got := keyUnusableTotal(t, "rejected") - before; got != 1 {
-			t.Errorf("velox_stripe_key_unusable_total{reason=rejected} rose by %v, want 1", got)
+			t.Errorf("hardcount_stripe_key_unusable_total{reason=rejected} rose by %v, want 1", got)
 		}
 	})
 
@@ -242,7 +242,7 @@ func TestChargeInvoice_RefusedKey_RealPostgres(t *testing.T) {
 			t.Error("a key row appeared for a tenant that never connected one")
 		}
 		if got := keyUnusableTotal(t, "not_configured") - before; got != 1 {
-			t.Errorf("velox_stripe_key_unusable_total{reason=not_configured} rose by %v, want 1", got)
+			t.Errorf("hardcount_stripe_key_unusable_total{reason=not_configured} rose by %v, want 1", got)
 		}
 	})
 }

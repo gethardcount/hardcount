@@ -17,7 +17,7 @@ import type { ProviderCostRate } from './gen/schemas/providerCostRate'
 
 const API_BASE = '/v1'
 
-// ApiError carries the structured pieces of a Velox error envelope so callers
+// ApiError carries the structured pieces of a Hardcount error envelope so callers
 // can route the message to the right UI surface. `field` identifies the single
 // offending input (backed by the envelope's `param` slot); `code` is the
 // stable business-rule code (e.g. billing_setup_incomplete) for switching on
@@ -59,7 +59,7 @@ function humanizeError(msg: string): string {
   return msg
 }
 
-// apiRequest is the shared fetch wrapper for all Velox API calls. The
+// apiRequest is the shared fetch wrapper for all Hardcount API calls. The
 // dashboard rides an httpOnly session cookie (minted via
 // POST /v1/auth/login from the operator's email + password). The cookie
 // attaches automatically via `credentials: 'include'` — no Authorization
@@ -121,7 +121,7 @@ export async function apiRequest<T>(method: string, path: string, body?: unknown
 
   // Record every observed request_id so "Report an issue" carries the most
   // recent trace handle even when the user's last request succeeded.
-  const headerRequestId = res.headers.get('Velox-Request-Id') || ''
+  const headerRequestId = res.headers.get('Hardcount-Request-Id') || ''
   if (headerRequestId) setLastRequestId(headerRequestId)
 
   if (!res.ok) {
@@ -140,7 +140,7 @@ export async function apiRequest<T>(method: string, path: string, body?: unknown
       field: detail?.param || undefined,
       code: detail?.code || undefined,
       // Prefer request_id from the Stripe-style envelope; fall back to the
-      // Velox-Request-Id header so errors that bypass the JSON writer (502s,
+      // Hardcount-Request-Id header so errors that bypass the JSON writer (502s,
       // plain-text proxy errors) still carry a traceable ID to the toast.
       requestId,
     })
@@ -906,7 +906,7 @@ export interface InvoiceAttention {
   // Dotted-path pointer at the field needing edit (Stripe parity).
   // E.g. "customer.address.postal_code" for tax_location_required.
   param?: string
-  // Velox's own classification context — operator-safe, our framing.
+  // Hardcount's own classification context — operator-safe, our framing.
   // Disclosed under "Detail" when present. Empty when the headline +
   // typed code + actions cover everything an operator needs.
   detail?: string
@@ -1039,7 +1039,7 @@ export interface LineItem {
   tax_code?: string
   // tax_reason is the Stripe-canonical structured taxability_reason
   // (e.g. "standard_rated", "reverse_charge", "not_collecting",
-  // "customer_exempt"), or Velox's own "prepaid_credit_purchase" on a
+  // "customer_exempt"), or Hardcount's own "prepaid_credit_purchase" on a
   // prepaid commit purchase line. Otherwise empty for non-Stripe providers. The dashboard
   // surfaces a small badge for non-trivial values; see taxReasonLabel
   // in lib/taxReasons.ts for the rendering contract.

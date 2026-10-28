@@ -13,7 +13,7 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Loader2, Eye, EyeOff } from 'lucide-react'
-import { VeloxLogo } from '@/components/VeloxLogo'
+import { HardcountLogo } from '@/components/HardcountLogo'
 
 export default function LoginPage() {
   usePageTitle('Sign in')
@@ -71,7 +71,7 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-4 bg-background">
       <div className="flex flex-col items-center mb-8">
-        <VeloxLogo size="lg" />
+        <HardcountLogo size="lg" />
         <p className="text-sm text-muted-foreground mt-2">Sign in to the dashboard</p>
       </div>
 
@@ -153,7 +153,7 @@ export default function LoginPage() {
       <p className="text-xs text-muted-foreground mt-6">
         Need help?{' '}
         <a
-          href="https://github.com/getvelox/velox/issues"
+          href="https://github.com/gethardcount/hardcount/issues"
           target="_blank"
           rel="noopener noreferrer"
           className="text-foreground hover:underline"

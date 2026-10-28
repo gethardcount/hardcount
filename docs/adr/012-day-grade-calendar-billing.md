@@ -97,7 +97,7 @@ description string itself tight while making the *why* discoverable.
 | **Recurly** | Day-based, standard proration. |
 | **Stripe** | Default: timestamp-precise to the second. Operators with edge cases configure a "custom proration script" picking a rounding interval (`hour`/`day`/`week`/`month`). |
 
-Velox's choice is the **Chargebee/Lago/Recurly default**, the
+Hardcount's choice is the **Chargebee/Lago/Recurly default**, the
 operator-friendly model. Stripe's timestamp-precise default is more
 "correct" mathematically but produces exactly the kind of UI/math
 disagreement that surfaced in the screenshot review. We adopt the
@@ -108,7 +108,7 @@ future ADR if a tenant needs hour- or second-grade.
 
 ### Migration & backwards-compat
 
-Velox is pre-launch (single tenant, no design partners). Existing
+Hardcount is pre-launch (single tenant, no design partners). Existing
 subs that pre-date this change keep their hour-precise period
 boundaries until the next billing cycle, when snapped boundaries
 take over. No backfill needed.

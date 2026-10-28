@@ -130,7 +130,7 @@ func TestTaxTypeDisplayName(t *testing.T) {
 }
 
 // TestMapResult_DocLevelRateFallback is the regression for the NYC precision
-// loss found in invoice vlx_inv_d8gomormajdhcl08grvg. Stripe returns the
+// loss found in invoice hc_inv_d8gomormajdhcl08grvg. Stripe returns the
 // verbatim percentage_decimal ("8.875") + jurisdiction in the DOCUMENT-level
 // tax_breakdown, but leaves the PER-LINE tax_breakdown null (the request only
 // expands "line_items", not "line_items.data.tax_breakdown"). Pre-fix, the line

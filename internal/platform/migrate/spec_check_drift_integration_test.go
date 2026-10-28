@@ -17,7 +17,7 @@ import (
 // archived, tax_status failed, dunning state paused and five event types)
 // and missed one the CHECK allows (tax_error_code provider_not_configured).
 func TestSpecEnumsMatchColumnChecks(t *testing.T) {
-	dsn, db := scratchDB(t, "velox_test_deadc_b_migrate_spec")
+	dsn, db := scratchDB(t, "hardcount_test_deadc_b_migrate_spec")
 	ctx := context.Background()
 	if err := up(ctx, dsn, migrationFiles()); err != nil {
 		t.Fatalf("Up: %v", err)

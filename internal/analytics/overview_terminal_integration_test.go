@@ -60,7 +60,7 @@ func TestOverview_ClosedInvoicesLeaveFailedPaymentsAndRecovery(t *testing.T) {
 	waived := makePaidInvoice(t, ctx, invStore, tenantID, c.ID, "USD", 10_05).ID
 	execBypass(t, db, `UPDATE invoices SET amount_paid_cents = 0 WHERE id = $1`, waived)
 
-	policyID := postgres.NewID("vlx_dpol")
+	policyID := postgres.NewID("hc_dpol")
 	// A tenant tx, so the set_livemode trigger stamps the test mode the
 	// overview reads.
 	execTenant(t, db, tenantID, `INSERT INTO dunning_policies (id, tenant_id, name, retry_days) VALUES ($1, $2, 'p', '[3, 3, 3]')`, policyID, tenantID)
@@ -68,7 +68,7 @@ func TestOverview_ClosedInvoicesLeaveFailedPaymentsAndRecovery(t *testing.T) {
 		t.Helper()
 		execTenant(t, db, tenantID, `INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, policy_id, state, resolution, created_at)
 			VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), $8)`,
-			postgres.NewID("vlx_drun"), tenantID, invoiceID, c.ID, policyID, state, resolution, now.Add(-5*24*time.Hour))
+			postgres.NewID("hc_drun"), tenantID, invoiceID, c.ID, policyID, state, resolution, now.Add(-5*24*time.Hour))
 	}
 	run(recovered, "resolved", "payment_recovered")
 	run(voided, "resolved", "invoice_voided")

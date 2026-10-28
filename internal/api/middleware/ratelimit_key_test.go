@@ -44,10 +44,10 @@ func TestRateLimitKey_APIKeyWinsOverTenant(t *testing.T) {
 	// integration can't starve the tenant's dashboard.
 	r := httptest.NewRequest("GET", "/v1/customers", nil)
 	ctx := auth.WithTenantID(r.Context(), "ten_abc")
-	ctx = auth.WithKeyID(ctx, "vlx_key_123")
+	ctx = auth.WithKeyID(ctx, "hc_key_123")
 	ctx = postgres.WithLivemode(ctx, true)
 
-	if got, want := mustRateLimitKey(t, r.WithContext(ctx)), "key:vlx_key_123"; got != want {
+	if got, want := mustRateLimitKey(t, r.WithContext(ctx)), "key:hc_key_123"; got != want {
 		t.Errorf("bucket = %q, want %q", got, want)
 	}
 }

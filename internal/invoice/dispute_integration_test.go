@@ -174,7 +174,7 @@ func TestRecordStripeDispute_InOrder(t *testing.T) {
 	h.wantEvents(t, du, 1, 1)
 	h.wantInvoiceUntouched(t)
 
-	lost, err := h.store.LostDisputesByInvoices(h.ctx, h.tenantID, []string{h.invID, "vlx_inv_other"})
+	lost, err := h.store.LostDisputesByInvoices(h.ctx, h.tenantID, []string{h.invID, "hc_inv_other"})
 	if err != nil {
 		t.Fatalf("lost disputes: %v", err)
 	}
@@ -314,9 +314,9 @@ func TestRecordStripeDispute_ConcurrentEventsRecordOnce(t *testing.T) {
 }
 
 // TestRecordStripeDispute_FindsTheInvoiceByThePayment: a dispute names a
-// payment, not an invoice. It is found from any payment Velox recorded on the
+// payment, not an invoice. It is found from any payment Hardcount recorded on the
 // invoice: the one that paid it, another attempt on it, or an unexpected
-// payment flagged as an anomaly. A payment no invoice holds is not Velox's:
+// payment flagged as an anomaly. A payment no invoice holds is not Hardcount's:
 // ErrNotFound, and nothing is written.
 func TestRecordStripeDispute_FindsTheInvoiceByThePayment(t *testing.T) {
 	db := testutil.SetupTestDB(t)
@@ -342,7 +342,7 @@ func TestRecordStripeDispute_FindsTheInvoiceByThePayment(t *testing.T) {
 	}
 
 	foreign := h.snap("evt_foreign", "du_foreign", domain.DisputeNeedsResponse, h.t0)
-	foreign.StripePaymentIntentID = "pi_not_velox"
+	foreign.StripePaymentIntentID = "pi_not_hardcount"
 	if _, err := h.store.RecordStripeDispute(h.ctx, h.tenantID, foreign); !errors.Is(err, errs.ErrNotFound) {
 		t.Fatalf("dispute on a payment no invoice holds: err=%v, want ErrNotFound", err)
 	}
@@ -441,7 +441,7 @@ func TestInvoiceService_LostDisputeRaisesAttention(t *testing.T) {
 	if err != nil || len(disputes) != 1 {
 		t.Fatalf("list via the service: %d disputes, err %v, want 1", len(disputes), err)
 	}
-	if _, err := svc.ListInvoiceDisputes(h.ctx, h.tenantID, "vlx_inv_missing"); !errors.Is(err, errs.ErrNotFound) {
+	if _, err := svc.ListInvoiceDisputes(h.ctx, h.tenantID, "hc_inv_missing"); !errors.Is(err, errs.ErrNotFound) {
 		t.Errorf("unknown invoice: err=%v, want ErrNotFound", err)
 	}
 }

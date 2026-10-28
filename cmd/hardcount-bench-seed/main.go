@@ -1,23 +1,23 @@
-// velox-bench-seed prepares a database for an ingest benchmark and prints the
+// hardcount-bench-seed prepares a database for an ingest benchmark and prints the
 // credentials the load generator needs. It does not generate load.
 //
 // Load generation is k6's job (scripts/bench-rig/ingest.js). This binary exists
 // because the two things k6 cannot do are exactly the two things that need
-// Velox's own code: creating the bench tenant/customer/meter with the right
+// Hardcount's own code: creating the bench tenant/customer/meter with the right
 // livemode partition, and minting an API key whose salt-and-hash format is
 // auth's business rather than a hand-rolled copy that silently stops matching.
 //
 // Usage:
 //
-//	DATABASE_URL="postgres://velox:velox@localhost:5432/velox?sslmode=disable" \
-//	  go run ./cmd/velox-bench-seed
+//	DATABASE_URL="postgres://hardcount:hardcount@localhost:5432/hardcount?sslmode=disable" \
+//	  go run ./cmd/hardcount-bench-seed
 //
 // Prints a JSON object to stdout:
 //
-//	{"api_key":"vlx_…","event_name":"bench_tokens",
-//	 "customer_count":"200","customer_id_prefix":"vlx_cus_bench_",
+//	{"api_key":"hc_…","event_name":"bench_tokens",
+//	 "customer_count":"200","customer_id_prefix":"hc_cus_bench_",
 //	 "external_customer_id_prefix":"bench-customer-",
-//	 "external_customer_id":"bench-customer-000","customer_id":"vlx_cus_bench_000"}
+//	 "external_customer_id":"bench-customer-000","customer_id":"hc_cus_bench_000"}
 //
 // BENCH_CUSTOMERS (default 200) customers are created, not one. That number is
 // the difference between a benchmark and a pathological case: with a single
@@ -52,10 +52,10 @@ import (
 )
 
 const (
-	benchTenant                 = "vlx_ten_bench"
-	benchMeter                  = "vlx_mtr_bench"
+	benchTenant                 = "hc_ten_bench"
+	benchMeter                  = "hc_mtr_bench"
 	benchMeterKey               = "bench_tokens"
-	benchCustomerIDPrefix       = "vlx_cus_bench_"
+	benchCustomerIDPrefix       = "hc_cus_bench_"
 	benchCustomerExternalPrefix = "bench-customer-"
 	defaultBenchCustomers       = 200
 )
@@ -161,7 +161,7 @@ func bootstrapFixtures(ctx context.Context, db *postgres.DB, customers int, live
 	}
 
 	if _, err = tx.ExecContext(ctx, `
-		INSERT INTO tenants (id, name, status) VALUES ($1, 'velox-bench', 'active')
+		INSERT INTO tenants (id, name, status) VALUES ($1, 'hardcount-bench', 'active')
 		ON CONFLICT (id) DO NOTHING
 	`, benchTenant); err != nil {
 		log.Fatalf("upsert tenant: %v", err)
@@ -174,7 +174,7 @@ func bootstrapFixtures(ctx context.Context, db *postgres.DB, customers int, live
 		       $2,
 		       $3 || lpad(g::text, 3, '0'),
 		       'Bench Customer ' || g,
-		       'bench-' || g || '@velox.local',
+		       'bench-' || g || '@hardcount.local',
 		       $5
 		FROM generate_series(0, $4 - 1) g
 		ON CONFLICT (id) DO UPDATE SET livemode = $5
@@ -204,7 +204,7 @@ func mintBenchAPIKey(ctx context.Context, db *postgres.DB, live bool) string {
 	// The key MUST be minted in the same mode as the fixtures, or it
 	// authenticates into the other partition and sees no bench data.
 	res, err := svc.CreateKey(postgres.WithLivemode(ctx, live), benchTenant, auth.CreateKeyInput{
-		Name: "velox-bench", KeyType: auth.KeyTypeSecret,
+		Name: "hardcount-bench", KeyType: auth.KeyTypeSecret,
 	})
 	if err != nil {
 		log.Fatalf("mint bench api key: %v", err)

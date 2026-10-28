@@ -13,7 +13,7 @@ CREATE TABLE login_throttle (
     signed_in_at    TIMESTAMPTZ
 );
 CREATE INDEX idx_login_throttle_last_attempt ON login_throttle (last_attempt_at);
-GRANT SELECT, INSERT, UPDATE, DELETE ON login_throttle TO velox_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON login_throttle TO hardcount_app;
 
 -- +goose Down
 DROP TABLE login_throttle;

@@ -66,12 +66,12 @@ idempotency key, evaluated check-then-act across transactions.
    the grant passes `expires_at`. Lago reports the same failure shape
    (lago-api #4240: "On billing day there are sometimes invoices stuck in
    `generating` status."). A tax-deferred draft finalized hours later
-   (#653) gives the same late collection. Velox follows the `expires_at`
+   (#653) gives the same late collection. Hardcount follows the `expires_at`
    condition of Stripe's eligibility list: a grant applies to an invoice
    when "the invoice's `period_end` occurs before the credit grant's
    `expires_at` time, if set." The same list also requires that "the
    invoice's `period_end` is on or after the credit grant's
-   `effective_at` time." Velox does not test that one:
+   `effective_at` time." Hardcount does not test that one:
    `drainPositiveBlocks` filters on `expires_at` only, so a period
    invoice collected late also draws a grant created after its period
    ended. This amendment does not change that.
@@ -202,7 +202,7 @@ invoice is a draft or queued.
 
 **Stripe says "before".** Its condition is "the invoice's `period_end`
 occurs before the credit grant's `expires_at` time", so it refuses a grant
-that expires exactly at the period end. Velox includes the boundary: all
+that expires exactly at the period end. Hardcount includes the boundary: all
 of the period's usage happened before its end.
 
 **No backfill.** Grants saved by the dashboard before this change keep

@@ -516,7 +516,7 @@ function AdvanceClockDialog({
     return fromZonedTime(`${datePart}T${timePart}:00`, tz).toISOString()
   }, [datePart, timePart, tz])
 
-  // Hard cap, Velox's own (ADR-028 amendment): a single advance call moves
+  // Hard cap, Hardcount's own (ADR-028 amendment): a single advance call moves
   // the clock by at most 1 year. Server enforces this too — UI
   // surfaces it early so the operator gets immediate feedback rather
   // than a 422 after submit. Year-arithmetic, not 365 days, so leap

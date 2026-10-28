@@ -127,8 +127,8 @@ func (f *fakeStripe) newPI(p PaymentIntentParams, status string) *fakePI {
 	f.seq++
 	pi := &fakePI{
 		id: fmt.Sprintf("pi_fake_%d", f.seq), status: status, customer: p.CustomerID, card: p.PaymentMethodID,
-		key: p.IdempotencyKey, purpose: p.Metadata["velox_purpose"],
-		invoiceID: p.Metadata["velox_invoice_id"], anchor: p.Metadata["velox_anchor_at"],
+		key: p.IdempotencyKey, purpose: p.Metadata["hardcount_purpose"],
+		invoiceID: p.Metadata["hardcount_invoice_id"], anchor: p.Metadata["hardcount_anchor_at"],
 		amount: p.AmountCents, created: time.Now().Unix() + int64(f.seq), // strictly increasing: oldest first is well defined
 	}
 	if status == "requires_payment_method" {
@@ -327,7 +327,7 @@ func (f *fakeStripe) setCustomer(stripeCustomerID, mode string) {
 func (f *fakeStripe) result(pi *fakePI) PaymentIntentResult {
 	res := PaymentIntentResult{
 		ID: pi.id, Status: pi.status, CreatedAt: pi.created, Purpose: pi.purpose,
-		AnchorAt: anchorFromPIMetadata(map[string]string{"velox_anchor_at": pi.anchor}),
+		AnchorAt: anchorFromPIMetadata(map[string]string{"hardcount_anchor_at": pi.anchor}),
 	}
 	setFakeListFields(&res, pi)
 	if pi.status == "succeeded" {

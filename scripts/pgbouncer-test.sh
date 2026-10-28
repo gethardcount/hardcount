@@ -15,7 +15,7 @@ set -euo pipefail
 
 MODE="${PGB_MODE:-local}"
 IMAGE="${PGB_IMAGE:-edoburu/pgbouncer:v1.24.1-p1}"
-NAME="velox-pgbouncer-test"
+NAME="hardcount-pgbouncer-test"
 PKGS="${PGB_PACKAGES:-./...}"
 DIR="$(cd "$(dirname "$0")" && pwd)/pgbouncer"
 CONF="$(mktemp -d)"
@@ -43,7 +43,7 @@ docker run -d --name "$NAME" "${NETFLAGS[@]}" -v "$CONF:/etc/pgbouncer" "$IMAGE"
 
 # Each probe is bounded (perl alarm — portable): a client of a PgBouncer
 # whose backend is unreachable otherwise waits query_wait_timeout (120 s).
-probe() { PGPASSWORD=velox_test_app perl -e 'alarm 5; exec @ARGV' psql -h localhost -p 6432 -U velox_test_app -d velox_test -A -t -c "SELECT 1" >/dev/null 2>&1; }
+probe() { PGPASSWORD=hardcount_test_app perl -e 'alarm 5; exec @ARGV' psql -h localhost -p 6432 -U hardcount_test_app -d hardcount_test -A -t -c "SELECT 1" >/dev/null 2>&1; }
 for _ in $(seq 1 12); do
   if probe; then break; fi
   sleep 1
@@ -51,6 +51,6 @@ done
 probe || { echo "pgbouncer not reachable"; docker logs "$NAME" 2>&1 | tail -20; exit 1; }
 echo "pgbouncer up (transaction mode) -> ${DB_HOST}:5432; app pool via localhost:6432"
 
-export TEST_ADMIN_DATABASE_URL="${TEST_ADMIN_DATABASE_URL:-postgres://velox:velox@localhost:5432/velox_test?sslmode=disable}"
-export TEST_DATABASE_URL="postgres://velox_test_app:velox_test_app@localhost:6432/velox_test?sslmode=disable"
+export TEST_ADMIN_DATABASE_URL="${TEST_ADMIN_DATABASE_URL:-postgres://hardcount:hardcount@localhost:5432/hardcount_test?sslmode=disable}"
+export TEST_DATABASE_URL="postgres://hardcount_test_app:hardcount_test_app@localhost:6432/hardcount_test?sslmode=disable"
 go test -p 1 $PKGS -count=1 -short=false

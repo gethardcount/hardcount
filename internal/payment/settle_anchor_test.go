@@ -16,7 +16,7 @@ import (
 // next_action_at, a cycle's close — must settle with paid_at at THAT
 // instant, whether the settle happens inline (charge response), via the
 // wall-side webhook (which can't see the caller's ctx and recovers the
-// anchor from the PI's velox_anchor_at metadata), or via the RECONCILER,
+// anchor from the PI's hardcount_anchor_at metadata), or via the RECONCILER,
 // which recovers the same key off a retrieved PI (ADR-049 Phase 2).
 //
 // All three must agree, because which one runs is decided by whether a
@@ -36,8 +36,8 @@ func TestChargeInvoice_SimBoundCtx_AnchorsPaidAtAndPIMetadata(t *testing.T) {
 	}
 
 	// The PI carries the anchor for the async webhook settle.
-	if got := client.lastParams.Metadata["velox_anchor_at"]; got != contracted.Format(time.RFC3339Nano) {
-		t.Errorf("PI velox_anchor_at: got %q, want %q", got, contracted.Format(time.RFC3339Nano))
+	if got := client.lastParams.Metadata["hardcount_anchor_at"]; got != contracted.Format(time.RFC3339Nano) {
+		t.Errorf("PI hardcount_anchor_at: got %q, want %q", got, contracted.Format(time.RFC3339Nano))
 	}
 	// The inline settle stamped the contracted instant, not wall now and
 	// not whatever the invoice pin would re-resolve.
@@ -57,8 +57,8 @@ func TestChargeInvoice_WallCtx_NoAnchor(t *testing.T) {
 	if _, err := s.ChargeInvoice(postgres.WithLivemode(context.Background(), true), "t1", invoices.invoices["inv_1"], testHold, "cus_stripe_abc", "pm_test"); err != nil {
 		t.Fatalf("ChargeInvoice: %v", err)
 	}
-	if _, present := client.lastParams.Metadata["velox_anchor_at"]; present {
-		t.Error("wall-clock charges must not stamp velox_anchor_at")
+	if _, present := client.lastParams.Metadata["hardcount_anchor_at"]; present {
+		t.Error("wall-clock charges must not stamp hardcount_anchor_at")
 	}
 	stored := invoices.invoices["inv_1"]
 	if stored.PaidAt == nil || stored.PaidAt.Before(before.Add(-time.Minute)) {
@@ -81,13 +81,13 @@ func TestAnchorFromEventPayload(t *testing.T) {
 	mk := func(meta map[string]string) domain.StripeWebhookEvent {
 		return domain.StripeWebhookEvent{Payload: rawPIEventPayload(meta)}
 	}
-	if got, ok := anchorFromEventPayload(mk(map[string]string{"velox_anchor_at": contracted.Format(time.RFC3339Nano)})); !ok || !got.Equal(contracted) {
+	if got, ok := anchorFromEventPayload(mk(map[string]string{"hardcount_anchor_at": contracted.Format(time.RFC3339Nano)})); !ok || !got.Equal(contracted) {
 		t.Errorf("present anchor: got %v ok=%v", got, ok)
 	}
 	if _, ok := anchorFromEventPayload(mk(map[string]string{})); ok {
 		t.Error("absent anchor must report false")
 	}
-	if _, ok := anchorFromEventPayload(mk(map[string]string{"velox_anchor_at": "not-a-time"})); ok {
+	if _, ok := anchorFromEventPayload(mk(map[string]string{"hardcount_anchor_at": "not-a-time"})); ok {
 		t.Error("malformed anchor must report false (fallback, never block a settlement)")
 	}
 	if _, ok := anchorFromEventPayload(domain.StripeWebhookEvent{Payload: map[string]any{}}); ok {
@@ -175,7 +175,7 @@ func TestReconciler_RecoversChargeAnchorFromPI(t *testing.T) {
 	}
 }
 
-// A wall-clock charge carries no velox_anchor_at, and must not acquire one —
+// A wall-clock charge carries no hardcount_anchor_at, and must not acquire one —
 // the pin binding (or plain wall now) has to stay in charge there.
 func TestReconciler_WallChargeSettlesWithoutAnchor(t *testing.T) {
 	store := newMockReconcileStore(domain.Invoice{
@@ -204,12 +204,12 @@ func TestAnchorFromPIMetadata(t *testing.T) {
 		meta map[string]string
 		want time.Time
 	}{
-		{"valid", map[string]string{"velox_anchor_at": contracted.Format(time.RFC3339Nano)}, contracted},
-		{"absent", map[string]string{"velox_purpose": "dunning_retry"}, time.Time{}},
-		{"empty string", map[string]string{"velox_anchor_at": ""}, time.Time{}},
+		{"valid", map[string]string{"hardcount_anchor_at": contracted.Format(time.RFC3339Nano)}, contracted},
+		{"absent", map[string]string{"hardcount_purpose": "dunning_retry"}, time.Time{}},
+		{"empty string", map[string]string{"hardcount_anchor_at": ""}, time.Time{}},
 		// Degrade to the pin binding rather than blocking a settlement: a
 		// malformed anchor must never keep money in an unresolved state.
-		{"malformed", map[string]string{"velox_anchor_at": "not-a-time"}, time.Time{}},
+		{"malformed", map[string]string{"hardcount_anchor_at": "not-a-time"}, time.Time{}},
 		{"nil map", nil, time.Time{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -98,7 +98,7 @@ func TestRefundUnknown_RealStore(t *testing.T) {
 		defer postgres.Rollback(tx)
 		if _, err := tx.ExecContext(ctx,
 			`UPDATE credit_notes SET refund_status = 'unknown', refund_unknown_key = $1 WHERE id = $2`,
-			"velox_cn_"+id+"_r_0123456789abcdef", id); err != nil {
+			"hardcount_cn_"+id+"_r_0123456789abcdef", id); err != nil {
 			t.Fatalf("mark unknown: %v", err)
 		}
 		if err := tx.Commit(); err != nil {
@@ -129,7 +129,7 @@ func TestRefundUnknown_RealStore(t *testing.T) {
 		if err != nil {
 			t.Fatalf("RetryRefund: %v", err)
 		}
-		want := "velox_cn_" + cn.ID
+		want := "hardcount_cn_" + cn.ID
 		if len(refunder.keys) != 2 || refunder.keys[0] != want || refunder.keys[1] != want {
 			t.Fatalf("request keys = %v, want [%s %s]: the resend must reuse the unclear request's key", refunder.keys, want, want)
 		}
@@ -180,7 +180,7 @@ func TestRefundUnknown_RealStore(t *testing.T) {
 		// None of them is news about the attempt whose result is unknown.
 		for _, st := range []domain.RefundStatus{domain.RefundFailed, domain.RefundSucceeded, domain.RefundPending} {
 			if err := store.ApplyRefundWebhookStatus(ctx, tenantID, "re_unk_dead", st); err != nil {
-				t.Fatalf("webhook %s: %v (want nil: the refund id is Velox's, the event is just not news)", st, err)
+				t.Fatalf("webhook %s: %v (want nil: the refund id is Hardcount's, the event is just not news)", st, err)
 			}
 			got, err := store.Get(ctx, tenantID, cn.ID)
 			if err != nil {
@@ -198,7 +198,7 @@ func TestRefundUnknown_RealStore(t *testing.T) {
 	// write lands last, the refund Stripe made stays recorded.
 	t.Run("a late unclear answer never overwrites the refund a concurrent retry recorded", func(t *testing.T) {
 		cn := seedRefundableCN(t, db, tenantID, "unk-race", "", domain.RefundNone)
-		key := "velox_cn_" + cn.ID
+		key := "hardcount_cn_" + cn.ID
 		write := func(w creditnote.RefundStatusWrite) {
 			t.Helper()
 			if err := store.UpdateRefundStatusAudited(ctx, tenantID, cn.ID, w, nil); err != nil {
@@ -273,8 +273,8 @@ func TestRefundUnknown_RealStore(t *testing.T) {
 		if err != nil {
 			t.Fatalf("get: %v", err)
 		}
-		if got.RefundStatus != refundStatusUnknown || got.RefundUnknownKey != "velox_cn_"+cn.ID {
-			t.Fatalf("stored refund leg = (%q, key %q), want (unknown, velox_cn_%s)", got.RefundStatus, got.RefundUnknownKey, cn.ID)
+		if got.RefundStatus != refundStatusUnknown || got.RefundUnknownKey != "hardcount_cn_"+cn.ID {
+			t.Fatalf("stored refund leg = (%q, key %q), want (unknown, hardcount_cn_%s)", got.RefundStatus, got.RefundUnknownKey, cn.ID)
 		}
 	})
 
@@ -302,7 +302,7 @@ func TestRefundUnknown_RealStore(t *testing.T) {
 		}
 	})
 
-	// From "none", Issue's request (velox_cn_<id>) may have reached Stripe and
+	// From "none", Issue's request (hardcount_cn_<id>) may have reached Stripe and
 	// its outcome was never recorded, so Retry resends it rather than starting
 	// a new request under a new key.
 	t.Run("Retry from none resends the issue request", func(t *testing.T) {
@@ -314,7 +314,7 @@ func TestRefundUnknown_RealStore(t *testing.T) {
 		if err != nil {
 			t.Fatalf("RetryRefund: %v", err)
 		}
-		if want := "velox_cn_" + cn.ID; len(refunder.keys) != 1 || refunder.keys[0] != want {
+		if want := "hardcount_cn_" + cn.ID; len(refunder.keys) != 1 || refunder.keys[0] != want {
 			t.Fatalf("request keys = %v, want [%s]", refunder.keys, want)
 		}
 		if out.RefundStatus != domain.RefundSucceeded || out.StripeRefundID != "re_unk_none_resend" {

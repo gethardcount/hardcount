@@ -1,4 +1,4 @@
-# Back up Velox
+# Back up Hardcount
 
 Back up two things, and keep them apart: the Postgres database and the encryption key. A backup cannot be read without its key.
 
@@ -6,11 +6,11 @@ On the one-VM Docker Compose install, follow [Production on one VM, step 7](../p
 
 ## 1. Keep the encryption key
 
-`VELOX_ENCRYPTION_KEY` encrypts personal data (email, names, phone numbers, tax IDs), webhook signing secrets and each account's Stripe keys before Velox saves them. This is on top of any disk encryption your Postgres has.
+`HARDCOUNT_ENCRYPTION_KEY` encrypts personal data (email, names, phone numbers, tax IDs), webhook signing secrets and each account's Stripe keys before Hardcount saves them. This is on top of any disk encryption your Postgres has.
 
 - Store the key in a secrets manager (such as AWS Secrets Manager, GCP Secret Manager or HashiCorp Vault), apart from the database backups.
 - Without the key, every encrypted column in a backup is unreadable. The rest of the backup cannot replace it.
-- Keep the same key. Velox has no tool to re-encrypt data with a new key, so changing it makes the old data unreadable.
+- Keep the same key. Hardcount has no tool to re-encrypt data with a new key, so changing it makes the old data unreadable.
 
 ## 2. Pick how to back up the database
 
@@ -21,10 +21,10 @@ On the one-VM Docker Compose install, follow [Production on one VM, step 7](../p
 
 Avoid these:
 
-- **Dumping table by table.** Velox adds tables often, and a list of tables goes out of date.
+- **Dumping table by table.** Hardcount adds tables often, and a list of tables goes out of date.
 - **Disk snapshots without the write-ahead log (WAL).** You lose everything since the last snapshot. Hourly snapshots still lose about 30 minutes on average.
 
-On managed Postgres, the provider's snapshots and PITR are your main backup. Still run the [restore drill](#5-run-the-restore-drill) every few months: only the drill proves that Velox's money tables come back whole, and a dump shows your billing data is not tied to one cloud.
+On managed Postgres, the provider's snapshots and PITR are your main backup. Still run the [restore drill](#5-run-the-restore-drill) every few months: only the drill proves that Hardcount's money tables come back whole, and a dump shows your billing data is not tied to one cloud.
 
 ## 3. Take a backup
 
@@ -33,25 +33,25 @@ On managed Postgres, the provider's snapshots and PITR are your main backup. Sti
 1. Run it with the admin database URL.
 
    ```bash
-   DATABASE_URL="postgres://velox:PASSWORD@db-host:5432/velox?sslmode=require" \
+   DATABASE_URL="postgres://hardcount:PASSWORD@db-host:5432/hardcount?sslmode=require" \
      ./scripts/backup.sh
    ```
 
-   **You see:** timestamped lines from `Starting backup of database 'velox'...` to `Verification passed: archive contains N table entries.`, then a "Backup Summary" block with `Verified:  yes`.
+   **You see:** timestamped lines from `Starting backup of database 'hardcount'...` to `Verification passed: archive contains N table entries.`, then a "Backup Summary" block with `Verified:  yes`.
 
 2. Check the file.
 
    ```bash
-   ls -l /var/backups/velox/
+   ls -l /var/backups/hardcount/
    ```
 
-   **You see:** `velox_<date>_<time>.dump`, and `latest.dump` pointing at the newest one.
+   **You see:** `hardcount_<date>_<time>.dump`, and `latest.dump` pointing at the newest one.
 
 Options, all set as environment variables:
 
 | Variable | Default | What it does |
 |---|---|---|
-| `BACKUP_DIR` | `/var/backups/velox` | Where dumps are written |
+| `BACKUP_DIR` | `/var/backups/hardcount` | Where dumps are written |
 | `BACKUP_S3_BUCKET` | unset | Also upload each dump to this S3 bucket. Needs the `aws` command; without it, the upload is skipped with a warning. |
 | `BACKUP_S3_PREFIX` | `logical-backups` | The folder inside the bucket |
 | `BACKUP_RETENTION_DAYS` | `30` | Local dumps older than this are deleted |
@@ -76,24 +76,24 @@ The dump travels through standard output, so the container needs no mounted fold
 1. On a new Postgres server, create the limited user first. Users and their settings belong to the server, not to the database, so a dump cannot carry them. Without the user the restore fails, and the script stops before it starts. The second line sets the timeout that [Postgres requirements](postgres-requirements.md#timeouts-on-the-limited-user) calls required.
 
    ```sql
-   CREATE ROLE velox_app LOGIN PASSWORD '<your-password>';
-   ALTER ROLE velox_app SET idle_in_transaction_session_timeout = '30s';
+   CREATE ROLE hardcount_app LOGIN PASSWORD '<your-password>';
+   ALTER ROLE hardcount_app SET idle_in_transaction_session_timeout = '30s';
    ```
 
 2. Run the restore against the target database.
 
    ```bash
-   DATABASE_URL="postgres://velox:PASSWORD@db-host:5432/velox?sslmode=require" \
-     ./scripts/restore.sh /var/backups/velox/latest.dump
+   DATABASE_URL="postgres://hardcount:PASSWORD@db-host:5432/hardcount?sslmode=require" \
+     ./scripts/restore.sh /var/backups/hardcount/latest.dump
    ```
 
-   **You see:** a warning box naming the target and the backup, then `Type 'yes' to proceed:`. Type `yes`. To skip the question in a script, set `VELOX_RESTORE_CONFIRM=yes`.
+   **You see:** a warning box naming the target and the backup, then `Type 'yes' to proceed:`. Type `yes`. To skip the question in a script, set `HARDCOUNT_RESTORE_CONFIRM=yes`.
 
 3. Wait for it to finish.
 
    **You see:** `All critical tables present.`, a "Restore Summary" block, and `Restore complete. Verify application behavior before resuming traffic.`
 
-4. Run the [checks after a restore](#checks-after-a-restore), then start Velox.
+4. Run the [checks after a restore](#checks-after-a-restore), then start Hardcount.
 
 Exit codes: `0` success, `1` a setting or the file is wrong, `2` the restore failed and was rolled back, `3` a critical table is missing after the restore.
 
@@ -112,26 +112,26 @@ A backup counts only once you have restored it. `scripts/restore-drill.sh` does 
 Run it every few months, and after every Postgres upgrade. It needs Docker, `pg_dump`, `pg_restore` and `psql` on the machine that runs it.
 
 ```bash
-SOURCE_DATABASE_URL="postgres://velox:PASSWORD@db-host:5432/velox?sslmode=require" \
+SOURCE_DATABASE_URL="postgres://hardcount:PASSWORD@db-host:5432/hardcount?sslmode=require" \
   ./scripts/restore-drill.sh
 ```
 
 **You see:** `OK` and a count for each table (`tenants`, `customers`, `subscriptions`, `invoices`, `customer_credit_ledger`), then a "Drill Summary" block with `Result:       PASS` and the backup and restore times.
 
-Each run adds one line to `~/.velox/drill.log`, so you can see how long backups and restores take over time. Compare the total with how long you can afford to be down.
+Each run adds one line to `~/.hardcount/drill.log`, so you can see how long backups and restores take over time. Compare the total with how long you can afford to be down.
 
 | Variable | Default | What it does |
 |---|---|---|
 | `SOURCE_DATABASE_URL` | `DATABASE_URL` | The database to back up and compare |
 | `DRILL_PG_IMAGE` | the source's major, else `postgres:16-alpine` | The Postgres image for the throwaway container |
 | `DRILL_PG_PORT` | `15432` | The port of the throwaway container. The drill stops if it is in use. |
-| `DRILL_LOG` | `~/.velox/drill.log` | Where the result lines go |
+| `DRILL_LOG` | `~/.hardcount/drill.log` | Where the result lines go |
 | `CRITICAL_TABLES` | the five tables above | The tables whose row counts must match |
 
 Exit codes: `0` passed, `1` a setting is wrong, `2` the backup failed, `3` the restore failed, `4` row counts differ, `5` the container did not start.
 
-After a drill passes, you can also start Velox against a restored copy, check that `/health/ready` answers 200, and run `go run ./cmd/velox-doctor` against it. It should report no problems.
-Run it as the database owner. The app role (`velox_app`) sees no rows and
+After a drill passes, you can also start Hardcount against a restored copy, check that `/health/ready` answers 200, and run `go run ./cmd/hardcount-doctor` against it. It should report no problems.
+Run it as the database owner. The app role (`hardcount_app`) sees no rows and
 reports clean.
 
 ## Checks after a restore
@@ -140,9 +140,9 @@ Run these before you let traffic back in.
 
 ### 1. The schema version matches
 
-Run the `velox migrate status` of the release you will start, against the restored database.
+Run the `hardcount migrate status` of the release you will start, against the restored database.
 
-**You see:** `state:        up to date, nothing to apply`. `behind` lists what `velox migrate` will do. `no migration record` means the backup was restored without its migration table: restore it again, with the table, into an empty database. A backup from Velox 0.8.x gives the same state, and it cannot be upgraded: install fresh.
+**You see:** `state:        up to date, nothing to apply`. `behind` lists what `hardcount migrate` will do. `no migration record` means the backup was restored without its migration table: restore it again, with the table, into an empty database. A backup from Velox 0.8.x gives the same state, and one from a later Velox build gives `made by Velox`. Neither can be upgraded: install fresh.
 
 The record itself, if you want to look:
 
@@ -174,7 +174,7 @@ Compare the numbers with what you saw before the incident, for example in your m
 
 ### 4. Queued emails and webhooks
 
-Velox queues outgoing emails and webhooks in two tables, `email_outbox` and `webhook_outbox`, and sends them later. After a restore, every `pending` row is sent again. If the backup is older than some sends, customers get those emails or webhooks twice.
+Hardcount queues outgoing emails and webhooks in two tables, `email_outbox` and `webhook_outbox`, and sends them later. After a restore, every `pending` row is sent again. If the backup is older than some sends, customers get those emails or webhooks twice.
 
 The safe default: leave the rows `pending` and accept a few duplicates. Webhook receivers should already handle the same event twice.
 
@@ -191,7 +191,7 @@ The `payload - '{…}'` part removes the links and the PDF from the email rows, 
 
 ### 5. Billing picks up where it stopped
 
-Velox's background jobs resume by themselves after a restart, on one copy or on several:
+Hardcount's background jobs resume by themselves after a restart, on one copy or on several:
 
 - A subscription that was due but not billed is billed on the next billing run (hourly in production, every 5 minutes in local development).
 - Invoices waiting for an automatic charge are charged.
@@ -217,7 +217,7 @@ If they do not fall, the background jobs are not running. See the [runbook](runb
 
 ### 6. Payments made during the gap
 
-If the backup is hours older than the failure, Stripe events sent in between are missing. Velox's background check asks Stripe about invoices whose payment status is `unknown`, but it does not replay every event. List the invoices to check by hand:
+If the backup is hours older than the failure, Stripe events sent in between are missing. Hardcount's background check asks Stripe about invoices whose payment status is `unknown`, but it does not replay every event. List the invoices to check by hand:
 
 ```sql
 SELECT id, payment_status, updated_at FROM invoices
@@ -251,11 +251,11 @@ Some tables matter more than others when you decide what a restore must bring ba
 | `users`, `user_tenants`, `password_reset_tokens` | Dashboard users |
 | `api_keys` | API keys |
 | `tenant_settings`, `stripe_provider_credentials` | Account settings, including the encrypted Stripe keys |
-| `webhook_endpoints` | Where Velox sends webhooks, with their signing secrets |
-| `webhook_events`, `webhook_deliveries` | Webhooks Velox sent, with every try. Replay and timelines read them. |
+| `webhook_endpoints` | Where Hardcount sends webhooks, with their signing secrets |
+| `webhook_events`, `webhook_deliveries` | Webhooks Hardcount sent, with every try. Replay and timelines read them. |
 | `recipe_instances` | Installed pricing recipes |
 | `test_clocks`, `dashboard_sessions` | Not money, but losing them disrupts the people using the dashboard |
-| `goose_db_version` | The schema version. Velox does not start without it. |
+| `goose_db_version` | The schema version. Hardcount does not start without it. |
 
 `usage_events` for billing periods that are still open belong here too: the next invoice needs every one of them.
 
@@ -275,8 +275,8 @@ Some tables matter more than others when you decide what a restore must bring ba
 
 These do not need a database backup:
 
-- Velox itself and its container images: download or build them again.
+- Hardcount itself and its container images: download or build them again.
 - Settings and secrets (the `.env` file or your secrets manager): back them up separately.
-- Invoice PDFs: Velox builds them again from the invoice.
+- Invoice PDFs: Hardcount builds them again from the invoice.
 
 **Next:** [Health checks, alerts and logs](runbook/monitoring.md).

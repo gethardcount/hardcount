@@ -50,7 +50,7 @@ func newMemStore() *memStore {
 }
 
 func (m *memStore) CreateEndpoint(ctx context.Context, tenantID string, ep domain.WebhookEndpoint) (domain.WebhookEndpoint, error) {
-	ep.ID = fmt.Sprintf("vlx_whe_%d", len(m.endpoints)+1)
+	ep.ID = fmt.Sprintf("hc_whe_%d", len(m.endpoints)+1)
 	ep.TenantID = tenantID
 	ep.Livemode = testutil.MustLivemode(ctx)
 	ep.CreatedAt = time.Now().UTC()
@@ -127,7 +127,7 @@ func (m *memStore) RotateEndpointSecret(_ context.Context, tenantID, id, newSecr
 }
 
 func (m *memStore) CreateEvent(ctx context.Context, tenantID string, event domain.WebhookEvent) (domain.WebhookEvent, error) {
-	event.ID = fmt.Sprintf("vlx_whevt_%d", len(m.events)+1)
+	event.ID = fmt.Sprintf("hc_whevt_%d", len(m.events)+1)
 	event.TenantID = tenantID
 	event.Livemode = testutil.MustLivemode(ctx)
 	event.CreatedAt = time.Now().UTC()
@@ -238,7 +238,7 @@ func (m *memStore) CreateReplayEvent(ctx context.Context, tenantID, originalEven
 
 func (m *memStore) CreateDelivery(ctx context.Context, tenantID string, d domain.WebhookDelivery) (domain.WebhookDelivery, error) {
 	m.dmu.Lock()
-	d.ID = fmt.Sprintf("vlx_whd_%d", len(m.deliveries)+1)
+	d.ID = fmt.Sprintf("hc_whd_%d", len(m.deliveries)+1)
 	d.TenantID = tenantID
 	d.CreatedAt = time.Now().UTC()
 	lm := testutil.MustLivemode(ctx)
@@ -595,7 +595,7 @@ func TestDispatch(t *testing.T) {
 
 	// Verify HMAC signature was sent
 	if httpClient.lastRequest != nil {
-		sig := httpClient.lastRequest.Header.Get("Velox-Signature")
+		sig := httpClient.lastRequest.Header.Get("Hardcount-Signature")
 		if !strings.Contains(sig, "t=") || !strings.Contains(sig, "v1=") {
 			t.Errorf("missing signature header, got %q", sig)
 		}
@@ -621,11 +621,11 @@ func TestDispatch(t *testing.T) {
 		}
 	}
 
-	// Verify Velox-Event-Type header
+	// Verify Hardcount-Event-Type header
 	if httpClient.lastRequest != nil {
-		et := httpClient.lastRequest.Header.Get("Velox-Event-Type")
+		et := httpClient.lastRequest.Header.Get("Hardcount-Event-Type")
 		if et != "invoice.finalized" {
-			t.Errorf("Velox-Event-Type: got %q", et)
+			t.Errorf("Hardcount-Event-Type: got %q", et)
 		}
 	}
 
@@ -823,7 +823,7 @@ func TestRetryLadder_AllBackoffsReachable(t *testing.T) {
 
 	// Seed a fresh delivery (AttemptCount=0, as CreateDelivery makes it).
 	d := domain.WebhookDelivery{
-		ID: "vlx_whd_ladder", TenantID: "t1", WebhookEndpointID: "ep_1",
+		ID: "hc_whd_ladder", TenantID: "t1", WebhookEndpointID: "ep_1",
 		WebhookEventID: "evt_gone", Status: domain.DeliveryPending,
 	}
 	store.deliveries = append(store.deliveries, d)
@@ -831,7 +831,7 @@ func TestRetryLadder_AllBackoffsReachable(t *testing.T) {
 
 	read := func() domain.WebhookDelivery {
 		for _, dd := range store.deliveries {
-			if dd.ID == "vlx_whd_ladder" {
+			if dd.ID == "hc_whd_ladder" {
 				return dd
 			}
 		}
@@ -1346,7 +1346,7 @@ func TestRotateSecret_GracePeriod(t *testing.T) {
 	if httpClient.lastRequest == nil {
 		t.Fatal("no outbound request captured")
 	}
-	header := httpClient.lastRequest.Header.Get("Velox-Signature")
+	header := httpClient.lastRequest.Header.Get("Hardcount-Signature")
 	if c := strings.Count(header, "v1="); c != 2 {
 		t.Errorf("during grace, header should have 2 v1= entries, got %d: %s", c, header)
 	}
@@ -1361,7 +1361,7 @@ func TestRotateSecret_GracePeriod(t *testing.T) {
 	if err := svc.Dispatch(ctx, "t1", "invoice.finalized", map[string]any{"invoice_id": "inv_2"}); err != nil {
 		t.Fatalf("dispatch 2: %v", err)
 	}
-	header2 := httpClient.lastRequest.Header.Get("Velox-Signature")
+	header2 := httpClient.lastRequest.Header.Get("Hardcount-Signature")
 	if c := strings.Count(header2, "v1="); c != 1 {
 		t.Errorf("after expiry, header should have 1 v1= entry, got %d: %s", c, header2)
 	}
@@ -1472,7 +1472,7 @@ func TestRetryPendingDeliveries_DeletedEventFails(t *testing.T) {
 	past := time.Now().UTC().Add(-time.Hour)
 	pending, err := store.CreateDelivery(ctx, "t1", domain.WebhookDelivery{
 		WebhookEndpointID: ep.Endpoint.ID,
-		WebhookEventID:    "vlx_whevt_gone", // never created
+		WebhookEventID:    "hc_whevt_gone", // never created
 		Status:            domain.DeliveryPending,
 		AttemptCount:      1,
 		NextRetryAt:       &past,
@@ -1538,7 +1538,7 @@ func TestAssertDialAddrAllowed(t *testing.T) {
 // TestLoopbackException_SameFlagAtBothLayers pins the fix for the walk find
 // (FLOW W0, 2026-08-03): the create-time validator advertised "except
 // localhost" while the egress-hardened dialer refused all loopback, so an
-// endpoint the operator could create was one Velox could never deliver to —
+// endpoint the operator could create was one Hardcount could never deliver to —
 // every delivery sat pending with the refusal buried in the delivery detail.
 // The exception must be ONE flag honored by BOTH layers, per environment.
 func TestLoopbackException_SameFlagAtBothLayers(t *testing.T) {
@@ -1788,7 +1788,7 @@ func TestCreateAndUpdateEndpoint_RefuseIPv6PrivateAddresses(t *testing.T) {
 
 // Event-name validation (2026-07-05): endpoint create/update rejects
 // subscriptions to event types the engine never emits — pre-fix any string
-// was accepted and matchesEvent silently never fired (Velox's own recipes
+// was accepted and matchesEvent silently never fired (Hardcount's own recipes
 // shipped two phantom names: invoice.payment_failed, subscription.updated).
 func TestCreateEndpoint_RejectsUnknownEventNames(t *testing.T) {
 	svc := NewService(newMemStore(), nil, "local")
@@ -1802,8 +1802,8 @@ func TestCreateEndpoint_RejectsUnknownEventNames(t *testing.T) {
 		}
 	}
 	// The two payment_method.* events were EMITTED long before they were
-	// admitted to the catalog — a subscriber to events Velox actually fires
-	// was told "Velox never emits it" (2026-07-10 design census). Pin their
+	// admitted to the catalog — a subscriber to events Hardcount actually fires
+	// was told "Hardcount never emits it" (2026-07-10 design census). Pin their
 	// acceptance so the emit-catalog gap can't silently reopen.
 	if _, err := svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{
 		URL: "http://localhost:9099/hook", Events: []string{"payment_method.attached", "payment_method.updated"},

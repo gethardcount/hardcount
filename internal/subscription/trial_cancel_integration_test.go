@@ -18,8 +18,8 @@ import (
 // ago), with the given schedule fields.
 func seedTrialingSub(t *testing.T, db *postgres.DB, ctx context.Context, tenantID string, cancelAtPeriodEnd bool, cancelAt *time.Time) (string, time.Time) {
 	t.Helper()
-	custID := postgres.NewID("vlx_cus")
-	subID := postgres.NewID("vlx_sub")
+	custID := postgres.NewID("hc_cus")
+	subID := postgres.NewID("hc_sub")
 	trialEnd := time.Now().UTC().Add(-1 * time.Hour).Truncate(time.Microsecond)
 	trialStart := trialEnd.Add(-14 * 24 * time.Hour)
 	periodEnd := trialEnd.Add(30 * 24 * time.Hour)

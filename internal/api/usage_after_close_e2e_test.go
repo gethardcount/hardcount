@@ -16,15 +16,15 @@ import (
 )
 
 // Usage that arrives after its period was invoiced (ADR-120 amendment
-// 2026-10-22). Velox still stores it and answers 2xx, and still bills it on
+// 2026-10-22). Hardcount still stores it and answers 2xx, and still bills it on
 // no invoice. What changed is that the caller and the operator are told:
 // the single-ingest and backfill 201 carry billing_status "after_close", the
 // batch and LiteLLM answers count after_close rows, and
-// velox_usage_unbilled_total{reason="after_close", origin} counts them.
+// hardcount_usage_unbilled_total{reason="after_close", origin} counts them.
 //
 // The flag must never be false: a flagged event must really be billed on no
 // invoice. Each test that flags an event checks the invoices too, and each
-// case Velox does still bill (the grace, a trial, a max
+// case Hardcount does still bill (the grace, a trial, a max
 // meter a threshold fire deferred) checks the event is not flagged.
 //
 // The rig is the close-lag rig: the real server over HTTP. April is
@@ -32,7 +32,7 @@ import (
 
 const afterCloseMetric = unbilledMetric + `{reason="after_close"}`
 
-// afterCloseCount reads velox_usage_unbilled_total{reason="after_close", origin}.
+// afterCloseCount reads hardcount_usage_unbilled_total{reason="after_close", origin}.
 func afterCloseCount(t *testing.T, origin string) float64 {
 	t.Helper()
 	return unbilledCount(t, "after_close", origin)
@@ -61,7 +61,7 @@ func (r *lagRig) doH(method, path string, at time.Time, body any) (int, map[stri
 }
 
 // postEvent posts one event of meter `meter` stamped ts with key, reaching
-// Velox at arrival, to path (/v1/usage-events or its backfill), and wants
+// Hardcount at arrival, to path (/v1/usage-events or its backfill), and wants
 // status `want`. It returns the answer.
 func (r *lagRig) postEvent(path, meter, key string, ts, arrival time.Time, qty int64, want int) map[string]any {
 	r.t.Helper()
@@ -500,7 +500,7 @@ func (r *lagRig) heldRelease(end, at time.Time) map[string]any {
 	return r.heldReleaseVia(end, end.Add(time.Minute), at)
 }
 
-// heldReleaseVia is heldRelease with the call reaching Velox at arrive.
+// heldReleaseVia is heldRelease with the call reaching Hardcount at arrive.
 func (r *lagRig) heldReleaseVia(end, arrive, at time.Time) map[string]any {
 	r.t.Helper()
 	out := r.must(http.MethodPost, "/v1/integrations/litellm/spend", arrive,
@@ -717,7 +717,7 @@ func TestUsageAfterClose_LiteLLMCacheWritesFlaggedPerWrittenRow(t *testing.T) {
 // TestUsageAfterClose_LiteLLMPreSplitCallCountsOldWayRows: a call whose
 // :input a release before the cache-write split stored in April, at the old
 // quantity (fresh input plus the writes), and whose :output it never stored.
-// LiteLLM resends it after April's invoice. Velox writes it the old way: its
+// LiteLLM resends it after April's invoice. Hardcount writes it the old way: its
 // :input is deduplicated and only its :output is written, with no write rows.
 // The answer counts after_close 1, the :output. The :input stays billed on
 // April's invoice; the :output is billed nowhere.

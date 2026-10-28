@@ -63,7 +63,7 @@ func TestVoid_WebhookShowsTheRowAtTheEvent(t *testing.T) {
 	svc.SetEventDispatcher(events)
 
 	inv, err := store.Create(ctx, tenantID, domain.Invoice{
-		CustomerID: cust.ID, InvoiceNumber: "VLX-VOID-TAX-1",
+		CustomerID: cust.ID, InvoiceNumber: "HC-VOID-TAX-1",
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
 		Currency: "USD", SubtotalCents: 10800, TotalAmountCents: 10800, AmountDueCents: 10800,
 		BillingPeriodStart: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),

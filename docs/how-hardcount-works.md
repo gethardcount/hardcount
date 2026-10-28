@@ -1,12 +1,12 @@
-# How Velox works
+# How Hardcount works
 
-Velox turns what your customers use into a paid invoice. Your app tells
-Velox what each customer used. Velox counts it, prices it, makes the
-invoice, and charges the card through Stripe. When a payment fails, Velox
+Hardcount turns what your customers use into a paid invoice. Your app tells
+Hardcount what each customer used. Hardcount counts it, prices it, makes the
+invoice, and charges the card through Stripe. When a payment fails, Hardcount
 tries again.
 
 Think of a taxi meter. It counts the distance, the fare card says what each
-kilometre costs, and at the end you get a receipt and pay by card. Velox
+kilometre costs, and at the end you get a receipt and pay by card. Hardcount
 does the same for usage, such as AI tokens or API calls.
 
 ```mermaid
@@ -22,7 +22,7 @@ flowchart LR
 ## The six steps
 
 1. **Your app reports usage.** Each time a customer uses something, your
-   app sends Velox a usage event: which customer, which meter, how much,
+   app sends Hardcount a usage event: which customer, which meter, how much,
    and an idempotency key (a unique ID, so a resent event is counted once).
    It can add labels, such as the AI model and the token type. You send it
    with `POST /v1/usage-events`, or let a
@@ -48,30 +48,30 @@ flowchart LR
    **Subscriptions**, and the bill so far under "Upcoming invoices" on the
    customer page.
 
-4. **The period ends, and Velox makes the invoice.** By default this
-   happens 1 to 2 hours after the period ends. Velox waits an hour so that
+4. **The period ends, and Hardcount makes the invoice.** By default this
+   happens 1 to 2 hours after the period ends. Hardcount waits an hour so that
    usage arriving a little late is still billed, and its billing run is
    hourly. The invoice has one line for each price, plus the base fee and
    any tax. Then the invoice is finalized: issued, and no longer a draft.
-   Velox tells your app with an `invoice.finalized` [webhook](webhooks.md).
+   Hardcount tells your app with an `invoice.finalized` [webhook](webhooks.md).
 
    **You see:** the invoice under **Invoices**. Its page shows each line,
    and its **⋯** menu has the PDF.
 
 5. **Credit pays first, then Stripe charges the card.** Right after the
-   invoice is finalized, Velox uses any credit the customer holds, such as
+   invoice is finalized, Hardcount uses any credit the customer holds, such as
    prepaid credit (a prepaid commit), to lower the amount due. So the
    `invoice.finalized` webhook shows the amount before credit. If credit
    covers it all, the invoice is marked paid with no charge. Otherwise, if
    the customer has a saved card and your Stripe account is connected,
-   Velox asks Stripe to charge that card for what is left. With no saved
-   card, Velox can email the customer a link to add one, once email is set
+   Hardcount asks Stripe to charge that card for what is left. With no saved
+   card, Hardcount can email the customer a link to add one, once email is set
    up.
 
    **You see:** the invoice reads **Paid**, with a "Credits applied" line
    if credit paid part of it. The payment shows in your Stripe dashboard.
 
-6. **A failed payment is tried again.** When a charge fails, Velox starts
+6. **A failed payment is tried again.** When a charge fails, Hardcount starts
    dunning: it retries the charge on a schedule and, once email is set up,
    emails the customer. Each retry first uses any credit the customer got
    since the last try, so credit added later can pay an older invoice. If

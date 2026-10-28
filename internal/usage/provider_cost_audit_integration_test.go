@@ -181,7 +181,7 @@ func TestProviderCostAudit_SharedFate(t *testing.T) {
 	})
 
 	t.Run("deleting a nonexistent rate emits nothing", func(t *testing.T) {
-		rec, reqCtx := f.serve(t, f.logger, http.MethodDelete, "/vlx_pcr_does_not_exist", "")
+		rec, reqCtx := f.serve(t, f.logger, http.MethodDelete, "/hc_pcr_does_not_exist", "")
 		if rec.Code != http.StatusNotFound {
 			t.Fatalf("delete missing rate: got %d, want 404", rec.Code)
 		}

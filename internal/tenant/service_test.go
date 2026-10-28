@@ -36,7 +36,7 @@ func (m *memoryStore) CreateAudited(ctx context.Context, t domain.Tenant, emit f
 }
 
 func (m *memoryStore) Create(_ context.Context, t domain.Tenant) (domain.Tenant, error) {
-	t.ID = "vlx_ten_test"
+	t.ID = "hc_ten_test"
 	t.Status = domain.TenantStatusActive
 	m.tenants[t.ID] = t
 	return t, nil

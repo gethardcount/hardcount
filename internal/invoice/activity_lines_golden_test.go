@@ -311,9 +311,9 @@ func buildGoldenCases(t *testing.T, w writerTokens) []goldenCase {
 	person := activity.ActorFromAudit("user", "alice@example.com")
 	key := activity.ActorFromAudit("api_key", "billing-sync")
 	auto := activity.ActorFromAudit("system", "")
-	sub := activity.L(activity.LinkSubscription, "vlx_sub_1", "Starter")
+	sub := activity.L(activity.LinkSubscription, "hc_sub_1", "Starter")
 	inv := domain.Invoice{
-		ID: "vlx_inv_1", InvoiceNumber: "VLX-000001", Currency: "USD", SubscriptionID: "vlx_sub_1",
+		ID: "hc_inv_1", InvoiceNumber: "HC-000001", Currency: "USD", SubscriptionID: "hc_sub_1",
 		TotalAmountCents: 4900, AmountDueCents: 4900, BillingPeriodDisplay: "Feb 1, 2027 – Feb 28, 2027",
 	}
 
@@ -359,7 +359,7 @@ func buildGoldenCases(t *testing.T, w writerTokens) []goldenCase {
 	add("paid/CAD money format", paidLine(cad, 0, "", nil, nil))
 	waived := inv
 	waived.AmountPaidCents = 0
-	note := activity.L(activity.LinkCreditNote, "vlx_cn_1", "CN-0001")
+	note := activity.L(activity.LinkCreditNote, "hc_cn_1", "CN-0001")
 	add("paid/by credit note, after 3 failed retries", paidLine(waived, 3, "", key, &note))
 	partly := credits
 	partly.CreditsAppliedCents = 2000
@@ -390,7 +390,7 @@ func buildGoldenCases(t *testing.T, w writerTokens) []goldenCase {
 	// code, operator text, and a failed refund's provider reason.
 	for _, rs := range w.refundStatuses {
 		for mix := 0; mix < 8; mix++ {
-			cn := domain.CreditNote{ID: "vlx_cn_1", CreditNoteNumber: "CN-000012", Currency: "USD", Reason: "Billing error", RefundStatus: domain.RefundStatus(rs)}
+			cn := domain.CreditNote{ID: "hc_cn_1", CreditNoteNumber: "CN-000012", Currency: "USD", Reason: "Billing error", RefundStatus: domain.RefundStatus(rs)}
 			var parts []string
 			if mix&1 != 0 {
 				cn.RefundAmountCents = 1500
@@ -414,11 +414,11 @@ func buildGoldenCases(t *testing.T, w writerTokens) []goldenCase {
 	}
 	for _, r := range append(w.cnReasons, "Goodwill credit for the outage") {
 		add("credit_note/reason/"+r, creditNoteLine(domain.CreditNote{
-			ID: "vlx_cn_1", CreditNoteNumber: "CN-000012", Currency: "USD", Reason: r, TotalCents: 1000, CreditAmountCents: 1000,
+			ID: "hc_cn_1", CreditNoteNumber: "CN-000012", Currency: "USD", Reason: r, TotalCents: 1000, CreditAmountCents: 1000,
 		}, auto, ""))
 	}
 	add("credit_note/failed refund with provider reason", creditNoteLine(domain.CreditNote{
-		ID: "vlx_cn_1", CreditNoteNumber: "CN-000012", Currency: "USD", TotalCents: 1000, RefundAmountCents: 1000,
+		ID: "hc_cn_1", CreditNoteNumber: "CN-000012", Currency: "USD", TotalCents: 1000, RefundAmountCents: 1000,
 		RefundStatus: domain.RefundFailed,
 	}, key, "expired_or_canceled_card"))
 
@@ -444,7 +444,7 @@ func buildGoldenCases(t *testing.T, w writerTokens) []goldenCase {
 		l, _ := emailLine(EmailEventRow{EmailType: "invoice", Status: "failed", SendFailure: f, To: "billing@acme.test"}, nil)
 		add("email/send failure/"+f, l)
 	}
-	cnLink := activity.L(activity.LinkCreditNote, "vlx_cn_1", "CN-000012")
+	cnLink := activity.L(activity.LinkCreditNote, "hc_cn_1", "CN-000012")
 	l, _ := emailLine(EmailEventRow{EmailType: "credit_note", Status: "dispatched", DeliveryState: "delivered", To: "billing@acme.test"}, &cnLink)
 	add("email/credit note email names its note", l)
 	// Every recorded skip reason, and a row skipped before the reason was
@@ -507,7 +507,7 @@ func buildGoldenCases(t *testing.T, w writerTokens) []goldenCase {
 	closed := goldenAt.Add(30 * 24 * time.Hour)
 	for _, ds := range w.disputeStatuses {
 		d := domain.InvoiceDispute{
-			ID: "vlx_dsp_1", StripeDisputeID: "du_1", Status: domain.DisputeStatus(ds), Reason: "product_not_received",
+			ID: "hc_dsp_1", StripeDisputeID: "du_1", Status: domain.DisputeStatus(ds), Reason: "product_not_received",
 			AmountCents: 4500, Currency: "USD", OpenedAt: goldenAt, EvidenceDueBy: &dueBy,
 		}
 		if d.Status.Closed() {

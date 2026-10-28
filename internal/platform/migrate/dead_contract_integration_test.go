@@ -58,14 +58,14 @@ INSERT INTO meters (id, tenant_id, %s, name) VALUES ('mtr_dc', 'ten_dc', 'dc', '
 `
 
 // TestDeadContract_RefusesRowsHoldingRemovedValues: 00201 removes values
-// and a table that no Velox version ever wrote. A row that holds one was
-// written outside Velox, so the upgrade stops before changing anything (a
+// and a table that no Hardcount version ever wrote. A row that holds one was
+// written outside Hardcount, so the upgrade stops before changing anything (a
 // draft plan stays draft too), the error names every kind of row it found
 // and how many, and its hint agrees with the wrapper's "fix the cause and
 // run the upgrade again": change or delete those rows, with a runbook
 // section that exists. Once those rows are gone, it runs.
 func TestDeadContract_RefusesRowsHoldingRemovedValues(t *testing.T) {
-	dsn, db := scratchDB(t, "velox_test_deadc_b_migrate_refuse")
+	dsn, db := scratchDB(t, "hardcount_test_deadc_b_migrate_refuse")
 	ctx := context.Background()
 	if err := up(ctx, dsn, filesBefore(t, deadContractVersion)); err != nil {
 		t.Fatalf("Up to before %d: %v", deadContractVersion, err)
@@ -97,7 +97,7 @@ func TestDeadContract_RefusesRowsHoldingRemovedValues(t *testing.T) {
 		"1 payment recovery event(s) with event_type retry_scheduled, retry_succeeded, retry_failed, paused or resumed",
 		"1 payment recovery event(s) with state paused",
 		"1 row(s) in billed_entries",
-		"No Velox version wrote these values",
+		"No Hardcount version wrote these values",
 		"Change or delete those rows, then run the upgrade again",
 	} {
 		if !strings.Contains(err.Error(), want) {
@@ -144,7 +144,7 @@ func TestDeadContract_RefusesRowsHoldingRemovedValues(t *testing.T) {
 // to its subtotal. A draft plan was sold and billed like an active one, so
 // it becomes active.
 func TestDeadContract_KeepsIssuedInvoiceLinesAndActivatesDraftPlans(t *testing.T) {
-	dsn, db := scratchDB(t, "velox_test_deadc_b_migrate_keep")
+	dsn, db := scratchDB(t, "hardcount_test_deadc_b_migrate_keep")
 	ctx := context.Background()
 	if err := up(ctx, dsn, filesBefore(t, deadContractVersion)); err != nil {
 		t.Fatalf("Up to before %d: %v", deadContractVersion, err)
@@ -204,7 +204,7 @@ func TestDeadContract_KeepsIssuedInvoiceLinesAndActivatesDraftPlans(t *testing.T
 }
 
 // TestDeadContract_KeepsHistoryEarlierVersionsWrote: three kinds of row an
-// earlier Velox wrote must survive 00201 unchanged, because there is no
+// earlier Hardcount wrote must survive 00201 unchanged, because there is no
 // true value to rewrite them to and deleting them deletes history:
 //   - a run v0.1.0 closed with resolution manually_resolved while its
 //     invoice stayed finalized (the NIM-000243 shape migration 0170 kept on
@@ -216,7 +216,7 @@ func TestDeadContract_KeepsIssuedInvoiceLinesAndActivatesDraftPlans(t *testing.T
 //
 // The upgrade runs, and every row reads as it did.
 func TestDeadContract_KeepsHistoryEarlierVersionsWrote(t *testing.T) {
-	dsn, db := scratchDB(t, "velox_test_deadc_b_migrate_history")
+	dsn, db := scratchDB(t, "hardcount_test_deadc_b_migrate_history")
 	ctx := context.Background()
 	if err := up(ctx, dsn, filesBefore(t, deadContractVersion)); err != nil {
 		t.Fatalf("Up to before %d: %v", deadContractVersion, err)
@@ -272,7 +272,7 @@ func TestDeadContract_KeepsHistoryEarlierVersionsWrote(t *testing.T) {
 // no default state the CHECK refuses. The Down puts the old schema back,
 // and Up runs again.
 func TestDeadContract_UpNarrowsAndDownRestores(t *testing.T) {
-	dsn, db := scratchDB(t, "velox_test_deadc_b_migrate_round")
+	dsn, db := scratchDB(t, "hardcount_test_deadc_b_migrate_round")
 	ctx := context.Background()
 	if err := up(ctx, dsn, migrationFiles()); err != nil {
 		t.Fatalf("Up: %v", err)

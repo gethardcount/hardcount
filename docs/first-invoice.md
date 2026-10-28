@@ -11,7 +11,7 @@ terminal. At the end, you open the invoice in the dashboard.
 | Customer | A person or company you bill. Its external ID is your own ID for it, such as the user ID in your database. |
 | Subscription | Puts a customer on a plan, and says when each billing month starts. |
 | Usage event | One "this customer used this much" record that your app sends. |
-| Idempotency key | A unique ID for one usage event. If you send the same event again with the same key, Velox counts it once. |
+| Idempotency key | A unique ID for one usage event. If you send the same event again with the same key, Hardcount counts it once. |
 
 Recipe, meter and test clock: [quick start](quick-start.md#words-on-this-page).
 
@@ -19,25 +19,25 @@ Recipe, meter and test clock: [quick start](quick-start.md#words-on-this-page).
 
 You need:
 
-- Velox running on your computer, from the [quick start](quick-start.md).
+- Hardcount running on your computer, from the [quick start](quick-start.md).
   You do not need to run its demo.
 - `curl` and `jq` (a tool that reads JSON). On macOS: `brew install jq`.
   On Debian or Ubuntu: `sudo apt install jq`.
 
 This page matches the newest code on `main`. The quick start starts the
 newest release, v0.8.2, which can answer some steps differently. On v0.8.2,
-follow [this page as of v0.8.2](https://github.com/getvelox/velox/blob/v0.8.2/docs/first-invoice.md).
+follow [this page as of v0.8.2](https://github.com/gethardcount/hardcount/blob/v0.8.2/docs/first-invoice.md).
 
-Open a terminal in the `velox` folder that the quick start downloaded. Save
+Open a terminal in the `hardcount` folder that the quick start downloaded. Save
 the address and your test API key in two variables. Every command below
 uses them.
 
 <!-- docs-run: command -->
 ```bash
-export VELOX=http://localhost:8080
-VELOX_KEY=$(jq -r .secret_key_test deploy/compose/quickstart-credentials.json)
-export VELOX_KEY
-curl -s "$VELOX/health"
+export HARDCOUNT=http://localhost:8080
+HARDCOUNT_KEY=$(jq -r .secret_key_test deploy/compose/quickstart-credentials.json)
+export HARDCOUNT_KEY
+curl -s "$HARDCOUNT/health"
 ```
 
 **You see:**
@@ -47,9 +47,9 @@ curl -s "$VELOX/health"
 {"status":"ok"}
 ```
 
-The key starts with `vlx_secret_test_`, so everything on this page happens
-in test mode, where no real money moves. Running Velox somewhere else? Set
-`VELOX` to its address and `VELOX_KEY` to a test secret key from **API
+The key starts with `hc_secret_test_`, so everything on this page happens
+in test mode, where no real money moves. Running Hardcount somewhere else? Set
+`HARDCOUNT` to its address and `HARDCOUNT_KEY` to a test secret key from **API
 keys** in the dashboard.
 
 Some steps send IDs that an earlier step saved, such as the customer ID.
@@ -68,8 +68,8 @@ variable into the JSON for you.
 
    <!-- docs-run: command -->
    ```bash
-   PLAN_ID=$(curl -s -X POST "$VELOX/v1/recipes/anthropic_style/instantiate" \
-     -H "Authorization: Bearer $VELOX_KEY" \
+   PLAN_ID=$(curl -s -X POST "$HARDCOUNT/v1/recipes/anthropic_style/instantiate" \
+     -H "Authorization: Bearer $HARDCOUNT_KEY" \
      -H "Content-Type: application/json" \
      -d '{}' | jq -r '.created_objects.plan_ids[0]')
    echo "$PLAN_ID"
@@ -79,7 +79,7 @@ variable into the JSON for you.
 
    <!-- docs-run: output -->
    ```text
-   vlx_pln_…
+   hc_pln_…
    ```
 
 2. **Create a test clock.** It starts at the current time.
@@ -88,8 +88,8 @@ variable into the JSON for you.
    ```bash
    CLOCK_ID=$(jq -n --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
        '{name: "first invoice", frozen_time: $now}' \
-     | curl -s -X POST "$VELOX/v1/test-clocks" \
-       -H "Authorization: Bearer $VELOX_KEY" \
+     | curl -s -X POST "$HARDCOUNT/v1/test-clocks" \
+       -H "Authorization: Bearer $HARDCOUNT_KEY" \
        -H "Content-Type: application/json" \
        -d @- | jq -r .id)
    echo "$CLOCK_ID"
@@ -99,11 +99,11 @@ variable into the JSON for you.
 
    <!-- docs-run: output -->
    ```text
-   vlx_tclk_…
+   hc_tclk_…
    ```
 
 3. **Create a customer on the test clock.** `CUSTOMER_REF` is your own ID
-   for the customer. Your app sends it with each usage event, so Velox
+   for the customer. Your app sends it with each usage event, so Hardcount
    knows whose usage it is.
 
    <!-- docs-run: command -->
@@ -112,8 +112,8 @@ variable into the JSON for you.
    CUSTOMER_ID=$(jq -n --arg ref "$CUSTOMER_REF" --arg clock "$CLOCK_ID" \
        '{external_id: $ref, display_name: "ACME Corp",
          email: "billing@acme.com", test_clock_id: $clock}' \
-     | curl -s -X POST "$VELOX/v1/customers" \
-       -H "Authorization: Bearer $VELOX_KEY" \
+     | curl -s -X POST "$HARDCOUNT/v1/customers" \
+       -H "Authorization: Bearer $HARDCOUNT_KEY" \
        -H "Content-Type: application/json" \
        -d @- | jq -r .id)
    echo "$CUSTOMER_ID"
@@ -123,7 +123,7 @@ variable into the JSON for you.
 
    <!-- docs-run: output -->
    ```text
-   vlx_cus_…
+   hc_cus_…
    ```
 
    ACME Corp is now on the **Customers** page.
@@ -140,8 +140,8 @@ variable into the JSON for you.
        '{code: ($ref + "-ai-api"), display_name: "ACME Corp AI API",
          customer_id: $cus, items: [{plan_id: $plan, quantity: 1}],
          billing_time: "anniversary"}' \
-     | curl -s -X POST "$VELOX/v1/subscriptions" \
-       -H "Authorization: Bearer $VELOX_KEY" \
+     | curl -s -X POST "$HARDCOUNT/v1/subscriptions" \
+       -H "Authorization: Bearer $HARDCOUNT_KEY" \
        -H "Content-Type: application/json" \
        -d @- | jq '{id, status}'
    ```
@@ -151,7 +151,7 @@ variable into the JSON for you.
    <!-- docs-run: output -->
    ```json
    {
-     "id": "vlx_sub_…",
+     "id": "hc_sub_…",
      "status": "active"
    }
    ```
@@ -174,8 +174,8 @@ variable into the JSON for you.
          '{event_name: "tokens", external_customer_id: $ref, quantity: $qty,
            idempotency_key: ($ref + "-call-1:" + $type),
            dimensions: {provider: "anthropic", model: "claude-sonnet-4.5", token_type: $type}}' \
-       | curl -s -X POST "$VELOX/v1/usage-events" \
-         -H "Authorization: Bearer $VELOX_KEY" \
+       | curl -s -X POST "$HARDCOUNT/v1/usage-events" \
+         -H "Authorization: Bearer $HARDCOUNT_KEY" \
          -H "Content-Type: application/json" \
          -d @- | jq -c '{id, quantity, token_type: .dimensions.token_type, timestamp}'
    }
@@ -187,15 +187,15 @@ variable into the JSON for you.
 
    <!-- docs-run: output -->
    ```text
-   {"id":"vlx_evt_…","quantity":"1000000","token_type":"input","timestamp":"…"}
-   {"id":"vlx_evt_…","quantity":"200000","token_type":"output","timestamp":"…"}
+   {"id":"hc_evt_…","quantity":"1000000","token_type":"input","timestamp":"…"}
+   {"id":"hc_evt_…","quantity":"200000","token_type":"output","timestamp":"…"}
    ```
 
    An event without a `timestamp` gets the customer's current time. For a
    customer on a test clock, that is the clock's time.
 
    **5b. Or send one call the way a LiteLLM proxy does.** A LiteLLM proxy
-   reports each AI call to Velox, and Velox splits it into events by token
+   reports each AI call to Hardcount, and Hardcount splits it into events by token
    type. This request sends the same record that the proxy sends.
    LiteLLM's `user` is the customer's external ID. To connect a real
    proxy, see [LiteLLM integration](integrations/litellm.md).
@@ -207,8 +207,8 @@ variable into the JSON for you.
          model: "claude-sonnet-4-5-20250929", custom_llm_provider: "anthropic",
          user: $ref,
          usage: {prompt_tokens: 1000000, completion_tokens: 200000}}' \
-     | curl -s -X POST "$VELOX/v1/integrations/litellm/spend" \
-       -H "Authorization: Bearer $VELOX_KEY" \
+     | curl -s -X POST "$HARDCOUNT/v1/integrations/litellm/spend" \
+       -H "Authorization: Bearer $HARDCOUNT_KEY" \
        -H "Content-Type: application/json" \
        -d @-
    ```
@@ -227,12 +227,12 @@ variable into the JSON for you.
    {"accepted":0,"deduplicated":2,"held":0,"skipped":0,"cache_hits":0,"after_close":0,"no_price":0,"not_on_plan":0,"outside_subscription":0}
    ```
 
-   Both ways use the same idempotency keys, so Velox counts the tokens once.
+   Both ways use the same idempotency keys, so Hardcount counts the tokens once.
 
    In the dashboard, the **Usage** page lists both events.
 
 6. **Move the test clock forward one month.** The clock moves 32 days
-   ahead, past the end of ACME Corp's first month. While it moves, Velox
+   ahead, past the end of ACME Corp's first month. While it moves, Hardcount
    closes that month and makes the invoice. The first `date` form is for
    macOS, the second for Linux.
 
@@ -240,8 +240,8 @@ variable into the JSON for you.
    ```bash
    LATER=$(date -u -v+32d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "+32 days" +%Y-%m-%dT%H:%M:%SZ)
    jq -n --arg t "$LATER" '{frozen_time: $t}' \
-     | curl -s -X POST "$VELOX/v1/test-clocks/$CLOCK_ID/advance" \
-       -H "Authorization: Bearer $VELOX_KEY" \
+     | curl -s -X POST "$HARDCOUNT/v1/test-clocks/$CLOCK_ID/advance" \
+       -H "Authorization: Bearer $HARDCOUNT_KEY" \
        -H "Content-Type: application/json" \
        -d @- | jq -r .status
    ```
@@ -257,8 +257,8 @@ variable into the JSON for you.
 
    <!-- docs-run: command repeat-until-output -->
    ```bash
-   curl -s "$VELOX/v1/test-clocks/$CLOCK_ID" \
-     -H "Authorization: Bearer $VELOX_KEY" | jq -r .status
+   curl -s "$HARDCOUNT/v1/test-clocks/$CLOCK_ID" \
+     -H "Authorization: Bearer $HARDCOUNT_KEY" | jq -r .status
    ```
 
    **You see:**
@@ -275,10 +275,10 @@ variable into the JSON for you.
 
    <!-- docs-run: command -->
    ```bash
-   INVOICE_ID=$(curl -s "$VELOX/v1/invoices?customer_id=$CUSTOMER_ID" \
-     -H "Authorization: Bearer $VELOX_KEY" | jq -r '.data[0].id')
-   curl -s "$VELOX/v1/invoices/$INVOICE_ID" \
-     -H "Authorization: Bearer $VELOX_KEY" \
+   INVOICE_ID=$(curl -s "$HARDCOUNT/v1/invoices?customer_id=$CUSTOMER_ID" \
+     -H "Authorization: Bearer $HARDCOUNT_KEY" | jq -r '.data[0].id')
+   curl -s "$HARDCOUNT/v1/invoices/$INVOICE_ID" \
+     -H "Authorization: Bearer $HARDCOUNT_KEY" \
      | jq '{number: .invoice.invoice_number, status: .invoice.status,
             total_cents: .invoice.total_amount_cents,
             lines: [.line_items[] | {description, amount_cents}]}'
@@ -289,7 +289,7 @@ variable into the JSON for you.
    <!-- docs-run: output -->
    ```json
    {
-     "number": "VLX-…",
+     "number": "HC-…",
      "status": "finalized",
      "total_cents": 600,
      "lines": [
@@ -314,14 +314,14 @@ variable into the JSON for you.
 
    <!-- docs-run: command -->
    ```bash
-   echo "$VELOX/invoices/$INVOICE_ID"
+   echo "$HARDCOUNT/invoices/$INVOICE_ID"
    ```
 
    **You see:** the invoice's address in the dashboard.
 
    <!-- docs-run: output -->
    ```text
-   http://localhost:8080/invoices/vlx_inv_…
+   http://localhost:8080/invoices/hc_inv_…
    ```
 
    Open it, and you see the invoice for ACME Corp, with the two token lines
@@ -339,10 +339,10 @@ That is expected: open the customer from **Customers** instead.
 |---|---|
 | A step prints `null` | The request failed. Run the same command without the last `jq` part to see the error message. |
 | `external_customer_id is required` in step 5a, or `payload.user is required` in step 5b | `CUSTOMER_REF` is not set. A variable lasts only as long as its terminal. Run the page again from the top in one terminal, with `acme-2` in place of `acme-1` in step 3. |
-| `customer "acme-1" not found`, or `"held":2` in step 5b | Step 3 did not run. Step 5a refuses usage for a customer Velox does not know. Step 5b holds it instead: create the customer, then release it from the notice on the **Usage** page. |
+| `customer "acme-1" not found`, or `"held":2` in step 5b | Step 3 did not run. Step 5a refuses usage for a customer Hardcount does not know. Step 5b holds it instead: create the customer, then release it from the notice on the **Usage** page. |
 | `customer with external_id "acme-1" already exists` | You ran this page before. In step 3, change `acme-1` to `acme-2`, then run steps 2 to 8 again. |
 | `INVOICE_ID` is `null`, or the invoice has no token lines | The usage went to another customer, or was sent after the clock moved. Run steps 2 to 8 again with a new name in step 3. |
-| `after_close`, `no_price`, `not_on_plan` or `outside_subscription` is not 0 in step 5b | Velox stored the events but will not bill them. `no_price` means no price of the plan takes their `model` and `token_type`. In step 5a, the same reason is in the event's `billing_status`: run the command without the last `jq` part to see it. |
+| `after_close`, `no_price`, `not_on_plan` or `outside_subscription` is not 0 in step 5b | Hardcount stored the events but will not bill them. `no_price` means no price of the plan takes their `model` and `token_type`. In step 5a, the same reason is in the event's `billing_status`: run the command without the last `jq` part to see it. |
 
 **Next:** price your own models, sell prepaid credit and see your margin:
 [AI pricing](ai-pricing.md).

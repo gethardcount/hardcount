@@ -12,11 +12,11 @@ import assert from 'node:assert/strict'
 import type { ActivityLine } from '../src/lib/gen/schemas/activityLine.ts'
 
 const finalized: ActivityLine = {
-  id: 'lifecycle:finalized:vlx_inv_1',
+  id: 'lifecycle:finalized:hc_inv_1',
   kind: 'invoice.finalized',
   title: 'Invoice finalized',
   amount: { cents: 2473, currency: 'USD' },
-  detail: [[{ text: 'Renewal for Feb 1 – Mar 1' }], [{ link: { kind: 'subscription', id: 'vlx_sub_1', label: 'Starter' } }]],
+  detail: [[{ text: 'Renewal for Feb 1 – Mar 1' }], [{ link: { kind: 'subscription', id: 'hc_sub_1', label: 'Starter' } }]],
   actor: { kind: 'automatic' },
   tone: 'neutral',
   occurred_at: '2027-02-01T04:30:00Z',
@@ -24,7 +24,7 @@ const finalized: ActivityLine = {
 }
 
 const failed: ActivityLine = {
-  id: 'attempt:vlx_att_1',
+  id: 'attempt:hc_att_1',
   kind: 'charge_attempt.failed',
   title: 'Payment failed',
   amount: { cents: 2473, currency: 'USD' },
@@ -63,7 +63,7 @@ test('a row reads title · amount, time, then meta parts, actor and Recorded, in
   assert.match(t, /Invoice finalized · \$24\.7310:00 AM/)
   assert.match(t, /Renewal for Feb 1 – Mar 1 · Starter · Automatic · Recorded Oct 18, 8:14 PM/)
   // The subscription is a link to its page.
-  assert.match(html, /<a [^>]*href="\/subscriptions\/vlx_sub_1"[^>]*>Starter<\/a>/)
+  assert.match(html, /<a [^>]*href="\/subscriptions\/hc_sub_1"[^>]*>Starter<\/a>/)
 })
 
 test('every date and time is a <time> element carrying its instant', async () => {

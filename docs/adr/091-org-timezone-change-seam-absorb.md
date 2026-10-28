@@ -71,7 +71,7 @@ keeps the exact current behavior and never spuriously prorates.
   industry root fix — a display-zone change then *structurally* cannot re-time
   billing. **Deferred**, not rejected: it is a multi-timezone capability (bill
   customer A in New York, customer B in London; or an operator who must change
-  *display* without touching billing), and Velox is pre-launch, 0 customers,
+  *display* without touching billing), and Hardcount is pre-launch, 0 customers,
   single-org-zone US B2B. Building it now is enterprise-shaped work with no named
   pressure, and it adds real surface (two-knob UI, per-surface render
   classification). ADR-092 records the full design + 6-platform industry

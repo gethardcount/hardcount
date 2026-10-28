@@ -14,9 +14,9 @@ var creditDrawAsOfIssueReasons = []InvoiceBillingReason{BillingReasonSubscriptio
 // DrawsCreditAsOfIssue reports whether an invoice with this billing reason
 // tests credit grant expiry at its issued_at, however late it is collected
 // (ADR-071 §2). A grant that was live when the period ended pays that
-// period's invoice: Velox draws it when the period ends at or before
+// period's invoice: Hardcount draws it when the period ends at or before
 // expires_at. Stripe's eligibility list says "before" ("The invoice's
-// period_end occurs before the credit grant's expires_at time"). Velox
+// period_end occurs before the credit grant's expires_at time"). Hardcount
 // includes the boundary because all of the period's usage happened before
 // its end, and because the dashboard stores "valid through Nov 30" as the
 // next local midnight, the instant the November period ends. Every other

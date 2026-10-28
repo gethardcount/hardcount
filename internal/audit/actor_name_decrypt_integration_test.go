@@ -20,7 +20,7 @@ import (
 // audit_log does not store actor_name — it RESOLVES it at read time by LEFT JOIN:
 // an api_keys name, a customers display_name, or a users email. But
 // customers.display_name is ENCRYPTED AT REST, and the audit reader had no
-// encryptor. So with VELOX_ENCRYPTION_KEY set — i.e. in production — every
+// encryptor. So with HARDCOUNT_ENCRYPTION_KEY set — i.e. in production — every
 // customer-actor row (a hosted-invoice Pay click, a payment-update link click)
 // showed its Actor as CIPHERTEXT: on the dashboard, and in the CSV export handed
 // to an auditor. "Who did this" is the audit log's first job, and for the one
@@ -71,7 +71,7 @@ func TestActorName_IsDecryptedForCustomerActorRows(t *testing.T) {
 	// The row a customer writes: a hosted-invoice Pay click.
 	if err := logger.Log(
 		postgres.WithLivemode(auth.WithCustomerActor(ctx, cust.ID), false),
-		tenantID, domain.AuditActionUpdate, "invoice", "vlx_inv_actor", "INV-1",
+		tenantID, domain.AuditActionUpdate, "invoice", "hc_inv_actor", "INV-1",
 		map[string]any{"action": "hosted_checkout_started"},
 	); err != nil {
 		t.Fatalf("log: %v", err)

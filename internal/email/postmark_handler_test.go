@@ -65,7 +65,7 @@ func (f *fakeSuppressor) SuppressComplained(_ context.Context, tenantID, email, 
 	return nil
 }
 
-const testOutboxID = "vlx_emob_00112233445566778899aabb"
+const testOutboxID = "hc_emob_00112233445566778899aabb"
 
 func testRow() OutboxRow {
 	return OutboxRow{
@@ -91,7 +91,7 @@ func goodAuth(r *http.Request) { r.SetBasicAuth("pmuser", "pmpass") }
 
 func deliveryJSON(recipient string) string {
 	return `{"RecordType":"Delivery","MessageID":"m-1","Recipient":"` + recipient + `",` +
-		`"Metadata":{"vlx-outbox-id":"` + testOutboxID + `"},"DeliveredAt":"2026-07-19T10:00:00Z"}`
+		`"Metadata":{"hc-outbox-id":"` + testOutboxID + `"},"DeliveredAt":"2026-07-19T10:00:00Z"}`
 }
 
 func bounceJSON(email, bounceType string, typeCode int, inactive bool) string {
@@ -101,7 +101,7 @@ func bounceJSON(email, bounceType string, typeCode int, inactive bool) string {
 	}
 	return `{"RecordType":"Bounce","ID":42,"MessageID":"m-2","Email":"` + email + `",` +
 		`"Type":"` + bounceType + `","TypeCode":` + strconv.Itoa(typeCode) + `,"Inactive":` + inact + `,` +
-		`"Description":"The server was unable to deliver your message","Metadata":{"vlx-outbox-id":"` + testOutboxID + `"}}`
+		`"Description":"The server was unable to deliver your message","Metadata":{"hc-outbox-id":"` + testOutboxID + `"}}`
 }
 
 // TestPostmarkWebhook_Auth locks the gate: bad or absent credentials are
@@ -214,7 +214,7 @@ func TestPostmarkWebhook_SpamComplaint(t *testing.T) {
 
 	body := `{"RecordType":"SpamComplaint","ID":7,"MessageID":"m-3","Email":"ap@acme.test",` +
 		`"Type":"SpamComplaint","TypeCode":512,"Inactive":true,` +
-		`"Metadata":{"vlx-outbox-id":"` + testOutboxID + `"}}`
+		`"Metadata":{"hc-outbox-id":"` + testOutboxID + `"}}`
 	if rec := postmarkPost(t, h, body, goodAuth); rec.Code != http.StatusOK {
 		t.Fatalf("complaint: got %d, want 200", rec.Code)
 	}
@@ -239,7 +239,7 @@ func TestPostmarkWebhook_DeterministicDrops(t *testing.T) {
 		"unknown record type": `{"RecordType":"Open","MessageID":"m"}`,
 		"bad json":            `{"RecordType":`,
 		"no metadata":         `{"RecordType":"Delivery","Recipient":"ap@acme.test"}`,
-		"unknown outbox id":   `{"RecordType":"Delivery","Recipient":"ap@acme.test","Metadata":{"vlx-outbox-id":"vlx_emob_ffffffffffffffffffffffff"}}`,
+		"unknown outbox id":   `{"RecordType":"Delivery","Recipient":"ap@acme.test","Metadata":{"hc-outbox-id":"hc_emob_ffffffffffffffffffffffff"}}`,
 		"oversize":            `{"RecordType":"Delivery","Recipient":"` + strings.Repeat("a", maxPostmarkBodySize) + `"}`,
 	}
 	for name, body := range cases {

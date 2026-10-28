@@ -148,7 +148,7 @@ func (s *PostgresStore) CreateWithBill(ctx context.Context, tenantID string, sub
 // commit). Shared by Create / CreateWithBill so the day-1 invoice can join the
 // same transaction.
 func (s *PostgresStore) createInTx(ctx context.Context, tx *sql.Tx, tenantID string, sub domain.Subscription) (domain.Subscription, error) {
-	id := postgres.NewID("vlx_sub")
+	id := postgres.NewID("hc_sub")
 	now := clock.Now(ctx)
 
 	// A clock customer's subscription takes its clock FOR KEY SHARE before
@@ -527,7 +527,7 @@ func (s *PostgresStore) CancelAtomicWithBill(ctx context.Context, tenantID, id s
 // subscription's unpaid invoices after the cancel: the auto-charge sweep
 // (notPausedForCollection) and the tax retry's auto-finalize read it, and a
 // cancel's own keep_as_draft final invoice is one of them. Clearing it would
-// let Velox charge invoices the operator, or dunning's pause, held back.
+// let Hardcount charge invoices the operator, or dunning's pause, held back.
 // Resume collection releases them.
 //
 // The pending plan lives on subscription_items, so it takes a second UPDATE.

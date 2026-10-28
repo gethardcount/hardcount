@@ -90,7 +90,7 @@ type Customer struct {
 	// already in flight stay on their original policy.
 	DunningPolicyID string `json:"dunning_policy_id,omitempty"`
 	// StripeCustomerID is the Stripe Customer object mapped 1:1 to
-	// this Velox customer. Created lazily on first PM-related action
+	// this Hardcount customer. Created lazily on first PM-related action
 	// (paymentmethods.StripeAdapter.EnsureStripeCustomer) — empty
 	// for customers who never went through any PM flow. Single source
 	// of truth for the mapping since migration 0096; previously lived

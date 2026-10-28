@@ -49,10 +49,10 @@ func TestFailureReport_MovesOnlyTheAttemptTheInvoiceWaitsOn(t *testing.T) {
 			stampOutcome(t, store, ctx, tenantID, id, domain.PaymentProcessing, pid(pi), "")
 		}
 	}
-	// veloxAttempt writes the attempt row the charge call writes when Stripe
-	// answers, before it reports (pi "" is a create whose id Velox never
+	// hardcountAttempt writes the attempt row the charge call writes when Stripe
+	// answers, before it reports (pi "" is a create whose id Hardcount never
 	// learned).
-	veloxAttempt := func(pi string) step {
+	hardcountAttempt := func(pi string) step {
 		return func(t *testing.T, id string) {
 			piID := ""
 			if pi != "" {
@@ -133,21 +133,21 @@ func TestFailureReport_MovesOnlyTheAttemptTheInvoiceWaitsOn(t *testing.T) {
 		// A hosted Checkout attempt never moves the invoice.
 		{"hosted decline on an invoice with no attempt", none, none, hostedReport, "pi_H", false, false},
 		{"hosted decline while an attempt is processing", processing("pi_B"), none, hostedReport, "pi_H", false, false},
-		{"hosted attempt a parked invoice adopted", steps(veloxAttempt(""), park, adopt("pi_H")), none, hostedReport, "pi_H", true, true},
+		{"hosted attempt a parked invoice adopted", steps(hardcountAttempt(""), park, adopt("pi_H")), none, hostedReport, "pi_H", true, true},
 
 		// The attempt history decides a report about a PaymentIntent the
 		// invoice does not hold.
-		{"lost charge report: webhook for Velox's newest attempt", steps(veloxAttempt("pi_A"), decline("pi_A"), veloxAttempt("pi_B")), none, webhookReport, "pi_B", true, true},
-		{"stale decline superseded by a newer Velox attempt", steps(veloxAttempt("pi_A"), decline("pi_A"), veloxAttempt("pi_B"), decline("pi_B")), none, webhookReport, "pi_A", false, false},
-		{"stale decline on a parked invoice", steps(veloxAttempt("pi_A"), decline("pi_A"), veloxAttempt(""), park), none, webhookReport, "pi_A", false, false},
-		{"the parked attempt's own decline", steps(veloxAttempt("pi_A"), decline("pi_A"), veloxAttempt(""), park), none, webhookReport, "pi_P", true, true},
-		{"stale decline after a failure with no PaymentIntent", steps(veloxAttempt("pi_A"), decline("pi_A"), veloxAttempt(""), stampFailedNoPI), none, webhookReport, "pi_A", false, false},
+		{"lost charge report: webhook for Hardcount's newest attempt", steps(hardcountAttempt("pi_A"), decline("pi_A"), hardcountAttempt("pi_B")), none, webhookReport, "pi_B", true, true},
+		{"stale decline superseded by a newer Hardcount attempt", steps(hardcountAttempt("pi_A"), decline("pi_A"), hardcountAttempt("pi_B"), decline("pi_B")), none, webhookReport, "pi_A", false, false},
+		{"stale decline on a parked invoice", steps(hardcountAttempt("pi_A"), decline("pi_A"), hardcountAttempt(""), park), none, webhookReport, "pi_A", false, false},
+		{"the parked attempt's own decline", steps(hardcountAttempt("pi_A"), decline("pi_A"), hardcountAttempt(""), park), none, webhookReport, "pi_P", true, true},
+		{"stale decline after a failure with no PaymentIntent", steps(hardcountAttempt("pi_A"), decline("pi_A"), hardcountAttempt(""), stampFailedNoPI), none, webhookReport, "pi_A", false, false},
 
 		// A paid invoice is never moved, by any source.
 		{"webhook decline on a paid invoice", markPaid, none, webhookReport, "pi_X", false, false},
 		{"late failure for the PaymentIntent that then succeeded (3DS retry on one PI)", markPaidWith("pi_X"), none, webhookReport, "pi_X", false, false},
 		{"webhook decline on an invoice paid by credits (no PaymentIntent)", markPaidWith(""), none, webhookReport, "pi_X", false, false},
-		{"stale decline while the invoice waits on an attempt whose row was lost", steps(veloxAttempt("pi_A"), decline("pi_A"), processing("pi_B")), none, webhookReport, "pi_A", false, false},
+		{"stale decline while the invoice waits on an attempt whose row was lost", steps(hardcountAttempt("pi_A"), decline("pi_A"), processing("pi_B")), none, webhookReport, "pi_A", false, false},
 		{"own decline on an invoice paid during the call", none, markPaid, ownDeclineReport, "pi_X", false, false},
 	}
 

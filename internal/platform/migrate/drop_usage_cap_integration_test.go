@@ -12,7 +12,7 @@ import (
 // one step, so a later migration does not take 191's place. Mutation: an up
 // that keeps either column turns this red.
 func TestUsageCapColumnsDropped(t *testing.T) {
-	dsn, db := scratchDB(t, "velox_migrate_usage_cap")
+	dsn, db := scratchDB(t, "hardcount_migrate_usage_cap")
 	if err := Up(dsn); err != nil {
 		t.Fatalf("up: %v", err)
 	}

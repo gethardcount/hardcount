@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-const STORAGE_KEY = 'velox-theme'
+const STORAGE_KEY = 'hardcount-theme'
 
 function safeGetItem(key: string): string | null {
   try { return localStorage.getItem(key) }

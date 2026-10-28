@@ -190,7 +190,7 @@ func TestSettleFailed_StaleOlderAttempt_LeavesInvoiceAlone(t *testing.T) {
 	}
 }
 
-// A decline on the hosted Checkout page is an attempt Velox never waits on:
+// A decline on the hosted Checkout page is an attempt Hardcount never waits on:
 // it lands on its attempt row only, whatever the invoice's state.
 func TestSettleFailed_HostedAttempt_NeverMovesInvoice(t *testing.T) {
 	invoices := newMockInvoiceUpdater()
@@ -266,7 +266,7 @@ func TestChargeDecline_WebhookRedrivesAFailedDunningStart(t *testing.T) {
 
 // The charge call's own report of its decline was lost (a DB blip, a crash
 // after Stripe answered), so the invoice still holds the previous attempt.
-// Its attempt row was written first, and it is Velox's newest: the webhook
+// Its attempt row was written first, and it is Hardcount's newest: the webhook
 // records it, which rotates the seq and sends the notice the charge call never
 // sent.
 func TestSettleFailed_LostChargeReport_WebhookRecordsTheNewestAttempt(t *testing.T) {

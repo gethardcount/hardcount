@@ -1,12 +1,12 @@
 # Versioning before 1.0
 
-Velox is pre-1.0. Until 1.0.0, a release can change the API, webhooks,
+Hardcount is pre-1.0. Until 1.0.0, a release can change the API, webhooks,
 settings or the database in a way that breaks your setup. This page says
 what can change, and where each change is written down before you upgrade.
 
 ## What a version number means
 
-Velox versions look like `0.MINOR.PATCH`, for example `0.8.2`.
+Hardcount versions look like `0.MINOR.PATCH`, for example `0.8.2`.
 
 - **A minor release** (`0.8.0`, `0.9.0`) adds features. It can also make
   breaking changes.
@@ -20,13 +20,14 @@ Velox versions look like `0.MINOR.PATCH`, for example `0.8.2`.
   required, a default can change, and a route can answer with a new error.
 - **New values.** A field can get a new value, such as `unknown` for a
   credit note's `refund_status`. Webhooks can gain new event types.
-- **Settings.** A setting Velox used to ignore when it could not read it can
+- **Settings.** A setting Hardcount used to ignore when it could not read it can
   now stop start-up.
 - **The upgrade path.** A release can drop the upgrade from older versions.
-  The next release, v0.9.0, cannot take over a v0.8.x database: you install
-  it fresh.
+  The next release, v0.9.0, is the first named Hardcount (the project was
+  called Velox). It cannot take over a database Velox made, from v0.8.x or
+  from a build of `main`: you install it fresh.
 
-Velox has one API version, `/v1`. Before 1.0, a breaking change goes into
+Hardcount has one API version, `/v1`. Before 1.0, a breaking change goes into
 `/v1` itself. There is no older version to stay on.
 
 ## Write code that survives new values
@@ -47,7 +48,7 @@ Read these before every upgrade:
    does. Changes not yet released are under **Unreleased**, where lines for
    code that calls the API say "API callers:".
 2. **The release notes** on
-   [GitHub releases](https://github.com/getvelox/velox/releases). Since
+   [GitHub releases](https://github.com/gethardcount/hardcount/releases). Since
    v0.6.0, a release with steps to take repeats them under **Before you
    upgrade**. v0.4.0 has them too.
 

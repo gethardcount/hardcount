@@ -1,6 +1,6 @@
 # Usage with no price
 
-Velox prices each usage event with the prices of the customer's plan. Usage
+Hardcount prices each usage event with the prices of the customer's plan. Usage
 of a meter that no price of the plan takes is left off the invoice.
 Back to the [runbook index](index.md).
 
@@ -9,13 +9,13 @@ Back to the [runbook index](index.md).
 The earliest sign is at ingest: the answer that wrote the event carries
 `billing_status: "no_price"` (a `no_price` count on a batch, a LiteLLM
 delivery or a held-usage release), and
-`velox_usage_unbilled_total{reason="no_price"}` rises. Usage of a meter the
+`hardcount_usage_unbilled_total{reason="no_price"}` rises. Usage of a meter the
 plan has no price for at all is answered `not_on_plan` instead. These are
-what Velox found when the event arrived. Ingest does not check every event,
+what Hardcount found when the event arrived. Ingest does not check every event,
 and an event with no status is not promised to be billed: the invoice signs
 below are the final answer.
 
-At the invoice, `velox_usage_unpriced_quantity_total{meter_id, mode}` rises (`mode` is
+At the invoice, `hardcount_usage_unpriced_quantity_total{meter_id, mode}` rises (`mode` is
 `live` or `test`; test-clock simulations are not counted). Or the server
 logs a WARN with `meter`, `quantity` and `subscription_id`:
 
@@ -33,7 +33,7 @@ no price for the meter at all. A price takes an event whose labels include
 every label of the price, so a common cause is a new model name on an AI
 meter whose plan has prices for the older models only.
 
-- Velox builds and sends the invoice without that usage. It does not bill
+- Hardcount builds and sends the invoice without that usage. It does not bill
   it later on its own.
 - The counter adds the quantity once per invoice built without it: period
   close, cancel final invoice or spend-threshold invoice, once that

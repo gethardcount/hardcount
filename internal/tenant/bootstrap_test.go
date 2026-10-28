@@ -95,18 +95,18 @@ func TestBootstrap_Success(t *testing.T) {
 	if resp.Tenant.Name != "Test Corp" {
 		t.Errorf("tenant name: got %q", resp.Tenant.Name)
 	}
-	// Mode-marked prefixes (ADR-073): the old unmarked vlx_secret_
+	// Mode-marked prefixes (ADR-073): the old unmarked hc_secret_
 	// parsed as LIVE in auth.ValidateKey — must not come back.
-	if !strings.HasPrefix(resp.SecretKeyTest, "vlx_secret_test_") {
+	if !strings.HasPrefix(resp.SecretKeyTest, "hc_secret_test_") {
 		t.Errorf("test secret key prefix: got %q", resp.SecretKeyTest)
 	}
-	if !strings.HasPrefix(resp.SecretKeyLive, "vlx_secret_live_") {
+	if !strings.HasPrefix(resp.SecretKeyLive, "hc_secret_live_") {
 		t.Errorf("live secret key prefix: got %q", resp.SecretKeyLive)
 	}
-	if !strings.HasPrefix(resp.PublishableKeyTest, "vlx_pub_test_") {
+	if !strings.HasPrefix(resp.PublishableKeyTest, "hc_pub_test_") {
 		t.Errorf("publishable key prefix: got %q", resp.PublishableKeyTest)
 	}
-	if resp.OwnerEmail != "admin@velox.local" || !resp.PasswordGenerated || len(resp.OwnerPassword) < 12 {
+	if resp.OwnerEmail != "admin@hardcount.local" || !resp.PasswordGenerated || len(resp.OwnerPassword) < 12 {
 		t.Errorf("owner defaults: email=%q generated=%v pwlen=%d", resp.OwnerEmail, resp.PasswordGenerated, len(resp.OwnerPassword))
 	}
 

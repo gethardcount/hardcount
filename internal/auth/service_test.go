@@ -117,11 +117,11 @@ func TestCreateKey_Secret(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if !strings.HasPrefix(result.RawKey, "vlx_secret_live_") {
-		t.Errorf("raw key should start with vlx_secret_live_, got prefix: %q", result.RawKey[:16])
+	if !strings.HasPrefix(result.RawKey, "hc_secret_live_") {
+		t.Errorf("raw key should start with hc_secret_live_, got prefix: %q", result.RawKey[:16])
 	}
-	if len(result.RawKey) != len("vlx_secret_live_")+64 {
-		t.Errorf("raw key length: got %d, want %d", len(result.RawKey), len("vlx_secret_live_")+64)
+	if len(result.RawKey) != len("hc_secret_live_")+64 {
+		t.Errorf("raw key length: got %d, want %d", len(result.RawKey), len("hc_secret_live_")+64)
 	}
 	if !result.Key.Livemode {
 		t.Error("key should be live by default")
@@ -157,8 +157,8 @@ func TestCreateKey_Publishable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.HasPrefix(result.RawKey, "vlx_pub_live_") {
-		t.Errorf("raw key should start with vlx_pub_live_")
+	if !strings.HasPrefix(result.RawKey, "hc_pub_live_") {
+		t.Errorf("raw key should start with hc_pub_live_")
 	}
 	if result.Key.KeyType != "publishable" {
 		t.Errorf("key_type: got %q, want publishable", result.Key.KeyType)
@@ -178,8 +178,8 @@ func TestCreateKey_Platform(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.HasPrefix(result.RawKey, "vlx_platform_live_") {
-		t.Errorf("raw key should start with vlx_platform_live_")
+	if !strings.HasPrefix(result.RawKey, "hc_platform_live_") {
+		t.Errorf("raw key should start with hc_platform_live_")
 	}
 	if result.Key.KeyType != "platform" {
 		t.Errorf("key_type: got %q, want platform", result.Key.KeyType)
@@ -332,8 +332,8 @@ func TestValidateKey_InvalidFormat(t *testing.T) {
 	cases := []string{
 		"",
 		"sk_live_invalid",
-		"vlx_secret_tooshort",
-		"vlx_unknown_" + strings.Repeat("ab", 32),
+		"hc_secret_tooshort",
+		"hc_unknown_" + strings.Repeat("ab", 32),
 	}
 	for _, raw := range cases {
 		_, err := svc.ValidateKey(context.Background(), raw)
@@ -350,7 +350,7 @@ func TestValidateKey_WrongSecret(t *testing.T) {
 	result, _ := svc.CreateKey(ctx, "t1", CreateKeyInput{Name: "Real", KeyType: KeyTypeSecret})
 
 	// Same prefix length but different secret
-	fake := "vlx_secret_live_" + strings.Repeat("ff", 32)
+	fake := "hc_secret_live_" + strings.Repeat("ff", 32)
 	if fake == result.RawKey {
 		t.Skip("astronomically unlikely collision")
 	}
@@ -404,8 +404,8 @@ func TestCreateKey_TestModeFromCtx(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if !strings.HasPrefix(result.RawKey, "vlx_secret_test_") {
-		t.Errorf("test-mode key should start with vlx_secret_test_, got %q", result.RawKey[:20])
+	if !strings.HasPrefix(result.RawKey, "hc_secret_test_") {
+		t.Errorf("test-mode key should start with hc_secret_test_, got %q", result.RawKey[:20])
 	}
 	if result.Key.Livemode {
 		t.Error("key should be test-mode")
@@ -422,14 +422,14 @@ func TestCreateKey_TestModeFromCtx(t *testing.T) {
 }
 
 func TestValidateKey_LegacyFormat(t *testing.T) {
-	// Pre-FEAT-8 keys have no mode infix (vlx_secret_<hex>). They must still
+	// Pre-FEAT-8 keys have no mode infix (hc_secret_<hex>). They must still
 	// validate, and must be classified as live.
 	store := newMemStore()
 	svc := NewService(store)
 
 	// Seed a legacy-format key directly.
-	rawKey := "vlx_secret_" + strings.Repeat("ab", 32)
-	dbPrefix := "vlx_secret_" + strings.Repeat("ab", 6) // first 12 hex chars
+	rawKey := "hc_secret_" + strings.Repeat("ab", 32)
+	dbPrefix := "hc_secret_" + strings.Repeat("ab", 6) // first 12 hex chars
 	salt := []byte("legacytestsalt16")
 	saltHex := hex.EncodeToString(salt)
 	hash := sha256.Sum256(append(salt, []byte(rawKey)...))
@@ -634,7 +634,7 @@ func TestRotateKey_PreservesTestmode(t *testing.T) {
 	if rotated.NewKey.Livemode {
 		t.Fatal("rotated key must stay test-mode regardless of caller ctx mode")
 	}
-	if !strings.HasPrefix(rotated.RawKey, "vlx_secret_test_") {
+	if !strings.HasPrefix(rotated.RawKey, "hc_secret_test_") {
 		t.Errorf("test-mode raw key prefix expected, got %q...", rotated.RawKey[:20])
 	}
 }

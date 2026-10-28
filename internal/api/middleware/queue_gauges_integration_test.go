@@ -69,8 +69,8 @@ func TestQueueDepthGauges_EveryQueryRunsOnRealPostgres(t *testing.T) {
 		}
 		seen[f.GetName()] = true
 	}
-	for _, name := range []string{"velox_billing_due_subscriptions", "velox_billing_oldest_due_age_seconds", "velox_billing_failing_subscriptions", "velox_auto_charge_queued_invoices", "velox_parked_invoices", "velox_email_outbox_pending",
-		"velox_email_outbox_oldest_due_age_seconds", "velox_email_outbox_failing_emails", "velox_webhook_outbox_oldest_pending_age_seconds"} {
+	for _, name := range []string{"hardcount_billing_due_subscriptions", "hardcount_billing_oldest_due_age_seconds", "hardcount_billing_failing_subscriptions", "hardcount_auto_charge_queued_invoices", "hardcount_parked_invoices", "hardcount_email_outbox_pending",
+		"hardcount_email_outbox_oldest_due_age_seconds", "hardcount_email_outbox_failing_emails", "hardcount_webhook_outbox_oldest_pending_age_seconds"} {
 		if !seen[name] {
 			t.Errorf("gauge %s not registered", name)
 		}
@@ -124,7 +124,7 @@ func TestBillingGauges_DueAndFailingPartition(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	due := now.Add(-48 * time.Hour)
-	const tenantID, clockID = "vlx_ten_bfgauge", "vlx_tclk_bfgauge"
+	const tenantID, clockID = "hc_ten_bfgauge", "hc_tclk_bfgauge"
 
 	tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
@@ -192,21 +192,21 @@ func TestBillingGauges_DueAndFailingPartition(t *testing.T) {
 		}
 		return l
 	}
-	if got := gaugeValue(t, "velox_billing_due_subscriptions", test()); got != 3 {
+	if got := gaugeValue(t, "hardcount_billing_due_subscriptions", test()); got != 3 {
 		t.Errorf("due = %v, want 3 (healthy, unrecorded, and the row with a stale record; the two rows inside their grace are not due)", got)
 	}
-	retrying := gaugeValue(t, "velox_billing_failing_subscriptions", test("state", "retrying"))
-	parked := gaugeValue(t, "velox_billing_failing_subscriptions", test("state", "parked"))
+	retrying := gaugeValue(t, "hardcount_billing_failing_subscriptions", test("state", "retrying"))
+	parked := gaugeValue(t, "hardcount_billing_failing_subscriptions", test("state", "parked"))
 	if retrying != 2 || parked != 2 {
 		t.Errorf("failing: retrying=%v parked=%v, want 2 and 2 (one of each keyed to next_billing_at, a parked mid-period cancel, a retrying trial)", retrying, parked)
 	}
-	if got := gaugeValue(t, "velox_billing_failing_subscriptions", map[string]string{"mode": "live", "state": "parked"}); got != 0 {
+	if got := gaugeValue(t, "hardcount_billing_failing_subscriptions", map[string]string{"mode": "live", "state": "parked"}); got != 0 {
 		t.Errorf("live-mode parked = %v, want 0: the test-mode rows leaked across the livemode partition", got)
 	}
 	// The oldest due age is the healthy/stale row's, counted from when it
 	// became due for the billing run: 48h after its due instant less the 1h
 	// grace is 47h.
-	if age := gaugeValue(t, "velox_billing_oldest_due_age_seconds", test()); age < 47*3600-300 || age > 47*3600+300 {
+	if age := gaugeValue(t, "hardcount_billing_oldest_due_age_seconds", test()); age < 47*3600-300 || age > 47*3600+300 {
 		t.Errorf("oldest due age = %vs, want about 47h (48h since the due instant, less the 1h grace)", age)
 	}
 
@@ -247,7 +247,7 @@ func TestOutboxGauges_StallAndRelayBroken(t *testing.T) {
 	db := vtestutil.SetupTestDB(t)
 	registerGauges(db)
 	ctx := context.Background()
-	const tenantID = "vlx_ten_obgauge"
+	const tenantID = "hc_ten_obgauge"
 
 	tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
@@ -311,23 +311,23 @@ func TestOutboxGauges_StallAndRelayBroken(t *testing.T) {
 	}
 	test, live := map[string]string{"mode": "test"}, map[string]string{"mode": "live"}
 
-	near("velox_email_outbox_oldest_due_age_seconds", test, 20*minute)
-	near("velox_email_outbox_oldest_due_age_seconds", live, 2*minute)
-	if got := gaugeValue(t, "velox_email_outbox_failing_emails", test); got != 2 {
+	near("hardcount_email_outbox_oldest_due_age_seconds", test, 20*minute)
+	near("hardcount_email_outbox_oldest_due_age_seconds", live, 2*minute)
+	if got := gaugeValue(t, "hardcount_email_outbox_failing_emails", test); got != 2 {
 		t.Errorf("failing emails (test) = %v, want 2: the row on the ramp and the one that came due, both tried 3+ times and queued 30+ min ago", got)
 	}
-	if got := gaugeValue(t, "velox_email_outbox_failing_emails", live); got != 0 {
+	if got := gaugeValue(t, "hardcount_email_outbox_failing_emails", live); got != 0 {
 		t.Errorf("failing emails (live) = %v, want 0: the test-mode rows leaked across the livemode partition", got)
 	}
-	near("velox_webhook_outbox_oldest_pending_age_seconds", test, 45*minute)
-	if got := gaugeValue(t, "velox_webhook_outbox_oldest_pending_age_seconds", live); got != 0 {
+	near("hardcount_webhook_outbox_oldest_pending_age_seconds", test, 45*minute)
+	if got := gaugeValue(t, "hardcount_webhook_outbox_oldest_pending_age_seconds", live); got != 0 {
 		t.Errorf("webhook outbox oldest pending age (live) = %v, want 0 with no live rows", got)
 	}
 }
 
 // TestParkedInvoicesGauge_CountsOnlyParksPastTheirDay pins the parked-invoice
-// gauge to the parks Velox has not ended on schedule (REC-5, ADR-127
-// amendment 2026-10-20). Velox ends a park at the first hourly tick 24 hours
+// gauge to the parks Hardcount has not ended on schedule (REC-5, ADR-127
+// amendment 2026-10-20). Hardcount ends a park at the first hourly tick 24 hours
 // after its charge's hold (domain.ParkedNothingWait), so a park is counted
 // once its hold is more than 26 hours old, or when it has no hold, which
 // nothing checks. The real trigger for the predicate: a count of every park
@@ -338,7 +338,7 @@ func TestParkedInvoicesGauge_CountsOnlyParksPastTheirDay(t *testing.T) {
 	db := vtestutil.SetupTestDB(t)
 	registerGauges(db)
 	ctx := context.Background()
-	const tenantID = "vlx_ten_pkgauge"
+	const tenantID = "hc_ten_pkgauge"
 
 	tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
@@ -368,7 +368,7 @@ func TestParkedInvoicesGauge_CountsOnlyParksPastTheirDay(t *testing.T) {
 			VALUES ($1, $2, $3, $1, $4, $5, NULLIF($6, ''),
 				CASE WHEN $7::double precision IS NULL THEN NULL ELSE now() - make_interval(secs => $7::double precision) END,
 				'USD', 5000, 5000, 5000, now() - interval '30 days', now())`,
-			fmt.Sprintf("vlx_inv_pkgauge%d", n), tenantID, customerID, status, paymentStatus, paymentIntent, ageSecs)
+			fmt.Sprintf("hc_inv_pkgauge%d", n), tenantID, customerID, status, paymentStatus, paymentIntent, ageSecs)
 	}
 	ago := func(d time.Duration) *time.Duration { return &d }
 	onSchedule := ago(domain.ParkedNothingWait + 30*time.Minute) // the 24 hours are over; the next hourly tick ends it
@@ -400,8 +400,8 @@ func TestParkedInvoicesGauge_CountsOnlyParksPastTheirDay(t *testing.T) {
 		{"live", "open", 1},
 		{"live", "written_off", 0},
 	} {
-		if got := gaugeValue(t, "velox_parked_invoices", map[string]string{"mode": c.mode, "disposition": c.disposition}); got != c.want {
-			t.Errorf("velox_parked_invoices{mode=%q,disposition=%q} = %v, want %v: only parks still parked 26 hours after their hold, or with no hold",
+		if got := gaugeValue(t, "hardcount_parked_invoices", map[string]string{"mode": c.mode, "disposition": c.disposition}); got != c.want {
+			t.Errorf("hardcount_parked_invoices{mode=%q,disposition=%q} = %v, want %v: only parks still parked 26 hours after their hold, or with no hold",
 				c.mode, c.disposition, got, c.want)
 		}
 	}

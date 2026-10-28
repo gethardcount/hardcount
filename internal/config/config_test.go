@@ -79,7 +79,7 @@ func TestValidate_ProductionWarnsMissingRedis(t *testing.T) {
 }
 
 func TestValidate_ValidConfig(t *testing.T) {
-	t.Setenv("VELOX_ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+	t.Setenv("HARDCOUNT_ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
 	for _, name := range publicAddressSettings {
 		t.Setenv(name, "https://billing.example.com")
 	}
@@ -98,7 +98,7 @@ func TestValidate_ValidConfig(t *testing.T) {
 }
 
 func TestValidate_EncryptionKeyWarnings(t *testing.T) {
-	_ = os.Unsetenv("VELOX_ENCRYPTION_KEY")
+	_ = os.Unsetenv("HARDCOUNT_ENCRYPTION_KEY")
 	cfg := Config{
 		Env: "production", Port: "8080",
 		RedisURL: "redis://localhost:6379",
@@ -107,7 +107,7 @@ func TestValidate_EncryptionKeyWarnings(t *testing.T) {
 	warnings := cfg.Validate()
 	found := false
 	for _, w := range warnings {
-		if w == "VELOX_ENCRYPTION_KEY is not set — customer PII will be stored in plaintext" {
+		if w == "HARDCOUNT_ENCRYPTION_KEY is not set — customer PII will be stored in plaintext" {
 			found = true
 		}
 	}
@@ -115,11 +115,11 @@ func TestValidate_EncryptionKeyWarnings(t *testing.T) {
 		t.Error("expected warning about missing encryption key in production")
 	}
 
-	t.Setenv("VELOX_ENCRYPTION_KEY", "tooshort")
+	t.Setenv("HARDCOUNT_ENCRYPTION_KEY", "tooshort")
 	warnings = cfg.Validate()
 	found = false
 	for _, w := range warnings {
-		if len(w) > 20 && w[:20] == "VELOX_ENCRYPTION_KEY" {
+		if strings.HasPrefix(w, "HARDCOUNT_ENCRYPTION_KEY") {
 			found = true
 		}
 	}
@@ -127,11 +127,11 @@ func TestValidate_EncryptionKeyWarnings(t *testing.T) {
 		t.Error("expected warning about invalid encryption key length")
 	}
 
-	t.Setenv("VELOX_ENCRYPTION_KEY", "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz")
+	t.Setenv("HARDCOUNT_ENCRYPTION_KEY", "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz")
 	warnings = cfg.Validate()
 	found = false
 	for _, w := range warnings {
-		if w == "VELOX_ENCRYPTION_KEY is not valid hex" {
+		if w == "HARDCOUNT_ENCRYPTION_KEY is not valid hex" {
 			found = true
 		}
 	}
@@ -139,14 +139,14 @@ func TestValidate_EncryptionKeyWarnings(t *testing.T) {
 		t.Error("expected warning about invalid hex")
 	}
 
-	_ = os.Unsetenv("VELOX_ENCRYPTION_KEY")
+	_ = os.Unsetenv("HARDCOUNT_ENCRYPTION_KEY")
 	localCfg := Config{
 		Env: "local", Port: "8080",
 		DB: DBConfig{MaxOpenConns: 20, MaxIdleConns: 5, QueryTimeout: 5 * time.Second},
 	}
 	warnings = localCfg.Validate()
 	for _, w := range warnings {
-		if w == "VELOX_ENCRYPTION_KEY is not set — customer PII will be stored in plaintext" {
+		if w == "HARDCOUNT_ENCRYPTION_KEY is not set — customer PII will be stored in plaintext" {
 			t.Error("should not warn about missing encryption key in local env")
 		}
 	}
@@ -173,13 +173,13 @@ func TestValidate_DBPoolSanity(t *testing.T) {
 func TestLoad_ProductionRequiresEncryptionKey(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://test:test@localhost/test")
 	t.Setenv("APP_ENV", "production")
-	t.Setenv("VELOX_ENCRYPTION_KEY", "")
+	t.Setenv("HARDCOUNT_ENCRYPTION_KEY", "")
 
 	_, err := Load()
 	if err == nil {
-		t.Fatal("expected error when VELOX_ENCRYPTION_KEY is missing in production")
+		t.Fatal("expected error when HARDCOUNT_ENCRYPTION_KEY is missing in production")
 	}
-	if !strings.Contains(err.Error(), "VELOX_ENCRYPTION_KEY") {
+	if !strings.Contains(err.Error(), "HARDCOUNT_ENCRYPTION_KEY") {
 		t.Errorf("error should mention encryption key, got: %v", err)
 	}
 }
@@ -187,14 +187,14 @@ func TestLoad_ProductionRequiresEncryptionKey(t *testing.T) {
 func TestLoad_InvalidEncryptionKeyFormat(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://test:test@localhost/test")
 	t.Setenv("APP_ENV", "local")
-	t.Setenv("VELOX_ENCRYPTION_KEY", "tooshort")
+	t.Setenv("HARDCOUNT_ENCRYPTION_KEY", "tooshort")
 
 	_, err := Load()
 	if err == nil {
 		t.Fatal("expected error for invalid encryption key length")
 	}
 
-	t.Setenv("VELOX_ENCRYPTION_KEY", "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz")
+	t.Setenv("HARDCOUNT_ENCRYPTION_KEY", "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz")
 	_, err = Load()
 	if err == nil {
 		t.Fatal("expected error for invalid hex in encryption key")
@@ -204,8 +204,8 @@ func TestLoad_InvalidEncryptionKeyFormat(t *testing.T) {
 func TestLoad_DiscreteDBVars(t *testing.T) {
 	_ = os.Unsetenv("DATABASE_URL")
 	_ = os.Setenv("DB_HOST", "localhost")
-	_ = os.Setenv("DB_NAME", "velox")
-	_ = os.Setenv("DB_USER", "velox")
+	_ = os.Setenv("DB_NAME", "hardcount")
+	_ = os.Setenv("DB_USER", "hardcount")
 	_ = os.Setenv("DB_PASSWORD", "secret")
 	defer func() {
 		_ = os.Unsetenv("DB_HOST")
@@ -232,7 +232,7 @@ func TestLoad_ProductionRequiresRedisURL(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://test:test@localhost/test")
 	t.Setenv("APP_DATABASE_URL", "postgres://app:app@localhost/test")
 	t.Setenv("APP_ENV", "production")
-	t.Setenv("VELOX_ENCRYPTION_KEY", strings.Repeat("ab", 32))
+	t.Setenv("HARDCOUNT_ENCRYPTION_KEY", strings.Repeat("ab", 32))
 	t.Setenv("REDIS_URL", "")
 
 	_, err := Load()
@@ -248,7 +248,7 @@ func TestLoad_ProductionWithRedisURLLoads(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://test:test@localhost/test")
 	t.Setenv("APP_DATABASE_URL", "postgres://app:app@localhost/test")
 	t.Setenv("APP_ENV", "production")
-	t.Setenv("VELOX_ENCRYPTION_KEY", strings.Repeat("ab", 32))
+	t.Setenv("HARDCOUNT_ENCRYPTION_KEY", strings.Repeat("ab", 32))
 	t.Setenv("REDIS_URL", "redis://redis:6379")
 	t.Setenv("TRUST_PROXY", "none")
 
@@ -260,7 +260,7 @@ func TestLoad_ProductionWithRedisURLLoads(t *testing.T) {
 func TestLoad_StagingWithoutRedisLoadsFailOpen(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://test:test@localhost/test")
 	t.Setenv("APP_ENV", "staging")
-	t.Setenv("VELOX_ENCRYPTION_KEY", "")
+	t.Setenv("HARDCOUNT_ENCRYPTION_KEY", "")
 	t.Setenv("REDIS_URL", "")
 
 	cfg, err := Load()
@@ -280,7 +280,7 @@ func TestLoad_AppEnvIsCaseNormalised(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://test:test@localhost/test")
 	t.Setenv("APP_DATABASE_URL", "postgres://app:app@localhost/test")
 	t.Setenv("APP_ENV", " Production ")
-	t.Setenv("VELOX_ENCRYPTION_KEY", strings.Repeat("ab", 32))
+	t.Setenv("HARDCOUNT_ENCRYPTION_KEY", strings.Repeat("ab", 32))
 	t.Setenv("REDIS_URL", "")
 
 	_, err := Load()
@@ -289,7 +289,7 @@ func TestLoad_AppEnvIsCaseNormalised(t *testing.T) {
 	}
 }
 
-// AppEnv is the one normalisation Load and `velox migrate rollback` share:
+// AppEnv is the one normalisation Load and `hardcount migrate rollback` share:
 // the rollback check must call " Local " local, and an unset APP_ENV local.
 func TestAppEnv(t *testing.T) {
 	for raw, want := range map[string]string{"": "local", " Local ": "local", "staging": "staging", " Staging ": "staging", "PRODUCTION": "production", " Production ": "production"} {
@@ -386,7 +386,7 @@ func TestLoad_InvoiceGracePeriod(t *testing.T) {
 func TestLoad_ProductionRequiresTrustProxy(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://test:test@localhost/test")
 	t.Setenv("APP_ENV", "production")
-	t.Setenv("VELOX_ENCRYPTION_KEY", strings.Repeat("ab", 32))
+	t.Setenv("HARDCOUNT_ENCRYPTION_KEY", strings.Repeat("ab", 32))
 	t.Setenv("REDIS_URL", "redis://localhost:6379")
 
 	t.Setenv("TRUST_PROXY", "")
@@ -407,7 +407,7 @@ func TestLoad_ProductionRequiresTrustProxy(t *testing.T) {
 // keep booting with the Validate warning.
 func TestLoad_RejectsNearMissOfProduction(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://test:test@localhost/test")
-	t.Setenv("VELOX_ENCRYPTION_KEY", "")
+	t.Setenv("HARDCOUNT_ENCRYPTION_KEY", "")
 	t.Setenv("REDIS_URL", "")
 	t.Setenv("TRUST_PROXY", "")
 
@@ -428,7 +428,7 @@ func TestLoad_RejectsNearMissOfProduction(t *testing.T) {
 
 // In staging and production the sign-in cookie is always Secure, and browsers
 // keep a Secure cookie only over HTTPS. An address setting that starts with
-// http:// says Velox is served without TLS there, so start-up names it. Local
+// http:// says Hardcount is served without TLS there, so start-up names it. Local
 // is plain HTTP by design and stays quiet.
 func TestValidate_WarnsOnPlainHTTPAddressOutsideLocal(t *testing.T) {
 	base := Config{
@@ -439,7 +439,7 @@ func TestValidate_WarnsOnPlainHTTPAddressOutsideLocal(t *testing.T) {
 	}
 	settings := []string{
 		"DASHBOARD_BASE_URL", "CUSTOMER_PORTAL_URL", "HOSTED_INVOICE_BASE_URL",
-		"PAYMENT_UPDATE_URL", "PAYMENT_UPDATE_RETURN_URL", "VELOX_API_BASE_URL",
+		"PAYMENT_UPDATE_URL", "PAYMENT_UPDATE_RETURN_URL", "HARDCOUNT_API_BASE_URL",
 	}
 	for _, name := range settings {
 		t.Run(name, func(t *testing.T) {
@@ -484,7 +484,7 @@ func TestValidate_WarnsOnPlainHTTPAddressOutsideLocal(t *testing.T) {
 func TestLoad_TrustProxyMustParse(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://test:test@localhost/test")
 	t.Setenv("APP_DATABASE_URL", "postgres://app:app@localhost/test")
-	t.Setenv("VELOX_ENCRYPTION_KEY", strings.Repeat("ab", 32))
+	t.Setenv("HARDCOUNT_ENCRYPTION_KEY", strings.Repeat("ab", 32))
 	t.Setenv("REDIS_URL", "redis://localhost:6379")
 
 	for _, env := range []string{"production", "local"} {
@@ -506,13 +506,13 @@ func TestLoad_TrustProxyMustParse(t *testing.T) {
 }
 
 // An origin with a * inside it, such as https://*.example.com, is not a
-// pattern: Velox matches origins exactly, so it would allow nothing. "*"
+// pattern: Hardcount matches origins exactly, so it would allow nothing. "*"
 // beside other origins turns the sign-in cookie off for them too. Both stop
 // start-up, in every environment.
 func TestLoad_CORSAllowedOriginsRefusesPatterns(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://test:test@localhost/test")
 	t.Setenv("APP_DATABASE_URL", "postgres://app:app@localhost/test")
-	t.Setenv("VELOX_ENCRYPTION_KEY", strings.Repeat("ab", 32))
+	t.Setenv("HARDCOUNT_ENCRYPTION_KEY", strings.Repeat("ab", 32))
 	t.Setenv("REDIS_URL", "redis://localhost:6379")
 	t.Setenv("TRUST_PROXY", "none")
 
@@ -590,7 +590,7 @@ func TestParseTrustProxy(t *testing.T) {
 func TestLoad_RejectsUnparseableInt(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://test:test@localhost/test")
 	t.Setenv("APP_ENV", "local")
-	t.Setenv("VELOX_ENCRYPTION_KEY", "")
+	t.Setenv("HARDCOUNT_ENCRYPTION_KEY", "")
 	t.Setenv("TRUST_PROXY", "")
 
 	for _, key := range []string{
@@ -618,15 +618,15 @@ func TestLoad_RejectsUnparseableInt(t *testing.T) {
 	}
 }
 
-// VELOX_RATE_LIMIT_* used to be read by the router, which fell back to the
+// HARDCOUNT_RATE_LIMIT_* used to be read by the router, which fell back to the
 // default without a word on a value it could not parse, or on 0. Load now
 // owns them, and a bad value stops start-up naming the setting.
 func TestLoad_RateLimits(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://test:test@localhost/test")
 	t.Setenv("APP_ENV", "local")
-	t.Setenv("VELOX_ENCRYPTION_KEY", "")
+	t.Setenv("HARDCOUNT_ENCRYPTION_KEY", "")
 	t.Setenv("TRUST_PROXY", "")
-	const general, ingest = "VELOX_RATE_LIMIT_GENERAL_PER_MIN", "VELOX_RATE_LIMIT_INGEST_PER_SEC"
+	const general, ingest = "HARDCOUNT_RATE_LIMIT_GENERAL_PER_MIN", "HARDCOUNT_RATE_LIMIT_INGEST_PER_SEC"
 
 	t.Setenv(general, "")
 	t.Setenv(ingest, "")
@@ -668,7 +668,7 @@ func TestLoad_RateLimits(t *testing.T) {
 func TestLoad_RunMigrationsOnBootMustParse(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://test:test@localhost/test")
 	t.Setenv("APP_ENV", "local")
-	t.Setenv("VELOX_ENCRYPTION_KEY", "")
+	t.Setenv("HARDCOUNT_ENCRYPTION_KEY", "")
 	t.Setenv("TRUST_PROXY", "")
 
 	for raw, want := range map[string]bool{"": false, "true": true, " TRUE ": true, "yes": true, "1": true, "false": false, "no": false, "0": false} {

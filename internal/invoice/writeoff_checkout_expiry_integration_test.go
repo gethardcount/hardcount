@@ -26,7 +26,7 @@ func (r *stopperRecorder) ExpireCheckoutSessions(_ context.Context, _ string, in
 
 // A write-off expires the invoice's open Stripe Checkout sessions, with the
 // same call and the same best-effort handling a void uses. The write-off's
-// transaction already closed Velox's checkout claims, but the session itself
+// transaction already closed Hardcount's checkout claims, but the session itself
 // stayed payable at Stripe until it expired (up to an hour), so a customer
 // with the page open could still pay a written-off invoice (ADR-110 closes
 // self-service payment on one). A write-off does not cancel the

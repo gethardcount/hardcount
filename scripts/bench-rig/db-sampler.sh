@@ -50,15 +50,15 @@
 set -euo pipefail
 
 if [ "${TARGET:-local}" = "aws" ]; then
-  REGION="${AWS_REGION:-ap-south-1}"; OUT="${OUT:-$HOME/.velox-bench-rig}"
-  KEYFILE="$OUT/velox-bench-key.pem"; [ -s "$KEYFILE" ] || { echo "FATAL: no key at $KEYFILE"; exit 1; }
+  REGION="${AWS_REGION:-ap-south-1}"; OUT="${OUT:-$HOME/.hardcount-bench-rig}"
+  KEYFILE="$OUT/hardcount-bench-key.pem"; [ -s "$KEYFILE" ] || { echo "FATAL: no key at $KEYFILE"; exit 1; }
   aws_() { aws --region "$REGION" "$@"; }
-  APP_PUB=$(aws_ ec2 describe-instances --filters "Name=tag:Name,Values=velox-bench-app" "Name=instance-state-name,Values=running" \
+  APP_PUB=$(aws_ ec2 describe-instances --filters "Name=tag:Name,Values=hardcount-bench-app" "Name=instance-state-name,Values=running" \
     --query 'Reservations[].Instances[0].PublicIpAddress' --output text)
   [ -n "$APP_PUB" ] && [ "$APP_PUB" != "None" ] || { echo "FATAL: app instance not running"; exit 1; }
-  DBHOST=$(aws_ rds describe-db-instances --db-instance-identifier velox-bench-db --query 'DBInstances[0].Endpoint.Address' --output text)
+  DBHOST=$(aws_ rds describe-db-instances --db-instance-identifier hardcount-bench-db --query 'DBInstances[0].Endpoint.Address' --output text)
   DBPASS=$(cat "$OUT/db-password")
-  REMOTE_DSN="postgres://velox:$DBPASS@$DBHOST:5432/${DBNAME:-velox}?sslmode=require"
+  REMOTE_DSN="postgres://hardcount:$DBPASS@$DBHOST:5432/${DBNAME:-hardcount}?sslmode=require"
   ssh_() { ssh -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -o ServerAliveInterval=20 -o ServerAliveCountMax=3 -i "$KEYFILE" "ec2-user@$APP_PUB" "$@"; }
   cmd="${1:-}"; tag="${2:-}"
   case "$cmd" in
@@ -79,11 +79,11 @@ if [ "${TARGET:-local}" = "aws" ]; then
         hours=$(python3 -c "import datetime as d,sys; a=int(sys.argv[1])-3600; b=int(sys.argv[2])+3600
 print(' '.join(sorted({d.datetime.utcfromtimestamp(t).strftime('%Y-%m-%d-%H') for t in range(a,b+1,900)})))" "$w_start" "$w_end")
         : > "$dest/$tag.postgres.log"
-        for f in $(aws_ rds describe-db-log-files --db-instance-identifier velox-bench-db \
+        for f in $(aws_ rds describe-db-log-files --db-instance-identifier hardcount-bench-db \
                      --query 'DescribeDBLogFiles[].LogFileName' --output text); do
           fh=$(printf '%s' "$f" | sed -n 's/.*postgresql\.log\.\([0-9-]*\)$/\1/p'); [ -n "$fh" ] || continue
           case " $hours " in *" $fh "*) ;; *) continue ;; esac
-          aws_ rds download-db-log-file-portion --db-instance-identifier velox-bench-db \
+          aws_ rds download-db-log-file-portion --db-instance-identifier hardcount-bench-db \
             --log-file-name "$f" --starting-token 0 --output text >> "$dest/$tag.postgres.log" 2>/dev/null \
             || echo "  (could not download $f)"
         done
@@ -91,11 +91,11 @@ print(' '.join(sorted({d.datetime.utcfromtimestamp(t).strftime('%Y-%m-%d-%H') fo
       fi
       # Performance Insights (1 s wait-event load by wait event, and by SQL) and
       # Enhanced Monitoring (1 s OS disk await/util/queue) for the same window,
-      # when the account grants them (pi:Get* inline policy; velox-bench-rds-monitoring
+      # when the account grants them (pi:Get* inline policy; hardcount-bench-rds-monitoring
       # role). Both are best-effort; the sampler stands on its own without them.
       if [ -s "$dest/$tag.window" ]; then
         read -r w_start w_end < "$dest/$tag.window"; : "${w_end:=$(date -u +%s)}"
-        RID=$(aws_ rds describe-db-instances --db-instance-identifier velox-bench-db --query 'DBInstances[0].DbiResourceId' --output text)
+        RID=$(aws_ rds describe-db-instances --db-instance-identifier hardcount-bench-db --query 'DBInstances[0].DbiResourceId' --output text)
         s_iso=$(python3 -c "import datetime as d,sys; print(d.datetime.utcfromtimestamp(int(sys.argv[1])).strftime('%Y-%m-%dT%H:%M:%SZ'))" "$w_start")
         e_iso=$(python3 -c "import datetime as d,sys; print(d.datetime.utcfromtimestamp(int(sys.argv[1])).strftime('%Y-%m-%dT%H:%M:%SZ'))" "$w_end")
         # PI returns at most 600 data points per call, i.e. 10 minutes at 1 s

@@ -136,7 +136,7 @@ func lintMigrationFile(body []byte, noTx bool, known indexSet) []string {
 		case len(stmts) == 0 && sec.name == "Up":
 			out = append(out, "the Up section has no statement")
 		case len(stmts) == 0:
-			out = append(out, "the Down section has no statement. Write one that undoes the Up, so `velox migrate rollback` "+
+			out = append(out, "the Down section has no statement. Write one that undoes the Up, so `hardcount migrate rollback` "+
 				"works while you develop the file")
 		case noTx && len(problems) == 0 && len(chunks) != len(stmts):
 			out = append(out, fmt.Sprintf("the %s section: put each statement on a line of its own. goose sends a file without "+
@@ -179,7 +179,7 @@ func lintMigrationFile(body []byte, noTx bool, known indexSet) []string {
 // gooseSections splits a goose file into its Up and Down sections, reading
 // annotations as goose does (gooseAnnotation). It also checks the
 // annotations themselves: exactly one Up, then exactly one Down, and only
-// the five Velox uses. ENVSUB, for one, would make a file's SQL depend on
+// the five Hardcount uses. ENVSUB, for one, would make a file's SQL depend on
 // the environment of whoever runs the migration.
 func gooseSections(body []byte) (up, down []byte, problems []string) {
 	var upB, downB strings.Builder
@@ -215,7 +215,7 @@ func gooseSections(body []byte) (up, down []byte, problems []string) {
 				}
 			case "NO TRANSACTION":
 			default:
-				problems = append(problems, fmt.Sprintf("line %d: annotation %q is not allowed. Velox files use only Up, "+
+				problems = append(problems, fmt.Sprintf("line %d: annotation %q is not allowed. Hardcount files use only Up, "+
 					"Down, StatementBegin, StatementEnd and NO TRANSACTION; a comment must not contain \"+goose\"", n, cmd))
 			}
 			continue
@@ -502,12 +502,12 @@ func sessionSettingFindings(body []byte) ([]string, error) {
 // A migration that must use a blocking form anyway (a table known to be
 // small, say) says so with a line
 //
-//	-- velox:blocking-ddl-ok: <why this is safe>
+//	-- hardcount:blocking-ddl-ok: <why this is safe>
 //
 // The check covers each file's Up section. Migration 180 is the baseline,
 // which only ever runs on an empty database.
 
-const blockingDDLOptOut = "-- velox:blocking-ddl-ok:"
+const blockingDDLOptOut = "-- hardcount:blocking-ddl-ok:"
 
 // minOptOutReason keeps the reason a sentence, not a placeholder.
 const minOptOutReason = 15
@@ -631,7 +631,7 @@ func blockingDDLOptOutReason(body []byte) string {
 
 // nonVolatileDefaultCalls are the calls a default may make: now() and the
 // rest of its family, which Postgres computes once for the statement; SQL
-// forms written like calls; and encode(), which Velox's ID defaults wrap
+// forms written like calls; and encode(), which Hardcount's ID defaults wrap
 // around gen_random_bytes(). Any other function might be volatile.
 var nonVolatileDefaultCalls = map[string]bool{
 	"NOW": true, "CURRENT_TIMESTAMP": true, "CURRENT_TIME": true, "LOCALTIMESTAMP": true, "LOCALTIME": true,

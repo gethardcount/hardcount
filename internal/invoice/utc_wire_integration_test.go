@@ -18,7 +18,7 @@ import (
 // a timestamp that round-trips through Postgres (pgx decodes timestamptz via
 // time.Unix → time.Local) must serialize on the API wire as canonical "…Z", not a
 // host-timezone offset like "+05:30". SetupTestDB pins the process to UTC exactly
-// as cmd/velox/main does, so this observes production behavior on any host.
+// as cmd/hardcount/main does, so this observes production behavior on any host.
 //
 // The DB round-trip is essential: the in-memory store echoes whatever the caller
 // built (already UTC via clock.Now().UTC()), so only a value scanned back out of
@@ -44,7 +44,7 @@ func TestInvoice_Timestamps_SerializeAsCanonicalUTC(t *testing.T) {
 	end := time.Date(2026, 5, 31, 18, 30, 0, 0, time.UTC)
 	created, err := invStore.Create(ctx, tenantID, domain.Invoice{
 		CustomerID:         cust.ID,
-		InvoiceNumber:      "VLX-UTC-1",
+		InvoiceNumber:      "HC-UTC-1",
 		Status:             domain.InvoiceDraft,
 		PaymentStatus:      domain.PaymentPending,
 		Currency:           "USD",

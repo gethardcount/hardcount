@@ -7,7 +7,7 @@ import assert from 'node:assert/strict'
 import { returnPath } from '../src/lib/returnPath.ts'
 
 test('returns the page the user was opening', () => {
-  assert.equal(returnPath({ from: '/invoices/vlx_inv_1' }), '/invoices/vlx_inv_1')
+  assert.equal(returnPath({ from: '/invoices/hc_inv_1' }), '/invoices/hc_inv_1')
   assert.equal(returnPath({ from: '/customers?status=active' }), '/customers?status=active')
 })
 

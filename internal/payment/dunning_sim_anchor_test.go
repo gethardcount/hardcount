@@ -91,7 +91,7 @@ func TestDecline_Webhook_StartsDunningFromThePIAnchor(t *testing.T) {
 	err := s.HandleWebhook(context.Background(), "t1", domain.StripeWebhookEvent{
 		StripeEventID: "evt_late", EventType: "payment_intent.payment_failed",
 		PaymentIntentID: "pi_late", FailureMessage: "Your card was declined.",
-		Payload: rawPIEventPayload(map[string]string{"velox_anchor_at": simCharged.Format(time.RFC3339Nano)}),
+		Payload: rawPIEventPayload(map[string]string{"hardcount_anchor_at": simCharged.Format(time.RFC3339Nano)}),
 	})
 	if err != nil {
 		t.Fatalf("HandleWebhook: %v", err)
@@ -168,7 +168,7 @@ func TestDecline_SignedWebhook_StartsDunningFromThePIAnchor(t *testing.T) {
 
 	secret := "whsec_sim_anchor"
 	handler := NewHandler(s, &stubResolver{rows: map[string]tenantstripe.EndpointLookup{
-		"vlx_spc_sim": {ID: "vlx_spc_sim", TenantID: "t1", Livemode: false, WebhookSecret: secret},
+		"hc_spc_sim": {ID: "hc_spc_sim", TenantID: "t1", Livemode: false, WebhookSecret: secret},
 	}})
 	body, _ := json.Marshal(map[string]any{
 		"id": "evt_late_signed", "type": "payment_intent.payment_failed", "created": time.Now().Unix(), "livemode": false,
@@ -176,12 +176,12 @@ func TestDecline_SignedWebhook_StartsDunningFromThePIAnchor(t *testing.T) {
 			"id": "pi_late", "object": "payment_intent", "status": "requires_payment_method", "amount": 5000, "currency": "usd",
 			"last_payment_error": map[string]any{"message": "Your card was declined."},
 			"metadata": map[string]string{
-				"velox_tenant_id": "t1", "velox_invoice_id": "inv_1",
-				"velox_anchor_at": simCharged.Format(time.RFC3339Nano),
+				"hardcount_tenant_id": "t1", "hardcount_invoice_id": "inv_1",
+				"hardcount_anchor_at": simCharged.Format(time.RFC3339Nano),
 			},
 		}},
 	})
-	req := httptest.NewRequest("POST", "/stripe/vlx_spc_sim", strings.NewReader(string(body)))
+	req := httptest.NewRequest("POST", "/stripe/hc_spc_sim", strings.NewReader(string(body)))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Stripe-Signature", signStripePayload(body, secret))
 	rec := httptest.NewRecorder()
@@ -212,19 +212,19 @@ func TestSucceeded_SignedWebhook_PaidAtIsThePIAnchor(t *testing.T) {
 
 	secret := "whsec_sim_anchor"
 	handler := NewHandler(s, &stubResolver{rows: map[string]tenantstripe.EndpointLookup{
-		"vlx_spc_sim": {ID: "vlx_spc_sim", TenantID: "t1", Livemode: false, WebhookSecret: secret},
+		"hc_spc_sim": {ID: "hc_spc_sim", TenantID: "t1", Livemode: false, WebhookSecret: secret},
 	}})
 	body, _ := json.Marshal(map[string]any{
 		"id": "evt_paid_signed", "type": "payment_intent.succeeded", "created": time.Now().Unix(), "livemode": false,
 		"data": map[string]any{"object": map[string]any{
 			"id": "pi_paid", "object": "payment_intent", "status": "succeeded", "amount": 5000, "currency": "usd",
 			"metadata": map[string]string{
-				"velox_tenant_id": "t1", "velox_invoice_id": "inv_1",
-				"velox_anchor_at": simCharged.Format(time.RFC3339Nano),
+				"hardcount_tenant_id": "t1", "hardcount_invoice_id": "inv_1",
+				"hardcount_anchor_at": simCharged.Format(time.RFC3339Nano),
 			},
 		}},
 	})
-	req := httptest.NewRequest("POST", "/stripe/vlx_spc_sim", strings.NewReader(string(body)))
+	req := httptest.NewRequest("POST", "/stripe/hc_spc_sim", strings.NewReader(string(body)))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Stripe-Signature", signStripePayload(body, secret))
 	rec := httptest.NewRecorder()

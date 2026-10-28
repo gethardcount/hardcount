@@ -164,7 +164,7 @@ export default function UpdatePaymentPage() {
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="w-full max-w-md">
-        {/* Brand header — the TENANT's identity, not Velox: this is the
+        {/* Brand header — the TENANT's identity, not Hardcount: this is the
             payment-recovery funnel, and a customer arriving from a
             failed-payment email who sees an unknown brand treats the
             page as phishing (audit P13). Falls back to a neutral header
@@ -304,7 +304,7 @@ export default function UpdatePaymentPage() {
         </Card>
 
         <p className="text-xs text-muted-foreground text-center mt-6">
-          Powered by Velox Billing
+          Powered by Hardcount Billing
         </p>
       </div>
     </div>

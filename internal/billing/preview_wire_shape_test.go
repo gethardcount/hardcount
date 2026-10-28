@@ -27,8 +27,8 @@ import (
 func TestWireShape_SnakeCase(t *testing.T) {
 	t.Run("FullyPopulated", func(t *testing.T) {
 		result := PreviewResult{
-			CustomerID:         "vlx_cus_abc",
-			SubscriptionID:     "vlx_sub_xyz",
+			CustomerID:         "hc_cus_abc",
+			SubscriptionID:     "hc_sub_xyz",
 			PlanName:           "AI API Pro",
 			BillingPeriodStart: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC),
 			BillingPeriodEnd:   time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC),
@@ -44,8 +44,8 @@ func TestWireShape_SnakeCase(t *testing.T) {
 				{
 					LineType:        "usage",
 					Description:     "Tokens - input (cached)",
-					MeterID:         "vlx_mtr_tokens",
-					PriceID:         "vlx_prc_input",
+					MeterID:         "hc_mtr_tokens",
+					PriceID:         "hc_prc_input",
 					DimensionMatch:  map[string]string{"model": "gpt-4", "operation": "input", "cached": "false"},
 					Currency:        "USD",
 					Quantity:        decimal.RequireFromString("1234567.891234"),
@@ -201,8 +201,8 @@ func TestWireShape_SnakeCase(t *testing.T) {
 		// must marshal to []s, not nulls — empty-state UI iterates over
 		// the slices directly and would crash on a null.
 		result := PreviewResult{
-			CustomerID:     "vlx_cus_abc",
-			SubscriptionID: "vlx_sub_xyz",
+			CustomerID:     "hc_cus_abc",
+			SubscriptionID: "hc_sub_xyz",
 			Lines:          []PreviewLine{},
 			Totals:         []PreviewTotal{},
 			Warnings:       []string{},

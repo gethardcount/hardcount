@@ -116,7 +116,7 @@ scoped to the internal manual provider.
   *which* line absorbs the cent moved. No customer is charged a
   different total than before.
 - **Method matches every reference indirect-tax engine.** See below —
-  this is the convergent industry rule, not a Velox invention.
+  this is the convergent industry rule, not a Hardcount invention.
 - **One small helper, two call sites.** No new dependency, no schema
   change, no API change. Pure provider-internal logic.
 
@@ -191,7 +191,7 @@ the per-line split:
 The second row shows the gap is **not** bounded at 1¢: many small lines
 that each round up make line-level over-collect substantially.
 
-**Velox's manual provider hardcodes document-level** (top-down total +
+**Hardcount's manual provider hardcodes document-level** (top-down total +
 largest-remainder split — Axis 1 + Axis 2 above). That is a valid,
 legally-accepted method, and `stripe_tax` already selects the correct
 per-jurisdiction method automatically — so the hardcode only under-serves
@@ -227,13 +227,13 @@ same mode used for proration and discount distribution across the engine.
 
 **Why half-to-even, not statutory half-up.** Most indirect-tax authorities
 specify round-**half-up** per transaction (HMRC VAT Notice 700 §17.5: "0.5 of
-one penny or more … rounded up"; US SSUTA: third decimal > 4 rounds up). Velox
+one penny or more … rounded up"; US SSUTA: third decimal > 4 rounds up). Hardcount
 deliberately diverges to half-to-even, for the reason documented at
 `internal/platform/money/round.go`: *half-up introduces a systematic positive
 bias over large batches of monetary amounts — a measurable accounting drift
 auditors flag; half-to-even averages to zero bias (IEEE 754 / Python `round()`
 / .NET `decimal` / GAAP-adjacent default).* Two defensible audit positions
-exist — statutory per-transaction half-up vs anti-bias half-to-even — and Velox
+exist — statutory per-transaction half-up vs anti-bias half-to-even — and Hardcount
 takes the anti-bias one **consistently across the whole money path** (tax,
 proration, discounts). Flipping only the tax path to half-up would reintroduce
 exactly the bias `money/round.go` exists to avoid and desync tax rounding from
@@ -256,7 +256,7 @@ intentional choice with a named re-open trigger.
 The fully-verified claim is that the residual goes to the **smallest-error
 line, never a positional one** — the old positional-last-line behavior was the
 outlier. Of the surveyed engines, **Sovos** (highest-remainder, ties → first
-line) is the *verbatim* match to Velox's largest-remainder + lowest-index tie-
+line) is the *verbatim* match to Hardcount's largest-remainder + lowest-index tie-
 break; Avalara/Dynamics "minimum percentage change" is the same minimum-
 distortion *intent* that largest-remainder approximates (it minimizes absolute
 cent error, not percentage change). Convergent principle, not four-way

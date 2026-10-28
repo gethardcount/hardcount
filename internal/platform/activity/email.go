@@ -48,7 +48,7 @@ const (
 	SendFailureInvalidRecipient    = "invalid_recipient"
 )
 
-// skipReasons says why Velox did not send an email: the state its invoice
+// skipReasons says why Hardcount did not send an email: the state its invoice
 // reached while the email sat queued, as the outbox row records it
 // (email_outbox.skip_reason).
 var skipReasons = map[string]string{
@@ -82,7 +82,7 @@ type Email struct {
 	// SendFailure is a failed row's classified send error (one of the
 	// SendFailure constants), or empty.
 	SendFailure string
-	// SkipReason is the state the invoice reached that made Velox skip a
+	// SkipReason is the state the invoice reached that made Hardcount skip a
 	// queued email, or empty for a row skipped before it was recorded.
 	SkipReason string
 	// Trigger is why a payment setup email was sent (its payload's trigger).
@@ -146,7 +146,7 @@ func sendFailureProblem(failure string) string {
 	case SendFailureSMTPNotConfigured:
 		return "Email sending is not set up on this server."
 	case SendFailureRecipientSuppressed:
-		return "This address bounced or marked an earlier email as spam, so Velox no longer emails it."
+		return "This address bounced or marked an earlier email as spam, so Hardcount no longer emails it."
 	case SendFailureInvalidRecipient:
 		return "The customer's email address is not valid."
 	}
@@ -171,7 +171,7 @@ func EmailCause(trigger string) string {
 
 // emailActor names who sent an email when the email itself proves it:
 // receipts, failed-payment notices and payment-recovery emails are only ever
-// sent by Velox, and so is a setup email whose trigger is automatic. An
+// sent by Hardcount, and so is a setup email whose trigger is automatic. An
 // invoice or credit-note email, or a resend, is an operator's act whose actor
 // is not recorded with the row yet.
 func emailActor(emailType, trigger string) *Actor {

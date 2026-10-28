@@ -19,7 +19,7 @@ A finalized, unpaid invoice whose customer has no payment method gets its own at
 
 ## Context
 
-Three operator-confusion bugs surfaced during the Velox v1 dashboard
+Three operator-confusion bugs surfaced during the Hardcount v1 dashboard
 review, all rooted in the same shape: the invoice-detail surface
 was emitting *plausible-sounding* signals that didn't match what the
 billing engine actually does.
@@ -177,7 +177,7 @@ synthetic event needed.
 
 ### Migration
 
-Velox is pre-launch (single tenant, no design partners). No backfill
+Hardcount is pre-launch (single tenant, no design partners). No backfill
 needed. Existing finalized-pending invoices on the dashboard
 re-classify on the next read.
 
@@ -234,7 +234,7 @@ name the manual override path explicitly. The message:
 
 The Collect Payment button on the invoice detail page is **disabled
 with a tooltip** ("Attach a payment method first") when the customer
-has no PaymentSetup ready. Same disable-with-tooltip pattern Velox
+has no PaymentSetup ready. Same disable-with-tooltip pattern Hardcount
 uses for Finalize-on-tax-failure. The InvoiceAttention banner above
 provides the path forward so the disabled button isn't a dead-end —
 it's a visible constraint with a clear link to the fix.
@@ -262,4 +262,4 @@ it's a visible constraint with a clear link to the fix.
 - **Lago**: deadline (`due_date`) and engine-action (`next_attempt`)
   are separate fields with distinct semantics.
 
-Velox now matches this convention.
+Hardcount now matches this convention.

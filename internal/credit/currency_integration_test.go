@@ -186,12 +186,12 @@ func TestApply_DrainsOnlyTheInvoiceCurrency(t *testing.T) {
 			cust := r.customer("cus_drain_ccy")
 			usd := r.block(cust, "USD", 5000)
 			eur := r.block(cust, "EUR", 1000)
-			inv := r.invoiceIn(cust, "EUR", 3000, "VLX-DRAIN-EUR")
+			inv := r.invoiceIn(cust, "EUR", 3000, "HC-DRAIN-EUR")
 			// invoices.currency has no CHECK; only the store's insert
 			// uppercases. The apply must not rely on that.
 			r.exec(`UPDATE invoices SET currency = $1 WHERE id = $2`, c.stored, inv)
 
-			applied, err := r.svc.ApplyToInvoice(r.ctx, r.tenantID, cust, inv, 3000, "VLX-DRAIN-EUR")
+			applied, err := r.svc.ApplyToInvoice(r.ctx, r.tenantID, cust, inv, 3000, "HC-DRAIN-EUR")
 			if err != nil {
 				t.Fatalf("apply: %v", err)
 			}
@@ -224,12 +224,12 @@ func TestApply_NoCreditInTheInvoiceCurrency(t *testing.T) {
 	r := newCcyRig(t, "Drain No Currency", true)
 	cust := r.customer("cus_no_ccy")
 	r.block(cust, "USD", 5000)
-	inv := r.invoiceIn(cust, "EUR", 3000, "VLX-NO-EUR")
+	inv := r.invoiceIn(cust, "EUR", 3000, "HC-NO-EUR")
 	r.exec(`INSERT INTO checkout_sessions (id, tenant_id, invoice_id, livemode, amount_cents, currency, status)
-		VALUES ('vlx_cs_no_ccy', $1, $2, false, 3000, 'EUR', 'open')`, r.tenantID, inv)
+		VALUES ('hc_cs_no_ccy', $1, $2, false, 3000, 'EUR', 'open')`, r.tenantID, inv)
 	outboxBefore := r.scanInt(`SELECT count(*) FROM webhook_outbox WHERE tenant_id = $1`, r.tenantID)
 
-	applied, err := r.svc.ApplyToInvoice(r.ctx, r.tenantID, cust, inv, 3000, "VLX-NO-EUR")
+	applied, err := r.svc.ApplyToInvoice(r.ctx, r.tenantID, cust, inv, 3000, "HC-NO-EUR")
 	if err != nil {
 		t.Fatalf("apply: %v", err)
 	}
@@ -242,7 +242,7 @@ func TestApply_NoCreditInTheInvoiceCurrency(t *testing.T) {
 	if due, credited := r.invoiceMoney(inv); due != 3000 || credited != 0 {
 		t.Errorf("invoice due %d, credits_applied %d; want 3000 and 0", due, credited)
 	}
-	if st := r.rowCurrency(`SELECT status FROM checkout_sessions WHERE id = 'vlx_cs_no_ccy'`); st != "open" {
+	if st := r.rowCurrency(`SELECT status FROM checkout_sessions WHERE id = 'hc_cs_no_ccy'`); st != "open" {
 		t.Errorf("checkout session status %q, want open (nothing changed the amount due)", st)
 	}
 	if n := r.scanInt(`SELECT count(*) FROM webhook_outbox WHERE tenant_id = $1`, r.tenantID); n != outboxBefore {
@@ -252,8 +252,8 @@ func TestApply_NoCreditInTheInvoiceCurrency(t *testing.T) {
 		t.Errorf("USD balance = %d, want 5000", got)
 	}
 
-	control := r.invoiceIn(cust, "USD", 3000, "VLX-NO-USD")
-	if applied, err := r.svc.ApplyToInvoice(r.ctx, r.tenantID, cust, control, 3000, "VLX-NO-USD"); err != nil || applied != 3000 {
+	control := r.invoiceIn(cust, "USD", 3000, "HC-NO-USD")
+	if applied, err := r.svc.ApplyToInvoice(r.ctx, r.tenantID, cust, control, 3000, "HC-NO-USD"); err != nil || applied != 3000 {
 		t.Errorf("control USD apply = %d, %v; want 3000", applied, err)
 	}
 }
@@ -268,8 +268,8 @@ func TestApply_CurrencyCollisions(t *testing.T) {
 		cust := r.customer("cus_collide_two")
 		usd := r.block(cust, "USD", 5000)
 		eur := r.block(cust, "EUR", 4000)
-		invUSD := r.invoiceIn(cust, "USD", 3000, "VLX-COL-USD")
-		invEUR := r.invoiceIn(cust, "EUR", 3000, "VLX-COL-EUR")
+		invUSD := r.invoiceIn(cust, "USD", 3000, "HC-COL-USD")
+		invEUR := r.invoiceIn(cust, "EUR", 3000, "HC-COL-EUR")
 
 		var wg sync.WaitGroup
 		start := make(chan struct{})
@@ -308,7 +308,7 @@ func TestApply_CurrencyCollisions(t *testing.T) {
 		cust := r.customer("cus_collide_grant")
 		r.block(cust, "USD", 9000)
 		r.block(cust, "EUR", 2000)
-		inv := r.invoiceIn(cust, "EUR", 1500, "VLX-COL-GA")
+		inv := r.invoiceIn(cust, "EUR", 1500, "HC-COL-GA")
 
 		var wg sync.WaitGroup
 		start := make(chan struct{})
@@ -351,7 +351,7 @@ func TestApply_CurrencyCollisions(t *testing.T) {
 		r := newCcyRig(t, "Collide Double Apply", false)
 		cust := r.customer("cus_collide_double")
 		r.block(cust, "EUR", 5000)
-		inv := r.invoiceIn(cust, "EUR", 1500, "VLX-COL-DBL")
+		inv := r.invoiceIn(cust, "EUR", 1500, "HC-COL-DBL")
 		first, err := r.svc.ApplyToInvoice(r.ctx, r.tenantID, cust, inv, 1500)
 		if err != nil || first != 1500 {
 			t.Fatalf("first apply = %d, %v; want 1500", first, err)
@@ -388,7 +388,7 @@ func TestBalanceCrossings_PerCurrency(t *testing.T) {
 		cust := r.customer("cus_cross_depleted")
 		r.block(cust, "USD", 1000)
 		r.block(cust, "EUR", 500)
-		inv := r.invoiceIn(cust, "EUR", 500, "VLX-CROSS-EUR")
+		inv := r.invoiceIn(cust, "EUR", 500, "HC-CROSS-EUR")
 		if _, err := r.svc.ApplyToInvoice(r.ctx, r.tenantID, cust, inv, 500); err != nil {
 			t.Fatalf("apply: %v", err)
 		}
@@ -413,7 +413,7 @@ func TestBalanceCrossings_PerCurrency(t *testing.T) {
 		cust := r.customer("cus_cross_low")
 		r.block(cust, "USD", 1000)
 		r.block(cust, "EUR", 900)
-		inv := r.invoiceIn(cust, "EUR", 200, "VLX-LOW-EUR")
+		inv := r.invoiceIn(cust, "EUR", 200, "HC-LOW-EUR")
 		if _, err := r.svc.ApplyToInvoice(r.ctx, r.tenantID, cust, inv, 200); err != nil {
 			t.Fatalf("apply: %v", err)
 		}
@@ -457,7 +457,7 @@ func TestCurrency_DerivedRowsInherit(t *testing.T) {
 		cust := r.customer("cus_inherit_reversal")
 		r.block(cust, "USD", 4000)
 		r.block(cust, "EUR", 2000)
-		inv := r.invoiceIn(cust, "EUR", 1500, "VLX-REV-EUR")
+		inv := r.invoiceIn(cust, "EUR", 1500, "HC-REV-EUR")
 		if _, err := r.svc.ApplyToInvoice(r.ctx, r.tenantID, cust, inv, 1500); err != nil {
 			t.Fatalf("apply: %v", err)
 		}
@@ -474,7 +474,7 @@ func TestCurrency_DerivedRowsInherit(t *testing.T) {
 		r := newCcyRig(t, "Inherit Reversal Mixed", false)
 		cust := r.customer("cus_inherit_mixed")
 		r.block(cust, "EUR", 2000)
-		inv := r.invoiceIn(cust, "EUR", 1500, "VLX-REV-MIX")
+		inv := r.invoiceIn(cust, "EUR", 1500, "HC-REV-MIX")
 		if _, err := r.svc.ApplyToInvoice(r.ctx, r.tenantID, cust, inv, 1500); err != nil {
 			t.Fatalf("apply: %v", err)
 		}
@@ -485,7 +485,7 @@ func TestCurrency_DerivedRowsInherit(t *testing.T) {
 			t.Fatalf("begin: %v", err)
 		}
 		if _, err := tx.ExecContext(r.ctx, `INSERT INTO customer_credit_ledger (id, tenant_id, customer_id, entry_type, currency, amount_cents, balance_after, description, invoice_id)
-			VALUES ('vlx_ccl_mixed_usd', $1, $2, 'usage', 'USD', -100, -100, 'drift', $3)`, r.tenantID, cust, inv); err != nil {
+			VALUES ('hc_ccl_mixed_usd', $1, $2, 'usage', 'USD', -100, -100, 'drift', $3)`, r.tenantID, cust, inv); err != nil {
 			t.Fatalf("seed USD usage row: %v", err)
 		}
 		if err := tx.Commit(); err != nil {
@@ -546,7 +546,7 @@ func TestCurrency_EveryWriterRequiresOne(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	_, err = r.svc.GrantForCreditNoteTx(r.ctx, tx, r.tenantID, "vlx_cn_writers", credit.GrantInput{
+	_, err = r.svc.GrantForCreditNoteTx(r.ctx, tx, r.tenantID, "hc_cn_writers", credit.GrantInput{
 		CustomerID: cust, AmountCents: 100, Description: "credit note",
 	})
 	postgres.Rollback(tx)
@@ -554,12 +554,12 @@ func TestCurrency_EveryWriterRequiresOne(t *testing.T) {
 		t.Error("credit-note grant with no currency: accepted, want an error")
 	}
 
-	inv := r.invoiceIn(cust, "EUR", 1000, "VLX-WRITERS-COMMIT")
+	inv := r.invoiceIn(cust, "EUR", 1000, "HC-WRITERS-COMMIT")
 	tx, err = r.db.BeginTx(r.ctx, postgres.TxTenant, r.tenantID)
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	_, err = r.svc.GrantCommitForInvoiceTx(r.ctx, tx, r.tenantID, cust, inv, "VLX-WRITERS-COMMIT", "", 1000, nil)
+	_, err = r.svc.GrantCommitForInvoiceTx(r.ctx, tx, r.tenantID, cust, inv, "HC-WRITERS-COMMIT", "", 1000, nil)
 	postgres.Rollback(tx)
 	if err == nil {
 		t.Error("commit grant with no currency: accepted, want an error")
@@ -575,7 +575,7 @@ func TestCurrency_EveryWriterRequiresOne(t *testing.T) {
 	cn := func(currency string) error {
 		_, err := r.store.AppendEntry(r.ctx, r.tenantID, domain.CreditLedgerEntry{
 			CustomerID: cust, EntryType: domain.CreditGrant, Currency: currency, AmountCents: 5000,
-			Description: "credit note CN-CCY", SourceCreditNoteID: "vlx_cn_same_ccy",
+			Description: "credit note CN-CCY", SourceCreditNoteID: "hc_cn_same_ccy",
 		})
 		return err
 	}

@@ -58,7 +58,7 @@ func (s *PostgresStore) CreateMeterTx(ctx context.Context, tx *sql.Tx, tenantID 
 }
 
 func (s *PostgresStore) createMeterTx(ctx context.Context, tx *sql.Tx, tenantID string, m domain.Meter) (domain.Meter, error) {
-	id := postgres.NewID("vlx_mtr")
+	id := postgres.NewID("hc_mtr")
 	now := time.Now().UTC()
 	created, err := scanMeter(tx.QueryRowContext(ctx, `
 		INSERT INTO meters (id, tenant_id, event_name, name, unit, aggregation, created_at, updated_at)
@@ -288,7 +288,7 @@ func (s *PostgresStore) CreatePlanTx(ctx context.Context, tx *sql.Tx, tenantID s
 }
 
 func (s *PostgresStore) createPlanTx(ctx context.Context, tx *sql.Tx, tenantID string, p domain.Plan) (domain.Plan, error) {
-	id := postgres.NewID("vlx_pln")
+	id := postgres.NewID("hc_pln")
 	now := time.Now().UTC()
 	if p.BaseBillTiming == "" {
 		p.BaseBillTiming = domain.BillInArrears

@@ -39,16 +39,16 @@ func TestAuditReadPath_PredicatesPagingAndIndex(t *testing.T) {
 	// mode plane is observable, not masked by identical vocabulary); 1 live
 	// row for tenant2 with a TENANT-DISTINCT action.
 	for _, action := range []string{"invoice.finalize", "invoice.void", "invoice.send"} {
-		if err := logger.Log(ctxLive, tenant1, action, "invoice", "vlx_inv_t1", "", nil); err != nil {
+		if err := logger.Log(ctxLive, tenant1, action, "invoice", "hc_inv_t1", "", nil); err != nil {
 			t.Fatalf("seed t1 live: %v", err)
 		}
 		// Distinct created_at per row so the order is deterministic.
 		time.Sleep(5 * time.Millisecond)
 	}
-	if err := logger.Log(ctxTest, tenant1, "testmode.probe", "probe", "vlx_prb_1", "", nil); err != nil {
+	if err := logger.Log(ctxTest, tenant1, "testmode.probe", "probe", "hc_prb_1", "", nil); err != nil {
 		t.Fatalf("seed t1 test-mode: %v", err)
 	}
-	if err := logger.Log(ctxLive, tenant2, "customer.delete", "customer", "vlx_cus_t2", "", nil); err != nil {
+	if err := logger.Log(ctxLive, tenant2, "customer.delete", "customer", "hc_cus_t2", "", nil); err != nil {
 		t.Fatalf("seed t2 live: %v", err)
 	}
 

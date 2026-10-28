@@ -38,7 +38,7 @@ vi.mock('@/hooks/useCustomerUsageWindows', () => ({
 
 test('empty margin window says there is no usage, without setup advice', async () => {
   const { MarginCard } = await import('../src/components/MarginCard.tsx')
-  const html = renderToStaticMarkup(createElement(MarginCard, { customerId: 'vlx_cus_test' }))
+  const html = renderToStaticMarkup(createElement(MarginCard, { customerId: 'hc_cus_test' }))
 
   assert.match(html, /No usage in this window yet\./)
   assert.doesNotMatch(html, /provider rates/i)

@@ -1,17 +1,17 @@
 # Stripe end-to-end test runbook
 
-A hand check that Velox's Stripe integration works against a real Stripe
+A hand check that Hardcount's Stripe integration works against a real Stripe
 test account. You connect the account, save a card, charge it, receive
 Stripe's webhooks, retry a declined card, refund, and disconnect.
 
 Run it:
 
 - before each [design-partner](../glossary.md) cutover, which brings an early
-  pilot customer live on Velox;
+  pilot customer live on Hardcount;
 - after any change touching `internal/payment/`, `internal/tenantstripe/` or
   `internal/dunning/`.
 
-**Audience:** Velox maintainer, design-partner technical contact during
+**Audience:** Hardcount maintainer, design-partner technical contact during
 sandbox cutover.
 
 **Never use live keys for this runbook.**
@@ -24,7 +24,7 @@ sandbox cutover.
   - The secret key authenticates server-side API calls.
   - The publishable key is its browser-safe counterpart.
   - Once entered, the keys never leave the dashboard's connection form.
-    Velox encrypts them at rest with the same AES-256-GCM key used for
+    Hardcount encrypts them at rest with the same AES-256-GCM key used for
     customer email.
 - **The Stripe CLI** (`brew install stripe/stripe-cli/stripe`), and
   `$STRIPE_SK` set to your Stripe test secret key. Step 1b uses them.
@@ -34,28 +34,28 @@ sandbox cutover.
   [Quick start](../../README.md#quick-start).
 
 To test a published release instead, start the Compose stack from
-[`deploy/compose`](../../deploy/compose/README.md) with `VELOX_IMAGE` and
-`VELOX_DASHBOARD_IMAGE` set to the release tag. Use its address in place of
+[`deploy/compose`](../../deploy/compose/README.md) with `HARDCOUNT_IMAGE` and
+`HARDCOUNT_DASHBOARD_IMAGE` set to the release tag. Use its address in place of
 `http://localhost:8080` and `http://localhost:5173`.
 
-A secret API key (`Authorization: Bearer vlx_secret_test_…`) works in place
+A secret API key (`Authorization: Bearer hc_secret_test_…`) works in place
 of the cookie in every call below.
 
 ---
 
-## Step 0 — Stand up Velox locally
+## Step 0 — Stand up Hardcount locally
 
 1. Start the services, bootstrap on first boot (it creates the owner and the
    tenant), and start the API:
 
    ```bash
    docker compose up -d postgres redis mailpit
-   DATABASE_URL="postgres://velox:velox@localhost:5432/velox?sslmode=disable" \
+   DATABASE_URL="postgres://hardcount:hardcount@localhost:5432/hardcount?sslmode=disable" \
      RUN_MIGRATIONS_ON_BOOT=true \
-     go run ./cmd/velox-bootstrap   # only on first boot — creates owner + tenant
-   DATABASE_URL="postgres://velox:velox@localhost:5432/velox?sslmode=disable" \
+     go run ./cmd/hardcount-bootstrap   # only on first boot — creates owner + tenant
+   DATABASE_URL="postgres://hardcount:hardcount@localhost:5432/hardcount?sslmode=disable" \
      RUN_MIGRATIONS_ON_BOOT=true \
-     go run ./cmd/velox &
+     go run ./cmd/hardcount &
    ```
 
    Then run `curl -sf http://localhost:8080/health`.
@@ -67,11 +67,11 @@ of the cookie in every call below.
    ```bash
    curl -s -X POST http://localhost:8080/v1/auth/login \
      -H 'Content-Type: application/json' \
-     -c /tmp/velox-cookies.txt \
+     -c /tmp/hardcount-cookies.txt \
      -d '{"email":"<OWNER_EMAIL>","password":"<OWNER_PASSWORD>"}'
    ```
 
-   **You see:** `/tmp/velox-cookies.txt` holds a `velox_session` cookie.
+   **You see:** `/tmp/hardcount-cookies.txt` holds a `hardcount_session` cookie.
 
 ---
 
@@ -92,7 +92,7 @@ umask 077 && cat > /tmp/stripe-connect.json <<'EOF'
 }
 EOF
 curl -s -X POST http://localhost:8080/v1/settings/stripe \
-  -b /tmp/velox-cookies.txt \
+  -b /tmp/hardcount-cookies.txt \
   -H 'Content-Type: application/json' \
   -d @/tmp/stripe-connect.json
 rm -f /tmp/stripe-connect.json
@@ -102,8 +102,8 @@ rm -f /tmp/stripe-connect.json
 
 ```json
 {
-  "id": "vlx_spc_...",
-  "tenant_id": "vlx_ten_...",
+  "id": "hc_spc_...",
+  "tenant_id": "hc_ten_...",
   "livemode": false,
   "stripe_account_id": "acct_...",
   "stripe_account_name": "<your account display name>",
@@ -113,7 +113,7 @@ rm -f /tmp/stripe-connect.json
 }
 ```
 
-**What this proves:** Velox called `GET /v1/account` with the supplied secret
+**What this proves:** Hardcount called `GET /v1/account` with the supplied secret
 key, got an answer, and stored the encrypted keys. A `verified_at` timestamp
 means the key shape and scope are valid and Stripe acknowledged the request.
 
@@ -125,18 +125,18 @@ rejected the verify call. Common causes:
 
 > **Code note:** the verify call is `internal/tenantstripe/service.go` `Connect()` → `sc.V1Accounts.Retrieve`.
 
-### 1b. Forward Stripe events to Velox
+### 1b. Forward Stripe events to Hardcount
 
-Do this before you save a card in step 2b. A saved card reaches Velox through
+Do this before you save a card in step 2b. A saved card reaches Hardcount through
 the `setup_intent.succeeded` webhook. Without the webhook secret in place,
 Stripe's page says the card is saved and the customer still has no payment
-method in Velox.
+method in Hardcount.
 
-Velox verifies Stripe's webhook signatures with a **per-tenant** secret.
+Hardcount verifies Stripe's webhook signatures with a **per-tenant** secret.
 There is no operator-level `STRIPE_WEBHOOK_SECRET` env var and no
 platform-level webhook URL. Each tenant's endpoint is
 `/v1/webhooks/stripe/{endpoint_id}`, where `<endpoint_id>` is the `id`
-from step 1a (`vlx_spc_…`, the tenant's `stripe_provider_credentials.id`).
+from step 1a (`hc_spc_…`, the tenant's `stripe_provider_credentials.id`).
 
 1. Forward events to your local API, without exposing port 8080 to the
    public internet:
@@ -147,8 +147,8 @@ from step 1a (`vlx_spc_…`, the tenant's `stripe_provider_credentials.id`).
    ```
 
    **You see:** the CLI prints a temporary webhook secret (`whsec_…`).
-2. Paste the secret into the Velox dashboard under **Settings → Payments**,
-   step 2 "Deliver Stripe events to Velox" (or send it with
+2. Paste the secret into the Hardcount dashboard under **Settings → Payments**,
+   step 2 "Deliver Stripe events to Hardcount" (or send it with
    `PATCH /v1/settings/stripe/test/webhook`).
    **You see:** all later test-mode events flow through the CLI tunnel.
 
@@ -158,31 +158,31 @@ from step 1a (`vlx_spc_…`, the tenant's `stripe_provider_credentials.id`).
 
 A [PaymentIntent](../glossary.md) is Stripe's object tracking the collection
 of one payment. PaymentIntent flows require a saved payment method. The
-Velox dashboard saves one through Stripe's Setup Intent flow, which saves a
+Hardcount dashboard saves one through Stripe's Setup Intent flow, which saves a
 card for later charges without charging it now.
 
 Customer creation (2a) needs no browser. Attaching the card (2b) goes through
 the dashboard and Stripe's hosted page.
 
-### 2a. Create the Velox customer
+### 2a. Create the Hardcount customer
 
 ```bash
 curl -s -X POST http://localhost:8080/v1/customers \
-  -b /tmp/velox-cookies.txt \
+  -b /tmp/hardcount-cookies.txt \
   -H 'Content-Type: application/json' \
   -d '{
     "display_name": "Stripe E2E Smoke",
-    "email": "e2e-smoke@velox.test",
+    "email": "e2e-smoke@hardcount.test",
     "external_id": "stripe-e2e-smoke-1"
   }'
 ```
 
-**You see:** the new customer, with its `vlx_cus_...` ID. Keep the ID for
+**You see:** the new customer, with its `hc_cus_...` ID. Keep the ID for
 the next steps.
 
 ### 2b. Attach a Stripe test card through the dashboard
 
-1. Open `http://localhost:5173/customers/<vlx_cus_...>`. In the **Payment
+1. Open `http://localhost:5173/customers/<hc_cus_...>`. In the **Payment
    methods** panel, click **Add payment method**, then **Copy link**.
 2. Open the link in a browser.
    **You see:** Stripe's hosted Checkout page in setup mode.
@@ -196,7 +196,7 @@ the next steps.
    **You see:** the **Payment methods** panel lists **Visa ····4242** with
    its expiry date.
 
-Velox stores the resulting `pm_*` payment method ID as a row in the
+Hardcount stores the resulting `pm_*` payment method ID as a row in the
 `payment_methods` table for that customer. That table is the canonical store
 for a customer's multiple payment methods.
 
@@ -210,7 +210,7 @@ for a customer's multiple payment methods.
 ### 2c. Failed-card variant (run after the happy path)
 
 1. Repeat 2a with a new `external_id` and email, for example
-   `stripe-e2e-smoke-2` and `e2e-decline@velox.test`. A customer's
+   `stripe-e2e-smoke-2` and `e2e-decline@hardcount.test`. A customer's
    `external_id` is unique per account and mode.
 2. Repeat 2b for that customer with `4000 0000 0000 0341`.
    **You see:** the card is listed, like `4242` was.
@@ -227,7 +227,7 @@ failed payment.
 
 Bootstrap seeds no plans, so create one first. Use the dashboard's Pricing
 page, or instantiate a [recipe](../glossary.md): a pre-built pricing template
-shipped with Velox.
+shipped with Hardcount.
 
 1. Create the plan at **2900 cents/month**, because the amounts in steps 4
    and 7 assume it. Its base fee bills **in advance**
@@ -237,7 +237,7 @@ shipped with Velox.
 
    ```bash
    curl -s -X POST http://localhost:8080/v1/plans \
-     -b /tmp/velox-cookies.txt \
+     -b /tmp/hardcount-cookies.txt \
      -H 'Content-Type: application/json' \
      -d '{"code":"flat-29","name":"Flat 29","currency":"USD","billing_interval":"monthly",
           "base_amount_cents":2900,"base_bill_timing":"in_advance"}'
@@ -246,22 +246,22 @@ shipped with Velox.
 2. Subscribe the customer from 2a to it:
 
    ```bash
-   PLAN_ID=$(curl -s http://localhost:8080/v1/plans -b /tmp/velox-cookies.txt \
+   PLAN_ID=$(curl -s http://localhost:8080/v1/plans -b /tmp/hardcount-cookies.txt \
      | jq -r '.data[0].id')
 
    curl -s -X POST http://localhost:8080/v1/subscriptions \
-     -b /tmp/velox-cookies.txt \
+     -b /tmp/hardcount-cookies.txt \
      -H 'Content-Type: application/json' \
      -d "{
        \"code\": \"stripe-e2e-smoke\",
        \"display_name\": \"Stripe E2E Smoke\",
-       \"customer_id\": \"<vlx_cus_...>\",
+       \"customer_id\": \"<hc_cus_...>\",
        \"items\": [{\"plan_id\": \"$PLAN_ID\", \"quantity\": 1}],
        \"billing_time\": \"anniversary\"
      }"
    ```
 
-   **You see:** a `vlx_sub_...` with `status=active`, and current period
+   **You see:** an `hc_sub_...` with `status=active`, and current period
    bounds set to monthly (anchor: now).
 
 ---
@@ -272,8 +272,8 @@ The flat-fee charge for the first cycle fires the moment the subscription
 activates.
 
 ```bash
-curl -s "http://localhost:8080/v1/invoices?customer_id=<vlx_cus_...>" \
-  -b /tmp/velox-cookies.txt | jq '.data[0]'
+curl -s "http://localhost:8080/v1/invoices?customer_id=<hc_cus_...>" \
+  -b /tmp/hardcount-cookies.txt | jq '.data[0]'
 ```
 
 **You see:** an invoice with `total_amount_cents=2900` and
@@ -284,7 +284,7 @@ also shows on the Stripe dashboard under **Test data → Payments**.
 
 ---
 
-## Step 5 — Check webhook delivery from Stripe to Velox
+## Step 5 — Check webhook delivery from Stripe to Hardcount
 
 Verified events are stored in `stripe_webhook_events`, keyed on
 `(tenant_id, livemode, stripe_event_id)` for idempotency. The key is a UNIQUE
@@ -302,7 +302,7 @@ answered 200 in the `stripe listen` window, and stored as a row in
 
 The dashboard's `/webhook_events` page does not show this inbound
 Stripe-ingestion table. It shows **outbound** webhook deliveries: events
-Velox sends to your configured endpoints.
+Hardcount sends to your configured endpoints.
 
 ---
 
@@ -315,8 +315,8 @@ Velox sends to your configured endpoints.
 2. List the dunning runs for that invoice:
 
    ```bash
-   curl -s "http://localhost:8080/v1/dunning/runs?invoice_id=<vlx_inv_...>" \
-     -b /tmp/velox-cookies.txt | jq
+   curl -s "http://localhost:8080/v1/dunning/runs?invoice_id=<hc_inv_...>" \
+     -b /tmp/hardcount-cookies.txt | jq
    ```
 
    **You see:** a [dunning run](../glossary.md), on the "Default retries"
@@ -350,10 +350,10 @@ an invoice.
 
 ```bash
 curl -s -X POST http://localhost:8080/v1/credit-notes \
-  -b /tmp/velox-cookies.txt \
+  -b /tmp/hardcount-cookies.txt \
   -H 'Content-Type: application/json' \
   -d '{
-    "invoice_id": "<vlx_inv_...>",
+    "invoice_id": "<hc_inv_...>",
     "reason": "duplicate",
     "lines": [
       {"description": "Refund - full invoice amount", "quantity": 1, "unit_amount_cents": 2900}
@@ -366,14 +366,14 @@ curl -s -X POST http://localhost:8080/v1/credit-notes \
 **You see:**
 
 - The credit note, with `status=issued`.
-- Because `refund_amount_cents` is set, Velox calls `refunds.Create` against
+- Because `refund_amount_cents` is set, Hardcount calls `refunds.Create` against
   Stripe, and the refund lands on the same charge.
 - A `charge.refunded` webhook flows back. The credit note's `refund_status`
   flips to `succeeded`, and `stripe_refund_id` is populated.
 
 A credit note has three allocation fields: `refund_amount_cents`,
 `credit_amount_cents` and `out_of_band_amount_cents`. If you leave all three
-at zero on a paid invoice, Velox defaults to `credit_amount = total`. That is
+at zero on a paid invoice, Hardcount defaults to `credit_amount = total`. That is
 a customer-balance credit with **no** Stripe refund.
 
 ---
@@ -382,7 +382,7 @@ a customer-balance credit with **no** Stripe refund.
 
 ```bash
 curl -s -X DELETE http://localhost:8080/v1/settings/stripe/test \
-  -b /tmp/velox-cookies.txt
+  -b /tmp/hardcount-cookies.txt
 ```
 
 **You see:** 204. The credentials row is deleted, and the encrypted blobs are
@@ -403,30 +403,30 @@ A passing run reports:
 - Refund webhook landed within 30 seconds (step 7)
 
 Anything that does not match a **You see:** line above is a bug. File it
-under the Velox repo with the request ID Velox returns in the error envelope:
+under the Hardcount repo with the request ID Hardcount returns in the error envelope:
 `{"error": {"type", "code", "message", "request_id"}}`. The envelope is
 defined in `internal/api/respond/respond.go`. The request ID is also echoed
-in the `Velox-Request-Id` response header.
+in the `Hardcount-Request-Id` response header.
 
 ---
 
 ## What this runbook does NOT cover
 
-- **Stripe Connect / Express accounts:** Velox is a self-host product, not a
+- **Stripe Connect / Express accounts:** Hardcount is a self-host product, not a
   marketplace. Connect onboarding is out of scope.
 - **Live mode:** explicitly forbidden in this runbook. Live testing belongs in
   the design-partner cutover playbook, maintained in the internal `velox-ops`
   repo.
 - **Tax:** Stripe Tax integration is exercised separately. See
   [Tax calculation](../ops/tax-calculation.md).
-- **Payouts / balance:** Velox does not surface Stripe payouts. The operator's
+- **Payouts / balance:** Hardcount does not surface Stripe payouts. The operator's
   Stripe dashboard is canonical for that.
 
 ---
 
 ## Last verified
 
-| Date | Velox SHA | Stripe API version | Verified by | Result |
+| Date | Hardcount SHA | Stripe API version | Verified by | Result |
 |---|---|---|---|---|
 | 2026-04-27 | `f1b2301` | `2025-08-27.basil` (default) | maintainer | Step 1 (connect + verify) ✅; steps 2–8 documented as runbook, full flow validated during sandbox cutover for first design partner |
 | 2026-10-13 | `v0.6.1` (published images, Compose) | `2026-03-25.dahlia` (Stripe CLI) | maintainer | Steps 1 to 5, 7 and 8 passed: account verified; cards `4242` and `0341` attached through Checkout; a 2,900 cent charge succeeded and a decline opened a dunning run, both matching Stripe's own PaymentIntent records; full refund through a credit note matched Stripe's refund; 23 webhook events, all answered 200. Not run: the dunning retry and recovery in step 6 (the first retry is three days out). Found and fixed in the same change: card setup after disconnect answered 500. |

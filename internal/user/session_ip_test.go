@@ -31,7 +31,7 @@ func TestLogin_SessionIPIsTheTrustedClientIP(t *testing.T) {
 		name       string
 		trustProxy string // the TRUST_PROXY value
 		remoteAddr string // the TCP peer
-		xff        string // X-Forwarded-For as it reaches Velox
+		xff        string // X-Forwarded-For as it reaches Hardcount
 		want       string
 	}{
 		{"no proxy trusted: a forged header is ignored", "", "203.0.113.9:5555", "6.6.6.6", "203.0.113.9"},

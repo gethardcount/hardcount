@@ -26,8 +26,8 @@ func TestListAndGet_CarryTheCustomersTestClock(t *testing.T) {
 	store := invoice.NewPostgresStore(db)
 	ctx := postgres.WithLivemode(context.Background(), false)
 
-	const tenantID = "vlx_ten_inv_clk_id"
-	const clockID = "vlx_tclk_inv_clk_id"
+	const tenantID = "hc_ten_inv_clk_id"
+	const clockID = "hc_tclk_inv_clk_id"
 
 	tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {

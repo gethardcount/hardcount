@@ -11,15 +11,15 @@ Superseded by [ADR-011](./011-email-password-auth-and-clean-api-keys.md) — the
 
 ## Summary
 
-Superseded by [ADR-011](011-email-password-auth-and-clean-api-keys.md). This ADR kept the API key as the credential but moved the browser to a short-lived httpOnly `velox_session` cookie, minted by `POST /v1/auth/exchange`. That way XSS could not read the key, and logout could revoke the session on the server. ADR-011 kept the cookie and the `internal/session` package, but binds sessions to `users.id` and mints them at `POST /v1/auth/login` after an email and password check. The XSS reasoning below still applies.
+Superseded by [ADR-011](011-email-password-auth-and-clean-api-keys.md). This ADR kept the API key as the credential but moved the browser to a short-lived httpOnly `hardcount_session` cookie, minted by `POST /v1/auth/exchange`. That way XSS could not read the key, and logout could revoke the session on the server. ADR-011 kept the cookie and the `internal/session` package, but binds sessions to `users.id` and mints them at `POST /v1/auth/login` after an email and password check. The XSS reasoning below still applies.
 
 ## Context
 
-ADR-007 reverted the dashboard from email+password sessions to bearer-key auth: the operator pastes a `vlx_secret_…` key into `/login`, the browser stores it in `localStorage`, and every request rides `Authorization: Bearer <key>`. That correctly aligned with `project_auth_decision.md` ("API keys custom-built; user auth via WorkOS/Clerk later") and removed ~2k LOC of password / session / invitation surface.
+ADR-007 reverted the dashboard from email+password sessions to bearer-key auth: the operator pastes an `hc_secret_…` key into `/login`, the browser stores it in `localStorage`, and every request rides `Authorization: Bearer <key>`. That correctly aligned with `project_auth_decision.md` ("API keys custom-built; user auth via WorkOS/Clerk later") and removed ~2k LOC of password / session / invitation surface.
 
 A security review of the result surfaced concerns the bare-Bearer-localStorage shape could not answer:
 
-- **XSS reads the credential.** `localStorage.getItem('velox_api_key')` is JS-reachable. Any successful cross-site scripting — malicious npm dependency, browser extension, future template injection — exfiltrates a credential that grants full tenant powers.
+- **XSS reads the credential.** `localStorage.getItem('hardcount_api_key')` is JS-reachable. Any successful cross-site scripting — malicious npm dependency, browser extension, future template injection — exfiltrates a credential that grants full tenant powers.
 - **No server-side revocation.** Logout only clears the browser; the key itself stays valid for anyone who has it. Compare to a session row whose `revoked_at` makes the credential unusable for everyone.
 - **No automatic expiry.** Browser sessions on the previous email+password design expired in 30 days; bearer keys live until manually revoked.
 - **Persistence.** `localStorage` survives browser close / restart. A shared machine retains the credential indefinitely.
@@ -35,7 +35,7 @@ Reintroduce server-side session storage scoped to API keys (not users):
 
 - New table `dashboard_sessions` — migration `0066_dashboard_sessions.up.sql`. Schema mirrors the legacy `sessions` table from migration `0034` minus the `user_id` FK; rows reference `api_keys` instead.
 - New package `internal/session/` — `Service.Issue / Resolve / Revoke / RevokeAllForKey`, postgres-backed `Store`, `MiddlewareOrAPIKey` that accepts the cookie OR a Bearer header (cookie wins on conflict), `Handler` for `POST /v1/auth/exchange` and `POST /v1/auth/logout`.
-- Cookie attributes: `velox_session`, `HttpOnly`, `SameSite=Lax`, `Path=/`, `Secure` in staging/production. 7-day TTL (vs the 30-day on the deleted email+password design — shorter because the underlying credential is durable, the session is just the browser-side artefact of "I pasted that key recently").
+- Cookie attributes: `hardcount_session`, `HttpOnly`, `SameSite=Lax`, `Path=/`, `Secure` in staging/production. 7-day TTL (vs the 30-day on the deleted email+password design — shorter because the underlying credential is durable, the session is just the browser-side artefact of "I pasted that key recently").
 - `POST /v1/auth/exchange` validates the pasted key via `auth.Service.ValidateKey`, mints a session row, and sets the cookie. Response body returns `{tenant_id, key_id, key_type, livemode, expires_at}` so the dashboard can populate AuthContext without a follow-up `/v1/whoami` round-trip.
 - `POST /v1/auth/logout` revokes the session row and clears the cookie. Idempotent.
 - `/v1/*` middleware switches from `auth.Middleware` (bearer-only) to `session.MiddlewareOrAPIKey` (cookie OR bearer). Cookie takes precedence so a stale Bearer header can't bypass session revocation.

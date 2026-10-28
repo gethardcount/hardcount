@@ -32,7 +32,7 @@ INSERT INTO invoices (id, tenant_id, customer_id, invoice_number, status, paymen
 // Mutation: an up that keeps flat in the mode CHECK, or a down that does
 // not turn per_unit back into flat, turns this red.
 func TestPriceShapes_UpAndDown(t *testing.T) {
-	dsn, db := scratchDB(t, "velox_test_price_shapes")
+	dsn, db := scratchDB(t, "hardcount_test_price_shapes")
 	ctx := context.Background()
 	// Up to 00211: 00212 drops the rating rule table this test reads.
 	if err := up(ctx, dsn, filesBefore(t, planPricesVersion)); err != nil {
@@ -143,7 +143,7 @@ INSERT INTO invoice_line_items (id, tenant_id, invoice_id, line_type, descriptio
 //
 // Mutation: drop the guard and the up succeeds, red.
 func TestPriceShapes_RefusesRowsItDoesNotConvert(t *testing.T) {
-	dsn, db := scratchDB(t, "velox_test_price_shapes_refuse")
+	dsn, db := scratchDB(t, "hardcount_test_price_shapes_refuse")
 	ctx := context.Background()
 	if err := up(ctx, dsn, filesBefore(t, priceShapesVersion)); err != nil {
 		t.Fatalf("up to before %d: %v", priceShapesVersion, err)

@@ -103,7 +103,7 @@ var rateDoors = []rateDoor{
 			store := newMemStore()
 			_, price := seedPlanWithPrice(store, "tnt_test")
 			h := NewHandler(NewService(store))
-			rr := doJSON(t, h.createOverride, http.MethodPost, "/", `{"customer_id":"vlx_cus_1","price_id":"`+price.ID+`",`+frag+`}`, nil)
+			rr := doJSON(t, h.createOverride, http.MethodPost, "/", `{"customer_id":"hc_cus_1","price_id":"`+price.ID+`",`+frag+`}`, nil)
 			for _, o := range store.overrides {
 				return rr, func(f rateField) decimal.Decimal {
 					return f.pick(rates{o.UnitAmountCents, o.Tiers, o.PackageAmountCents})

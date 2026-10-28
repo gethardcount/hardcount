@@ -22,7 +22,7 @@ import (
 // choke-point behavior).
 func seedOpenClaim(t *testing.T, db *postgres.DB, ctx context.Context, tenantID, invoiceID string) string {
 	t.Helper()
-	id := postgres.NewID("vlx_cks")
+	id := postgres.NewID("hc_cks")
 	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		t.Fatalf("begin: %v", err)

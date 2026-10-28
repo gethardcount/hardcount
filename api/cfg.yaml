@@ -1,4 +1,4 @@
-# oapi-codegen configuration for the Velox HTTP API.
+# oapi-codegen configuration for the Hardcount HTTP API.
 #
 # Drives `make gen-go` (Makefile target) to emit chi-server scaffolding
 # from api/openapi.yaml. The generated output is checked in alongside

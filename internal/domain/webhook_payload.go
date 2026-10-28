@@ -34,7 +34,7 @@ const (
 
 // webhookFamilyResource maps an event family (the event type before its
 // first dot) to the resource every event of the family carries. payment.*
-// carries the invoice the payment was for: Velox has no payment object.
+// carries the invoice the payment was for: Hardcount has no payment object.
 var webhookFamilyResource = map[string]string{
 	"invoice":        WebhookResourceInvoice,
 	"payment":        WebhookResourceInvoice,

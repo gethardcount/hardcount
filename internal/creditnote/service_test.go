@@ -40,7 +40,7 @@ func newMemStore() *memStore {
 }
 
 func (m *memStore) Create(ctx context.Context, tenantID string, cn domain.CreditNote) (domain.CreditNote, error) {
-	cn.ID = fmt.Sprintf("vlx_cn_%d", len(m.notes)+1)
+	cn.ID = fmt.Sprintf("hc_cn_%d", len(m.notes)+1)
 	cn.TenantID = tenantID
 	// Mirrors the real Postgres store, which reads clock.Now(ctx) so a
 	// clock-pinned write lands in simulated time (ADR-030 rule 3). A fake that
@@ -99,7 +99,7 @@ func (m *memStore) createUnderInvoiceLock(ctx context.Context, tenantID, invoice
 	}
 	// Lines land with the header, mirroring the real store's single-tx write.
 	for _, line := range lines {
-		line.ID = fmt.Sprintf("vlx_cnli_%d", len(m.lineItems[created.ID])+1)
+		line.ID = fmt.Sprintf("hc_cnli_%d", len(m.lineItems[created.ID])+1)
 		line.TenantID = tenantID
 		line.CreditNoteID = created.ID
 		m.lineItems[created.ID] = append(m.lineItems[created.ID], line)
@@ -129,7 +129,7 @@ func (m *memStore) CreateUnderInvoiceLockDynamicTx(ctx context.Context, _ *sql.T
 		return domain.CreditNote{}, err
 	}
 	for _, line := range lines {
-		line.ID = fmt.Sprintf("vlx_cnli_%d", len(m.lineItems[created.ID])+1)
+		line.ID = fmt.Sprintf("hc_cnli_%d", len(m.lineItems[created.ID])+1)
 		line.TenantID = tenantID
 		line.CreditNoteID = created.ID
 		m.lineItems[created.ID] = append(m.lineItems[created.ID], line)
@@ -1381,7 +1381,7 @@ func (r *simResolver) SimForSubscription(context.Context, string, string) (clock
 	return clock.Sim{}, errs.ErrNotFound
 }
 func (r *simResolver) SimForInvoice(_ context.Context, _, _ string) (clock.Sim, error) {
-	return clock.Sim{At: r.at, TestClockID: "vlx_tclk_test"}, nil
+	return clock.Sim{At: r.at, TestClockID: "hc_tclk_test"}, nil
 }
 
 // TestOperatorCreditNote_StampsSimulatedTime pins ADR-030 on the operator

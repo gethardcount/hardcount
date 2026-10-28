@@ -187,7 +187,7 @@ func seedLiveHostedPage(t *testing.T, db *postgres.DB, ctx context.Context, tena
 		INSERT INTO checkout_sessions (id, tenant_id, invoice_id, livemode, stripe_session_id, amount_cents, currency, status, expires_at)
 		SELECT $1, $2, r.invoice_id, false, 'cs_' || $1, 5000, 'USD', 'open', now() + interval '50 minutes'
 		FROM invoice_dunning_runs r WHERE r.id = $3
-	`, postgres.NewID("vlx_cks"), tenantID, runID); err != nil {
+	`, postgres.NewID("hc_cks"), tenantID, runID); err != nil {
 		t.Fatalf("seed hosted page: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -209,7 +209,7 @@ func TestListDueRunsForClock_InFlightGate(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	tenantID := "tnt_inflight_clock"
-	const clockID = "vlx_tclk_inflight"
+	const clockID = "hc_tclk_inflight"
 	frozen := time.Date(2027, 6, 1, 0, 0, 0, 0, time.UTC)
 
 	tx, err := db.BeginTx(ctx, postgres.TxBypass, "")

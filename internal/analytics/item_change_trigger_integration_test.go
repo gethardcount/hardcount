@@ -44,8 +44,8 @@ func TestItemChangeTrigger_SoftDeleteEmitsRemove(t *testing.T) {
 	}
 
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	subID := postgres.NewID("vlx_sub")
-	itemID := postgres.NewID("vlx_si")
+	subID := postgres.NewID("hc_sub")
+	itemID := postgres.NewID("hc_si")
 	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		t.Fatalf("begin: %v", err)
@@ -208,7 +208,7 @@ func TestP9Indexes(t *testing.T) {
 			sb.WriteString(",")
 		}
 		fmt.Fprintf(&sb, "('%s', '%s', '%s', '%s', 1, '%s')",
-			postgres.NewID("vlx_evt"), tenantID, cust.ID, meter.ID,
+			postgres.NewID("hc_evt"), tenantID, cust.ID, meter.ID,
 			base.Add(time.Duration(i)*time.Hour).Format(time.RFC3339))
 	}
 	if _, err := btx.Exec(sb.String()); err != nil {

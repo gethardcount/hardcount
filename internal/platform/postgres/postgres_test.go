@@ -6,23 +6,23 @@ import (
 )
 
 func TestNewID(t *testing.T) {
-	id := NewID("vlx_cus")
-	if !strings.HasPrefix(id, "vlx_cus_") {
-		t.Errorf("ID should start with vlx_cus_, got %q", id)
+	id := NewID("hc_cus")
+	if !strings.HasPrefix(id, "hc_cus_") {
+		t.Errorf("ID should start with hc_cus_, got %q", id)
 	}
 	if len(id) < 20 {
 		t.Errorf("ID too short: %q", id)
 	}
 
 	// IDs should be unique
-	id2 := NewID("vlx_cus")
+	id2 := NewID("hc_cus")
 	if id == id2 {
 		t.Error("IDs should be unique")
 	}
 }
 
 func TestNewID_DifferentPrefixes(t *testing.T) {
-	prefixes := []string{"vlx_ten", "vlx_cus", "vlx_inv", "vlx_sub", "vlx_key"}
+	prefixes := []string{"hc_ten", "hc_cus", "hc_inv", "hc_sub", "hc_key"}
 	for _, p := range prefixes {
 		id := NewID(p)
 		if !strings.HasPrefix(id, p+"_") {

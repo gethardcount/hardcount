@@ -182,8 +182,8 @@ type TenantSettings struct {
 }
 
 // StripeProviderCredentials holds a tenant's connection to their own Stripe
-// account for a single mode (live or test). Velox is a billing engine, not a
-// merchant of record — tenants bring their own Stripe accounts and Velox
+// account for a single mode (live or test). Hardcount is a billing engine, not a
+// merchant of record — tenants bring their own Stripe accounts and Hardcount
 // orchestrates billing through the supplied keys. Secret keys and webhook
 // signing secrets are encrypted at rest; the plaintext is only present in
 // transit (Connect call → Stripe verify → DB row).

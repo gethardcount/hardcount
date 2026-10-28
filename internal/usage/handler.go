@@ -206,7 +206,7 @@ func (h *Handler) resolve(ctx context.Context, tenantID string, evt APIEvent, ca
 	if eventName == "" {
 		return IngestInput{}, errs.Required("event_name")
 	}
-	// Without a key Velox cannot tell a retry from new usage, so a client
+	// Without a key Hardcount cannot tell a retry from new usage, so a client
 	// that missed the response and sent the event again was billed twice
 	// (#980). Checked before the lookups so a keyless event never costs a
 	// store round trip or turns into a 503. The key is stored as sent, not

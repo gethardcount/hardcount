@@ -37,7 +37,7 @@
 # The published statistic is LATENCY (p50/p99 across passing repeats), not
 # events/sec: in rate mode delivered ev/s equals the offered RATE whenever
 # drops are zero, so a "median ev/s with 0.2% spread" is the generator keeping
-# its own schedule, not anything about Velox.
+# its own schedule, not anything about Hardcount.
 #
 #   TARGET=local ADMIN_DSN=postgres://... ./measure.sh
 #   TARGET=aws   ./measure.sh
@@ -65,7 +65,7 @@ K6_MODE="${K6_MODE:-rate}"
 VUS="${VUS:-}"
 P99_MS="${P99_MS:-0}"
 REGION="${AWS_REGION:-ap-south-1}"
-OUT="${OUT:-$HOME/.velox-bench-rig}"
+OUT="${OUT:-$HOME/.hardcount-bench-rig}"
 CREDS="${CREDS:-$OUT/bench-creds.json}"
 # SUSTAINED=1 is the preset for anything that will be published under the word
 # "sustained": five repeats of ten minutes each, with a cool-down between them.
@@ -111,24 +111,24 @@ CUSTOMER_ID_PREFIX=$(jqf customer_id_prefix)
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
 if [ "$TARGET" = "aws" ]; then
-  KEYFILE="$OUT/velox-bench-key.pem"
+  KEYFILE="$OUT/hardcount-bench-key.pem"
   aws_() { aws --region "$REGION" "$@"; }
   ip_of() { aws_ ec2 describe-instances --filters "Name=tag:Name,Values=$1" \
       "Name=instance-state-name,Values=running" \
       --query "Reservations[].Instances[0].$2" --output text; }
-  APP_PRIV=$(ip_of velox-bench-app PrivateIpAddress)
-  APP_INSTANCE_ID=$(ip_of velox-bench-app InstanceId)
-  GEN_PUB=$(ip_of velox-bench-loadgen PublicIpAddress)
-  APP_PUB=$(ip_of velox-bench-app PublicIpAddress)
+  APP_PRIV=$(ip_of hardcount-bench-app PrivateIpAddress)
+  APP_INSTANCE_ID=$(ip_of hardcount-bench-app InstanceId)
+  GEN_PUB=$(ip_of hardcount-bench-loadgen PublicIpAddress)
+  APP_PUB=$(ip_of hardcount-bench-app PublicIpAddress)
   [ -n "$GEN_PUB" ] && [ "$GEN_PUB" != "None" ] || die "loadgen instance is not running"
   app_sh() { ssh -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o ConnectTimeout=15 -o ServerAliveInterval=20 -o ServerAliveCountMax=3 -i "$KEYFILE" "ec2-user@$APP_PUB" "$@"; }
   gen_sh() { ssh -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o ConnectTimeout=15 -o ServerAliveInterval=20 -o ServerAliveCountMax=3 -i "$KEYFILE" "ec2-user@$GEN_PUB" "$@"; }
   BASE="http://$APP_PRIV:8080"
-  SCRIPT_PATH="${SCRIPT_PATH:-/opt/velox/scripts/bench-rig/ingest.js}"
+  SCRIPT_PATH="${SCRIPT_PATH:-/opt/hardcount/scripts/bench-rig/ingest.js}"
   DBPASS=$(cat "$OUT/db-password")
-  DBHOST=$(aws_ rds describe-db-instances --db-instance-identifier velox-bench-db \
+  DBHOST=$(aws_ rds describe-db-instances --db-instance-identifier hardcount-bench-db \
     --query 'DBInstances[0].Endpoint.Address' --output text)
-  ADMIN_DSN="postgres://velox:$DBPASS@$DBHOST:5432/${DBNAME:-velox}?sslmode=require"
+  ADMIN_DSN="postgres://hardcount:$DBPASS@$DBHOST:5432/${DBNAME:-hardcount}?sslmode=require"
 else
   [ -n "${ADMIN_DSN:-}" ] || die "TARGET=local requires ADMIN_DSN"
   app_sh() { bash -c "$*"; }
@@ -153,7 +153,7 @@ capture_cloudwatch() { # tag start end
   # of a 32 GB instance's cache, with disk queue depth 10.7 in the last minute.
   for m in CPUUtilization DatabaseConnections WriteIOPS WriteLatency ReadIOPS ReadLatency DiskQueueDepth FreeableMemory; do
     aws_ cloudwatch get-metric-statistics --namespace AWS/RDS --metric-name "$m" \
-      --dimensions Name=DBInstanceIdentifier,Value=velox-bench-db \
+      --dimensions Name=DBInstanceIdentifier,Value=hardcount-bench-db \
       --start-time "$start" --end-time "$end" --period 60 --statistics Average Maximum \
       > "$RESULTS/$tag.rds.$m.json" 2>/dev/null || { info "cloudwatch RDS/$m capture failed (non-fatal)"; rm -f "$RESULTS/$tag.rds.$m.json"; }
   done
@@ -165,8 +165,8 @@ capture_cloudwatch() { # tag start end
   fi
 }
 
-rows() { app_sh "psql '$ADMIN_DSN' -qtA -c \"SELECT count(*) FROM usage_events WHERE tenant_id='vlx_ten_bench'\"" | tr -d '[:space:]'; }
-qsum() { app_sh "psql '$ADMIN_DSN' -qtA -c \"SELECT COALESCE(sum(quantity),0)::bigint FROM usage_events WHERE tenant_id='vlx_ten_bench'\"" | tr -d '[:space:]'; }
+rows() { app_sh "psql '$ADMIN_DSN' -qtA -c \"SELECT count(*) FROM usage_events WHERE tenant_id='hc_ten_bench'\"" | tr -d '[:space:]'; }
+qsum() { app_sh "psql '$ADMIN_DSN' -qtA -c \"SELECT COALESCE(sum(quantity),0)::bigint FROM usage_events WHERE tenant_id='hc_ten_bench'\"" | tr -d '[:space:]'; }
 # The table a run writes into is part of the measurement — index maintenance
 # grows with volume, and an empty table is the optimistic case. Record it.
 table_state() { app_sh "psql '$ADMIN_DSN' -qtA -c \"SELECT count(*)||' rows, '||pg_size_pretty(pg_table_size('usage_events'))||' heap, '||pg_size_pretty(pg_indexes_size('usage_events'))||' idx' FROM usage_events\"" | tr -d '\n'; }

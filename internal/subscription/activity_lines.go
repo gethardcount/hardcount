@@ -350,7 +350,7 @@ func cancelScheduledWhen(meta map[string]any) activity.Segment {
 func prorationNotAppliedProblem(ct domain.ItemChangeType) string {
 	switch ct {
 	case domain.ItemChangeTypeAdd:
-		return "The item was added, but its prorated charge was not billed. Velox will not retry it; bill it with a one-off invoice."
+		return "The item was added, but its prorated charge was not billed. Hardcount will not retry it; bill it with a one-off invoice."
 	case domain.ItemChangeTypeRemove:
 		return "The item was removed, but its prorated credit was not issued. Issue a credit note by hand."
 	case domain.ItemChangeTypePlan:
@@ -362,8 +362,8 @@ func prorationNotAppliedProblem(ct domain.ItemChangeType) string {
 }
 
 // prorationSegment is the proration outcome a change produced, from the
-// metadata addProrationMeta stamps: "Proration invoice VLX-000123 $18.00",
-// "Credit $19.80", "Open invoice VLX-000120 adjusted by $54.44". Nil when the
+// metadata addProrationMeta stamps: "Proration invoice HC-000123 $18.00",
+// "Credit $19.80", "Open invoice HC-000120 adjusted by $54.44". Nil when the
 // change produced none.
 func prorationSegment(meta map[string]any, lb lineLabels) activity.Segment {
 	amt, ok := metaInt(meta, "proration_amount_cents")
@@ -425,7 +425,7 @@ func prorationSegment(meta map[string]any, lb lineLabels) activity.Segment {
 	return seg
 }
 
-// adjustedSegment is "Open invoice VLX-000120 adjusted by $54.44": the open
+// adjustedSegment is "Open invoice HC-000120 adjusted by $54.44": the open
 // invoice the credit reduced, linked when there is exactly one, or "2 open
 // invoices adjusted by …" when it reduced several.
 func adjustedSegment(meta map[string]any, lb lineLabels, first bool, money activity.Part) activity.Segment {
@@ -442,7 +442,7 @@ func adjustedSegment(meta map[string]any, lb lineLabels, first bool, money activ
 	return activity.Segment{activity.T(open + " adjusted by "), money}
 }
 
-// heldSegment is "Credit $14.19 held until draft invoice VLX-000120 is
+// heldSegment is "Credit $14.19 held until draft invoice HC-000120 is
 // finalized": the part of a credit on a draft invoice, whose note waits for
 // the draft to be finalized. It names the draft when there is exactly one,
 // or "2 draft invoices" when there are several.

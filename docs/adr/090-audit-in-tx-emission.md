@@ -119,7 +119,7 @@ audit-only tx.
 > If that second write fails, the mutation stands and its evidence does not. Every
 > one of them discards the error, correctly — post-commit there is nothing the
 > caller can do. It surfaces as
-> `velox_audit_write_errors_total{outcome="row_lost"}`, and nothing retries it.
+> `hardcount_audit_write_errors_total{outcome="row_lost"}`, and nothing retries it.
 >
 > **What holds the line meanwhile.** `internal/arch/audit_background_writers_test.go`
 > pins that exact set. A new post-commit writer in a background package fails CI;
@@ -181,7 +181,7 @@ classifiers (`parseAuditPath`, `extractLabel`, `extractID`,
 - **A pure-observer detector** (`mw.AuditCoverage`, mounted at the ROOT, not
   on /v1 — RC1's fix). It NEVER mutates the response and NEVER buffers the
   body: a mutating 2xx that produced no audit row and is not declared exempt
-  increments `velox_audit_uncovered_mutation_total{route}` and logs
+  increments `hardcount_audit_uncovered_mutation_total{route}` and logs
   `UNCOVERED MUTATION`. It reports; it does not invent.
 
 Two amendments this forced, both deliberate:
@@ -387,7 +387,7 @@ existing `chimw.GetReqID` reader — the audit writer, `telemetry.ContextHandler
 
 The inbound value is DROPPED, not preserved under a second key. Nothing consumed
 it as INPUT (the name still appears — in the test that forges the header to prove it is ignored, and in this ADR; an earlier version of this sentence claimed no reference existed anywhere, which was false 15 lines below its own use of the name. State the property, not a grep result); the published
-contract is the `Velox-Request-Id` RESPONSE header); cross-service trace
+contract is the `Hardcount-Request-Id` RESPONSE header); cross-service trace
 continuity is already carried properly by W3C Trace Context via `mw.Tracing()`;
 and recording an unverified client string anywhere on the row — even under an
 honestly-named key — is precisely the "unverified input in a permanent record"
@@ -398,13 +398,13 @@ forbids rewriting them. A `req_` prefix marks the server-minted era; a
 
 **The append-only triggers were the only barrier.** `audit_log` is immutable via
 BEFORE UPDATE/DELETE (0011) and BEFORE TRUNCATE (0115) triggers that hold even
-for an RLS-bypassing role — but `velox_app` still HELD `UPDATE`/`DELETE`/
+for an RLS-bypassing role — but `hardcount_app` still HELD `UPDATE`/`DELETE`/
 `TRUNCATE` from 0001's blanket `GRANT ALL` (0115's own header admits it was never
 revoked). One dropped or disabled trigger and the tamper-evidence log was
 writable by the role that serves customer traffic. Migration 0150 revokes those
-three privileges from `velox_app` (INSERT/SELECT retained — the writer only ever
+three privileges from `hardcount_app` (INSERT/SELECT retained — the writer only ever
 appends). The privilege system and the triggers now fail independently:
-`velox_app` is refused at the permission check (42501) before a trigger runs; the
+`hardcount_app` is refused at the permission check (42501) before a trigger runs; the
 owner/superuser is still refused by the trigger (P0001). Retention purges are
 unaffected — they remain an owner-role operation, as 0011 documented.
 ### 7. Read egress: bulk exports are audited, fail-closed, emit-before-stream
@@ -479,10 +479,10 @@ and `SUM()` breaks.
   0147 pre-paid most of it).
 - Old heuristic rows are kept as-is (append-only forbids rewriting);
   mixed-era vocabulary in a long-lived dev DB is cosmetic.
-- `velox_audit_write_errors_total` narrows to residual own-tx callers as
+- `hardcount_audit_write_errors_total` narrows to residual own-tx callers as
   migration proceeds; covered paths ride the mutation's own error SLO.
 
-## Note (2026-10-22): why `velox_audit_write_errors_total` carries no `tenant_id` label
+## Note (2026-10-22): why `hardcount_audit_write_errors_total` carries no `tenant_id` label
 
 Moved here from the audit-write-errors runbook page. Prometheus client
 counters never age out. So a tenant label would create a permanent time

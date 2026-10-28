@@ -8,12 +8,12 @@ import (
 	"testing"
 )
 
-// runHelper re-runs this test binary with VELOX_CLI_HELPER set, so a test
+// runHelper re-runs this test binary with HARDCOUNT_CLI_HELPER set, so a test
 // can watch a subcommand exit with its code.
 func runHelper(t *testing.T, test, helper string, env ...string) (string, int) {
 	t.Helper()
 	cmd := exec.Command(os.Args[0], "-test.run=^"+test+"$")
-	cmd.Env = append(os.Environ(), append(env, "VELOX_CLI_HELPER="+helper)...)
+	cmd.Env = append(os.Environ(), append(env, "HARDCOUNT_CLI_HELPER="+helper)...)
 	out, err := cmd.CombinedOutput()
 	var exit *exec.ExitError
 	if errors.As(err, &exit) {
@@ -25,12 +25,12 @@ func runHelper(t *testing.T, test, helper string, env ...string) (string, int) {
 	return string(out), 0
 }
 
-// `velox migrate force` is gone (B5): the one-release stub that pointed at
+// `hardcount migrate force` is gone (B5): the one-release stub that pointed at
 // the runbook is removed before the first tag, so it is an unknown
 // subcommand like any other.
 func TestMigrateForceIsUnknown(t *testing.T) {
-	if os.Getenv("VELOX_CLI_HELPER") == "force" {
-		os.Args = []string{"velox", "migrate", "force"}
+	if os.Getenv("HARDCOUNT_CLI_HELPER") == "force" {
+		os.Args = []string{"hardcount", "migrate", "force"}
 		main()
 		return
 	}
@@ -43,10 +43,10 @@ func TestMigrateForceIsUnknown(t *testing.T) {
 	}
 }
 
-// `velox migrate rollback` refuses outside APP_ENV=local, before it
+// `hardcount migrate rollback` refuses outside APP_ENV=local, before it
 // connects anywhere.
 func TestMigrateRollbackRefusesOutsideLocal(t *testing.T) {
-	if os.Getenv("VELOX_CLI_HELPER") == "rollback" {
+	if os.Getenv("HARDCOUNT_CLI_HELPER") == "rollback" {
 		runMigrateRollback()
 		return
 	}

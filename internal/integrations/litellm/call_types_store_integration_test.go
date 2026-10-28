@@ -56,7 +56,7 @@ func TestSpend_NewCallTypes_RealStore(t *testing.T) {
 	}
 	newCustomer := func(t *testing.T, ext string) string {
 		t.Helper()
-		id := postgres.NewID("vlx_cus")
+		id := postgres.NewID("hc_cus")
 		exec(t, `INSERT INTO customers (id, tenant_id, external_id, display_name, email) VALUES ($1, $2, $3, $3, $3 || '@example.com')`, id, tenantID, ext)
 		return id
 	}
@@ -84,7 +84,7 @@ func TestSpend_NewCallTypes_RealStore(t *testing.T) {
 		return out
 	}
 
-	meterID := postgres.NewID("vlx_mtr")
+	meterID := postgres.NewID("hc_mtr")
 	exec(t, `INSERT INTO meters (id, tenant_id, name, event_name, unit, aggregation) VALUES ($1, $2, 'Tokens', 'tokens', 'tokens', 'sum')`, meterID, tenantID)
 
 	t.Run("a /v1/messages call bills once", func(t *testing.T) {

@@ -68,7 +68,7 @@ func (s *PostgresStore) CreateEndpoint(ctx context.Context, tenantID string, ep 
 }
 
 func (s *PostgresStore) createEndpointTx(ctx context.Context, tx *sql.Tx, tenantID string, ep domain.WebhookEndpoint) (domain.WebhookEndpoint, error) {
-	id := postgres.NewID("vlx_whe")
+	id := postgres.NewID("hc_whe")
 	now := time.Now().UTC()
 	eventsJSON, _ := json.Marshal(ep.Events)
 
@@ -352,7 +352,7 @@ func (s *PostgresStore) CreateEvent(ctx context.Context, tenantID string, event 
 	}
 	defer postgres.Rollback(tx)
 
-	id := postgres.NewID("vlx_whevt")
+	id := postgres.NewID("hc_whevt")
 	now := time.Now().UTC()
 	payloadJSON, _ := json.Marshal(event.Payload)
 
@@ -399,7 +399,7 @@ func (s *PostgresStore) CreateEventWithDeliveries(ctx context.Context, tenantID 
 	}
 	defer postgres.Rollback(tx)
 
-	id := postgres.NewID("vlx_whevt")
+	id := postgres.NewID("hc_whevt")
 	now := time.Now().UTC()
 	payloadJSON, _ := json.Marshal(event.Payload)
 
@@ -420,7 +420,7 @@ func (s *PostgresStore) CreateEventWithDeliveries(ctx context.Context, tenantID 
 	lease := now.Add(birthLease)
 	for _, epID := range endpointIDs {
 		d := domain.WebhookDelivery{
-			ID:                postgres.NewID("vlx_whd"),
+			ID:                postgres.NewID("hc_whd"),
 			TenantID:          tenantID,
 			WebhookEndpointID: epID,
 			WebhookEventID:    id,
@@ -473,7 +473,7 @@ func (s *PostgresStore) CreateDeliveriesForEvent(ctx context.Context, tenantID, 
 	out := make([]domain.WebhookDelivery, 0, len(endpointIDs))
 	for _, epID := range endpointIDs {
 		d := domain.WebhookDelivery{
-			ID:                postgres.NewID("vlx_whd"),
+			ID:                postgres.NewID("hc_whd"),
 			TenantID:          tenantID,
 			WebhookEndpointID: epID,
 			WebhookEventID:    eventID,
@@ -541,7 +541,7 @@ func (s *PostgresStore) CreateReplayEvent(ctx context.Context, tenantID, origina
 		rootID = origReplay.String
 	}
 
-	id := postgres.NewID("vlx_whevt")
+	id := postgres.NewID("hc_whevt")
 	now := time.Now().UTC()
 	clone := domain.WebhookEvent{
 		ID:                id,
@@ -618,7 +618,7 @@ func (s *PostgresStore) EventDeliveryStatuses(ctx context.Context, tenantID stri
 	}
 	defer postgres.Rollback(tx)
 
-	// string_to_array instead of a driver array type: ids are vlx_whevt_…
+	// string_to_array instead of a driver array type: ids are hc_whevt_…
 	// (no commas by construction), and the repo's database/sql driver has
 	// no native []string binding.
 	rows, err := tx.QueryContext(ctx, `
@@ -700,7 +700,7 @@ func (s *PostgresStore) CreateDelivery(ctx context.Context, tenantID string, d d
 	}
 	defer postgres.Rollback(tx)
 
-	id := postgres.NewID("vlx_whd")
+	id := postgres.NewID("hc_whd")
 	now := time.Now().UTC()
 
 	d.ID = id

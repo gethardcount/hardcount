@@ -29,11 +29,11 @@ func TestStripeAdapter_NotConnectedIsATypedError(t *testing.T) {
 	}
 }
 
-// noStripeIDLink is a customer Velox has never sent to Stripe.
+// noStripeIDLink is a customer Hardcount has never sent to Stripe.
 type noStripeIDLink struct{ CustomerStripeLink }
 
 func (noStripeIDLink) Get(context.Context, string, string) (domain.Customer, error) {
-	return domain.Customer{ID: "vlx_cus_1"}, nil
+	return domain.Customer{ID: "hc_cus_1"}, nil
 }
 
 // The first card setup for such a customer creates its Stripe customer, so
@@ -42,7 +42,7 @@ func (noStripeIDLink) Get(context.Context, string, string) (domain.Customer, err
 func TestStripeAdapter_EnsureCustomerNotConnectedIsATypedError(t *testing.T) {
 	a := NewStripeAdapter(nil, noStripeIDLink{})
 	ctx := postgres.WithLivemode(context.Background(), false)
-	_, err := a.EnsureStripeCustomer(ctx, "vlx_ten_1", "vlx_cus_1")
+	_, err := a.EnsureStripeCustomer(ctx, "hc_ten_1", "hc_cus_1")
 	if errs.Code(err) != errs.CodeStripeNotConnected || !errors.Is(err, errs.ErrInvalidState) {
 		t.Fatalf("err = %#v, want the 409 stripe_not_connected", err)
 	}

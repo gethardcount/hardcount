@@ -211,7 +211,7 @@ func mapInvoiceUniqueViolation(err error, inv domain.Invoice) error {
 			"threshold invoice already exists for this subscription cycle").WithCode("invoice_threshold_cycle_taken")
 	case idxInvoicesStripeInvoiceID:
 		return errs.AlreadyExists("stripe_invoice_id",
-			"a Velox invoice is already linked to this Stripe invoice id").WithCode("invoice_stripe_id_taken")
+			"a Hardcount invoice is already linked to this Stripe invoice id").WithCode("invoice_stripe_id_taken")
 	}
 	// Unknown constraint — surface the constraint name in the message
 	// so the operator + logs identify what fired, instead of squashing
@@ -334,7 +334,7 @@ func (s *PostgresStore) CreateAudited(
 	// revenue queries filter with a case-sensitive `currency = $1`.
 	inv.Currency = strings.ToUpper(inv.Currency)
 
-	id := postgres.NewID("vlx_inv")
+	id := postgres.NewID("hc_inv")
 	// Honor caller-provided CreatedAt — engine paths pass clk.Now()
 	// so test-clock-driven invoices align with their issued_at /
 	// due_at on simulation time. Zero falls back to wall-clock.
@@ -1051,9 +1051,9 @@ func (s *PostgresStore) MarkPaymentFailedReportingTransition(ctx context.Context
 	}
 
 	holdsThisPI := rowPI.Valid && rowPI.String == pi
-	standing := domain.AttemptNotVelox
+	standing := domain.AttemptNotHardcount
 	if !holdsThisPI && report.ChargedAtSeq == nil && !report.External {
-		if standing, err = veloxAttemptStandingTx(ctx, tx, id, pi); err != nil {
+		if standing, err = hardcountAttemptStandingTx(ctx, tx, id, pi); err != nil {
 			return domain.Invoice{}, domain.PaymentFailureResult{}, err
 		}
 	}
@@ -1157,15 +1157,15 @@ func (s *PostgresStore) MarkPaymentFailedReportingTransition(ctx context.Context
 	return inv, domain.PaymentFailureResult{Recorded: true, FirstNotice: firstNotice}, nil
 }
 
-// veloxAttemptStandingTx says where PaymentIntent pi stands among the
-// attempts Velox itself made on the invoice (domain.AttemptStanding). Velox's
+// hardcountAttemptStandingTx says where PaymentIntent pi stands among the
+// attempts Hardcount itself made on the invoice (domain.AttemptStanding). Hardcount's
 // charge call writes its attempt row when Stripe answers, before it reports
 // the outcome, and its charges are serialized by the charge lease, so the
-// newest Velox-made row is the attempt the invoice is waiting on. Rows for
-// attempts Velox did not make (hosted Checkout, inserted 'external' by a
+// newest Hardcount-made row is the attempt the invoice is waiting on. Rows for
+// attempts Hardcount did not make (hosted Checkout, inserted 'external' by a
 // report) do not count. Empty-PI rows (a create that failed, a parked
 // attempt) do: an older attempt's late decline is superseded by them.
-func veloxAttemptStandingTx(ctx context.Context, tx *sql.Tx, invoiceID, pi string) (domain.AttemptStanding, error) {
+func hardcountAttemptStandingTx(ctx context.Context, tx *sql.Tx, invoiceID, pi string) (domain.AttemptStanding, error) {
 	var mine bool
 	var newest sql.NullString
 	err := tx.QueryRowContext(ctx, `
@@ -1179,11 +1179,11 @@ func veloxAttemptStandingTx(ctx context.Context, tx *sql.Tx, invoiceID, pi strin
 		invoiceID, pi,
 	).Scan(&mine, &newest)
 	if err != nil {
-		return domain.AttemptNotVelox, fmt.Errorf("read attempt standing: %w", err)
+		return domain.AttemptNotHardcount, fmt.Errorf("read attempt standing: %w", err)
 	}
 	switch {
 	case !mine:
-		return domain.AttemptNotVelox, nil
+		return domain.AttemptNotHardcount, nil
 	case newest.String == pi:
 		return domain.AttemptNewest, nil
 	default:
@@ -1433,7 +1433,7 @@ func (s *PostgresStore) markPaidLockedTx(ctx context.Context, tx *sql.Tx, tenant
 	//     settles, so amount_due stays full through this settle.
 	// PART C remains, but is NOT reachable today: recording amount_paid from the
 	// PI's amount_received (vs re-reading amount_due) is only load-bearing under
-	// PARTIAL capture, and Velox is PaymentIntent-only full-capture (no
+	// PARTIAL capture, and Hardcount is PaymentIntent-only full-capture (no
 	// partial/manual-capture flow). Revisit if partial capture is added.
 	// (2026-06-15 proration audit; Parts A/B shipped #295 + ADR-059.)
 	err := tx.QueryRowContext(ctx, `
@@ -1800,7 +1800,7 @@ func (s *PostgresStore) CreateLineItem(ctx context.Context, tenantID string, ite
 	}
 	defer postgres.Rollback(tx)
 
-	id := postgres.NewID("vlx_ili")
+	id := postgres.NewID("hc_ili")
 	now := clock.Now(ctx)
 	metaJSON, _ := json.Marshal(item.Metadata)
 	if item.Metadata == nil {
@@ -2015,7 +2015,7 @@ func (s *PostgresStore) AddLineItemAtomicAudited(
 	item.TenantID = tenantID
 	item.Currency = currency
 
-	itemID := postgres.NewID("vlx_ili")
+	itemID := postgres.NewID("hc_ili")
 	now := clock.Now(ctx)
 	metaJSON, _ := json.Marshal(item.Metadata)
 	if item.Metadata == nil {
@@ -2261,7 +2261,7 @@ func (s *PostgresStore) CreateWithLineItemsTx(ctx context.Context, tx *sql.Tx, t
 // createWithLineItemsInTx is the shared body. The exported wrappers
 // differ only in tx ownership.
 func (s *PostgresStore) createWithLineItemsInTx(ctx context.Context, tx *sql.Tx, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem) (domain.Invoice, error) {
-	id := postgres.NewID("vlx_inv")
+	id := postgres.NewID("hc_inv")
 	// Canonical UPPERCASE ISO-4217 (see Create) — normalize the header and
 	// every line so origin (manual vs cycle) can't change the casing and
 	// the stored value matches the tenant default the analytics/dunning
@@ -2378,7 +2378,7 @@ func (s *PostgresStore) createWithLineItemsInTx(ctx context.Context, tx *sql.Tx,
 	// Create all line items within the same transaction
 	for i := range items {
 		items[i].InvoiceID = inv.ID
-		itemID := postgres.NewID("vlx_ili")
+		itemID := postgres.NewID("hc_ili")
 		itemMetaJSON, _ := json.Marshal(items[i].Metadata)
 		if items[i].Metadata == nil {
 			itemMetaJSON = []byte("{}")
@@ -2424,7 +2424,7 @@ func collectionQueuedAtFinalize(status domain.InvoiceStatus, paymentStatus domai
 	return status == domain.InvoiceFinalized && paymentStatus == domain.PaymentPending
 }
 
-// noLiveHostedPageSQL keeps every Velox charge off an invoice the customer
+// noLiveHostedPageSQL keeps every Hardcount charge off an invoice the customer
 // may be paying on the hosted page: one payer at a time
 // (domain.HostedCheckoutLiveSQL says when a page counts as live).
 var noLiveHostedPageSQL = "NOT " + domain.HostedCheckoutLiveSQL("invoices.id")
@@ -2894,7 +2894,7 @@ const parkedNoPaymentReason = "Stripe showed no payment for this attempt 24 hour
 // an uncollectible invoice (ADR-113), so for them this only ends the park.
 //
 // In the same transaction the parked attempt's row is recorded as failed,
-// with parkedNoPaymentReason as its reason: Velox now knows the attempt took
+// with parkedNoPaymentReason as its reason: Hardcount now knows the attempt took
 // no money, and the timeline would otherwise say "result unknown" forever.
 // The saved answer is not kept as the reason. For a timed-out call it is Go's
 // error (`Post "https://api.stripe.com/v1/payment_intents": context deadline
@@ -3278,7 +3278,7 @@ func (s *PostgresStore) ListProcessingPayments(ctx context.Context, olderThan ti
 // clock-pinned invoices), and the catchup worker has no payment-sync phase,
 // so excluding simulated rows here would strand an ambiguous simulated charge
 // in unknown/processing forever. The settle path re-binds simulated time via
-// BindEffectiveNow + the velox_anchor_at PI anchor, so recovered outcomes
+// BindEffectiveNow + the hardcount_anchor_at PI anchor, so recovered outcomes
 // still stamp the simulated instant. See the ADR-030 wall-plane note.
 func (s *PostgresStore) listInflightPayments(ctx context.Context, status domain.InvoicePaymentStatus, olderThan time.Time, limit int) ([]domain.Invoice, error) {
 	live, err := postgres.Livemode(ctx)
@@ -3928,7 +3928,7 @@ func (s *PostgresStore) GetByPublicToken(ctx context.Context, token string) (dom
 }
 
 // GetByStripeInvoiceID resolves a Stripe invoice id (in_xxx) to its imported
-// Velox invoice row. Built as the idempotency lookup for the Stripe importer
+// Hardcount invoice row. Built as the idempotency lookup for the Stripe importer
 // removed in the 2026-04-29 lean-cut (rebuild deferred until a design-partner
 // cutover), so it has no production caller today. When an importer returns,
 // re-running an import after a finalized invoice has already landed must
@@ -3936,7 +3936,7 @@ func (s *PostgresStore) GetByPublicToken(ctx context.Context, token string) (dom
 // rather than ErrAlreadyExists from a unique-violation collision.
 //
 // Empty stripeInvoiceID returns ErrNotFound rather than matching the
-// partial unique index's NULL gap (no Velox-native invoice should match).
+// partial unique index's NULL gap (no Hardcount-native invoice should match).
 // Runs under TxTenant — an importer always has a tenant in context, and
 // scoping by tenant is the standard RLS posture for this store.
 func (s *PostgresStore) GetByStripeInvoiceID(ctx context.Context, tenantID, stripeInvoiceID string) (domain.Invoice, error) {
@@ -4522,7 +4522,7 @@ func (s *PostgresStore) StreamForExport(ctx context.Context, tenantID string, fr
 //
 // Insert-time identity (trigger_source, sim_effective_at, the actor) is
 // preserved by the ON CONFLICT — the chokepoint knows those; a settle does
-// not. A settle for a PaymentIntent Velox never minted (hosted checkout)
+// not. A settle for a PaymentIntent Hardcount never minted (hosted checkout)
 // INSERTS here, and that row is the only record of the attempt. It records
 // no actor: the report does not know who paid, and its ctx (a webhook, the
 // reconciler) would name the system, which did not.
@@ -4664,7 +4664,7 @@ func (s *PostgresStore) RecordChargeAttempt(ctx context.Context, tenantID string
 				-- A report that beat this writer (its webhook arrived first)
 				-- inserted the row as 'external'. This writer made the attempt,
 				-- so its trigger is the truth: the timeline label and the
-				-- attempt order (veloxAttemptStandingTx) both read it.
+				-- attempt order (hardcountAttemptStandingTx) both read it.
 				trigger_source = CASE WHEN invoice_charge_attempts.trigger_source = 'external'
 					THEN EXCLUDED.trigger_source ELSE invoice_charge_attempts.trigger_source END,
 				-- The actor goes with the trigger: a report's row has none.

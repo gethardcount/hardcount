@@ -6,11 +6,11 @@
 
 ## Summary
 
-The customer self-serve portal (magic-link login and the `/v1/me/*` API) was removed. Self-serve billing portals are a consumer and small-business pattern, while Velox's B2B users build their own billing UI and route lifecycle changes through the operator. Customers still add cards on a Stripe-hosted setup page, pay through the hosted invoice link and see usage through the cost-dashboard token. The portal session and magic-link tables are kept in case a future customer group needs a portal. Status: active.
+The customer self-serve portal (magic-link login and the `/v1/me/*` API) was removed. Self-serve billing portals are a consumer and small-business pattern, while Hardcount's B2B users build their own billing UI and route lifecycle changes through the operator. Customers still add cards on a Stripe-hosted setup page, pay through the hosted invoice link and see usage through the cost-dashboard token. The portal session and magic-link tables are kept in case a future customer group needs a portal. Status: active.
 
 ## Context
 
-Velox shipped a customer **self-serve portal**: a magic-link login (`/portal`) where an operator's end-customer authenticates via an operator-issued session (`vlx_cps_…` / magic-link `vlx_cpml_…`) and self-manages their subscription — view/pay invoices, cancel/resume, manage payment methods, edit profile. Backend: `internal/portalapi` (the `/v1/me/*` handler) + `internal/customerportal` (sessions + magic-links). Frontend: `Portal.tsx` / `PortalLogin.tsx` / `PortalMagic.tsx` + `portalAuth.ts`. ~3,000 LOC.
+Hardcount shipped a customer **self-serve portal**: a magic-link login (`/portal`) where an operator's end-customer authenticates via an operator-issued session (`hc_cps_…` / magic-link `hc_cpml_…`) and self-manages their subscription — view/pay invoices, cancel/resume, manage payment methods, edit profile. Backend: `internal/portalapi` (the `/v1/me/*` handler) + `internal/customerportal` (sessions + magic-links). Frontend: `Portal.tsx` / `PortalLogin.tsx` / `PortalMagic.tsx` + `portalAuth.ts`. ~3,000 LOC.
 
 A spine/wedge audit flagged it as off-wedge B2C-flavored surface maintained for zero design partners. Before cutting working customer-facing code, we did multi-platform industry research (Stripe, Chargebee, Recurly, Zuora + AI-native Orb/Metronome/Lago + real AI infra: OpenAI, Anthropic, Modal, Replicate, Baseten).
 
@@ -22,7 +22,7 @@ A spine/wedge audit flagged it as off-wedge B2C-flavored surface maintained for 
 - **Every real AI infra/API company builds its own billing UI** in its own console (platform.openai.com, console.anthropic, Modal/Replicate/Baseten settings). None redirects customers to a billing-vendor's hosted portal. Self-serve there = top-up credits / set spend limits / watch usage — not "log in to a portal to cancel."
 - **B2B billing is operator-/contract-mediated**: AP pays via wire/ACH, lifecycle changes are CSM-negotiated, not a portal button.
 
-For Velox's stated first design partner (B2B AI infra), the customer surface that matters is the **embeddable cost dashboard** (a wedge build-list item) — not a subscription self-service portal.
+For Hardcount's stated first design partner (B2B AI infra), the customer surface that matters is the **embeddable cost dashboard** (a wedge build-list item) — not a subscription self-service portal.
 
 ## Decision
 

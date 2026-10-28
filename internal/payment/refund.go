@@ -22,7 +22,7 @@ import (
 //
 // NotRun narrows false: Stripe ran nothing for this request. It refused the
 // API key before running it (a 401 invalid key, a 403 key without refund
-// permission), or Velox sent nothing (Stripe not configured for the mode).
+// permission), or Hardcount sent nothing (Stripe not configured for the mode).
 // Stripe saves no result for such a request: "Errors that occur before
 // execution begins, such as invalid parameters, an invalid API key or rate
 // limiting, don't cache a result"
@@ -50,7 +50,7 @@ func (e *RefundError) RequestNotRun() bool { return e.NotRun }
 // curated sentence, never Stripe's raw text.
 func (e *RefundError) OperatorSafeMessage() string {
 	if e.Unknown {
-		return "Stripe didn't confirm whether the refund went through. Don't refund this payment in Stripe. Retry the refund later: Velox looks for the refund in Stripe first, then resends the same request."
+		return "Stripe didn't confirm whether the refund went through. Don't refund this payment in Stripe. Retry the refund later: Hardcount looks for the refund in Stripe first, then resends the same request."
 	}
 	return "Stripe didn't make the refund, so the customer was not refunded. Check the payment in Stripe, then retry the refund."
 }
@@ -80,8 +80,8 @@ func (e *RefundError) OperatorErrorCode() string {
 //   - 429 is unclear. Stripe refuses it before running the request, but the
 //     error is only the last attempt's: stripe-go resends a request lost on
 //     the wire, under the same key, and stops at a 429 (stripe-go v82
-//     shouldRetry and Error.canRetry; Velox keeps its default of 2
-//     retries). So a 429 can follow an attempt that ran, and Velox cannot
+//     shouldRetry and Error.canRetry; Hardcount keeps its default of 2
+//     retries). So a 429 can follow an attempt that ran, and Hardcount cannot
 //     tell. Retry refund then resends under the same key, which is safe
 //     either way.
 //   - 401 and 403 are refusals of the API key, made before the request runs
@@ -106,9 +106,9 @@ func classifyRefundError(err error) *RefundError {
 	return &RefundError{Message: "stripe refund: " + pe.Message, Unknown: pe.Unknown}
 }
 
-// mapStripeRefundStatus collapses Stripe's 5 refund states into 3 of Velox's
+// mapStripeRefundStatus collapses Stripe's 5 refund states into 3 of Hardcount's
 // refund_status values (DB CHECK: none/pending/succeeded/failed/unknown; none
-// and unknown are Velox's own and never come from Stripe). canceled→failed (the
+// and unknown are Hardcount's own and never come from Stripe). canceled→failed (the
 // money returned to the platform balance, not the customer — operator-actionable);
 // requires_action→pending (still in-flight). Shared by CreateRefund (create-time)
 // and handleRefundUpdated (the async webhook truth) so both agree. Note: even
@@ -146,8 +146,8 @@ func NewStripeRefunder(clients *StripeClients) *StripeRefunder {
 // CreateRefund creates a Stripe refund for the given PaymentIntent.
 //
 // `idempotencyKey` is mandatory in production — same key + same params
-// returns the existing refund without creating a duplicate. Velox passes
-// `velox_cn_<credit_note_id>` so that a credit-note Issue() retry after
+// returns the existing refund without creating a duplicate. Hardcount passes
+// `hardcount_cn_<credit_note_id>` so that a credit-note Issue() retry after
 // a partial failure (e.g. DB hiccup on the post-refund credit grant
 // step) hits Stripe's cache and gets back the original refund_id,
 // not a second refund.
@@ -157,12 +157,12 @@ func NewStripeRefunder(clients *StripeClients) *StripeRefunder {
 // returns error → CN stays draft → operator retries → Stripe called
 // again with no idempotency key → DUPLICATE refund → customer over-
 // refunded (caught 2026-05-22).
-// Returns the refund id AND Stripe's create-time status (mapped to a Velox
+// Returns the refund id AND Stripe's create-time status (mapped to a Hardcount
 // refund_status). A card refund on a healthy balance returns `succeeded`
 // synchronously; ACH/balance-constrained refunds legitimately return `pending`,
 // whose terminal outcome (succeeded/failed) lands later via a refund webhook —
 // so the caller must record what Stripe actually said, not a blanket success.
-// creditNoteID stamps metadata velox_cn_id on the refund. That metadata is
+// creditNoteID stamps metadata hardcount_cn_id on the refund. That metadata is
 // the ADOPTION key: Stripe v1 idempotency keys expire after ~24h, so the key
 // alone cannot make a late retry converge on an earlier attempt — but a
 // metadata-stamped refund can always be found again by FindRefundForCreditNote
@@ -184,7 +184,7 @@ func (r *StripeRefunder) CreateRefund(ctx context.Context, paymentIntentID strin
 		Amount:        stripe.Int64(amountCents),
 	}
 	if creditNoteID != "" {
-		params.Metadata = map[string]string{"velox_cn_id": creditNoteID}
+		params.Metadata = map[string]string{"hardcount_cn_id": creditNoteID}
 	}
 	if idempotencyKey != "" {
 		params.IdempotencyKey = stripe.String(idempotencyKey)
@@ -218,11 +218,11 @@ func (r *StripeRefunder) GetRefund(ctx context.Context, refundID string) (domain
 
 // FindRefundForCreditNote searches the PaymentIntent's refunds for a LIVE
 // (succeeded/pending) refund minted for this credit note (metadata
-// velox_cn_id). Returns ("", "", nil) when none exists. This is the search
+// hardcount_cn_id). Returns ("", "", nil) when none exists. This is the search
 // half of search-and-adopt (ADR-108's pattern, applied to refunds): it
 // recovers the lost-response shapes — a create that errored on the wire
-// after Stripe minted the refund, in either the original Issue leg (Velox
-// holds no id) or a later re-drive (Velox still holds a dead predecessor).
+// after Stripe minted the refund, in either the original Issue leg (Hardcount
+// holds no id) or a later re-drive (Hardcount still holds a dead predecessor).
 //
 // Failed matches are deliberately NOT returned. Adopting a live twin is what
 // prevents a duplicate; a failed twin is a dead prior attempt, and returning
@@ -243,7 +243,7 @@ func (r *StripeRefunder) FindRefundForCreditNote(ctx context.Context, paymentInt
 		if err != nil {
 			return "", "", fmt.Errorf("stripe list refunds: %s", stripeErrorMessage(err))
 		}
-		if ref.Metadata["velox_cn_id"] != creditNoteID {
+		if ref.Metadata["hardcount_cn_id"] != creditNoteID {
 			continue
 		}
 		if status := mapStripeRefundStatus(string(ref.Status)); status != domain.RefundFailed {

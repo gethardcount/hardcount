@@ -31,7 +31,7 @@ func TestValidateTaxID_GSTIN(t *testing.T) {
 			t.Errorf("ValidateTaxID(in_gst, %q) unexpected error: %v", v, err)
 		}
 	}
-	// Legacy Velox shorthand and the in_gstin alias must still validate.
+	// Legacy Hardcount shorthand and the in_gstin alias must still validate.
 	if err := ValidateTaxID("gstin", "27AAEPM1234C1Z5"); err != nil {
 		t.Errorf("legacy gstin alias rejected: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestValidateTaxID_VAT(t *testing.T) {
 			t.Errorf("ValidateTaxID(eu_vat, %q) unexpected error: %v", v, err)
 		}
 	}
-	// Legacy Velox shorthand still validates.
+	// Legacy Hardcount shorthand still validates.
 	if err := ValidateTaxID("vat", "DE123456789"); err != nil {
 		t.Errorf("legacy vat alias rejected: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestValidateTaxID_ABN(t *testing.T) {
 	if err := ValidateTaxID("au_abn", "51824753556"); err != nil {
 		t.Errorf("valid ABN rejected: %v", err)
 	}
-	// Legacy Velox shorthand still validates.
+	// Legacy Hardcount shorthand still validates.
 	if err := ValidateTaxID("abn", "51824753556"); err != nil {
 		t.Errorf("legacy abn alias rejected: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestValidateTaxID_EmptyValuePasses(t *testing.T) {
 }
 
 func TestValidateTaxID_UnknownKindPassesThrough(t *testing.T) {
-	// Jurisdictions without explicit support must not be rejected — Velox
+	// Jurisdictions without explicit support must not be rejected — Hardcount
 	// stores the type as-is and lets Stripe / downstream tax engines apply
 	// any format rules.
 	if err := ValidateTaxID("br_cnpj", "12.345.678/0001-90"); err != nil {
@@ -115,7 +115,7 @@ func TestValidateTaxID_UnknownKindPassesThrough(t *testing.T) {
 	}
 }
 
-func TestNormalizeTaxIDType_VeloxShorthandToCanonical(t *testing.T) {
+func TestNormalizeTaxIDType_HardcountShorthandToCanonical(t *testing.T) {
 	tests := []struct {
 		in, want string
 	}{
@@ -144,7 +144,7 @@ func TestNormalizeTaxIDType_VeloxShorthandToCanonical(t *testing.T) {
 
 func TestValidateTaxID_AcceptsBothFormats(t *testing.T) {
 	// Same value must validate identically under canonical Stripe codes
-	// and legacy Velox shorthand — required so old data continues to work
+	// and legacy Hardcount shorthand — required so old data continues to work
 	// without a backfill.
 	pairs := []struct {
 		canonical, legacy, value string

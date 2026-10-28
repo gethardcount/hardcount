@@ -83,8 +83,8 @@ func TestSentEmailLinesGolden(t *testing.T) {
 	dispatched := created.Add(2 * time.Minute)
 	sim := time.Date(2027, 2, 1, 4, 30, 0, 0, time.UTC)
 	base := SentEmailOutboxRow{
-		ID: "vlx_emob_1", Recipient: "billing@acme.test", Status: "dispatched", DeliveryState: "delivered",
-		CreatedAt: created, DispatchedAt: &dispatched, InvoiceNumber: "VLX-000123", InvoiceID: "vlx_inv_1",
+		ID: "hc_emob_1", Recipient: "billing@acme.test", Status: "dispatched", DeliveryState: "delivered",
+		CreatedAt: created, DispatchedAt: &dispatched, InvoiceNumber: "HC-000123", InvoiceID: "hc_inv_1",
 	}
 
 	var cases []sentEmailGoldenCase
@@ -130,7 +130,7 @@ func TestSentEmailLinesGolden(t *testing.T) {
 	}
 	// A credit-note email names its credit note: a link while it exists.
 	cn := base
-	cn.EmailType, cn.CreditNoteNumber, cn.CreditNoteID = "credit_note", "CN-000012", "vlx_cn_1"
+	cn.EmailType, cn.CreditNoteNumber, cn.CreditNoteID = "credit_note", "CN-000012", "hc_cn_1"
 	add("credit note email/note exists", cn)
 	cn.CreditNoteID = ""
 	add("credit note email/note gone", cn)

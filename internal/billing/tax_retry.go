@@ -19,7 +19,7 @@ import (
 //   Chargebee: retries provider_outage / timeout codes only.
 //   Lago:      no automatic retry; manual operator action only.
 //
-// Velox lands on Recurly's curve (which is itself the Stripe-Smart-
+// Hardcount lands on Recurly's curve (which is itself the Stripe-Smart-
 // Retries shape adapted to tax). 8 attempts cover transient outages
 // over ~10 days; longer than that and an operator should know.
 

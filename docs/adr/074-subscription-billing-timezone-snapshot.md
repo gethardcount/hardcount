@@ -39,7 +39,7 @@ changes freely, applies everywhere) from a *billing anchor* (immutable per
 contract). Stripe anchors each subscription to a `billing_cycle_anchor` — a
 stored Unix **instant**, never re-interpreted by a timezone setting. Chargebee
 / Zuora treat the site timezone as a **setup-time** decision that is heavyweight
-(or restricted) to change once live billing exists. Velox already froze the
+(or restricted) to change once live billing exists. Hardcount already froze the
 anchor *day*; freezing the anchor *timezone* completes the model.
 
 ## Decision

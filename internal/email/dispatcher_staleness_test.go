@@ -106,7 +106,7 @@ func TestDispatcherStalenessGate(t *testing.T) {
 		// The SETUP LINK is the second exemption, added 2026-08-05. This
 		// test used to assert it stayed muted, on the reasoning that
 		// "asking for a card on a written-off invoice is still noise" —
-		// TRUE when written, because ADR-110 records that Velox then
+		// TRUE when written, because ADR-110 records that Hardcount then
 		// "could not charge a written-off invoice at all". Under ADR-113
 		// that is true AGAIN — but the card still unblocks recovery, now
 		// via a fresh recovery invoice on normal rails, so the setup link

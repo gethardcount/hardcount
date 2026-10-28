@@ -402,7 +402,7 @@ func firstPeriodForActivate(at time.Time, billingTime domain.SubscriptionBilling
 //   - Bill-timing mix: in_arrears and in_advance carry different
 //     invoice-shape semantics (close elapsed vs open upcoming) and
 //     mixing them on the same sub would emit inconsistent lines on the
-//     same invoice. Velox's hybrid invoice shape assumes a uniform
+//     same invoice. Hardcount's hybrid invoice shape assumes a uniform
 //     bill_timing across items.
 //
 // Empty BillingInterval defaults to monthly; empty BaseBillTiming
@@ -639,7 +639,7 @@ func (s *Service) rejectMeterOverlap(ctx context.Context, tenantID, customerID, 
 // BillingMonthly — the pre-Bug-#10 behavior, so unwired test paths
 // don't break.
 //
-// Stripe / Lago reject mixed intervals on the same sub. Velox should
+// Stripe / Lago reject mixed intervals on the same sub. Hardcount should
 // too eventually; for now the first-item-wins approach is consistent
 // with how plans / currencies are resolved elsewhere (engine.go's
 // firstPlanCurrency pattern).
@@ -1719,7 +1719,7 @@ func (s *Service) UpdateItem(ctx context.Context, tenantID, subscriptionID, item
 		// / Recurly / Metronome found no documented support for
 		// swapping a customer between a prepaid plan and a postpaid
 		// plan as an in-place plan-change operation. Lago — the
-		// closest model to Velox (per-plan pay_in_advance flag) —
+		// closest model to Hardcount (per-plan pay_in_advance flag) —
 		// explicitly documents same-cadence transitions only. The
 		// industry pattern is: change collection_method at sub level
 		// (Stripe) or end + recreate (Metronome contract transitions).
@@ -1804,7 +1804,7 @@ func mapPeriodMoved(err error) error {
 }
 
 // applyCrossIntervalPlanSwapTx is the immediate same-cadence cross-interval
-// plan swap — the only restructure-the-cycle plan change Velox supports —
+// plan swap — the only restructure-the-cycle plan change Hardcount supports —
 // run on the handler's tx. It runs the
 // cycle-restructuring DB writes — the period CAS (first statement, ADR-115),
 // the refund drafts, the plan swap, and (for in_advance) the swap invoice

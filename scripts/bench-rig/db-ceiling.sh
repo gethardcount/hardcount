@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
-# The database's OWN ceiling for Velox's row shape — the denominator every
-# Velox throughput figure has been missing.
+# The database's OWN ceiling for Hardcount's row shape — the denominator every
+# Hardcount throughput figure has been missing.
 #
 # "N events/sec" means nothing on its own: is that 30% of what the
 # database can commit, or 95%? pgbench is the Postgres community's standard
 # instrument for exactly this question, and running it on the SAME database,
-# with the SAME row shape, decomposes Velox's number into three parts a buyer
+# with the SAME row shape, decomposes Hardcount's number into three parts a buyer
 # can reason about:
 #
 #   leg A  commit floor      BEGIN; INSERT one usage_events row; COMMIT — with
 #                            the RLS session variables set ONCE per connection.
 #                            This is what the hardware + Postgres can do for
 #                            our row, our five indexes, our trigger. Nothing
-#                            above it is Velox's fault.
-#   leg B  velox tx protocol BEGIN; set_config x3; INSERT; COMMIT — the exact
-#                            per-transaction protocol Velox's store uses (three
+#                            above it is Hardcount's fault.
+#   leg B  hardcount tx protocol BEGIN; set_config x3; INSERT; COMMIT — the exact
+#                            per-transaction protocol Hardcount's store uses (three
 #                            set_config round trips for row-level security).
 #                            A minus B is what RLS-per-transaction costs.
-#   Velox measured ev/s      from measure.sh. B minus this is what HTTP + auth
+#   Hardcount measured ev/s      from measure.sh. B minus this is what HTTP + auth
 #                            + resolve + the Go service cost.
 #
 # BATCH=N inserts N rows per transaction (multi-row VALUES), which is the
@@ -30,11 +30,11 @@
 #
 #   DATABASE_URL=postgres://... ./db-ceiling.sh              # both legs
 #   DATABASE_URL=... CLIENTS=16 DURATION=60 BATCH=10 ./db-ceiling.sh
-#   DATABASE_URL=... VELOX_EVS=10203 ./db-ceiling.sh          # prints the ratios
-#   TARGET=aws VELOX_EVS=10203 ./db-ceiling.sh                # on the rig: runs itself on the app node
+#   DATABASE_URL=... HARDCOUNT_EVS=10203 ./db-ceiling.sh          # prints the ratios
+#   TARGET=aws HARDCOUNT_EVS=10203 ./db-ceiling.sh                # on the rig: runs itself on the app node
 #
 # Needs pgbench (postgresql16-contrib on AL2023; libpq on macOS) and the bench
-# fixtures from velox-bench-seed (it spreads rows across those customers).
+# fixtures from hardcount-bench-seed (it spreads rows across those customers).
 set -uo pipefail
 
 # ---------------------------------------------------------------------------
@@ -44,28 +44,28 @@ set -uo pipefail
 # environment. The app node has psql and pgbench (postgresql16-contrib).
 # ---------------------------------------------------------------------------
 if [ "${TARGET:-local}" = "aws" ]; then
-  REGION="${AWS_REGION:-ap-south-1}"; OUT="${OUT:-$HOME/.velox-bench-rig}"
-  KEYFILE="$OUT/velox-bench-key.pem"; [ -s "$KEYFILE" ] || { echo "FATAL: no key at $KEYFILE"; exit 1; }
+  REGION="${AWS_REGION:-ap-south-1}"; OUT="${OUT:-$HOME/.hardcount-bench-rig}"
+  KEYFILE="$OUT/hardcount-bench-key.pem"; [ -s "$KEYFILE" ] || { echo "FATAL: no key at $KEYFILE"; exit 1; }
   aws_() { aws --region "$REGION" "$@"; }
-  APP_PUB=$(aws_ ec2 describe-instances --filters "Name=tag:Name,Values=velox-bench-app" "Name=instance-state-name,Values=running" \
+  APP_PUB=$(aws_ ec2 describe-instances --filters "Name=tag:Name,Values=hardcount-bench-app" "Name=instance-state-name,Values=running" \
     --query 'Reservations[].Instances[0].PublicIpAddress' --output text)
   [ -n "$APP_PUB" ] && [ "$APP_PUB" != "None" ] || { echo "FATAL: app instance not running"; exit 1; }
-  DBHOST=$(aws_ rds describe-db-instances --db-instance-identifier velox-bench-db --query 'DBInstances[0].Endpoint.Address' --output text)
+  DBHOST=$(aws_ rds describe-db-instances --db-instance-identifier hardcount-bench-db --query 'DBInstances[0].Endpoint.Address' --output text)
   DBPASS=$(cat "$OUT/db-password")
-  REMOTE_DSN="postgres://velox:$DBPASS@$DBHOST:5432/${DBNAME:-velox}?sslmode=require"
+  REMOTE_DSN="postgres://hardcount:$DBPASS@$DBHOST:5432/${DBNAME:-hardcount}?sslmode=require"
   echo "== running on the app node ($APP_PUB) against $DBHOST"
   # Forward every knob this script honours; TARGET is dropped so it runs locally there.
   exec ssh -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -i "$KEYFILE" "ec2-user@$APP_PUB" \
-    "TARGET=local DATABASE_URL='$REMOTE_DSN' CLIENTS='${CLIENTS:-16}' DURATION='${DURATION:-60}' BATCH='${BATCH:-1}' VELOX_EVS='${VELOX_EVS:-}' LIVEMODE='${LIVEMODE:-on}' ROUNDS='${ROUNDS:-2}' bash -s -- $*" < "$0"
+    "TARGET=local DATABASE_URL='$REMOTE_DSN' CLIENTS='${CLIENTS:-16}' DURATION='${DURATION:-60}' BATCH='${BATCH:-1}' HARDCOUNT_EVS='${HARDCOUNT_EVS:-}' LIVEMODE='${LIVEMODE:-on}' ROUNDS='${ROUNDS:-2}' bash -s -- $*" < "$0"
 fi
 
 : "${DATABASE_URL:?set DATABASE_URL (admin/owner role — pgbench inserts directly)}"
 CLIENTS="${CLIENTS:-16}"
 DURATION="${DURATION:-60}"
 BATCH="${BATCH:-1}"
-VELOX_EVS="${VELOX_EVS:-}"
+HARDCOUNT_EVS="${HARDCOUNT_EVS:-}"
 LIVEMODE="${LIVEMODE:-on}"          # must match how the bench fixtures were seeded
-TENANT="vlx_ten_bench"
+TENANT="hc_ten_bench"
 
 command -v pgbench >/dev/null || { echo "FATAL: pgbench not installed (postgresql16-contrib / libpq)"; exit 1; }
 say()  { printf '\n== %s\n' "$*"; }
@@ -73,7 +73,7 @@ info() { printf '   %s\n' "$*"; }
 q()    { psql "$DATABASE_URL" -qtA -v ON_ERROR_STOP=1 -c "$1"; }
 
 ncust=$(q "SELECT count(*) FROM customers WHERE tenant_id='$TENANT'")
-[ "${ncust:-0}" -ge 1 ] || { echo "FATAL: no bench customers — run velox-bench-seed first"; exit 1; }
+[ "${ncust:-0}" -ge 1 ] || { echo "FATAL: no bench customers — run hardcount-bench-seed first"; exit 1; }
 # LIVEMODE must match the fixtures, or the trigger files every row under the
 # other partition. Refuse rather than measure the wrong table.
 fixmode=$(q "SELECT CASE WHEN bool_and(livemode) THEN 'on' WHEN bool_and(NOT livemode) THEN 'off' ELSE 'mixed' END FROM customers WHERE tenant_id='$TENANT'")
@@ -86,7 +86,7 @@ maxc=$((ncust - 1))
 
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 
-# Velox's row shape: the same columns the store's INSERT writes. Customer ids
+# Hardcount's row shape: the same columns the store's INSERT writes. Customer ids
 # come from the ACTUAL seeded set (an array literal built once here), not from
 # an assumed 'prefix + 000..n-1' pattern — a database holding an older bench
 # customer alongside the seeded ones made that assumption pick a non-existent
@@ -94,9 +94,9 @@ WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 # generate_series; unique idempotency keys; ADR-044-shaped dims.
 IDS_SQL=$(q "SELECT 'ARRAY[' || string_agg(quote_literal(id), ',') || ']' FROM customers WHERE tenant_id='$TENANT'")
 INSERT_SQL="INSERT INTO usage_events (id, tenant_id, customer_id, meter_id, quantity, properties, idempotency_key, timestamp, origin, provider_cost_micros, provider_cost_source)
-SELECT 'vlx_evt_pgb_' || gen_random_uuid()::text, '$TENANT',
+SELECT 'hc_evt_pgb_' || gen_random_uuid()::text, '$TENANT',
        (${IDS_SQL})[1 + floor(random() * $ncust)::int],
-       'vlx_mtr_bench', (floor(random() * 1000) + 1)::numeric,
+       'hc_mtr_bench', (floor(random() * 1000) + 1)::numeric,
        jsonb_build_object('model', (ARRAY['gpt-4','claude-3-opus','gemini-pro','llama-2-70b','mistral-large'])[1 + floor(random()*5)],
                           'operation', (ARRAY['input','output','embedding','moderation'])[1 + floor(random()*4)],
                           'cached', random() < 0.5),
@@ -109,7 +109,7 @@ BEGIN;
 $INSERT_SQL
 COMMIT;
 SQL
-# leg B: Velox's per-transaction protocol — three set_config round trips
+# leg B: Hardcount's per-transaction protocol — three set_config round trips
 cat > "$WORK/legB.sql" <<SQL
 BEGIN;
 SELECT set_config('app.bypass_rls', 'off', true);
@@ -129,7 +129,7 @@ run_leg() { # name script
   local lm; [ "$LIVEMODE" = "on" ] && lm=true || lm=false
   before=$(q "SELECT count(*) FROM usage_events WHERE tenant_id='$TENANT' AND livemode=$lm")
   # PGOPTIONS sets the RLS/livemode GUCs at SESSION level for leg A; harmless
-  # for leg B, whose per-tx set_config then overrides them the way Velox does.
+  # for leg B, whose per-tx set_config then overrides them the way Hardcount does.
   PGOPTIONS="-c app.tenant_id=$TENANT -c app.livemode=$LIVEMODE -c app.bypass_rls=off" \
     pgbench "$DATABASE_URL" -n -M prepared -c "$CLIENTS" -j "$(( CLIENTS < 8 ? CLIENTS : 8 ))" \
       -T "$DURATION" -f "$script" > "$WORK/$name.out" 2>&1 || { echo "  pgbench FAILED:"; tail -5 "$WORK/$name.out" | sed 's/^/    /'; return 1; }
@@ -155,7 +155,7 @@ q "SELECT 'table: '||count(*)||' rows, '||pg_size_pretty(pg_table_size('usage_ev
 for r in $(seq 1 "$ROUNDS"); do
   info "round $r"
   run_leg "A commit-floor"  "$WORK/legA.sql";      cat "$WORK/A commit-floor.evs"      >> "$WORK/A.all" 2>/dev/null; echo >> "$WORK/A.all"
-  run_leg "B velox-tx-protocol" "$WORK/legB.sql";  cat "$WORK/B velox-tx-protocol.evs" >> "$WORK/B.all" 2>/dev/null; echo >> "$WORK/B.all"
+  run_leg "B hardcount-tx-protocol" "$WORK/legB.sql";  cat "$WORK/B hardcount-tx-protocol.evs" >> "$WORK/B.all" 2>/dev/null; echo >> "$WORK/B.all"
 done
 median() { sort -n | awk '{a[NR]=$1} END{ if (NR==0) print ""; else if (NR%2==1) print a[(NR+1)/2]; else printf "%.0f\n", (a[NR/2]+a[NR/2+1])/2 }'; }
 a=$(grep -E '^[0-9]+$' "$WORK/A.all" | median); b=$(grep -E '^[0-9]+$' "$WORK/B.all" | median)
@@ -164,11 +164,11 @@ say "decomposition (median rows/s over $ROUNDS interleaved rounds, batch $BATCH)
 if [ -n "$a" ] && [ -n "$b" ]; then
   awk -v a="$a" -v b="$b" 'BEGIN{printf "   RLS per-tx protocol costs: %.0f%% of the commit floor  (A %s -> B %s)\n", (1-b/a)*100, a, b}'
 fi
-if [ -n "$VELOX_EVS" ] && [ -n "$b" ]; then
-  awk -v v="$VELOX_EVS" -v a="$a" -v b="$b" 'BEGIN{
-    printf "   Velox at %s ev/s is %.0f%% of the DB commit floor and %.0f%% of the same protocol without HTTP/app\n", v, v/a*100, v/b*100
+if [ -n "$HARDCOUNT_EVS" ] && [ -n "$b" ]; then
+  awk -v v="$HARDCOUNT_EVS" -v a="$a" -v b="$b" 'BEGIN{
+    printf "   Hardcount at %s ev/s is %.0f%% of the DB commit floor and %.0f%% of the same protocol without HTTP/app\n", v, v/a*100, v/b*100
     printf "   -> HTTP + auth + resolve + service overhead: %.0f%% of B\n", (1-v/b)*100 }'
-  info "(only meaningful if VELOX_EVS came from a closed-loop run at BATCH=$BATCH — a mismatched batch makes these fractions nonsense)"
+  info "(only meaningful if HARDCOUNT_EVS came from a closed-loop run at BATCH=$BATCH — a mismatched batch makes these fractions nonsense)"
 else
-  info "pass VELOX_EVS=<measured ev/s at this batch> to see Velox as a fraction of the ceiling"
+  info "pass HARDCOUNT_EVS=<measured ev/s at this batch> to see Hardcount as a fraction of the ceiling"
 fi

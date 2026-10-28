@@ -1,6 +1,6 @@
 # Code of Conduct
 
-The Velox project follows the [Contributor Covenant, version 2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct/) without modification.
+The Hardcount project follows the [Contributor Covenant, version 2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct/) without modification.
 
 The full text — including the standards we hold ourselves to, the enforcement guidelines, and the four-tier consequence ladder (correction → warning → temporary ban → permanent ban) — is available at the link above. We adopt it verbatim rather than vendoring a copy that could drift.
 
@@ -12,9 +12,9 @@ If your concern overlaps with a security vulnerability, see [`SECURITY.md`](SECU
 
 ## Scope
 
-This Code applies to all project spaces — the GitHub repository (issues, pull requests, discussions, code reviews), any official Velox community channels (chat, forum, mailing list once they exist), and any in-person or virtual event held under the Velox name.
+This Code applies to all project spaces — the GitHub repository (issues, pull requests, discussions, code reviews), any official Hardcount community channels (chat, forum, mailing list once they exist), and any in-person or virtual event held under the Hardcount name.
 
-It also applies when an individual is officially representing the project — for example, posting from a Velox social account, or speaking at an event as a Velox maintainer.
+It also applies when an individual is officially representing the project — for example, posting from a Hardcount social account, or speaking at an event as a Hardcount maintainer.
 
 ## Enforcement
 
@@ -25,7 +25,7 @@ The maintainer is responsible for:
 - Applying the Contributor Covenant enforcement ladder consistently
 - Documenting the outcome in a private incident log retained for 18 months
 
-The maintainer is held to the same standard as everyone else. Velox has one maintainer today, so there is no second person to escalate to. If your concern is about the maintainer, [report it to GitHub](https://docs.github.com/en/communities/maintaining-your-safety-on-github/reporting-abuse-or-spam).
+The maintainer is held to the same standard as everyone else. Hardcount has one maintainer today, so there is no second person to escalate to. If your concern is about the maintainer, [report it to GitHub](https://docs.github.com/en/communities/maintaining-your-safety-on-github/reporting-abuse-or-spam).
 
 ## Acknowledgement
 

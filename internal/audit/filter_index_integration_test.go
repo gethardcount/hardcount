@@ -38,7 +38,7 @@ func TestFilterIndexes_AreActuallyUsed(t *testing.T) {
 		if i%5 == 0 {
 			action = "void"
 		}
-		if err := logger.Log(ctx, tenantID, action, "invoice", fmt.Sprintf("vlx_inv_%d", i), "", nil); err != nil {
+		if err := logger.Log(ctx, tenantID, action, "invoice", fmt.Sprintf("hc_inv_%d", i), "", nil); err != nil {
 			t.Fatalf("seed %d: %v", i, err)
 		}
 	}
@@ -78,7 +78,7 @@ func TestFilterIndexes_AreActuallyUsed(t *testing.T) {
 			query: `SELECT al.id FROM audit_log al
 				WHERE al.tenant_id = $1 AND al.livemode = $2 AND al.actor_id = $3
 				ORDER BY al.created_at DESC, al.id DESC LIMIT 50`,
-			args: []any{tenantID, false, "vlx_usr_x"},
+			args: []any{tenantID, false, "hc_usr_x"},
 			why:  "the first question asked after an incident: everything this operator did",
 		},
 		{
@@ -87,7 +87,7 @@ func TestFilterIndexes_AreActuallyUsed(t *testing.T) {
 			query: `SELECT al.id FROM audit_log al
 				WHERE al.tenant_id = $1 AND al.livemode = $2 AND al.resource_id = $3
 				ORDER BY al.created_at DESC, al.id DESC LIMIT 50`,
-			args: []any{tenantID, false, "vlx_inv_7"},
+			args: []any{tenantID, false, "hc_inv_7"},
 			why:  "the entity detail pages link straight to this; 0001's index put resource_id THIRD, so it could not serve it",
 		},
 	}
@@ -125,7 +125,7 @@ func TestFilterOptions_DoNotScanTheWholeHistory(t *testing.T) {
 		if i%3 == 0 {
 			action = "void"
 		}
-		if err := logger.Log(ctx, tenantID, action, "invoice", fmt.Sprintf("vlx_inv_%d", i), "", nil); err != nil {
+		if err := logger.Log(ctx, tenantID, action, "invoice", fmt.Sprintf("hc_inv_%d", i), "", nil); err != nil {
 			t.Fatalf("seed: %v", err)
 		}
 	}

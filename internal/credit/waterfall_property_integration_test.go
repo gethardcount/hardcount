@@ -139,8 +139,8 @@ func TestProperty_Waterfall_ConservesAndRespectsOrder(t *testing.T) {
 		if want == 0 {
 			want = 1
 		}
-		invID := seedPayableInvoice(t, db, ctx, tenantID, custID, want, fmt.Sprintf("VLX-WF-%03d", trial))
-		applied, err := svc.ApplyToInvoice(ctx, tenantID, custID, invID, want, fmt.Sprintf("VLX-WF-%03d", trial))
+		invID := seedPayableInvoice(t, db, ctx, tenantID, custID, want, fmt.Sprintf("HC-WF-%03d", trial))
+		applied, err := svc.ApplyToInvoice(ctx, tenantID, custID, invID, want, fmt.Sprintf("HC-WF-%03d", trial))
 		if err != nil {
 			t.Fatalf("trial %d: apply: %v", trial, err)
 		}

@@ -3,16 +3,16 @@
 **Status:** Accepted (amended 2026-08-30)
 **Date:** 2026-05-30
 **Supersedes:** the boot-time fallback contract introduced when
-the webhook/email outboxes shipped (the `VELOX_WEBHOOK_OUTBOX_ENABLED`
-and `VELOX_EMAIL_OUTBOX_ENABLED` env flags).
+the webhook/email outboxes shipped (the `HARDCOUNT_WEBHOOK_OUTBOX_ENABLED`
+and `HARDCOUNT_EMAIL_OUTBOX_ENABLED` env flags).
 
 ## Summary
 
-Webhooks and emails always go through their outbox tables, and a background dispatcher delivers each row with retries and a dead-letter queue. The `VELOX_WEBHOOK_OUTBOX_ENABLED` and `VELOX_EMAIL_OUTBOX_ENABLED` flags were removed, because the direct-send path they enabled lost messages on any transient failure. Amended 2026-08-30: the four money emails (payment receipt, payment failed, dunning warning, dunning escalation) are now queued inside their state change's transaction; other emails are queued after commit. To pause a dispatcher, run `SELECT leader_pause('email_outbox', who, why)` or the `webhook_outbox` equivalent ([runbook](../ops/runbook/background-job-stuck.md)); the advisory locks named below were retired by [ADR-114](114-leader-leases-tick-scoped-fencing.md). Status: active, amended.
+Webhooks and emails always go through their outbox tables, and a background dispatcher delivers each row with retries and a dead-letter queue. The `HARDCOUNT_WEBHOOK_OUTBOX_ENABLED` and `HARDCOUNT_EMAIL_OUTBOX_ENABLED` flags were removed, because the direct-send path they enabled lost messages on any transient failure. Amended 2026-08-30: the four money emails (payment receipt, payment failed, dunning warning, dunning escalation) are now queued inside their state change's transaction; other emails are queued after commit. To pause a dispatcher, run `SELECT leader_pause('email_outbox', who, why)` or the `webhook_outbox` equivalent ([runbook](../ops/runbook/background-job-stuck.md)); the advisory locks named below were retired by [ADR-114](114-leader-leases-tick-scoped-fencing.md). Status: active, amended.
 
 ## Context
 
-Velox shipped transactional outboxes for outbound webhooks
+Hardcount shipped transactional outboxes for outbound webhooks
 (`webhook_outbox`) and customer-facing email (`email_outbox`) to make
 delivery durable across crashes and transient downstream failures.
 Producers persist an event/email intent inside the business-op
@@ -51,7 +51,7 @@ DLQ.
 > enqueue error synchronously).
 
 At migration time, both outboxes shipped behind boot env flags
-(`VELOX_WEBHOOK_OUTBOX_ENABLED=true` and `VELOX_EMAIL_OUTBOX_ENABLED
+(`HARDCOUNT_WEBHOOK_OUTBOX_ENABLED=true` and `HARDCOUNT_EMAIL_OUTBOX_ENABLED
 =true`) so operators could roll back to the legacy direct-dispatch
 path on regression. The router used the flag to switch BOTH the
 producer wiring (`OutboxSender` ↔ `*email.Sender`, `OutboxDispatcher`
@@ -79,7 +79,7 @@ Three observations on 2026-05-30 forced a re-evaluation:
    `internal/platform/postgres/advisory_lock.go`). Runtime pause
    ("stop sending email RIGHT NOW") wants a runtime API or external
    advisory-lock hold, not a restart-required env flag. Worker /
-   API binary split is a deployment topology decision (`cmd/velox-worker`
+   API binary split is a deployment topology decision (`cmd/hardcount-worker`
    if it ever ships), not a feature flag.
 
 The flag also violates two project principles:
@@ -98,9 +98,9 @@ The flag also violates two project principles:
 
 **Cut both flags. The outbox is the only path.**
 
-- `VELOX_WEBHOOK_OUTBOX_ENABLED` removed. Producers always enqueue
+- `HARDCOUNT_WEBHOOK_OUTBOX_ENABLED` removed. Producers always enqueue
   to `webhook_outbox`; the dispatcher worker always starts.
-- `VELOX_EMAIL_OUTBOX_ENABLED` removed. Producers always enqueue
+- `HARDCOUNT_EMAIL_OUTBOX_ENABLED` removed. Producers always enqueue
   to `email_outbox` via `OutboxSender`; the dispatcher worker
   always starts.
 - `Server.OutboxEnabled` and `Server.EmailOutboxEnabled` fields
@@ -122,7 +122,7 @@ The flag also violates two project principles:
 |---|---|---|
 | Multi-replica: only one drains | Disable on N−1 replicas | Advisory lock already handles this; first claimant wins, all others sleep |
 | Emergency pause | Set flag false + restart | Hold the advisory lock from an external psql session (no restart) |
-| Separate worker process | Skip the goroutine on API replicas | When/if this is needed: split into `cmd/velox` (API) + `cmd/velox-worker` (dispatcher-only); topology in deploy, not code |
+| Separate worker process | Skip the goroutine on API replicas | When/if this is needed: split into `cmd/hardcount` (API) + `cmd/hardcount-worker` (dispatcher-only); topology in deploy, not code |
 | Local dev quiet | Set flag false | No traffic = no rows = quiet dispatcher (it polls every 5s, claims nothing) |
 
 All four are dynamic OR deployment-shape concerns; none of them
@@ -167,7 +167,7 @@ Resurrect the flag (or a runtime equivalent) when:
 - A DP names a use case where producer enqueue must be skipped
   cluster-wide (e.g. compliance regime requires "no email storage
   even transient"), OR
-- A binary split (`cmd/velox-worker`) is shipped and one side
+- A binary split (`cmd/hardcount-worker`) is shipped and one side
   needs to know which role it's running.
 
 Until then, "outbox on" is an invariant.

@@ -55,8 +55,8 @@ func TestCostDashboard_PinsCustomerLivemode(t *testing.T) {
 			t.Parallel()
 
 			lookup := fakeTokenLookup{cust: domain.Customer{
-				ID:       "vlx_cus_test",
-				TenantID: "vlx_ten_test",
+				ID:       "hc_cus_test",
+				TenantID: "hc_ten_test",
 				Livemode: tt.custLivemode,
 			}}
 			lister := &recordingLister{}
@@ -70,7 +70,7 @@ func TestCostDashboard_PinsCustomerLivemode(t *testing.T) {
 			// ctx deliberately carries NO livemode — the public route is
 			// unauthenticated and never set one. The fix must pin it from
 			// the resolved customer.
-			_, err := a.GetByToken(context.Background(), "vlx_pcd_whatever")
+			_, err := a.GetByToken(context.Background(), "hc_pcd_whatever")
 			if err != nil {
 				t.Fatalf("GetByToken returned error: %v", err)
 			}

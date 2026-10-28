@@ -118,7 +118,7 @@ func TestLeaseHolderHelperProcess(t *testing.T) {
 	}
 	url := os.Getenv("TEST_DATABASE_URL")
 	if url == "" {
-		url = "postgres://velox_test_app:velox_test_app@localhost:5432/velox_test?sslmode=disable"
+		url = "postgres://hardcount_test_app:hardcount_test_app@localhost:5432/hardcount_test?sslmode=disable"
 	}
 	pool, err := sql.Open("pgx", url)
 	if err != nil {

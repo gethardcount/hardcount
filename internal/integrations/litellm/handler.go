@@ -19,14 +19,14 @@ import (
 )
 
 // CustomerLookup is the narrow surface the adapter uses to resolve
-// LiteLLM's `user` field (= external_customer_id) to a Velox internal
+// LiteLLM's `user` field (= external_customer_id) to a Hardcount internal
 // customer_id. Implemented by *customer.PostgresStore.
 type CustomerLookup interface {
 	GetByExternalID(ctx context.Context, tenantID, externalID string) (domain.Customer, error)
 }
 
 // MeterLookup is the narrow surface the adapter uses to resolve the
-// event_name ("tokens_input" / "tokens_output") to a Velox internal
+// event_name ("tokens_input" / "tokens_output") to a Hardcount internal
 // meter_id. Implemented by *pricing.Service.
 type MeterLookup interface {
 	GetMeterByEventName(ctx context.Context, tenantID, key string) (domain.Meter, error)
@@ -50,9 +50,9 @@ type Holder interface {
 }
 
 // Handler exposes POST /v1/integrations/litellm/spend. Auth is the
-// standard API key (Bearer); operator generates a Velox key and
+// standard API key (Bearer); operator generates a Hardcount key and
 // pastes it into LiteLLM's GENERIC_LOGGER_HEADERS as
-// `Authorization: Bearer <vlx_secret_…>`.
+// `Authorization: Bearer <hc_secret_…>`.
 type Handler struct {
 	customers CustomerLookup
 	meters    MeterLookup
@@ -74,7 +74,7 @@ func New(customers CustomerLookup, meters MeterLookup, ingester Ingester, holder
 // Routes returns the chi router for /v1/integrations/litellm/*.
 // Mounted by api/router.go under the standard /v1 auth-required
 // stack — LiteLLM's generic_api callback sets the Bearer header on
-// every POST, so the Velox auth middleware enforces the tenant.
+// every POST, so the Hardcount auth middleware enforces the tenant.
 func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
 	r.Post("/spend", h.spend)
@@ -146,7 +146,7 @@ type SpendRowError struct {
 //     suffixes the key per token type
 //  5. Tally accepted / deduplicated / held / skipped / errors; return 200
 //
-// The status code answers ONE question: did Velox reach a verdict on
+// The status code answers ONE question: did Hardcount reach a verdict on
 // this batch? Per-row verdicts — a customer or meter that does not exist
 // yet (the row is HELD, counted in held, #1044), a payload that fails
 // validation, a row the store already has — stay 200 with held / errors[]

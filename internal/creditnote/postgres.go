@@ -288,7 +288,7 @@ func (s *PostgresStore) CreateUnderInvoiceLockDynamicTx(ctx context.Context, tx 
 // reaches RetryPendingClawbackIssue's per-row logging — deferred drafts
 // produce NO error logs by design (the prior claim here that
 // repeated ERROR logs surface them was false). The
-// velox_creditnote_pending_issue_drafts gauge is the surface: alert on
+// hardcount_creditnote_pending_issue_drafts gauge is the surface: alert on
 // sustained growth/age (see docs/ops/runbook/unclear-charge.md), not presence.
 func (s *PostgresStore) ListPendingClawbackDrafts(ctx context.Context, batch int, livemode bool) ([]domain.CreditNote, error) {
 	if batch <= 0 {
@@ -385,7 +385,7 @@ func (s *PostgresStore) ListPendingClawbackDraftsForClock(ctx context.Context, t
 }
 
 func (s *PostgresStore) insertCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID string, cn domain.CreditNote) (domain.CreditNote, error) {
-	id := postgres.NewID("vlx_cn")
+	id := postgres.NewID("hc_cn")
 	// Honors ctx-bound effective-now (ADR-030) — credit notes against
 	// invoices on clock-pinned subs inherit sim-time. Falls back to
 	// wall-clock for unbound ctx (production credit notes).
@@ -1056,7 +1056,7 @@ func (s *PostgresStore) ApplyRefundWebhookStatusAudited(ctx context.Context, ten
 	// and no audit row is emitted for a transition that didn't happen.
 	//
 	// An 'unknown' row is never moved by a webhook (#965). Its status is
-	// about a later request whose refund Velox never learned the id of; the
+	// about a later request whose refund Hardcount never learned the id of; the
 	// id it still stores is a refund Stripe already reported failed
 	// (RetryRefund creates only past a failed one). An event for that id is
 	// old news about the dead refund, and writing it would put back the
@@ -1171,7 +1171,7 @@ func (s *PostgresStore) SetTaxReversalPending(ctx context.Context, tenantID, id 
 // fails onto the marker branch, which is unbounded (a known owed reversal is
 // never aged out) — so the window bounds how long an orphan can go unnoticed
 // (one healthy leader tick), not whether it is ever reversed. Re-reversal is
-// Stripe-idempotent via the per-CN velox_tax_rev_<cn.ID> reference, so any
+// Stripe-idempotent via the per-CN hardcount_tax_rev_<cn.ID> reference, so any
 // overlap between (a) and (b), or with the inline attempt, dedups to one.
 func (s *PostgresStore) ListPendingCreditNoteTaxReversal(ctx context.Context, batch int, livemode bool) ([]domain.CreditNote, error) {
 	if batch <= 0 {
@@ -1227,7 +1227,7 @@ func (s *PostgresStore) ListPendingCreditNoteTaxReversal(ctx context.Context, ba
 // only ever called from CreateUnderInvoiceLock so a line can't exist without
 // its committed header (and vice versa).
 func (s *PostgresStore) insertLineItemTx(ctx context.Context, tx *sql.Tx, tenantID string, item domain.CreditNoteLineItem) (domain.CreditNoteLineItem, error) {
-	id := postgres.NewID("vlx_cnli")
+	id := postgres.NewID("hc_cnli")
 	now := clock.Now(ctx)
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO credit_note_line_items (id, credit_note_id, tenant_id,

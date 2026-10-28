@@ -21,7 +21,7 @@ and loud beats silently double-charged" — and its premise was that an unnamed
 PaymentIntent is unreachable.
 
 The premise is false. Every engine-minted PaymentIntent has always carried
-`velox_invoice_id` in its metadata (stripe.go, stamped at create), and Stripe's
+`hardcount_invoice_id` in its metadata (stripe.go, stamped at create), and Stripe's
 PaymentIntent Search API can find PIs by metadata. Verified 2026-08-02 against
 the vendored SDK (v82.5.1: `sc.V1PaymentIntents.Search`) and Stripe's docs:
 search works in test mode and sandboxes (separate 20 reads/sec limits per
@@ -39,7 +39,7 @@ shape that survived.
 ## Decision
 
 A third reconciler sweep over exactly the parked population searches Stripe by
-`metadata['velox_invoice_id']` and acts on **positive evidence only**:
+`metadata['hardcount_invoice_id']` and acts on **positive evidence only**:
 
 | Search finds | Action |
 |---|---|
@@ -84,7 +84,7 @@ naming the PI). Search is simply a second, pull-shaped way to learn the name.
    so rotation, rate-limiting, and re-search pacing are one mechanism. Stamping
    every search result (found or not) is then correct by construction.
 4. **Search-refused is observable and self-limiting**: a per-class error counter
-   (`velox_parked_search_errors_total`), WARN per occurrence, and an
+   (`hardcount_parked_search_errors_total`), WARN per occurrence, and an
    invalid-request class (the not-offered/India shape — a request-shape error
    that will not heal) disables the sweep for that tenant+mode for the process
    lifetime with a single CRITICAL. Those tenants keep exactly today's
@@ -97,7 +97,7 @@ naming the PI). Search is simply a second, pull-shaped way to learn the name.
 
 The parked copy said "it will not resolve on its own" — unconditionally true
 under ADR-107, conditionally false now. Banner and gate copy become bounded:
-Velox searches the provider for the attempt; if it can be found the invoice
+Hardcount searches the provider for the attempt; if it can be found the invoice
 resolves automatically; if it cannot, it will not resolve on its own and the
 write-off remains the exit. FLOW I4c gains the search boxes; the park-site
 CRITICAL log names the sweep instead of implying permanent manual-only
@@ -153,7 +153,7 @@ invoice is still only settled, never charged (ADR-113).
 Removed with the sweep: `SearchPaymentIntentsByInvoiceID`,
 `ListParkedSearchable`, `AdoptPaymentIntentIfParked` (the stale-hold sweep
 follows a processing payment through `StampChargeOutcome`), the latch for
-accounts without Search, and the metric `velox_parked_search_errors_total`.
+accounts without Search, and the metric `hardcount_parked_search_errors_total`.
 Rows this sweep stamped keep `provider_payment_status` values
 `search_not_found`, `search_terminal_only` or `search_error`; nothing reads
 them.

@@ -82,7 +82,7 @@ type outboxMessage struct {
 	// for a card error, or the different-card message
 	// (payment.customerFailureReason). The previous release's settle
 	// transaction wrote it as failure_reason instead, unfiltered (it could
-	// be Velox's own "reconciled: requires_payment_method"); the dispatcher
+	// be Hardcount's own "reconciled: requires_payment_method"); the dispatcher
 	// never read that for payment_failed, and still doesn't.
 	Reason string `json:"reason,omitempty"`
 	// FailureReason carries the latest decline message for the

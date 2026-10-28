@@ -1,6 +1,6 @@
 # Agent Prompting Standards (Claude Fable 5)
 
-> **Internal tooling record.** How the maintainer writes prompts for AI agents that work on this repo. You do not need it to use or contribute to Velox.
+> **Internal tooling record.** How the maintainer writes prompts for AI agents that work on this repo. You do not need it to use or contribute to Hardcount.
 
 Reusable prompt fragments and rules for every multi-agent workflow this repo
 runs — adversarial design panels, audit finders (read-only defect-hunting
@@ -45,7 +45,7 @@ one line of "coverage over precision here," not an enumerated finder rulebook.
 
 Every agent prompt opens with intent, not just task:
 
-> You are one lens of an adversarial design panel for Velox (an open-source
+> You are one lens of an adversarial design panel for Hardcount (an open-source
 > usage-based billing engine). The design under attack fixes [the bug and its
 > money consequence]. Your verdict gates whether we build it.
 

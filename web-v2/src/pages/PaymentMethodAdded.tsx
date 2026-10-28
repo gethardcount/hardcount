@@ -2,7 +2,7 @@ import { useSearchParams } from 'react-router-dom'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { CheckCircle2, AlertCircle, ShieldCheck } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
-import { VeloxLogo } from '@/components/VeloxLogo'
+import { HardcountLogo } from '@/components/HardcountLogo'
 
 // PaymentMethodAdded is the public landing page Stripe Checkout
 // redirects to after a customer completes (or cancels) a setup-mode
@@ -15,7 +15,7 @@ import { VeloxLogo } from '@/components/VeloxLogo'
 // success_url + cancel_url both point here so the SPA renders the
 // right copy without us needing two routes.
 //
-// Customers have no Velox sign-in (the self-serve portal was removed,
+// Customers have no Hardcount sign-in (the self-serve portal was removed,
 // ADR-051), so this page is the end of the flow: confirm, encourage
 // closing the tab.
 //
@@ -33,7 +33,7 @@ export default function PaymentMethodAddedPage() {
     <div className="min-h-screen bg-background flex flex-col">
       <header className="border-b border-border bg-card">
         <div className="max-w-2xl mx-auto px-4 py-4">
-          <VeloxLogo />
+          <HardcountLogo />
         </div>
       </header>
       <main className="flex-1 flex items-center justify-center px-4 py-12">

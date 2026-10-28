@@ -1,19 +1,19 @@
 # Set up email
 
-Velox sends email through your email provider's SMTP server. SMTP is the standard way programs hand email to a provider. This page connects a provider, checks that email arrives, and sets up bounce handling.
+Hardcount sends email through your email provider's SMTP server. SMTP is the standard way programs hand email to a provider. This page connects a provider, checks that email arrives, and sets up bounce handling.
 
-Velox sends:
+Hardcount sends:
 
 - invoices, receipts and credit notes,
 - [dunning](../glossary.md) emails (reminders after a card payment fails),
 - payment-failed emails and links to add a payment method,
 - password resets and team invites.
 
-Velox sends about 20 to 30 emails a minute, and you cannot change that. Emails above that rate wait in a queue and go out in order. Velox sends only through SMTP, so it cannot show opens or clicks.
+Hardcount sends about 20 to 30 emails a minute, and you cannot change that. Emails above that rate wait in a queue and go out in order. Hardcount sends only through SMTP, so it cannot show opens or clicks.
 
 ## Connect a provider
 
-1. Set the SMTP settings on the Velox server. Your provider gives you these values; [Settings for each provider](#settings-for-each-provider) has them for common ones.
+1. Set the SMTP settings on the Hardcount server. Your provider gives you these values; [Settings for each provider](#settings-for-each-provider) has them for common ones.
 
    ```bash
    SMTP_HOST=smtp.your-provider.com
@@ -24,7 +24,7 @@ Velox sends about 20 to 30 emails a minute, and you cannot change that. Emails a
    SMTP_TLS=starttls         # starttls (default) | implicit | none
    ```
 
-   `SMTP_TLS` is how the connection is encrypted: `starttls` for port 587, `implicit` for port 465. `none` sends in plain text: use it only for a local test inbox, never in production, where Velox refuses to send with it.
+   `SMTP_TLS` is how the connection is encrypted: `starttls` for port 587, `implicit` for port 465. `none` sends in plain text: use it only for a local test inbox, never in production, where Hardcount refuses to send with it.
 
 2. Set the web addresses that the links in emails point to. With the one-VM install, all of them use your dashboard's address.
 
@@ -37,7 +37,7 @@ Velox sends about 20 to 30 emails a minute, and you cannot change that. Emails a
 
    What each one is for: [What breaks when a setting is missing](#what-breaks-when-a-setting-is-missing).
 
-3. Restart Velox. With Docker Compose, run `docker compose up -d`.
+3. Restart Hardcount. With Docker Compose, run `docker compose up -d`.
 
    **You see:** a start-up log line `SMTP configured` with your host. A missing setting logs a warning instead; see [What breaks when a setting is missing](#what-breaks-when-a-setting-is-missing).
 
@@ -51,7 +51,7 @@ Velox sends about 20 to 30 emails a minute, and you cannot change that. Emails a
 
 ## Keep email out of spam
 
-Before you go live, set up your sending domain at your provider, so emails are trusted. Velox cannot do this for you, because the domain's DNS is yours.
+Before you go live, set up your sending domain at your provider, so emails are trusted. Hardcount cannot do this for you, because the domain's DNS is yours.
 
 - **SPF**: a DNS record that lists the servers allowed to send for your domain.
 - **DKIM**: a signature on each email. Most providers turn it on when you add their DNS records.
@@ -59,19 +59,19 @@ Before you go live, set up your sending domain at your provider, so emails are t
 
 Each provider has step-by-step DNS instructions. You do this once per sending domain.
 
-Use a `SMTP_FROM` address on that domain. Every email Velox sends carries a `Date` and a `Message-ID` header, and the Message-ID ends with the `SMTP_FROM` domain.
+Use a `SMTP_FROM` address on that domain. Every email Hardcount sends carries a `Date` and a `Message-ID` header, and the Message-ID ends with the `SMTP_FROM` domain.
 
 ## What breaks when a setting is missing
 
-Velox starts without any of these. It logs one warning at start-up for each one that is missing, starting with the setting's name (`SMTP NOT CONFIGURED` for `SMTP_HOST`, `… NOT SET` for the others).
+Hardcount starts without any of these. It logs one warning at start-up for each one that is missing, starting with the setting's name (`SMTP NOT CONFIGURED` for `SMTP_HOST`, `… NOT SET` for the others).
 
-| Setting | What Velox uses it for | Without it |
+| Setting | What Hardcount uses it for | Without it |
 |---|---|---|
 | `SMTP_HOST` | Your provider's SMTP server | No email is sent. Queued emails are retried for about 72 hours, then marked failed. Actions that send email right away (send an invoice or a credit note, send a setup link, invite a teammate) refuse with 409 `email_not_configured`. |
-| `HOSTED_INVOICE_BASE_URL` | The "View & pay invoice" and "View receipt" buttons. Velox adds `/invoice/<token>`. | Invoice, receipt, dunning and payment-failed emails have no link in their button. |
-| `PAYMENT_UPDATE_URL` | The link in the email that asks a customer to add a payment method. Velox adds `?token=…`. | That email is not sent. Velox sends it when an invoice has no payment method on file, and when you click Resend setup link. Payment-failed and dunning emails link to the invoice page instead, so they do not need it. |
-| `DASHBOARD_BASE_URL` | Password-reset and team-invite links | Password-reset emails are not sent, and team invites are refused. Velox never builds these links from the address in a request. |
-| `CUSTOMER_PORTAL_URL` | Not an email link: where Stripe sends a customer after they save a card. Velox adds `/payment-method-added`. | Stripe sends the customer to `http://localhost:5173`, which exists only in local development. The card is still saved. |
+| `HOSTED_INVOICE_BASE_URL` | The "View & pay invoice" and "View receipt" buttons. Hardcount adds `/invoice/<token>`. | Invoice, receipt, dunning and payment-failed emails have no link in their button. |
+| `PAYMENT_UPDATE_URL` | The link in the email that asks a customer to add a payment method. Hardcount adds `?token=…`. | That email is not sent. Hardcount sends it when an invoice has no payment method on file, and when you click Resend setup link. Payment-failed and dunning emails link to the invoice page instead, so they do not need it. |
+| `DASHBOARD_BASE_URL` | Password-reset and team-invite links | Password-reset emails are not sent, and team invites are refused. Hardcount never builds these links from the address in a request. |
+| `CUSTOMER_PORTAL_URL` | Not an email link: where Stripe sends a customer after they save a card. Hardcount adds `/payment-method-added`. | Stripe sends the customer to `http://localhost:5173`, which exists only in local development. The card is still saved. |
 
 ## Settings for each provider
 
@@ -101,7 +101,7 @@ SMTP_FROM=billing@yourdomain.com
 SMTP_TLS=starttls
 ```
 
-The user name and the password are both the same Server API Token. Postmark is for transactional email only, so send billing email through it, not marketing. `SMTP_FROM` must be a verified Sender Signature or on a verified domain: Postmark accepts email from an unverified address and then drops it, so Velox shows it as sent while nothing arrives. Postmark can also report bounces back to Velox; see [Bounces and spam complaints](#bounces-and-spam-complaints). [Postmark SMTP docs](https://postmarkapp.com/developer/user-guide/send-email-with-smtp)
+The user name and the password are both the same Server API Token. Postmark is for transactional email only, so send billing email through it, not marketing. `SMTP_FROM` must be a verified Sender Signature or on a verified domain: Postmark accepts email from an unverified address and then drops it, so Hardcount shows it as sent while nothing arrives. Postmark can also report bounces back to Hardcount; see [Bounces and spam complaints](#bounces-and-spam-complaints). [Postmark SMTP docs](https://postmarkapp.com/developer/user-guide/send-email-with-smtp)
 
 ### AWS SES, port 587
 
@@ -180,7 +180,7 @@ Mailpit is a local email catcher with a web inbox. The repository's root `docker
    docker compose up -d mailpit
    ```
 
-2. Point Velox at it. Set the link settings too, or the links in the emails are empty.
+2. Point Hardcount at it. Set the link settings too, or the links in the emails are empty.
 
    ```bash
    SMTP_HOST=localhost
@@ -195,7 +195,7 @@ Mailpit is a local email catcher with a web inbox. The repository's root `docker
    DASHBOARD_BASE_URL=http://localhost:5173
    ```
 
-3. Send an email from Velox.
+3. Send an email from Hardcount.
 
    **You see:** it in the inbox at <http://localhost:8025>. Nothing leaves your machine.
 
@@ -215,8 +215,8 @@ Mailpit is a local email catcher with a web inbox. The repository's root `docker
 Send one invoice email and follow it.
 
 1. Set three shell variables:
-   - `API`: your Velox address, such as `https://billing.example.com`.
-   - `KEY`: a secret API key (`vlx_secret_…`) in the same mode, test or live, as the invoice. See [API keys](../api-keys.md).
+   - `API`: your Hardcount address, such as `https://billing.example.com`.
+   - `KEY`: a secret API key (`hc_secret_…`) in the same mode, test or live, as the invoice. See [API keys](../api-keys.md).
    - `INV_ID`: the ID of a finalized invoice.
 2. Send it.
 
@@ -233,21 +233,21 @@ Send one invoice email and follow it.
 
    **You see:** the email with status `dispatched`, which means your provider accepted it. With the Postmark webhook below, it then changes to `delivered`.
 
-If the email stays `pending`, Velox is retrying it. The server log shows the provider's error; fix the cause it names. Velox retries for about 72 hours, then marks the email failed.
+If the email stays `pending`, Hardcount is retrying it. The server log shows the provider's error; fix the cause it names. Hardcount retries for about 72 hours, then marks the email failed.
 
-If the email is `failed` at once with `email: recipient is not a single valid email address`, the customer's email or a CC entry is not one bare address, such as `Bob <bob@example.com>`. New addresses are checked when they are entered; an address stored earlier may still have this form. Velox does not retry this email. Change the address to the bare form (`bob@example.com`) and send again.
+If the email is `failed` at once with `email: recipient is not a single valid email address`, the customer's email or a CC entry is not one bare address, such as `Bob <bob@example.com>`. New addresses are checked when they are entered; an address stored earlier may still have this form. Hardcount does not retry this email. Change the address to the bare form (`bob@example.com`) and send again.
 
 ## Bounces and spam complaints
 
-A bounce is an email that could not be delivered. Velox stops emailing an address that bounced or that marked Velox's email as spam.
+A bounce is an email that could not be delivered. Hardcount stops emailing an address that bounced or that marked Hardcount's email as spam.
 
-Both ways below need `VELOX_EMAIL_BIDX_KEY` (64 hex characters, `openssl rand -hex 32`). Velox uses it to find the customer by email address, because stored emails are encrypted. Without it, Velox cannot mark a customer as bounced, and it logs a warning at start-up.
+Both ways below need `HARDCOUNT_EMAIL_BIDX_KEY` (64 hex characters, `openssl rand -hex 32`). Hardcount uses it to find the customer by email address, because stored emails are encrypted. Without it, Hardcount cannot mark a customer as bounced, and it logs a warning at start-up.
 
 ### When the SMTP server rejects the address
 
-Velox marks the customer's `email_status` as `bounced`, and sends no more email to that address. A rejection is the server's answer to the recipient address: a 550, 551, 552 or 553 reply, or any 5xx reply whose status starts with 5.1 or 5.2. This catches failures that happen while Velox is still connected.
+Hardcount marks the customer's `email_status` as `bounced`, and sends no more email to that address. A rejection is the server's answer to the recipient address: a 550, 551, 552 or 553 reply, or any 5xx reply whose status starts with 5.1 or 5.2. This catches failures that happen while Hardcount is still connected.
 
-These do not mark a customer bounced, and Velox retries them:
+These do not mark a customer bounced, and Hardcount retries them:
 
 - an authentication error (535),
 - a policy rejection (a 5.7.x status such as `550 5.7.1 relaying denied`),
@@ -257,17 +257,17 @@ These do not mark a customer bounced, and Velox retries them:
 
 ### When Postmark reports a bounce later
 
-Some bounces arrive later: the provider accepts the email, and the recipient's mailbox rejects it afterwards. Velox hears about these only from **Postmark**, through a webhook (a message Postmark sends to Velox) at `POST /v1/webhooks/postmark`.
+Some bounces arrive later: the provider accepts the email, and the recipient's mailbox rejects it afterwards. Hardcount hears about these only from **Postmark**, through a webhook (a message Postmark sends to Hardcount) at `POST /v1/webhooks/postmark`.
 
-1. Pick a user name and a password for the webhook, and set them on the Velox server:
+1. Pick a user name and a password for the webhook, and set them on the Hardcount server:
 
    ```bash
-   POSTMARK_WEBHOOK_USER=velox-postmark
+   POSTMARK_WEBHOOK_USER=hardcount-postmark
    POSTMARK_WEBHOOK_PASS=$(openssl rand -hex 24)
    ```
 
    On the Compose stack, put them in `.env`.
-2. Restart Velox.
+2. Restart Hardcount.
 
    **You see:** no `POSTMARK_WEBHOOK_USER/POSTMARK_WEBHOOK_PASS not set` warning at start-up.
 3. In Postmark, open your server, then **Webhooks**, and add this URL, with **Delivery**, **Bounce** and **Spam Complaint** checked:
@@ -281,16 +281,16 @@ Some bounces arrive later: the provider accepts the email, and the recipient's m
 
    **You see:** on the customer page, under **Sent emails**, the email's status changes from `dispatched` to `delivered` once Postmark reports it.
 
-What Velox does with each report:
+What Hardcount does with each report:
 
 - **Delivery**: marks the email `delivered`.
-- **Bounce**: a permanent bounce (Postmark calls it a hard bounce, or has deactivated the address) marks the email `bounced` and the customer `bounced`, so Velox sends no more email to that address. A temporary bounce changes nothing; Postmark retries it.
+- **Bounce**: a permanent bounce (Postmark calls it a hard bounce, or has deactivated the address) marks the email `bounced` and the customer `bounced`, so Hardcount sends no more email to that address. A temporary bounce changes nothing; Postmark retries it.
 - **Spam Complaint**: shows the email as `marked as spam`, marks the customer `complained`, and stops email to that address.
 
-Velox also sends the `customer.email_bounced` or `customer.email_complained` [webhook event](../webhooks.md) when it marks a customer.
+Hardcount also sends the `customer.email_bounced` or `customer.email_complained` [webhook event](../webhooks.md) when it marks a customer.
 
-If the two settings are unset, the route answers 401 to every call, and emails stay in the state Velox last knew.
+If the two settings are unset, the route answers 401 to every call, and emails stay in the state Hardcount last knew.
 
-**Other providers (SES, SendGrid, Mailgun, Resend):** Velox cannot receive their bounce reports. Turn on suppression (a do-not-send list) in the provider's dashboard, so it stops sending to addresses that bounce.
+**Other providers (SES, SendGrid, Mailgun, Resend):** Hardcount cannot receive their bounce reports. Turn on suppression (a do-not-send list) in the provider's dashboard, so it stops sending to addresses that bounce.
 
 **Next:** [Connect Stripe](../production-one-vm.md#6-connect-stripe).

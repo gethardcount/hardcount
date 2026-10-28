@@ -54,7 +54,7 @@ func TestPostgresStore_GetNotFound(t *testing.T) {
 
 // TestSettingsStore_GetSynthesizesDefaultsOnMiss covers the
 // data-layer fix for orphan tenants without settings rows. Get
-// must return Velox defaults (no ErrNotFound) so the engine
+// must return Hardcount defaults (no ErrNotFound) so the engine
 // path never sees the missing-row case.
 func TestSettingsStore_GetSynthesizesDefaultsOnMiss(t *testing.T) {
 	db := testutil.SetupTestDB(t)

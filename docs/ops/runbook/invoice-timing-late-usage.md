@@ -1,6 +1,6 @@
 # Invoice timing and late usage
 
-Velox waits a short grace period after a billing period ends before it
+Hardcount waits a short grace period after a billing period ends before it
 builds the invoice, so usage that arrives a little late still counts. This
 page is for an invoice that seems late, or usage missing from an invoice.
 Back to the [runbook index](index.md).
@@ -12,7 +12,7 @@ Back to the [runbook index](index.md).
 
 ## Why
 
-Velox builds a period's invoice only once `INVOICE_GRACE_PERIOD` (default
+Hardcount builds a period's invoice only once `INVOICE_GRACE_PERIOD` (default
 1 hour, 0 to 72 hours) has passed after the period ends. Usage that is
 stamped inside the period but arrives late is then still billed. The hourly
 billing run picks it up after that, so with the default the invoice is
@@ -39,9 +39,9 @@ invoice of a cancel scheduled for a date, and to `POST /v1/billing/run`.
   its period that arrives later is stored, but billed on no invoice, now or
   later. After a spend-threshold invoice, usage stamped before it that
   arrives later is not on the period-end invoice either (sum and count
-  meters). Velox says so when it writes such an event: the answer carries
+  meters). Hardcount says so when it writes such an event: the answer carries
   `billing_status: "after_close"` (an `after_close` count on a batch or a
-  LiteLLM delivery), `velox_usage_unbilled_total{reason="after_close"}`
+  LiteLLM delivery), `hardcount_usage_unbilled_total{reason="after_close"}`
   counts it, and a WARN
   line names the customer, meter and timestamp. There is no list of such
   events yet.
@@ -55,7 +55,7 @@ invoice of a cancel scheduled for a date, and to `POST /v1/billing/run`.
 - **Writing off or voiding a spend-threshold invoice.** A spend-threshold
   invoice bills the usage up to when it fired, and no base fee: the base
   fee is billed as it would be with no threshold. One issued by a
-  Velox build from before 2026-10-23 also carries the base fee of a plan billed in arrears; the
+  Hardcount build from before 2026-10-23 also carries the base fee of a plan billed in arrears; the
   period-end invoice does not bill that base again, and what follows
   applies to it as to the usage. A threshold invoice leaves out the
   usage of a `max` or `last` meter: the period-end invoice bills that for
@@ -104,7 +104,7 @@ For usage that missed an invoice, look for the after-close signal:
 
 ```bash
 # How many events arrived after their period's invoice, by origin:
-curl -sS "$API/metrics" -H "Authorization: Bearer $METRICS_TOKEN" | grep '^velox_usage_unbilled_total{' | grep 'reason="after_close"'
+curl -sS "$API/metrics" -H "Authorization: Bearer $METRICS_TOKEN" | grep '^hardcount_usage_unbilled_total{' | grep 'reason="after_close"'
 # Which ones: the WARN line per event.
 #   {"level":"WARN","msg":"usage event arrived after its period was invoiced — stored, billed on no invoice","customer_id":...,"meter_id":...,"timestamp":...}
 ```
@@ -150,7 +150,7 @@ whose billing is not failing, so it cannot close a healthy one early.)
 
 ## Verify
 
-After the grace and the next billing tick, `velox_billing_due_subscriptions`
+After the grace and the next billing tick, `hardcount_billing_due_subscriptions`
 falls back and the invoice exists, dated at the period end.
 
 Related: [ADR-120](../../adr/120-invoice-grace-period-for-late-usage.md).

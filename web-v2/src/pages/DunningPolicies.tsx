@@ -45,7 +45,7 @@ import {
 //
 // Industry shape verified against Stripe (account-level retry policy),
 // Lago (campaigns + per-customer assignment), Orb (rules + schedules),
-// Recurly (campaigns + per-account assignment). Velox follows the
+// Recurly (campaigns + per-account assignment). Hardcount follows the
 // converging named-templates pattern.
 
 // ADR-036 amendment — four Stripe-aligned terminal actions. Single

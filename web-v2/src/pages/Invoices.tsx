@@ -232,7 +232,7 @@ export default function InvoicesPage() {
           <h1 className="text-2xl font-semibold text-foreground">Invoices</h1>
           <p className="text-sm text-muted-foreground mt-1 flex items-center gap-2">
             <span>
-              The bills Velox makes for your customers, with what each one owes and whether it's paid
+              The bills Hardcount makes for your customers, with what each one owes and whether it's paid
               {statusFilter ? ` · Showing ${statusTabLabel(statusFilter).toLowerCase()}` : overdueFilter ? ' · Showing past due' : !paymentStatusFilter && !customerFilter && total > 0 ? ` · ${total} total` : ''}
             </span>
             {paymentStatusFilter && (

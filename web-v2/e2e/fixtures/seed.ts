@@ -107,7 +107,7 @@ export async function seedWorld() {
   const billed = await billedCustomer()
   const meter = await createMeter()
   const webhook = await api<{ endpoint: { id: string } }>('POST', '/webhook-endpoints/endpoints', {
-    url: 'https://example.com/velox-e2e',
+    url: 'https://example.com/hardcount-e2e',
     description: 'E2E endpoint',
   })
   await api('POST', '/credits/grant', { customer_id: billed.customer.id, currency: 'USD', amount_cents: 1000, description: 'E2E welcome credit' })

@@ -37,7 +37,7 @@ var preflight = map[string]string{
 }
 
 func TestCORS_Preflight(t *testing.T) {
-	rec, reached := corsRun(t, []string{"https://app.velox.dev"}, http.MethodOptions, "https://app.velox.dev", preflight)
+	rec, reached := corsRun(t, []string{"https://app.hardcount.dev"}, http.MethodOptions, "https://app.hardcount.dev", preflight)
 
 	if reached {
 		t.Error("a preflight must be answered by CORS, not reach the handler")
@@ -45,7 +45,7 @@ func TestCORS_Preflight(t *testing.T) {
 	if rec.Code != http.StatusNoContent {
 		t.Errorf("status: got %d, want 204", rec.Code)
 	}
-	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "https://app.velox.dev" {
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "https://app.hardcount.dev" {
 		t.Errorf("allow-origin: got %q", got)
 	}
 	if rec.Header().Get("Access-Control-Allow-Credentials") != "true" {
@@ -60,9 +60,9 @@ func TestCORS_Preflight(t *testing.T) {
 }
 
 func TestCORS_AllowedOrigin(t *testing.T) {
-	rec, _ := corsRun(t, []string{"https://app.velox.dev"}, http.MethodGet, "https://app.velox.dev", nil)
+	rec, _ := corsRun(t, []string{"https://app.hardcount.dev"}, http.MethodGet, "https://app.hardcount.dev", nil)
 
-	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "https://app.velox.dev" {
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "https://app.hardcount.dev" {
 		t.Errorf("allow-origin: got %q", got)
 	}
 	if rec.Header().Get("Access-Control-Allow-Credentials") != "true" {
@@ -71,7 +71,7 @@ func TestCORS_AllowedOrigin(t *testing.T) {
 }
 
 func TestCORS_DisallowedOrigin(t *testing.T) {
-	rec, _ := corsRun(t, []string{"https://app.velox.dev"}, http.MethodGet, "https://evil.com", nil)
+	rec, _ := corsRun(t, []string{"https://app.hardcount.dev"}, http.MethodGet, "https://evil.com", nil)
 
 	if rec.Header().Get("Access-Control-Allow-Origin") != "" {
 		t.Errorf("should not set allow-origin for disallowed origin")
@@ -107,14 +107,14 @@ func TestCORS_Wildcard(t *testing.T) {
 // An OPTIONS request without Access-Control-Request-Method is not a preflight,
 // so it gets the route's own answer.
 func TestCORS_PlainOptionsReachesHandler(t *testing.T) {
-	_, reached := corsRun(t, []string{"https://app.velox.dev"}, http.MethodOptions, "", nil)
+	_, reached := corsRun(t, []string{"https://app.hardcount.dev"}, http.MethodOptions, "", nil)
 	if !reached {
 		t.Error("an OPTIONS request that is not a preflight must reach the handler")
 	}
 }
 
 // An empty list allows no origin. The CORS library reads an empty list as
-// "every origin", so this pins that Velox does not.
+// "every origin", so this pins that Hardcount does not.
 func TestCORS_NoOriginsAllowsNone(t *testing.T) {
 	for _, origins := range [][]string{nil, {}} {
 		rec, _ := corsRun(t, origins, http.MethodGet, "https://evil.com", nil)
@@ -136,13 +136,13 @@ func TestCORS_StarInsideEntryIsNotAPattern(t *testing.T) {
 	}
 }
 
-func TestCORS_ExposesVeloxHeaders(t *testing.T) {
-	rec, _ := corsRun(t, []string{"*"}, http.MethodGet, "https://app.velox.dev", nil)
+func TestCORS_ExposesHardcountHeaders(t *testing.T) {
+	rec, _ := corsRun(t, []string{"*"}, http.MethodGet, "https://app.hardcount.dev", nil)
 
 	// Header names are case-insensitive, and browsers match this list that
 	// way: X-RateLimit-Limit and X-Ratelimit-Limit are the same header.
 	exposed := strings.Split(rec.Header().Get("Access-Control-Expose-Headers"), ",")
-	for _, want := range []string{"Velox-Version", "Velox-Request-Id", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset", "Retry-After"} {
+	for _, want := range []string{"Hardcount-Version", "Hardcount-Request-Id", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset", "Retry-After"} {
 		found := false
 		for _, h := range exposed {
 			if strings.EqualFold(strings.TrimSpace(h), want) {

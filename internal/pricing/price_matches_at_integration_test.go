@@ -69,14 +69,14 @@ func TestPostgresStore_PriceMatchesAtMatchesPlanPricesAt(t *testing.T) {
 			t.Fatalf("%s: %v", q, err)
 		}
 	}
-	for _, c := range []string{"vlx_tclk_mpa_c", "vlx_tclk_mpa_d"} {
+	for _, c := range []string{"hc_tclk_mpa_c", "hc_tclk_mpa_d"} {
 		exec(`INSERT INTO test_clocks (id, tenant_id, name, frozen_time, status) VALUES ($1, $2, $1, $3, 'ready')`, c, tenantID, t1)
 	}
-	exec(`INSERT INTO plan_prices (id, tenant_id, plan_id, meter_id, dimension_match) VALUES ('vlx_prc_mpa3', $1, $2, $3, '{}')`, tenantID, plan.ID, m3)
-	exec(`INSERT INTO plan_price_versions (id, tenant_id, price_id, valid_from, removed) VALUES ('vlx_ppv_mpa2', $1, $2, $3, true)`, tenantID, prices[2].ID, t1)
-	exec(`INSERT INTO plan_price_versions (id, tenant_id, price_id, valid_from, mode, unit_amount_cents) VALUES ('vlx_ppv_mpa3', $1, 'vlx_prc_mpa3', $2, 'per_unit', 1)`, tenantID, t1)
-	for _, v := range []string{"vlx_ppv_mpa2", "vlx_ppv_mpa3"} {
-		exec(`INSERT INTO plan_price_version_clocks (tenant_id, version_id, test_clock_id, valid_from) VALUES ($1, $2, 'vlx_tclk_mpa_c', $3)`, tenantID, v, t2)
+	exec(`INSERT INTO plan_prices (id, tenant_id, plan_id, meter_id, dimension_match) VALUES ('hc_prc_mpa3', $1, $2, $3, '{}')`, tenantID, plan.ID, m3)
+	exec(`INSERT INTO plan_price_versions (id, tenant_id, price_id, valid_from, removed) VALUES ('hc_ppv_mpa2', $1, $2, $3, true)`, tenantID, prices[2].ID, t1)
+	exec(`INSERT INTO plan_price_versions (id, tenant_id, price_id, valid_from, mode, unit_amount_cents) VALUES ('hc_ppv_mpa3', $1, 'hc_prc_mpa3', $2, 'per_unit', 1)`, tenantID, t1)
+	for _, v := range []string{"hc_ppv_mpa2", "hc_ppv_mpa3"} {
+		exec(`INSERT INTO plan_price_version_clocks (tenant_id, version_id, test_clock_id, valid_from) VALUES ($1, $2, 'hc_tclk_mpa_c', $3)`, tenantID, v, t2)
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -86,12 +86,12 @@ func TestPostgresStore_PriceMatchesAtMatchesPlanPricesAt(t *testing.T) {
 	pins := []pricing.PlanPin{
 		{PlanID: plan.ID, At: t1.Add(-time.Hour)},
 		{PlanID: plan.ID, At: t1},
-		{PlanID: plan.ID, At: t2.Add(-time.Hour), ClockID: "vlx_tclk_mpa_c"},
-		{PlanID: plan.ID, At: t2, ClockID: "vlx_tclk_mpa_c"},
-		{PlanID: plan.ID, At: t1.Add(-time.Hour), ClockID: "vlx_tclk_mpa_d"},
-		{PlanID: "vlx_pln_none", At: t1},
+		{PlanID: plan.ID, At: t2.Add(-time.Hour), ClockID: "hc_tclk_mpa_c"},
+		{PlanID: plan.ID, At: t2, ClockID: "hc_tclk_mpa_c"},
+		{PlanID: plan.ID, At: t1.Add(-time.Hour), ClockID: "hc_tclk_mpa_d"},
+		{PlanID: "hc_pln_none", At: t1},
 		{PlanID: plan.ID, At: time.Now().UTC().Add(time.Hour)},
-		{PlanID: plan.ID, At: t1, ClockID: "vlx_tclk_mpa_d"},
+		{PlanID: plan.ID, At: t1, ClockID: "hc_tclk_mpa_d"},
 	}
 	m1x := m1 + `{"model":"x","tier":"1"}`
 	want := [][]string{{m1 + "{}", m1x, m2 + "{}"}, {m1 + "{}", m1x, m3 + "{}"}, {m1 + "{}", m1x, m2 + "{}"}, {m1 + "{}", m1x, m3 + "{}"}, {m1 + "{}", m1x, m3 + "{}"}, nil, {m1 + "{}", m1x, m3 + "{}"}, {m1 + "{}", m1x, m3 + "{}"}}

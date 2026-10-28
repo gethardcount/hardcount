@@ -38,7 +38,7 @@ type strictRig struct {
 func newStrictRig(t *testing.T) *strictRig {
 	t.Helper()
 	db := testutil.SetupTestDB(t)
-	t.Setenv("VELOX_BOOTSTRAP_TOKEN", "strict-bodies-bootstrap")
+	t.Setenv("HARDCOUNT_BOOTSTRAP_TOKEN", "strict-bodies-bootstrap")
 	t.Setenv("DASHBOARD_BASE_URL", "http://dash.strict-bodies.test")
 	t.Setenv("SMTP_HOST", "smtp.strict-bodies.invalid")
 	ts := httptest.NewServer(NewServer(db, clock.Real(), nil))
@@ -81,7 +81,7 @@ func createPlatformKey(t *testing.T, db *postgres.DB, tenantID string) string {
 	secret := make([]byte, 32)
 	_, _ = rand.Read(secret)
 	secretHex := hex.EncodeToString(secret)
-	rawKey := "vlx_platform_live_" + secretHex
+	rawKey := "hc_platform_live_" + secretHex
 	hash := sha256.Sum256([]byte(rawKey))
 	tx, err := db.BeginTx(context.Background(), postgres.TxBypass, "")
 	if err != nil {
@@ -94,7 +94,7 @@ func createPlatformKey(t *testing.T, db *postgres.DB, tenantID string) string {
 	if _, err := tx.ExecContext(context.Background(),
 		`INSERT INTO api_keys (id, key_prefix, key_hash, key_type, name, tenant_id)
 		 VALUES ($1, $2, $3, 'platform', 'Strict bodies platform key', $4)`,
-		"vlx_key_strict_"+secretHex[:8], "vlx_platform_live_"+secretHex[:12], hex.EncodeToString(hash[:]), tenantID); err != nil {
+		"hc_key_strict_"+secretHex[:8], "hc_platform_live_"+secretHex[:12], hex.EncodeToString(hash[:]), tenantID); err != nil {
 		t.Fatalf("insert platform key: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -111,7 +111,7 @@ func probePath(pattern string) string {
 		if p == "{mode}" {
 			return "test"
 		}
-		return "vlx_b9_probe"
+		return "hc_b9_probe"
 	})
 }
 
@@ -121,7 +121,7 @@ func probePath(pattern string) string {
 // that key. A handler that drops unknown keys (encoding/json's default)
 // answers something else, and fails here.
 //
-// The only routes not probed are the ones whose body Velox does not define
+// The only routes not probed are the ones whose body Hardcount does not define
 // (bodiesNotChecked: the Stripe and Postmark webhooks and the LiteLLM
 // callback; their sender adds fields when it likes) and routes the spec
 // gives no body. A handler that reads a body the spec does not declare
@@ -313,12 +313,12 @@ func TestStrictBodies_PatchRefusesFieldsItCannotChange(t *testing.T) {
 		{"/v1/customers/" + cus, "DISPLAY_NAME", "Renamed", "/v1/customers/" + cus},
 		{"/v1/customers/" + cus, "Email", "x@strict-bodies.test", "/v1/customers/" + cus},
 		{"/v1/dunning/policies/" + policy, "is_default", true, "/v1/dunning/policies/" + policy},
-		{"/v1/dunning/policies/" + policy, "id", "vlx_dpol_other", "/v1/dunning/policies/" + policy},
+		{"/v1/dunning/policies/" + policy, "id", "hc_dpol_other", "/v1/dunning/policies/" + policy},
 		{"/v1/meters/" + meter, "event_name", "strict_renamed", "/v1/meters/" + meter},
 		{"/v1/plans/" + planID, "currency", "EUR", "/v1/plans/" + planID},
-		{"/v1/plans/" + planID + "/prices/" + priceID, "meter_id", "vlx_mtr_other", "/v1/plans/" + planID},
+		{"/v1/plans/" + planID + "/prices/" + priceID, "meter_id", "hc_mtr_other", "/v1/plans/" + planID},
 		{"/v1/settings/stripe/test/webhook", "livemode", true, ""},
-		{"/v1/subscriptions/" + subID + "/items/" + itemID, "plan_id", "vlx_pln_other", "/v1/subscriptions/" + subID},
+		{"/v1/subscriptions/" + subID + "/items/" + itemID, "plan_id", "hc_pln_other", "/v1/subscriptions/" + subID},
 		{"/v1/webhook-endpoints/endpoints/" + hook, "secret", "whsec_strict", ""},
 	}
 	for _, tc := range cases {
@@ -343,7 +343,7 @@ func TestStrictBodies_PatchRefusesFieldsItCannotChange(t *testing.T) {
 // the mode, asking for a card-setup link is the caller's state to fix, not a
 // server fault. Both operator routes that mint one answer 409
 // stripe_not_connected with a sentence that says what to do, for a customer
-// Velox has never sent to Stripe (the path that answered 500).
+// Hardcount has never sent to Stripe (the path that answered 500).
 func TestSetupSession_StripeNotConnected(t *testing.T) {
 	r := newStrictRig(t)
 	cus := flowStr(r.call("POST", "/v1/customers", map[string]any{

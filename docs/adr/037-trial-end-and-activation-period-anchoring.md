@@ -119,7 +119,7 @@ all reject this).
   11 scenarios.
 - **`feedback_stripe_parity_framing`** — the chosen design is a
   superset that contains Stripe's behavior as a configuration:
-  Velox's `billing_time` lets the operator pick calendar vs
+  Hardcount's `billing_time` lets the operator pick calendar vs
   anniversary, but for yearly plans (where neither platform ships
   a meaningful calendar variant) anniversary is forced.
 
@@ -137,7 +137,7 @@ all reject this).
 - **C. Stub-to-next-Jan-1 for yearly + calendar.** Rejected: no
   industry analog. Stripe and Lago both force anniversary for
   yearly. A partial-year first invoice followed by full-year
-  cycles is a Velox-specific oddity with no operator demand.
+  cycles is a Hardcount-specific oddity with no operator demand.
 - **D. Reject `billing_time=calendar` for yearly plans at Create.**
   Rejected: would force operators to think about the interaction
   when only one combination is meaningful. Forcing anniversary
@@ -200,7 +200,7 @@ structure the same invoice. Three platforms checked:
 - **[Lago — Plan model](https://doc.getlago.com/guide/plans/plan-model)** / **[Lago — Usage-based charge](https://getlago.com/docs/guide/plans/charges/usage-based-charges)** — *"Additional charges for per-usage Billable metrics **are always paid in arrears because they are linked to a past consumption of your customers.**"* Combined with their pay-in-advance subscription-fee rule: same hybrid invoice shape.
 - **[Chargebee — Metered Billing](https://www.chargebee.com/docs/billing/2.0/usage-based-billing/metered_billing)** — diverges. *"Processing the final invoice amount for subscriptions with metered items requires the finalized usage data, which is not available in advance. As a result, **scheduling advanced invoices for subscriptions with metered items is not possible.**"* Chargebee disallows the combination — metered subs cannot bill the base in advance.
 
-**Velox follows the Stripe + Lago pattern** — the dominant convention
+**Hardcount follows the Stripe + Lago pattern** — the dominant convention
 across the two platforms operators most often compare us against.
 Base line items stamp `billing_period_start/end = [periodEnd,
 nextPeriodEnd]` (`internal/billing/engine.go:1494-1495`); usage line
@@ -212,7 +212,7 @@ and steady-state cycle invoices follow this shape.
 `base_bill_timing=in_advance` when the plan has `meter_ids`. Defensible
 to add later if an operator surveys produce a named need; per
 `feedback_pre_launch_scoping` it's not justified pre-launch since
-Velox's reference platforms allow the combination.
+Hardcount's reference platforms allow the combination.
 
 **Operator-facing implication**: a customer on an in_advance metered
 plan sees their period-N invoice combining period-(N+1) base lines
@@ -241,7 +241,7 @@ wrong.** Re-verification on 2026-05-18:
 - **Stripe**: only `pause_collection` (keep_as_draft / void / mark_uncollectible). No cycle-skip hard pause.
 - **Lago**: no documented pause feature.
 
-So the honest framing: **hard pause exists in industry (Chargebee, Recurly), Velox deferred for scope, not absence**.
+So the honest framing: **hard pause exists in industry (Chargebee, Recurly), Hardcount deferred for scope, not absence**.
 
 **PR-8 removes the entire hard-pause surface:**
 - Routes: `POST /v1/subscriptions/:id/pause` + `/resume`
@@ -256,7 +256,7 @@ So the honest framing: **hard pause exists in industry (Chargebee, Recurly), Vel
 - OpenAPI spec: removed `paused` from the status enum (and re-added missing `trialing`, fixing a stale gap from migration 0053)
 - Generated types regenerated via `make gen`
 
-The Chargebee/Recurly e2e shape (paused_at + resume_at + remaining_pause_cycles + unbilled-charges decision tree) is documented in the body of this ADR as the **future re-implementation target** when a design partner names the need. The pre-launch decision is to ship truth over feature-count: `pause_collection` covers the legitimate "operator wants to freeze charging" use case for Velox's wedge market (AI infra Series A-B), and rebuilding hard-pause properly is a 3-5 day project that should be designed against a real customer's requirements.
+The Chargebee/Recurly e2e shape (paused_at + resume_at + remaining_pause_cycles + unbilled-charges decision tree) is documented in the body of this ADR as the **future re-implementation target** when a design partner names the need. The pre-launch decision is to ship truth over feature-count: `pause_collection` covers the legitimate "operator wants to freeze charging" use case for Hardcount's wedge market (AI infra Series A-B), and rebuilding hard-pause properly is a 3-5 day project that should be designed against a real customer's requirements.
 
 **Updated risks/open items:**
 

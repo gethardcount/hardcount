@@ -4,7 +4,7 @@ import { createCustomer, invoicesFor, type Invoice } from './fixtures/seed'
 
 // Payment retries (dunning) through the screen: closing a run by hand, and
 // deleting a policy that has run. A run is made the way it happens for real:
-// a customer with no card on file is billed, and Velox starts payment retries
+// a customer with no card on file is billed, and Hardcount starts payment retries
 // on the unpaid invoice under the customer's policy.
 
 interface DunningRun { id: string; invoice_id: string; policy_id: string; state: string }

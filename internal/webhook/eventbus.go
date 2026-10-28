@@ -86,7 +86,7 @@ type EventBus struct {
 
 // NewEventBus returns an empty in-memory bus, one per process. It fans
 // out only frames published in this process; see streamEvents (sse.go)
-// for what a stream misses when Velox runs as several replicas.
+// for what a stream misses when Hardcount runs as several replicas.
 func NewEventBus() *EventBus {
 	return &EventBus{subscribers: make(map[string]map[*subscription]struct{})}
 }
@@ -160,7 +160,7 @@ func (b *EventBus) Publish(tenantID string, frame StreamFrame) {
 }
 
 // CloseAll closes every subscriber channel and marks the bus closed.
-// Wired via http.Server.RegisterOnShutdown in cmd/velox/main.go: Shutdown
+// Wired via http.Server.RegisterOnShutdown in cmd/hardcount/main.go: Shutdown
 // never cancels request contexts and waits for connections to go idle,
 // and the SSE handler (sse.go) only returns when its frames channel
 // closes — without this, every deploy with a dashboard tab on Webhook

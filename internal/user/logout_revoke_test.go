@@ -73,7 +73,7 @@ func logoutRequest() *http.Request {
 // lie — and this one is a lie about a security boundary.
 func TestLogout_RevokeFailure_WritesNoRowAndDoesNotReport204(t *testing.T) {
 	sessions := &fakeSessions{
-		sess:     session.Session{UserID: "vlx_usr_1", TenantID: "vlx_ten_1"},
+		sess:     session.Session{UserID: "hc_usr_1", TenantID: "hc_ten_1"},
 		revokeEr: errors.New("postgres is down"),
 	}
 	rec := &rowRecorder{}
@@ -101,7 +101,7 @@ func TestLogout_RevokeFailure_WritesNoRowAndDoesNotReport204(t *testing.T) {
 // The happy path still records exactly one row — and only on the far side of a
 // revoke that actually worked.
 func TestLogout_Success_RevokesThenRecordsExactlyOneRow(t *testing.T) {
-	sessions := &fakeSessions{sess: session.Session{UserID: "vlx_usr_1", TenantID: "vlx_ten_1"}}
+	sessions := &fakeSessions{sess: session.Session{UserID: "hc_usr_1", TenantID: "hc_ten_1"}}
 	rec := &rowRecorder{}
 
 	h := NewHandler(nil, sessions, session.CookieConfig{}, nil, "", false)
@@ -119,8 +119,8 @@ func TestLogout_Success_RevokesThenRecordsExactlyOneRow(t *testing.T) {
 	if len(rec.rows) != 1 || rec.rows[0].action != "logout" {
 		t.Fatalf("audit rows = %+v, want exactly one 'logout'", rec.rows)
 	}
-	if rec.rows[0].tenantID != "vlx_ten_1" {
-		t.Errorf("tenant = %q, want vlx_ten_1 (identity must be resolved BEFORE the revoke — after it the token names nobody)", rec.rows[0].tenantID)
+	if rec.rows[0].tenantID != "hc_ten_1" {
+		t.Errorf("tenant = %q, want hc_ten_1 (identity must be resolved BEFORE the revoke — after it the token names nobody)", rec.rows[0].tenantID)
 	}
 }
 
@@ -128,12 +128,12 @@ func TestLogout_Success_RevokesThenRecordsExactlyOneRow(t *testing.T) {
 // forced-logout CSRF.
 //
 // A cross-site POST is not a hypothetical shape for this branch — it is the
-// ONLY shape that reaches it in a browser. SameSite=Lax withholds velox_session
+// ONLY shape that reaches it in a browser. SameSite=Lax withholds hardcount_session
 // from every cross-site request, so an attacker's form POST arrives here looking
 // exactly like "the user has no cookie". The old code answered it with
 // ClearCookie:
 //
-//	Set-Cookie: velox_session=; Path=/; Max-Age=0
+//	Set-Cookie: hardcount_session=; Path=/; Max-Age=0
 //
 // which the browser honours. So any website could log any operator out of the
 // dashboard — no click needed, an auto-submitting form does it on page load —
@@ -175,7 +175,7 @@ func TestLogout_NoCookie_DoesNotClearTheCookie(t *testing.T) {
 // cookie, because there the server saw the cookie, authenticated it, and
 // revoked the session first.
 func TestLogout_Success_StillClearsTheCookie(t *testing.T) {
-	sessions := &fakeSessions{sess: session.Session{UserID: "vlx_usr_1", TenantID: "vlx_ten_1"}}
+	sessions := &fakeSessions{sess: session.Session{UserID: "hc_usr_1", TenantID: "hc_ten_1"}}
 
 	h := NewHandler(nil, sessions, session.CookieConfig{}, nil, "", false)
 	h.SetAuditLogger(&rowRecorder{})

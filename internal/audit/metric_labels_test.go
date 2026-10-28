@@ -12,7 +12,7 @@ import (
 // TestAuditWriteErrors_IsNeverLabelledByTenant is the regression lock for an
 // unbounded-cardinality metric.
 //
-// velox_audit_write_errors_total used to carry the TENANT ID as its label value.
+// hardcount_audit_write_errors_total used to carry the TENANT ID as its label value.
 // Prometheus client counters never age out: a label value that appears once is
 // exported by that process forever. So a single shared-database blip during a busy
 // hour mints a permanent time series per affected tenant — cardinality that grows

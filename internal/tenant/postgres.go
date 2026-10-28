@@ -35,7 +35,7 @@ func (s *PostgresStore) CreateAudited(ctx context.Context, t domain.Tenant, emit
 	ctx, cancel := context.WithTimeout(ctx, s.db.QueryTimeout)
 	defer cancel()
 
-	id := postgres.NewID("vlx_ten")
+	id := postgres.NewID("hc_ten")
 	now := time.Now().UTC()
 
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, id)

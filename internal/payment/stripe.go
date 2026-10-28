@@ -14,7 +14,7 @@ import (
 
 	mw "github.com/sagarsuperuser/velox/internal/api/middleware"
 	"github.com/sagarsuperuser/velox/internal/audit"
-	veloxauth "github.com/sagarsuperuser/velox/internal/auth"
+	hardcountauth "github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/payment/breaker"
@@ -49,7 +49,7 @@ type CardDetails struct {
 // CardFetcher fetches card details from Stripe.
 //
 // FetchCardDetails returns the NEWEST card saved on the Stripe customer
-// (by created time), not Stripe's or Velox's default. RecordCheckoutCard
+// (by created time), not Stripe's or Hardcount's default. RecordCheckoutCard
 // uses it to find the card a finished Checkout session just saved; it
 // reads only and never changes Stripe's default.
 //
@@ -96,7 +96,7 @@ type EmailPaymentFailed interface {
 // Stripe is the payment adapter. It creates PaymentIntents for finalized invoices
 // and processes webhook events to update invoice payment status.
 //
-// This is NOT an abstract "payment provider" interface. Velox is Stripe-native.
+// This is NOT an abstract "payment provider" interface. Hardcount is Stripe-native.
 // If we ever support another provider, we'll refactor — not speculate now.
 type Stripe struct {
 	client             StripeClient
@@ -112,7 +112,7 @@ type Stripe struct {
 	emailPaymentFailed EmailPaymentFailed
 	breaker            *breaker.Breaker // optional; nil = no breaker
 	pmAttacher         PaymentMethodAttacher
-	customerResolver   CustomerByStripeIDResolver // optional; resolves SetupIntent.customer → velox id
+	customerResolver   CustomerByStripeIDResolver // optional; resolves SetupIntent.customer → hardcount id
 	refundUpdater      RefundStatusUpdater        // optional; applies async refund-webhook status to a CN
 	disputes           DisputeRecorder            // optional; records charge.dispute.* against the invoice (#979)
 	resolver           clock.Resolver             // optional; binds effective-now from invoice
@@ -209,7 +209,7 @@ type PaymentIntentParams struct {
 	Currency    string
 	CustomerID  string // Stripe customer ID
 	// PaymentMethodID is the Stripe PaymentMethod to charge, resolved by
-	// the caller from Velox's payment_methods table (the single source of
+	// the caller from Hardcount's payment_methods table (the single source of
 	// truth for the customer's default card). Required: the client charges
 	// this exact PM and never asks Stripe to pick one. Empty → loud failure.
 	PaymentMethodID string
@@ -227,7 +227,7 @@ type PaymentIntentResult struct {
 	// it finds (oldest succeeded first, newest processing adopted) on
 	// provider truth, not result order. Zero when unset.
 	CreatedAt int64
-	// Purpose is the velox_purpose PI metadata (e.g. "dunning_retry",
+	// Purpose is the hardcount_purpose PI metadata (e.g. "dunning_retry",
 	// "hosted_invoice_pay"). Populated by GetPaymentIntent so the reconciler
 	// can replicate the webhook's customer-email suppression when it recovers a
 	// failure (ADR-049 Phase 2). Empty for the create response / when unset.
@@ -240,7 +240,7 @@ type PaymentIntentResult struct {
 	// when capturedCents == 0).
 	AmountReceivedCents int64
 	// AnchorAt is the charge's CONTRACTED simulated instant, read back from
-	// the PI's velox_anchor_at metadata. It exists for the same reason the
+	// the PI's hardcount_anchor_at metadata. It exists for the same reason the
 	// webhook path reads that key: SettleSucceeded's invoice-pin binding
 	// resolves the clock's CURRENT frozen_time, so a settle that lands after
 	// an advance stamps paid_at on the advance target rather than the instant
@@ -262,7 +262,7 @@ type PaymentIntentResult struct {
 	// CardMessage is last_payment_error's message when it is a card error
 	// (cardErrorMessage), for the customer's payment-failed email.
 	CardMessage string
-	// InvoiceID is the velox_invoice_id metadata every Velox PaymentIntent
+	// InvoiceID is the hardcount_invoice_id metadata every Hardcount PaymentIntent
 	// carries (the off-session charge and the hosted page alike). The
 	// stale-hold sweep matches on it. Populated by the read paths.
 	InvoiceID string
@@ -407,8 +407,8 @@ func (s *Stripe) SetBreaker(b *breaker.Breaker) {
 // and ack'd but no payment_methods row is created. In practice the
 // router always wires paymentmethods.Service here.
 //
-// makeDefault makes the card the customer's default, the card Velox charges
-// next: set for a card saved through a Velox setup flow (ADR-021). Without
+// makeDefault makes the card the customer's default, the card Hardcount charges
+// next: set for a card saved through a Hardcount setup flow (ADR-021). Without
 // it the store's rule decides (the first card, or one replacing a default
 // the bank refused for good, becomes the default; any other is added beside).
 //
@@ -428,9 +428,9 @@ func (s *Stripe) SetPaymentMethodAttacher(a PaymentMethodAttacher) {
 	s.pmAttacher = a
 }
 
-// CustomerByStripeIDResolver maps a Stripe Customer ID back to the Velox
+// CustomerByStripeIDResolver maps a Stripe Customer ID back to the Hardcount
 // customer ID. Optional fallback for setup_intent.succeeded: a Checkout
-// session in setup mode only carries velox_customer_id on the SetupIntent
+// session in setup mode only carries hardcount_customer_id on the SetupIntent
 // when its creator set setup_intent_data.metadata — and not every call site
 // does. Rather than depend on that discipline at every session-creation
 // site, the webhook resolves the customer from the SetupIntent's `customer`
@@ -441,7 +441,7 @@ type CustomerByStripeIDResolver interface {
 	CustomerIDByStripeID(ctx context.Context, tenantID, stripeCustomerID string) (string, error)
 }
 
-// SetCustomerResolver wires the Stripe-customer → velox-customer resolver
+// SetCustomerResolver wires the Stripe-customer → hardcount-customer resolver
 // used as the setup_intent.succeeded fallback. Optional: nil leaves the
 // handler dependent on SetupIntent metadata alone (test default).
 func (s *Stripe) SetCustomerResolver(r CustomerByStripeIDResolver) {
@@ -449,7 +449,7 @@ func (s *Stripe) SetCustomerResolver(r CustomerByStripeIDResolver) {
 }
 
 // RefundStatusUpdater applies an async refund-webhook status (already mapped to a
-// Velox refund_status) to the credit note carrying stripeRefundID, monotonically.
+// Hardcount refund_status) to the credit note carrying stripeRefundID, monotonically.
 // Returns errs.ErrNotFound when no credit note matches (foreign/dashboard refund,
 // or the row hasn't committed yet). Optional — nil logs+acks refund events.
 // payment imports nothing from creditnote; creditnote.Service satisfies this.
@@ -468,8 +468,8 @@ func (s *Stripe) SetRefundStatusUpdater(u RefundStatusUpdater) {
 
 // DisputeRecorder records a card dispute snapshot against the invoice whose
 // payment was disputed (#979), queuing payment.dispute_opened / .closed in
-// the same transaction. Returns errs.ErrNotFound when no Velox invoice holds
-// the disputed PaymentIntent (a charge the tenant made outside Velox).
+// the same transaction. Returns errs.ErrNotFound when no Hardcount invoice holds
+// the disputed PaymentIntent (a charge the tenant made outside Hardcount).
 // payment imports nothing from invoice; *invoice.PostgresStore satisfies it.
 type DisputeRecorder interface {
 	RecordStripeDispute(ctx context.Context, tenantID string, snap domain.DisputeSnapshot) (domain.DisputeRecordResult, error)
@@ -547,7 +547,7 @@ func (s *Stripe) ChargeInvoiceNow(ctx context.Context, tenantID string, inv doma
 
 // ChargeInvoiceForDunningRetry charges an invoice as part of a dunning
 // retry attempt. Identical to ChargeInvoice except the resulting
-// PaymentIntent carries velox_purpose=dunning_retry metadata, so every
+// PaymentIntent carries hardcount_purpose=dunning_retry metadata, so every
 // source that reports its failure — this call's own decline, the
 // payment_intent.payment_failed webhook, the reconciler — skips the
 // generic payment-failed email (failureEmailSuppressed): dunning sends its
@@ -599,7 +599,7 @@ func (s *Stripe) ChargeInvoiceForDunningRetry(ctx context.Context, tenantID stri
 // distinct even at the same seq: they attach different PI metadata, and Stripe
 // answers "same key, different parameters" with a 409.
 func ChargeIdempotencyKey(invoiceID string, chargeAttemptSeq int64, purpose string) string {
-	key := fmt.Sprintf("velox_inv_%s_%d", invoiceID, chargeAttemptSeq)
+	key := fmt.Sprintf("hardcount_inv_%s_%d", invoiceID, chargeAttemptSeq)
 	if purpose != "" {
 		key += "_" + purpose
 	}
@@ -607,8 +607,8 @@ func ChargeIdempotencyKey(invoiceID string, chargeAttemptSeq int64, purpose stri
 }
 
 // chargeInvoice is the one charge path. purpose is the PaymentIntent's
-// velox_purpose metadata, which Stripe sees and the idempotency key carries;
-// trigger is the attempt row's trigger_source, which only Velox sees.
+// hardcount_purpose metadata, which Stripe sees and the idempotency key carries;
+// trigger is the attempt row's trigger_source, which only Hardcount sees.
 func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.Invoice, hold domain.ChargeHold, stripeCustomerID, stripePaymentMethodID, purpose string, trigger domain.ChargeAttemptTrigger) (domain.Invoice, error) {
 	// finalized ONLY (ADR-113: nothing initiates money against a written-off
 	// invoice). This belt gate is not redundant with the claims: every claim
@@ -629,7 +629,7 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 	if stripeCustomerID == "" {
 		return domain.Invoice{}, fmt.Errorf("stripe customer ID is required")
 	}
-	// The exact card to charge is resolved upstream from Velox's
+	// The exact card to charge is resolved upstream from Hardcount's
 	// payment_methods table and passed in explicitly — the charge never
 	// defers PM selection to Stripe. A missing PM id is a caller bug
 	// (the charge gates require a default PM before reaching here); fail
@@ -647,25 +647,25 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 	// driven charges arrive on background ctx without tenant stamped.
 	// Livemode is already carried on ctx: authenticated callers set it from
 	// the key, and background workers per row or per mode.
-	ctx = veloxauth.WithTenantID(ctx, tenantID)
+	ctx = hardcountauth.WithTenantID(ctx, tenantID)
 
 	// Stable business metadata only — nothing per-HTTP-request. The
 	// idempotency key + metadata together form Stripe's dedup contract:
 	// same key + same params → cached response; different params → 409
-	// conflict. Putting velox_request_id (per-call chi ID) in metadata
+	// conflict. Putting hardcount_request_id (per-call chi ID) in metadata
 	// would make every retry attempt see "same key, different params"
 	// and 409. Log correlation goes through stripe_payment_intent_id
 	// (recorded back on the invoice) instead.
 	metadata := map[string]string{
-		"velox_invoice_id":     inv.ID,
-		"velox_invoice_number": inv.InvoiceNumber,
-		"velox_tenant_id":      tenantID,
-		"velox_customer_id":    inv.CustomerID,
+		"hardcount_invoice_id":     inv.ID,
+		"hardcount_invoice_number": inv.InvoiceNumber,
+		"hardcount_tenant_id":      tenantID,
+		"hardcount_customer_id":    inv.CustomerID,
 	}
 	if purpose != "" {
-		metadata["velox_purpose"] = purpose
+		metadata["hardcount_purpose"] = purpose
 	}
-	// velox_anchor_at: the CONTRACTED simulated instant this charge fires
+	// hardcount_anchor_at: the CONTRACTED simulated instant this charge fires
 	// at (a dunning retry's next_action_at, a cycle's close boundary).
 	// The settle path — inline OR the wall-side webhook, which cannot see
 	// the caller's ctx — stamps paid_at from this anchor, so a recovery
@@ -673,7 +673,7 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 	// the operator advanced a month in one click (ADR-030
 	// contracted-instant rule). Absent on wall-clock charges.
 	if sim, ok := clock.SimOf(ctx); ok {
-		metadata["velox_anchor_at"] = sim.At.UTC().Format(time.RFC3339Nano)
+		metadata["hardcount_anchor_at"] = sim.At.UTC().Format(time.RFC3339Nano)
 	}
 	// Per-attempt idempotency key — see ChargeIdempotencyKey, the single
 	// source. inv.ChargeAttemptSeq advances on every write that records an
@@ -687,7 +687,7 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 	// finalize-time auto-charge (purpose="") and the first dunning
 	// retry (purpose="dunning_retry") when no outcome was recorded between
 	// them, so both read the same seq — the metadata differs (the retry adds
-	// velox_purpose=dunning_retry) and Stripe answers "same key, different
+	// hardcount_purpose=dunning_retry) and Stripe answers "same key, different
 	// parameters" with a 409. Surfaced 2026-05-19 from a clock-pinned dunning
 	// workflow. The seq seed does not retire this: it narrows when two calls
 	// share a key, it does not eliminate it.
@@ -849,7 +849,7 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 		// being saved: a 500 that arrives just before it would otherwise be
 		// lost and charged again about 75 minutes later, while Stripe may
 		// still complete it. A cancelled context (a shutdown, a lost lease, a
-		// closed tab) is Velox interrupting itself: nothing is saved, the hold
+		// closed tab) is Hardcount interrupting itself: nothing is saved, the hold
 		// stays, and the stale-hold sweep decides about an hour after the
 		// claim (ADR-127; Sagar's "by cause" rule, 2026-10-19).
 		saveCtx := ctx
@@ -1052,7 +1052,7 @@ func (s *Stripe) recordBelowMinimum(ctx context.Context, tenantID string, inv do
 
 // RecordCheckoutBelowMinimum records Stripe refusing the hosted page's
 // Checkout Session because the amount is below its minimum charge. For a
-// customer with no card it is the first time Velox learns this, so it is
+// customer with no card it is the first time Hardcount learns this, so it is
 // recorded as a charge's refusal is: the invoice is stamped (no Pay button,
 // the operator's notice, out of the auto-charge queue) and the payment
 // recovery the card-less finalize started ends, so no reminder or final
@@ -1227,8 +1227,8 @@ const chargeOutcomeSaveTimeout = 10 * time.Second
 const piPurposeDunningRetry = "dunning_retry"
 
 // PurposeHostedInvoicePay tags a PaymentIntent created by the hosted invoice
-// page's Stripe Checkout session. Velox never waits on such an attempt — the
-// customer drives it while Velox's own charges carry on — so its failure is
+// page's Stripe Checkout session. Hardcount never waits on such an attempt — the
+// customer drives it while Hardcount's own charges carry on — so its failure is
 // recorded on its attempt row and never moves the invoice (SettleFailed).
 const PurposeHostedInvoicePay = "hosted_invoice_pay"
 
@@ -1317,7 +1317,7 @@ func (s *Stripe) stampUnreportableOutcome(ctx context.Context, tenantID string, 
 			// tick, which is how real alerts get buried. Announced only once
 			// the park is on disk: an outcome recorded during the call leaves
 			// nothing parked.
-			slog.ErrorContext(ctx, "a charge got an unclear answer from Stripe that named no payment; this invoice is parked. Velox checks the customer's payments at Stripe every billing tick, records the payment if it appears, and charges again only if none appears within 24 hours of the attempt",
+			slog.ErrorContext(ctx, "a charge got an unclear answer from Stripe that named no payment; this invoice is parked. Hardcount checks the customer's payments at Stripe every billing tick, records the payment if it appears, and charges again only if none appears within 24 hours of the attempt",
 				"invoice_id", inv.ID, "tenant_id", tenantID,
 				"customer_id", inv.CustomerID, "invoice_number", inv.InvoiceNumber,
 				"amount_due_cents", inv.AmountDueCents,
@@ -1378,7 +1378,7 @@ func (s *Stripe) stampUnreportableOutcome(ctx context.Context, tenantID string, 
 }
 
 // withChargeAnchor hands a simulated charge's contracted instant to its inline
-// settle — the same value the PI's velox_anchor_at metadata carries for the
+// settle — the same value the PI's hardcount_anchor_at metadata carries for the
 // webhook and the reconciler, passed directly instead of round-tripping via
 // Stripe. A wall-clock charge carries none.
 func withChargeAnchor(ctx context.Context) context.Context {
@@ -1611,7 +1611,7 @@ func isTransientWebhookError(err error) bool {
 }
 
 // handleSetupIntentSucceeded re-parses the raw payload to pull out the
-// velox_customer_id + payment_method fields, then delegates to the
+// hardcount_customer_id + payment_method fields, then delegates to the
 // PaymentMethodAttacher. Re-parsing (instead of adding fields to
 // StripeWebhookEvent) keeps the event struct narrow — other consumers
 // of the event don't need to know about setup-intent-specific fields.
@@ -1639,19 +1639,19 @@ func (s *Stripe) handleSetupIntentSucceeded(ctx context.Context, tenantID string
 		return fmt.Errorf("setup_intent.succeeded: parse payload: %w", err)
 	}
 
-	customerID := parsed.Data.Object.Metadata["velox_customer_id"]
+	customerID := parsed.Data.Object.Metadata["hardcount_customer_id"]
 	pmID := parsed.Data.Object.PaymentMethod
-	// A SetupIntent Velox created (both of its Checkout setup sessions stamp
-	// velox_customer_id in setup_intent_data.metadata: the operator's Add
+	// A SetupIntent Hardcount created (both of its Checkout setup sessions stamp
+	// hardcount_customer_id in setup_intent_data.metadata: the operator's Add
 	// payment method link and the customer's payment-update link) saved a
 	// card to be charged: it becomes the default (ADR-021). Read before the resolver fallback below, which also
-	// lets in SetupIntents Velox did not create; their card is added beside.
-	fromVeloxSetup := customerID != ""
+	// lets in SetupIntents Hardcount did not create; their card is added beside.
+	fromHardcountSetup := customerID != ""
 
 	// Metadata is best-effort: Stripe Checkout doesn't copy a session's
 	// metadata onto the underlying SetupIntent unless the creator set
-	// setup_intent_data.metadata. Velox's setup sessions do; a SetupIntent
-	// Velox did not create, or one from a session made before that stamp
+	// setup_intent_data.metadata. Hardcount's setup sessions do; a SetupIntent
+	// Hardcount did not create, or one from a session made before that stamp
 	// shipped, carries none. Fall back to the SetupIntent's
 	// authoritative `customer` field — always set for our customer-scoped
 	// setup flows — so a saved card lands in payment_methods regardless of
@@ -1675,8 +1675,8 @@ func (s *Stripe) handleSetupIntentSucceeded(ctx context.Context, tenantID string
 		return nil
 	}
 	if customerID == "" {
-		// The card was saved at Stripe but we can't yet resolve which Velox
-		// customer it belongs to (no velox_customer_id in metadata AND the
+		// The card was saved at Stripe but we can't yet resolve which Hardcount
+		// customer it belongs to (no hardcount_customer_id in metadata AND the
 		// SetupIntent.customer isn't linked locally yet — a race against the
 		// customer↔Stripe-id link-write, or a session created before the
 		// setup_intent_data.metadata stamp shipped). Return a NON-ErrNotFound
@@ -1692,7 +1692,7 @@ func (s *Stripe) handleSetupIntentSucceeded(ctx context.Context, tenantID string
 	}
 
 	// Attribute the attach to the CUSTOMER when this SetupIntent came from the
-	// customer-driven payment-update token link (velox_purpose set on the
+	// customer-driven payment-update token link (hardcount_purpose set on the
 	// public flow's setup_intent_data.metadata). Operator-driven attaches
 	// (portal "Add payment method" → "portal_add_payment_method", or a
 	// session from the removed POST /v1/checkout/setup → empty purpose) are
@@ -1700,11 +1700,11 @@ func (s *Stripe) handleSetupIntentSucceeded(ctx context.Context, tenantID string
 	// gate every webhook-attach row — operator and customer alike — resolved
 	// to "System", so a customer self-serving a card was indistinguishable
 	// from an operator adding one in the audit log.
-	if parsed.Data.Object.Metadata["velox_purpose"] == purposePaymentUpdateToken {
-		ctx = veloxauth.WithCustomerActor(ctx, customerID)
+	if parsed.Data.Object.Metadata["hardcount_purpose"] == purposePaymentUpdateToken {
+		ctx = hardcountauth.WithCustomerActor(ctx, customerID)
 	}
 
-	pm, err := s.pmAttacher.AttachForWebhook(ctx, tenantID, customerID, pmID, fromVeloxSetup)
+	pm, err := s.pmAttacher.AttachForWebhook(ctx, tenantID, customerID, pmID, fromHardcountSetup)
 	if err != nil {
 		return fmt.Errorf("attach payment method: %w", err)
 	}
@@ -1738,10 +1738,10 @@ func (s *Stripe) handleSetupIntentSucceeded(ctx context.Context, tenantID string
 const refundWebhookRaceWindow = 15 * time.Minute
 
 // disputeWebhookRaceWindow bounds redelivery for a dispute webhook that
-// arrives before Velox has recorded the payment it disputes (handleDispute).
+// arrives before Hardcount has recorded the payment it disputes (handleDispute).
 // Same reasoning and value as refundWebhookRaceWindow: longer than Stripe's
 // first redelivery backoff, short enough that a dispute on a payment made
-// outside Velox does not loop for days.
+// outside Hardcount does not loop for days.
 const disputeWebhookRaceWindow = refundWebhookRaceWindow
 
 // handleRefundUpdated reconciles the ASYNC outcome of a refund. A refund can
@@ -1786,8 +1786,8 @@ func (s *Stripe) handleRefundUpdated(ctx context.Context, tenantID string, event
 
 	err := s.refundUpdater.ApplyRefundWebhook(ctx, tenantID, rf.ID, status, rf.FailureReason)
 	if errors.Is(err, errs.ErrNotFound) {
-		// No Velox credit note carries this refund id. Either a refund created
-		// OUTSIDE Velox (dashboard / direct API) — ack and ignore, never fabricate
+		// No Hardcount credit note carries this refund id. Either a refund created
+		// OUTSIDE Hardcount (dashboard / direct API) — ack and ignore, never fabricate
 		// a credit note — OR our own refund whose CN row hasn't committed yet
 		// (rare; the create→persist is synchronous). Disambiguate by age: a very
 		// recent refund gets a bounded redelivery so the row can land; an older
@@ -1806,27 +1806,27 @@ func (s *Stripe) handleRefundUpdated(ctx context.Context, tenantID string, event
 		return fmt.Errorf("%s: apply refund status: %w", event.EventType, err)
 	}
 	slog.Info("refund status reconciled from webhook",
-		"refund_id", rf.ID, "stripe_status", rf.Status, "velox_status", status, "type", event.EventType)
+		"refund_id", rf.ID, "stripe_status", rf.Status, "hardcount_status", status, "type", event.EventType)
 	return nil
 }
 
-// handleDispute records a charge.dispute.* event against the Velox invoice
+// handleDispute records a charge.dispute.* event against the Hardcount invoice
 // whose payment was disputed (#979). It records and reports; it never changes
 // the invoice's payment status and never moves money. Re-parses the raw
 // payload: data.object is a Dispute (https://docs.stripe.com/api/disputes/object),
-// whose own metadata is empty, so the event arrives without velox_tenant_id
+// whose own metadata is empty, so the event arrives without hardcount_tenant_id
 // and the handler admits it on the endpoint's tenant (endpointAuthoritativeEvent).
 //
 // Outcomes:
 //   - recorded, or already recorded (a redelivery, or an older event arriving
 //     after a newer one): nil, and HandleWebhook writes the dedup row;
-//   - no Velox invoice holds the disputed PaymentIntent, and the dispute is
+//   - no Hardcount invoice holds the disputed PaymentIntent, and the dispute is
 //     older than disputeWebhookRaceWindow: an ErrNotFound error, which
 //     HandleWebhook acknowledges with its audit row. The tenant can charge
-//     cards outside Velox on the same Stripe account;
-//   - the same, but the dispute is younger (Velox may not have recorded its
+//     cards outside Hardcount on the same Stripe account;
+//   - the same, but the dispute is younger (Hardcount may not have recorded its
 //     own payment yet): an error, so Stripe redelivers it;
-//   - a status Velox does not know (Stripe added one) or a body it cannot
+//   - a status Hardcount does not know (Stripe added one) or a body it cannot
 //     read: an error, so the delivery fails and Stripe redelivers it, which
 //     shows on Stripe's webhook page, instead of the dispute being dropped;
 //   - a store error: an error, so Stripe redelivers.
@@ -1866,7 +1866,7 @@ func (s *Stripe) handleDispute(ctx context.Context, tenantID string, event domai
 	}
 	status := domain.DisputeStatus(dp.Status)
 	if !status.Valid() {
-		slog.ErrorContext(ctx, "dispute webhook carries a status Velox does not know — failing the delivery so Stripe redelivers it; add the status to domain.DisputeStatus and the invoice_disputes CHECK",
+		slog.ErrorContext(ctx, "dispute webhook carries a status Hardcount does not know — failing the delivery so Stripe redelivers it; add the status to domain.DisputeStatus and the invoice_disputes CHECK",
 			"stripe_event_id", event.StripeEventID, "stripe_dispute_id", dp.ID, "status", dp.Status)
 		return fmt.Errorf("%s: dispute %s has unknown status %q", event.EventType, dp.ID, dp.Status)
 	}
@@ -1875,8 +1875,8 @@ func (s *Stripe) handleDispute(ctx context.Context, tenantID string, event domai
 	}
 	pi := stripeObjectID(dp.PaymentIntent)
 	if pi == "" {
-		// Velox charges only through PaymentIntents (ADR-001), so a dispute
-		// on a charge without one is not on a Velox payment.
+		// Hardcount charges only through PaymentIntents (ADR-001), so a dispute
+		// on a charge without one is not on a Hardcount payment.
 		return fmt.Errorf("%s: dispute %s names no payment intent: %w", event.EventType, dp.ID, errs.ErrNotFound)
 	}
 	snap := domain.DisputeSnapshot{
@@ -1898,19 +1898,19 @@ func (s *Stripe) handleDispute(ctx context.Context, tenantID string, event domai
 
 	res, err := s.disputes.RecordStripeDispute(ctx, tenantID, snap)
 	if errors.Is(err, errs.ErrNotFound) {
-		// No invoice holds the payment yet. It can be a Velox payment whose
+		// No invoice holds the payment yet. It can be a Hardcount payment whose
 		// record has not committed: a hosted-page payment before its settle,
 		// an off-session charge before its attempt row (written after Stripe
 		// answers). Stripe's test dispute cards open the dispute right after
 		// the charge. So a dispute younger than the race window, or of unknown
 		// age, fails the delivery and Stripe sends it again, as a young refund
 		// does (handleRefundUpdated); an older one is acknowledged as not
-		// Velox's, with its audit row.
+		// Hardcount's, with its audit row.
 		// Wall clock against Stripe's clock: the dispute's age is real time.
 		if dp.Created == 0 || time.Now().Unix()-dp.Created < int64(disputeWebhookRaceWindow.Seconds()) {
 			return fmt.Errorf("%s: dispute %s: no invoice holds payment %s yet (recent dispute — retry)", event.EventType, dp.ID, pi)
 		}
-		slog.WarnContext(ctx, "dispute webhook names a payment no Velox invoice holds — acknowledged; if it is a Velox charge, find the invoice by this payment intent",
+		slog.WarnContext(ctx, "dispute webhook names a payment no Hardcount invoice holds — acknowledged; if it is a Hardcount charge, find the invoice by this payment intent",
 			"stripe_event_id", event.StripeEventID, "stripe_dispute_id", dp.ID,
 			"stripe_payment_intent_id", pi, "status", dp.Status)
 		return fmt.Errorf("%s: dispute %s: %w", event.EventType, dp.ID, err)
@@ -1953,12 +1953,12 @@ func (s *Stripe) handlePaymentSucceeded(ctx context.Context, tenantID string, ev
 	// Currency truth-check (ADR-100): the webhook is the ONE settle entry
 	// point carrying Stripe's independently-reported charge currency, so
 	// compare it against the invoice header here — case-folded (Stripe
-	// reports lowercase). Velox creates the PaymentIntent FROM the header,
+	// reports lowercase). Hardcount creates the PaymentIntent FROM the header,
 	// so a mismatch means the charge was made under a different currency
 	// than the invoice now claims — report-only tripwire via the standard
 	// anomaly channel; the settle itself proceeds (the money already moved,
 	// absorbing silently is the one wrong option).
-	// The event names the charge's currency in upper case, as Velox writes
+	// The event names the charge's currency in upper case, as Hardcount writes
 	// every currency; the invoice beside it carries its own.
 	if event.Currency != "" && !strings.EqualFold(event.Currency, inv.Currency) {
 		chargeCurrency := strings.ToUpper(event.Currency)
@@ -2005,7 +2005,7 @@ func (s *Stripe) handlePaymentFailed(ctx context.Context, tenantID string, event
 	return s.SettleFailed(ctx, tenantID, inv, PaymentFailure{
 		PaymentIntentID: event.PaymentIntentID,
 		Message:         event.FailureMessage,
-		Purpose:         md["velox_purpose"],
+		Purpose:         md["hardcount_purpose"],
 		DeclineCode:     d.code,
 		PaymentMethodID: d.paymentMethodID,
 		CardMessage:     d.cardMessage,
@@ -2109,10 +2109,10 @@ func piMetadataFromPayload(payload map[string]any) map[string]string {
 }
 
 func (s *Stripe) handleCheckoutCompleted(ctx context.Context, tenantID string, event domain.StripeWebhookEvent) error {
-	// Extract velox_customer_id from metadata (set during checkout session creation)
+	// Extract hardcount_customer_id from metadata (set during checkout session creation)
 	customerID := ""
 	sessionID := ""
-	veloxPurpose := ""
+	hardcountPurpose := ""
 	if payload, ok := event.Payload["raw"]; ok {
 		var raw struct {
 			Data struct {
@@ -2129,9 +2129,9 @@ func (s *Stripe) handleCheckoutCompleted(ctx context.Context, tenantID string, e
 			// completion for good. Fail so Stripe redelivers.
 			return fmt.Errorf("decode checkout.session.completed: %w", err)
 		}
-		customerID = raw.Data.Object.Metadata["velox_customer_id"]
+		customerID = raw.Data.Object.Metadata["hardcount_customer_id"]
 		sessionID = raw.Data.Object.ID
-		veloxPurpose = raw.Data.Object.Metadata["velox_purpose"]
+		hardcountPurpose = raw.Data.Object.Metadata["hardcount_purpose"]
 		if event.CustomerExternalID == "" {
 			event.CustomerExternalID = raw.Data.Object.Customer
 		}
@@ -2147,18 +2147,18 @@ func (s *Stripe) handleCheckoutCompleted(ctx context.Context, tenantID string, e
 	}
 
 	if customerID == "" {
-		slog.Debug("checkout.session.completed missing velox_customer_id, skipping")
+		slog.Debug("checkout.session.completed missing hardcount_customer_id, skipping")
 		return nil
 	}
 
-	return s.RecordCheckoutCard(ctx, tenantID, customerID, event.CustomerExternalID, veloxPurpose)
+	return s.RecordCheckoutCard(ctx, tenantID, customerID, event.CustomerExternalID, hardcountPurpose)
 }
 
 // RecordCheckoutCard records the card a finished Checkout session saved to the
 // customer's Stripe customer (setup_future_usage, ADR-021) as the customer's
 // payment method. Two callers: the checkout.session.completed webhook, and
 // the reconciler's hosted sweep for a paid session whose webhooks were lost —
-// without the sweep's call, Velox recorded the payment but showed "no payment
+// without the sweep's call, Hardcount recorded the payment but showed "no payment
 // method" and sent the next invoice to card-less dunning, asking for a card
 // the customer had just given. A card already on file with the same Stripe
 // payment method is left alone, so a webhook and the sweep both reporting one
@@ -2219,8 +2219,8 @@ func (s *Stripe) RecordCheckoutCard(ctx context.Context, tenantID, customerID, s
 	// setup_intent.succeeded called. A hosted payment confirms a
 	// PaymentIntent (setup_future_usage, ADR-021), so no SetupIntent event
 	// ever came, and the card the customer paid with was never recorded:
-	// Velox kept charging its old card, or none (found 2026-10-11: Stripe
-	// held two saved 4242 cards for a customer whose Velox record had only
+	// Hardcount kept charging its old card, or none (found 2026-10-11: Stripe
+	// held two saved 4242 cards for a customer whose Hardcount record had only
 	// the declining 0341). The attach follows the store's default rule
 	// (makeDefault false): the customer's first card becomes the default, a
 	// card replacing a default the bank refused for good does too, and any
@@ -2256,11 +2256,11 @@ func (s *Stripe) RecordCheckoutCard(ctx context.Context, tenantID, customerID, s
 	}
 
 	// Attribute customer-driven completions to the CUSTOMER actor — the
-	// same velox_purpose gate as the setup_intent attach path (#461); an
+	// same hardcount_purpose gate as the setup_intent attach path (#461); an
 	// operator-driven or purposeless session stays system-attributed.
 	auditCtx := ctx
 	if purpose == PurposeHostedInvoicePay || purpose == purposePaymentUpdateToken {
-		auditCtx = veloxauth.WithCustomerActor(ctx, customerID)
+		auditCtx = hardcountauth.WithCustomerActor(ctx, customerID)
 	}
 	var emit func(tx *sql.Tx) error
 	if s.audit != nil {
@@ -2274,7 +2274,7 @@ func (s *Stripe) RecordCheckoutCard(ctx context.Context, tenantID, customerID, s
 					"card_brand":         setup.CardBrand,
 					"card_last4":         setup.CardLast4,
 					"stripe_customer_id": stripeCustomerID,
-					"velox_purpose":      purpose,
+					"hardcount_purpose":  purpose,
 				},
 			})
 		}
@@ -2293,7 +2293,7 @@ func (s *Stripe) RecordCheckoutCard(ctx context.Context, tenantID, customerID, s
 		// The customer is already linked to a different Stripe customer, and
 		// that link is never replaced (customer.SetStripeCustomerID, ADR-127).
 		// A retry cannot change it, so ACK, loudly: a card saved on this other
-		// Stripe customer will not be charged by Velox.
+		// Stripe customer will not be charged by Hardcount.
 		if errors.Is(err, errs.ErrInvalidState) {
 			slog.ErrorContext(ctx, "checkout.session.completed: the customer is already linked to a different Stripe customer; this session's Stripe customer was not recorded — acking event",
 				"customer_id", customerID, "stripe_customer_id", stripeCustomerID, "error", err)

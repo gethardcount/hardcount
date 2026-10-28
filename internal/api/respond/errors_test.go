@@ -184,7 +184,7 @@ func TestFromError_SafeMessageError_SurfacedNotRaw(t *testing.T) {
 	// PaymentError-shaped marker. Raw message is leaky; safe message
 	// is curated.
 	err := &fakeSafeMessageError{
-		raw:  "Keys for idempotent requests can only be used with the same parameters they were first used with. Try using a key other than 'velox_inv_xxx'",
+		raw:  "Keys for idempotent requests can only be used with the same parameters they were first used with. Try using a key other than 'hardcount_inv_xxx'",
 		safe: "Card was declined: insufficient funds.",
 	}
 	FromError(rec, req, err, "payment")
@@ -201,7 +201,7 @@ func TestFromError_SafeMessageError_SurfacedNotRaw(t *testing.T) {
 	if strings.Contains(body, "Keys for idempotent requests") {
 		t.Errorf("raw Stripe SDK error leaked to wire: %s", body)
 	}
-	if strings.Contains(body, "velox_inv_") {
+	if strings.Contains(body, "hardcount_inv_") {
 		t.Errorf("internal idempotency-key leaked to wire: %s", body)
 	}
 }

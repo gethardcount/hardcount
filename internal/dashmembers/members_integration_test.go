@@ -378,7 +378,7 @@ func TestRemoveMember(t *testing.T) {
 	}
 
 	// Removing a non-member → not found.
-	if err := h.svc.RemoveMember(ctx, h.tenantID, h.owner, "vlx_user_nonexistent"); !errors.Is(err, errs.ErrNotFound) {
+	if err := h.svc.RemoveMember(ctx, h.tenantID, h.owner, "hc_user_nonexistent"); !errors.Is(err, errs.ErrNotFound) {
 		t.Fatalf("remove non-member: got %v, want ErrNotFound", err)
 	}
 

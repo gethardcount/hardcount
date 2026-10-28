@@ -6,11 +6,11 @@ Amends: ADR-082 (whose "Still cut" list deferred email provider events)
 
 ## Summary
 
-Velox ingests Postmark's delivery, bounce and spam-complaint webhooks at `POST /v1/webhooks/postmark`, and ignores opens and clicks. Postmark answers SMTP 250 before it knows whether a message will deliver and reports bounces only later, so without this the dashboard could not show delivery and bounced addresses were never suppressed. The endpoint uses HTTP Basic Auth (`POSTMARK_WEBHOOK_USER`, `POSTMARK_WEBHOOK_PASS`), refuses every post with 401 when they are unset, and finds the tenant only through the outbox row id each email carries. A verdict sets `email_outbox.delivery_state`, which only moves to a more severe state; a hard bounce or spam complaint also flags the customer's email, and a soft bounce changes nothing. Status: active; it partly reverses [ADR-082](082-email-recipient-semantics.md)'s cut of provider events, and with other SMTP providers the state stays `unknown`.
+Hardcount ingests Postmark's delivery, bounce and spam-complaint webhooks at `POST /v1/webhooks/postmark`, and ignores opens and clicks. Postmark answers SMTP 250 before it knows whether a message will deliver and reports bounces only later, so without this the dashboard could not show delivery and bounced addresses were never suppressed. The endpoint uses HTTP Basic Auth (`POSTMARK_WEBHOOK_USER`, `POSTMARK_WEBHOOK_PASS`), refuses every post with 401 when they are unset, and finds the tenant only through the outbox row id each email carries. A verdict sets `email_outbox.delivery_state`, which only moves to a more severe state; a hard bounce or spam complaint also flags the customer's email, and a soft bounce changes nothing. Status: active; it partly reverses [ADR-082](082-email-recipient-semantics.md)'s cut of provider events, and with other SMTP providers the state stays `unknown`.
 
 ## Context
 
-Velox marks an outbox row `dispatched` on SMTP 250. For an
+Hardcount marks an outbox row `dispatched` on SMTP 250. For an
 async-validating provider — Postmark, our recommended default — that 250
 is only "accepted for handoff": Postmark decides *afterwards* whether the
 message delivers, bounces, or draws a spam complaint, and reports each
@@ -30,7 +30,7 @@ Parity (live-doc verified): SendGrid/Resend/Mailgun/SES all model
 `delivered` as a state distinct from `sent`; all suppress on hard bounce
 + spam complaint and **never** on soft bounce; webhook ingestion is the
 standard mechanism. Billing peers (Stripe Invoicing, Lago, Metronome)
-expose *no* recipient-level delivery state — ingesting it puts Velox
+expose *no* recipient-level delivery state — ingesting it puts Hardcount
 AHEAD of peers at the cost of one webhook endpoint.
 
 ## Decision
@@ -43,7 +43,7 @@ One platform-level endpoint — `POST /v1/webhooks/postmark` — ingesting
 
 The dispatcher puts the outbox row id on the send ctx
 (`email.WithCorrelation`); the MIME builders emit it as
-`X-PM-Metadata-vlx-outbox-id`. Postmark strips the header before
+`X-PM-Metadata-hc-outbox-id`. Postmark strips the header before
 delivery and echoes it in every webhook's `Metadata`. Inbound, that id
 is the **only** tenant resolution: resolve the row (bypass-RLS read, the
 blind-index pattern), take `tenant_id` + `livemode` from the row, never

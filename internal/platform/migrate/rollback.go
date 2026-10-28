@@ -14,7 +14,7 @@ var ErrNothingToRollBack = errors.New("no migration is applied: nothing to roll 
 
 // Down rolls back the latest migration, one step, and returns the version
 // the database is at afterwards. It is the local loop for writing a new
-// migration: `velox migrate rollback` refuses outside APP_ENV=local, because
+// migration: `hardcount migrate rollback` refuses outside APP_ENV=local, because
 // rolling back loses data the newer release wrote. Migration 180 never
 // rolls back (errBaselineDown).
 func Down(dsn string) (int64, error) {
@@ -36,6 +36,8 @@ func down(ctx context.Context, dsn string, fsys fs.FS, to int64) (int64, error) 
 	switch decide(st) {
 	case actRefuse:
 		return 0, ErrNoMigrationRecord
+	case actRefuseVelox:
+		return 0, ErrVeloxDatabase
 	case actBaseline:
 		return 0, ErrNothingToRollBack
 	}

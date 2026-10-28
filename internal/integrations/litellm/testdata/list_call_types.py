@@ -17,7 +17,7 @@ Sources, each printed with the first place it was found:
   keyword    call_type="..." keyword literals (Logging(...),
              update_environment_variables(...), kwargs dicts)
 
-testdata/litellm-1.83.9-call-types.tsv holds these strings with Velox's
+testdata/litellm-1.83.9-call-types.tsv holds these strings with Hardcount's
 verdict for each. TestCallTypeInventory fails when the two disagree, so a
 LiteLLM upgrade shows its new call types until each is classified.
 """

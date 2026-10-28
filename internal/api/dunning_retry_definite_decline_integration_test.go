@@ -109,7 +109,7 @@ func captureSlog(t *testing.T) *bytes.Buffer {
 }
 
 // settleFaultInvoices is the charge path's invoice store with its first card
-// settle failing: Stripe took the money and Velox could not record it.
+// settle failing: Stripe took the money and Hardcount could not record it.
 type settleFaultInvoices struct {
 	*invoice.PostgresStore
 	failed bool

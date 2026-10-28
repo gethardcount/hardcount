@@ -30,7 +30,7 @@ finalize-no-PM moment:
 
 3. **Customer email after interactive Pay decline is noise.** Customer
    clicks Pay on the hosted invoice page, card declines, customer sees
-   "Your card was declined" inline on the page. Velox then sends them
+   "Your card was declined" inline on the page. Hardcount then sends them
    an email saying the same thing. The customer was watching the
    transaction; the email tells them what they just saw.
 
@@ -55,7 +55,7 @@ Distinct primitives per lifecycle moment:
 | Invoice **charge attempted, declined** (auto-charge OR interactive Pay\*) | `payment_failed` (existing) | `Stripe.SettleFailed`, from whichever reports the decline first: the charge response, the webhook or the reconciler (ADR-049 amendment 2026-10-11) | "Payment-failed email sent to customer" | Update payment method / Retry payment |
 | Dunning retries | `payment_failed` / `dunning_warning` / `dunning_escalation` | dunning notifier | (existing) | (existing) |
 
-\* With one suppression: when the PI's `velox_purpose` metadata is
+\* With one suppression: when the PI's `hardcount_purpose` metadata is
 `hosted_invoice_pay` (interactive customer-on-page flow), no email is
 sent. The customer is staring at the same failure inline.
 
@@ -86,9 +86,9 @@ sent. The customer is staring at the same failure inline.
   needed single-use tokens; the post-decline email goes to the
   hosted invoice page.
 - `handlePaymentFailed`:
-  - Reads `data.object.metadata.velox_purpose` from the webhook payload
+  - Reads `data.object.metadata.hardcount_purpose` from the webhook payload
     via new `piPurposeFromPayload` helper.
-  - If `velox_purpose == "hosted_invoice_pay"`: skip email, log INFO.
+  - If `hardcount_purpose == "hosted_invoice_pay"`: skip email, log INFO.
   - Otherwise: dispatch `SendPaymentFailed` with `inv.PublicToken`.
   - Still fires `event.payment.failed` on the dispatcher and starts
     dunning regardless of suppression — only the customer email is
@@ -96,7 +96,7 @@ sent. The customer is staring at the same failure inline.
     not about disabling the dunning state machine).
   - *Amended 2026-10-11 (ADR-049 amendment):* a hosted-page decline no
     longer fires `payment.failed`, marks the invoice failed or starts
-    dunning. Velox never waits on a hosted attempt, so its failure is
+    dunning. Hardcount never waits on a hosted attempt, so its failure is
     recorded on its own attempt row only. The suppression above now
     applies to dunning-retry attempts.
 

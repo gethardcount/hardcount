@@ -194,8 +194,8 @@ func (m *mockInvoiceUpdater) noteAttemptTrigger(pi string, trigger domain.Charge
 	}
 }
 
-// attemptStanding mirrors veloxAttemptStandingTx: chargeAttempts holds the
-// Velox-made attempt rows in write order.
+// attemptStanding mirrors hardcountAttemptStandingTx: chargeAttempts holds the
+// Hardcount-made attempt rows in write order.
 func (m *mockInvoiceUpdater) attemptStanding(id, pi string) domain.AttemptStanding {
 	var newest string
 	mine := false
@@ -210,7 +210,7 @@ func (m *mockInvoiceUpdater) attemptStanding(id, pi string) domain.AttemptStandi
 	}
 	switch {
 	case !mine:
-		return domain.AttemptNotVelox
+		return domain.AttemptNotHardcount
 	case newest == pi:
 		return domain.AttemptNewest
 	default:
@@ -298,7 +298,7 @@ func (m *mockInvoiceUpdater) MarkPaymentFailedReportingTransition(_ context.Cont
 	if !ok {
 		return domain.Invoice{}, domain.PaymentFailureResult{}, errs.ErrNotFound
 	}
-	standing := domain.AttemptNotVelox
+	standing := domain.AttemptNotHardcount
 	if inv.StripePaymentIntentID != piID && report.ChargedAtSeq == nil && !report.External {
 		standing = m.attemptStanding(id, piID)
 	}
@@ -408,7 +408,7 @@ func TestChargeInvoice_Success(t *testing.T) {
 
 	inv := domain.Invoice{
 		ID: "inv_1", TenantID: "t1", CustomerID: "cus_1",
-		InvoiceNumber: "VLX-202604-0001",
+		InvoiceNumber: "HC-202604-0001",
 		Status:        domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
 		Currency: "USD", AmountDueCents: 19900,
 	}
@@ -428,7 +428,7 @@ func TestChargeInvoice_Success(t *testing.T) {
 		t.Errorf("customer: got %q, want cus_stripe_abc", client.lastParams.CustomerID)
 	}
 	// The exact PM resolved upstream must be threaded into the PaymentIntent —
-	// Velox names the card, Stripe does not pick. (Single-source-of-truth PM
+	// Hardcount names the card, Stripe does not pick. (Single-source-of-truth PM
 	// selection: the card gated on is the card charged.)
 	if client.lastParams.PaymentMethodID != "pm_test" {
 		t.Errorf("payment method: got %q, want pm_test", client.lastParams.PaymentMethodID)
@@ -436,8 +436,8 @@ func TestChargeInvoice_Success(t *testing.T) {
 	if client.lastParams.Currency != "USD" {
 		t.Errorf("currency: got %q, want USD", client.lastParams.Currency)
 	}
-	if client.lastParams.Metadata["velox_invoice_id"] != "inv_1" {
-		t.Errorf("metadata missing velox_invoice_id")
+	if client.lastParams.Metadata["hardcount_invoice_id"] != "inv_1" {
+		t.Errorf("metadata missing hardcount_invoice_id")
 	}
 
 	// Verify invoice updated to processing
@@ -460,7 +460,7 @@ func TestChargeInvoice_RequiresPaymentMethod(t *testing.T) {
 
 	inv := domain.Invoice{
 		ID: "inv_1", TenantID: "t1", CustomerID: "cus_1",
-		InvoiceNumber: "VLX-202604-0001",
+		InvoiceNumber: "HC-202604-0001",
 		Status:        domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
 		Currency: "USD", AmountDueCents: 19900,
 	}
@@ -963,7 +963,7 @@ type recordingAttacher struct {
 	// stay system.
 	actorType, actorID string
 	// makeDefault is what the caller asked of the attach: true only for a
-	// card saved through a Velox setup flow (ADR-021).
+	// card saved through a Hardcount setup flow (ADR-021).
 	makeDefault bool
 }
 
@@ -975,11 +975,11 @@ func (r *recordingAttacher) AttachForWebhook(ctx context.Context, tenantID, cust
 	if r.err != nil {
 		return nil, r.err
 	}
-	return &domain.PaymentMethodView{ID: "vlx_pm_" + pmID, CustomerID: customerID, Type: "card", IsDefault: makeDefault}, nil
+	return &domain.PaymentMethodView{ID: "hc_pm_" + pmID, CustomerID: customerID, Type: "card", IsDefault: makeDefault}, nil
 }
 
 // TestHandleWebhook_SetupIntentSucceeded — a setup_intent.succeeded event
-// must re-parse the raw payload, pull payment_method + velox_customer_id
+// must re-parse the raw payload, pull payment_method + hardcount_customer_id
 // from it, and delegate to the configured attacher.
 func TestHandleWebhook_SetupIntentSucceeded(t *testing.T) {
 	stripe := NewStripe(&mockStripeClient{}, newMockInvoiceUpdater(), newMockWebhookStore(), nil)
@@ -994,8 +994,8 @@ func TestHandleWebhook_SetupIntentSucceeded(t *testing.T) {
 			"payment_method": "pm_stripe_42",
 			"customer": "cus_stripe_99",
 			"metadata": {
-				"velox_tenant_id": "tnt_x",
-				"velox_customer_id": "cus_local_7"
+				"hardcount_tenant_id": "tnt_x",
+				"hardcount_customer_id": "cus_local_7"
 			}
 		}}
 	}`
@@ -1015,20 +1015,20 @@ func TestHandleWebhook_SetupIntentSucceeded(t *testing.T) {
 		t.Fatalf("attacher got wrong args: tenant=%q customer=%q pm=%q",
 			attacher.tenantID, attacher.customerID, attacher.pmID)
 	}
-	// No velox_purpose in this payload → operator/system attach, not customer.
+	// No hardcount_purpose in this payload → operator/system attach, not customer.
 	if attacher.actorType != "system" {
 		t.Errorf("purpose-less attach must resolve to system actor, got %q/%q", attacher.actorType, attacher.actorID)
 	}
-	// velox_customer_id on the SetupIntent: Velox created it, so its card
+	// hardcount_customer_id on the SetupIntent: Hardcount created it, so its card
 	// becomes the default. No purpose: a session from the removed
 	// POST /v1/checkout/setup, made before the upgrade and finished after.
 	if !attacher.makeDefault {
-		t.Error("a SetupIntent carrying velox_customer_id must attach its card as the default")
+		t.Error("a SetupIntent carrying hardcount_customer_id must attach its card as the default")
 	}
 }
 
 // TestHandleWebhook_SetupIntent_CustomerActor — an attach whose SetupIntent
-// carries velox_purpose=payment_update_token (the customer-driven public
+// carries hardcount_purpose=payment_update_token (the customer-driven public
 // token link) must be attributed to the CUSTOMER in the audit log, so a
 // self-served card is distinguishable from an operator-added one.
 func TestHandleWebhook_SetupIntent_CustomerActor(t *testing.T) {
@@ -1044,9 +1044,9 @@ func TestHandleWebhook_SetupIntent_CustomerActor(t *testing.T) {
 			"payment_method": "pm_stripe_cust",
 			"customer": "cus_stripe_99",
 			"metadata": {
-				"velox_tenant_id": "tnt_x",
-				"velox_customer_id": "cus_local_7",
-				"velox_purpose": "payment_update_token"
+				"hardcount_tenant_id": "tnt_x",
+				"hardcount_customer_id": "cus_local_7",
+				"hardcount_purpose": "payment_update_token"
 			}
 		}}
 	}`
@@ -1068,7 +1068,7 @@ func TestHandleWebhook_SetupIntent_CustomerActor(t *testing.T) {
 }
 
 // TestHandleWebhook_SetupIntent_OperatorPurposeStaysSystem — the operator
-// "Add payment method" flow (velox_purpose=portal_add_payment_method) must
+// "Add payment method" flow (hardcount_purpose=portal_add_payment_method) must
 // NOT be attributed to the customer.
 func TestHandleWebhook_SetupIntent_OperatorPurposeStaysSystem(t *testing.T) {
 	stripe := NewStripe(&mockStripeClient{}, newMockInvoiceUpdater(), newMockWebhookStore(), nil)
@@ -1083,9 +1083,9 @@ func TestHandleWebhook_SetupIntent_OperatorPurposeStaysSystem(t *testing.T) {
 			"payment_method": "pm_stripe_op",
 			"customer": "cus_stripe_99",
 			"metadata": {
-				"velox_tenant_id": "tnt_x",
-				"velox_customer_id": "cus_local_7",
-				"velox_purpose": "portal_add_payment_method"
+				"hardcount_tenant_id": "tnt_x",
+				"hardcount_customer_id": "cus_local_7",
+				"hardcount_purpose": "portal_add_payment_method"
 			}
 		}}
 	}`
@@ -1122,7 +1122,7 @@ func TestHandleWebhook_SetupIntent_NoAttacher(t *testing.T) {
 }
 
 // TestHandleWebhook_SetupIntent_MissingMetadata — a setup_intent with no
-// velox metadata AND no resolvable customer shouldn't error (someone else's
+// hardcount metadata AND no resolvable customer shouldn't error (someone else's
 // SI passing through); we just skip.
 // TestHandleWebhook_SetupIntent_UnresolvedCustomerRedelivers locks the
 // dropped-card fix: a setup_intent.succeeded that HAS a payment method but
@@ -1137,7 +1137,7 @@ func TestHandleWebhook_SetupIntent_UnresolvedCustomerRedelivers(t *testing.T) {
 	attacher := &recordingAttacher{}
 	stripe.SetPaymentMethodAttacher(attacher)
 	// Resolver can't place cus_foreign (link not yet written) → NotFound.
-	stripe.SetCustomerResolver(&recordingCustomerResolver{wantStripeID: "cus_known", veloxID: "cus_x"})
+	stripe.SetCustomerResolver(&recordingCustomerResolver{wantStripeID: "cus_known", hardcountID: "cus_x"})
 
 	err := stripe.HandleWebhook(context.Background(), "tnt_x", domain.StripeWebhookEvent{
 		StripeEventID: "evt_unresolved",
@@ -1173,7 +1173,7 @@ func TestHandleWebhook_SetupIntent_NoPaymentMethodAcks(t *testing.T) {
 		StripeEventID: "evt_no_pm",
 		EventType:     "setup_intent.succeeded",
 		Payload: map[string]any{"raw": `{
-			"data": {"object": {"id": "seti_2", "metadata": {"velox_customer_id": "cus_7"}}}
+			"data": {"object": {"id": "seti_2", "metadata": {"hardcount_customer_id": "cus_7"}}}
 		}`},
 	})
 	if err != nil {
@@ -1188,10 +1188,10 @@ func TestHandleWebhook_SetupIntent_NoPaymentMethodAcks(t *testing.T) {
 }
 
 // recordingCustomerResolver is a fake CustomerByStripeIDResolver. Maps one
-// Stripe customer id → velox id; everything else is NotFound.
+// Stripe customer id → hardcount id; everything else is NotFound.
 type recordingCustomerResolver struct {
 	wantStripeID string
-	veloxID      string
+	hardcountID  string
 	called       int
 	err          error
 }
@@ -1202,21 +1202,21 @@ func (r *recordingCustomerResolver) CustomerIDByStripeID(_ context.Context, _ /*
 		return "", r.err
 	}
 	if stripeCustomerID == r.wantStripeID {
-		return r.veloxID, nil
+		return r.hardcountID, nil
 	}
 	return "", errs.ErrNotFound
 }
 
 // TestHandleWebhook_SetupIntent_ResolvesCustomerByStripeID — the bug fix:
 // a setup_intent.succeeded created by Stripe Checkout carries metadata on the
-// session, NOT the SetupIntent, so velox_customer_id is absent. The handler
+// session, NOT the SetupIntent, so hardcount_customer_id is absent. The handler
 // must fall back to the SetupIntent's `customer` field, resolve it to the
-// velox customer, and still attach the PM.
+// hardcount customer, and still attach the PM.
 func TestHandleWebhook_SetupIntent_ResolvesCustomerByStripeID(t *testing.T) {
 	stripe := NewStripe(&mockStripeClient{}, newMockInvoiceUpdater(), newMockWebhookStore(), nil)
 	attacher := &recordingAttacher{}
 	stripe.SetPaymentMethodAttacher(attacher)
-	resolver := &recordingCustomerResolver{wantStripeID: "cus_stripe_99", veloxID: "cus_local_7"}
+	resolver := &recordingCustomerResolver{wantStripeID: "cus_stripe_99", hardcountID: "cus_local_7"}
 	stripe.SetCustomerResolver(resolver)
 
 	// No metadata on the SetupIntent — only the authoritative `customer`.
@@ -1248,7 +1248,7 @@ func TestHandleWebhook_SetupIntent_ResolvesCustomerByStripeID(t *testing.T) {
 	if attacher.customerID != "cus_local_7" || attacher.pmID != "pm_stripe_77" {
 		t.Fatalf("attacher got wrong args: customer=%q pm=%q", attacher.customerID, attacher.pmID)
 	}
-	// No velox_customer_id: Velox did not create this SetupIntent, so its
+	// No hardcount_customer_id: Hardcount did not create this SetupIntent, so its
 	// card is added beside the default, not made the default.
 	if attacher.makeDefault {
 		t.Error("a SetupIntent matched only by its Stripe customer must not take the default")
@@ -1256,13 +1256,13 @@ func TestHandleWebhook_SetupIntent_ResolvesCustomerByStripeID(t *testing.T) {
 }
 
 // TestHandleWebhook_SetupIntent_MetadataWinsOverResolver — when the SetupIntent
-// DOES carry velox_customer_id (the paymentmethods portal flow sets it), the
+// DOES carry hardcount_customer_id (the paymentmethods portal flow sets it), the
 // metadata fast-path is used and the resolver is never consulted.
 func TestHandleWebhook_SetupIntent_MetadataWinsOverResolver(t *testing.T) {
 	stripe := NewStripe(&mockStripeClient{}, newMockInvoiceUpdater(), newMockWebhookStore(), nil)
 	attacher := &recordingAttacher{}
 	stripe.SetPaymentMethodAttacher(attacher)
-	resolver := &recordingCustomerResolver{wantStripeID: "cus_stripe_99", veloxID: "cus_should_not_be_used"}
+	resolver := &recordingCustomerResolver{wantStripeID: "cus_stripe_99", hardcountID: "cus_should_not_be_used"}
 	stripe.SetCustomerResolver(resolver)
 
 	rawPayload := `{
@@ -1270,7 +1270,7 @@ func TestHandleWebhook_SetupIntent_MetadataWinsOverResolver(t *testing.T) {
 			"id": "seti_4",
 			"payment_method": "pm_meta",
 			"customer": "cus_stripe_99",
-			"metadata": { "velox_customer_id": "cus_from_metadata" }
+			"metadata": { "hardcount_customer_id": "cus_from_metadata" }
 		}}
 	}`
 
@@ -1345,7 +1345,7 @@ func TestHandleWebhook_CheckoutCompleted_NeverAsksForTheDefault(t *testing.T) {
 
 			raw := `{"id": "evt_cs_` + tc.mode + `", "type": "checkout.session.completed", "data": {"object": {
 				"id": "cs_1", "mode": "` + tc.mode + `", "customer": "cus_stripe_1",
-				"metadata": {"velox_customer_id": "cus_local_1", "velox_purpose": "` + tc.purpose + `"}}}}`
+				"metadata": {"hardcount_customer_id": "cus_local_1", "hardcount_purpose": "` + tc.purpose + `"}}}}`
 			if err := s.HandleWebhook(context.Background(), "tnt_x", domain.StripeWebhookEvent{
 				StripeEventID: "evt_cs_" + tc.mode + tc.purpose, EventType: "checkout.session.completed",
 				Payload: map[string]any{"raw": raw},

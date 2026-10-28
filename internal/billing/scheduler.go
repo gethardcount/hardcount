@@ -220,7 +220,7 @@ func (s *Scheduler) SetGate(gate leader.Gate) {
 }
 
 // SetOnRun registers this replica's liveness stamp (the API health check and
-// velox_scheduler_last_run_timestamp_seconds). It fires on every poll of the
+// hardcount_scheduler_last_run_timestamp_seconds). It fires on every poll of the
 // billing loop, and after every page of the billing drain, since one tick can
 // run for hours (P27).
 func (s *Scheduler) SetOnRun(fn func()) {
@@ -248,7 +248,7 @@ func (s *Scheduler) Start(ctx context.Context) {
 	go func() {
 		defer wg.Done()
 		// onRun fires on EVERY poll (followers too): /health/ready and
-		// velox_scheduler_last_run_timestamp_seconds mean "this replica's
+		// hardcount_scheduler_last_run_timestamp_seconds mean "this replica's
 		// loop is alive"; the cluster fact "billing last ran" is the
 		// leader_leases row.
 		scheduler.Run(ctx, leader.RoleBilling, s.interval, s.gate, s.runBillingHalf, s.onRun)
@@ -388,7 +388,7 @@ func (s *Scheduler) runBillingCycleForMode(ctx context.Context, live bool, panic
 	// can outlast the interval (thousands of subs due on the 1st, each charged
 	// inline), so it stamps this replica's liveness after every page: the
 	// stamp normally fires between ticks, and the scheduler-stalled alert
-	// (velox_scheduler_last_run_timestamp_seconds) and the /health/ready
+	// (hardcount_scheduler_last_run_timestamp_seconds) and the /health/ready
 	// body report it stale once it is 2x the interval old.
 	//
 	// A subscription whose bill panics is saved as failed, the drain bills

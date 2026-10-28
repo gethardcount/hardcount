@@ -98,12 +98,12 @@ How the peers shape a payload (verified 2026-10-24):
 
 - **A. Stripe's generic `data.object`:** one key name for every family. It
   hides the type behind `event_type` and has no obvious place for a second
-  resource, such as the dispute beside its invoice. Velox resources carry
+  resource, such as the dispute beside its invoice. Hardcount resources carry
   no `object` field to say what they are. Rejected for the named key.
 - **B. Keep the flat payloads and only make each family's keys agree:**
   smaller payloads, but receivers would still call the API for the rest,
   and a hand-kept key list drifts again, as it did. Rejected.
-- **C. A payment object for `payment.*`:** Velox has none in its API, and
+- **C. A payment object for `payment.*`:** Hardcount has none in its API, and
   inventing one for webhooks would make a second payment model. The invoice
   already holds the charge, its error and how it was paid.
 

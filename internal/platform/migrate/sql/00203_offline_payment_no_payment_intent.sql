@@ -1,6 +1,6 @@
 -- +goose Up
 -- An offline payment (money the operator records as received outside
--- Velox: a bank transfer, a cheque) stops writing a fake PaymentIntent id.
+-- Hardcount: a bank transfer, a cheque) stops writing a fake PaymentIntent id.
 -- Before this, it wrote "out_of_band:<paid_at>" into
 -- invoices.stripe_payment_intent_id, and the settle's attempt upsert wrote
 -- a succeeded invoice_charge_attempts row under the same fake id. Now the

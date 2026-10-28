@@ -13,23 +13,23 @@ import (
 // configOwnedSettings are the settings config.Load parses or normalises.
 // Read anywhere else, a setting gets its own parsing and its own fallback,
 // and the two disagree: APP_ENV was read and normalised six ways, and the
-// router used the default without a word for a VELOX_RATE_LIMIT_* value it
+// router used the default without a word for a HARDCOUNT_RATE_LIMIT_* value it
 // could not parse while config refused other bad numbers. Code that needs
 // one of these takes it from config.Config. Add a name here when config.Load
 // takes over another setting.
 var configOwnedSettings = map[string]bool{
-	"APP_ENV":                          true,
-	"RUN_MIGRATIONS_ON_BOOT":           true,
-	"VELOX_RATE_LIMIT_GENERAL_PER_MIN": true,
-	"VELOX_RATE_LIMIT_INGEST_PER_SEC":  true,
-	"INVOICE_GRACE_PERIOD":             true,
-	"SHUTDOWN_DRAIN_DELAY":             true,
-	"DB_MAX_OPEN_CONNS":                true,
-	"DB_MAX_IDLE_CONNS":                true,
-	"DB_CONN_MAX_LIFETIME_MIN":         true,
-	"DB_CONN_MAX_IDLE_TIME_SEC":        true,
-	"DB_PING_TIMEOUT_SEC":              true,
-	"DB_QUERY_TIMEOUT_MS":              true,
+	"APP_ENV":                              true,
+	"RUN_MIGRATIONS_ON_BOOT":               true,
+	"HARDCOUNT_RATE_LIMIT_GENERAL_PER_MIN": true,
+	"HARDCOUNT_RATE_LIMIT_INGEST_PER_SEC":  true,
+	"INVOICE_GRACE_PERIOD":                 true,
+	"SHUTDOWN_DRAIN_DELAY":                 true,
+	"DB_MAX_OPEN_CONNS":                    true,
+	"DB_MAX_IDLE_CONNS":                    true,
+	"DB_CONN_MAX_LIFETIME_MIN":             true,
+	"DB_CONN_MAX_IDLE_TIME_SEC":            true,
+	"DB_PING_TIMEOUT_SEC":                  true,
+	"DB_QUERY_TIMEOUT_MS":                  true,
 }
 
 // TestConfigOwnedSettings_ReadOnlyInConfig fails on any non-test call outside

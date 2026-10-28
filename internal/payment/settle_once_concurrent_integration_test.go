@@ -37,7 +37,7 @@ import (
 //   - charge response vs webhook: an auto-charge whose create response says
 //     `succeeded` while Stripe's payment_intent.succeeded (redelivered) lands.
 //     The row holds no PaymentIntent yet, so the webhook finds the invoice by
-//     its velox_invoice_id metadata. The reconciler cannot see this row.
+//     its hardcount_invoice_id metadata. The reconciler cannot see this row.
 //   - webhook vs reconciler: a charge whose outcome was ambiguous (the row is
 //     `unknown` and names the PaymentIntent), then the webhook (redelivered)
 //     and two overlapping reconciler sweeps all learn it succeeded. The
@@ -187,7 +187,7 @@ func (r *settleRaceRig) seed(t *testing.T, name string) (string, domain.Invoice)
 }
 
 // succeededEvent is Stripe's payment_intent.succeeded for the PI, carrying
-// the velox_invoice_id metadata the handler falls back to.
+// the hardcount_invoice_id metadata the handler falls back to.
 func succeededEvent(evtID, piID, invoiceID string) domain.StripeWebhookEvent {
 	amt := settleDue
 	return domain.StripeWebhookEvent{

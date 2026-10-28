@@ -18,7 +18,7 @@ import (
 
 // Issue #1271: with a tax provider on, a prepaid commit used to be taxed
 // twice: once on its purchase invoice, and again on the usage invoices the
-// credit paid (credit pays amount_due, which includes tax). Velox follows
+// credit paid (credit pays amount_due, which includes tax). Hardcount follows
 // Lago (ADR-078 amendment 2026-10-19): the purchase is an advance payment
 // and is not taxed; the usage is taxed when it is invoiced.
 

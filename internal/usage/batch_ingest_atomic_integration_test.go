@@ -120,7 +120,7 @@ func TestBatchIngest_Atomic(t *testing.T) {
 	}
 	if _, err := rateTx.ExecContext(ctx, `
 		INSERT INTO provider_cost_rates (id, tenant_id, livemode, provider, model, token_type, unit_cost_cents)
-		VALUES ('vlx_pcr_batchtest', $1, false, 'anthropic', 'claude-x', 'input', 0.0002)`,
+		VALUES ('hc_pcr_batchtest', $1, false, 'anthropic', 'claude-x', 'input', 0.0002)`,
 		tenantID); err != nil {
 		t.Fatalf("seed cost rate: %v", err)
 	}

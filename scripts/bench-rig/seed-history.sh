@@ -25,15 +25,15 @@ set -euo pipefail
 # environment. The app node has psql and pgbench (postgresql16-contrib).
 # ---------------------------------------------------------------------------
 if [ "${TARGET:-local}" = "aws" ]; then
-  REGION="${AWS_REGION:-ap-south-1}"; OUT="${OUT:-$HOME/.velox-bench-rig}"
-  KEYFILE="$OUT/velox-bench-key.pem"; [ -s "$KEYFILE" ] || { echo "FATAL: no key at $KEYFILE"; exit 1; }
+  REGION="${AWS_REGION:-ap-south-1}"; OUT="${OUT:-$HOME/.hardcount-bench-rig}"
+  KEYFILE="$OUT/hardcount-bench-key.pem"; [ -s "$KEYFILE" ] || { echo "FATAL: no key at $KEYFILE"; exit 1; }
   aws_() { aws --region "$REGION" "$@"; }
-  APP_PUB=$(aws_ ec2 describe-instances --filters "Name=tag:Name,Values=velox-bench-app" "Name=instance-state-name,Values=running" \
+  APP_PUB=$(aws_ ec2 describe-instances --filters "Name=tag:Name,Values=hardcount-bench-app" "Name=instance-state-name,Values=running" \
     --query 'Reservations[].Instances[0].PublicIpAddress' --output text)
   [ -n "$APP_PUB" ] && [ "$APP_PUB" != "None" ] || { echo "FATAL: app instance not running"; exit 1; }
-  DBHOST=$(aws_ rds describe-db-instances --db-instance-identifier velox-bench-db --query 'DBInstances[0].Endpoint.Address' --output text)
+  DBHOST=$(aws_ rds describe-db-instances --db-instance-identifier hardcount-bench-db --query 'DBInstances[0].Endpoint.Address' --output text)
   DBPASS=$(cat "$OUT/db-password")
-  REMOTE_DSN="postgres://velox:$DBPASS@$DBHOST:5432/${DBNAME:-velox}?sslmode=require"
+  REMOTE_DSN="postgres://hardcount:$DBPASS@$DBHOST:5432/${DBNAME:-hardcount}?sslmode=require"
   echo "== running on the app node ($APP_PUB) against $DBHOST"
   # Forward every knob this script honours; TARGET is dropped so it runs locally there.
   exec ssh -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o ServerAliveInterval=20 -o ServerAliveCountMax=3 -i "$KEYFILE" "ec2-user@$APP_PUB" \
@@ -45,23 +45,23 @@ ROWS="${1:-20000000}"
 CHUNK="${CHUNK:-2000000}"
 
 echo "seeding $ROWS usage_events in chunks of $CHUNK"
-ncust=$(psql "$DATABASE_URL" -qtA -c "SELECT count(*) FROM customers WHERE tenant_id='vlx_ten_bench'")
-nmet=$(psql "$DATABASE_URL" -qtA -c "SELECT count(*) FROM meters WHERE tenant_id='vlx_ten_bench'")
+ncust=$(psql "$DATABASE_URL" -qtA -c "SELECT count(*) FROM customers WHERE tenant_id='hc_ten_bench'")
+nmet=$(psql "$DATABASE_URL" -qtA -c "SELECT count(*) FROM meters WHERE tenant_id='hc_ten_bench'")
 echo "  spreading across $ncust customers and $nmet meters"
-# Refuse the shape this file exists to avoid. Run velox-bench-seed first.
+# Refuse the shape this file exists to avoid. Run hardcount-bench-seed first.
 if [ "${ncust:-0}" -lt 2 ]; then
   echo "FATAL: only $ncust bench customer(s) exist — every row would land on one customer_id." >&2
-  echo "       run velox-bench-seed (BENCH_CUSTOMERS defaults to 200) before seeding history." >&2
+  echo "       run hardcount-bench-seed (BENCH_CUSTOMERS defaults to 200) before seeding history." >&2
   exit 1
 fi
-# Seed into the SAME partition the fixtures live in. velox-bench-seed defaults
+# Seed into the SAME partition the fixtures live in. hardcount-bench-seed defaults
 # to live mode now; an earlier version of this script hard-coded 'off' and
 # put 20M rows of "history" in the partition the bench key could never see.
-fixmode=$(psql "$DATABASE_URL" -qtA -c "SELECT CASE WHEN bool_and(livemode) THEN 'on' WHEN bool_and(NOT livemode) THEN 'off' ELSE 'mixed' END FROM customers WHERE tenant_id='vlx_ten_bench'")
+fixmode=$(psql "$DATABASE_URL" -qtA -c "SELECT CASE WHEN bool_and(livemode) THEN 'on' WHEN bool_and(NOT livemode) THEN 'off' ELSE 'mixed' END FROM customers WHERE tenant_id='hc_ten_bench'")
 case "$fixmode" in on|off) ;; *) echo "FATAL: bench customers are in mixed livemodes ($fixmode) — re-seed" >&2; exit 1;; esac
 [ "$fixmode" = "on" ] && LM_BOOL=true || LM_BOOL=false
 echo "  livemode partition: $fixmode (matching the fixtures)"
-before_rows=$(psql "$DATABASE_URL" -qtA -c "SELECT count(*) FROM usage_events WHERE tenant_id='vlx_ten_bench' AND livemode=$LM_BOOL")
+before_rows=$(psql "$DATABASE_URL" -qtA -c "SELECT count(*) FROM usage_events WHERE tenant_id='hc_ten_bench' AND livemode=$LM_BOOL")
 
 done_rows=0
 while [ "$done_rows" -lt "$ROWS" ]; do
@@ -75,7 +75,7 @@ while [ "$done_rows" -lt "$ROWS" ]; do
   # The SET must be in the same psql invocation as the INSERT to share a session.
   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -c "SET app.livemode = '$fixmode';
     INSERT INTO usage_events (tenant_id, customer_id, meter_id, quantity, properties, timestamp)
-    SELECT 'vlx_ten_bench',
+    SELECT 'hc_ten_bench',
            c.id,
            m.id,
            (random()*1000)::bigint + 1,
@@ -91,8 +91,8 @@ while [ "$done_rows" -lt "$ROWS" ]; do
     -- LATERAL 'ORDER BY random() LIMIT 1' per row — a 200-row sort for every one
     -- of 2M rows, ~8 minutes per chunk on RDS. (Its uncorrelated predecessor was
     -- worse: evaluated once per statement, it put every chunk on ONE customer.)
-    CROSS JOIN (SELECT array_agg(id) AS ids FROM customers WHERE tenant_id='vlx_ten_bench') ca
-    CROSS JOIN (SELECT array_agg(id) AS ids FROM meters    WHERE tenant_id='vlx_ten_bench') ma
+    CROSS JOIN (SELECT array_agg(id) AS ids FROM customers WHERE tenant_id='hc_ten_bench') ca
+    CROSS JOIN (SELECT array_agg(id) AS ids FROM meters    WHERE tenant_id='hc_ten_bench') ma
     CROSS JOIN LATERAL (SELECT ca.ids[1 + floor(random() * array_length(ca.ids, 1))::int] AS id WHERE g.g = g.g) c
     CROSS JOIN LATERAL (SELECT ma.ids[1 + floor(random() * array_length(ma.ids, 1))::int] AS id WHERE g.g = g.g) m;"
   done_rows=$(( done_rows + n ))
@@ -104,13 +104,13 @@ done
 # closer to a production table than a freshly rewritten one.
 # Verify the rows landed where intended. Trusting the SET without checking is
 # how the previous run produced a confidently-labelled wrong number.
-after_rows=$(psql "$DATABASE_URL" -qtA -c "SELECT count(*) FROM usage_events WHERE tenant_id='vlx_ten_bench' AND livemode=$LM_BOOL")
+after_rows=$(psql "$DATABASE_URL" -qtA -c "SELECT count(*) FROM usage_events WHERE tenant_id='hc_ten_bench' AND livemode=$LM_BOOL")
 gained=$((after_rows - before_rows))
 if [ "$gained" -ne "$ROWS" ]; then
   echo "FAIL: asked for $ROWS rows in livemode=$fixmode, the partition gained $gained — the app.livemode session GUC did not take, or rows went to the other partition" >&2
   exit 1
 fi
-spread=$(psql "$DATABASE_URL" -qtA -c "SELECT count(DISTINCT customer_id) FROM usage_events WHERE tenant_id='vlx_ten_bench' AND livemode=$LM_BOOL AND idempotency_key IS NULL")
+spread=$(psql "$DATABASE_URL" -qtA -c "SELECT count(DISTINCT customer_id) FROM usage_events WHERE tenant_id='hc_ten_bench' AND livemode=$LM_BOOL AND idempotency_key IS NULL")
 echo "verified: $gained rows landed in livemode=$fixmode, spread over $spread customers"
 
 echo "analyzing"

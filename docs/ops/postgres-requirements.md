@@ -1,6 +1,6 @@
 # Postgres requirements
 
-Velox keeps all its data in one Postgres database. This page is a checklist for preparing that database, often a managed one such as AWS RDS. Running Postgres itself (replication, failover, sizing the server) stays with you or your provider.
+Hardcount keeps all its data in one Postgres database. This page is a checklist for preparing that database, often a managed one such as AWS RDS. Running Postgres itself (replication, failover, sizing the server) stays with you or your provider.
 
 The Compose stack already covers the version, the extensions and the two users, and on a new data volume it sets the required timeout. Use this page when you bring your own Postgres, and for the [timeouts](#timeouts-on-the-limited-user) on an older Compose volume.
 
@@ -16,15 +16,15 @@ The Compose stack already covers the version, the extensions and the two users, 
 
 ## Extensions
 
-Velox needs three standard extensions. They ship with Postgres and with every common managed Postgres (RDS, Cloud SQL, Aurora, CloudNativePG).
+Hardcount needs three standard extensions. They ship with Postgres and with every common managed Postgres (RDS, Cloud SQL, Aurora, CloudNativePG).
 
-| Extension | What Velox uses it for |
+| Extension | What Hardcount uses it for |
 |---|---|
 | `pgcrypto` | Random bytes for IDs, and hashing |
 | `citext` | The email column on users, which ignores upper and lower case |
 | `btree_gist` | A rule that stops two billing periods of one subscription from overlapping |
 
-Velox creates them during its database upgrades (migrations), so the admin user needs permission to create extensions. If your provider forbids that, create them first, as a user that may:
+Hardcount creates them during its database upgrades (migrations), so the admin user needs permission to create extensions. If your provider forbids that, create them first, as a user that may:
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
@@ -32,71 +32,71 @@ CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public;
 CREATE EXTENSION IF NOT EXISTS btree_gist WITH SCHEMA public;
 ```
 
-They must be in schema `public`, where Velox keeps its tables and looks for them. If one already exists in another schema (some providers put extensions in a schema named `extensions`), the first upgrade stops with an error such as `function public.gen_random_bytes(integer) does not exist`, and changes nothing. Move the extension with `ALTER EXTENSION pgcrypto SET SCHEMA public`, if nothing else in the database depends on where it is, or give Velox a database of its own.
+They must be in schema `public`, where Hardcount keeps its tables and looks for them. If one already exists in another schema (some providers put extensions in a schema named `extensions`), the first upgrade stops with an error such as `function public.gen_random_bytes(integer) does not exist`, and changes nothing. Move the extension with `ALTER EXTENSION pgcrypto SET SCHEMA public`, if nothing else in the database depends on where it is, or give Hardcount a database of its own.
 
 ## The two database users
 
-Velox connects as two users. The second one is what keeps each account's data apart.
+Hardcount connects as two users. The second one is what keeps each account's data apart.
 
 | Setting | User | Used for | Needs |
 |---|---|---|---|
 | `DATABASE_URL` | The admin user, usually the database owner | Database upgrades (migrations) | Create tables and extensions in the database |
-| `APP_DATABASE_URL` | A limited user, usually `velox_app` | Every API request and background job | Read and write the tables. It must not be a superuser and must not have `BYPASSRLS`. |
+| `APP_DATABASE_URL` | A limited user, usually `hardcount_app` | Every API request and background job | Read and write the tables. It must not be a superuser and must not have `BYPASSRLS`. |
 
-Postgres hides each account's rows from the others with a feature called Row-Level Security (RLS). A superuser, or a user with `BYPASSRLS`, skips that check. So with `APP_ENV` set to `staging` or `production`, Velox refuses to start when `APP_DATABASE_URL`:
+Postgres hides each account's rows from the others with a feature called Row-Level Security (RLS). A superuser, or a user with `BYPASSRLS`, skips that check. So with `APP_ENV` set to `staging` or `production`, Hardcount refuses to start when `APP_DATABASE_URL`:
 
 - is missing,
-- uses the default password `velox_app`, or an empty one,
+- uses the default password `hardcount_app`, or an empty one,
 - cannot connect, or
 - points at a superuser or a user with `BYPASSRLS`. This catches a copied `DATABASE_URL`.
 
-With `APP_ENV=local` it builds `velox_app:velox_app` from `DATABASE_URL` and logs a warning instead.
+With `APP_ENV=local` it builds `hardcount_app:hardcount_app` from `DATABASE_URL` and logs a warning instead.
 
 Create the limited user as the admin user, before the first start:
 
 ```sql
 -- in psql: \set pw 'a-long-random-password'
-CREATE ROLE velox_app WITH LOGIN PASSWORD :'pw';
-GRANT ALL PRIVILEGES ON DATABASE velox TO velox_app;
-GRANT ALL ON SCHEMA public TO velox_app;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO velox_app;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO velox_app;
+CREATE ROLE hardcount_app WITH LOGIN PASSWORD :'pw';
+GRANT ALL PRIVILEGES ON DATABASE hardcount TO hardcount_app;
+GRANT ALL ON SCHEMA public TO hardcount_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO hardcount_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO hardcount_app;
 ```
 
 `ALTER DEFAULT PRIVILEGES` covers the tables the admin user creates later, so run the upgrades as that same admin user.
 
-**You see:** `CREATE ROLE`, `GRANT` and `ALTER DEFAULT PRIVILEGES` lines from psql. When Velox starts, it checks the user and starts listening.
+**You see:** `CREATE ROLE`, `GRANT` and `ALTER DEFAULT PRIVILEGES` lines from psql. When Hardcount starts, it checks the user and starts listening.
 
-### Settings Velox sets on each transaction
+### Settings Hardcount sets on each transaction
 
-Velox tells Postgres which account a transaction belongs to with two custom settings, `app.tenant_id` and `app.bypass_rls`. They need no setup on standard Postgres or on common managed Postgres. If your environment blocks custom settings, allow these two. Every account-scoped table uses `FORCE ROW LEVEL SECURITY`, so a hardened setup that requires it also works.
+Hardcount tells Postgres which account a transaction belongs to with two custom settings, `app.tenant_id` and `app.bypass_rls`. They need no setup on standard Postgres or on common managed Postgres. If your environment blocks custom settings, allow these two. Every account-scoped table uses `FORCE ROW LEVEL SECURITY`, so a hardened setup that requires it also works.
 
 ## Timeouts on the limited user
 
-Set these two on `velox_app`, as the admin user:
+Set these two on `hardcount_app`, as the admin user:
 
 ```sql
-ALTER ROLE velox_app SET idle_in_transaction_session_timeout = '30s';
-ALTER ROLE velox_app SET statement_timeout = '30s';
+ALTER ROLE hardcount_app SET idle_in_transaction_session_timeout = '30s';
+ALTER ROLE hardcount_app SET statement_timeout = '30s';
 ```
 
-**You see:** `ALTER ROLE` twice. They apply to new connections, so restart Velox afterwards.
+**You see:** `ALTER ROLE` twice. They apply to new connections, so restart Hardcount afterwards.
 
-- **`idle_in_transaction_session_timeout` is required.** Closing a billing period locks the subscription's row until the invoice is saved. If a Velox process freezes in the middle (a paused VM, for example), that lock blocks every other change to the subscription. This timeout ends such a frozen session. The Compose stack sets it when it creates a new data volume. Velox itself neither sets it nor checks it at start-up.
-- **`statement_timeout` is optional.** Velox sets no time limit on most queries. `DB_QUERY_TIMEOUT_MS` (default 5 seconds) covers only a few. Set this if you want a hard limit on every query.
+- **`idle_in_transaction_session_timeout` is required.** Closing a billing period locks the subscription's row until the invoice is saved. If a Hardcount process freezes in the middle (a paused VM, for example), that lock blocks every other change to the subscription. This timeout ends such a frozen session. The Compose stack sets it when it creates a new data volume. Hardcount itself neither sets it nor checks it at start-up.
+- **`statement_timeout` is optional.** Hardcount sets no time limit on most queries. `DB_QUERY_TIMEOUT_MS` (default 5 seconds) covers only a few. Set this if you want a hard limit on every query.
 
-To check, connect as `velox_app` and run `SHOW idle_in_transaction_session_timeout;`. On the Compose stack, from `deploy/compose`:
+To check, connect as `hardcount_app` and run `SHOW idle_in_transaction_session_timeout;`. On the Compose stack, from `deploy/compose`:
 
 ```bash
-docker compose exec postgres psql -U velox_app -d velox -tAc "SHOW idle_in_transaction_session_timeout"
+docker compose exec postgres psql -U hardcount_app -d hardcount -tAc "SHOW idle_in_transaction_session_timeout"
 ```
 
-**You see:** `30s`. A Compose volume created before the stack set it shows `0`. Postgres runs its setup script only on an empty volume, so set it yourself, then restart Velox:
+**You see:** `30s`. A Compose volume created before the stack set it shows `0`. Postgres runs its setup script only on an empty volume, so set it yourself, then restart Hardcount:
 
 ```bash
-docker compose exec postgres psql -U velox -d velox \
-  -c "ALTER ROLE velox_app SET idle_in_transaction_session_timeout = '30s'"
-docker compose restart velox-api
+docker compose exec postgres psql -U hardcount -d hardcount \
+  -c "ALTER ROLE hardcount_app SET idle_in_transaction_session_timeout = '30s'"
+docker compose restart hardcount-api
 ```
 
 ## Connection poolers
@@ -111,7 +111,7 @@ A connection pooler, such as PgBouncer, shares a few database connections among 
 | Older PgBouncer in transaction mode | Yes, if you add `default_query_exec_mode=cache_describe` to both database URLs | No |
 | RDS Proxy | Expected to work, not tested. It pins each client to one connection, so it pools little. | Use a direct connection |
 
-**Database upgrades need a direct or session-mode connection.** They hold a lock for the whole run, and some steps run outside a transaction. Run them over that connection, with `RUN_MIGRATIONS_ON_BOOT=true` or the `velox migrate` command, as a deploy step.
+**Database upgrades need a direct or session-mode connection.** They hold a lock for the whole run, and some steps run outside a transaction. Run them over that connection, with `RUN_MIGRATIONS_ON_BOOT=true` or the `hardcount migrate` command, as a deploy step.
 
 Why `max_prepared_statements` matters: the Go database driver reuses prepared statements on each connection. In transaction mode the pooler must track them, or most queries fail with `prepared statement "stmtcache_…" does not exist`. `scripts/pgbouncer-test.sh` runs the same pooler check locally.
 
@@ -132,21 +132,21 @@ The default 20 connections carried 1,200 requests a second for one account in th
 
 | Table | Grows with | Keep |
 |---|---|---|
-| `usage_events` | Every usage event. Can pass 10 million rows a month. | All. Velox deletes events only when you delete a test clock: the events of that clock's customers go with it. It cannot yet split the table by month. Do not delete or archive old rows yourself: an event's idempotency key is kept only in its row, so a resent old event would be stored again ([If you need more](../scale.md#if-you-need-more)). |
-| `audit_log` | Every change by a person or by Velox. Hundreds a day per account. | Often 7 years for audits such as SOC 2 |
+| `usage_events` | Every usage event. Can pass 10 million rows a month. | All. Hardcount deletes events only when you delete a test clock: the events of that clock's customers go with it. It cannot yet split the table by month. Do not delete or archive old rows yourself: an event's idempotency key is kept only in its row, so a resent old event would be stored again ([If you need more](../scale.md#if-you-need-more)). |
+| `audit_log` | Every change by a person or by Hardcount. Hundreds a day per account. | Often 7 years for audits such as SOC 2 |
 | `email_outbox` | One row per email sent | All. The invoice timeline, the customer's Sent emails and the Postmark webhook read them. |
-| `webhook_outbox` | One row per webhook queued | Rows with `status='dispatched'` can be deleted at any age; Velox does not delete them. Keep `failed` rows: [the runbook](runbook/webhook-outbox-backed-up.md#send-failed-rows-again) sends them again. |
-| `webhook_events`, `webhook_deliveries` | Every webhook Velox sends, and every try | All. Replay and timelines read them. |
+| `webhook_outbox` | One row per webhook queued | Rows with `status='dispatched'` can be deleted at any age; Hardcount does not delete them. Keep `failed` rows: [the runbook](runbook/webhook-outbox-backed-up.md#send-failed-rows-again) sends them again. |
+| `webhook_events`, `webhook_deliveries` | Every webhook Hardcount sends, and every try | All. Replay and timelines read them. |
 | `stripe_webhook_events` | Every event Stripe sends | At least 90 days |
 | `invoice_dunning_events` | Every payment-retry step | As long as the invoice |
 | `invoices`, `invoice_line_items`, `credit_notes`, `credit_note_line_items` | Each invoice, line and credit note | All. These are financial records. |
 | `subscriptions`, `subscription_items`, `customers`, `customer_billing_profiles` | Slowly | All. There is no automatic deletion of a customer's personal data yet. |
 
-**How much space:** 10,000 subscriptions sending 100 events a day each make about 30 million `usage_events` rows a month. One event takes about 0.5 to 0.6 KB, counting indexes: on the benchmark rig, 62 million rows used 14 GB of table plus 18 GB of indexes ([sustained throughput](../benchmarks/sustained-throughput.md)). Plan for about 15 GB a month, or 185 GB a year. Velox cannot yet split the table by month or delete events by age ([If you need more](../scale.md#if-you-need-more)), so the table keeps every event: size the disk for that.
+**How much space:** 10,000 subscriptions sending 100 events a day each make about 30 million `usage_events` rows a month. One event takes about 0.5 to 0.6 KB, counting indexes: on the benchmark rig, 62 million rows used 14 GB of table plus 18 GB of indexes ([sustained throughput](../benchmarks/sustained-throughput.md)). Plan for about 15 GB a month, or 185 GB a year. Hardcount cannot yet split the table by month or delete events by age ([If you need more](../scale.md#if-you-need-more)), so the table keeps every event: size the disk for that.
 
 ## Indexes
 
-Velox's migrations create the indexes its queries need. Check `pg_stat_user_indexes` every few months for unused ones. Do not drop an index without reading the query plans first: some billing queries depend on reading from the index alone.
+Hardcount's migrations create the indexes its queries need. Check `pg_stat_user_indexes` every few months for unused ones. Do not drop an index without reading the query plans first: some billing queries depend on reading from the index alone.
 
 ## Which Postgres works
 
@@ -164,4 +164,4 @@ Velox's migrations create the indexes its queries need. Check `pg_stat_user_inde
 | CockroachDB | ⚠️ Untested | Expect problems with Row-Level Security, `gen_random_bytes` and some constraints. Nobody has run the tests against it. |
 | YugabyteDB | ⚠️ Untested | Its Row-Level Security differs |
 
-**Next:** [Back up Velox](backup-considerations.md).
+**Next:** [Back up Hardcount](backup-considerations.md).

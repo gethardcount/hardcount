@@ -2,7 +2,7 @@
   "credit_balance": {
     "balance_cents": 900,
     "currency": "USD",
-    "customer_id": "vlx_cus_golden",
+    "customer_id": "hc_cus_golden",
     "total_deducted": 500,
     "total_expired": 100,
     "total_granted": 10000,

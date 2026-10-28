@@ -141,7 +141,7 @@ func TestRateShapes_PreviewEqualsTheInvoice(t *testing.T) {
 				}
 			}
 			if tc.testClock {
-				clockID := postgres.NewID("vlx_tclk")
+				clockID := postgres.NewID("hc_tclk")
 				bypassExec(t, lf, `INSERT INTO test_clocks (id, tenant_id, livemode, name, frozen_time, status) VALUES ($1, $2, false, 'Rate Shapes Clock', $3, 'ready')`,
 					clockID, lf.tenantID, time.Now().UTC())
 				bypassExec(t, lf, `UPDATE subscriptions SET test_clock_id = $1 WHERE id = $2`, clockID, lf.subID)
@@ -289,5 +289,5 @@ func insertUsageAt(t *testing.T, lf *liveFixture, at time.Time, qty string, dims
 	bypassExec(t, lf, `
 		INSERT INTO usage_events (id, tenant_id, customer_id, meter_id, quantity, properties, timestamp, livemode)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, false)
-	`, postgres.NewID("vlx_ue"), lf.tenantID, lf.customerID, lf.meterID, qty, string(props), at.Truncate(time.Microsecond))
+	`, postgres.NewID("hc_ue"), lf.tenantID, lf.customerID, lf.meterID, qty, string(props), at.Truncate(time.Microsecond))
 }

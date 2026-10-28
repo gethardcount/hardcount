@@ -38,7 +38,7 @@ type Handler struct {
 // in the URL path — there is no operator-level secret: each tenant registers
 // their own webhook endpoint in their own Stripe dashboard pointing at
 // /v1/webhooks/stripe/{endpoint_id}, where endpoint_id is the
-// stripe_provider_credentials.id (vlx_spc_XXX) Velox handed them when they
+// stripe_provider_credentials.id (hc_spc_XXX) Hardcount handed them when they
 // connected. Moving secrets off env vars is the whole point of the per-
 // tenant model (see migration 0032).
 func NewHandler(stripe *Stripe, endpoints EndpointResolver) *Handler {
@@ -168,11 +168,11 @@ func (h *Handler) handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.Unmarshal(raw.Data.Object, &obj)
 
-	// Defense in depth: velox_tenant_id in metadata should match the
+	// Defense in depth: hardcount_tenant_id in metadata should match the
 	// endpoint's tenant. If they disagree, someone's Stripe account is
 	// configured with the wrong endpoint — reject so we don't write one
 	// tenant's webhook into another's invoice rows.
-	metaTenant := obj.Metadata["velox_tenant_id"]
+	metaTenant := obj.Metadata["hardcount_tenant_id"]
 	if metaTenant != "" && metaTenant != lookup.TenantID {
 		slog.WarnContext(r.Context(), "stripe webhook tenant mismatch",
 			"endpoint_id", endpointID,
@@ -185,22 +185,22 @@ func (h *Handler) handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if metaTenant == "" && !endpointAuthoritativeEvent(raw.Type) {
-		// Not a Velox-originated payment intent (tenant fires their own
+		// Not a Hardcount-originated payment intent (tenant fires their own
 		// Stripe objects at the same endpoint). Acknowledge and skip.
 		//
-		// Exception: a few event types are recognized as Velox-originated from
+		// Exception: a few event types are recognized as Hardcount-originated from
 		// the object itself, not a metadata marker — Stripe Checkout doesn't
 		// copy a session's metadata onto the SetupIntent it creates, so a
-		// Velox setup_intent.succeeded legitimately arrives with empty
+		// Hardcount setup_intent.succeeded legitimately arrives with empty
 		// metadata. Dropping it here silently loses the saved card; the
-		// handler instead maps the SetupIntent's `customer` back to the Velox
+		// handler instead maps the SetupIntent's `customer` back to the Hardcount
 		// customer. The endpoint's tenant is already authoritative (per-tenant
 		// secret + HMAC), and the cross-tenant mismatch guard above still runs.
-		respond.JSON(w, r, http.StatusOK, map[string]string{"status": "skipped", "reason": "no velox metadata"})
+		respond.JSON(w, r, http.StatusOK, map[string]string{"status": "skipped", "reason": "no hardcount metadata"})
 		return
 	}
 
-	// Scrub Stripe's free-text failure message before it enters Velox data.
+	// Scrub Stripe's free-text failure message before it enters Hardcount data.
 	// Persisted to stripe_webhook_events.failure_message and echoed into
 	// invoices.last_payment_error via handlePaymentFailed — scrubbing at
 	// ingress keeps PII (card last4, emails) out of both.
@@ -227,7 +227,7 @@ func (h *Handler) handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 		Currency:           obj.Currency,
 		CustomerExternalID: obj.Customer,
 		FailureMessage:     failureMsg,
-		InvoiceID:          obj.Metadata["velox_invoice_id"],
+		InvoiceID:          obj.Metadata["hardcount_invoice_id"],
 		Payload:            map[string]any{"raw": string(body)},
 		OccurredAt:         time.Unix(raw.Created, 0).UTC(),
 		Livemode:           lookup.Livemode,
@@ -263,11 +263,11 @@ func (h *Handler) handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 
 // endpointAuthoritativeEvent reports whether an event type may be processed
 // using only the endpoint's authoritative tenant + the object's own
-// references, without a velox_tenant_id metadata marker. Stripe Checkout
+// references, without a hardcount_tenant_id metadata marker. Stripe Checkout
 // doesn't copy a session's metadata onto the SetupIntent it creates, so a
-// Velox-originated setup_intent.* arrives with empty metadata; these are
+// Hardcount-originated setup_intent.* arrives with empty metadata; these are
 // recognized downstream by mapping the SetupIntent's `customer` back to the
-// Velox customer (setup_failed is a no-op log). Kept deliberately narrow —
+// Hardcount customer (setup_failed is a no-op log). Kept deliberately narrow —
 // payment_intent.* still requires the metadata marker so a tenant's own
 // unrelated charges at the same endpoint aren't ingested.
 func endpointAuthoritativeEvent(eventType string) bool {
@@ -275,19 +275,19 @@ func endpointAuthoritativeEvent(eventType string) bool {
 	case "setup_intent.succeeded", "setup_intent.setup_failed":
 		return true
 	case "charge.refund.updated", "refund.updated", "refund.failed":
-		// Refund objects carry no velox_* metadata (we create them with only an
+		// Refund objects carry no hardcount_* metadata (we create them with only an
 		// idempotency key), so without admitting them here they'd be silently
 		// skipped and the async-refund-status reconciliation would never run. The
 		// endpoint tenant is authoritative (per-tenant secret + HMAC); the handler
-		// still matches the refund to a Velox credit note by stripe_refund_id and
+		// still matches the refund to a Hardcount credit note by stripe_refund_id and
 		// acks anything foreign.
 		return true
 	case "charge.dispute.created", "charge.dispute.updated", "charge.dispute.closed":
 		// A Dispute carries its own metadata, not the PaymentIntent's, so a
-		// dispute on a Velox charge arrives without velox_tenant_id (#979).
+		// dispute on a Hardcount charge arrives without hardcount_tenant_id (#979).
 		// The endpoint tenant is authoritative; the handler matches the
-		// dispute to a Velox invoice by the disputed PaymentIntent and acks
-		// one that no Velox invoice holds.
+		// dispute to a Hardcount invoice by the disputed PaymentIntent and acks
+		// one that no Hardcount invoice holds.
 		return true
 	default:
 		return false

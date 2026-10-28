@@ -105,7 +105,7 @@ func (h *Handler) OperatorRoutes() chi.Router {
 	// customer can add a card themselves. The card data never touches
 	// the operator's dashboard — it goes browser → Stripe.js → Stripe.
 	r.Post("/setup-session", h.operatorCreateSetupSession)
-	// Send the setup link as an email from Velox's branded sender to
+	// Send the setup link as an email from Hardcount's branded sender to
 	// the customer's email on file. Industry-primary path (Stripe
 	// "Send Payment Method" + Chargebee "Request Payment Method" both
 	// default to email); copy-link via setup-session above stays the
@@ -281,7 +281,7 @@ func (h *Handler) operatorSendSetupEmail(w http.ResponseWriter, r *http.Request)
 	if h.customerLookup == nil || h.emailer == nil {
 		respond.Error(w, r, http.StatusServiceUnavailable, "api_error",
 			"email_unavailable",
-			"email setup-link sending is not configured on this Velox instance")
+			"email setup-link sending is not configured on this Hardcount instance")
 		return
 	}
 	// Cooldown — 1 send per (tenant, customer) per 60s. Defends

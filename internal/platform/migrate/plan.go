@@ -12,25 +12,28 @@ import (
 	"github.com/pressly/goose/v3/lock"
 )
 
-// PlanState says what `velox migrate` would do with the database.
+// PlanState says what `hardcount migrate` would do with the database.
 type PlanState string
 
 const (
 	// PlanEmpty: goose has not recorded 180; migration 180 runs the
 	// baseline, then the files after it.
 	PlanEmpty PlanState = "empty"
-	// PlanBehind: `velox migrate` would apply Plan.Pending.
+	// PlanBehind: `hardcount migrate` would apply Plan.Pending.
 	PlanBehind PlanState = "behind"
 	// PlanUpToDate: nothing to apply.
 	PlanUpToDate PlanState = "up to date"
 	// PlanAhead: the database has migrations this binary does not ship.
 	PlanAhead PlanState = "ahead"
-	// PlanUnrecorded: Velox tables, but goose has not recorded 180.
-	// `velox migrate` refuses it (ErrNoMigrationRecord).
+	// PlanUnrecorded: tables, but goose has not recorded 180.
+	// `hardcount migrate` refuses it (ErrNoMigrationRecord).
 	PlanUnrecorded PlanState = "no migration record"
+	// PlanVelox: a build of Velox made the database. `hardcount migrate`
+	// refuses it (ErrVeloxDatabase).
+	PlanVelox PlanState = "made by Velox"
 )
 
-// PlanFile is one migration `velox migrate` would apply.
+// PlanFile is one migration `hardcount migrate` would apply.
 type PlanFile struct {
 	Version int64
 	Name    string
@@ -43,8 +46,8 @@ type PlanVersion struct {
 	AppliedAt time.Time
 }
 
-// Plan is what `velox migrate` would do, read without changing anything.
-// `velox migrate status` prints it before an upgrade.
+// Plan is what `hardcount migrate` would do, read without changing anything.
+// `hardcount migrate status` prints it before an upgrade.
 type Plan struct {
 	State PlanState
 	// Database is the highest version goose recorded, 0 when none.
@@ -136,6 +139,8 @@ func planFor(st state, files []PlanFile) Plan {
 	}
 	p.Database = st.gooseVersion()
 	switch {
+	case decide(st) == actRefuseVelox:
+		p.State, p.Pending, p.Ahead = PlanVelox, nil, nil
 	case decide(st) == actRefuse:
 		p.State, p.Pending, p.Ahead = PlanUnrecorded, nil, nil
 	case decide(st) == actBaseline:
@@ -179,7 +184,7 @@ func lockHolder(ctx context.Context, db *sql.DB) (string, error) {
 	return strings.Join(holders, ", "), rows.Err()
 }
 
-// FormatPlan renders `velox migrate status`. Docs quote its lines.
+// FormatPlan renders `hardcount migrate status`. Docs quote its lines.
 func FormatPlan(p Plan, release string) string {
 	var b strings.Builder
 	row := func(label, value string) { fmt.Fprintf(&b, "%-14s%s\n", label+":", value) }
@@ -188,11 +193,13 @@ func FormatPlan(p Plan, release string) string {
 	case PlanEmpty:
 		row("database", "empty")
 	case PlanUnrecorded:
-		row("database", "Velox tables, no migration record")
+		row("database", "tables, no migration record")
+	case PlanVelox:
+		row("database", "made by Velox (new rows get vlx_ ids)")
 	default:
 		row("database", fmt.Sprintf("%d (goose_db_version)", p.Database))
 	}
-	row("this release", fmt.Sprintf("%d (velox %s)", p.Latest, release))
+	row("this release", fmt.Sprintf("%d (hardcount %s)", p.Latest, release))
 
 	switch p.State {
 	case PlanEmpty, PlanBehind:
@@ -204,7 +211,9 @@ func FormatPlan(p Plan, release string) string {
 	case PlanUpToDate:
 		row("state", "up to date, nothing to apply")
 	case PlanUnrecorded:
-		row("state", "no migration record, velox migrate will not run")
+		row("state", "no migration record, hardcount migrate will not run")
+	case PlanVelox:
+		row("state", "made by Velox, hardcount migrate will not run")
 	case PlanAhead:
 		row("state", "ahead, the database has migrations this release does not ship")
 		for _, a := range p.Ahead {
@@ -227,12 +236,15 @@ func FormatPlan(p Plan, release string) string {
 
 	switch p.State {
 	case PlanEmpty, PlanBehind:
-		b.WriteString(`next: take a backup, then run "velox migrate". A server started with RUN_MIGRATIONS_ON_BOOT=true runs it as it starts.` + "\n")
+		b.WriteString(`next: take a backup, then run "hardcount migrate". A server started with RUN_MIGRATIONS_ON_BOOT=true runs it as it starts.` + "\n")
 	case PlanAhead:
 		b.WriteString("next: this binary is older than the database; to go back, restore the backup taken before the upgrade\n")
 	case PlanUnrecorded:
 		b.WriteString("next: restore the backup together with its migration table, or use an empty database. " +
 			"Upgrading from Velox 0.8.x is not supported; install fresh. Steps: " + RunbookPath + "\n")
+	case PlanVelox:
+		b.WriteString("next: install fresh on an empty database; Hardcount does not take over a Velox database. Steps: " +
+			VeloxRunbookPath + "\n")
 	}
 	return b.String()
 }

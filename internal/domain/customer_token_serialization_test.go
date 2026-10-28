@@ -13,7 +13,7 @@ import (
 // History, because it explains why this test is shaped the way it is. The
 // credential originally lived on Customer WITH a json tag, so every
 // authenticated customer GET/List re-disclosed it indefinitely while the spec
-// said "shown ONCE — Velox never returns it again" (found by the 2026-07-19
+// said "shown ONCE — Hardcount never returns it again" (found by the 2026-07-19
 // truth audit). The first fix was to mark it json:"-", and the test that
 // replaced this one marshalled a Customer and asserted the token was absent
 // from the bytes.

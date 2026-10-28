@@ -42,9 +42,9 @@ func longCreditNote(n int, status domain.CreditNoteStatus) (domain.CreditNote, [
 	}
 	tax := total * 18 / 118
 	cn := domain.CreditNote{
-		ID:                "vlx_cn_long",
+		ID:                "hc_cn_long",
 		CreditNoteNumber:  "CN-202604-0042",
-		InvoiceID:         "vlx_inv_long",
+		InvoiceID:         "hc_inv_long",
 		CustomerID:        "cus_1",
 		Status:            status,
 		Reason:            "Service outage credit for incident 2026-04-10",
@@ -60,7 +60,7 @@ func longCreditNote(n int, status domain.CreditNoteStatus) (domain.CreditNote, [
 }
 
 var longOrig = OriginalInvoiceInfo{
-	Number:       "VLX-202604-0042",
+	Number:       "HC-202604-0042",
 	Currency:     "USD",
 	TaxCountry:   "US",
 	TaxName:      "Sales Tax",

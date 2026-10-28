@@ -17,10 +17,10 @@ func (failingSettings) Get(context.Context, string) (domain.TenantSettings, erro
 }
 
 // A customer email names the seller only when the tenant has set a company
-// name. It used to fill in "Velox Billing", in the From name and in the
+// name. It used to fill in "Hardcount Billing", in the From name and in the
 // header, when the name was unset or the settings read failed, so the
 // software vendor read as the biller (sweep 2026-10-21, C8). The
-// "Powered by Velox Billing" credit in the footer is a credit, not a seller
+// "Powered by Hardcount Billing" credit in the footer is a credit, not a seller
 // name, and stays.
 func TestCustomerEmail_NoInventedSellerName(t *testing.T) {
 	pdf := []byte("%PDF-1.4 fake\n")
@@ -62,12 +62,12 @@ func TestCustomerEmail_NoInventedSellerName(t *testing.T) {
 				}
 				texts := map[string]string{}
 				walkParts(t, mail.Header(msg.Header), msg.Body, texts)
-				html := strings.ReplaceAll(texts["text/html"], "Powered by Velox Billing", "")
-				if strings.Contains(html, "Velox Billing") {
-					t.Errorf("%s: the HTML names Velox Billing as the seller", kind)
+				html := strings.ReplaceAll(texts["text/html"], "Powered by Hardcount Billing", "")
+				if strings.Contains(html, "Hardcount Billing") {
+					t.Errorf("%s: the HTML names Hardcount Billing as the seller", kind)
 				}
-				if strings.Contains(msg.Header.Get("Subject"), "Velox") {
-					t.Errorf("%s: subject %q names Velox", kind, msg.Header.Get("Subject"))
+				if strings.Contains(msg.Header.Get("Subject"), "Hardcount") {
+					t.Errorf("%s: subject %q names Hardcount", kind, msg.Header.Get("Subject"))
 				}
 			}
 		})

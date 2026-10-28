@@ -16,9 +16,9 @@ import (
 // TestLiveBalance_ReadLatency times the live credit read for one customer
 // with a large period of usage. It is a measurement, not a gate: it asserts
 // only that the figure is right, logs the timings, and runs only when
-// VELOX_LIVE_BALANCE_TIMING_EVENTS names the event counts to seed, e.g.
+// HARDCOUNT_LIVE_BALANCE_TIMING_EVENTS names the event counts to seed, e.g.
 //
-//	VELOX_LIVE_BALANCE_TIMING_EVENTS=100000,1000000 go test -p 1 ./internal/billing/ \
+//	HARDCOUNT_LIVE_BALANCE_TIMING_EVENTS=100000,1000000 go test -p 1 ./internal/billing/ \
 //	  -run TestLiveBalance_ReadLatency -count=1 -short=false -v -timeout 30m
 //
 // The number decides how the periodic pass of issue #1019 step two is built
@@ -31,14 +31,14 @@ import (
 // meter's default rule) and with four dimension-matched pricing rules (the
 // AI-token shape, where each event is matched against the rules).
 func TestLiveBalance_ReadLatency(t *testing.T) {
-	spec := os.Getenv("VELOX_LIVE_BALANCE_TIMING_EVENTS")
+	spec := os.Getenv("HARDCOUNT_LIVE_BALANCE_TIMING_EVENTS")
 	if spec == "" {
-		t.Skip("measurement only: set VELOX_LIVE_BALANCE_TIMING_EVENTS (e.g. 100000,1000000) to run")
+		t.Skip("measurement only: set HARDCOUNT_LIVE_BALANCE_TIMING_EVENTS (e.g. 100000,1000000) to run")
 	}
 	for _, field := range strings.Split(spec, ",") {
 		n, err := strconv.Atoi(strings.TrimSpace(field))
 		if err != nil || n <= 0 {
-			t.Fatalf("VELOX_LIVE_BALANCE_TIMING_EVENTS: bad count %q", field)
+			t.Fatalf("HARDCOUNT_LIVE_BALANCE_TIMING_EVENTS: bad count %q", field)
 		}
 		t.Run(fmt.Sprintf("%d_events", n), func(t *testing.T) { timeLiveRead(t, n) })
 	}
@@ -60,7 +60,7 @@ func timeLiveRead(t *testing.T, events int) {
 	seedStart := time.Now()
 	lf.exec(t, `
 		INSERT INTO usage_events (id, tenant_id, customer_id, meter_id, quantity, properties, timestamp, livemode)
-		SELECT 'vlx_ue_timing_' || g, $1, $2, $3, 1,
+		SELECT 'hc_ue_timing_' || g, $1, $2, $3, 1,
 		       jsonb_build_object(
 		           'model',      (ARRAY['gpt-4o','claude-sonnet'])[1 + g % 2],
 		           'token_type', (ARRAY['input','output'])[1 + (g / 2) % 2]),

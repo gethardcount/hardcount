@@ -16,7 +16,7 @@ import (
 // to the exact decimal.
 func TestPlanPrice_UnitAmountCents_SerializesAsDecimalString(t *testing.T) {
 	rr := PlanPrice{
-		ID:         "vlx_prc_1",
+		ID:         "hc_prc_1",
 		PriceShape: PriceShape{Mode: PricingPerUnit, UnitAmountCents: decimal.RequireFromString("0.0003")}, // 0.0003¢/unit = $3.00 / 1,000,000 units
 	}
 	b, err := json.Marshal(rr)

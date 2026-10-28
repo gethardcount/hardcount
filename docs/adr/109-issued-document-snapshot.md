@@ -7,7 +7,7 @@
 
 An issued invoice or credit note must not change when the customer or the
 company edits its details later. When an invoice is finalized, or a credit
-note is issued, Velox copies what the document prints about the buyer
+note is issued, Hardcount copies what the document prints about the buyer
 (bill-to) and the seller (supplier) into two nullable JSONB columns on that
 row: `bill_to_snapshot` and `supplier_snapshot`. The copy is written in the
 same transaction as the status change, at the store layer, so no finalize or
@@ -110,14 +110,14 @@ write. (Probe objects deleted afterwards.)
 
 **Lago — freezes the artifact instead of the fields.** Its invoice object
 carries only a `customer` reference, with no duplicated address, so on
-the object axis Lago looks like Velox. The difference is that the PDF is
+the object axis Lago looks like Hardcount. The difference is that the PDF is
 generated once and persisted: `file_url` "contains the URL that provides
 direct access to the invoice PDF file", and the download endpoint returns
 empty with an `invoice.generated` webhook when the file still has to be
 produced. The issued document is a stored file, not a live re-render.
 
 Two platforms, two mechanisms, same guarantee: **what was issued stays
-issued.** Velox has neither mechanism — it is the only one of the three
+issued.** Hardcount has neither mechanism — it is the only one of the three
 where a finalized document is a live view over mutable rows.
 
 ## Decision
@@ -158,7 +158,7 @@ and an operator fixing an address before finalizing must see the fix.
 
 **Snapshot columns, not a stored PDF.** Freezing the bytes (Lago's
 mechanism) also freezes template bugs and layout fixes into every
-historical document, and it needs an object store that Velox does not
+historical document, and it needs an object store that Hardcount does not
 currently run. Snapshotting the *inputs* keeps the renderer free to
 improve while the legal content stays fixed. It is also the mechanism
 the closer anchor (Stripe) uses.
@@ -276,7 +276,7 @@ likewise omitted).
 adversarial pass over it:
 
 - **A third `INSERT INTO invoices`** lives outside `internal/invoice`
-  entirely — `cmd/velox-migrate-safety/seed.go:224`, writing
+  entirely — `cmd/hardcount-migrate-safety/seed.go:224`, writing
   `'finalized'` as a SQL literal. The "only four SQL statements, all in
   internal/invoice" claim above is therefore wrong as stated; it is true
   only of the production paths.
@@ -364,7 +364,7 @@ What the document prints, and what decides printed wording.
 
 ### PII: encrypted at rest, kept with the document
 
-With `VELOX_ENCRYPTION_KEY` set (production refuses to boot without it),
+With `HARDCOUNT_ENCRYPTION_KEY` set (production refuses to boot without it),
 the customer store encrypts the buyer's display name, email, legal name and
 tax ID. The bill-to copy holds the same four fields, so it encrypts them
 too, with the same key:
@@ -382,7 +382,7 @@ too, with the same key:
   ciphertext into a document.
 
 The copy is PII and is kept as part of the issued tax document, which the
-law usually requires a seller to retain. Velox has no erasure path today
+law usually requires a seller to retain. Hardcount has no erasure path today
 (removed 2026-05-29). A future erasure path must decide, for
 `invoices.bill_to_snapshot` and `credit_notes.bill_to_snapshot`, whether to
 redact the copy or keep it on purpose as a retained tax record.
@@ -418,7 +418,7 @@ change; its callers re-read the row.
 | `invoice/postgres.go` `updateStatusInTx` (target `finalized`) | `Service.Finalize` for engine drafts, tax-retry auto-finalize (scheduler, test clock, operator retry, `RetryCustomerDataErrors`, `RetryProviderConfigErrors`) | yes |
 | `invoice/postgres.go` `FinalizeWithDates` | `Service.Finalize` for operator-composed invoices | yes |
 | `creditnote/postgres.go` `TransitionStatusTx` (target `issued`) | `Service.Issue`, commit relief, every auto-issue | yes |
-| `cmd/velox-migrate-safety/seed.go` | synthetic rows for migration timing, not a product path | no: they stand for pre-0177 rows |
+| `cmd/hardcount-migrate-safety/seed.go` | synthetic rows for migration timing, not a product path | no: they stand for pre-0177 rows |
 
 A missing customer row fails the issue instead of writing an empty copy.
 

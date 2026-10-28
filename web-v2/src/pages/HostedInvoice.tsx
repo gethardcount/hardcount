@@ -724,7 +724,7 @@ export default function HostedInvoicePage() {
         )}
 
         <p className="text-xs text-muted-foreground/70 text-center mt-4">
-          Powered by Velox Billing
+          Powered by Hardcount Billing
         </p>
       </div>
     </div>

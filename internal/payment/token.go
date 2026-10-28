@@ -44,13 +44,13 @@ func (s *TokenService) Create(ctx context.Context, tenantID, customerID, invoice
 	if _, err := rand.Read(buf); err != nil {
 		return "", fmt.Errorf("generate token: %w", err)
 	}
-	rawToken := "vlx_pt_" + hex.EncodeToString(buf)
+	rawToken := "hc_pt_" + hex.EncodeToString(buf)
 
 	// Hash for storage
 	hash := sha256.Sum256([]byte(rawToken))
 	tokenHash := hex.EncodeToString(hash[:])
 
-	id := postgres.NewID("vlx_ptk")
+	id := postgres.NewID("hc_ptk")
 	expiresAt := time.Now().UTC().Add(24 * time.Hour)
 
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)

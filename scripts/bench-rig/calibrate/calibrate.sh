@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Calibrates the load generator against a system whose behaviour we control.
 #
-# ingest.js reports numbers about Velox, and nothing about Velox tells us
+# ingest.js reports numbers about Hardcount, and nothing about Hardcount tells us
 # whether those numbers are true. This points the SAME script at a stub with a
 # known service time and an exact server-side counter, then checks that what
 # the generator reports matches what actually happened.
@@ -11,13 +11,13 @@
 #
 #   - the pre-k6 generator fired all workers in lockstep from slot 0. The MEAN
 #     rate was right, so it survived a full round of AWS measurement while its
-#     self-inflicted queueing was charged to Velox (median 24.8ms -> 6.1ms once
+#     self-inflicted queueing was charged to Hardcount (median 24.8ms -> 6.1ms once
 #     fixed).
 #   - ingest.js read values['p(99)'], which k6 does not compute by default. It
 #     came back undefined and printed as a confident 0.0ms.
 #   - ingest.js sized VUs for a 100ms tail, so at 100 ev/s against a 7.4ms p50
 #     it reported dropped iterations — the GENERATOR failing to offer the rate,
-#     which reads as Velox failing to sustain it.
+#     which reads as Hardcount failing to sustain it.
 #
 # Three cases, and the two negative controls matter more than the positive one:
 # an instrument that always reports success is not an instrument.

@@ -12,7 +12,7 @@ import (
 // audit_log is APPEND-ONLY, and migration 0150 revoked DELETE and TRUNCATE from
 // the runtime role. Whatever a writer puts into a row is there forever: it cannot
 // be corrected, redacted, or erased by the application, ever. That makes the audit
-// log the one table in Velox from which a person's email address can never be
+// log the one table in Hardcount from which a person's email address can never be
 // removed — a GDPR-erasure dead end.
 //
 // The rule is therefore: an audit row POINTS AT a person (resource_id = their user

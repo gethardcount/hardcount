@@ -29,7 +29,7 @@ ALTER TABLE invoice_charge_attempts ADD CONSTRAINT invoice_charge_attempts_trigg
 
 -- +goose Down
 -- Rollback runs only with APP_ENV=local. A 'charge_now' attempt goes back
--- to 'auto_charge', the trigger Velox wrote for it before this file, so the
+-- to 'auto_charge', the trigger Hardcount wrote for it before this file, so the
 -- old CHECK holds.
 UPDATE invoice_charge_attempts SET trigger_source = 'auto_charge' WHERE trigger_source = 'charge_now';
 ALTER TABLE invoice_charge_attempts DROP CONSTRAINT invoice_charge_attempts_trigger_source_check;

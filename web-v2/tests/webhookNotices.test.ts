@@ -15,7 +15,7 @@ test('replay queued: success, no clone id in the text', () => {
   const t = replayToast('queued')
   assert.equal(t.level, 'success')
   assert.equal(t.title, 'Event resent')
-  assert.doesNotMatch(t.title + t.description, /vlx_|evt_|not sent/)
+  assert.doesNotMatch(t.title + t.description, /hc_|evt_|not sent/)
 })
 
 test('paused endpoint gets the notice; an active one does not', () => {

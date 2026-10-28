@@ -149,7 +149,7 @@ func (s *PostgresStore) GetByIdempotencyKey(ctx context.Context, tenantID, key s
 // rather than a unique-violation error, because a violation would poison
 // the surrounding batch transaction.
 func ingestOneTx(ctx context.Context, tx *sql.Tx, tenantID string, event domain.UsageEvent) (domain.UsageEvent, error) {
-	id := postgres.NewID("vlx_evt")
+	id := postgres.NewID("hc_evt")
 
 	origin := string(event.Origin)
 	if origin == "" {

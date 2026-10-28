@@ -562,14 +562,14 @@ func TestLists_ReachRowsPastOldReadCaps(t *testing.T) {
 
 	const cards, onClock = 105, 1005
 	seedBypass(t, db, `INSERT INTO payment_methods (id, tenant_id, customer_id, stripe_payment_method_id, card_brand, card_last4)
-		SELECT 'vlx_pm_cap' || g, $1, $2, 'pm_cap' || g, 'visa', '4242' FROM generate_series(1, $3) g`,
+		SELECT 'hc_pm_cap' || g, $1, $2, 'pm_cap' || g, 'visa', '4242' FROM generate_series(1, $3) g`,
 		tenantID, owner, cards)
 	seedBypass(t, db, `INSERT INTO customers (id, tenant_id, external_id, display_name, status, test_clock_id)
-		SELECT 'vlx_cus_cap' || g, $1, 'clock-cap-' || g, 'Clock cap ' || g, 'active', $2 FROM generate_series(1, $3) g`,
+		SELECT 'hc_cus_cap' || g, $1, 'clock-cap-' || g, 'Clock cap ' || g, 'active', $2 FROM generate_series(1, $3) g`,
 		tenantID, clk, onClock)
 	seedBypass(t, db, `INSERT INTO subscriptions (id, tenant_id, code, display_name, customer_id, status, billing_time,
 			current_billing_period_start, current_billing_period_end, next_billing_at, test_clock_id)
-		SELECT 'vlx_sub_cap' || g, $1, 'clock-cap-' || g, 'Clock cap ' || g, 'vlx_cus_cap' || g, 'active', 'calendar',
+		SELECT 'hc_sub_cap' || g, $1, 'clock-cap-' || g, 'Clock cap ' || g, 'hc_cus_cap' || g, 'active', 'calendar',
 			now(), now() + interval '1 month', now() + interval '1 month', $2
 		FROM generate_series(1, $3) g`,
 		tenantID, clk, onClock)

@@ -46,7 +46,7 @@ func (s *pmCardStripe) SetDefaultPaymentMethod(context.Context, string, string, 
 // customer paid with in payment_methods — the table charges read. Since
 // migration 0097 the webhook only wrote the customer↔Stripe mapping, so the
 // card was never recorded (Stripe held two saved 4242s for a customer whose
-// Velox record had only the declining 0341, 2026-10-11). Production wiring:
+// Hardcount record had only the declining 0341, 2026-10-11). Production wiring:
 // the composite setup store + the real payment-methods service.
 //
 // A customer with no card gets it as the default (ADR-021: the next invoice
@@ -71,7 +71,7 @@ func TestCheckoutCompleted_RecordsTheCard_RealStore(t *testing.T) {
 		t.Helper()
 		body, _ := json.Marshal(map[string]any{"id": evtID, "type": "checkout.session.completed", "data": map[string]any{"object": map[string]any{
 			"id": "cs_" + evtID, "customer": stripeCustID,
-			"metadata": map[string]string{"velox_customer_id": custID, "velox_purpose": payment.PurposeHostedInvoicePay},
+			"metadata": map[string]string{"hardcount_customer_id": custID, "hardcount_purpose": payment.PurposeHostedInvoicePay},
 		}}})
 		if err := stripe.HandleWebhook(ctx, tenantID, domain.StripeWebhookEvent{
 			StripeEventID: evtID, EventType: "checkout.session.completed", Payload: map[string]any{"raw": string(body)},

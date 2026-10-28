@@ -153,7 +153,7 @@ func (r *recordingKeyHealth) MarkKeyRejected(_ context.Context, tenantID string,
 	return nil
 }
 
-// keyUnusableCount reads velox_stripe_key_unusable_total{reason}.
+// keyUnusableCount reads hardcount_stripe_key_unusable_total{reason}.
 func keyUnusableCount(t *testing.T, reason string) float64 {
 	t.Helper()
 	mfs, err := prometheus.DefaultGatherer.Gather()
@@ -161,7 +161,7 @@ func keyUnusableCount(t *testing.T, reason string) float64 {
 		t.Fatalf("gather metrics: %v", err)
 	}
 	for _, mf := range mfs {
-		if mf.GetName() != "velox_stripe_key_unusable_total" {
+		if mf.GetName() != "hardcount_stripe_key_unusable_total" {
 			continue
 		}
 		for _, m := range mf.GetMetric() {
@@ -214,7 +214,7 @@ func TestChargeInvoice_RefusedKey_WritesNothingAndTellsTheOperator(t *testing.T)
 		t.Errorf("Settings marks = %v, want one for t1 live with Stripe's sentence", health.marks)
 	}
 	if got := keyUnusableCount(t, StripeKeyRejected) - before; got != 1 {
-		t.Errorf("velox_stripe_key_unusable_total{reason=rejected} rose by %v, want 1", got)
+		t.Errorf("hardcount_stripe_key_unusable_total{reason=rejected} rose by %v, want 1", got)
 	}
 	if len(health.clears) != 0 {
 		t.Errorf("Settings clears = %v, want none: the key was refused", health.clears)
@@ -274,6 +274,6 @@ func TestChargeInvoice_NoKey_WritesNothing(t *testing.T) {
 		t.Errorf("Settings marks = %v, want none: there is no key row to mark", health.marks)
 	}
 	if got := keyUnusableCount(t, StripeKeyNotConfigured) - before; got != 1 {
-		t.Errorf("velox_stripe_key_unusable_total{reason=not_configured} rose by %v, want 1", got)
+		t.Errorf("hardcount_stripe_key_unusable_total{reason=not_configured} rose by %v, want 1", got)
 	}
 }

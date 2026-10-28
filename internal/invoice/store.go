@@ -218,7 +218,7 @@ type Store interface {
 	GetByPublicToken(ctx context.Context, token string) (domain.Invoice, bool, error)
 
 	// GetByStripeInvoiceID resolves a Stripe invoice id (in_xxx) to its
-	// imported Velox invoice row. Built as the idempotency check for the
+	// imported Hardcount invoice row. Built as the idempotency check for the
 	// Stripe importer removed in the 2026-04-29 lean-cut (rebuild deferred
 	// until a design-partner cutover) — no production caller today. The
 	// partial unique index from migration 0063 makes stripe_invoice_id the

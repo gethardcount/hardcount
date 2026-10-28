@@ -21,7 +21,7 @@ import (
 // never log in to the dashboard nor reach live mode.
 func TestE2E_BootstrapToLoginToLiveKey(t *testing.T) {
 	db := testutil.SetupTestDB(t)
-	t.Setenv("VELOX_BOOTSTRAP_TOKEN", "p7-e2e-bootstrap-token")
+	t.Setenv("HARDCOUNT_BOOTSTRAP_TOKEN", "p7-e2e-bootstrap-token")
 
 	srv := NewServer(db, clock.NewFake(time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)), nil)
 	ts := httptest.NewServer(srv)
@@ -60,12 +60,12 @@ func TestE2E_BootstrapToLoginToLiveKey(t *testing.T) {
 	}
 	gotSession := false
 	for _, c := range loginResp.Cookies() {
-		if c.Name == "velox_session" && c.Value != "" {
+		if c.Name == "hardcount_session" && c.Value != "" {
 			gotSession = true
 		}
 	}
 	if !gotSession {
-		t.Error("login response did not set a velox_session cookie")
+		t.Error("login response did not set a hardcount_session cookie")
 	}
 
 	// 3. The LIVE key authenticates against the API.

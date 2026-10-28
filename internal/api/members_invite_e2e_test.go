@@ -24,7 +24,7 @@ import (
 // DASHBOARD_BASE_URL plumbing through router construction.
 func TestE2E_MemberInviteAcceptRemove(t *testing.T) {
 	db := testutil.SetupTestDB(t)
-	t.Setenv("VELOX_BOOTSTRAP_TOKEN", "invite-e2e-bootstrap-token")
+	t.Setenv("HARDCOUNT_BOOTSTRAP_TOKEN", "invite-e2e-bootstrap-token")
 	t.Setenv("DASHBOARD_BASE_URL", "http://dash.e2e.test")
 	// Invites are refused on a server with no SMTP (email_not_configured).
 	// No dispatcher runs in this test, so nothing connects to this host.
@@ -95,12 +95,12 @@ func TestE2E_MemberInviteAcceptRemove(t *testing.T) {
 	}
 	var memberCookie *http.Cookie
 	for _, c := range acceptResp.Cookies() {
-		if c.Name == "velox_session" && c.Value != "" {
+		if c.Name == "hardcount_session" && c.Value != "" {
 			memberCookie = c
 		}
 	}
 	if memberCookie == nil {
-		t.Fatal("accept-invite did not set a velox_session cookie")
+		t.Fatal("accept-invite did not set a hardcount_session cookie")
 	}
 	memberID, _ := accept["user_id"].(string)
 
@@ -135,7 +135,7 @@ func TestE2E_MemberInviteAcceptRemove(t *testing.T) {
 	assertStatus(t, deadResp, 401)
 }
 
-// login posts credentials and returns the velox_session cookie.
+// login posts credentials and returns the hardcount_session cookie.
 func login(t *testing.T, ts *httptest.Server, email, password string) *http.Cookie {
 	t.Helper()
 	body, _ := json.Marshal(map[string]any{"email": email, "password": password})
@@ -148,11 +148,11 @@ func login(t *testing.T, ts *httptest.Server, email, password string) *http.Cook
 		t.Fatalf("login status: %d", resp.StatusCode)
 	}
 	for _, c := range resp.Cookies() {
-		if c.Name == "velox_session" && c.Value != "" {
+		if c.Name == "hardcount_session" && c.Value != "" {
 			return c
 		}
 	}
-	t.Fatal("login set no velox_session cookie")
+	t.Fatal("login set no hardcount_session cookie")
 	return nil
 }
 

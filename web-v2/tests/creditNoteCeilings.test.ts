@@ -23,7 +23,7 @@ import {
 
 // VLX-000067: $88.59 total = $20.00 credits + $68.59 card, with CN-000030
 // already issued for $80.00 of which $10.00 went back to the card.
-const VLX67 = {
+const HC67 = {
   invoiceTotalCents: 8859,
   amountPaidCents: 6859,
   stripePaymentIntentId: 'pi_3U015R',
@@ -43,7 +43,7 @@ test('hasCardPayment: only a real PaymentIntent counts', () => {
 test('the refund ceiling is the BINDING rule, not the card rule alone', () => {
   // Nothing typed yet: the note could still grow to the full $8.59 remaining,
   // so that — not the $58.59 of card headroom — is what the field can accept.
-  const c = creditNoteCeilings({ ...VLX67, amountCents: 0 })
+  const c = creditNoteCeilings({ ...HC67, amountCents: 0 })
 
   assert.equal(c.alreadyCreditedCents, 8000)
   assert.equal(c.creditableRemainingCents, 859, 'rule 1: 88.59 − 80.00')
@@ -57,7 +57,7 @@ test('the refund ceiling is the BINDING rule, not the card rule alone', () => {
 })
 
 test('the refund ceiling tracks the typed note total, live', () => {
-  const typed = creditNoteCeilings({ ...VLX67, amountCents: 500 })
+  const typed = creditNoteCeilings({ ...HC67, amountCents: 500 })
   assert.equal(typed.refundCeilingCents, 500, 'a $5.00 note can refund at most $5.00')
   // Here raising the note DOES unlock more (up to $8.59), so the copy may say so.
   assert.equal(typed.refundBoundBy, 'note-total')
@@ -82,9 +82,9 @@ test('when the card is the binding rule, it stays the ceiling', () => {
 
 test('drafts consume headroom exactly as the server counts them', () => {
   const withDraft = creditNoteCeilings({
-    ...VLX67,
+    ...HC67,
     creditNotes: [
-      ...VLX67.creditNotes,
+      ...HC67.creditNotes,
       { status: 'draft', total_cents: 200, refund_amount_cents: 200 },
     ],
     amountCents: 0,
@@ -95,9 +95,9 @@ test('drafts consume headroom exactly as the server counts them', () => {
 
 test('voided notes release their claim', () => {
   const withVoid = creditNoteCeilings({
-    ...VLX67,
+    ...HC67,
     creditNotes: [
-      ...VLX67.creditNotes,
+      ...HC67.creditNotes,
       { status: 'voided', total_cents: 5000, refund_amount_cents: 5000 },
     ],
     amountCents: 0,
@@ -123,7 +123,7 @@ test('no card payment means no refund ceiling at all', () => {
 
 test('a fully credited invoice offers nothing on either axis', () => {
   const spent = creditNoteCeilings({
-    ...VLX67,
+    ...HC67,
     creditNotes: [{ status: 'issued', total_cents: 8859, refund_amount_cents: 0 }],
     amountCents: 0,
   })
@@ -133,7 +133,7 @@ test('a fully credited invoice offers nothing on either axis', () => {
 
 test('over-refunded history clamps at zero rather than going negative', () => {
   const over = creditNoteCeilings({
-    ...VLX67,
+    ...HC67,
     creditNotes: [{ status: 'issued', total_cents: 8000, refund_amount_cents: 9999 }],
     amountCents: 0,
   })

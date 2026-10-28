@@ -1,5 +1,5 @@
 // Package doctor is the money-invariant sweep: a read-only interrogation of
-// a Velox database for states no legal writer can produce.
+// a Hardcount database for states no legal writer can produce.
 //
 // It exists because the defect class it catches is invisible to every other
 // gate: walks prove flows, CI pins behaviors, but a row quietly violating an

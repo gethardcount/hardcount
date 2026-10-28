@@ -9,12 +9,12 @@ Superseded by [ADR-086](086-simulated-data-lifecycle.md) on 2026-07-09. This ADR
 
 ## Context
 
-Velox's other entities are uniformly soft-deleted: tenants, customers,
+Hardcount's other entities are uniformly soft-deleted: tenants, customers,
 plans, subscriptions, and credit notes use a `status` column with
 terminal states; coupons + API keys use timestamp columns
 (`archived_at`, `revoked_at`). Invoices are immutable in their
 terminal states (paid, voided). Live financial data never silently
-vanishes — audit trail integrity is one of Velox's load-bearing
+vanishes — audit trail integrity is one of Hardcount's load-bearing
 invariants.
 
 `test_clocks` was the lone exception: hard `DELETE FROM test_clocks`
@@ -31,7 +31,7 @@ produced two problems an operator surfaced on 2026-05-04:
 2. **Broken audit refs.** `audit_log` is append-only with a trigger;
    entries that referenced the deleted clock by id became
    unresolvable. For test-mode entities this is cosmetic, but it's
-   inconsistent with how every other entity in Velox preserves audit
+   inconsistent with how every other entity in Hardcount preserves audit
    integrity.
 
 The dialog copy on the operator-facing delete confirmation also
@@ -41,7 +41,7 @@ The dialog copy on the operator-facing delete confirmation also
 ## Decision
 
 `test_clocks` gets a `deleted_at TIMESTAMPTZ NULL` column (migration
-0073) and joins the rest of Velox's soft-delete convention. The
+0073) and joins the rest of Hardcount's soft-delete convention. The
 service-layer `Delete` operation:
 
 1. `UPDATE test_clocks SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL`
@@ -55,7 +55,7 @@ clock disappears from the operator surface. The status-transition
 filter prevents an in-flight catchup worker from advancing a clock
 that's been soft-deleted while it was running.
 
-Generated invoices are intentionally untouched. Velox's invoice
+Generated invoices are intentionally untouched. Hardcount's invoice
 immutability rule (terminal-state finalized/paid/voided rows never
 mutate) takes precedence; the simulated timestamps on those invoices
 remain self-evident from the now-deleted clock, and any future audit
@@ -93,7 +93,7 @@ completed the consumer side (`Store.SweepDueDeletes` running in the
 scheduler tick, soft-deleting any clock whose `deletes_after` had
 elapsed and cascade-cancelling its pinned subs).
 
-The producer side never landed: nothing in Velox ever wrote
+The producer side never landed: nothing in Hardcount ever wrote
 `deletes_after` on a clock — not the create endpoint, not the SPA,
 not a background job. The sweeper matched zero rows on every tick,
 and the only thing that ever set a value was the manual psql step
@@ -130,9 +130,9 @@ That works for Stripe's product because:
 - Stripe's test data has its own audit retention policy
 - Stripe explicitly documents test data as ephemeral
 
-Velox runs the same code path against test and live mode through a
+Hardcount runs the same code path against test and live mode through a
 single audit_log + RLS partition. Hard-deleting test entities would
-diverge from Velox's everywhere-else soft-delete convention and
+diverge from Hardcount's everywhere-else soft-delete convention and
 create a special case for test-mode audit refs. Soft-delete with
 cascade-cancel keeps the model uniform; the operator outcome is
 nearly identical (the clock and its pinned subs are gone from every
@@ -142,7 +142,7 @@ operator surface).
 
 ### Positive
 
-- Internal consistency: `test_clocks` matches the rest of Velox.
+- Internal consistency: `test_clocks` matches the rest of Hardcount.
 - Audit integrity: no orphan refs from `audit_log`.
 - No silent orphan subs: pinned subs land in the canceled-subs view,
   visible to the operator instead of dormant in unbillable state.

@@ -29,7 +29,7 @@ type CookieConfig struct {
 func DefaultCookieConfig(appEnv string) CookieConfig {
 	secure := appEnv == "production" || appEnv == "staging"
 	return CookieConfig{
-		Domain:   strings.TrimSpace(os.Getenv("VELOX_COOKIE_DOMAIN")),
+		Domain:   strings.TrimSpace(os.Getenv("HARDCOUNT_COOKIE_DOMAIN")),
 		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
 		Path:     "/",

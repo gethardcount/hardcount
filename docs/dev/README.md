@@ -1,7 +1,7 @@
 # Contributor docs
 
-For people changing Velox itself. You do not need these pages to use or run
-Velox: the user and operator docs start at [docs/README.md](../README.md).
+For people changing Hardcount itself. You do not need these pages to use or run
+Hardcount: the user and operator docs start at [docs/README.md](../README.md).
 
 ## Start here
 

@@ -33,7 +33,7 @@ func TestPerClockQueries_SQLValid(t *testing.T) {
 	// Empty-DB smoke: each query should return ([], nil) — proving the
 	// SQL parses and executes, not that anything matches.
 	t.Run("ListAutoChargePendingForClock", func(t *testing.T) {
-		got, err := store.ListAutoChargePendingForClock(ctx, "vlx_ten_test", "vlx_tclk_test", domain.InvoiceKeyset{}, 50)
+		got, err := store.ListAutoChargePendingForClock(ctx, "hc_ten_test", "hc_tclk_test", domain.InvoiceKeyset{}, 50)
 		if err != nil {
 			t.Fatalf("expected nil error on empty DB; got: %v", err)
 		}
@@ -43,7 +43,7 @@ func TestPerClockQueries_SQLValid(t *testing.T) {
 	})
 
 	t.Run("ListPendingTaxRetryForClock", func(t *testing.T) {
-		got, err := store.ListPendingTaxRetryForClock(ctx, "vlx_ten_test", "vlx_tclk_test",
+		got, err := store.ListPendingTaxRetryForClock(ctx, "hc_ten_test", "hc_tclk_test",
 			[]string{"provider_outage", "unknown"}, 8, 50)
 		if err != nil {
 			t.Fatalf("expected nil error on empty DB; got: %v", err)
@@ -76,8 +76,8 @@ func TestListAutoChargePendingForClock_IncludesOneOffInvoices(t *testing.T) {
 	store := invoice.NewPostgresStore(db)
 	ctx := postgres.WithLivemode(context.Background(), false)
 
-	const tenantID = "vlx_ten_oneoff_clk"
-	const clockID = "vlx_tclk_oneoff_clk"
+	const tenantID = "hc_ten_oneoff_clk"
+	const clockID = "hc_tclk_oneoff_clk"
 
 	tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {

@@ -1,8 +1,8 @@
 // Stripe-canonical tax_id_type codes. Source of truth:
 // https://stripe.com/docs/api/customer_tax_ids/object#tax_id_object-type
 //
-// Velox stores `tax_id_type` in this exact form (the backend's
-// NormalizeTaxIDType folds legacy Velox shorthand — gstin/vat/abn — to the
+// Hardcount stores `tax_id_type` in this exact form (the backend's
+// NormalizeTaxIDType folds legacy Hardcount shorthand — gstin/vat/abn — to the
 // canonical Stripe code on write). The dashboard always writes canonical;
 // legacy values read back from older rows are pinned at the top of the
 // dropdown with a "Legacy" annotation so existing data isn't lost.
@@ -67,7 +67,7 @@ export const STRIPE_TAX_ID_TYPES: ReadonlyArray<TaxIdTypeOption> = [
   { value: 'za_vat', label: 'South Africa VAT', country: 'ZA' },
 ] as const
 
-// Hint text printed under the tax-ID input for the codes Velox knows how to
+// Hint text printed under the tax-ID input for the codes Hardcount knows how to
 // format-validate. Other codes pass through silently — Stripe / downstream
 // tax engines apply any format rules.
 export const TAX_ID_HINTS: Record<string, string> = {

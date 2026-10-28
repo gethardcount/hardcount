@@ -32,8 +32,8 @@ func TestListDueRunsForClock_IncludesOneOffInvoiceRuns(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 
-	const tenantID = "vlx_ten_dun_oneoff"
-	const clockID = "vlx_tclk_dun_oneoff"
+	const tenantID = "hc_ten_dun_oneoff"
+	const clockID = "hc_tclk_dun_oneoff"
 	frozen := time.Date(2027, 6, 1, 0, 0, 0, 0, time.UTC)
 
 	tx, err := db.BeginTx(ctx, postgres.TxBypass, "")

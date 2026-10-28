@@ -249,7 +249,7 @@ func TestActivityLines_SkippedEmailSaysWhy(t *testing.T) {
 		t.Fatalf("before delivery resumes, the invoice card reads %q; want the setup email queued", got)
 	}
 
-	// Delivery resumes: the dispatcher runs as cmd/velox runs it, behind
+	// Delivery resumes: the dispatcher runs as cmd/hardcount runs it, behind
 	// the leader lease, with the invoice store as its staleness check.
 	ctx, cancel := context.WithCancel(context.Background())
 	d := email.NewDispatcher(srv.EmailOutboxStore, srv.EmailSender, email.DispatcherConfig{Interval: 50 * time.Millisecond}, leader.New(db.Pool, nil))

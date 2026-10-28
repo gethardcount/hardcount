@@ -39,7 +39,7 @@ problems worth fixing at the root rather than patching:
    knows an operator's email can lock them out on demand (5 wrong guesses → 15
    minutes of denial). This is the on-demand DoS lever OWASP explicitly cautions
    against; account lockout is a known anti-pattern.
-3. **It leaks PII.** The Redis key was `velox:login_fail:<PLAINTEXT-EMAIL>` —
+3. **It leaks PII.** The Redis key was `hardcount:login_fail:<PLAINTEXT-EMAIL>` —
    operator emails in a store visible via `KEYS`/`SCAN` and RDB/AOF snapshots,
    the same class the audit #485 arc spent effort purging.
 
@@ -145,7 +145,7 @@ real-inner:
 - **The `LoginGuard` seam + the Postgres `(IP-prefix × account)` throttle** — the
   first buildable layer (built in #497, since removed). Rebuild it to the
   target design: the `Check`/`Record` seam, `HMAC(pepper, …)` subjects (a dedicated
-  pepper key, or `crypto` derivation from `VELOX_ENCRYPTION_KEY`), and a fixed
+  pepper key, or `crypto` derivation from `HARDCOUNT_ENCRYPTION_KEY`), and a fixed
   window. Trigger: any real user traffic, or the MFA phase below (whichever first).
 - **MFA / step-up (TOTP homegrown, per ADR-014) and login-time breached-password**
   — the controls that actually stop distributed stuffing. *These are the highest
@@ -158,7 +158,7 @@ real-inner:
 - **The optional Redis accelerator** under the I1/I2 invariants, if the
   failed-login path ever becomes hot (it essentially never does for operator
   login).
-- **A dedicated throttle pepper key** (separate from `VELOX_ENCRYPTION_KEY`), and
+- **A dedicated throttle pepper key** (separate from `HARDCOUNT_ENCRYPTION_KEY`), and
   a **retention sweep** (`DELETE WHERE window_start < now() - ttl`) wired on the
   scheduler — the throttle table's only growth vector; negligible at operator-
   login volume, so deferred with the throttle itself.
@@ -270,7 +270,7 @@ the per-email count does not slow a browser that signed in before.
 |---|---|---|
 | Address × email | every attempt from a browser that never signed in to the email | the 5th attempt |
 | Email | the same attempts, over all addresses | the 10th attempt |
-| Known browser × email | every attempt from a browser that signed in to the email before (the `velox_device` cookie) | the 5th attempt |
+| Known browser × email | every attempt from a browser that signed in to the email before (the `hardcount_device` cookie) | the 5th attempt |
 
 - **The rule.** An attempt is counted before the password check, in one
   transaction that locks the subject rows in a fixed order, so a burst is
@@ -305,14 +305,14 @@ the per-email count does not slow a browser that signed in before.
   one count and Redis plays no part. The per-address `/v1/auth` limiter
   stays as the outer layer. It counts in Redis, and in each server process
   when Redis is down (ADR-095 amendment of the same date). Each subject is an HMAC whose key HKDF derives from
-  `VELOX_ENCRYPTION_KEY`, so the table holds no email, address or cookie
+  `HARDCOUNT_ENCRYPTION_KEY`, so the table holds no email, address or cookie
   value. The leader deletes rows with no attempt for 24 hours, no running
   wait, and no sign-in from that browser for 180 days.
 - **Fail closed.** If the throttle cannot read its table, the attempt gets
   503 `authentication_unavailable` and the password is not checked.
 - **Logs and metrics.** The failed-login line no longer holds the typed
   email. It holds the first 12 characters of the email's subject and, when
-  the email has an account, the user id. `velox_auth_login_total{outcome}`
+  the email has an account, the user id. `hardcount_auth_login_total{outcome}`
   counts `ok`, `bad_credentials`, `throttled`, `refused` (the right
   password from a user who cannot sign in, such as a removed member) and
   `error` (a server failure).
@@ -320,7 +320,7 @@ the per-email count does not slow a browser that signed in before.
 **The bound.** After the 10th attempt, about 100 guesses a day reach the
 password check for one email from new browsers, over all addresses, with no
 cap. NIST SP 800-63B-4 §3.2.2 caps failures in a row at 100 and then
-disables the password until it is bound again. Velox does not lock, by
+disables the password until it is bound again. Hardcount does not lock, by
 decision: a lock lets anyone who knows an email hold its owner out.
 
 **What stays open:**
@@ -335,7 +335,7 @@ decision: a lock lets anyone who knows an email hold its owner out.
   counts their own attempts can notice that reset between two waits, which
   shows the email has an account. It needs the person to sign in from a new
   browser in the gap between the guesser's waits.
-- **The `velox_device` value is kept across sign-ins.** A sign-in reuses a
+- **The `hardcount_device` value is kept across sign-ins.** A sign-in reuses a
   well-formed cookie the browser sends, so one browser stays known for every
   email it signed in to. The cost: someone who can plant the cookie in a
   person's browser before that person signs in gets a second allowance of

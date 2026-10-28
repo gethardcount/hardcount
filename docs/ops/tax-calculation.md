@@ -1,8 +1,8 @@
 # Tax calculation
 
-Velox adds tax to each invoice in one of three ways: no tax, one flat rate, or Stripe Tax.
+Hardcount adds tax to each invoice in one of three ways: no tax, one flat rate, or Stripe Tax.
 
-Velox does not decide which taxes you owe. You register for tax with the authorities (and, for Stripe Tax, in your Stripe account), and Velox applies what you set up. That works for registrations such as:
+Hardcount does not decide which taxes you owe. You register for tax with the authorities (and, for Stripe Tax, in your Stripe account), and Hardcount applies what you set up. That works for registrations such as:
 
 - US sales tax,
 - VAT or GST in your own country,
@@ -16,11 +16,11 @@ Set it in the dashboard under **Settings → Tax → Tax calculation → Tax pro
 |---|---|---|
 | **None** | Invoices have no tax. | You do not collect tax, for example early business-to-business sales where you are not registered. |
 | **Manual (flat rate)** | One rate on every line of every invoice, with a name you choose, such as "VAT" or "Sales Tax". | You sell in one place with one legal rate, or you have not set up Stripe Tax. |
-| **Stripe Tax** | Stripe works out the rate for each customer's location, and records each invoice in Stripe's tax reports. | You sell in several countries or US states, or you need Stripe's tax reports to include Velox's invoices. Needs Stripe connected under **Settings → Payments**. |
+| **Stripe Tax** | Stripe works out the rate for each customer's location, and records each invoice in Stripe's tax reports. | You sell in several countries or US states, or you need Stripe's tax reports to include Hardcount's invoices. Needs Stripe connected under **Settings → Payments**. |
 
 One line is never taxed under any provider: a prepaid-commit purchase. It is not sent to Stripe Tax either, so a commit-only invoice has no Stripe Tax record. The usage the credit pays for is taxed when it is invoiced ([why](../ai-pricing.md#tax-on-prepaid-credit)).
 
-If Stripe Tax fails, the invoice waits; Velox never falls back to a guessed rate ([what to do](#when-tax-cannot-be-worked-out)).
+If Stripe Tax fails, the invoice waits; Hardcount never falls back to a guessed rate ([what to do](#when-tax-cannot-be-worked-out)).
 
 ### Manual (flat rate)
 
@@ -42,12 +42,12 @@ If Stripe Tax fails, the invoice waits; Velox never falls back to a guessed rate
 
 ## Options that work with every provider
 
-- **Tax-inclusive pricing** (Settings → Tax). When it is on, your prices already include tax, and Velox shows the tax part inside them. When it is off, tax is added on top.
+- **Tax-inclusive pricing** (Settings → Tax). When it is on, your prices already include tax, and Hardcount shows the tax part inside them. When it is off, tax is added on top.
 - **A customer's tax status**, set in the customer's **Billing Profile**:
   - **Standard**: tax applies as usual.
-  - **Exempt**: no tax. Velox asks for the reason.
+  - **Exempt**: no tax. Hardcount asks for the reason.
   - **Reverse charge**: no tax on the invoice, because the business customer pays the VAT or GST themselves in their own country.
-- **Tax IDs**, such as a VAT or GST number, are shown on the invoice. Velox checks only that an ID has the right shape, not that the tax authority knows it.
+- **Tax IDs**, such as a VAT or GST number, are shown on the invoice. Hardcount checks only that an ID has the right shape, not that the tax authority knows it.
 
 ## When tax cannot be worked out
 
@@ -56,23 +56,23 @@ This happens only with Stripe Tax. The invoice waits: it is not issued, emailed 
 | The notice says | What to do | Retried by itself? |
 |---|---|---|
 | The customer's address or tax ID is missing or invalid | Fix the customer's billing profile, then click **Retry tax** | No |
-| The tax provider can't be reached right now | Check [status.stripe.com](https://status.stripe.com). Velox retries; click **Retry now** to try at once. | Yes, up to 8 times |
+| The tax provider can't be reached right now | Check [status.stripe.com](https://status.stripe.com). Hardcount retries; click **Retry now** to try at once. | Yes, up to 8 times |
 | The tax provider rejected the API key | Update the Stripe keys under **Settings → Payments**, then retry | No |
 | Stripe isn't connected in this mode | Connect Stripe for this mode (test or live), then retry | Yes, up to 8 times |
 | The tax provider can't calculate tax for this customer's region | Add a tax registration for that region in Stripe, then retry | No |
 | Tax calculation failed for an unknown reason | Retry. If it keeps failing, check the server log. | Yes, up to 8 times |
 
-After 8 automatic tries, Velox stops and the notice says so. Click **Retry tax** to try again.
+After 8 automatic tries, Hardcount stops and the notice says so. Click **Retry tax** to try again.
 
 ## What to watch
 
-Velox counts every invoice that waits for tax on the metric `velox_tax_outcome_total`, with `outcome="deferred"` and a `reason`. Successful calculations are not counted, so any increase means something needs a look: alert when its rate is above zero.
+Hardcount counts every invoice that waits for tax on the metric `hardcount_tax_outcome_total`, with `outcome="deferred"` and a `reason`. Successful calculations are not counted, so any increase means something needs a look: alert when its rate is above zero.
 
 | `reason` | Meaning |
 |---|---|
 | `no_country` | The customer has no country on file |
 | `no_client_for_mode` | Stripe is not connected for the invoice's mode, test or live |
-| `credentials_unreadable` | Velox could not read the stored Stripe keys for that mode, for example a database error or a key it cannot decrypt |
+| `credentials_unreadable` | Hardcount could not read the stored Stripe keys for that mode, for example a database error or a key it cannot decrypt |
 | `api_error` | Stripe Tax returned an error |
 
 Each one also logs a WARN line, `stripe tax failed, deferring invoice for retry`, with the reason. Alert on the metric, not the log.
@@ -83,6 +83,6 @@ Each one also logs a WARN line, `stripe tax failed, deferring invoice for retry`
 | Many accounts at the same time | A Stripe outage. Check [status.stripe.com](https://status.stripe.com). | Make sure the waiting invoices clear once Stripe is back |
 | One account, starting suddenly | Its Stripe API key was changed or revoked | Ask the account owner to update the keys |
 
-How the providers work inside Velox: [Architecture](../architecture.md#tax-providers).
+How the providers work inside Hardcount: [Architecture](../architecture.md#tax-providers).
 
 **Next:** [alerts on billing runs](runbook/monitoring.md).

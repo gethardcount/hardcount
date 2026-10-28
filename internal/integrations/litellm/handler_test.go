@@ -89,7 +89,7 @@ func spendPayload(id string) StandardLoggingPayload {
 
 func postSpend(t *testing.T, h *Handler, payloads ...StandardLoggingPayload) (int, string) {
 	t.Helper()
-	return postSpendWithCtx(t, h, context.Background(), "vlx_ten_test", payloads...)
+	return postSpendWithCtx(t, h, context.Background(), "hc_ten_test", payloads...)
 }
 
 func postSpendWithCtx(t *testing.T, h *Handler, ctx context.Context, tenantID string, payloads ...StandardLoggingPayload) (int, string) {

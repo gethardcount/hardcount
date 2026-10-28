@@ -1,7 +1,7 @@
 # An invoice is below Stripe's minimum charge
 
 Stripe will not charge an amount below its minimum, for example $0.50 for
-an account that settles in USD. This page is for an invoice Stripe refused for that reason: what Velox
+an account that settles in USD. This page is for an invoice Stripe refused for that reason: what Hardcount
 did, and what you can do with it. Back to the [runbook index](index.md).
 
 ## Symptom
@@ -23,15 +23,15 @@ One of these:
   currency, and for a charge that Stripe converts, on your Stripe account's
   settlement currency ([Stripe's list](https://docs.stripe.com/currencies#minimum-and-maximum-charge-amounts)).
   A light usage month, a trial tail or a proration can come out below it.
-- **Velox does not treat it as a failed payment.** The invoice stays
-  finalized with `payment_status` `pending`. Velox does not charge it again
+- **Hardcount does not treat it as a failed payment.** The invoice stays
+  finalized with `payment_status` `pending`. Hardcount does not charge it again
   automatically, starts no payment recovery, and does not email the
   customer about it. A payment recovery already running on the invoice ends
   with resolution `amount_below_minimum`, at once or at its next scheduled
   step, so its final action (by default, pausing the subscription) does not
   run.
-- **Velox learns the minimum from Stripe's answer**, so the invoice is first
-  charged once. For a customer with no card on file, Velox learns it when
+- **Hardcount learns the minimum from Stripe's answer**, so the invoice is first
+  charged once. For a customer with no card on file, Hardcount learns it when
   the customer clicks Pay on the hosted page, or when a card is saved and
   charged. Until then the invoice is handled like any card-less invoice
   (payment-method reminders, then the policy's final action).

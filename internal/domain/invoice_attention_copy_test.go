@@ -65,7 +65,7 @@ func sameActions(got []AttentionAction, want ...AttentionAction) bool {
 
 func noPMInvoice(simulated bool) Invoice {
 	return Invoice{
-		ID: "vlx_inv_copy", Status: InvoiceFinalized, PaymentStatus: PaymentPending,
+		ID: "hc_inv_copy", Status: InvoiceFinalized, PaymentStatus: PaymentPending,
 		AutoChargePending: true, IsSimulated: simulated, UpdatedAt: time.Now(),
 		TaxFacts: TaxFacts{TaxStatus: InvoiceTaxOK},
 	}
@@ -221,7 +221,7 @@ func TestPaymentStateCopy_EveryBranch(t *testing.T) {
 			"", []AttentionAction{AttentionActionChargeNow, AttentionActionSendReminder}},
 		{"payment page open", queued(false), AttentionContext{HasPaymentMethod: true, PaymentPageOpen: true},
 			AttentionReasonPaymentProcessing, AttentionSeverityInfo,
-			"The customer has the payment page open or just paid on it, so Velox holds charges until that finishes, usually within an hour.",
+			"The customer has the payment page open or just paid on it, so Hardcount holds charges until that finishes, usually within an hour.",
 			"", nil},
 		{"processing fresh", func() Invoice { i := queued(false); i.PaymentStatus = PaymentProcessing; return i }(), withCard,
 			AttentionReasonPaymentProcessing, AttentionSeverityInfo,
@@ -241,11 +241,11 @@ func TestPaymentStateCopy_EveryBranch(t *testing.T) {
 			i.StripePaymentIntentID = "pi_x"
 			return i
 		}(), withCard, AttentionReasonPaymentUnconfirmed, AttentionSeverityInfo,
-			"Stripe hasn't confirmed this charge yet, and Velox re-checks automatically until it does.",
+			"Stripe hasn't confirmed this charge yet, and Hardcount re-checks automatically until it does.",
 			"3-D Secure", nil},
 		{"parked (no payment id)", func() Invoice { i := queued(false); i.PaymentStatus = PaymentUnknown; return i }(), withCard,
 			AttentionReasonPaymentUnconfirmed, AttentionSeverityWarning,
-			"Stripe didn't confirm this charge and may still complete it.\nVelox checks Stripe every hour and records the payment if it appears.\nIf none appears within 24 hours, the invoice is charged again as usual.",
+			"Stripe didn't confirm this charge and may still complete it.\nHardcount checks Stripe every hour and records the payment if it appears.\nIf none appears within 24 hours, the invoice is charged again as usual.",
 			"paid another way", []AttentionAction{AttentionActionMarkUncollectible}},
 		{"declined", func() Invoice {
 			i := queued(false)
@@ -299,7 +299,7 @@ func TestPaymentAnomalyCopy_EveryKind(t *testing.T) {
 		EventPaymentAmountMismatch:          "Stripe captured 96.52 USD but this invoice recorded 100.00 USD as paid, so reconcile the difference.",
 		EventPaymentReceivedOnVoidedInvoice: "A payment succeeded on this voided invoice, so the customer paid money they don't owe; refund it in Stripe.",
 		EventPaymentCurrencyMismatch:        "A payment was charged in a different currency than this invoice, so review it in Stripe and refund or correct it.",
-		"payment.something_new":             "Velox found a payment on this invoice that doesn't match its records, so review it in Stripe.",
+		"payment.something_new":             "Hardcount found a payment on this invoice that doesn't match its records, so review it in Stripe.",
 	}
 	for kind, want := range kinds {
 		t.Run(kind, func(t *testing.T) {

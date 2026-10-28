@@ -13,7 +13,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/api/respond"
 	"github.com/sagarsuperuser/velox/internal/audit"
-	veloxauth "github.com/sagarsuperuser/velox/internal/auth"
+	hardcountauth "github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
@@ -30,7 +30,7 @@ type PublicPaymentCustomerReader interface {
 }
 
 // StripeCustomerEnsurer resolves — or lazily creates — the Stripe Customer for
-// a Velox customer. The public first-payment-method flow needs this: a customer
+// a Hardcount customer. The public first-payment-method flow needs this: a customer
 // setting up their first card legitimately has no Stripe Customer yet, so
 // requiring a pre-existing customers.stripe_customer_id dead-ends exactly the
 // case this email exists to serve. Every sibling payment-setup path (operator
@@ -105,7 +105,7 @@ type TokenValidateResponse struct {
 // publicUpdateBranding mirrors the hosted-invoice page's safe branding
 // projection. The payment-update page is the RECOVERY funnel — a
 // failed-payment customer lands here from an email; a page branded
-// "Velox" instead of the company they actually pay reads as phishing
+// "Hardcount" instead of the company they actually pay reads as phishing
 // and kills the recovery (audit: fe-operator + fe-enduser dupe).
 type publicUpdateBranding struct {
 	CompanyName string `json:"company_name,omitempty"`
@@ -292,7 +292,7 @@ func (h *PublicPaymentHandler) createCheckoutSession(w http.ResponseWriter, r *h
 	// this point burns the token — not a recoverable precondition.
 	// The token IS a customer credential — stamp the customer actor so the
 	// consume/restore audit rows attribute to the customer (ADR-090 D16).
-	scopedCtx = veloxauth.WithCustomerActor(scopedCtx, token.CustomerID)
+	scopedCtx = hardcountauth.WithCustomerActor(scopedCtx, token.CustomerID)
 	var consumeEmit func(tx *sql.Tx) error
 	if h.audit != nil {
 		consumeEmit = func(tx *sql.Tx) error {
@@ -342,7 +342,7 @@ func (h *PublicPaymentHandler) createCheckoutSession(w http.ResponseWriter, r *h
 		PaymentMethodTypes: stripe.StringSlice([]string{"card"}),
 		SuccessURL:         stripe.String(successURL),
 		CancelURL:          stripe.String(cancelURL),
-		// Stamp velox_customer_id on the underlying SetupIntent, not just the
+		// Stamp hardcount_customer_id on the underlying SetupIntent, not just the
 		// session: Stripe Checkout does NOT copy session metadata onto the
 		// SetupIntent, so without this the setup_intent.succeeded webhook
 		// arrives with empty metadata and must resolve the customer by Stripe
@@ -350,18 +350,18 @@ func (h *PublicPaymentHandler) createCheckoutSession(w http.ResponseWriter, r *h
 		// saved card. setup_intent_data.metadata makes the event self-resolving.
 		SetupIntentData: &stripe.CheckoutSessionCreateSetupIntentDataParams{
 			Metadata: map[string]string{
-				"velox_customer_id": token.CustomerID,
-				"velox_tenant_id":   token.TenantID,
-				"velox_invoice_id":  token.InvoiceID,
-				"velox_purpose":     purposePaymentUpdateToken,
+				"hardcount_customer_id": token.CustomerID,
+				"hardcount_tenant_id":   token.TenantID,
+				"hardcount_invoice_id":  token.InvoiceID,
+				"hardcount_purpose":     purposePaymentUpdateToken,
 			},
 		},
 		Params: stripe.Params{
 			Metadata: map[string]string{
-				"velox_customer_id": token.CustomerID,
-				"velox_tenant_id":   token.TenantID,
-				"velox_invoice_id":  token.InvoiceID,
-				"velox_purpose":     purposePaymentUpdateToken,
+				"hardcount_customer_id": token.CustomerID,
+				"hardcount_tenant_id":   token.TenantID,
+				"hardcount_invoice_id":  token.InvoiceID,
+				"hardcount_purpose":     purposePaymentUpdateToken,
 			},
 		},
 	})

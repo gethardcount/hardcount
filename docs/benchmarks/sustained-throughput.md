@@ -2,12 +2,12 @@
 
 > **Record of runs on 2026-08-16 and 2026-08-17, kept as measured (status checked
 > 2026-10-17).** The code has changed since, and the runs have not been repeated.
-> The short version of these figures is [How much traffic Velox handles](../scale.md).
+> The short version of these figures is [How much traffic Hardcount handles](../scale.md).
 
 ## Result
 
 The test ran on `db.m7g.4xlarge` with the #818 hot-row fix. On stock
-settings, Velox sustained **12,000 events/s at batch 10 (p99 22.6 ms)** and
+settings, Hardcount sustained **12,000 events/s at batch 10 (p99 22.6 ms)** and
 **15,000 events/s at batch 100 (p99 43.8 ms)** in 4 of 5 ten-minute repeats.
 With the WAL pool sized, both passed 5 of 5 (12k: worst 10-s p99 52 ms; 15k:
 p99 40.2–42.8 ms).
@@ -41,7 +41,7 @@ tables and the evidence for each row are in
 | batch 100 at 25,000 ev/s | — | 2/5 stock with drops. With a 16 GB pool: **4/5, p50 36 ms, p99 49–120 ms, 0 drops**; the sampler shows that pool is still one size too small at that rate |
 | what stops it | RAM (index working set falls out of cache) | At 15–25k: the 100 GB gp3 volume (3,000 IOPS / 125 MiB/s). At any rate after a lull: RDS's default WAL segment pool (third run; one parameter fixes it). The app was never the limit (RDS CPU ≤ 67 %, app node ≥ 75 % idle) |
 | closed-loop maximum, batch 500 (not a service level) | 25,424 ev/s | **41,172 ev/s** (p50 187 / p99 226 ms) |
-| the database's own floor for this row shape (`pgbench`, 16 clients) | 6,840 one-row commits/s | 7,184 one-row commits/s. **52,713 rows/s at batch 500.** Velox's closed loop is **78 % of that, and 101 % of the same with the RLS protocol** |
+| the database's own floor for this row shape (`pgbench`, 16 clients) | 6,840 one-row commits/s | 7,184 one-row commits/s. **52,713 rows/s at batch 500.** Hardcount's closed loop is **78 % of that, and 101 % of the same with the RLS protocol** |
 | reads under load | list endpoints 2–9 ms at every rate; per-customer usage summary is a linear scan, ~2.7 µs/event (#819) | same |
 
 ## Reproducing
@@ -52,7 +52,7 @@ cd scripts/bench-rig
                          # -> watchdog -> bringup -> seed 20M -> SUSTAINED protocol
                          # -> closed-loop ceiling -> pgbench denominator -> teardown.
                          # Stops at the first step that fails; one log in
-                         # ~/.velox-bench-rig/run-<timestamp>.log, readable while
+                         # ~/.hardcount-bench-rig/run-<timestamp>.log, readable while
                          # it runs. KEEP=1 leaves the rig up (billing).
 ```
 
@@ -63,18 +63,18 @@ that is how a failed step is re-run:
 ./calibrate/calibrate.sh          # 0. instrument: must print CALIBRATED (six cases)
 ./teardown.sh --check             #    account: exit 0 = clean; 2 = COULD NOT LOOK
 ./provision.sh --yes              # 1. hardware — billing starts here
-( nohup ./watchdog.sh 240 >/tmp/velox-rig-watchdog.log 2>&1 & )
+( nohup ./watchdog.sh 240 >/tmp/hardcount-rig-watchdog.log 2>&1 & )
 ./bringup.sh                      # 2. running, seeded (live mode, 200 customers), verified
 TARGET=aws ./seed-history.sh 20000000            # 3. history, into the fixtures' partition
 TARGET=aws SUSTAINED=1 CONFIGS="single:200:1 batched:1000:10" PROBE_RATE=5 ./measure.sh
 TARGET=aws K6_MODE=max VUS=16 CONFIGS="ceiling:0:500" DURATION=90s ./measure.sh
-TARGET=aws BATCH=500 VELOX_EVS=<ceiling ev/s> ./db-ceiling.sh   # 5. denominator
+TARGET=aws BATCH=500 HARDCOUNT_EVS=<ceiling ev/s> ./db-ceiling.sh   # 5. denominator
 ./teardown.sh                     # 6. must end CLEAN
 ```
 
 What each script guards:
 
-- **`db-ceiling.sh`** is the control every Velox throughput figure had been
+- **`db-ceiling.sh`** is the control every Hardcount throughput figure had been
   missing. A headline "events per second" has no denominator without the
   database's own ceiling for the same row shape. Both legs verify their row
   count in the intended livemode partition, and the script refuses to run
@@ -136,7 +136,7 @@ it. The run chapters in
   10-second window.
 - **Every throughput figure has a denominator.** `pgbench` on the same
   database and row shape (`db-ceiling.sh`) gives the database's own commit
-  floor, so "Velox does N" is always beside "the database alone does M".
+  floor, so "Hardcount does N" is always beside "the database alone does M".
 - **Tail detection is two-grained.** Windows use 10-second buckets. A
   per-second *freeze-seconds* metric also counts individual stalled seconds.
   The bucket rule alone can miss a single frozen second in five or six,
@@ -184,7 +184,7 @@ One high-volume client meant one row, and a row lock hands off at roughly one
 RTT (~1.75 ms), so ~570 requests/s. More connections only added waiters. Batch
 100 and 500 stayed under 150 requests/s, which is why 10,000 and 15,000 ev/s
 held while 6,000 at batch 10 did not. Fixed in
-[#818](https://github.com/getvelox/velox/issues/818): Velox now writes
+[#818](https://github.com/gethardcount/hardcount/issues/818): Hardcount now writes
 `last_used_at` at most once a minute per key. Run 2 moved the knee from ~570 to
 1,600–2,000 requests/s.
 
@@ -194,7 +194,7 @@ On `db.m7g.2xlarge` (32 GB), steady inserts turn **read-IOPS-bound at roughly
 60M rows / 30 GB of table + index**. Across three repeats at 5,000 ev/s, p99
 went 51 ms → 116 ms → 9.9 s as the working set outgrew memory. Read IOPS
 climbed 108 → 2,486/s against the volume's 3,000 baseline. This is a capacity
-cliff, not a Velox defect. Levers: RAM, provisioned IOPS, fewer or smaller
+cliff, not a Hardcount defect. Levers: RAM, provisioned IOPS, fewer or smaller
 indexes (five on `usage_events`, one GIN), or time-partitioning so the hot set
 stays small. Full evidence:
 [run 1](../dev/records/sustained-throughput-runs-2026-08.md#the-headline-2026-08-16-measured-under-the-protocol-below).
@@ -258,7 +258,7 @@ untested, because it was not needed at this rate.
 ### What the read probe found: the per-customer usage summary is a linear scan
 
 These runs probed `GET /v1/usage-summary/{customer_id}`, removed on 2026-10-23
-([#1368](https://github.com/getvelox/velox/pull/1368)). The rig now probes
+([#1368](https://github.com/gethardcount/hardcount/pull/1368)). The rig now probes
 `GET /v1/usage-events/aggregate?customer_id=`, which runs the same aggregate
 query.
 
@@ -280,7 +280,7 @@ customer's rows with no rollup (no precomputed aggregate to read instead).
 Above ~180k events per customer per month it misses a 500 ms budget regardless
 of load. This is also a product finding, with a number on it. The classic fix
 (a per-customer daily rollup) is well understood and is filed as
-[#819](https://github.com/getvelox/velox/issues/819). The read gate is
+[#819](https://github.com/gethardcount/hardcount/issues/819). The read gate is
 reported separately from the ingest gate for exactly this reason: at 10,000
 ev/s ingest held and the summary missed its budget, and both are true.
 
@@ -308,7 +308,7 @@ ev/s ingest held and the summary missed its budget, and both are true.
   per 10 min (the sized 12k series: 0 in all five; the sized 15k: 1), and the
   freezes sit exactly where the events were. So the published tails were not
   hiding a rhythm, and the detector gap changed no published number.
-- **Product side, quantified from the same evidence.** Velox writes ~1.2 KB of
+- **Product side, quantified from the same evidence.** Hardcount writes ~1.2 KB of
   WAL and 7.7 WAL records per 200-byte event. Full-page images are *not* the
   driver (0.05 per event with `wal_compression=zstd`). The event insert runs
   as **one statement per event**: 36.1M calls for 36.1M events at batch 10,
@@ -319,7 +319,7 @@ ev/s ingest held and the summary missed its budget, and both are true.
   tenant_time 37 B, GIN 9 B, heap 247 B. The levers are multi-row inserts per
   batch and a cheaper strategy for hot parent rows. They cut the WAL rate that
   every number in this section scales with. Filed as
-  [#823](https://github.com/getvelox/velox/issues/823), not built here.
+  [#823](https://github.com/gethardcount/hardcount/issues/823), not built here.
 
 ## What this does not show
 
@@ -349,7 +349,7 @@ ev/s ingest held and the summary missed its budget, and both are true.
   setting is verified only in the arms and series shown.
 - **No dashboard in the loop, but the evidence is captured.** Every run leaves
   the raw k6 sample stream, a 5-second `vmstat` from the app node, and the RDS
-  CloudWatch series over its window (`~/.velox-bench-rig/results-*/`). The
+  CloudWatch series over its window (`~/.hardcount-bench-rig/results-*/`). The
   third run adds, per series, the 5-second DB sampler, 1-second Enhanced
   Monitoring and Performance Insights pulls, and the Postgres log. Every claim
   on this page was read from those files, not from a console.
@@ -385,7 +385,7 @@ GOSUMDB=sum.golang.org`. The container image is unaffected, because the
 Dockerfile pins its own toolchain.
 
 **Create the app role *and* its default privileges before the first migration.**
-`CREATE ROLE velox_app` alone is not enough: most tables get their grant from
+`CREATE ROLE hardcount_app` alone is not enough: most tables get their grant from
 `ALTER DEFAULT PRIVILEGES`. Skipping it produces a cluster that migrates
 cleanly and then returns 500 on ingest across 11 tables.
 

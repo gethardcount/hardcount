@@ -32,9 +32,9 @@ func TestPostgresStore_CreateAndGet(t *testing.T) {
 		RecipeVersion: "1.0.0",
 		Overrides:     map[string]any{"currency": "USD", "plan_name": "AI API"},
 		CreatedObjects: domain.CreatedObjects{
-			MeterIDs: []string{"vlx_mtr_aaa"},
-			PlanIDs:  []string{"vlx_pln_bbb"},
-			PriceIDs: []string{"vlx_prc_ccc"},
+			MeterIDs: []string{"hc_mtr_aaa"},
+			PlanIDs:  []string{"hc_pln_bbb"},
+			PriceIDs: []string{"hc_prc_ccc"},
 		},
 		CreatedBy: "operator@example.com",
 	})
@@ -61,7 +61,7 @@ func TestPostgresStore_CreateAndGet(t *testing.T) {
 	if got.Overrides["currency"] != "USD" {
 		t.Errorf("Overrides: got %v", got.Overrides)
 	}
-	if len(got.CreatedObjects.PriceIDs) != 1 || got.CreatedObjects.PriceIDs[0] != "vlx_prc_ccc" {
+	if len(got.CreatedObjects.PriceIDs) != 1 || got.CreatedObjects.PriceIDs[0] != "hc_prc_ccc" {
 		t.Errorf("CreatedObjects.PriceIDs: got %v", got.CreatedObjects.PriceIDs)
 	}
 	if got.CreatedBy != "operator@example.com" {

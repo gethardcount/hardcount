@@ -1,6 +1,6 @@
 ---
 name: Bug Report
-about: Report a bug in Velox
+about: Report a bug in Hardcount
 title: "[Bug] "
 labels: bug
 ---
@@ -20,7 +20,7 @@ A clear description of the bug.
 What you expected to happen.
 
 **Environment**
-- Velox version: <!-- `velox version`, or the image tag if running ghcr.io/getvelox/velox -->
+- Hardcount version: <!-- `hardcount version`, or the image tag if running ghcr.io/gethardcount/hardcount -->
 - Deployment: <!-- docker compose stack / plain binary / local dev (`make dev`) -->
 - Mode: <!-- test or live -->
 - Surface: <!-- REST API / dashboard (browser + version) / hosted invoice page -->
@@ -28,5 +28,5 @@ What you expected to happen.
 - OS:
 
 **Logs**
-<!-- Relevant server log lines if you have them — Velox logs structured
+<!-- Relevant server log lines if you have them — Hardcount logs structured
      JSON to stdout. Please redact API keys and customer data. -->

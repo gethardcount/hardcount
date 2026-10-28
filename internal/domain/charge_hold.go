@@ -84,7 +84,7 @@ const (
 // after that window, don't retry with either the old key or a new one.
 // Retrieve the relevant object, inspect the request in the Dashboard and use
 // webhook events to reconcile the outcome. If you can't establish what
-// happened, contact Stripe support before repeating the operation." Velox
+// happened, contact Stripe support before repeating the operation." Hardcount
 // retrieves: the stale-hold sweep lists the customer's PaymentIntents. When
 // that list still shows none for the invoice 24 hours after the attempt, the
 // invoice is charged again under a new key: a deliberate departure from the

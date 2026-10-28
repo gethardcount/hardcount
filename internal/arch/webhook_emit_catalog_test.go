@@ -16,7 +16,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/domain"
 )
 
-// Every outbound webhook Velox sends must be one an endpoint can subscribe
+// Every outbound webhook Hardcount sends must be one an endpoint can subscribe
 // to by name. payment.currency_mismatch was sent for months while missing
 // from domain.KnownWebhookEventTypes, so an endpoint that named it got 422
 // "unknown event type" and only `*` and `payment.*` endpoints received it.

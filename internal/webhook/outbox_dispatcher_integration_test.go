@@ -22,7 +22,7 @@ func enqueueFailureCount(t *testing.T, eventType string) float64 {
 	}
 
 	for _, family := range families {
-		if family.GetName() != "velox_webhook_outbox_enqueue_failures_total" {
+		if family.GetName() != "hardcount_webhook_outbox_enqueue_failures_total" {
 			continue
 		}
 

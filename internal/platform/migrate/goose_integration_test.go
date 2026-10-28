@@ -28,7 +28,7 @@ DROP TABLE widgets;
 // session (set_config(..., false)); it then leaks into the widgets file,
 // which has no schema to create its table in.
 func TestUpBaselineThenFileInOneUp(t *testing.T) {
-	dsn, db := scratchDB(t, "velox_migrate_t4")
+	dsn, db := scratchDB(t, "hardcount_migrate_t4")
 	widgets, version := pastShipped(t, "widgets.sql")
 	fsys := files(map[string]string{widgets: widgetsFile})
 	if err := up(context.Background(), dsn, fsys); err != nil {
@@ -73,11 +73,11 @@ func pastShipped(t *testing.T, name string) (file string, version int64) {
 // A new database where the admin user owns a schema named after itself,
 // so its default search_path ("$user", public) puts new objects there. The
 // baseline names every object public.x; a later file's unqualified CREATE
-// TABLE must land in public too, where velox_app looks. Mutation: drop
+// TABLE must land in public too, where hardcount_app looks. Mutation: drop
 // migrationSession's SET search_path; widgets then lands in the user's
 // own schema.
 func TestUpCreatesInPublicWhateverTheSearchPath(t *testing.T) {
-	dsn, db := scratchDB(t, "velox_migrate_search_path")
+	dsn, db := scratchDB(t, "hardcount_migrate_search_path")
 	mustExec(t, db, `CREATE SCHEMA AUTHORIZATION CURRENT_USER`)
 	widgets, _ := pastShipped(t, "widgets.sql")
 	fsys := files(map[string]string{widgets: widgetsFile})
@@ -111,7 +111,7 @@ func TestUpConcurrentCopies(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("new database, three copies", func(t *testing.T) {
-		dsn, db := scratchDB(t, "velox_migrate_t5a")
+		dsn, db := scratchDB(t, "hardcount_migrate_t5a")
 		fsys := files(map[string]string{"00181_widgets.sql": widgetsFile})
 		errs := make([]error, 3)
 		var wg sync.WaitGroup
@@ -133,7 +133,7 @@ func TestUpConcurrentCopies(t *testing.T) {
 	})
 
 	t.Run("index build waits for an old snapshot", func(t *testing.T) {
-		dsn, db := scratchDB(t, "velox_migrate_t5b")
+		dsn, db := scratchDB(t, "hardcount_migrate_t5b")
 		fsys := files(map[string]string{"00181_widgets.sql": widgetsFile})
 		if err := up(ctx, dsn, fsys); err != nil {
 			t.Fatalf("Up: %v", err)
@@ -193,7 +193,7 @@ func indexValid(t *testing.T, db *sql.DB, name string) bool {
 // T6. A failed normal file leaves no table and no row, and passes once
 // fixed (E5 as a regression test).
 func TestUpFailedFileLeavesNothing(t *testing.T) {
-	dsn, db := scratchDB(t, "velox_migrate_t6")
+	dsn, db := scratchDB(t, "hardcount_migrate_t6")
 	ctx := context.Background()
 	bad := files(map[string]string{"00181_broken.sql": "-- +goose Up\nCREATE TABLE half_done (id int);\nSELECT 1/0;\n-- +goose Down\nDROP TABLE half_done;\n"})
 	err := up(ctx, dsn, bad)
@@ -227,7 +227,7 @@ func TestUpFailedFileLeavesNothing(t *testing.T) {
 // of, which every later command refuses. Mutation: a COMMIT after
 // CREATE TABLE public.tenants in the baseline; tenants then stays.
 func TestUpFailedBaselineLeavesNothing(t *testing.T) {
-	dsn, db := scratchDB(t, "velox_migrate_baseline_fails")
+	dsn, db := scratchDB(t, "hardcount_migrate_baseline_fails")
 	ctx := context.Background()
 	// The baseline creates tenants long before webhook_events.
 	mustExec(t, db, `CREATE TABLE public.webhook_events (id int)`)
@@ -291,7 +291,7 @@ func TestUpStopsOnLockTimeout(t *testing.T) {
 	t.Setenv(LockTimeoutEnv, "1s")
 
 	t.Run("after earlier files", func(t *testing.T) {
-		dsn, db := scratchDB(t, "velox_migrate_t7a")
+		dsn, db := scratchDB(t, "hardcount_migrate_t7a")
 		fsys := files(map[string]string{"00181_widgets.sql": widgetsFile})
 		if err := up(context.Background(), dsn, fsys); err != nil {
 			t.Fatalf("Up: %v", err)
@@ -325,7 +325,7 @@ func TestUpStopsOnLockTimeout(t *testing.T) {
 	})
 
 	t.Run("baseline and file in one Up", func(t *testing.T) {
-		dsn, db := scratchDB(t, "velox_migrate_t7b")
+		dsn, db := scratchDB(t, "hardcount_migrate_t7b")
 		mustExec(t, db, `CREATE SCHEMA side`)
 		mustExec(t, db, `CREATE TABLE side.t (id int)`)
 		release := blockTable(t, db, "side.t")
@@ -351,7 +351,7 @@ func TestUpStopsOnLockTimeout(t *testing.T) {
 // failed build's session keeps lock_timeout = 0.
 func TestUpIndexBuildFailure(t *testing.T) {
 	t.Setenv(LockTimeoutEnv, "1s")
-	dsn, db := scratchDB(t, "velox_migrate_t8")
+	dsn, db := scratchDB(t, "hardcount_migrate_t8")
 	ctx := context.Background()
 	base := map[string]string{"00181_widgets.sql": widgetsFile}
 	if err := up(ctx, dsn, files(base)); err != nil {
@@ -402,7 +402,7 @@ func TestUpIndexBuildFailure(t *testing.T) {
 // drop the migrationSession wrapper; goose's bare "failed to acquire lock" comes
 // back instead.
 func TestUpLockWait(t *testing.T) {
-	dsn, db := scratchDB(t, "velox_migrate_t10")
+	dsn, db := scratchDB(t, "hardcount_migrate_t10")
 	fastLockWait(t, 2)
 	conn, err := db.Conn(context.Background())
 	if err != nil {
@@ -434,16 +434,16 @@ func TestUpLockWait(t *testing.T) {
 func TestCheckSchemaReady(t *testing.T) {
 	ctx := context.Background()
 	shipped, latest := shippedSet(t)
-	behind := countMigrations(shipped) + " to apply; run `velox migrate`"
+	behind := countMigrations(shipped) + " to apply; run `hardcount migrate`"
 
 	t.Run("empty", func(t *testing.T) {
-		_, db := scratchDB(t, "velox_migrate_t11a")
+		_, db := scratchDB(t, "hardcount_migrate_t11a")
 		if err := CheckSchemaReady(db); err == nil || !strings.Contains(err.Error(), behind) {
 			t.Fatalf("got %v, want %q", err, behind)
 		}
 	})
 	t.Run("up to date, then ahead", func(t *testing.T) {
-		dsn, db := scratchDB(t, "velox_migrate_t11c")
+		dsn, db := scratchDB(t, "hardcount_migrate_t11c")
 		if err := up(ctx, dsn, migrationFiles()); err != nil {
 			t.Fatal(err)
 		}
@@ -489,7 +489,7 @@ func TestReadPlanIsReadOnly(t *testing.T) {
 		{"empty", func(*testing.T, string, *sql.DB) {}, PlanEmpty},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			dsn, db := scratchDB(t, "velox_migrate_t12_"+strings.ReplaceAll(strings.ReplaceAll(tc.name, " ", "_"), ".", ""))
+			dsn, db := scratchDB(t, "hardcount_migrate_t12_"+strings.ReplaceAll(strings.ReplaceAll(tc.name, " ", "_"), ".", ""))
 			tc.build(t, dsn, db)
 			holder, err := db.Conn(ctx)
 			if err != nil {
@@ -528,7 +528,7 @@ func TestReadPlanIsReadOnly(t *testing.T) {
 // T14. Round trip after 180, and 180 itself never rolls back. Mutation:
 // an empty Down for 180.
 func TestDownRoundTrip(t *testing.T) {
-	dsn, db := scratchDB(t, "velox_migrate_t14")
+	dsn, db := scratchDB(t, "hardcount_migrate_t14")
 	ctx := context.Background()
 	fsys := files(map[string]string{"00181_widgets.sql": widgetsFile})
 	fsys["00182_widgets_id.sql"] = indexFile("idx_widgets_id", "CREATE INDEX CONCURRENTLY idx_widgets_id ON widgets (id);")
@@ -561,13 +561,13 @@ func TestDownRoundTrip(t *testing.T) {
 	}
 }
 
-// A database with Velox's tables but no goose record for 180: a Velox
-// 0.8.x database, or a backup restored without its migration table. It has
+// A database with tables but no goose record for 180: a Velox 0.8.x
+// database, or a backup restored without its migration table. It has
 // no upgrade path. Status says so, the boot check refuses, and Up refuses
 // before it takes the lock or creates anything; goose's own table included.
 // Mutation: drop the refusal from decide; status then says "empty", and
 // Up runs the baseline, which fails and leaves goose_db_version behind.
-func TestVeloxTablesWithoutRecordAreRefused(t *testing.T) {
+func TestTablesWithoutRecordAreRefused(t *testing.T) {
 	ctx := context.Background()
 	for i, tc := range []struct {
 		name  string
@@ -600,7 +600,7 @@ func TestVeloxTablesWithoutRecordAreRefused(t *testing.T) {
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			dsn, db := scratchDB(t, "velox_migrate_unrecorded_"+string(rune('a'+i)))
+			dsn, db := scratchDB(t, "hardcount_migrate_unrecorded_"+string(rune('a'+i)))
 			if err := up(ctx, dsn, migrationFiles()); err != nil {
 				t.Fatalf("Up: %v", err)
 			}
@@ -621,7 +621,7 @@ func TestVeloxTablesWithoutRecordAreRefused(t *testing.T) {
 				t.Errorf("status: state %q with %d pending, want %q and none", p.State, len(p.Pending), PlanUnrecorded)
 			}
 			out := FormatPlan(p, "v0.9.1")
-			if !strings.Contains(out, "Velox tables, no migration record") || strings.Contains(out, `run "velox migrate"`) {
+			if !strings.Contains(out, "tables, no migration record") || strings.Contains(out, `run "hardcount migrate"`) {
 				t.Errorf("status output:\n%s", out)
 			}
 
@@ -634,7 +634,7 @@ func TestVeloxTablesWithoutRecordAreRefused(t *testing.T) {
 			if !errors.Is(err, ErrNoMigrationRecord) || errors.As(err, &fe) {
 				t.Errorf("Up: want a refusal before any migration runs, got %v", err)
 			} else {
-				for _, want := range []string{"Velox tables but no migration record", "Nothing was changed", "Upgrading from Velox 0.8.x is not supported", RunbookPath} {
+				for _, want := range []string{"has tables but no migration record", "Nothing was changed", "Upgrading from Velox 0.8.x is not supported", RunbookPath} {
 					if !strings.Contains(err.Error(), want) {
 						t.Errorf("Up's message lacks %q: %v", want, err)
 					}
@@ -653,6 +653,65 @@ func TestVeloxTablesWithoutRecordAreRefused(t *testing.T) {
 	}
 }
 
+// A database a build of Velox, Hardcount's old name, made: goose has 180
+// and every later file, but public.tenants gives vlx_ ids. v0.9.0 installs
+// fresh only, so status, the boot check, Up and Down all refuse it and
+// change nothing. The setup changes only what a Velox baseline wrote
+// differently that the check reads: the tenants id default.
+// Mutation: drop the veloxSchema case from decide; status then says "up to
+// date", the boot check passes and Up returns nil.
+func TestVeloxDatabaseIsRefused(t *testing.T) {
+	ctx := context.Background()
+	dsn, db := scratchDB(t, "hardcount_migrate_velox")
+	if err := up(ctx, dsn, migrationFiles()); err != nil {
+		t.Fatalf("Up: %v", err)
+	}
+	if err := CheckSchemaReady(db); err != nil {
+		t.Fatalf("a Hardcount database must pass the boot check: %v", err)
+	}
+	mustExec(t, db, `ALTER TABLE public.tenants ALTER COLUMN id SET DEFAULT ('vlx_ten_' || encode(gen_random_bytes(12), 'hex'))`)
+	before := fingerprint(t, db)
+
+	pool, err := openPool(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = pool.Close() }()
+	p, err := readPlan(ctx, pool, migrationFiles())
+	if err != nil {
+		t.Fatalf("readPlan: %v", err)
+	}
+	if p.State != PlanVelox || len(p.Pending) != 0 || len(p.Ahead) != 0 {
+		t.Errorf("status: state %q with %d pending, want %q and none", p.State, len(p.Pending), PlanVelox)
+	}
+	out := FormatPlan(p, "v0.9.1")
+	if !strings.Contains(out, "made by Velox, hardcount migrate will not run") || !strings.Contains(out, VeloxRunbookPath) {
+		t.Errorf("status output:\n%s", out)
+	}
+	if ready := CheckSchemaReady(db); !errors.Is(ready, ErrVeloxDatabase) {
+		t.Errorf("CheckSchemaReady: want ErrVeloxDatabase, got %v", ready)
+	}
+	err = up(ctx, dsn, migrationFiles())
+	if !errors.Is(err, ErrVeloxDatabase) {
+		t.Errorf("Up: want ErrVeloxDatabase, got %v", err)
+	} else {
+		for _, want := range []string{"made by Velox", "Nothing was changed", "install fresh", VeloxRunbookPath} {
+			if !strings.Contains(strings.ToLower(err.Error()), strings.ToLower(want)) {
+				t.Errorf("Up's message lacks %q: %v", want, err)
+			}
+		}
+		if strings.Contains(err.Error(), "\n") {
+			t.Errorf("Up's message is not one line: %q", err)
+		}
+	}
+	if _, err := down(ctx, dsn, migrationFiles(), -1); !errors.Is(err, ErrVeloxDatabase) {
+		t.Errorf("Down: want ErrVeloxDatabase, got %v", err)
+	}
+	if after := fingerprint(t, db); after != before {
+		t.Errorf("a refused command changed the database:\nbefore %s\nafter  %s", before, after)
+	}
+}
+
 // Our own dev databases moved to goose and kept golang-migrate's
 // schema_migrations table. With goose at 180, that table is never read,
 // whatever it holds. Mutation: refuse a goose database that also has
@@ -665,7 +724,7 @@ func TestUpIgnoresOldRecordWhenGooseHas180(t *testing.T) {
 	}{
 		{"frozen record with its comment", func(t *testing.T, db *sql.DB) {
 			writeV08Record(t, db, 180, false)
-			mustExec(t, db, `COMMENT ON TABLE public.schema_migrations IS 'velox: frozen at 180; the migration record moved to public.goose_db_version'`)
+			mustExec(t, db, `COMMENT ON TABLE public.schema_migrations IS 'hardcount: frozen at 180; the migration record moved to public.goose_db_version'`)
 		}},
 		{"record at 180 without the comment", func(t *testing.T, db *sql.DB) {
 			writeV08Record(t, db, 180, false)
@@ -675,7 +734,7 @@ func TestUpIgnoresOldRecordWhenGooseHas180(t *testing.T) {
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			dsn, db := scratchDB(t, "velox_migrate_old_record_"+string(rune('a'+i)))
+			dsn, db := scratchDB(t, "hardcount_migrate_old_record_"+string(rune('a'+i)))
 			if err := up(ctx, dsn, migrationFiles()); err != nil {
 				t.Fatalf("Up: %v", err)
 			}

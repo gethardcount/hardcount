@@ -10,11 +10,11 @@ in #678 and unaffected by this decision), ADR-049 (payment reconciler).
 
 ## Summary
 
-When a Stripe charge ends with an unclear result and no PaymentIntent id, Velox no longer marks the invoice `failed`. That used to make the invoice claimable again under a new idempotency key (`charge_attempt_seq`), so a retry could charge the customer twice. Now the invoice is parked at `payment_status='unknown'`, which no charge path accepts, and `TestUnknownPaymentIsUnchargeableByEveryClaimPath` fails the build if one ever does. That exclusion is the whole safeguard: the write that records `unknown` also bumps `charge_attempt_seq`, so the original attempt cannot be replayed (amendment of 2026-08-01). The park is logged once, and the unknown sweep skips parked rows. Since 2026-10-20 the park ends without a person. The stale-hold sweep lists the customer's payments in Stripe and records or follows a payment that appears. With none 24 hours after the attempt, it puts the invoice back to `pending` or `failed` to be charged again ([ADR-127](127-a-lost-charge-result-is-resolved-by-asking-stripe.md), last amendment). `MarkUncollectible` stays allowed, for a customer who paid another way; it leaves `unknown` in place, so a charge that later succeeds still marks the invoice paid. Credit-note refunds follow the same rule since 2026-10-18: an unclear refund result is `unknown`, and **Retry refund** resends the same request under the same key (see the last amendment).
+When a Stripe charge ends with an unclear result and no PaymentIntent id, Hardcount no longer marks the invoice `failed`. That used to make the invoice claimable again under a new idempotency key (`charge_attempt_seq`), so a retry could charge the customer twice. Now the invoice is parked at `payment_status='unknown'`, which no charge path accepts, and `TestUnknownPaymentIsUnchargeableByEveryClaimPath` fails the build if one ever does. That exclusion is the whole safeguard: the write that records `unknown` also bumps `charge_attempt_seq`, so the original attempt cannot be replayed (amendment of 2026-08-01). The park is logged once, and the unknown sweep skips parked rows. Since 2026-10-20 the park ends without a person. The stale-hold sweep lists the customer's payments in Stripe and records or follows a payment that appears. With none 24 hours after the attempt, it puts the invoice back to `pending` or `failed` to be charged again ([ADR-127](127-a-lost-charge-result-is-resolved-by-asking-stripe.md), last amendment). `MarkUncollectible` stays allowed, for a customer who paid another way; it leaves `unknown` in place, so a charge that later succeeds still marks the invoice paid. Credit-note refunds follow the same rule since 2026-10-18: an unclear refund result is `unknown`, and **Retry refund** resends the same request under the same key (see the last amendment).
 
 ## Context
 
-A Stripe charge can create a PaymentIntent that Velox never learns the name of:
+A Stripe charge can create a PaymentIntent that Hardcount never learns the name of:
 the process dies between the call and the outcome write (a **timeout** does this
 with no crash at all), or the call returns an ambiguous error carrying no
 PaymentIntent id.
@@ -73,7 +73,7 @@ an `unknown` one. Admitting `unknown` anywhere fails the build, naming the path.
   the hole by accident: convenient names, obvious signatures, no guard.
 - **Migration 0009's rollback carries a warning.** `0009_payment_unknown.down.sql`
   rewrites every `unknown` row across all tenants in one statement, and is
-  reachable from `velox migrate rollback`. It predates this invariant and is now
+  reachable from `hardcount migrate rollback`. It predates this invariant and is now
   load-bearing for it.
 
 ## Consequences
@@ -94,7 +94,7 @@ refused. Corrected the same day (the parked-invoice honesty sweep):
   `RecordOfflinePayment` stays refused (it would label a card charge as
   out-of-band). The invoice page already carried the button; only the service
   refused it.
-- **The banner tells the truth.** It rendered at Info severity saying "Velox
+- **The banner tells the truth.** It rendered at Info severity saying "Hardcount
   re-checks automatically and resolves" — of an invoice that will never resolve,
   on day 1 and day 400. A parked invoice now raises Critical, states that it
   will not resolve on its own, explains that no further charge is attempted
@@ -211,7 +211,7 @@ is worth keeping because it nearly shipped twice:
   with no `return_url`, and no `client_secret` is ever exposed to a customer
   (verified: the frontend has no payment-confirmation code at all), so such an
   attempt is unreachable by anyone — a genuine dead end.
-- But Velox never sets Stripe's `error_on_requires_action`, whose documented
+- But Hardcount never sets Stripe's `error_on_requires_action`, whose documented
   purpose is exactly *"fail the payment attempt if the PaymentIntent transitions
   into requires_action"*. **The right fix is preventing the state, not
   remediating it** — one parameter instead of a cancel path, a provider-status
@@ -250,7 +250,7 @@ timeout or 5xx — as `RefundFailed`. That is the identical false statement
 `reconcileOne` used to make about charges.
 
 It is materially less dangerous, and the reason is worth stating precisely: the
-refund idempotency key is `velox_cn_<id>`, **invariant** — no attempt counter,
+refund idempotency key is `hardcount_cn_<id>`, **invariant** — no attempt counter,
 so settling `failed` does NOT rotate it. A retry therefore dedups against the
 original and Stripe returns the existing refund. **A double refund is not
 reachable.** What remains is (a) a credit note asserting "refund failed" when it
@@ -325,7 +325,7 @@ persisted nowhere) killed it. ADR-106 records the full refutation.
 **And the "cannot be reconciled" premise of this ADR is now amended (2026-08-02,
 [ADR-108](108-parked-invoices-search-and-adopt.md)).** This ADR reasoned as if
 an unnamed PaymentIntent were unreachable. It is not: Stripe's PaymentIntent
-Search API finds it by the `velox_invoice_id` metadata every engine PI carries
+Search API finds it by the `hardcount_invoice_id` metadata every engine PI carries
 (SDK v82 surface verified; search works in test mode; 20 reads/sec, separate
 per mode). What survives of this ADR's conclusion — on the TRUE ground — is
 that search is eventually consistent, indexing "could be delayed during an
@@ -348,14 +348,14 @@ no give-up write left to un-gate.
 [ADR-125](125-goose-migrations-from-one-v081-baseline.md) replaces the 178
 migration files with one baseline at version 180, from v0.9.0. From that
 release, `0009_payment_unknown.down.sql` is no longer in the binary.
-`velox migrate rollback` runs only when `APP_ENV` is `local`, and it never
+`hardcount migrate rollback` runs only when `APP_ENV` is `local`, and it never
 goes below version 180. So the warning under "What ships with it" applies
 only to v0.8.1 and older binaries. The invariant itself does not change.
 
 ## Amendment 2026-10-18 — the refund half is done
 
 The refund path now makes the charge path's split
-([#965](https://github.com/getvelox/velox/issues/965)). Its trigger,
+([#965](https://github.com/gethardcount/hardcount/issues/965)). Its trigger,
 production cutover, fired: the first design partners go live with real
 cards.
 
@@ -380,14 +380,14 @@ cards.
   `credit_notes.refund_unknown_key`. That is the handle the charge path
   could not keep (amendment of 2026-08-01).
 - **Retry refund looks first, then resends.** It searches Stripe for a live
-  refund that carries the note's `velox_cn_id` metadata, and adopts one if
+  refund that carries the note's `hardcount_cn_id` metadata, and adopts one if
   found. Otherwise it resends the same request under the same key. Stripe
   then returns the first request's saved result, or answers 409 while that
   request still runs. Only a key Stripe never ran makes a new refund
   ([Stripe](https://docs.stripe.com/error-low-level#content-errors): "A new
   key can start a second operation"). A saved result can be days old, so
   Retry refund then reads the refund's current status. A note still at
-  `none` is resent the same way, under Issue's key `velox_cn_<id>`: Issue
+  `none` is resent the same way, under Issue's key `hardcount_cn_<id>`: Issue
   may have sent it, and its result was never recorded.
 - **A resend Stripe never ran stays `unknown`.** Stripe saves no result for
   a request it refused before running it, such as a 401 or a 403. On a
@@ -405,7 +405,7 @@ search before it adopts a refund Stripe already made. It cannot see a
 refund that Stripe makes later, during incident recovery, for a request
 that got a 5xx. For an outcome still unknown after 24 hours, Stripe advises
 to reconcile, not resend
-([Stripe](https://docs.stripe.com/error-low-level#post-requests)). Velox
+([Stripe](https://docs.stripe.com/error-low-level#post-requests)). Hardcount
 does not stop a resend at that age yet. **Trigger:** the first unknown
 refund older than 24 hours in production.
 

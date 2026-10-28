@@ -12,19 +12,19 @@ import (
 	"github.com/sagarsuperuser/velox/internal/domain"
 )
 
-// A written usage row carries a billing_status when Velox finds a reason no
+// A written usage row carries a billing_status when Hardcount finds a reason no
 // invoice bills it (ADR-120 amendments 2026-10-22 and 2026-10-27; ADR-130,
-// PR-6, which builds D07). The status is what Velox found when the row
+// PR-6, which builds D07). The status is what Hardcount found when the row
 // arrived, checked against the customer's subscriptions, the plans and
 // prices in force, and the invoices already built at that moment. A present
-// status was true then. No status means Velox found no reason then; it is
+// status was true then. No status means Hardcount found no reason then; it is
 // not a promise that the row will be billed, and a later change can change
 // the outcome either way. The invoice is the final answer.
 //
-// Velox stores such an event and answers 2xx. The event answer carries the
+// Hardcount stores such an event and answers 2xx. The event answer carries the
 // status, the batch answer carries it per event and counts each, the LiteLLM
 // answer and the held-usage release count them, and
-// velox_usage_unbilled_total{reason, origin} counts every written row by
+// hardcount_usage_unbilled_total{reason, origin} counts every written row by
 // status. The statuses:
 //
 //   - after_close: its billing period was already invoiced, whatever plan
@@ -58,7 +58,7 @@ import (
 // If such an event's plan prices the meter but no price takes it, the close
 // logs its unpriced-usage WARN. One subscription's unchecked time wins over
 // another's flag (Later ranks above every flag): that subscription may bill
-// the event, so Velox found no reason for the customer as a whole.
+// the event, so Hardcount found no reason for the customer as a whole.
 //
 // The rule is one function, classify, shared by ingest and the held-usage
 // release. Ingest reads the open periods, with each plan's prices at its pin,
@@ -155,7 +155,7 @@ const (
 )
 
 // BillingStatus is the billing_status a written row of class c answers
-// with: "" when Velox found no reason no invoice bills the row (InOpen,
+// with: "" when Hardcount found no reason no invoice bills the row (InOpen,
 // Unsettled), and when it was not checked (Later).
 func (c Class) BillingStatus() string {
 	switch c {
@@ -535,8 +535,8 @@ var unbilledEvents *prometheus.CounterVec
 
 func init() {
 	c := prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "velox_usage_unbilled_total",
-		Help: "Usage events written with a billing_status, what Velox found when the event arrived (reason: after_close, no_price, not_on_plan, outside_subscription). Counted once per written row; a replay is not counted.",
+		Name: "hardcount_usage_unbilled_total",
+		Help: "Usage events written with a billing_status, what Hardcount found when the event arrived (reason: after_close, no_price, not_on_plan, outside_subscription). Counted once per written row; a replay is not counted.",
 	}, []string{"reason", "origin"})
 	if err := prometheus.DefaultRegisterer.Register(c); err != nil {
 		if are, ok := err.(prometheus.AlreadyRegisteredError); ok {

@@ -8,7 +8,7 @@
 # human notices. Detaching this watchdog means the deadline survives the thing
 # that set it.
 #
-#   ( nohup ./watchdog.sh 240 >/tmp/velox-rig-watchdog.log 2>&1 & )
+#   ( nohup ./watchdog.sh 240 >/tmp/hardcount-rig-watchdog.log 2>&1 & )
 #
 # It is a backstop, not the normal path: the benchmark runner tears down when
 # it finishes, and this only fires if that never happened.

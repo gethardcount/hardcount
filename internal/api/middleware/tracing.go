@@ -19,7 +19,7 @@ import (
 // TraceRequestAttrs renames it once the route is known.
 func Tracing() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
-		return otelhttp.NewHandler(next, "velox-http",
+		return otelhttp.NewHandler(next, "hardcount-http",
 			otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
 				return methodLabel(r.Method)
 			}),

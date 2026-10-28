@@ -27,11 +27,11 @@ func at(d time.Duration) *time.Time {
 // run's joined figures) so the goldens show they are left out.
 func goldenInvoice() Invoice {
 	return Invoice{
-		ID:             "vlx_inv_golden",
-		TenantID:       "vlx_ten_golden",
-		CustomerID:     "vlx_cus_golden",
-		SubscriptionID: "vlx_sub_golden",
-		InvoiceNumber:  "VLX-000042",
+		ID:             "hc_inv_golden",
+		TenantID:       "hc_ten_golden",
+		CustomerID:     "hc_cus_golden",
+		SubscriptionID: "hc_sub_golden",
+		InvoiceNumber:  "HC-000042",
 		Status:         InvoicePaid,
 		PaymentStatus:  PaymentSucceeded,
 		Currency:       "USD",
@@ -59,7 +59,7 @@ func goldenInvoice() Invoice {
 		BillingReason:         BillingReasonSubscriptionCycle,
 		Attention:             &Attention{Severity: "warning", Reason: "overdue", Message: "read-time only"},
 		RecoveryWarning:       &PaymentBlock{Code: "read_time_only"},
-		TestClockID:           "vlx_tclk_read_time_only",
+		TestClockID:           "hc_tclk_read_time_only",
 		CreatedAt:             goldenAt,
 		UpdatedAt:             goldenAt.Add(time.Minute),
 	}
@@ -67,11 +67,11 @@ func goldenInvoice() Invoice {
 
 func goldenSubscription() Subscription {
 	return Subscription{
-		ID:                          "vlx_sub_golden",
-		TenantID:                    "vlx_ten_golden",
+		ID:                          "hc_sub_golden",
+		TenantID:                    "hc_ten_golden",
 		Code:                        "acme-pro",
 		DisplayName:                 "Acme Pro",
-		CustomerID:                  "vlx_cus_golden",
+		CustomerID:                  "hc_cus_golden",
 		Status:                      SubscriptionActive,
 		BillingTime:                 BillingTimeCalendar,
 		StartedAt:                   at(-30 * 24 * time.Hour),
@@ -87,12 +87,12 @@ func goldenSubscription() Subscription {
 		CreatedAt: goldenAt.Add(-30 * 24 * time.Hour),
 		UpdatedAt: goldenAt,
 		Items: []SubscriptionItem{{
-			ID:                     "vlx_si_golden",
-			TenantID:               "vlx_ten_golden",
-			SubscriptionID:         "vlx_sub_golden",
-			PlanID:                 "vlx_pln_pro",
+			ID:                     "hc_si_golden",
+			TenantID:               "hc_ten_golden",
+			SubscriptionID:         "hc_sub_golden",
+			PlanID:                 "hc_pln_pro",
 			Quantity:               3,
-			PendingPlanID:          "vlx_pln_team",
+			PendingPlanID:          "hc_pln_team",
 			PendingPlanEffectiveAt: at(31 * 24 * time.Hour),
 			CreatedAt:              goldenAt.Add(-30 * 24 * time.Hour),
 			UpdatedAt:              goldenAt,
@@ -102,8 +102,8 @@ func goldenSubscription() Subscription {
 
 func goldenCustomer() Customer {
 	return Customer{
-		ID:                 "vlx_cus_golden",
-		TenantID:           "vlx_ten_golden",
+		ID:                 "hc_cus_golden",
+		TenantID:           "hc_ten_golden",
 		ExternalID:         "acme-1",
 		DisplayName:        "Acme Inc",
 		Email:              "billing@acme.example",
@@ -119,7 +119,7 @@ func goldenCustomer() Customer {
 
 func goldenPaymentMethod() PaymentMethodView {
 	return PaymentMethodView{
-		ID: "vlx_pm_golden", CustomerID: "vlx_cus_golden", Type: "card",
+		ID: "hc_pm_golden", CustomerID: "hc_cus_golden", Type: "card",
 		CardBrand: "visa", CardLast4: "4242", CardExpMo: 12, CardExpYr: 2030,
 		IsDefault: true, CreatedAt: goldenAt,
 	}
@@ -127,11 +127,11 @@ func goldenPaymentMethod() PaymentMethodView {
 
 func goldenDunningRun() InvoiceDunningRun {
 	return InvoiceDunningRun{
-		ID:               "vlx_dr_golden",
-		TenantID:         "vlx_ten_golden",
-		InvoiceID:        "vlx_inv_golden",
-		CustomerID:       "vlx_cus_golden",
-		PolicyID:         "vlx_dpol_golden",
+		ID:               "hc_dr_golden",
+		TenantID:         "hc_ten_golden",
+		InvoiceID:        "hc_inv_golden",
+		CustomerID:       "hc_cus_golden",
+		PolicyID:         "hc_dpol_golden",
 		State:            DunningEscalated,
 		Reason:           "payment_failed",
 		AttemptCount:     4,
@@ -144,21 +144,21 @@ func goldenDunningRun() InvoiceDunningRun {
 		InvoiceAmountDue: 999,
 		InvoiceCurrency:  "XXX",
 		EffectiveNow:     at(0),
-		TestClockID:      "vlx_tclk_read_time_only",
+		TestClockID:      "hc_tclk_read_time_only",
 		MaxRetryAttempts: 4,
 	}
 }
 
 func goldenCreditBalance() CreditBalance {
 	return CreditBalance{
-		CustomerID: "vlx_cus_golden", Currency: "USD", BalanceCents: 900,
+		CustomerID: "hc_cus_golden", Currency: "USD", BalanceCents: 900,
 		TotalGranted: 10000, TotalUsed: 8000, TotalExpired: 100, TotalRetired: 500, TotalDeducted: 500,
 	}
 }
 
 func goldenDispute() InvoiceDispute {
 	return InvoiceDispute{
-		ID: "vlx_dsp_golden", InvoiceID: "vlx_inv_golden", StripeDisputeID: "du_golden",
+		ID: "hc_dsp_golden", InvoiceID: "hc_inv_golden", StripeDisputeID: "du_golden",
 		StripeChargeID: "ch_golden", StripePaymentIntentID: "pi_golden", Status: DisputeStatus("needs_response"),
 		Reason: "fraudulent", AmountCents: 10825, Currency: "USD", EvidenceDueBy: at(7 * 24 * time.Hour),
 		OpenedAt: goldenAt, Livemode: false, CreatedAt: goldenAt, UpdatedAt: goldenAt,
@@ -202,14 +202,14 @@ func goldenWebhookData(t *testing.T, eventType string) map[string]any {
 		return SubscriptionWebhookData(goldenSubscription(), map[string]any{"triggered_by": "schedule", "resumed_at": goldenAt})
 	case EventSubscriptionItemAdded, EventSubscriptionItemUpdated, EventSubscriptionItemRemoved,
 		EventSubscriptionPendingChangeScheduled, EventSubscriptionPendingChangeCanceled:
-		return SubscriptionWebhookData(goldenSubscription(), map[string]any{"item_id": "vlx_si_golden"})
+		return SubscriptionWebhookData(goldenSubscription(), map[string]any{"item_id": "hc_si_golden"})
 	case EventSubscriptionPendingChangeApplied:
 		return SubscriptionWebhookData(goldenSubscription(), map[string]any{
-			"item_id": "vlx_si_golden", "old_plan_id": "vlx_pln_basic", "applied_at": goldenAt,
+			"item_id": "hc_si_golden", "old_plan_id": "hc_pln_basic", "applied_at": goldenAt,
 		})
 	case EventSubscriptionThresholdCrossed:
 		return SubscriptionWebhookData(goldenSubscription(), map[string]any{
-			"invoice_id": "vlx_inv_golden", "running_subtotal": int64(50100), "crossed_amount": true, "crossed_item_id": "",
+			"invoice_id": "hc_inv_golden", "running_subtotal": int64(50100), "crossed_amount": true, "crossed_item_id": "",
 		})
 	case EventCustomerEmailBounced, EventCustomerEmailComplained:
 		return CustomerWebhookData(goldenCustomer(), map[string]any{"reason": "mailbox does not exist"})
@@ -226,7 +226,7 @@ func goldenWebhookData(t *testing.T, eventType string) map[string]any {
 		return CreditBalanceWebhookData(goldenCreditBalance(), map[string]any{"threshold_cents": int64(1000)})
 	case EventCreditCommitRetired:
 		return CreditBalanceWebhookData(goldenCreditBalance(), map[string]any{
-			"grant_id": "vlx_ccl_golden", "funding_invoice_id": "vlx_inv_commit", "credit_note_id": "vlx_cn_golden",
+			"grant_id": "hc_ccl_golden", "funding_invoice_id": "hc_inv_commit", "credit_note_id": "hc_cn_golden",
 			"retired_cents": int64(500), "refunded_gross_cents": int64(500), "remaining_after_cents": int64(0),
 		})
 	}
@@ -331,14 +331,14 @@ func TestWebhookEventCustomerID(t *testing.T) {
 		data      map[string]any
 		want      string
 	}{
-		{EventInvoicePaid, InvoiceWebhookData(goldenInvoice(), nil), "vlx_cus_golden"},
-		{EventSubscriptionCreated, SubscriptionWebhookData(goldenSubscription(), nil), "vlx_cus_golden"},
-		{EventCustomerEmailBounced, CustomerWebhookData(goldenCustomer(), nil), "vlx_cus_golden"},
-		{EventPaymentMethodAttached, PaymentMethodWebhookData(goldenPaymentMethod(), nil), "vlx_cus_golden"},
-		{EventDunningStarted, DunningRunWebhookData(goldenDunningRun(), nil), "vlx_cus_golden"},
-		{EventCreditBalanceLow, CreditBalanceWebhookData(goldenCreditBalance(), nil), "vlx_cus_golden"},
+		{EventInvoicePaid, InvoiceWebhookData(goldenInvoice(), nil), "hc_cus_golden"},
+		{EventSubscriptionCreated, SubscriptionWebhookData(goldenSubscription(), nil), "hc_cus_golden"},
+		{EventCustomerEmailBounced, CustomerWebhookData(goldenCustomer(), nil), "hc_cus_golden"},
+		{EventPaymentMethodAttached, PaymentMethodWebhookData(goldenPaymentMethod(), nil), "hc_cus_golden"},
+		{EventDunningStarted, DunningRunWebhookData(goldenDunningRun(), nil), "hc_cus_golden"},
+		{EventCreditBalanceLow, CreditBalanceWebhookData(goldenCreditBalance(), nil), "hc_cus_golden"},
 		// An event stored before ADR-131 carried customer_id at the top.
-		{EventInvoicePaid, map[string]any{"invoice_id": "vlx_inv_old", "customer_id": "vlx_cus_old"}, "vlx_cus_old"},
+		{EventInvoicePaid, map[string]any{"invoice_id": "hc_inv_old", "customer_id": "hc_cus_old"}, "hc_cus_old"},
 		{EventInvoicePaid, map[string]any{}, ""},
 	}
 	for _, c := range cases {
@@ -352,7 +352,7 @@ func TestCheckWebhookData(t *testing.T) {
 	if err := CheckWebhookData(EventInvoicePaid, InvoiceWebhookData(goldenInvoice(), nil)); err != nil {
 		t.Errorf("valid data refused: %v", err)
 	}
-	old := map[string]any{"invoice_id": "vlx_inv_1", "customer_id": "vlx_cus_1", "amount_paid_cents": 100}
+	old := map[string]any{"invoice_id": "hc_inv_1", "customer_id": "hc_cus_1", "amount_paid_cents": 100}
 	if err := CheckWebhookData(EventInvoicePaid, old); err == nil {
 		t.Error("the pre-ADR-131 flat payload passed the check")
 	}

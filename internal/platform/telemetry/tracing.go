@@ -1,9 +1,9 @@
-// Package telemetry provides OpenTelemetry tracing initialization for Velox.
+// Package telemetry provides OpenTelemetry tracing initialization for Hardcount.
 //
 // Configure via environment:
 //
 //	OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318  (Jaeger, Grafana Tempo, etc.)
-//	OTEL_SERVICE_NAME=velox                            (defaults to "velox")
+//	OTEL_SERVICE_NAME=hardcount                            (defaults to "hardcount")
 //	OTEL_TRACES_SAMPLER=parentbased_traceidratio       (defaults to parentbased_always_on)
 //	OTEL_TRACES_SAMPLER_ARG=0.1                        (the ratio, for the *traceidratio samplers)
 //
@@ -37,7 +37,7 @@ func Init(ctx context.Context) (shutdown func(context.Context) error, err error)
 
 	serviceName := strings.TrimSpace(os.Getenv("OTEL_SERVICE_NAME"))
 	if serviceName == "" {
-		serviceName = "velox"
+		serviceName = "hardcount"
 	}
 
 	// Schemaless on purpose. resource.Merge REFUSES to merge two resources

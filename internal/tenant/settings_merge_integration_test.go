@@ -94,8 +94,8 @@ func TestSettingsUpsert_MergePatch(t *testing.T) {
 		t.Fatalf("prefix-reset status: %d body=%s", rr.Code, rr.Body.String())
 	}
 	got, _ = store.Get(ctx, tenantID)
-	if got.InvoicePrefix != "VLX" {
-		t.Errorf("invoice_prefix after explicit \"\": got %q, want the VLX default", got.InvoicePrefix)
+	if got.InvoicePrefix != "HC" {
+		t.Errorf("invoice_prefix after explicit \"\": got %q, want the HC default", got.InvoicePrefix)
 	}
 }
 

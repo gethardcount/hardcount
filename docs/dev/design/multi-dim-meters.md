@@ -1,8 +1,8 @@
 # Multi-Dimensional Meters — Technical Design
 
 > - **Decided:** one meter takes usage events with dimension labels, such as `model`. Pricing rules match sets of labels, and the highest-priority matching rule claims each event, so no event is priced twice.
-> - **Shipped:** v0.1.0, in [#20](https://github.com/getvelox/velox/pull/20) (migration `0054_multi_dim_meters`).
-> - **Current docs:** [How Velox picks the price for an event](../../ai-pricing.md#how-velox-picks-the-price-for-an-event) in the AI pricing reference. The decisions made since are listed below. Where this page and the code disagree, the code wins.
+> - **Shipped:** v0.1.0, in [#20](https://github.com/gethardcount/hardcount/pull/20) (migration `0054_multi_dim_meters`).
+> - **Current docs:** [How Hardcount picks the price for an event](../../ai-pricing.md#how-hardcount-picks-the-price-for-an-event) in the AI pricing reference. The decisions made since are listed below. Where this page and the code disagree, the code wins.
 
 > **Design document from 2026-04-25** (the proposal as reviewed before building). It is not kept current.
 >
@@ -14,15 +14,15 @@
 > 2. A matched rule is not priced at a stored rating-rule version. Its `rule_key` is looked up as of the period start (ADR-070), so a newly published rate applies from the next period.
 > 3. Until ADR-045 (2026-06-01), only the preview and the threshold scan priced multi-dim meters; the cycle close billed them at $0. It now emits one line per claimed rule.
 > 4. A meter has one aggregation (`sum`, `count`, `max`, `last`) and every rule bills under it ([ADR-130](../../adr/130-usage-prices-belong-to-the-plan.md) §2, 2026-10-23). The per-rule `aggregation_mode`, `last_during_period` and `last_ever` are gone, `last` breaks a timestamp tie by id, and the meter's `key` is `event_name`. The aggregation is fixed once the meter has usage events (held rows do not count, amended 2026-10-24).
-> 5. Rating rules, `priority`, `rule_key` and the meter's default price are gone ([ADR-130](../../adr/130-usage-prices-belong-to-the-plan.md) PR-4, [#1386](https://github.com/getvelox/velox/pull/1386), 2026-10-26). A plan's usage prices live on the plan, each on one meter with a `dimension_match`. A price takes an event whose labels include all of its `dimension_match`. When several do, the one with the most labels bills it, and two that could tie are refused (409 `price_conflict`). See [How Velox picks the price for an event](../../ai-pricing.md#how-velox-picks-the-price-for-an-event).
+> 5. Rating rules, `priority`, `rule_key` and the meter's default price are gone ([ADR-130](../../adr/130-usage-prices-belong-to-the-plan.md) PR-4, [#1386](https://github.com/gethardcount/hardcount/pull/1386), 2026-10-26). A plan's usage prices live on the plan, each on one meter with a `dimension_match`. A price takes an event whose labels include all of its `dimension_match`. When several do, the one with the most labels bills it, and two that could tie are refused (409 `price_conflict`). See [How Hardcount picks the price for an event](../../ai-pricing.md#how-hardcount-picks-the-price-for-an-event).
 
-This page is the technical design for multi-dimensional metering: one usage meter that carries many differently-priced slices of usage, distinguished by dimension labels such as model or operation. It is written for engineers building on or evaluating Velox's pricing engine.
+This page is the technical design for multi-dimensional metering: one usage meter that carries many differently-priced slices of usage, distinguished by dimension labels such as model or operation. It is written for engineers building on or evaluating Hardcount's pricing engine.
 
 ## Motivation
 
 Stripe's Meter API was bolted onto a card-subscription engine. To bill `gpt-4 input cached` vs `gpt-4 input uncached` vs `gpt-4 output` at different rates, you create three Meters with three event names and three pricing rules. For full Anthropic / OpenAI parity (3 models × 4 operations × 2 cache states), you need ~24 Meters. The dimensional structure is encoded in event-name strings instead of data.
 
-Velox's wedge — the product bet it differentiates on — is **AI-native billing for usage-heavy SaaS**. The minimum-viable expression of that is: **one meter** receives events with arbitrary dimension labels, **many pricing rules** pick out subsets to apply rates. Same data, far fewer meters, far simpler subscription wiring.
+Hardcount's wedge — the product bet it differentiates on — is **AI-native billing for usage-heavy SaaS**. The minimum-viable expression of that is: **one meter** receives events with arbitrary dimension labels, **many pricing rules** pick out subsets to apply rates. Same data, far fewer meters, far simpler subscription wiring.
 
 Without this design, the wedge is just a slide.
 
@@ -95,7 +95,7 @@ CREATE INDEX idx_usage_events_properties_gin
 -- 3. New table: pricing rules per meter, with dimension match + per-rule
 --    aggregation mode. Enables N rules per meter (vs today's 1:1 on meters).
 CREATE TABLE meter_pricing_rules (
-    id                       TEXT PRIMARY KEY DEFAULT 'vlx_mpr_' || encode(gen_random_bytes(12), 'hex'),
+    id                       TEXT PRIMARY KEY DEFAULT 'hc_mpr_' || encode(gen_random_bytes(12), 'hex'),
     tenant_id                TEXT NOT NULL REFERENCES tenants(id),
     meter_id                 TEXT NOT NULL REFERENCES meters(id),
     rating_rule_version_id   TEXT NOT NULL REFERENCES rating_rule_versions(id),
@@ -116,7 +116,7 @@ CREATE POLICY tenant_isolation ON meter_pricing_rules FOR ALL USING (
     current_setting('app.bypass_rls', true) = 'on'
     OR tenant_id = current_setting('app.tenant_id', true)
 );
-GRANT ALL ON TABLE meter_pricing_rules TO velox_app;
+GRANT ALL ON TABLE meter_pricing_rules TO hardcount_app;
 ```
 
 ### Why a new table instead of extending `meters`
@@ -161,11 +161,11 @@ Authorization: Bearer <secret_key>
 Response `201`:
 ```json
 {
-  "id": "vlx_evt_...",
+  "id": "hc_evt_...",
   "tenant_id": "tnt_...",
-  "customer_id": "vlx_cus_...",
-  "meter_id": "vlx_mtr_...",
-  "subscription_id": "vlx_sub_...",
+  "customer_id": "hc_cus_...",
+  "meter_id": "hc_mtr_...",
+  "subscription_id": "hc_sub_...",
   "quantity": "1234.5",
   "properties": { "model": "gpt-4", "operation": "input", "cached": false },
   "timestamp": "2026-04-25T12:34:56Z",
@@ -173,7 +173,7 @@ Response `201`:
 }
 ```
 
-The response carries internal IDs (`vlx_cus_*`, `vlx_mtr_*`) and surfaces dimensions on `properties` (the storage column name) — `dimensions` on the request is just an alias and collapses onto `properties` at the storage layer.
+The response carries internal IDs (`hc_cus_*`, `hc_mtr_*`) and surfaces dimensions on `properties` (the storage column name) — `dimensions` on the request is just an alias and collapses onto `properties` at the storage layer.
 
 
 ### `POST /v1/meters/{id}/pricing-rules`
@@ -302,7 +302,7 @@ A standing project rule (recorded as `feedback_prefer_battle_tested_libs`) appli
 
 - **Target:** sustained 50k events/sec ingest on a single tenant
 - **Hardware:** Postgres 16, 8 vCPU, 16GB RAM, NVMe SSD (matches commodity AWS m5/m6)
-- **Workload:** `scripts/bench-rig/ingest.js` (k6, an open-source load-testing tool) — synthetic event stream with realistic dimension cardinality (~10 model values, 4 operation values, 2 boolean cache states), driving the public ingest endpoint. `cmd/velox-bench-seed` creates the fixtures and mints the key.
+- **Workload:** `scripts/bench-rig/ingest.js` (k6, an open-source load-testing tool) — synthetic event stream with realistic dimension cardinality (~10 model values, 4 operation values, 2 boolean cache states), driving the public ingest endpoint. `cmd/hardcount-bench-seed` creates the fixtures and mints the key.
 - **Measurement:** total events ingested over 60s, p50/p95/p99 ingest latency, Postgres CPU + IO
 - **Mitigations if we miss target:**
   - Batch INSERTs (already needed for any high-throughput workload)
@@ -331,6 +331,6 @@ A standing project rule (recorded as `feedback_prefer_battle_tested_libs`) appli
 - [x] `GET /v1/customers/{id}/usage` powering the cost dashboard
 - [x] Unit tests: ingest, aggregation per mode, subset-match, priority-claim
 - [x] Integration tests: real Postgres, RLS-isolated tenants, decimal precision, idempotency
-- [x] Ingest benchmark (the 50k events/sec target was never validated. Measured 2026-08-15 on an isolated Postgres 16 container, 8 workers, 10s, with the since-deleted `velox-bench --batch` (k6 `BATCH=` is the equivalent today): **2,714 ev/s single-event; 8,245 at batch 10; 10,821 at batch 50; 12,095 at batch 500**, the curve flattening after ~50 while per-call latency keeps climbing. The long-standing "single-row-INSERT-bound" reading is WRONG — statement-level profiling attributes **~66% of in-database time to COMMIT and only ~28% to the INSERT**, with the three per-transaction `set_config` calls at 5%. Ingest is fsync/commit-bound, so the lever is commits-per-event (batching), not statements-per-event; the plateau above batch 50 is the INSERT-bound ceiling underneath. Laptop-container numbers — not a cloud benchmark.)
+- [x] Ingest benchmark (the 50k events/sec target was never validated. Measured 2026-08-15 on an isolated Postgres 16 container, 8 workers, 10s, with the since-deleted `hardcount-bench --batch` (k6 `BATCH=` is the equivalent today): **2,714 ev/s single-event; 8,245 at batch 10; 10,821 at batch 50; 12,095 at batch 500**, the curve flattening after ~50 while per-call latency keeps climbing. The long-standing "single-row-INSERT-bound" reading is WRONG — statement-level profiling attributes **~66% of in-database time to COMMIT and only ~28% to the INSERT**, with the three per-transaction `set_config` calls at 5%. Ingest is fsync/commit-bound, so the lever is commits-per-event (batching), not statements-per-event; the plateau above batch 50 is the INSERT-bound ceiling underneath. Laptop-container numbers — not a cloud benchmark.)
 - [x] OpenAPI spec update (`api/openapi.yaml`)
 - [x] CHANGELOG entry + public changelog rollup

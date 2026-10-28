@@ -12,7 +12,7 @@
 #   0  calibrate.sh          instrument must print CALIBRATED
 #   0  teardown.sh --check   account must be CLEAN (exit 0); UNKNOWN stops here
 #   1  provision.sh --yes    + watchdog armed (aws only)
-#   2  bringup.sh            running, seeded, verified velox — or FATAL
+#   2  bringup.sh            running, seeded, verified hardcount — or FATAL
 #   3  seed-history.sh       SEED_ROWS rows of history (0 to skip)
 #   4  measure.sh            SUSTAINED protocol, then the closed-loop ceiling
 #   5  db-ceiling.sh         the denominator, fed the ev/s measure.sh reported
@@ -23,7 +23,7 @@
 set -uo pipefail
 
 TARGET="${TARGET:-aws}"
-OUT="${OUT:-$HOME/.velox-bench-rig}"
+OUT="${OUT:-$HOME/.hardcount-bench-rig}"
 KEEP="${KEEP:-0}"
 SEED_ROWS="${SEED_ROWS:-20000000}"
 CONFIGS="${CONFIGS:-single:200:1 batched:1000:10}"
@@ -39,7 +39,7 @@ step() { printf '\n\n########## [%s] STEP %s ##########\n' "$(date -u +%FT%TZ)" 
 fail() { printf '\n########## RUN STOPPED at: %s ##########\nlog: %s\n' "$*" "$LOG"; [ "$TARGET" = "aws" ] && printf 'the rig may still be up — ./teardown.sh --check, then ./teardown.sh\n'; exit 1; }
 
 export TARGET OUT
-printf 'velox benchmark run — target=%s  log=%s\n' "$TARGET" "$LOG"
+printf 'hardcount benchmark run — target=%s  log=%s\n' "$TARGET" "$LOG"
 
 step "0a calibrate the instrument"
 "$HERE/calibrate/calibrate.sh" || fail "calibration (the measuring tool did not report the truth)"
@@ -91,14 +91,14 @@ step "4b measure — closed-loop ceiling: $CEILING_VUS VUs, batch $CEILING_BATCH
 K6_MODE=max VUS="$CEILING_VUS" CONFIGS="ceiling:0:$CEILING_BATCH" DURATION="${CEIL_DURATION:-90s}" REPEATS=1 WARMUP="${CEIL_WARMUP:-20s}" SUSTAINED=0 PROBE_RATE=0 CREDS="$CREDS" "$HERE/measure.sh" || printf '\nNOTE: ceiling run failed its gate (see above)\n'
 
 step "5 denominator — pgbench on the same DB, batch $CEILING_BATCH (compared against the closed-loop ceiling)"
-# Compare ceilings to ceilings: the numerator is the CLOSED-LOOP ev/s Velox
+# Compare ceilings to ceilings: the numerator is the CLOSED-LOOP ev/s Hardcount
 # reached (a maximum), against the DB's own maximum. Feeding the rate-controlled
 # offered rate here would just restate the rate we chose.
 CEIL_DIR=$(ls -dt "$OUT"/results-* | head -1)
 EVS=$(grep -E '^ceiling ' "$CEIL_DIR/summary.txt" 2>/dev/null | grep -oE 'ceiling median [0-9]+' | grep -oE '[0-9]+' | head -1)
 [ -n "$EVS" ] || EVS=$(grep -E '^batched ' "$SUMMARY_DIR/summary.txt" 2>/dev/null | grep -oE 'offered [0-9]+' | grep -oE '[0-9]+' | head -1)
-if [ "$TARGET" = "aws" ]; then VELOX_EVS="${EVS:-}" BATCH="$CEILING_BATCH" "$HERE/db-ceiling.sh" || printf '\nNOTE: db-ceiling failed (non-fatal for the run)\n'
-else DATABASE_URL="$ADMIN_DSN" TARGET=local VELOX_EVS="${EVS:-}" BATCH="$CEILING_BATCH" DURATION="${PGB_DURATION:-30}" "$HERE/db-ceiling.sh" || printf '\nNOTE: db-ceiling failed (non-fatal)\n'; fi
+if [ "$TARGET" = "aws" ]; then HARDCOUNT_EVS="${EVS:-}" BATCH="$CEILING_BATCH" "$HERE/db-ceiling.sh" || printf '\nNOTE: db-ceiling failed (non-fatal for the run)\n'
+else DATABASE_URL="$ADMIN_DSN" TARGET=local HARDCOUNT_EVS="${EVS:-}" BATCH="$CEILING_BATCH" DURATION="${PGB_DURATION:-30}" "$HERE/db-ceiling.sh" || printf '\nNOTE: db-ceiling failed (non-fatal)\n'; fi
 
 if [ "$TARGET" = "aws" ]; then
   if [ "$KEEP" = "1" ]; then

@@ -14,14 +14,14 @@ import (
 )
 
 // Helpers for the real-Postgres tests in this package. Each test gets a
-// scratch database of its own, so the shared velox_test database the
+// scratch database of its own, so the shared hardcount_test database the
 // other packages use is never touched.
 
 func adminTestURL() string {
 	if u := strings.TrimSpace(os.Getenv("TEST_ADMIN_DATABASE_URL")); u != "" {
 		return u
 	}
-	return "postgres://velox:velox@localhost:5432/velox_test?sslmode=disable"
+	return "postgres://hardcount:hardcount@localhost:5432/hardcount_test?sslmode=disable"
 }
 
 // scratchDB creates an empty database and returns its DSN and a pool for

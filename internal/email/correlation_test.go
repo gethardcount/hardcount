@@ -15,15 +15,15 @@ func TestCorrelationHeader_CtxRoundTrip(t *testing.T) {
 		t.Errorf("no ctx id: want empty header, got %q", got)
 	}
 
-	ctx := WithCorrelation(context.Background(), "vlx_emob_00112233445566778899aabb")
-	want := "vlx_emob_00112233445566778899aabb"
+	ctx := WithCorrelation(context.Background(), "hc_emob_00112233445566778899aabb")
+	want := "hc_emob_00112233445566778899aabb"
 	if got := correlationID(ctx); got != want {
 		t.Errorf("header value: got %q, want %q", got, want)
 	}
 
 	for name, bad := range map[string]string{
-		"crlf injection": "vlx_emob_1\r\nBcc: attacker@evil.test",
-		"space":          "vlx emob 1",
+		"crlf injection": "hc_emob_1\r\nBcc: attacker@evil.test",
+		"space":          "hc emob 1",
 		"oversize":       strings.Repeat("a", 81),
 		"empty":          "",
 	} {
@@ -40,7 +40,7 @@ func TestCorrelationHeader_CtxRoundTrip(t *testing.T) {
 func TestCorrelationHeader_OnTheWire(t *testing.T) {
 	srv := newScriptedSMTP(t)
 	s := newCCTestSender(t, srv)
-	ctx := WithCorrelation(context.Background(), "vlx_emob_deadbeefdeadbeefdeadbeef")
+	ctx := WithCorrelation(context.Background(), "hc_emob_deadbeefdeadbeefdeadbeef")
 
 	if err := s.sendRich(ctx, richMessage{
 		TenantID: "t1", To: "ap@acme.test",
@@ -49,14 +49,14 @@ func TestCorrelationHeader_OnTheWire(t *testing.T) {
 		t.Fatalf("sendRich: %v", err)
 	}
 	data := srv.lastData()
-	if n := strings.Count(data, "X-PM-Metadata-vlx-outbox-id: vlx_emob_deadbeefdeadbeefdeadbeef"); n != 1 {
+	if n := strings.Count(data, "X-PM-Metadata-hc-outbox-id: hc_emob_deadbeefdeadbeefdeadbeef"); n != 1 {
 		t.Errorf("sendRich wire message: want header exactly once, found %d\n%s", n, data[:min(400, len(data))])
 	}
 
 	if err := s.sendPlain(ctx, "t1", "op@acme.test", "", "Reset", "body"); err != nil {
 		t.Fatalf("sendPlain: %v", err)
 	}
-	if n := strings.Count(srv.lastData(), "X-PM-Metadata-vlx-outbox-id: vlx_emob_deadbeefdeadbeefdeadbeef"); n != 1 {
+	if n := strings.Count(srv.lastData(), "X-PM-Metadata-hc-outbox-id: hc_emob_deadbeefdeadbeefdeadbeef"); n != 1 {
 		t.Errorf("sendPlain wire message: want header exactly once, found %d", n)
 	}
 

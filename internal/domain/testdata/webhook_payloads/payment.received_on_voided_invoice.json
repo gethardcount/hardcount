@@ -11,11 +11,11 @@
     "created_at": "2026-10-01T12:00:00Z",
     "credits_applied_cents": 0,
     "currency": "USD",
-    "customer_id": "vlx_cus_golden",
+    "customer_id": "hc_cus_golden",
     "discount_cents": 0,
     "due_at": "2026-10-01T12:00:00Z",
-    "id": "vlx_inv_golden",
-    "invoice_number": "VLX-000042",
+    "id": "hc_inv_golden",
+    "invoice_number": "HC-000042",
     "is_simulated": false,
     "issued_at": "2026-10-01T12:00:00Z",
     "metadata": {
@@ -29,7 +29,7 @@
     "payment_status": "succeeded",
     "status": "paid",
     "stripe_payment_intent_id": "pi_golden",
-    "subscription_id": "vlx_sub_golden",
+    "subscription_id": "hc_sub_golden",
     "subtotal_cents": 10000,
     "tax_amount_cents": 825,
     "tax_country": "US",
@@ -37,7 +37,7 @@
     "tax_provider": "manual",
     "tax_rate": 8.25,
     "tax_status": "ok",
-    "tenant_id": "vlx_ten_golden",
+    "tenant_id": "hc_ten_golden",
     "total_amount_cents": 10825,
     "updated_at": "2026-10-01T12:01:00Z"
   }

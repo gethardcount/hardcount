@@ -92,7 +92,7 @@ type SentEmailOutboxRow struct {
 	// SendFailure is a failed row's error classified into one the line
 	// names in plain words (activity.SendFailure*), or empty.
 	SendFailure string
-	// SkipReason is the state the invoice reached that made Velox skip a
+	// SkipReason is the state the invoice reached that made Hardcount skip a
 	// queued email, or empty.
 	SkipReason string
 	// SimEffectiveAt is the instant on the customer's test clock that
@@ -346,7 +346,7 @@ func (h *Handler) getBillingProfile(w http.ResponseWriter, r *http.Request) {
 // immediately (no grace window — read-only surface, rotation intent
 // is "stop the previous URL right now").
 //
-// Response body: { "token": "vlx_pcd_<64 hex>", "public_url": "<url>" }.
+// Response body: { "token": "hc_pcd_<64 hex>", "public_url": "<url>" }.
 // Audit log records the rotation with no plaintext token.
 func (h *Handler) rotateCostDashboardToken(w http.ResponseWriter, r *http.Request) {
 	if !respond.NoBody(w, r) {

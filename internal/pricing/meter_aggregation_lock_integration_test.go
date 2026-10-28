@@ -39,12 +39,12 @@ func wantHasUsage(t *testing.T, what string, err error) {
 // eventSQL is the two statements that write a customer and one usage event
 // of meterID.
 func (f meterEditFixture) eventSQL(meterID string) (string, []any, string, []any) {
-	custID := postgres.NewID("vlx_cus")
+	custID := postgres.NewID("hc_cus")
 	return `INSERT INTO customers (id, tenant_id, external_id, display_name) VALUES ($1, $2, $3, $3)`,
 		[]any{custID, f.tenantID, "ext_" + custID},
 		`INSERT INTO usage_events (id, tenant_id, customer_id, meter_id, quantity, properties, timestamp)
 		 VALUES ($1, $2, $3, $4, 5, '{}', now())`,
-		[]any{postgres.NewID("vlx_evt"), f.tenantID, custID, meterID}
+		[]any{postgres.NewID("hc_evt"), f.tenantID, custID, meterID}
 }
 
 // event commits one usage event of meterID.
@@ -73,7 +73,7 @@ func (f meterEditFixture) held(t *testing.T, eventName, status string) {
 		INSERT INTO usage_held_events (id, tenant_id, source, external_customer_id, event_name, quantity,
 			idempotency_key, event_at, reason, status)
 		VALUES ($1, $2, 'litellm', 'ext_not_yet', $3, 5, $4, now(), 'customer_not_found', $5)
-	`, postgres.NewID("vlx_hue"), f.tenantID, eventName, postgres.NewID("idem"), status); err != nil {
+	`, postgres.NewID("hc_hue"), f.tenantID, eventName, postgres.NewID("idem"), status); err != nil {
 		t.Fatalf("insert held row: %v", err)
 	}
 	if err := tx.Commit(); err != nil {

@@ -413,7 +413,7 @@ func TestStaleHold_CrashAfterStripeCharged_NoSecondPayment(t *testing.T) {
 // request whose browser went away). A deadline is a call that timed out:
 // Stripe was slow, as in an incident, so the attempt is saved as parked even
 // though the caller's context is over, and gets Stripe's 24 hours when Stripe
-// shows nothing (ADR-127 amendment 2026-10-20). A cancellation is Velox
+// shows nothing (ADR-127 amendment 2026-10-20). A cancellation is Hardcount
 // interrupting itself: nothing is saved. Either way the hold stays, nothing
 // charges again, and the sweep records the payment.
 func TestStaleHold_CallerDeadlineEndsDuringTheCall(t *testing.T) {

@@ -44,7 +44,7 @@ func oldPolicySQL(id string, grace, max int, schedule string) string {
 // dropped. The CHECK then refuses any list that is not 1 to 15 whole days
 // from 1 to 30, and the Down writes the three old columns back.
 func TestRetryDays_ConvertsExactlyAndRollsBack(t *testing.T) {
-	dsn, db := scratchDB(t, "velox_test_dunsched_b_migrate_convert")
+	dsn, db := scratchDB(t, "hardcount_test_dunsched_b_migrate_convert")
 	ctx := context.Background()
 	if err := up(ctx, dsn, filesBefore(t, retryDaysVersion)); err != nil {
 		t.Fatalf("Up to before %d: %v", retryDaysVersion, err)
@@ -163,11 +163,11 @@ func TestRetryDays_ConvertsExactlyAndRollsBack(t *testing.T) {
 }
 
 // TestRetryDays_RefusesWhatCannotConvertExactly: a policy whose retries use
-// a wait that is not a whole number of days from 1 to 30, or that Velox's
+// a wait that is not a whole number of days from 1 to 30, or that Hardcount's
 // policy writer would have refused, stops 00206 before anything changes.
 // The error names each policy and why. Once those rows are fixed, it runs.
 func TestRetryDays_RefusesWhatCannotConvertExactly(t *testing.T) {
-	dsn, db := scratchDB(t, "velox_test_dunsched_b_migrate_refuse")
+	dsn, db := scratchDB(t, "hardcount_test_dunsched_b_migrate_refuse")
 	ctx := context.Background()
 	if err := up(ctx, dsn, filesBefore(t, retryDaysVersion)); err != nil {
 		t.Fatalf("Up to before %d: %v", retryDaysVersion, err)
@@ -231,7 +231,7 @@ func TestRetryDays_RefusesWhatCannotConvertExactly(t *testing.T) {
 // deleted, and deleting the account's default stops dunning for every
 // customer without a policy of their own.
 func TestRetryDays_RunbookFixConverts(t *testing.T) {
-	dsn, db := scratchDB(t, "velox_test_dunsched_f2_migrate_runbook")
+	dsn, db := scratchDB(t, "hardcount_test_dunsched_f2_migrate_runbook")
 	ctx := context.Background()
 	if err := up(ctx, dsn, filesBefore(t, retryDaysVersion)); err != nil {
 		t.Fatalf("Up to before %d: %v", retryDaysVersion, err)

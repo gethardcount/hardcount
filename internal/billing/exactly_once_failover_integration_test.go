@@ -55,7 +55,7 @@ import (
 //     produce. A crash is one interleaving; a race is all of them.
 
 const (
-	exactlyOnceHelperEnv = "VELOX_TEST_BILLING_LEADER"
+	exactlyOnceHelperEnv = "HARDCOUNT_TEST_BILLING_LEADER"
 	// billedCents is the flat in-arrears base fee each seeded subscription
 	// bills per period. Value is arbitrary; what matters is that it is
 	// non-zero, so a duplicate would be visible as money and not just as a row.
@@ -249,8 +249,8 @@ func runKilledLeaderTrial(t *testing.T, killAfter int) bool {
 	leader := exec.Command(os.Args[0], "-test.run=TestBillingLeaderHelperProcess")
 	leader.Env = append(os.Environ(),
 		exactlyOnceHelperEnv+"=1",
-		"VELOX_TEST_TENANT_ID="+seed.tenantID,
-		"VELOX_TEST_RUN_AT="+seed.runAt.Format(time.RFC3339Nano),
+		"HARDCOUNT_TEST_TENANT_ID="+seed.tenantID,
+		"HARDCOUNT_TEST_RUN_AT="+seed.runAt.Format(time.RFC3339Nano),
 	)
 	leader.Stderr = os.Stderr
 	if err := leader.Start(); err != nil {
@@ -500,8 +500,8 @@ func TestBillingLeaderHelperProcess(t *testing.T) {
 	if os.Getenv(exactlyOnceHelperEnv) != "1" {
 		return
 	}
-	tenantID := os.Getenv("VELOX_TEST_TENANT_ID")
-	runAt, err := time.Parse(time.RFC3339Nano, os.Getenv("VELOX_TEST_RUN_AT"))
+	tenantID := os.Getenv("HARDCOUNT_TEST_TENANT_ID")
+	runAt, err := time.Parse(time.RFC3339Nano, os.Getenv("HARDCOUNT_TEST_RUN_AT"))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "helper: parse run-at: %v\n", err)
 		return
@@ -509,7 +509,7 @@ func TestBillingLeaderHelperProcess(t *testing.T) {
 
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
-		dsn = "postgres://velox_test_app:velox_test_app@localhost:5432/velox_test?sslmode=disable"
+		dsn = "postgres://hardcount_test_app:hardcount_test_app@localhost:5432/hardcount_test?sslmode=disable"
 	}
 	pool, err := sql.Open("pgx", dsn)
 	if err != nil {

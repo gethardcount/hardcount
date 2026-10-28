@@ -52,7 +52,7 @@ func TestPricingHandler_BadJSON_Returns400(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			rr := doJSON(t, c.fn, http.MethodPost, "/", "{not json", map[string]string{"id": "vlx_pln_1", "price_id": "vlx_prc_1"})
+			rr := doJSON(t, c.fn, http.MethodPost, "/", "{not json", map[string]string{"id": "hc_pln_1", "price_id": "hc_prc_1"})
 			if rr.Code != http.StatusBadRequest {
 				t.Errorf("%s bad JSON: got %d, want 400; body=%s", c.name, rr.Code, rr.Body.String())
 			}
@@ -95,7 +95,7 @@ func TestPricingHandler_NotFound_Returns404(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			rr := doJSON(t, c.fn, http.MethodGet, "/vlx_missing", "", map[string]string{"id": "vlx_missing", "price_id": "vlx_missing"})
+			rr := doJSON(t, c.fn, http.MethodGet, "/hc_missing", "", map[string]string{"id": "hc_missing", "price_id": "hc_missing"})
 			if rr.Code != http.StatusNotFound {
 				t.Errorf("%s unknown id: got %d, want 404; body=%s", c.name, rr.Code, rr.Body.String())
 			}
@@ -115,13 +115,13 @@ func TestPricingHandler_RemovedFieldsRefused(t *testing.T) {
 		name, body, field string
 		fn                func(http.ResponseWriter, *http.Request)
 	}{
-		{"meter with a default price", `{"event_name":"calls","name":"Calls","rating_rule_version_id":"vlx_rrv_x"}`, "rating_rule_version_id", h.createMeter},
+		{"meter with a default price", `{"event_name":"calls","name":"Calls","rating_rule_version_id":"hc_rrv_x"}`, "rating_rule_version_id", h.createMeter},
 		{"meter with key and no event_name", `{"key":"calls","name":"Calls"}`, `"key"`, h.createMeter},
-		{"plan with meter_ids", `{"code":"p","name":"p","currency":"USD","billing_interval":"monthly","meter_ids":["vlx_mtr_1"]}`, "meter_ids", h.createPlan},
-		{"price with a priority", `{"meter_id":"vlx_mtr_1","mode":"per_unit","unit_amount_cents":"1","priority":100}`, "priority", h.addPrice},
-		{"override with a rule key", `{"customer_id":"vlx_cus_1","rule_key":"r","mode":"per_unit","unit_amount_cents":"1"}`, "rule_key", h.createOverride},
+		{"plan with meter_ids", `{"code":"p","name":"p","currency":"USD","billing_interval":"monthly","meter_ids":["hc_mtr_1"]}`, "meter_ids", h.createPlan},
+		{"price with a priority", `{"meter_id":"hc_mtr_1","mode":"per_unit","unit_amount_cents":"1","priority":100}`, "priority", h.addPrice},
+		{"override with a rule key", `{"customer_id":"hc_cus_1","rule_key":"r","mode":"per_unit","unit_amount_cents":"1"}`, "rule_key", h.createOverride},
 	} {
-		rr := doJSON(t, tc.fn, http.MethodPost, "/", tc.body, map[string]string{"id": "vlx_pln_1"})
+		rr := doJSON(t, tc.fn, http.MethodPost, "/", tc.body, map[string]string{"id": "hc_pln_1"})
 		if rr.Code != http.StatusUnprocessableEntity || !bytes.Contains(rr.Body.Bytes(), []byte(tc.field)) {
 			t.Errorf("%s: got %d %s, want 422 naming %s", tc.name, rr.Code, rr.Body.String(), tc.field)
 		}

@@ -41,7 +41,7 @@ func (f *fakeCNIssuer) CreateAndIssueAdjustment(_ context.Context, _, invoiceID 
 	if f.err != nil {
 		return domain.CreditNote{}, f.err
 	}
-	return domain.CreditNote{ID: "vlx_cn_test", InvoiceID: invoiceID}, nil
+	return domain.CreditNote{ID: "hc_cn_test", InvoiceID: invoiceID}, nil
 }
 
 func (f *fakeCNIssuer) LockInvoicesForDraftsTx(context.Context, *sql.Tx, string, []string) error {
@@ -55,7 +55,7 @@ func (f *fakeCNIssuer) CreateAdjustmentDraftTx(_ context.Context, _ *sql.Tx, _, 
 	if f.err != nil {
 		return domain.CreditNote{}, f.err
 	}
-	return domain.CreditNote{ID: "vlx_cn_draft_test", InvoiceID: invoiceID, Status: domain.CreditNoteDraft, IssuePending: true}, nil
+	return domain.CreditNote{ID: "hc_cn_draft_test", InvoiceID: invoiceID, Status: domain.CreditNoteDraft, IssuePending: true}, nil
 }
 
 func (f *fakeCNIssuer) Issue(_ context.Context, _, id string) (domain.CreditNote, error) {

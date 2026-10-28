@@ -112,7 +112,7 @@ func (f ingestAggFixture) hold(t *testing.T, key string, at time.Time) {
 	}
 }
 
-// afterCloseTotal reads velox_usage_unbilled_total{reason="after_close", origin}.
+// afterCloseTotal reads hardcount_usage_unbilled_total{reason="after_close", origin}.
 func afterCloseTotal(t *testing.T, origin domain.UsageEventOrigin) float64 {
 	t.Helper()
 	mfs, err := prometheus.DefaultGatherer.Gather()
@@ -120,7 +120,7 @@ func afterCloseTotal(t *testing.T, origin domain.UsageEventOrigin) float64 {
 		t.Fatalf("gather metrics: %v", err)
 	}
 	for _, mf := range mfs {
-		if mf.GetName() != "velox_usage_unbilled_total" {
+		if mf.GetName() != "hardcount_usage_unbilled_total" {
 			continue
 		}
 		for _, m := range mf.GetMetric() {
@@ -233,7 +233,7 @@ func ingestDoors() []ingestDoor {
 // At every ingest door, an aggregation PATCH that commits after the
 // ingest's open-period read and before its insert decides the after_close
 // signals: the answer's billing_status (or after_close count),
-// velox_usage_unbilled_total{reason="after_close"} and the "billed on no invoice" WARN. The
+// hardcount_usage_unbilled_total{reason="after_close"} and the "billed on no invoice" WARN. The
 // event is before a paid threshold invoice's end: under sum the close does
 // not count it (after_close), under max it does (not flagged).
 //
@@ -291,7 +291,7 @@ func TestIngest_AfterCloseFollowsTheAggregationTheEventIsCountedUnder(t *testing
 					t.Errorf("after_close in the answer = %d, want %d: the events are counted under %s", flagged, want, m.Aggregation)
 				}
 				if got := afterCloseTotal(t, door.origin) - before; got != float64(want) {
-					t.Errorf("velox_usage_unbilled_total{reason=\"after_close\",origin=%q} moved by %v, want %d", door.origin, got, want)
+					t.Errorf("hardcount_usage_unbilled_total{reason=\"after_close\",origin=%q} moved by %v, want %d", door.origin, got, want)
 				}
 				if got := logs.afterCloseWarns(f.meter.ID); got != want {
 					t.Errorf("after_close WARN lines = %d, want %d", got, want)

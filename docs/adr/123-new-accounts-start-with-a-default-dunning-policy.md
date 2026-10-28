@@ -74,7 +74,7 @@ subscription or write-off action the account did not choose.
   accounts' defaults.
 - **Both account-creation paths call it**, in their own transaction, so a
   failed seed creates no account:
-  - `tenant.RunBootstrap` (`POST /v1/bootstrap`, `cmd/velox-bootstrap`,
+  - `tenant.RunBootstrap` (`POST /v1/bootstrap`, `cmd/hardcount-bootstrap`,
     the compose quick start) through `BootstrapDeps.SeedDunningTx`;
   - `tenant.Service.Create` (`POST /v1/tenants`) through
     `SetDunningSeeder`.

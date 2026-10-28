@@ -265,7 +265,7 @@ func TestExportsAudit_AuditLogExportStreamsEveryRow(t *testing.T) {
 		if err := logger.LogInTx(ctx, tx, audit.Entry{
 			Action:       domain.AuditActionUpdate,
 			ResourceType: "seed_probe",
-			ResourceID:   fmt.Sprintf("vlx_seed_%03d", i),
+			ResourceID:   fmt.Sprintf("hc_seed_%03d", i),
 		}); err != nil {
 			_ = tx.Rollback()
 			t.Fatalf("seed row %d: %v", i, err)
@@ -400,8 +400,8 @@ func TestExportsAudit_FailClosed_NoBytesStreamWhenTheRowCannotBeWritten(t *testi
 	for name, tc := range exports {
 		t.Run(name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
-			ctx := auth.WithTenantID(req.Context(), "vlx_tnt_failclosed")
-			ctx = auth.WithKeyID(ctx, "vlx_key_failclosed")
+			ctx := auth.WithTenantID(req.Context(), "hc_tnt_failclosed")
+			ctx = auth.WithKeyID(ctx, "hc_key_failclosed")
 			ctx = postgres.WithLivemode(ctx, testKeyLivemode)
 			rec := httptest.NewRecorder()
 
@@ -463,7 +463,7 @@ func TestAuditLogCSV_NeutralizesHistoricalPoisonedRequestID(t *testing.T) {
 		INSERT INTO audit_log (id, tenant_id, actor_type, actor_id, action,
 			resource_type, resource_id, resource_label, metadata, request_id, created_at)
 		VALUES ($1, $2, 'api_key', 'k1', 'update', 'customer', 'cus_1', '', '{}', $3, now())
-	`, postgres.NewID("vlx_aud"), tenantID, payload); err != nil {
+	`, postgres.NewID("hc_aud"), tenantID, payload); err != nil {
 		t.Fatalf("seed legacy row: %v", err)
 	}
 	if err := tx.Commit(); err != nil {

@@ -53,14 +53,14 @@ func TestRecoveryRunLines_SameWordsAsTheInvoicePageWithoutItsFolds(t *testing.T)
 	t0 := time.Date(2027, 2, 1, 4, 30, 0, 0, time.UTC)
 	t1, t2 := t0.Add(72*time.Hour), t0.Add(192*time.Hour)
 	wall := time.Date(2026, 10, 19, 10, 0, 0, 0, time.UTC)
-	run := domain.InvoiceDunningRun{ID: "vlx_dr_1", State: domain.DunningEscalated, Resolution: domain.ResolutionRetriesExhausted}
+	run := domain.InvoiceDunningRun{ID: "hc_dr_1", State: domain.DunningEscalated, Resolution: domain.ResolutionRetriesExhausted}
 
 	// A written-off invoice on a test clock: one decline, its retry declined
 	// with a mapped code, then retries ran out, which paused collection and
 	// wrote the invoice off.
 	writtenOff := domain.Invoice{
 		Status: domain.InvoiceUncollectible, PaymentStatus: domain.PaymentFailed, AmountDueCents: 4900, TotalAmountCents: 4900,
-		IssuedAt: &t0, UncollectibleAt: &t2, IsSimulated: true, InvoiceNumber: "VLX-000123",
+		IssuedAt: &t0, UncollectibleAt: &t2, IsSimulated: true, InvoiceNumber: "HC-000123",
 	}
 	c := wireCase{
 		inv:  writtenOff,
@@ -139,7 +139,7 @@ func TestRecoveryRunLines_TheRunsEndAndItsRecoveringRetryShow(t *testing.T) {
 
 	// Recovered by a retry: the invoice page folds the retry and the run's
 	// end into "Invoice paid · After 1 retry"; the Dunning page shows both.
-	recovered := domain.InvoiceDunningRun{ID: "vlx_dr_2", State: domain.DunningResolved, Resolution: domain.ResolutionPaymentRecovered}
+	recovered := domain.InvoiceDunningRun{ID: "hc_dr_2", State: domain.DunningResolved, Resolution: domain.ResolutionPaymentRecovered}
 	paid := domain.Invoice{
 		Status: domain.InvoicePaid, PaymentStatus: domain.PaymentSucceeded, TotalAmountCents: 4900, AmountPaidCents: 4900,
 		IssuedAt: &t0, PaidAt: &t1, StripePaymentIntentID: "pi_ok",
@@ -181,7 +181,7 @@ func TestRecoveryRunLines_TheRunsEndAndItsRecoveringRetryShow(t *testing.T) {
 	}
 
 	// An operator's resolve names the operator, from the run's audit row.
-	voided := domain.InvoiceDunningRun{ID: "vlx_dr_3", State: domain.DunningResolved, Resolution: domain.ResolutionInvoiceVoided}
+	voided := domain.InvoiceDunningRun{ID: "hc_dr_3", State: domain.DunningResolved, Resolution: domain.ResolutionInvoiceVoided}
 	dunning, _, _ = recoveryLinesOf(t, wireCase{
 		inv:    domain.Invoice{Status: domain.InvoiceVoided, TotalAmountCents: 4900, IssuedAt: &t0, VoidedAt: &t1},
 		runs:   []domain.InvoiceDunningRun{voided},
@@ -198,9 +198,9 @@ func TestRecoveryRunLines_TheRunsEndAndItsRecoveringRetryShow(t *testing.T) {
 func TestRecoveryRunLines_UnreadableLanesAreNamed(t *testing.T) {
 	t.Parallel()
 	t0 := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
-	run := domain.InvoiceDunningRun{ID: "vlx_dr_4", State: domain.DunningActive}
+	run := domain.InvoiceDunningRun{ID: "hc_dr_4", State: domain.DunningActive}
 	c := wireCase{
-		inv:    domain.Invoice{Status: domain.InvoiceFinalized, TotalAmountCents: 4900, AmountDueCents: 4900, IssuedAt: &t0, InvoiceNumber: "VLX-9"},
+		inv:    domain.Invoice{Status: domain.InvoiceFinalized, TotalAmountCents: 4900, AmountDueCents: 4900, IssuedAt: &t0, InvoiceNumber: "HC-9"},
 		runs:   []domain.InvoiceDunningRun{run},
 		events: []domain.InvoiceDunningEvent{{ID: "evt_start", RunID: run.ID, EventType: domain.DunningEventStarted, CreatedAt: t0}},
 	}
@@ -220,7 +220,7 @@ func TestRecoveryRunLines_UnreadableLanesAreNamed(t *testing.T) {
 
 	// The run's invoice cannot be read: no line is built, and the caller
 	// is told.
-	run.InvoiceID = "vlx_inv_missing"
+	run.InvoiceID = "hc_inv_missing"
 	if _, _, err := h.RecoveryRunLines(context.Background(), "t1", run, c.events); err == nil {
 		t.Error("no error for a run whose invoice cannot be read")
 	}

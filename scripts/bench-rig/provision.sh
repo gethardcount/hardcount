@@ -18,7 +18,7 @@
 # has zero effect on the measured numbers, because benchmark traffic never
 # leaves the VPC. Ingress is restricted by security group instead.
 #
-# No IAM instance profile — the velox-benchmark policy denies IAM writes by
+# No IAM instance profile — the hardcount-benchmark policy denies IAM writes by
 # design, and the rig does not need one: instances build from the PUBLIC repo.
 #
 # Refuses to run without --yes, because this bills from the moment it succeeds.
@@ -41,8 +41,8 @@ DB_CLASS="${DB_CLASS:-db.m7g.large}"
 DB_STORAGE_GB="${DB_STORAGE_GB:-100}"
 DB_IOPS="${DB_IOPS:-}"             # only valid at >= 400 GB
 DB_THROUGHPUT="${DB_THROUGHPUT:-}" # MiB/s, only valid at >= 400 GB
-TAGS="Key=Project,Value=velox-bench"
-OUT="${OUT:-$HOME/.velox-bench-rig}"
+TAGS="Key=Project,Value=hardcount-bench"
+OUT="${OUT:-$HOME/.hardcount-bench-rig}"
 BRANCH="${BRANCH:-main}"
 
 [ "${1:-}" = "--yes" ] || { echo "refusing to provision without --yes (this starts billing)"; exit 1; }
@@ -63,18 +63,18 @@ say "vpc=$VPC subnet=$SUBNET ($AZ) ami=$AMI ssh-from=$MYIP"
 say "shape: app=$APP_TYPE loadgen=$GEN_TYPE db=$DB_CLASS storage=${DB_STORAGE_GB}GB gp3${DB_IOPS:+ ${DB_IOPS} IOPS}${DB_THROUGHPUT:+ ${DB_THROUGHPUT} MiB/s}"
 
 say "key pair"
-if ! aws_ ec2 describe-key-pairs --key-names velox-bench-key >/dev/null 2>&1; then
-  aws_ ec2 create-key-pair --key-name velox-bench-key --tag-specifications "ResourceType=key-pair,Tags=[{$TAGS}]" \
-    --query 'KeyMaterial' --output text > "$OUT/velox-bench-key.pem"
-  chmod 600 "$OUT/velox-bench-key.pem"
+if ! aws_ ec2 describe-key-pairs --key-names hardcount-bench-key >/dev/null 2>&1; then
+  aws_ ec2 create-key-pair --key-name hardcount-bench-key --tag-specifications "ResourceType=key-pair,Tags=[{$TAGS}]" \
+    --query 'KeyMaterial' --output text > "$OUT/hardcount-bench-key.pem"
+  chmod 600 "$OUT/hardcount-bench-key.pem"
 fi
-echo "  private key: $OUT/velox-bench-key.pem"
+echo "  private key: $OUT/hardcount-bench-key.pem"
 
 say "security group"
-SG=$(aws_ ec2 describe-security-groups --filters Name=group-name,Values=velox-bench-sg Name=vpc-id,Values="$VPC" \
+SG=$(aws_ ec2 describe-security-groups --filters Name=group-name,Values=hardcount-bench-sg Name=vpc-id,Values="$VPC" \
   --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null)
 if [ "$SG" = "None" ] || [ -z "$SG" ]; then
-  SG=$(aws_ ec2 create-security-group --group-name velox-bench-sg --description "velox track B bench rig" \
+  SG=$(aws_ ec2 create-security-group --group-name hardcount-bench-sg --description "hardcount track B bench rig" \
     --vpc-id "$VPC" --tag-specifications "ResourceType=security-group,Tags=[{$TAGS}]" \
     --query 'GroupId' --output text)
   aws_ ec2 authorize-security-group-ingress --group-id "$SG" --protocol tcp --port 22 --cidr "$MYIP" >/dev/null
@@ -88,11 +88,11 @@ say "RDS (longest lead time — started first, ~6-10 min)"
 DBPASS_FILE="$OUT/db-password"
 [ -f "$DBPASS_FILE" ] || { openssl rand -hex 20 > "$DBPASS_FILE"; chmod 600 "$DBPASS_FILE"; }
 DBPASS=$(cat "$DBPASS_FILE")
-if ! aws_ rds describe-db-subnet-groups --db-subnet-group-name velox-bench-subnets >/dev/null 2>&1; then
+if ! aws_ rds describe-db-subnet-groups --db-subnet-group-name hardcount-bench-subnets >/dev/null 2>&1; then
   # RDS requires >=2 AZs in a subnet group even for a Single-AZ instance; the
   # instance itself is pinned to $AZ below, which is what actually matters.
-  aws_ rds create-db-subnet-group --db-subnet-group-name velox-bench-subnets \
-    --db-subnet-group-description "velox bench" --subnet-ids "$SUBNET" "$SUBNET_B" \
+  aws_ rds create-db-subnet-group --db-subnet-group-name hardcount-bench-subnets \
+    --db-subnet-group-description "hardcount bench" --subnet-ids "$SUBNET" "$SUBNET_B" \
     --tags "$TAGS" >/dev/null
 fi
 # Instrumentation lives in a custom parameter group created BEFORE the instance,
@@ -115,20 +115,20 @@ fi
 # inline policy the account owner added to the benchmark key on 2026-08-17).
 # Enhanced Monitoring (1 s OS-level disk await/util/queue — what CloudWatch's
 # 60 s averages hide) needs an IAM role that RDS can assume; the policy only
-# lets this key pass roles named velox-bench-*, so the role is
-# velox-bench-rds-monitoring (created once by the account owner). If it exists
+# lets this key pass roles named hardcount-bench-*, so the role is
+# hardcount-bench-rds-monitoring (created once by the account owner). If it exists
 # it is attached; if not, the rig still works, just without 1 s OS metrics.
 # RDS_PARAMS="name=value;name=value" appends treatment settings for A/B rigs
 # (e.g. max_wal_size). Dynamic ones apply immediately; static ones at first boot.
-EM_ROLE=$(aws iam get-role --role-name velox-bench-rds-monitoring --query 'Role.Arn' --output text 2>/dev/null || true)
+EM_ROLE=$(aws iam get-role --role-name hardcount-bench-rds-monitoring --query 'Role.Arn' --output text 2>/dev/null || true)
 [ "$EM_ROLE" = "None" ] && EM_ROLE=""
 echo "  enhanced monitoring role: ${EM_ROLE:-<none — 1 s OS metrics off>}"
 PG_FAMILY="postgres16"
-PARAM_GROUP="velox-bench-pg16"
+PARAM_GROUP="hardcount-bench-pg16"
 say "parameter group $PARAM_GROUP (instrumentation)"
 if ! aws_ rds describe-db-parameter-groups --db-parameter-group-name "$PARAM_GROUP" >/dev/null 2>&1; then
   aws_ rds create-db-parameter-group --db-parameter-group-name "$PARAM_GROUP" \
-    --db-parameter-group-family "$PG_FAMILY" --description "velox bench: instrumentation" \
+    --db-parameter-group-family "$PG_FAMILY" --description "hardcount bench: instrumentation" \
     --tags "$TAGS" >/dev/null
 fi
 params="log_autovacuum_min_duration=0;log_checkpoints=1;log_lock_waits=1;deadlock_timeout=200;log_min_duration_statement=250;log_parameter_max_length=0;log_temp_files=0;track_io_timing=1;track_wal_io_timing=1;pg_stat_statements.track=all;shared_preload_libraries=pg_stat_statements,pg_tle${RDS_PARAMS:+;$RDS_PARAMS}"
@@ -145,12 +145,12 @@ pjson="$pjson]"
 aws_ rds modify-db-parameter-group --db-parameter-group-name "$PARAM_GROUP" --parameters "$pjson" >/dev/null
 echo "  $params"
 
-if ! aws_ rds describe-db-instances --db-instance-identifier velox-bench-db >/dev/null 2>&1; then
-  aws_ rds create-db-instance --db-instance-identifier velox-bench-db \
+if ! aws_ rds describe-db-instances --db-instance-identifier hardcount-bench-db >/dev/null 2>&1; then
+  aws_ rds create-db-instance --db-instance-identifier hardcount-bench-db \
     --db-instance-class "$DB_CLASS" --engine postgres --engine-version 16.14 \
-    --master-username velox --master-user-password "$DBPASS" \
+    --master-username hardcount --master-user-password "$DBPASS" \
     --allocated-storage "$DB_STORAGE_GB" --storage-type gp3 ${DB_IOPS:+--iops "$DB_IOPS"} ${DB_THROUGHPUT:+--storage-throughput "$DB_THROUGHPUT"} \
-    --db-subnet-group-name velox-bench-subnets --vpc-security-group-ids "$SG" \
+    --db-subnet-group-name hardcount-bench-subnets --vpc-security-group-ids "$SG" \
     --db-parameter-group-name "$PARAM_GROUP" \
     --enable-performance-insights --performance-insights-retention-period 7 \
     ${EM_ROLE:+--monitoring-interval 1 --monitoring-role-arn "$EM_ROLE"} \
@@ -158,7 +158,7 @@ if ! aws_ rds describe-db-instances --db-instance-identifier velox-bench-db >/de
     --backup-retention-period 0 --no-auto-minor-version-upgrade \
     --tags "$TAGS" >/dev/null
 fi
-echo "  velox-bench-db creating (password in $DBPASS_FILE)"
+echo "  hardcount-bench-db creating (password in $DBPASS_FILE)"
 
 # Both run modes are built, because they answer different questions and only
 # one of them is the number a self-hoster actually gets.
@@ -175,7 +175,7 @@ echo "  velox-bench-db creating (password in $DBPASS_FILE)"
 # that flatters us rather than the one the reader will run.
 #
 # NOTE the published figure still excludes nginx. deploy/compose puts nginx in
-# front of velox, which is one more hop; this measures the app container
+# front of hardcount, which is one more hop; this measures the app container
 # directly and the writeup says so.
 # THE HEREDOC IS QUOTED (<<'UD'). Nothing below expands here — it is a script
 # for the instance, not for this shell. That distinction is load-bearing and was
@@ -207,9 +207,9 @@ run() { local log=$1; shift; "$@" >"$log" 2>&1 || { echo "FAILED: $* (see $log)"
 run /tmp/install.log dnf install -y git golang postgresql16 postgresql16-contrib docker tar gzip procps-ng   # -contrib = pgbench (db-ceiling.sh); procps-ng = vmstat (measure.sh capture)
 run /tmp/docker.log systemctl enable --now docker
 cd /opt || exit 1
-run /tmp/clone.log git clone --depth 1 --branch __BRANCH__ https://github.com/getvelox/velox.git
-cd /opt/velox || { echo "FAILED: clone produced no /opt/velox" >>/tmp/failures.log; touch /tmp/NOT_READY; exit 1; }
-git config --global --add safe.directory /opt/velox
+run /tmp/clone.log git clone --depth 1 --branch __BRANCH__ https://github.com/gethardcount/hardcount.git
+cd /opt/hardcount || { echo "FAILED: clone produced no /opt/hardcount" >>/tmp/failures.log; touch /tmp/NOT_READY; exit 1; }
+git config --global --add safe.directory /opt/hardcount
 # Amazon Linux ships Go with GOTOOLCHAIN=local, so go build REFUSES when go.mod
 # requires a newer patch release than the packaged one — and GOSUMDB=off then
 # blocks downloading the right toolchain. Both must be overridden or every
@@ -222,12 +222,12 @@ git config --global --add safe.directory /opt/velox
 # three builds. docs/benchmarks/sustained-throughput.md has documented this
 # since the first rig run; provision.sh simply never applied it. It is invisible
 # to a container test, because Docker sets HOME=/root for you.
-run /tmp/build-velox.log go build -o /usr/local/bin/velox ./cmd/velox
-run /tmp/build-seed.log  go build -o /usr/local/bin/velox-bench-seed ./cmd/velox-bench-seed
-run /tmp/build-boot.log  go build -o /usr/local/bin/velox-bootstrap ./cmd/velox-bootstrap
-run /tmp/build-image.log docker build -t velox:bench .
+run /tmp/build-hardcount.log go build -o /usr/local/bin/hardcount ./cmd/hardcount
+run /tmp/build-seed.log  go build -o /usr/local/bin/hardcount-bench-seed ./cmd/hardcount-bench-seed
+run /tmp/build-boot.log  go build -o /usr/local/bin/hardcount-bootstrap ./cmd/hardcount-bootstrap
+run /tmp/build-image.log docker build -t hardcount:bench .
 
-# k6 generates the load; velox-bench-seed only creates fixtures and mints a key.
+# k6 generates the load; hardcount-bench-seed only creates fixtures and mints a key.
 # Installed on both instances because the loadgen is the one that needs it and
 # the app node is where you end up debugging.
 #
@@ -277,7 +277,7 @@ launch() {
     echo "  $name already running ($existing)" >&2; echo "$existing"; return
   fi
   aws_ ec2 run-instances --image-id "$AMI" --instance-type "$type" --count 1 \
-    --key-name velox-bench-key --security-group-ids "$SG" --subnet-id "$SUBNET" \
+    --key-name hardcount-bench-key --security-group-ids "$SG" --subnet-id "$SUBNET" \
     --associate-public-ip-address \
     --monitoring Enabled=true \
     --user-data "$USERDATA" \
@@ -286,8 +286,8 @@ launch() {
 }
 
 say "EC2"
-APP=$(launch velox-bench-app "$APP_TYPE")
-GEN=$(launch velox-bench-loadgen "$GEN_TYPE")
+APP=$(launch hardcount-bench-app "$APP_TYPE")
+GEN=$(launch hardcount-bench-loadgen "$GEN_TYPE")
 echo "  app=$APP loadgen=$GEN"
 
 say "waiting for instances to run"
@@ -308,10 +308,10 @@ aws_ ec2 describe-instances --instance-ids $APP $GEN \
 # still produce confident-looking numbers, which is the failure mode worth
 # spending ten lines to prevent.
 say "verifying same-AZ placement"
-INST_AZS=$(aws_ ec2 describe-instances --filters "Name=tag:Project,Values=velox-bench" \
+INST_AZS=$(aws_ ec2 describe-instances --filters "Name=tag:Project,Values=hardcount-bench" \
   "Name=instance-state-name,Values=running,pending" \
   --query 'Reservations[].Instances[].Placement.AvailabilityZone' --output text | tr '\t' '\n' | sort -u)
-DB_AZ=$(aws_ rds describe-db-instances --db-instance-identifier velox-bench-db \
+DB_AZ=$(aws_ rds describe-db-instances --db-instance-identifier hardcount-bench-db \
   --query 'DBInstances[0].AvailabilityZone' --output text 2>/dev/null)
 echo "  instances: $(echo "$INST_AZS" | tr '\n' ' ') | rds: ${DB_AZ:-<still creating>}"
 if [ "$(echo "$INST_AZS" | wc -l | tr -d ' ')" != "1" ]; then
@@ -323,7 +323,7 @@ fi
 # a pass, so say so rather than printing a checkmark over an unchecked thing.
 if [ -z "$DB_AZ" ] || [ "$DB_AZ" = "None" ]; then
   echo "  RDS AZ not yet assigned — RE-CHECK before measuring:" >&2
-  echo "    aws --region $REGION rds describe-db-instances --db-instance-identifier velox-bench-db --query 'DBInstances[0].AvailabilityZone' --output text" >&2
+  echo "    aws --region $REGION rds describe-db-instances --db-instance-identifier hardcount-bench-db --query 'DBInstances[0].AvailabilityZone' --output text" >&2
 elif [ "$DB_AZ" != "$(echo "$INST_AZS" | tr -d ' ')" ]; then
   echo "  FATAL: app nodes are in $INST_AZS but RDS is in $DB_AZ" >&2
   echo "  every DB round trip would be billed inter-AZ; tear down and re-provision" >&2

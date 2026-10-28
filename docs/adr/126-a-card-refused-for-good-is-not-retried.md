@@ -17,7 +17,7 @@ normal retry schedule.
 
 ## Context
 
-Issue #966. Velox used Stripe's decline code only for the message it showed.
+Issue #966. Hardcount used Stripe's decline code only for the message it showed.
 Dunning retried every decline on the card saved at that moment, so a card
 reported lost or stolen was charged again on every retry until the schedule
 ran out.
@@ -103,7 +103,7 @@ customer as a plain decline, never with the reason
    payment-update link, the hosted invoice page and the dashboard's Add card.
    (Amended 2026-10-22: a card saved through a setup or update link now
    becomes the default whatever the old default's state, ADR-021. This rule
-   still decides for a card paid on the hosted page and a SetupIntent Velox
+   still decides for a card paid on the hosted page and a SetupIntent Hardcount
    did not create.)
    This holds for the store's insert path and for a card already on file
    being saved again, so the customer always keeps exactly one default.
@@ -143,7 +143,7 @@ customer as a plain decline, never with the reason
   invoice, and a customer-wide block needs a rule for when it ends. The cost
   is one more decline on the next invoice's first charge.
 - **B. Use Stripe's `advice_code` (`do_not_try_again`).** It carries the card
-  network's own retry advice. Rejected for now: the stripe-go version Velox
+  network's own retry advice. Rejected for now: the stripe-go version Hardcount
   pins (v82) does not expose it on its error type, and Stripe's own retry
   rule is the code list.
 - **C. Hold the run without counting attempts until a new card arrives.**
@@ -212,7 +212,7 @@ customer as a plain decline, never with the reason
 ## Amendment 2026-10-23: a payment the bank wants the customer to confirm
 
 The Stripe card-flow review of 2026-10-22 (P4) charged a 3-D Secure card
-off-session. Stripe answered `authentication_required`; Velox showed "The
+off-session. Stripe answered `authentication_required`; Hardcount showed "The
 customer's card was declined" with **Retry payment**, put Stripe's developer
 text in the activity, emailed the generic decline, and every dunning retry
 charged the card off-session again. The customer could pay on the hosted

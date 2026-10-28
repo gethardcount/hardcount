@@ -6,17 +6,17 @@ Status: Accepted (amended 2026-10-14; see [the amendment](#amendment-2026-10-14-
 Original status: Accepted. The **guard + loud-log** below is IMPLEMENTED in this PR. The fuller "durable marker + critical banner + metering-only flag" design (from the design panel) is **deferred** — see *Deferred* — because live-doc verification showed it has no industry precedent and the guard already fixes the real defect.
 Relates: ADR-070 (no-silent-fallbacks in billing — this extends its fail-LOUD mandate to the finalize path), ADR-044 (multi-dim `{model,token_type}` rating — the meters this most affects), ADR-034 (plan immutability — the guard runs after it).
 
-**Superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23. Built in PR-4 (#1386): the plan-attach guard (decision 1) and the meter-in-use guard that replaced the last-price guard are gone, because a plan's meters are the meters it has prices for and a price edit on a used plan waits for the next period. Decision 2 and the amendment's WARN and counter stay. Built in PR-6 (#1390): when ingest finds that no price of the plan takes an event, it answers `billing_status: "no_price"` and counts it in `velox_usage_unbilled_total{reason="no_price"}` ([ADR-120 amendment 2026-10-27](120-invoice-grace-period-for-late-usage.md#amendment-2026-10-27-an-events-answer-says-what-velox-found-adr-130-pr-6-d07)). The close still leaves that usage off the invoice, logs it and counts its quantity, as above.
+**Superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23. Built in PR-4 (#1386): the plan-attach guard (decision 1) and the meter-in-use guard that replaced the last-price guard are gone, because a plan's meters are the meters it has prices for and a price edit on a used plan waits for the next period. Decision 2 and the amendment's WARN and counter stay. Built in PR-6 (#1390): when ingest finds that no price of the plan takes an event, it answers `billing_status: "no_price"` and counts it in `hardcount_usage_unbilled_total{reason="no_price"}` ([ADR-120 amendment 2026-10-27](120-invoice-grace-period-for-late-usage.md#amendment-2026-10-27-an-events-answer-says-what-hardcount-found-adr-130-pr-6-d07)). The close still leaves that usage off the invoice, logs it and counts its quantity, as above.
 
 ## Summary
 
-A plan can attach a usage meter only if the meter has a price: a default rating rule or at least one meter pricing rule. Without this check, a meter that only looked priced billed its usage at $0 with no signal. Amended 2026-10-14: removing a meter's last price was refused with 409 `invalid_state` while a plan using the meter had a draft, trialing or active subscription. Since 2026-10-23 the wider guard of the [ADR-070 amendment](070-price-change-semantics.md#amendment-2026-10-23-meter-pricing-edits-are-refused-while-a-subscription-uses-the-meter) replaces it: while such a subscription uses the meter, a rule delete, a default price pointed at another price or removed, and any other edit that would reprice usage is refused with 409 `meter_in_use`. Usage that still matches no price is left off the invoice and never billed later; each invoice that leaves such usage out logs a WARN and adds the quantity to `velox_usage_unpriced_quantity_total`. Status: active, amended 2026-10-14 and 2026-10-23.
+A plan can attach a usage meter only if the meter has a price: a default rating rule or at least one meter pricing rule. Without this check, a meter that only looked priced billed its usage at $0 with no signal. Amended 2026-10-14: removing a meter's last price was refused with 409 `invalid_state` while a plan using the meter had a draft, trialing or active subscription. Since 2026-10-23 the wider guard of the [ADR-070 amendment](070-price-change-semantics.md#amendment-2026-10-23-meter-pricing-edits-are-refused-while-a-subscription-uses-the-meter) replaces it: while such a subscription uses the meter, a rule delete, a default price pointed at another price or removed, and any other edit that would reprice usage is refused with 409 `meter_in_use`. Usage that still matches no price is left off the invoice and never billed later; each invoice that leaves such usage out logs a WARN and adds the quantity to `hardcount_usage_unpriced_quantity_total`. Status: active, amended 2026-10-14 and 2026-10-23.
 
 ## Context
 
 A MANUAL_TEST FLOW S1 walkthrough surfaced a **silent under-bill**: when a plan attaches a usage meter that has **no rating rule** — neither a `meter_pricing_rules` binding nor a default `meters.rating_rule_version_id` — the billing engine drops that meter's usage at cycle-close finalize and charges the customer **$0** for it, with no signal. Reproduced live: a $29 plan + 1,000 metered events that should have added $10.00 finalized and **auto-charged** base+tax only. The events aggregated correctly (1,000 units); they were simply never rated.
 
-The trap is a **key-match illusion**: the meter and the rule both carried the key `api_calls`, so it *looked* wired — but Velox binds meter↔rule by an explicit row/field, not by matching keys. The meter was created before the rule, so it was never bound.
+The trap is a **key-match illusion**: the meter and the rule both carried the key `api_calls`, so it *looked* wired — but Hardcount binds meter↔rule by an explicit row/field, not by matching keys. The meter was created before the rule, so it was never bound.
 
 ### Loudness was inverted
 
@@ -28,11 +28,11 @@ The trap is a **key-match illusion**: the meter and the rule both carried the ke
 
 A four-stance adversarial panel (annotate-only, fail-closed/hold, config-guard, durable-record) synthesized a fuller design: a durable `invoices.unrated_usage` marker + a **critical** `usage_unrated` attention banner + a `metering_only` meter flag, plus the guard. Before building it, the "is this industry-standard?" question was checked against live docs — and the answer **reshaped the decision**:
 
-- **The meter/rule split is universal** (Stripe meter+price, Metronome product+rate-card, Lago metric+charge, Orb metric+price) — Velox's architecture is standard.
-- **"Unpriced meter = tracked but not billed" is a *documented, intended* state in Orb and Lago.** Orb: *"Without a price configured for a metric on a given plan, the usage is **tracked but not billed**"* ([docs.withorb.com](https://docs.withorb.com/self-serve/agent-pricing)). Lago: a metric with no *charge* isn't invoiced ([getlago.com](https://www.getlago.com/docs/guide/plans/charges)). So Velox's *current* silent behavior actually matches Orb/Lago; only Stripe binds tightly enough (you subscribe to a **price**, not a bare meter) to make the state hard to reach.
+- **The meter/rule split is universal** (Stripe meter+price, Metronome product+rate-card, Lago metric+charge, Orb metric+price) — Hardcount's architecture is standard.
+- **"Unpriced meter = tracked but not billed" is a *documented, intended* state in Orb and Lago.** Orb: *"Without a price configured for a metric on a given plan, the usage is **tracked but not billed**"* ([docs.withorb.com](https://docs.withorb.com/self-serve/agent-pricing)). Lago: a metric with no *charge* isn't invoiced ([getlago.com](https://www.getlago.com/docs/guide/plans/charges)). So Hardcount's *current* silent behavior actually matches Orb/Lago; only Stripe binds tightly enough (you subscribe to a **price**, not a bare meter) to make the state hard to reach.
 - **No platform documents a "warn about unbilled usage" feature.** The marker/banner has **no industry precedent**.
 
-Conclusion: the fuller marker/banner apparatus would make Velox *louder than anyone* about a state Orb/Lago treat as normal. The real, Velox-specific defect is narrower — the **key-match illusion** that lets an operator attach a bare unpriced meter to a plan and *believe* it's priced. The fix is to make pricing an **explicit part of attaching a meter** (as Stripe/Orb/Lago do), not to detect-and-annotate after charging.
+Conclusion: the fuller marker/banner apparatus would make Hardcount *louder than anyone* about a state Orb/Lago treat as normal. The real, Hardcount-specific defect is narrower — the **key-match illusion** that lets an operator attach a bare unpriced meter to a plan and *believe* it's priced. The fix is to make pricing an **explicit part of attaching a meter** (as Stripe/Orb/Lago do), not to detect-and-annotate after charging.
 
 ## Decision
 
@@ -73,7 +73,7 @@ The panel's fuller design — a durable `invoices.unrated_usage` JSONB marker, a
 
 ## Consequences
 
-- The reachable bug (attach an unpriced meter → silent $0 usage) is **prevented at authoring** with a clear error — Velox now matches how Stripe/Orb/Lago make pricing explicit.
+- The reachable bug (attach an unpriced meter → silent $0 usage) is **prevented at authoring** with a clear error — Hardcount now matches how Stripe/Orb/Lago make pricing explicit.
 - The one case the guard can't see (drift) is **no longer silent** (loud log), satisfying ADR-070 without an invoice-schema change.
 - **Known limitation:** intentionally-unpriced (metering-only) meters can't be attached to a plan until `metering_only` ships. Acceptable at 0 customers; documented.
 - **No** migration, no new invoice column, no attention-reason/banner, no frontend — the minimal, industry-aligned fix.
@@ -114,7 +114,7 @@ research file `wrong-invoice-holes-981-980-design-2026-10-14.json`):
   billed" is no longer on the page this ADR cites.
 
 **Decision.** Keep the peer norm: the invoice is built and sent without
-the unpriced usage, and Velox does not bill it again later (the shape of
+the unpriced usage, and Hardcount does not bill it again later (the shape of
 ADR-120). Close the two gaps:
 
 1. **Guard** (replaced 2026-10-23 by ADR-070's amendment). While a
@@ -137,7 +137,7 @@ ADR-120). Close the two gaps:
    signals report that too.
 2. **Signals.** Each place that builds an invoice without unpriced usage
    logs a WARN with meter and quantity, and adds the quantity to
-   `velox_usage_unpriced_quantity_total{meter_id, mode}` (`mode` is live
+   `hardcount_usage_unpriced_quantity_total{meter_id, mode}` (`mode` is live
    or test; test-clock simulations are not counted, as in the other
    billing metrics). It counts after the commit that makes the invoice
    decision final. For a cancel, that is the caller's commit, so a cancel

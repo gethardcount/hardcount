@@ -3074,7 +3074,7 @@ type APIKeyRotation struct {
 
 // ActivityActor Who did it. `person` and `api_key` carry the name (a person's email
 // when they have no name), `customer` says where through `via`, and
-// `automatic` is anything Velox did on its own. Absent when no fact
+// `automatic` is anything Hardcount did on its own. Absent when no fact
 // written with the row names one.
 type ActivityActor struct {
 	Kind ActivityActorKind `json:"kind"`
@@ -3097,7 +3097,7 @@ type ActivityActorVia string
 type ActivityLine struct {
 	// Actor Who did it. `person` and `api_key` carry the name (a person's email
 	// when they have no name), `customer` says where through `via`, and
-	// `automatic` is anything Velox did on its own. Absent when no fact
+	// `automatic` is anything Hardcount did on its own. Absent when no fact
 	// written with the row names one.
 	Actor  ActivityActor `json:"actor,omitempty"`
 	Amount ActivityMoney `json:"amount,omitempty"`
@@ -3340,8 +3340,8 @@ type Attention struct {
 	// bump. Stripe parity.
 	Code string `json:"code,omitempty"`
 
-	// Detail Velox's own explanation behind `message`: why the state
-	// holds, what Velox does on its own, and ids support may ask
+	// Detail Hardcount's own explanation behind `message`: why the state
+	// holds, what Hardcount does on its own, and ids support may ask
 	// for (for example the payment intent ids of a payment
 	// anomaly). Plain text; may contain blank-line paragraph
 	// breaks. Never a provider payload — that is
@@ -3352,7 +3352,7 @@ type Attention struct {
 	// reason. Stripe parity.
 	DocUrl string `json:"doc_url,omitempty"`
 
-	// DueBy The invoice's payment deadline (its `due_at`). Velox does not
+	// DueBy The invoice's payment deadline (its `due_at`). Hardcount does not
 	// act on this date; it is shown so the operator knows it.
 	// Absent when the invoice has no due date.
 	DueBy time.Time `json:"due_by,omitempty"`
@@ -3368,7 +3368,7 @@ type Attention struct {
 	// releases; switch on `reason` and `code`, not on this text.
 	Message string `json:"message"`
 
-	// NextAttemptAt When Velox will next retry on its own. Today only a tax
+	// NextAttemptAt When Hardcount will next retry on its own. Today only a tax
 	// retry sets it. Absent when no automatic retry is scheduled.
 	NextAttemptAt time.Time `json:"next_attempt_at,omitempty"`
 
@@ -3380,7 +3380,7 @@ type Attention struct {
 
 	// ProviderResponse The provider's own response (Stripe Tax error envelope,
 	// Stripe's last payment error), exactly as received. Present
-	// only when Velox called the provider.
+	// only when Hardcount called the provider.
 	ProviderResponse string `json:"provider_response,omitempty"`
 
 	// Reason Closed, typed code naming why an invoice needs operator
@@ -3407,7 +3407,7 @@ type Attention struct {
 	// not treat the reason code as the presence test for exposure
 	// (2026-08-04). `dispute_lost` reports a payment on the invoice that
 	// the customer disputed with their bank and that the dispute took
-	// back (the dispute closed as `lost`). Velox leaves the invoice paid
+	// back (the dispute closed as `lost`). Hardcount leaves the invoice paid
 	// and moves no money; the operator records the loss. Surfaced on paid
 	// invoices. On an invoice that bought prepaid credit, the message
 	// also says how much of the credit is still spendable and names
@@ -3448,7 +3448,7 @@ type Attention struct {
 // refund or correction is made there. `mark_uncollectible` opens
 // the write-off and is offered only on a parked invoice (payment
 // status unknown with no payment intent recorded), for a customer
-// who paid another way: Velox records a payment that Stripe shows,
+// who paid another way: Hardcount records a payment that Stripe shows,
 // and charges the invoice again if none appears within 24 hours.
 // Dashboards render it as a secondary action. `void_invoice` is offered
 // on prepaid-commit exposure, only while some of the granted
@@ -3469,7 +3469,7 @@ type AttentionActionItem struct {
 	// refund or correction is made there. `mark_uncollectible` opens
 	// the write-off and is offered only on a parked invoice (payment
 	// status unknown with no payment intent recorded), for a customer
-	// who paid another way: Velox records a payment that Stripe shows,
+	// who paid another way: Hardcount records a payment that Stripe shows,
 	// and charges the invoice again if none appears within 24 hours.
 	// Dashboards render it as a secondary action. `void_invoice` is offered
 	// on prepaid-commit exposure, only while some of the granted
@@ -3510,7 +3510,7 @@ type AttentionActionItem struct {
 // not treat the reason code as the presence test for exposure
 // (2026-08-04). `dispute_lost` reports a payment on the invoice that
 // the customer disputed with their bank and that the dispute took
-// back (the dispute closed as `lost`). Velox leaves the invoice paid
+// back (the dispute closed as `lost`). Hardcount leaves the invoice paid
 // and moves no money; the operator records the loss. Surfaced on paid
 // invoices. On an invoice that bought prepaid credit, the message
 // also says how much of the credit is still spendable and names
@@ -3556,7 +3556,7 @@ type AuditLogEntry struct {
 	// Metadata Action details. A settings change lists each changed field with `from` and `to`.
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
 
-	// RequestId Matches the `Velox-Request-Id` header of the request that made the change.
+	// RequestId Matches the `Hardcount-Request-Id` header of the request that made the change.
 	RequestId string `json:"request_id,omitempty"`
 
 	// ResourceId Can be empty for tenant-wide resources such as settings.
@@ -3636,13 +3636,13 @@ type BootstrapResult struct {
 	OwnerPassword     string `json:"owner_password"`
 	PasswordGenerated bool   `json:"password_generated"`
 
-	// PublishableKeyTest Test-mode publishable key (`vlx_pub_test_...`).
+	// PublishableKeyTest Test-mode publishable key (`hc_pub_test_...`).
 	PublishableKeyTest string `json:"publishable_key_test"`
 
-	// SecretKeyLive Live-mode secret key (`vlx_secret_live_...`).
+	// SecretKeyLive Live-mode secret key (`hc_secret_live_...`).
 	SecretKeyLive string `json:"secret_key_live"`
 
-	// SecretKeyTest Test-mode secret key (`vlx_secret_test_...`).
+	// SecretKeyTest Test-mode secret key (`hc_secret_test_...`).
 	SecretKeyTest string `json:"secret_key_test"`
 	Tenant        Tenant `json:"tenant"`
 }
@@ -3820,7 +3820,7 @@ type CreditLiveCurrency struct {
 // CreditNote A credit note reduces what a customer owes on an invoice, or gives
 // money back after it was paid. Its total is split three ways: refund
 // to the card (`refund_amount_cents`), credit to the customer's
-// balance (`credit_amount_cents`), and money returned outside Velox
+// balance (`credit_amount_cents`), and money returned outside Hardcount
 // (`out_of_band_amount_cents`).
 type CreditNote struct {
 	// BillToSnapshot What an issued invoice or credit note prints about its buyer, copied
@@ -3841,7 +3841,7 @@ type CreditNote struct {
 	// IsSimulated True when `issued_at` is test-clock time.
 	IsSimulated bool `json:"is_simulated"`
 
-	// IssuePending True on a draft that Velox will issue automatically.
+	// IssuePending True on a draft that Hardcount will issue automatically.
 	IssuePending         bool                   `json:"issue_pending"`
 	IssuedAt             time.Time              `json:"issued_at,omitempty"`
 	Metadata             map[string]interface{} `json:"metadata,omitempty"`
@@ -4192,7 +4192,7 @@ type CustomerUsageMeter struct {
 		// DimensionMatch The labels the price takes. Absent for a price that takes every event.
 		DimensionMatch map[string]string `json:"dimension_match,omitempty"`
 
-		// NoPrice True for usage no price of the plan took. Velox bills
+		// NoPrice True for usage no price of the plan took. Hardcount bills
 		// nothing for it, and it is left out of the meter's totals.
 		NoPrice bool   `json:"no_price,omitempty"`
 		PlanId  string `json:"plan_id"`
@@ -4218,7 +4218,7 @@ type CustomerUsageMeter struct {
 // disputed payment paid and the dispute, each as the API returns it.
 // Both are saved in the same transaction that records the dispute, so
 // a crash cannot drop them. `payment.dispute_opened` is sent once per
-// dispute, when Velox first records it; if the first event Velox
+// dispute, when Hardcount first records it; if the first event Hardcount
 // receives is already the close, both are sent, and both carry the
 // closed status and `closed_at`. Their delivery order is not
 // guaranteed. `payment.dispute_closed` is sent when the dispute
@@ -4230,11 +4230,11 @@ type DisputeWebhookEventData struct {
 	// invoice's payments, recorded from Stripe's `charge.dispute.created`,
 	// `.updated` and `.closed` webhook events. It holds the dispute as the
 	// newest of those events showed it, whatever order they arrived in.
-	// Velox records and reports a dispute, and nothing else: the invoice
+	// Hardcount records and reports a dispute, and nothing else: the invoice
 	// stays paid and no money moves.
 	Dispute InvoiceDispute `json:"dispute"`
 
-	// Invoice A Velox invoice. Returned from create, finalize, void, list, get,
+	// Invoice A Hardcount invoice. Returned from create, finalize, void, list, get,
 	// rotate-public-token, and collect-payment endpoints.
 	Invoice Invoice `json:"invoice"`
 }
@@ -4556,7 +4556,7 @@ type HeldUsageGroup struct {
 	FirstEventAt       time.Time `json:"first_event_at"`
 	LastEventAt        time.Time `json:"last_event_at"`
 
-	// LastReceivedAt When Velox last received a row for this group.
+	// LastReceivedAt When Hardcount last received a row for this group.
 	LastReceivedAt time.Time `json:"last_received_at"`
 
 	// MeterExists Whether a meter with this `event_name` exists now.
@@ -4573,7 +4573,7 @@ type HeldUsageGroup struct {
 // HeldUsageGroupReason What was missing when the rows arrived.
 type HeldUsageGroupReason string
 
-// HeldUsageReleaseResult The counts are what Velox found when the release wrote the rows, as
+// HeldUsageReleaseResult The counts are what Hardcount found when the release wrote the rows, as
 // for `billing_status` (see `UsageBillingStatus`). The invoice is the
 // final answer.
 type HeldUsageReleaseResult struct {
@@ -4587,7 +4587,7 @@ type HeldUsageReleaseResult struct {
 	Deduplicated int `json:"deduplicated"`
 
 	// InOpenPeriod Released rows in a billing period not invoiced yet that a price
-	// of its plan takes. Rows Velox does not check count here too:
+	// of its plan takes. Rows Hardcount does not check count here too:
 	// rows after the current period's end, while the subscription
 	// continues, and rows after a trial's end while the subscription
 	// still trials. Rows of a sum or count meter stamped before the end
@@ -4682,8 +4682,8 @@ type HostedInvoice struct {
 		// PaymentStatus Payment-attempt status. `unknown` marks a Stripe charge attempt that
 		// returned an ambiguous error (5xx, timeout, connection reset) where
 		// we cannot tell whether Stripe processed the charge. With a payment
-		// intent recorded, Velox asks Stripe for it after a short wait. With
-		// none (a parked invoice), Velox lists the customer's payments at
+		// intent recorded, Hardcount asks Stripe for it after a short wait. With
+		// none (a parked invoice), Hardcount lists the customer's payments at
 		// Stripe every billing tick: it records a payment for the invoice that
 		// appears, and if none has appeared 24 hours after the attempt the
 		// invoice goes back to `pending` (`failed` after a dunning retry) and
@@ -4746,7 +4746,7 @@ type HostedInvoice struct {
 // charge.
 type HostedInvoicePayUnavailableReason string
 
-// Invoice A Velox invoice. Returned from create, finalize, void, list, get,
+// Invoice A Hardcount invoice. Returned from create, finalize, void, list, get,
 // rotate-public-token, and collect-payment endpoints.
 type Invoice struct {
 	AmountDueCents  int64 `json:"amount_due_cents"`
@@ -4817,7 +4817,7 @@ type Invoice struct {
 	NoPmNotifiedAt time.Time `json:"no_pm_notified_at,omitempty"`
 	PaidAt         time.Time `json:"paid_at,omitempty"`
 
-	// PaidOutOfBand True when the payment was recorded as made outside Velox, such as
+	// PaidOutOfBand True when the payment was recorded as made outside Hardcount, such as
 	// a bank transfer or cheque (`POST /v1/invoices/{id}/record-payment`,
 	// or a payment recovery run resolved as `payment_recovered`). Such
 	// an invoice has no `stripe_payment_intent_id`, so there is no card
@@ -4846,23 +4846,23 @@ type Invoice struct {
 	// PaymentStatus Payment-attempt status. `unknown` marks a Stripe charge attempt that
 	// returned an ambiguous error (5xx, timeout, connection reset) where
 	// we cannot tell whether Stripe processed the charge. With a payment
-	// intent recorded, Velox asks Stripe for it after a short wait. With
-	// none (a parked invoice), Velox lists the customer's payments at
+	// intent recorded, Hardcount asks Stripe for it after a short wait. With
+	// none (a parked invoice), Hardcount lists the customer's payments at
 	// Stripe every billing tick: it records a payment for the invoice that
 	// appears, and if none has appeared 24 hours after the attempt the
 	// invoice goes back to `pending` (`failed` after a dunning retry) and
 	// is charged again as usual.
 	PaymentStatus InvoicePaymentStatus `json:"payment_status"`
 
-	// ProviderPaymentStatus Stripe's PaymentIntent status the last time Velox checked it,
+	// ProviderPaymentStatus Stripe's PaymentIntent status the last time Hardcount checked it,
 	// word for word. For information only: `payment_status` is the
-	// invoice's payment state. Absent until Velox has checked. An
+	// invoice's payment state. Absent until Hardcount has checked. An
 	// invoice checked by the Stripe Search sweep of releases before
 	// this one may still show `search_not_found`,
 	// `search_terminal_only` or `search_error`.
 	ProviderPaymentStatus string `json:"provider_payment_status,omitempty"`
 
-	// ProviderSyncedAt When Velox last asked Stripe about this invoice's payment, whether
+	// ProviderSyncedAt When Hardcount last asked Stripe about this invoice's payment, whether
 	// or not Stripe answered: a read of `provider_payment_status`, or a
 	// check of a charge whose result was lost.
 	ProviderSyncedAt time.Time `json:"provider_synced_at,omitempty"`
@@ -4900,7 +4900,7 @@ type Invoice struct {
 	// invoice, or of its last charge that is in progress or failed. It
 	// can be absent after a charge was sent: for example when the
 	// invoice was then paid without a card (by credits, with nothing
-	// due, or outside Velox: `paid_out_of_band`), or when Stripe
+	// due, or outside Hardcount: `paid_out_of_band`), or when Stripe
 	// refused the last charge as below its minimum.
 	StripePaymentIntentId string `json:"stripe_payment_intent_id,omitempty"`
 
@@ -4951,7 +4951,7 @@ type Invoice struct {
 
 	// TaxStatus Whether tax has been calculated. `ok`: it has. `pending`: the
 	// calculation failed, and `tax_error_code` says why and whether
-	// Velox retries it. A pending invoice cannot be finalized, so a wrong
+	// Hardcount retries it. A pending invoice cannot be finalized, so a wrong
 	// tax amount is never sent.
 	TaxStatus InvoiceTaxStatus `json:"tax_status,omitempty"`
 
@@ -5013,7 +5013,7 @@ type InvoiceCreateRequest struct {
 // invoice's payments, recorded from Stripe's `charge.dispute.created`,
 // `.updated` and `.closed` webhook events. It holds the dispute as the
 // newest of those events showed it, whatever order they arrived in.
-// Velox records and reports a dispute, and nothing else: the invoice
+// Hardcount records and reports a dispute, and nothing else: the invoice
 // stays paid and no money moves.
 type InvoiceDispute struct {
 	// AmountCents The disputed amount. It can differ from the payment.
@@ -5120,7 +5120,7 @@ type InvoiceLineItem struct {
 	// TaxReason Stripe-canonical structured `taxability_reason`
 	// (`standard_rated`, `reverse_charge`, `not_collecting`,
 	// `customer_exempt`, `product_exempt`, `zero_rated`, etc.).
-	// `prepaid_credit_purchase` is Velox's own value, on a prepaid
+	// `prepaid_credit_purchase` is Hardcount's own value, on a prepaid
 	// commit purchase line under the manual or Stripe Tax provider:
 	// the line is not taxed, and the usage the credit pays for is
 	// taxed when invoiced. Otherwise empty for non-Stripe providers.
@@ -5165,8 +5165,8 @@ type InvoiceLineType string
 // InvoicePaymentStatus Payment-attempt status. `unknown` marks a Stripe charge attempt that
 // returned an ambiguous error (5xx, timeout, connection reset) where
 // we cannot tell whether Stripe processed the charge. With a payment
-// intent recorded, Velox asks Stripe for it after a short wait. With
-// none (a parked invoice), Velox lists the customer's payments at
+// intent recorded, Hardcount asks Stripe for it after a short wait. With
+// none (a parked invoice), Hardcount lists the customer's payments at
 // Stripe every billing tick: it records a payment for the invoice that
 // appears, and if none has appeared 24 hours after the attempt the
 // invoice goes back to `pending` (`failed` after a dunning retry) and
@@ -5247,7 +5247,7 @@ type InvoiceStatus string
 
 // InvoiceTaxStatus Whether tax has been calculated. `ok`: it has. `pending`: the
 // calculation failed, and `tax_error_code` says why and whether
-// Velox retries it. A pending invoice cannot be finalized, so a wrong
+// Hardcount retries it. A pending invoice cannot be finalized, so a wrong
 // tax amount is never sent.
 type InvoiceTaxStatus string
 
@@ -5302,7 +5302,7 @@ type InvoiceTimelineEventStatus string
 // nesting `line_items` inside the invoice) so the client can render
 // the two arrays independently.
 type InvoiceWithLineItems struct {
-	// Invoice A Velox invoice. Returned from create, finalize, void, list, get,
+	// Invoice A Hardcount invoice. Returned from create, finalize, void, list, get,
 	// rotate-public-token, and collect-payment endpoints.
 	Invoice   Invoice           `json:"invoice"`
 	LineItems []InvoiceLineItem `json:"line_items"`
@@ -5318,7 +5318,7 @@ type ItemChangeType string
 // email sort say where they stop counting.
 type ListTotal = int
 
-// LitellmSpendLog The fields of a LiteLLM `StandardLoggingPayload` that Velox reads.
+// LitellmSpendLog The fields of a LiteLLM `StandardLoggingPayload` that Hardcount reads.
 // Other fields are accepted and ignored.
 type LitellmSpendLog struct {
 	// CacheHit `true` when LiteLLM answered from its own response cache. The
@@ -5327,7 +5327,7 @@ type LitellmSpendLog struct {
 	CacheHit bool `json:"cache_hit,omitempty"`
 
 	// CallType A record bills on its token counts unless its call type is one
-	// Velox does not bill (images, audio, realtime, moderation,
+	// Hardcount does not bill (images, audio, realtime, moderation,
 	// batches, files, A2A, response retrieval, ...); those are
 	// skipped, and a skipped record that carries tokens is logged.
 	CallType         string `json:"call_type,omitempty"`
@@ -6033,7 +6033,7 @@ type RecipePriceMode string
 // refusing to record it would only make the books wrong too.
 //
 // A written-off invoice is settled by RECORDING writers only — an
-// offline payment, or Velox recording a card charge that Stripe shows
+// offline payment, or Hardcount recording a card charge that Stripe shows
 // succeeded (its webhook, or the check of an unresolved charge).
 // Nothing initiates a card
 // charge against one (ADR-113): recovery of a returned customer runs on
@@ -6079,7 +6079,7 @@ type SentEmail struct {
 	Line      ActivityLine `json:"line,omitempty"`
 	Recipient string       `json:"recipient"`
 
-	// Status Velox's send state. `dispatched` means the mail server accepted it.
+	// Status Hardcount's send state. `dispatched` means the mail server accepted it.
 	Status SentEmailStatus `json:"status"`
 }
 
@@ -6089,7 +6089,7 @@ type SentEmailDeliveryState string
 // SentEmailEmailType defines model for SentEmail.EmailType.
 type SentEmailEmailType string
 
-// SentEmailStatus Velox's send state. `dispatched` means the mail server accepted it.
+// SentEmailStatus Hardcount's send state. `dispatched` means the mail server accepted it.
 type SentEmailStatus string
 
 // StripeConnection defines model for StripeConnection.
@@ -6159,7 +6159,7 @@ type Subscription struct {
 	// Never set on a subscription attached to a test clock.
 	BillingFailure BillingFailure `json:"billing_failure,omitempty"`
 
-	// BillingThresholds Limits that make Velox invoice before the period ends. A threshold
+	// BillingThresholds Limits that make Hardcount invoice before the period ends. A threshold
 	// invoice bills the period's usage so far, and no base fee. The period
 	// keeps its dates, the base fee is billed as it would be with no
 	// threshold, and the period's next invoice bills the rest of the usage.
@@ -6212,7 +6212,7 @@ type SubscriptionBillingTime string
 // SubscriptionStatus defines model for Subscription.Status.
 type SubscriptionStatus string
 
-// SubscriptionBillingThresholds Limits that make Velox invoice before the period ends. A threshold
+// SubscriptionBillingThresholds Limits that make Hardcount invoice before the period ends. A threshold
 // invoice bills the period's usage so far, and no base fee. The period
 // keeps its dates, the base fee is billed as it would be with no
 // threshold, and the period's next invoice bills the rest of the usage.
@@ -6255,11 +6255,11 @@ type SubscriptionItemChangeResult struct {
 	// interval created for the new period it starts.
 	NewPeriodInvoice SubscriptionNewPeriodInvoice `json:"new_period_invoice,omitempty"`
 
-	// Proration What Velox did to settle the rest of the period for an item change.
+	// Proration What Hardcount did to settle the rest of the period for an item change.
 	Proration SubscriptionItemProration `json:"proration,omitempty"`
 }
 
-// SubscriptionItemProration What Velox did to settle the rest of the period for an item change.
+// SubscriptionItemProration What Hardcount did to settle the rest of the period for an item change.
 type SubscriptionItemProration struct {
 	// AmountCents Gross amount, tax included: the invoice total (`invoice`), or
 	// the whole credit for unused time (`credit` and `adjustment`).
@@ -6343,7 +6343,7 @@ type SubscriptionPauseCollection struct {
 	Behavior SubscriptionPauseCollectionBehavior `json:"behavior"`
 
 	// ResumesAt When collection resumes. Absent when the pause lasts until it is
-	// cleared. On a pause set by dunning, it is when Velox recorded the
+	// cleared. On a pause set by dunning, it is when Hardcount recorded the
 	// payment of the invoice the pause was set for.
 	ResumesAt time.Time `json:"resumes_at,omitempty"`
 
@@ -6482,7 +6482,7 @@ type TenantSettings struct {
 	// the current text.
 	InvoiceFooter string `json:"invoice_footer,omitempty"`
 
-	// InvoicePrefix Starts every invoice number, such as `VLX-000001`.
+	// InvoicePrefix Starts every invoice number, such as `HC-000001`.
 	InvoicePrefix string `json:"invoice_prefix"`
 
 	// LogoUrl Shown in emails and on the hosted invoice page. PDFs do not print it.
@@ -6581,7 +6581,7 @@ type TenantSettingsInput struct {
 	// the current text.
 	InvoiceFooter string `json:"invoice_footer,omitempty"`
 
-	// InvoicePrefix Starts every invoice number, such as `VLX-000001`.
+	// InvoicePrefix Starts every invoice number, such as `HC-000001`.
 	InvoicePrefix string `json:"invoice_prefix,omitempty"`
 
 	// LogoUrl Shown in emails and on the hosted invoice page. PDFs do not print it.
@@ -6722,7 +6722,7 @@ type UsageAggregate struct {
 	TotalUnits string `json:"total_units"`
 }
 
-// UsageBillingStatus What Velox found when the event arrived. It checked the event
+// UsageBillingStatus What Hardcount found when the event arrived. It checked the event
 // against the customer's subscriptions, the plans and prices in force,
 // and the invoices already built at that moment. Sent only on the
 // answer that wrote the event; the event is stored all the same.
@@ -6744,11 +6744,11 @@ type UsageAggregate struct {
 //     `dimension_match`, compared as strings: the number `1` is not the
 //     string `"1"`.
 //
-// No `billing_status` means Velox found no reason then. It is not a
-// promise that the event will be billed. Velox checks only the
+// No `billing_status` means Hardcount found no reason then. It is not a
+// promise that the event will be billed. Hardcount checks only the
 // customer's current billing periods: time after a period end whose
 // invoice is not built yet is not checked, nor is time after a trial's
-// end before Velox ends the trial. A later change can change the
+// end before Hardcount ends the trial. A later change can change the
 // outcome either way: a subscription created, activated or changed, a
 // trial extended, a scheduled cancel undone, or a price added. The
 // invoice is the final answer.
@@ -6761,7 +6761,7 @@ type UsageBillingStatus string
 
 // UsageEvent defines model for UsageEvent.
 type UsageEvent struct {
-	// BillingStatus What Velox found when the event arrived. It checked the event
+	// BillingStatus What Hardcount found when the event arrived. It checked the event
 	// against the customer's subscriptions, the plans and prices in force,
 	// and the invoices already built at that moment. Sent only on the
 	// answer that wrote the event; the event is stored all the same.
@@ -6783,11 +6783,11 @@ type UsageEvent struct {
 	//   `dimension_match`, compared as strings: the number `1` is not the
 	//   string `"1"`.
 	//
-	// No `billing_status` means Velox found no reason then. It is not a
-	// promise that the event will be billed. Velox checks only the
+	// No `billing_status` means Hardcount found no reason then. It is not a
+	// promise that the event will be billed. Hardcount checks only the
 	// customer's current billing periods: time after a period end whose
 	// invoice is not built yet is not checked, nor is time after a trial's
-	// end before Velox ends the trial. A later change can change the
+	// end before Hardcount ends the trial. A later change can change the
 	// outcome either way: a subscription created, activated or changed, a
 	// trial extended, a scheduled cancel undone, or a price added. The
 	// invoice is the final answer.
@@ -6838,7 +6838,7 @@ type UsageEventProviderCostSource string
 
 // UsageEventBatchEventResult defines model for UsageEventBatchEventResult.
 type UsageEventBatchEventResult struct {
-	// BillingStatus What Velox found when the event arrived. It checked the event
+	// BillingStatus What Hardcount found when the event arrived. It checked the event
 	// against the customer's subscriptions, the plans and prices in force,
 	// and the invoices already built at that moment. Sent only on the
 	// answer that wrote the event; the event is stored all the same.
@@ -6860,11 +6860,11 @@ type UsageEventBatchEventResult struct {
 	//   `dimension_match`, compared as strings: the number `1` is not the
 	//   string `"1"`.
 	//
-	// No `billing_status` means Velox found no reason then. It is not a
-	// promise that the event will be billed. Velox checks only the
+	// No `billing_status` means Hardcount found no reason then. It is not a
+	// promise that the event will be billed. Hardcount checks only the
 	// customer's current billing periods: time after a period end whose
 	// invoice is not built yet is not checked, nor is time after a trial's
-	// end before Velox ends the trial. A later change can change the
+	// end before Hardcount ends the trial. A later change can change the
 	// outcome either way: a subscription created, activated or changed, a
 	// trial extended, a scheduled cancel undone, or a price added. The
 	// invoice is the final answer.
@@ -6955,7 +6955,7 @@ type WebhookEndpoint struct {
 type WebhookEndpointCreated struct {
 	Endpoint WebhookEndpoint `json:"endpoint"`
 
-	// Secret The signing secret (`whsec_…`). Store it now; Velox does not show it again.
+	// Secret The signing secret (`whsec_…`). Store it now; Hardcount does not show it again.
 	Secret string `json:"secret"`
 }
 
@@ -6998,7 +6998,7 @@ type WebhookEndpointStats struct {
 	TotalDeliveries int `json:"total_deliveries"`
 }
 
-// WebhookEvent One outbound webhook event, as Velox created it.
+// WebhookEvent One outbound webhook event, as Hardcount created it.
 type WebhookEvent struct {
 	CreatedAt time.Time `json:"created_at"`
 	EventType string    `json:"event_type"`
@@ -7294,11 +7294,11 @@ type BootstrapJSONBody struct {
 	// OwnerEmail Must contain `@`.
 	OwnerEmail string `json:"owner_email,omitempty"`
 
-	// OwnerPassword 12 or more characters, at most 72 bytes, and not a common password from a leaked-password list. Omit to have Velox generate one.
+	// OwnerPassword 12 or more characters, at most 72 bytes, and not a common password from a leaked-password list. Omit to have Hardcount generate one.
 	OwnerPassword string `json:"owner_password,omitempty"`
 	TenantName    string `json:"tenant_name,omitempty"`
 
-	// Token The value of `VELOX_BOOTSTRAP_TOKEN`. Or send it as a Bearer token.
+	// Token The value of `HARDCOUNT_BOOTSTRAP_TOKEN`. Or send it as a Bearer token.
 	Token string `json:"token,omitempty"`
 }
 
@@ -8998,7 +8998,7 @@ type PostV1UsageEventsJSONBody struct {
 	// EventName The meter's `event_name` (e.g. "tokens").
 	EventName string `json:"event_name"`
 
-	// ExternalCustomerId The customer's external_id (your identifier), not the internal vlx_cus_ id.
+	// ExternalCustomerId The customer's external_id (your identifier), not the internal hc_cus_ id.
 	ExternalCustomerId string `json:"external_customer_id"`
 
 	// IdempotencyKey Your unique ID for this event. Pick it once, before the
@@ -9064,7 +9064,7 @@ type BackfillUsageEventJSONBody struct {
 	// EventName The meter's `event_name` (e.g. "tokens").
 	EventName string `json:"event_name"`
 
-	// ExternalCustomerId The customer's external_id (your identifier), not the internal vlx_cus_ id.
+	// ExternalCustomerId The customer's external_id (your identifier), not the internal hc_cus_ id.
 	ExternalCustomerId string `json:"external_customer_id"`
 
 	// IdempotencyKey Your unique ID for this event. Pick it once, before the
@@ -9110,7 +9110,7 @@ type PostV1UsageEventsBatchJSONBody = []struct {
 	// EventName The meter's `event_name` (e.g. "tokens").
 	EventName string `json:"event_name"`
 
-	// ExternalCustomerId The customer's external_id (your identifier), not the internal vlx_cus_ id.
+	// ExternalCustomerId The customer's external_id (your identifier), not the internal hc_cus_ id.
 	ExternalCustomerId string `json:"external_customer_id"`
 
 	// IdempotencyKey Your unique ID for this event. Pick it once, before the
@@ -9156,7 +9156,7 @@ type DiscardHeldUsageJSONBody struct {
 
 // ReleaseHeldUsageJSONBody defines parameters for ReleaseHeldUsage.
 type ReleaseHeldUsageJSONBody struct {
-	// CustomerId Release into this customer (a `vlx_cus_` id) instead of
+	// CustomerId Release into this customer (an `hc_cus_` id) instead of
 	// the one whose external ID matches, for a `user` value
 	// that had a typo.
 	CustomerId string `json:"customer_id,omitempty"`

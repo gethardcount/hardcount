@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Loader2 } from 'lucide-react'
-import { VeloxLogo } from '@/components/VeloxLogo'
+import { HardcountLogo } from '@/components/HardcountLogo'
 import { Callout } from '@/components/Callout'
 import { resetSentNotice } from '@/lib/emailOffNotices'
 
@@ -54,7 +54,7 @@ export default function ForgotPasswordPage() {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-4 bg-background">
       <div className="flex flex-col items-center mb-8">
-        <VeloxLogo size="lg" />
+        <HardcountLogo size="lg" />
         <p className="text-sm text-muted-foreground mt-2">Reset your password</p>
       </div>
 
@@ -67,7 +67,7 @@ export default function ForgotPasswordPage() {
                 title={notice.title}
                 details={notice.operatorDetails ? (
                   <p>
-                    For whoever runs Velox: set <code className="font-mono">SMTP_HOST</code> and{' '}
+                    For whoever runs Hardcount: set <code className="font-mono">SMTP_HOST</code> and{' '}
                     <code className="font-mono">DASHBOARD_BASE_URL</code> (docs/ops/email-setup.md).
                   </p>
                 ) : undefined}

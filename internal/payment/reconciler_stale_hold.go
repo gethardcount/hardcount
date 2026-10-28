@@ -55,7 +55,7 @@ const (
 )
 
 // Stale-hold check results, the label of
-// velox_stale_charge_hold_resolutions_total.
+// hardcount_stale_charge_hold_resolutions_total.
 const (
 	staleHoldSettled   = "settled"    // a succeeded payment was found and recorded
 	staleHoldAdopted   = "adopted"    // a processing payment was found and put on the invoice
@@ -100,7 +100,7 @@ const (
 // Why "Stripe has nothing" is final: List is the read-after-write API; no
 // request for the attempt can start after its hold ends (the charge's
 // re-check and send budget); the sweep waits StaleChargeHoldWait more; every
-// Velox PaymentIntent carries velox_invoice_id and the invoice's Stripe
+// Hardcount PaymentIntent carries hardcount_invoice_id and the invoice's Stripe
 // customer; and that customer id is set once (customer store guard). For a
 // parked invoice "nothing" is final only domain.ParkedNothingWait after the
 // attempt: its answer means Stripe received the request or may have, and
@@ -228,7 +228,7 @@ func (r *Reconciler) checkStaleHold(ctx context.Context, h domain.StaleChargeHol
 		case domain.ProviderPISucceeded:
 			if pi.FullyRefunded {
 				// Money taken and handed back in full: it does not pay the
-				// invoice. Loud, because Velox did not refund it.
+				// invoice. Loud, because Hardcount did not refund it.
 				slog.ErrorContext(ctx, "stale charge check: a payment on this invoice was found already fully refunded at Stripe; it is not counted as paying the invoice",
 					"invoice_id", inv.ID, "tenant_id", inv.TenantID, "stripe_payment_intent_id", pi.ID)
 				continue
@@ -410,8 +410,8 @@ func (r *Reconciler) adoptStaleHold(ctx context.Context, h domain.StaleChargeHol
 	return staleHoldCleared, nil
 }
 
-// cancelUnfinished cancels Velox's own off-session PaymentIntents that
-// stopped at requires_action / requires_confirmation / requires_capture: Velox
+// cancelUnfinished cancels Hardcount's own off-session PaymentIntents that
+// stopped at requires_action / requires_confirmation / requires_capture: Hardcount
 // never shows the customer a way to finish them, so they would never end. The
 // hold is kept; the next check sees them canceled and decides then.
 func (r *Reconciler) cancelUnfinished(ctx context.Context, h domain.StaleChargeHold, unfinished []PaymentIntentResult) (string, error) {

@@ -8,7 +8,7 @@ import (
 
 // The trusted dashboard origins, as CSRFGuard would receive them from
 // CORS_ALLOWED_ORIGINS.
-var testOrigins = []string{"http://localhost:5173", "https://app.velox.dev"}
+var testOrigins = []string{"http://localhost:5173", "https://app.hardcount.dev"}
 
 // runGuard sends one request through CSRFGuard and reports whether it was
 // allowed to reach the wrapped handler (true) or rejected with 403 (false).
@@ -67,12 +67,12 @@ func TestCSRFGuard_Matrix(t *testing.T) {
 			wantAllowed: true,
 		},
 		{
-			// Dashboard on app.velox.dev calling api.velox.dev is same-SITE, not
+			// Dashboard on app.hardcount.dev calling api.hardcount.dev is same-SITE, not
 			// same-origin — must pass WHEN its Origin is an allowlisted dashboard
 			// origin, or the real product breaks.
 			name:        "same-site POST with allowlisted Origin passes",
 			method:      http.MethodPost,
-			headers:     map[string]string{"Sec-Fetch-Site": "same-site", "Origin": "https://app.velox.dev"},
+			headers:     map[string]string{"Sec-Fetch-Site": "same-site", "Origin": "https://app.hardcount.dev"},
 			wantAllowed: true,
 		},
 		{
@@ -81,7 +81,7 @@ func TestCSRFGuard_Matrix(t *testing.T) {
 			// the same-site label + Lax cookie into a mutation.
 			name:        "same-site POST from a non-allowlisted sibling subdomain is blocked",
 			method:      http.MethodPost,
-			headers:     map[string]string{"Sec-Fetch-Site": "same-site", "Origin": "https://evil.velox.dev"},
+			headers:     map[string]string{"Sec-Fetch-Site": "same-site", "Origin": "https://evil.hardcount.dev"},
 			wantAllowed: false,
 		},
 		{
@@ -106,13 +106,13 @@ func TestCSRFGuard_Matrix(t *testing.T) {
 			// exempt (an attacker can't attach a victim's bearer key anyway).
 			name:        "bearer POST with no Origin passes",
 			method:      http.MethodPost,
-			headers:     map[string]string{"Authorization": "Bearer vlx_secret_abc"},
+			headers:     map[string]string{"Authorization": "Bearer hc_secret_abc"},
 			wantAllowed: true,
 		},
 		{
 			name:        "bearer POST is exempt even from a cross-site origin (no cookie)",
 			method:      http.MethodPost,
-			headers:     map[string]string{"Authorization": "Bearer vlx_secret_abc", "Sec-Fetch-Site": "cross-site"},
+			headers:     map[string]string{"Authorization": "Bearer hc_secret_abc", "Sec-Fetch-Site": "cross-site"},
 			wantAllowed: true,
 		},
 		{
@@ -122,7 +122,7 @@ func TestCSRFGuard_Matrix(t *testing.T) {
 			// SDK shape, so it is origin-checked, not exempted → blocked.
 			name:        "bearer + session cookie from cross-site is NOT exempt (blocked)",
 			method:      http.MethodPost,
-			headers:     map[string]string{"Authorization": "Bearer x", "Cookie": "velox_session=abc", "Sec-Fetch-Site": "cross-site"},
+			headers:     map[string]string{"Authorization": "Bearer x", "Cookie": "hardcount_session=abc", "Sec-Fetch-Site": "cross-site"},
 			wantAllowed: false,
 		},
 		{
@@ -130,7 +130,7 @@ func TestCSRFGuard_Matrix(t *testing.T) {
 			// origin-checking it just passes on same-origin.
 			name:        "bearer + session cookie same-origin passes (origin-checked, not blocked)",
 			method:      http.MethodPost,
-			headers:     map[string]string{"Authorization": "Bearer x", "Cookie": "velox_session=abc", "Sec-Fetch-Site": "same-origin"},
+			headers:     map[string]string{"Authorization": "Bearer x", "Cookie": "hardcount_session=abc", "Sec-Fetch-Site": "same-origin"},
 			wantAllowed: true,
 		},
 		{

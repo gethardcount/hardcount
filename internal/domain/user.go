@@ -2,7 +2,7 @@ package domain
 
 import "time"
 
-// User is a dashboard operator account. Velox stores email + password
+// User is a dashboard operator account. Hardcount stores email + password
 // hash; sessions are user-bound (see ADR-011). Operators are
 // bootstrapped externally (`make bootstrap`) — there is no public
 // signup. Multi-user invite flows are deferred until a DP requests.

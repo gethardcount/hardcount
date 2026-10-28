@@ -161,7 +161,7 @@ func (s *PostgresStore) Get(ctx context.Context, tenantID, pmID string) (Payment
 //
 // A card saved through a setup flow becomes the default (makeDefault, ADR-021):
 // the customer, or the operator for them, gave this card to be charged, and
-// the setup and update pages say Velox will use it for upcoming invoices.
+// the setup and update pages say Hardcount will use it for upcoming invoices.
 // The other active defaults are cleared first, in this tx, on the insert and
 // the conflict path alike, so the one-default-per-customer index never sees
 // two and a redelivery of a card already saved beside still promotes it.
@@ -175,7 +175,7 @@ func (s *PostgresStore) Get(ctx context.Context, tenantID, pmID string) (Payment
 // the customer saved through the update link, asked for a different card,
 // sat beside the refused one while every retry skipped it until dunning ran
 // out. A working default is not replaced: a card saved by paying on the
-// hosted page, or by a SetupIntent Velox did not create, is added beside it.
+// hosted page, or by a SetupIntent Hardcount did not create, is added beside it.
 //
 // A card already removed stays removed. A late webhook (Stripe redelivers
 // setup_intent.succeeded after a failed first delivery, for up to three

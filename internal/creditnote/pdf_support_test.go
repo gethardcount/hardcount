@@ -26,7 +26,7 @@ func TestCreditNotePDF_PrintsSupportURL(t *testing.T) {
 	h := NewHandler(nil, HandlerDeps{
 		Customers: cnStaticCustomers{cust: domain.Customer{DisplayName: "Acme Corp"}},
 		Settings:  settings,
-		Invoices:  cnStaticInvoices{inv: domain.Invoice{InvoiceNumber: "VLX-202604-0042", Currency: "USD"}},
+		Invoices:  cnStaticInvoices{inv: domain.Invoice{InvoiceNumber: "HC-202604-0042", Currency: "USD"}},
 	})
 
 	for _, c := range []struct {

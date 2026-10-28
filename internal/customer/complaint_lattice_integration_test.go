@@ -61,10 +61,10 @@ func TestEmailStatus_ComplaintLattice(t *testing.T) {
 	}
 
 	// A missing customer is still a REAL miss.
-	if err := store.MarkEmailBounced(ctx, tenantID, "vlx_cus_missing", "550"); !errors.Is(err, errs.ErrNotFound) {
+	if err := store.MarkEmailBounced(ctx, tenantID, "hc_cus_missing", "550"); !errors.Is(err, errs.ErrNotFound) {
 		t.Errorf("missing customer bounce: want ErrNotFound, got %v", err)
 	}
-	if err := store.MarkEmailComplained(ctx, tenantID, "vlx_cus_missing", "spam"); !errors.Is(err, errs.ErrNotFound) {
+	if err := store.MarkEmailComplained(ctx, tenantID, "hc_cus_missing", "spam"); !errors.Is(err, errs.ErrNotFound) {
 		t.Errorf("missing customer complaint: want ErrNotFound, got %v", err)
 	}
 

@@ -65,12 +65,12 @@ type DunningResolver interface {
 // protects only the individual request from transport-level duplication —
 // Stripe v1 keys EXPIRE after ~24h, so the key alone cannot make a late
 // retry converge on an earlier attempt. Durable exactly-once comes from the
-// other two methods: every create stamps metadata velox_cn_id, GetRefund
+// other two methods: every create stamps metadata hardcount_cn_id, GetRefund
 // reads current provider truth (a read never replays a stale saved
-// response), and FindRefundForCreditNote recovers a refund Velox lost the
+// response), and FindRefundForCreditNote recovers a refund Hardcount lost the
 // id of. Callers reconcile-then-create; they never blind-create on retry.
 type Refunder interface {
-	// Returns the refund id + Stripe's create-time status (mapped to a Velox
+	// Returns the refund id + Stripe's create-time status (mapped to a Hardcount
 	// refund_status). A pending result settles later via a refund webhook.
 	// creditNoteID is stamped as metadata for later adoption.
 	//
@@ -134,7 +134,7 @@ func (e *refundStillUnknownError) OperatorErrorCode() string { return "payment_o
 // issueRefundKey is the idempotency key of Issue's refund request. Issue
 // sends no other, so RetryRefund resends it for a note whose refund leg has
 // no recorded outcome.
-func issueRefundKey(creditNoteID string) string { return "velox_cn_" + creditNoteID }
+func issueRefundKey(creditNoteID string) string { return "hardcount_cn_" + creditNoteID }
 
 // refundOutcomeWriteTimeout bounds the work that records what a Stripe refund
 // call did, once it runs detached (afterRefundCall): the database write and,
@@ -737,7 +737,7 @@ func (s *Service) RetryPendingClawbackIssueForClock(ctx context.Context, tenantI
 // stamps credit_notes.tax_transaction_id instead) is structurally invisible to
 // it — leaving the tenant over-remitting until recovered. Cross-tenant + scoped
 // to the ctx's livemode. Re-drive is Stripe-idempotent via the per-CN
-// velox_tax_rev_<cn.ID> reference; on success the marker is cleared and the
+// hardcount_tax_rev_<cn.ID> reference; on success the marker is cleared and the
 // reversal transaction id stamped. Per-row errors are collected, not aborted-on.
 func (s *Service) RetryPendingCreditNoteTaxReversal(ctx context.Context, batch int) (int, []error) {
 	if s.taxRev == nil {
@@ -907,7 +907,7 @@ func (s *Service) buildCreditNote(ctx context.Context, tx *sql.Tx, tenantID stri
 	// equivalent single-channel allocation is filled in.
 	//
 	// Refund cap: refund_amount_cents ≤ AmountPaidCents − already
-	// refunded by prior CNs. Velox cannot push more cash back to
+	// refunded by prior CNs. Hardcount cannot push more cash back to
 	// the PM than the customer actually paid via card.
 	//
 	// Default when paid invoice + all three zero + no legacy
@@ -1881,7 +1881,7 @@ func (s *Service) holdIssue(ctx context.Context, tenantID string, cn domain.Cred
 
 // runPostIssueExternalLegs runs the POST-COMMIT external effects shared by
 // Issue() and CreateAndIssueCommitRelief (ADR-080): the Stripe refund leg
-// (idempotency-keyed velox_cn_<id>, refund_status persisted, RetryRefund
+// (idempotency-keyed hardcount_cn_<id>, refund_status persisted, RetryRefund
 // recovers) and the upstream tax reversal (partial mode, sweep-recovered).
 // Both are idempotent + recoverable, so a crash after the coordinator tx
 // commits self-heals. Returns the current row with the leg statuses.
@@ -1889,7 +1889,7 @@ func (s *Service) runPostIssueExternalLegs(ctx context.Context, tenantID, id str
 
 	// Paid-branch Stripe refund (EXTERNAL — cannot share the DB tx, per "no
 	// network I/O in a DB transaction"). Idempotency contract: the deterministic
-	// `velox_cn_<cn_id>` key makes a retry after a partial failure return the
+	// `hardcount_cn_<cn_id>` key makes a retry after a partial failure return the
 	// original refund_id rather than double-refund; refund_status is persisted
 	// immediately, and a failed, unknown or pending leg recovers via RetryRefund.
 	// With no PaymentIntent there is nothing to hand Stripe, and the leg could
@@ -2047,7 +2047,7 @@ func (s *Service) runPostIssueExternalLegs(ctx context.Context, tenantID, id str
 //
 // Industry parity: Stripe's own `credit_notes.refunds` array is
 // append-only; refunds have their own status independent of the CN's
-// status. Velox tracks a single refund per CN (no array), but the
+// status. Hardcount tracks a single refund per CN (no array), but the
 // retry contract matches: the CN is a financial document that stays
 // in its final state while the cash-back leg can be re-driven by the
 // operator.
@@ -2056,7 +2056,7 @@ func (s *Service) runPostIssueExternalLegs(ctx context.Context, tenantID, id str
 // before any create (see the numbered contract below). The key moves
 // only after an outcome is recorded: from `unknown`, the retry resends
 // the unclear request under its own key (refund_unknown_key); from
-// `none`, it resends Issue's request (velox_cn_<id>).
+// `none`, it resends Issue's request (hardcount_cn_<id>).
 //
 // Rejects when:
 //   - CN status != issued (drafts use Issue(); voided CNs are terminal)
@@ -2178,7 +2178,7 @@ func (s *Service) RetryRefund(ctx context.Context, tenantID, id string) (domain.
 
 	// ── Reconcile with provider truth BEFORE any create (ADR-063 amendment,
 	// 2026-08-04). The old contract — re-call Create with the eternal
-	// velox_cn_<id> key and let Stripe dedup — was broken twice over:
+	// hardcount_cn_<id> key and let Stripe dedup — was broken twice over:
 	// Stripe v1 idempotency keys EXPIRE after ~24h, while our own
 	// needs-attention alert tells the operator to retry at 72h (a retried
 	// stuck PARTIAL refund past the horizon minted a second live refund);
@@ -2194,7 +2194,7 @@ func (s *Service) RetryRefund(ctx context.Context, tenantID, id string) (domain.
 	//      second refund while one is in flight. failed → fall through and
 	//      create a genuinely new refund.
 	//   2. No refund id (the create leg errored) → FindRefundForCreditNote
-	//      by metadata velox_cn_id: if Stripe DID mint one despite the
+	//      by metadata hardcount_cn_id: if Stripe DID mint one despite the
 	//      error, ADOPT it instead of duplicating (search-and-adopt,
 	//      ADR-108's pattern). Found → persist and stop; the operator sees
 	//      the adopted state and a second click walks path 1.
@@ -2237,7 +2237,7 @@ func (s *Service) RetryRefund(ctx context.Context, tenantID, id string) (domain.
 	// Search-and-adopt (ADR-108's pattern) before any create, in BOTH lanes:
 	// with no stored id (the create leg errored — Stripe may have minted one
 	// anyway) and past a dead stored id (a lost re-drive may have too). Every
-	// create stamps metadata velox_cn_id, so a lost refund is always
+	// create stamps metadata hardcount_cn_id, so a lost refund is always
 	// findable; adopting it is what makes convergence independent of the
 	// idempotency key's 24h lifetime.
 	foundID, foundStatus, ferr := s.refunder.FindRefundForCreditNote(ctx, inv.StripePaymentIntentID, cn.ID)
@@ -2260,7 +2260,7 @@ func (s *Service) RetryRefund(ctx context.Context, tenantID, id string) (domain.
 	// saved response. Durable convergence never rests on the key: the
 	// metadata stamp above makes any lost refund findable and adoptable.
 	gen := sha256.Sum256([]byte(cn.StripeRefundID + "|" + string(cn.RefundStatus)))
-	idempotencyKey := fmt.Sprintf("velox_cn_%s_r_%s", cn.ID, hex.EncodeToString(gen[:8]))
+	idempotencyKey := fmt.Sprintf("hardcount_cn_%s_r_%s", cn.ID, hex.EncodeToString(gen[:8]))
 	// The exceptions are `unknown` and `none`: no outcome was recorded for
 	// the last request, so the key must not move (money-path playbook, gate
 	// 2). From `unknown` that request's key is stored; from `none` it is
@@ -2354,7 +2354,7 @@ func (s *Service) RetryRefund(ctx context.Context, tenantID, id string) (domain.
 		// Stripe call succeeded but local persist (or its audit emission —
 		// shared fate) failed. Convergence is the METADATA, not the key: the
 		// next retry's FindRefundForCreditNote finds this refund by
-		// velox_cn_id and adopts it — no duplicate even after the key ages out.
+		// hardcount_cn_id and adopts it — no duplicate even after the key ages out.
 		return domain.CreditNote{}, fmt.Errorf("persist refund status: %w", err)
 	}
 
@@ -2362,7 +2362,7 @@ func (s *Service) RetryRefund(ctx context.Context, tenantID, id string) (domain.
 }
 
 // ApplyRefundWebhook applies an async refund-webhook status (already mapped to a
-// Velox refund_status by the payment layer) to the credit note carrying
+// Hardcount refund_status by the payment layer) to the credit note carrying
 // stripeRefundID, monotonically (terminal wins; a stale 'pending' never clobbers
 // a terminal). This is the source of truth for the async refund outcome
 // (pending→succeeded/failed) that the create-call cannot observe. Returns

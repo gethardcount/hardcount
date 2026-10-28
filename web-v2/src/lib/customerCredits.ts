@@ -121,7 +121,7 @@ export function ledgerEntryLabel(entryType: string): string {
 }
 
 // ledgerEntryTitle is the line shown for a ledger entry. The server writes
-// expiry and usage descriptions with ids in them ("Expired grant vlx_…"), so
+// expiry and usage descriptions with ids in them ("Expired grant hc_…"), so
 // those read as their plain label; an operator's own description is kept.
 export function ledgerEntryTitle(e: { entry_type: string; description?: string }): string {
   if (e.entry_type === 'expiry' || e.entry_type === 'usage') return ledgerEntryLabel(e.entry_type)

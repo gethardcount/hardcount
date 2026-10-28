@@ -1,14 +1,14 @@
 # LiteLLM spend gap after an outage
 
 LiteLLM is an AI proxy that can send each model call's token usage to
-Velox. If Velox refuses a batch during an outage and LiteLLM runs out of
+Hardcount. If Hardcount refuses a batch during an outage and LiteLLM runs out of
 retries, that usage is lost. Back to the [runbook index](index.md).
 
 ## Symptom
 
 - The `…/litellm/spend` 503 counter rose during a Postgres failover or a
   rolling restart:
-  `velox_http_requests_total{method="POST",path="/v1/integrations/litellm/spend",status="503"}`.
+  `hardcount_http_requests_total{method="POST",path="/v1/integrations/litellm/spend",status="503"}`.
 - LiteLLM's proxy log shows `Generic API Logger Error sending batch` (its
   `max_retries` were used up).
 - Or LiteLLM was never configured with retries
@@ -16,14 +16,14 @@ retries, that usage is lost. Back to the [runbook index](index.md).
 
 ## Why
 
-Velox answered 503 to spend batches while its usage store was unreachable,
+Hardcount answered 503 to spend batches while its usage store was unreachable,
 so LiteLLM would retry them. A batch whose retries ran out is lost: every
-LLM call LiteLLM sent in that window. Velox's spend view is then short
+LLM call LiteLLM sent in that window. Hardcount's spend view is then short
 against LiteLLM's spend page for the period.
 
 ## Check
 
-Compare Velox's usage for the window with LiteLLM's spend logs for the same
+Compare Hardcount's usage for the window with LiteLLM's spend logs for the same
 window.
 
 ## Fix
@@ -35,28 +35,28 @@ Replay LiteLLM's spend logs for the window to
   (`<litellm_call_id>:input|cache_read|cache_write_5m|cache_write_1h|output`),
   and a call's rows are saved together. The call ID is the spend log's
   `request_id`; an ID over 240 characters goes into the key as its SHA-256,
-  which Velox works out the same way on the replay. Nothing else goes into
+  which Hardcount works out the same way on the replay. Nothing else goes into
   the key, so the spend log's millisecond times don't matter. So replaying
   a window that was partly recorded only fills the gap. A call first saved before cache writes
   were split (2026-10-22) is saved the old way again, not billed twice.
-- **Deadline:** the replay must reach Velox before the period's invoice is
+- **Deadline:** the replay must reach Hardcount before the period's invoice is
   built. That is `INVOICE_GRACE_PERIOD` (default 1 hour) after the period
   ends, plus up to one billing tick. A replay after that is stored but not
   billed; bill it with a one-off invoice (see
   [Invoice timing and late usage](invoice-timing-late-usage.md)).
 - A replayed row that missed its period's invoice is counted in the
   answer's `after_close` and in
-  `velox_usage_unbilled_total{reason="after_close"}`, with a WARN line
+  `hardcount_usage_unbilled_total{reason="after_close"}`, with a WARN line
   naming it. Rows on a canceled subscription count as
   `outside_subscription` instead, and rows before a spend-threshold
   invoice that is not paid yet are not counted (see
   [Invoice timing and late usage](invoice-timing-late-usage.md)). These
-  counts are what Velox found when each row arrived; the invoice is the
-  final answer. `velox_usage_late_event_total` counts only events more than
+  counts are what Hardcount found when each row arrived; the invoice is the
+  final answer. `hardcount_usage_late_event_total` counts only events more than
   24 hours old on arrival, so it does not show which rows missed an
   invoice.
 
 ## Verify
 
-Rows Velox already held come back as `deduplicated`, never counted twice,
-and Velox's spend for the window now matches LiteLLM's.
+Rows Hardcount already held come back as `deduplicated`, never counted twice,
+and Hardcount's spend for the window now matches LiteLLM's.

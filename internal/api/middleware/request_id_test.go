@@ -114,12 +114,12 @@ func TestRequestID_HeaderSetForNonRespondResponses(t *testing.T) {
 			rec := httptest.NewRecorder()
 			mw.RequestID(handler).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/nope", nil))
 
-			got := rec.Header().Get("Velox-Request-Id")
+			got := rec.Header().Get("Hardcount-Request-Id")
 			if got == "" {
-				t.Fatal("Velox-Request-Id header is absent; a caller with an unparseable body has no id to report")
+				t.Fatal("Hardcount-Request-Id header is absent; a caller with an unparseable body has no id to report")
 			}
 			if !strings.HasPrefix(got, "req_") {
-				t.Fatalf("Velox-Request-Id = %q, want the server-minted req_ prefix", got)
+				t.Fatalf("Hardcount-Request-Id = %q, want the server-minted req_ prefix", got)
 			}
 		})
 	}
@@ -138,7 +138,7 @@ func TestRequestID_HeaderMatchesContextID(t *testing.T) {
 	if fromCtx == "" {
 		t.Fatal("no request id in context")
 	}
-	if got := rec.Header().Get("Velox-Request-Id"); got != fromCtx {
+	if got := rec.Header().Get("Hardcount-Request-Id"); got != fromCtx {
 		t.Fatalf("header %q != context id %q — a reported id would not find its audit row", got, fromCtx)
 	}
 }

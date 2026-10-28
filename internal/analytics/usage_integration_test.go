@@ -101,7 +101,7 @@ func TestUsageAnalytics_TenantScoped(t *testing.T) {
 
 func seedCustomer(t *testing.T, db *postgres.DB, tenantID, externalID string) string {
 	t.Helper()
-	id := postgres.NewID("vlx_cus")
+	id := postgres.NewID("hc_cus")
 	execInTenantTx(t, db, tenantID, `
 		INSERT INTO customers (id, tenant_id, external_id, display_name, email)
 		VALUES ($1, $2, $3, $4, $5)
@@ -111,7 +111,7 @@ func seedCustomer(t *testing.T, db *postgres.DB, tenantID, externalID string) st
 
 func seedMeter(t *testing.T, db *postgres.DB, tenantID, name, key string) string {
 	t.Helper()
-	id := postgres.NewID("vlx_mtr")
+	id := postgres.NewID("hc_mtr")
 	execInTenantTx(t, db, tenantID, `
 		INSERT INTO meters (id, tenant_id, name, event_name, unit, aggregation)
 		VALUES ($1, $2, $3, $4, 'requests', 'sum')
@@ -124,7 +124,7 @@ func seedUsageEvent(t *testing.T, db *postgres.DB, tenantID, customerID, meterID
 	execInTenantTx(t, db, tenantID, `
 		INSERT INTO usage_events (id, tenant_id, customer_id, meter_id, quantity, properties, timestamp, origin)
 		VALUES ($1, $2, $3, $4, $5, '{}'::jsonb, $6, 'api')
-	`, postgres.NewID("vlx_evt"), tenantID, customerID, meterID, qty, ts)
+	`, postgres.NewID("hc_evt"), tenantID, customerID, meterID, qty, ts)
 }
 
 func execInTenantTx(t *testing.T, db *postgres.DB, tenantID, query string, args ...any) {

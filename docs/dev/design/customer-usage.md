@@ -1,8 +1,8 @@
 # Customer Usage Endpoint — Technical Design
 
 > - **Decided:** add `GET /v1/customers/{id}/usage`. One call returns a customer's usage and its cost, per meter and per pricing rule, matched to rules the same way the cycle close does. It covers the current billing period unless you pass `from` and `to`.
-> - **Shipped:** v0.1.0, in [#26](https://github.com/getvelox/velox/pull/26); the dashboard view came in [#27](https://github.com/getvelox/velox/pull/27).
-> - **Current docs:** the [usage routes](../../api-surface.md#usage) in The Velox API, and `/v1/customers/{id}/usage` in [`api/openapi.yaml`](../../../api/openapi.yaml). Where this page and the code disagree, the code wins.
+> - **Shipped:** v0.1.0, in [#26](https://github.com/gethardcount/hardcount/pull/26); the dashboard view came in [#27](https://github.com/gethardcount/hardcount/pull/27).
+> - **Current docs:** the [usage routes](../../api-surface.md#usage) in The Hardcount API, and `/v1/customers/{id}/usage` in [`api/openapi.yaml`](../../../api/openapi.yaml). Where this page and the code disagree, the code wins.
 
 > **Design document, written 2026-04-26 before the build.** The endpoint (`GET /v1/customers/{id}/usage`) has shipped; no ADR decided it, so the code is the current record: `internal/usage/customer_usage.go` and `customer_usage_handler.go`, with the dashboard in `web-v2/src/components/CostDashboard.tsx`.
 > Later decisions that changed it: [ADR-032](../../adr/032-public-cost-dashboard-projection.md) added the public, token-protected cost-dashboard view of this data; [ADR-044](../../adr/044-canonical-ai-token-metering-model.md) made one `token_type` dimension the canonical token shape (the example response already uses it; leftover names like `gpt4_input_uncached` predate it); [ADR-045](../../adr/045-decimal-per-unit-pricing-rates.md) made per-unit rates decimal; [ADR-054](../../adr/054-effective-unit-price-decimal-display.md) added the full-precision per-unit price to each rule row; [ADR-070](../../adr/070-price-change-semantics.md) prices each rule (and any customer override) at the version in force at the start of the window, the same way invoices do. The [ADR-012 amendment of 2026-10-22](../../adr/012-day-grade-calendar-billing.md#amendment-2026-10-22-one-usage-window-for-every-closer) starts an invoice's usage at the trial end, or where another subscription of the customer stopped covering the meter. This report still starts at the period start. Take the first paid period after a trial that ends mid-day, or a subscription created the day another one ended. For those, the report also shows that day's earlier usage, which the invoice does not bill.
@@ -11,7 +11,7 @@
 
 ## Motivation
 
-A buyer evaluating Velox asks the same question on day one: "How do I show a customer their current usage and what they'll be charged?" Stripe Billing's answer is a hosted Customer Portal page — but that's locked to Stripe Billing, which Velox does not use (per the ADR — Architecture Decision Record — adopting the PaymentIntent-only pattern). Buyers self-hosting Velox today have no first-party answer. They hand-roll a SQL query against `usage_events` and pray the dimension-match logic (the mapping of each event's dimensions to the pricing rule that rates it) stays in sync with their pricing rules.
+A buyer evaluating Hardcount asks the same question on day one: "How do I show a customer their current usage and what they'll be charged?" Stripe Billing's answer is a hosted Customer Portal page — but that's locked to Stripe Billing, which Hardcount does not use (per the ADR — Architecture Decision Record — adopting the PaymentIntent-only pattern). Buyers self-hosting Hardcount today have no first-party answer. They hand-roll a SQL query against `usage_events` and pray the dimension-match logic (the mapping of each event's dimensions to the pricing rule that rates it) stays in sync with their pricing rules.
 
 This is the second flagship developer-experience surface, alongside recipes. Where recipes collapse "set up billing" to one POST, **`GET /v1/customers/{id}/usage` collapses "show me what this customer used and owes" to one GET**. The cost-dashboard component is the in-product manifestation; the API itself unblocks every operator who needs the same data in their own portal, in Slack alerts, in CSV exports.
 
@@ -53,21 +53,21 @@ This endpoint is **composition, not new aggregation logic**. The hard SQL alread
 > **Wire-contract conventions** (consistent with `/v1/*`, see `docs/dev/design/recipes.md` § wire-contract):
 >
 > - **Snake-case JSON keys**, struct-tag enforced. Picker-side TS types match.
-> - **Customer identity is the customer ID** (`vlx_cus_…`), not the external ID (the identifier the tenant's own system uses for the customer). Use `?external_id=` if you need external-ID lookup; defer for v2 or wrap as a separate endpoint.
+> - **Customer identity is the customer ID** (`hc_cus_…`), not the external ID (the identifier the tenant's own system uses for the customer). Use `?external_id=` if you need external-ID lookup; defer for v2 or wrap as a separate endpoint.
 > - **Period bounds are RFC 3339** (`?from=2026-04-01T00:00:00Z&to=2026-05-01T00:00:00Z`). Both inclusive of `from`, exclusive of `to`. If only `from` is supplied → 400 (we don't guess "to=now"). If both omitted → defaults to the customer's current billing cycle.
 > - **Empty results are `[]`, never `null`.** Aligns with the existing list endpoints.
 
 ### `GET /v1/customers/{id}/usage` — current cycle (default)
 
 ```http
-GET /v1/customers/vlx_cus_abc123/usage
+GET /v1/customers/hc_cus_abc123/usage
 Authorization: Bearer <secret_key>
 ```
 
 Response `200`:
 ```json
 {
-  "customer_id": "vlx_cus_abc123",
+  "customer_id": "hc_cus_abc123",
   "period": {
     "from": "2026-04-01T00:00:00Z",
     "to": "2026-05-01T00:00:00Z",
@@ -75,8 +75,8 @@ Response `200`:
   },
   "subscriptions": [
     {
-      "id": "vlx_sub_xyz",
-      "plan_id": "vlx_pln_pro",
+      "id": "hc_sub_xyz",
+      "plan_id": "hc_pln_pro",
       "plan_name": "AI API Pro",
       "currency": "USD",
       "current_period_start": "2026-04-01T00:00:00Z",
@@ -85,7 +85,7 @@ Response `200`:
   ],
   "meters": [
     {
-      "meter_id": "vlx_mtr_tokens",
+      "meter_id": "hc_mtr_tokens",
       "meter_key": "tokens",
       "meter_name": "Tokens",
       "unit": "tokens",
@@ -94,14 +94,14 @@ Response `200`:
       "total_amount_cents": 3704,
       "rules": [
         {
-          "rating_rule_version_id": "vlx_rrv_gpt4_input_uncached",
+          "rating_rule_version_id": "hc_rrv_gpt4_input_uncached",
           "rule_key": "gpt4_input_uncached",
           "dimension_match": { "model": "gpt-4", "token_type": "input" },
           "quantity": "1000000.000000000000",
           "amount_cents": 3000
         },
         {
-          "rating_rule_version_id": "vlx_rrv_gpt4_output",
+          "rating_rule_version_id": "hc_rrv_gpt4_output",
           "rule_key": "gpt4_output",
           "dimension_match": { "model": "gpt-4", "token_type": "output" },
           "quantity": "234567.000000000000",
@@ -125,7 +125,7 @@ Response `200`:
 ### `GET /v1/customers/{id}/usage?from=…&to=…` — explicit window
 
 ```http
-GET /v1/customers/vlx_cus_abc123/usage?from=2026-01-01T00:00:00Z&to=2026-04-01T00:00:00Z
+GET /v1/customers/hc_cus_abc123/usage?from=2026-01-01T00:00:00Z&to=2026-04-01T00:00:00Z
 Authorization: Bearer <secret_key>
 ```
 
@@ -201,7 +201,7 @@ Standard `BeginTx(ctx, postgres.TxTenant, tenantID)`. The customer lookup natura
 
 ### End-to-end test (against running stack)
 
-Delivered as `internal/usage/customer_usage_integration_test.go` (real Postgres: ingest across dimension combinations, `GET /v1/customers/{id}/usage` asserted against expected fixtures) plus MANUAL_TEST FLOW S2 (the matching scripted walkthrough in `MANUAL_TEST.md`) for the running-stack smoke. The standalone e2e binary this section originally proposed (`cmd/velox-customer-usage-e2e`, or extending `velox-recipes-e2e`) was never built — neither ever existed in git.
+Delivered as `internal/usage/customer_usage_integration_test.go` (real Postgres: ingest across dimension combinations, `GET /v1/customers/{id}/usage` asserted against expected fixtures) plus MANUAL_TEST FLOW S2 (the matching scripted walkthrough in `MANUAL_TEST.md`) for the running-stack smoke. The standalone e2e binary this section originally proposed (`cmd/hardcount-customer-usage-e2e`, or extending `hardcount-recipes-e2e`) was never built — neither ever existed in git.
 
 ## Migrations
 

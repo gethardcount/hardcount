@@ -19,7 +19,7 @@ const NON_TRIVIAL_LABELS: Record<string, string> = {
   not_subject_to_tax: 'Not subject to tax',
   reduced_rated: 'Reduced rate',
   zero_rated: 'Zero rated',
-  // Velox's own reason, not Stripe's: a prepaid commit purchase is not
+  // Hardcount's own reason, not Stripe's: a prepaid commit purchase is not
   // taxed; the usage it pays for is (ADR-078 amendment 2026-10-19).
   prepaid_credit_purchase: 'Prepaid credit, not taxed',
 }

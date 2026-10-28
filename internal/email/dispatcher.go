@@ -87,7 +87,7 @@ func NewDispatcher(outbox *OutboxStore, sender EmailDeliverer, cfg DispatcherCon
 func (d *Dispatcher) Config() DispatcherConfig { return d.cfg }
 
 // Start runs the dispatcher loop until ctx is cancelled. Intended to be
-// launched as a goroutine from cmd/velox during boot.
+// launched as a goroutine from cmd/hardcount during boot.
 func (d *Dispatcher) Start(ctx context.Context) {
 	slog.Info("email outbox dispatcher started",
 		"interval", d.cfg.Interval.String(),

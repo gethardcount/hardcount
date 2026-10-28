@@ -125,10 +125,10 @@ export function finalizeConfirmLines(o: {
 }): string[] {
   const lines = ["The invoice is issued. You can't edit it afterwards, and the only way to cancel it is to void it."]
   if (o.taxAtFinalize) lines.push('Tax is worked out now, so the total may change.')
-  const collect = "Velox then collects payment right away. It uses the customer's credit balance first."
+  const collect = "Hardcount then collects payment right away. It uses the customer's credit balance first."
   const canEmail = o.canEmailSetupLinks === true
   if (o.collectionPaused) {
-    lines.push('Collection is paused on this subscription, so nothing is charged now. Velox collects payment once collection resumes.')
+    lines.push('Collection is paused on this subscription, so nothing is charged now. Hardcount collects payment once collection resumes.')
   } else if (o.stripeConnected === false) {
     lines.push(`${collect} Stripe isn't connected in this mode, so no card can be charged or added online. Connect Stripe under Settings to collect by card.`)
   } else if (o.stripeConnected === undefined) {
@@ -139,7 +139,7 @@ export function finalizeConfirmLines(o: {
     if (!o.hasEmail) {
       lines.push(`${collect} The customer has no card on file and no email address, so nothing is charged.`)
     } else if (canEmail) {
-      lines.push(`${collect} The customer has no card on file, so if anything is left to pay, Velox emails them a link to add one.`)
+      lines.push(`${collect} The customer has no card on file, so if anything is left to pay, Hardcount emails them a link to add one.`)
     } else {
       lines.push(`${collect} The customer has no card on file and this server can't email setup links, so if anything is left to pay, copy a setup link from the customer page and send it to them.`)
     }

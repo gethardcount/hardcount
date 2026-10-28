@@ -149,7 +149,7 @@ func (m *memStore) AppendEntry(_ context.Context, tenantID string, entry domain.
 		}
 	}
 	entry.BalanceAfter = balance + entry.AmountCents
-	entry.ID = fmt.Sprintf("vlx_ccl_%d", len(m.entries)+1)
+	entry.ID = fmt.Sprintf("hc_ccl_%d", len(m.entries)+1)
 	entry.TenantID = tenantID
 	// Honor caller-supplied CreatedAt (mirrors PostgresStore.AppendEntry
 	// which lets the credit-expiry path stamp the row at the grant's

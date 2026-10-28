@@ -167,7 +167,7 @@ func (s *PostgresStore) WriteOverride(ctx context.Context, tenantID string, o do
 			reason, active, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true, $11, now())
 		RETURNING `+overrideColumns,
-		postgres.NewID("vlx_cpo"), tenantID, o.CustomerID, o.PriceID,
+		postgres.NewID("hc_cpo"), tenantID, o.CustomerID, o.PriceID,
 		o.Mode, o.UnitAmountCents, tiers, o.PackageSize, o.PackageAmountCents,
 		postgres.NullableString(o.Reason), at))
 	if err != nil {

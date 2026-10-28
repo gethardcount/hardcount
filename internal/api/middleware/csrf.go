@@ -15,7 +15,7 @@ import (
 //
 // # Why this exists (and why CORS did not already cover it)
 //
-// CSRF is an ambient-authority problem: the browser attaches velox_session to
+// CSRF is an ambient-authority problem: the browser attaches hardcount_session to
 // every request to the API automatically, so any page the operator visits can
 // cause a request that carries it. SameSite=Lax narrows this (it withholds the
 // cookie from most cross-site requests) but is not sufficient on its own — it

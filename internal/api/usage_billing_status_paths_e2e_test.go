@@ -102,7 +102,7 @@ func TestBillingStatus_TestClockPricesAtTheSimulatedPin(t *testing.T) {
 
 // TestBillingStatus_LiteLLMPreSplitCallIsClassifiedByItsOwnRows: a call whose
 // :input a release before the cache-write split stored at the old quantity
-// is resent while April is open. Velox writes it the old way, [input,
+// is resent while April is open. Hardcount writes it the old way, [input,
 // output], and writes only its :output. The plan prices output tokens and
 // no cache writes. The :output is classified as itself: no no_price, and
 // April's invoice bills its 500 tokens. In the split mapping the same index

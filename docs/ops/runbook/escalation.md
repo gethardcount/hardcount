@@ -8,7 +8,7 @@ How to handle an incident by severity. Back to the
 Data leakage, a billing-correctness bug, or all customer charges failing.
 
 1. **Contain the damage.** Revoke API keys or stop the API container;
-   Velox has no read-only mode. Pause webhook delivery by deactivating
+   Hardcount has no read-only mode. Pause webhook delivery by deactivating
    endpoints (`PATCH` with `active=false`, which keeps the signing secret).
 2. **Snapshot the database** for forensic review.
 3. **Assemble responders:** get whoever runs the database and payments on

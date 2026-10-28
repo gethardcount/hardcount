@@ -34,7 +34,7 @@ func TestDunningEvent_RecordedAt_DualStamp(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	inv, err := invStore.Create(base, tenantID, domain.Invoice{
-		CustomerID: cust.ID, InvoiceNumber: "VLX-DUNREC-1",
+		CustomerID: cust.ID, InvoiceNumber: "HC-DUNREC-1",
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed,
 		Currency: "USD", SubtotalCents: 5000, TotalAmountCents: 5000, AmountDueCents: 5000,
 		BillingPeriodStart: now.Add(-30 * 24 * time.Hour), BillingPeriodEnd: now,
@@ -53,7 +53,7 @@ func TestDunningEvent_RecordedAt_DualStamp(t *testing.T) {
 	}
 
 	frozen := time.Date(2027, 3, 7, 9, 0, 0, 0, time.UTC)
-	simCtx := clock.WithSim(base, clock.Sim{At: frozen, TestClockID: "vlx_tclk_dunrec"})
+	simCtx := clock.WithSim(base, clock.Sim{At: frozen, TestClockID: "hc_tclk_dunrec"})
 
 	run, err := dunStore.CreateRun(simCtx, tenantID, domain.InvoiceDunningRun{
 		InvoiceID: inv.ID, CustomerID: cust.ID, PolicyID: policy.ID,

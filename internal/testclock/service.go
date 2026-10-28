@@ -26,7 +26,7 @@ import (
 // accidentally do, every advance fails until they unset it (loud
 // failure, easy to spot). Not a security risk: the env is process-
 // local and only affects an operator-initiated test-clock advance.
-const envInjectCatchupFailure = "VELOX_TEST_CLOCK_INJECT_FAILURE"
+const envInjectCatchupFailure = "HARDCOUNT_TEST_CLOCK_INJECT_FAILURE"
 
 // injectedCatchupFailureReason reads + clears the injection env var.
 // One-shot semantics: if the var was set, the helper returns the
@@ -388,7 +388,7 @@ func (s *Service) Advance(ctx context.Context, tenantID, id string, input Advanc
 		return domain.TestClock{}, errs.Invalid("frozen_time", "must be strictly after current frozen_time")
 	}
 	// Advance window cap (ADR-028 amendment): a single Advance call
-	// shifts frozen_time by ≤ 1 year. This is Velox's own cap; Stripe
+	// shifts frozen_time by ≤ 1 year. This is Hardcount's own cap; Stripe
 	// allows two intervals of the shortest subscription period, or, on a
 	// clock with no subscriptions, up to two years from the clock's
 	// initial frozen time. Larger ranges are

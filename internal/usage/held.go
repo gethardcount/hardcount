@@ -34,7 +34,7 @@ type HoldInput struct {
 	Quantity           decimal.Decimal
 	Dimensions         map[string]any
 	IdempotencyKey     string
-	// EventAt is the row's own time. Nil means the time Velox received it.
+	// EventAt is the row's own time. Nil means the time Hardcount received it.
 	EventAt            *time.Time
 	ObservedCostMicros *int64
 	Reason             domain.HeldUsageReason
@@ -48,7 +48,7 @@ var heldUsageEvents *prometheus.CounterVec
 
 func init() {
 	c := prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "velox_usage_held_events_total",
+		Name: "hardcount_usage_held_events_total",
 		Help: "Usage rows held because their customer or meter did not exist (LiteLLM callback). Counted once per new held row; a resend of a held row is not counted.",
 	}, []string{"reason"})
 	if err := prometheus.DefaultRegisterer.Register(c); err != nil {
@@ -145,7 +145,7 @@ type ReleaseInput struct {
 }
 
 // ReleaseResult is the response of POST /v1/usage-events/held/release. Its
-// counts are what Velox found when the release wrote the rows, as for an
+// counts are what Hardcount found when the release wrote the rows, as for an
 // ingest's billing_status (open_period.go): not a promise. The invoice is the
 // final answer.
 type ReleaseResult struct {
@@ -166,7 +166,7 @@ type ReleaseResult struct {
 	MoreToRelease int `json:"more_to_release"`
 	// InOpenPeriod counts released rows whose time falls in an active
 	// subscription's current billing period and that a price of the plan the
-	// subscription was on then takes. Rows Velox does not check count here
+	// subscription was on then takes. Rows Hardcount does not check count here
 	// too: a row after the period end, released before that period's invoice
 	// is built (the grace), when the subscription goes on, and a row at or
 	// after the trial end of a subscription still trialing. A row of a sum or count
@@ -195,7 +195,7 @@ type ReleaseResult struct {
 	// sum or count meter stamped before the time a paid threshold invoice of
 	// the current period billed through. Bill them with a one-off invoice if
 	// they should be charged.
-	// Velox never moves usage onto a later invoice (ADR-120).
+	// Hardcount never moves usage onto a later invoice (ADR-120).
 	OutsideOpenPeriod int `json:"outside_open_period"`
 }
 
@@ -402,7 +402,7 @@ func (s *Service) releaseBuckets(ctx context.Context, tx *sql.Tx, in ReleaseInpu
 //     invoice that is not paid billed through. Counted if that invoice is
 //     voided before the period closes, else on no invoice.
 //   - OutsideOpenPeriod (Outside, AfterClose): everything else, including a
-//     time in a period whose invoice is already built (Velox never re-opens
+//     time in a period whose invoice is already built (Hardcount never re-opens
 //     a built invoice, ADR-120), before a paid threshold invoice's end, and
 //     after the end of a subscription that ends there.
 //

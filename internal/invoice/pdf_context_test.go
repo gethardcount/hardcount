@@ -119,7 +119,7 @@ func TestBuildPDFContext_OneBuilderForAllSurfaces(t *testing.T) {
 		},
 	}
 	settings := &fakePDFSettings{ts: domain.TenantSettings{
-		CompanyName: "Velox GmbH", CompanyCountry: "DE", TaxID: "DE987654321",
+		CompanyName: "Hardcount GmbH", CompanyCountry: "DE", TaxID: "DE987654321",
 		Timezone: "Europe/Berlin", BrandColor: "#112233",
 	}}
 	creditNotes := &fakePDFCreditNotes{notes: []domain.CreditNote{
@@ -145,7 +145,7 @@ func TestBuildPDFContext_OneBuilderForAllSurfaces(t *testing.T) {
 	if bt.AddressLine1 != "1 Way" || bt.Country != "DE" {
 		t.Errorf("buyer address: got %+v", bt)
 	}
-	if ci.Name != "Velox GmbH" || ci.TaxID != "DE987654321" || ci.BrandColor != "#112233" {
+	if ci.Name != "Hardcount GmbH" || ci.TaxID != "DE987654321" || ci.BrandColor != "#112233" {
 		t.Errorf("company info: got %+v", ci)
 	}
 	if len(cns) != 1 || cns[0].Number != "CN-1" {

@@ -210,7 +210,7 @@ func TestMapPayload_CacheWriteFallback(t *testing.T) {
 				t.Fatalf("legacy = %v, want nil: the fallback IS the old mapping", m.Legacy)
 			}
 			if d := promtest.ToFloat64(cacheWriteUnsplit.WithLabelValues("anthropic", tc.reason)) - before; d != 1 {
-				t.Fatalf("velox_litellm_cache_write_unsplit_total{anthropic,%s} moved by %v, want 1", tc.reason, d)
+				t.Fatalf("hardcount_litellm_cache_write_unsplit_total{anthropic,%s} moved by %v, want 1", tc.reason, d)
 			}
 		})
 	}

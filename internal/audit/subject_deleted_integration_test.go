@@ -33,17 +33,17 @@ func TestSubjectDeleted_TheRowOutlivesItsSubject(t *testing.T) {
 	tenantID := testutil.CreateTestTenant(t, db, "Subject Deleted")
 	logger := audit.NewLogger(db)
 
-	clockID := "vlx_clk_teardown"
+	clockID := "hc_clk_teardown"
 	seedClock(t, db, ctx, tenantID, clockID)
 
 	simAt := time.Date(2027, 5, 1, 0, 0, 0, 0, time.UTC)
 	simCtx := clock.WithSim(ctx, clock.Sim{At: simAt, TestClockID: clockID})
-	if err := logger.Log(simCtx, tenantID, "finalize", "invoice", "vlx_inv_sim", "INV-SIM", nil); err != nil {
+	if err := logger.Log(simCtx, tenantID, "finalize", "invoice", "hc_inv_sim", "INV-SIM", nil); err != nil {
 		t.Fatalf("log sim row: %v", err)
 	}
 	// A live wall-clock row, as the control: it belongs to no clock, so nothing can
 	// ever delete its subject out from under it.
-	if err := logger.Log(ctx, tenantID, "finalize", "invoice", "vlx_inv_real", "INV-REAL", nil); err != nil {
+	if err := logger.Log(ctx, tenantID, "finalize", "invoice", "hc_inv_real", "INV-REAL", nil); err != nil {
 		t.Fatalf("log real row: %v", err)
 	}
 
@@ -65,7 +65,7 @@ func TestSubjectDeleted_TheRowOutlivesItsSubject(t *testing.T) {
 		}
 		for _, e := range rows {
 			switch e.ResourceID {
-			case "vlx_inv_sim":
+			case "hc_inv_sim":
 				if !e.SubjectDeleted {
 					t.Error("the torn-down clock's row does not report subject_deleted — the dashboard renders a View link to an invoice that no longer exists, and the operator lands on a 404")
 				}
@@ -76,7 +76,7 @@ func TestSubjectDeleted_TheRowOutlivesItsSubject(t *testing.T) {
 				if e.SimEffectiveAt == nil {
 					t.Error("sim_effective_at lost on teardown")
 				}
-			case "vlx_inv_real":
+			case "hc_inv_real":
 				if e.SubjectDeleted {
 					t.Error("a live wall-clock row reports subject_deleted — its subject was never in any simulation, so its link still works and must still be offered")
 				}

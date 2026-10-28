@@ -65,7 +65,7 @@ func TestApplyRefundWebhook_FlipsThenMonotonic(t *testing.T) {
 	}
 }
 
-// TestApplyRefundWebhook_UnknownRefundIsNotFound: a webhook for a refund Velox
+// TestApplyRefundWebhook_UnknownRefundIsNotFound: a webhook for a refund Hardcount
 // didn't create (Stripe dashboard / direct API) returns ErrNotFound so the
 // caller acks it permanently — never fabricates a credit note.
 func TestApplyRefundWebhook_UnknownRefundIsNotFound(t *testing.T) {

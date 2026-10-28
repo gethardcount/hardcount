@@ -89,7 +89,7 @@ func NewPostmarkHandler(store OutboxDeliveryStore, user, pass string) *PostmarkH
 func (h *PostmarkHandler) SetSuppressor(s RecipientSuppressor) { h.suppressor = s }
 
 // postmarkEvent is the union of the Delivery / Bounce / SpamComplaint
-// payload fields Velox consumes. Bounce and SpamComplaint carry the
+// payload fields Hardcount consumes. Bounce and SpamComplaint carry the
 // recipient in Email; Delivery carries it in Recipient.
 type postmarkEvent struct {
 	RecordType  string            `json:"RecordType"`
@@ -108,7 +108,7 @@ func (h *PostmarkHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) 
 	// probe shouldn't even buffer a payload. Constant-time over both
 	// halves; unconfigured credentials compare equal to nothing.
 	if !h.authorized(r) {
-		w.Header().Set("WWW-Authenticate", `Basic realm="velox-webhooks"`)
+		w.Header().Set("WWW-Authenticate", `Basic realm="hardcount-webhooks"`)
 		respond.Unauthorized(w, r, "unauthorized")
 		return
 	}

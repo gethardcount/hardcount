@@ -27,7 +27,7 @@ const backendKeepAlive = new http.Agent({ keepAlive: true, maxSockets: 64 })
 // trip either. Both are safe for a local single-user dev server.
 function keepConnectionsAlive() {
   return {
-    name: 'velox-dev-keepalive',
+    name: 'hardcount-dev-keepalive',
     configureServer(server: { httpServer: http.Server | null }) {
       if (server.httpServer) {
         server.httpServer.keepAliveTimeout = 0
@@ -53,7 +53,7 @@ export default defineConfig({
     // IPv6-only socket on macOS, which a browser hitting 127.0.0.1 can't
     // reach). Access the dashboard at http://localhost:5173.
     host: true,
-    port: Number(process.env.VELOX_DEV_PORT ?? 5173),
+    port: Number(process.env.HARDCOUNT_DEV_PORT ?? 5173),
     proxy: {
       // Bounded + error-handled so a stalled/reset upstream surfaces as a 502
       // instead of leaving the browser request "pending" forever. timeout/
@@ -61,7 +61,7 @@ export default defineConfig({
       // backend's own response wins when it's merely slow; the proxy only fires
       // on a genuinely dead/wedged upstream.
       '/v1': {
-        target: process.env.VELOX_API_TARGET ?? 'http://localhost:8080',
+        target: process.env.HARDCOUNT_API_TARGET ?? 'http://localhost:8080',
         changeOrigin: true,
         agent: backendKeepAlive,
         timeout: 35_000,

@@ -2,7 +2,7 @@
 // operator is removed from the workspace, or their password is reset
 // elsewhere. Every request then answers 401, and before this each page showed
 // the server's text for API callers ("missing credentials — … Authorization:
-// Bearer vlx_secret_…"). Now any 401 is reported here, one check asks the
+// Bearer hc_secret_…"). Now any 401 is reported here, one check asks the
 // server who owns the cookie, and only if that also answers 401 is the
 // operator sent to sign-in, then back to the page they were on.
 //

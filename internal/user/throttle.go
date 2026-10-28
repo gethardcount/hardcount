@@ -27,7 +27,7 @@ import (
 // or two subjects:
 //
 //   - A browser that has signed in to this email before (it sends the
-//     velox_device cookie) is counted under that browser and email only.
+//     hardcount_device cookie) is counted under that browser and email only.
 //     Guesses from elsewhere never hold it out.
 //   - Any other browser is counted twice: under its address and the email,
 //     which stops one source early; and under the email alone, which caps
@@ -42,14 +42,14 @@ import (
 // the right password from a browser the email's count held clears that
 // count too (SignedIn says why).
 //
-// Every subject is an HMAC keyed from VELOX_ENCRYPTION_KEY, and the typed
+// Every subject is an HMAC keyed from HARDCOUNT_ENCRYPTION_KEY, and the typed
 // email is used as typed (trimmed, lower-cased), so an email with no account
 // is counted and answered exactly like a real one. All times come from the
 // database clock, so every copy of the server shares one count.
 const (
 	// DeviceCookieName is the cookie that marks a browser that signed in.
 	// It holds 32 random bytes as hex and is sent only to /v1/auth.
-	DeviceCookieName = "velox_device"
+	DeviceCookieName = "hardcount_device"
 
 	// pairThreshold: one address and one email. Attempts 1 to 5 reach the
 	// password check; the 5th starts a 1-minute wait.
@@ -58,7 +58,7 @@ const (
 	// to it, over all addresses. The 10th attempt starts a 1-minute wait.
 	// After that about 100 guesses a day reach the check, with no cap.
 	// NIST SP 800-63B-4 §3.2.2 caps 100 failures in a row and then disables
-	// the password; Velox does not lock, by decision (ADR-094).
+	// the password; Hardcount does not lock, by decision (ADR-094).
 	accountThreshold = 10
 	// browserThreshold: one known browser and one email.
 	browserThreshold = 5
@@ -111,21 +111,21 @@ func decide(row throttleRow, threshold int, now time.Time) throttleStep {
 	return throttleStep{next: next}
 }
 
-// ThrottleKey derives the throttle's HMAC key from VELOX_ENCRYPTION_KEY
+// ThrottleKey derives the throttle's HMAC key from HARDCOUNT_ENCRYPTION_KEY
 // (64 hex characters) with HKDF. With no key, as in local development, it
 // derives from a fixed value: the subjects then still hold no email or
 // address, but anyone with the code can test a guess against them.
 // Production refuses to start without a key.
 func ThrottleKey(encryptionKeyHex string) ([]byte, error) {
-	secret := []byte("velox local development: VELOX_ENCRYPTION_KEY is not set")
+	secret := []byte("hardcount local development: HARDCOUNT_ENCRYPTION_KEY is not set")
 	if encryptionKeyHex != "" {
 		b, err := hex.DecodeString(encryptionKeyHex)
 		if err != nil || len(b) != 32 {
-			return nil, errors.New("VELOX_ENCRYPTION_KEY must be 64 hex characters")
+			return nil, errors.New("HARDCOUNT_ENCRYPTION_KEY must be 64 hex characters")
 		}
 		secret = b
 	}
-	return hkdf.Key(sha256.New, secret, nil, "velox/login-throttle/v1", 32)
+	return hkdf.Key(sha256.New, secret, nil, "hardcount/login-throttle/v1", 32)
 }
 
 // LoginThrottle counts sign-in attempts in the login_throttle table.
@@ -136,7 +136,7 @@ type LoginThrottle struct {
 }
 
 // NewLoginThrottle builds the throttle. key comes from ThrottleKey; cookie
-// gives the velox_device cookie the session cookie's Domain, Secure and
+// gives the hardcount_device cookie the session cookie's Domain, Secure and
 // SameSite.
 func NewLoginThrottle(db *postgres.DB, key []byte, cookie session.CookieConfig) *LoginThrottle {
 	return &LoginThrottle{db: db, key: key, cookie: cookie}
@@ -173,7 +173,7 @@ func normalizeEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
 }
 
-// deviceToken reads the velox_device cookie. A missing or malformed value
+// deviceToken reads the hardcount_device cookie. A missing or malformed value
 // reads as "".
 func deviceToken(r *http.Request) string {
 	c, err := r.Cookie(DeviceCookieName)
@@ -285,7 +285,7 @@ func (t *LoginThrottle) Reserve(r *http.Request, email string) (ThrottleVerdict,
 
 // SignedIn records a sign-in with the right password. v is the verdict
 // Reserve gave the same request. The sign-in marks the browser, sets the
-// velox_device cookie and clears this address's count for the email.
+// hardcount_device cookie and clears this address's count for the email.
 //
 // It clears the email's count only when the attempt was counted under it,
 // that is, from a browser that never signed in to the email. A successful

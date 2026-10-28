@@ -106,16 +106,16 @@ func TestValidateSettings_PrefixesStoredInCapitals(t *testing.T) {
 	}
 }
 
-// A credit note prefix equal to the invoice prefix makes VLX-000040 both an
+// A credit note prefix equal to the invoice prefix makes HC-000040 both an
 // invoice and a credit note: the two counts are separate, so the same number
 // comes up in each. The check ignores case, because numbers are printed in
 // capitals.
 func TestValidateSettings_CreditNotePrefixDiffersFromInvoicePrefix(t *testing.T) {
 	for _, tc := range []struct{ inv, cn string }{
-		{"VLX", "VLX"},
+		{"HC", "HC"},
 		{"ACME", "acme"},
-		{"", "VLX"}, // an empty invoice prefix is the default VLX
-		{"CN", ""},  // an empty credit note prefix is the default CN
+		{"", "HC"}, // an empty invoice prefix is the default HC
+		{"CN", ""}, // an empty credit note prefix is the default CN
 	} {
 		err := validateSettings(&domain.TenantSettings{InvoicePrefix: tc.inv, CreditNotePrefix: tc.cn})
 		if err == nil || errs.Field(err) != "credit_note_prefix" || err.Error() != "must differ from the invoice prefix" {

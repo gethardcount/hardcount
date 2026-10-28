@@ -18,7 +18,7 @@ is the textbook safe approach for **production systems with staged
 rollouts** — protects against mid-deploy heterogeneity where some
 replicas read the old column and others read the new.
 
-Velox has zero such concern:
+Hardcount has zero such concern:
 
 - Zero deployments. Single local DB, single binary.
 - No staged rollout. No mid-deploy mix.

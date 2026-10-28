@@ -1,6 +1,6 @@
 # Usage below zero
 
-Velox accepts negative usage events as corrections. When the corrections in
+Hardcount accepts negative usage events as corrections. When the corrections in
 a billing period are larger than the usage they offset, that meter's usage
 for the period is below zero. Back to the [runbook index](index.md).
 
@@ -17,7 +17,7 @@ for the period is below zero. Back to the [runbook index](index.md).
 
 ## Why
 
-A negative quantity has no price, so Velox counts that meter as 0 for the
+A negative quantity has no price, so Hardcount counts that meter as 0 for the
 period and builds the rest of the invoice: base fees and every other meter.
 It does not carry the negative amount into a later period.
 

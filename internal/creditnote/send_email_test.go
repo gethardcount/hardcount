@@ -138,7 +138,7 @@ func TestCreditNoteSendEmail(t *testing.T) {
 	// Unknown id → 404; missing email → 422 naming it; an unknown key → 422
 	// naming it; no sender wired → 409.
 	h, _ = newH()
-	if rr := cnSendReq(t, h, "vlx_cn_missing", `{"email":"a@b.co"}`); rr.Code != http.StatusNotFound {
+	if rr := cnSendReq(t, h, "hc_cn_missing", `{"email":"a@b.co"}`); rr.Code != http.StatusNotFound {
 		t.Fatalf("unknown id: status %d, want 404", rr.Code)
 	}
 	if rr := cnSendReq(t, h, issued.ID, `{}`); rr.Code != http.StatusUnprocessableEntity || !strings.Contains(rr.Body.String(), `"param":"email"`) {

@@ -436,7 +436,7 @@ type UpdateInput struct {
 	// policy (ADR-036). Pointer so the handler can distinguish
 	// "unset" (omitted) from "clear" (explicit empty string). nil =
 	// leave as-is; *"" = clear assignment (fall back to default);
-	// *"vlx_dpol_..." = assign to that policy.
+	// *"hc_dpol_..." = assign to that policy.
 	DunningPolicyID *string `json:"dunning_policy_id,omitempty"`
 	// AdditionalEmails replaces the CC list (ADR-082). Pointer for the
 	// same omitted-vs-clear distinction: nil = leave as-is; *[] =
@@ -798,7 +798,7 @@ func normalizeAdditionalEmails(list []string, primaryEmail string) ([]string, er
 // archiveBlockedMessage is the refusal to archive a customer whose
 // subscriptions still bill (ADR-067). It names them as the customer page
 // lists them, by name, not by id: "Pro monthly" means something to the
-// operator reading it, "vlx_sub_d9o…" does not. A subscription with no name
+// operator reading it, "hc_sub_d9o…" does not. A subscription with no name
 // falls back to its id so it can still be found.
 func archiveBlockedMessage(blocking []NonTerminalSubscription) string {
 	names := make([]string, 0, len(blocking))

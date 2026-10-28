@@ -65,7 +65,7 @@ func TestDeclineReason(t *testing.T) {
 		{"lost_card", "", "Card declined: reported lost or stolen"},
 		{"stolen_card", "", "Card declined: reported lost or stolen"},
 		{"generic_decline", "", "Card declined by the bank"},
-		// Unmapped: the provider's own text, without Velox's wrapper.
+		// Unmapped: the provider's own text, without Hardcount's wrapper.
 		{"pickup_card", "payment failed: Your card cannot be used.", "Your card cannot be used."},
 		{"", "payment state unknown: Stripe timed out.", "Stripe timed out."},
 		{"", "", ""},
@@ -120,7 +120,7 @@ func TestMetaText(t *testing.T) {
 	due := time.Date(2027, 2, 15, 4, 30, 0, 0, time.UTC)
 	l := Line{
 		Detail: []Segment{
-			{L(LinkCreditNote, "vlx_cn_1", "CN-000012")},
+			{L(LinkCreditNote, "hc_cn_1", "CN-000012")},
 			{M(1500, "USD"), T(" refunded to card")},
 			{T("Respond by "), At(due)},
 			{},

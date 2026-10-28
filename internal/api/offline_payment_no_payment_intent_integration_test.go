@@ -11,8 +11,8 @@ import (
 	"github.com/sagarsuperuser/velox/internal/testutil"
 )
 
-// An offline payment is money that moved outside Velox (a bank transfer, a
-// cheque). Velox used to record it by writing "out_of_band:<time>" into the
+// An offline payment is money that moved outside Hardcount (a bank transfer, a
+// cheque). Hardcount used to record it by writing "out_of_band:<time>" into the
 // invoice's Stripe PaymentIntent column, so every reader of that column had
 // to know the prefix, and one that did not offered a card refund on a bank
 // transfer (VLX-000068). Now the column holds only Stripe's ids: an offline
@@ -142,11 +142,11 @@ func TestOfflinePayment_LeavesNoPaymentIntent_EveryReader(t *testing.T) {
 			if direct.status != 409 || !strings.Contains(direct.errMessage(), "paid outside Stripe") {
 				t.Errorf("direct refund: %d %q, want 409 saying the invoice was paid outside Stripe", direct.status, direct.errMessage())
 			}
-			// Money returned outside Velox is recorded as such.
+			// Money returned outside Hardcount is recorded as such.
 			cn := call("POST", "/v1/credit-notes", flowReq{body: map[string]any{
 				"invoice_id": c.id, "reason": "Billing error", "auto_issue": true, "out_of_band_amount_cents": 1000,
 				"lines": []map[string]any{{"description": "Billing error", "quantity": 1, "unit_amount_cents": 1000}},
-			}}).want(t, 201, "credit note returned outside Velox")
+			}}).want(t, 201, "credit note returned outside Hardcount")
 			if flowInt(cn.body, "refund_amount_cents") != 0 || flowInt(cn.body, "out_of_band_amount_cents") != 1000 {
 				t.Errorf("credit note channels refund %d out_of_band %d, want 0/1000",
 					flowInt(cn.body, "refund_amount_cents"), flowInt(cn.body, "out_of_band_amount_cents"))

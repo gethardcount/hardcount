@@ -71,7 +71,7 @@ func TestDelete_TearsDownSimulatedGraph_KeepsEverythingElse(t *testing.T) {
 	}
 
 	// A clock + a customer pinned to it + an invoice it owns + a raw usage event.
-	clockID := "vlx_tclk_teardown01"
+	clockID := "hc_tclk_teardown01"
 	execTx(`INSERT INTO test_clocks (id, tenant_id, frozen_time) VALUES ($1, $2, now())`, clockID, tenantID)
 	simCust, err := custStore.Create(ctx, tenantID, domain.Customer{ExternalID: "cus_sim", DisplayName: "Sim", TestClockID: clockID})
 	if err != nil {

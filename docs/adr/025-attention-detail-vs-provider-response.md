@@ -1,11 +1,11 @@
-# ADR-025: Attention banner separates Velox's classification from upstream provider responses
+# ADR-025: Attention banner separates Hardcount's classification from upstream provider responses
 
 **Status:** Accepted
 **Date:** 2026-05-05
 
 ## Summary
 
-An attention banner keeps two kinds of detail apart. `detail` is Velox's own explanation, and `provider_response` is text a provider such as Stripe actually returned. A check that fails before any provider call, such as `provider_not_configured`, leaves both empty, so the operator never mistakes Velox's text for a Stripe reply. The split is made from the typed `tax_error_code` when the response is built, and storage is unchanged. Status: active.
+An attention banner keeps two kinds of detail apart. `detail` is Hardcount's own explanation, and `provider_response` is text a provider such as Stripe actually returned. A check that fails before any provider call, such as `provider_not_configured`, leaves both empty, so the operator never mistakes Hardcount's text for a Stripe reply. The split is made from the typed `tax_error_code` when the response is built, and storage is unchanged. Status: active.
 
 ## Context
 
@@ -25,7 +25,7 @@ live) in Settings → Payments.
 ```
 
 The disclosed string ("no client configured for livemode=false") is
-**Velox's own internal classification message** — produced before any
+**Hardcount's own internal classification message** — produced before any
 HTTP call to Stripe. The label "Provider response" was misleading the
 operator into thinking we got a 4xx back from Stripe; their reaction
 was *"why are we hitting the provider when no creds are set?"* (we
@@ -37,7 +37,7 @@ which conflates two distinct semantics:
 
 | Typed code | What `tax_pending_reason` actually carries |
 |---|---|
-| `provider_not_configured` (pre-flight, no API call) | Velox's own string |
+| `provider_not_configured` (pre-flight, no API call) | Hardcount's own string |
 | `provider_auth` (got 4xx from Stripe) | Upstream Stripe response body |
 | `provider_outage` (got 5xx) | Upstream Stripe response body |
 | `customer_data_invalid` (got 422) | Upstream Stripe response body |
@@ -54,7 +54,7 @@ Split `Attention.Detail` into **two fields with disjoint semantics**:
 type Attention struct {
     // ... existing ...
 
-    // Detail: Velox's own classification context — always operator-
+    // Detail: Hardcount's own classification context — always operator-
     // safe, always our framing. May be empty.
     Detail string
 
@@ -82,7 +82,7 @@ type Attention struct {
 
 `classifyPaymentFailure`: `inv.LastPaymentError` is Stripe's
 `last_payment_error` message — upstream payload — so it goes in
-`ProviderResponse`. `Detail` left empty until we have Velox-side
+`ProviderResponse`. `Detail` left empty until we have Hardcount-side
 context worth surfacing (e.g., "engine retried 3 times before giving
 up", deferred until dunning surfaces it).
 
@@ -91,7 +91,7 @@ up", deferred until dunning surfaces it).
 Two conditional disclosures, each rendering only when its field is
 populated:
 
-- **"Detail"** — Velox's own framing.
+- **"Detail"** — Hardcount's own framing.
 - **"Provider response"** — literal upstream payload.
 
 Both empty (the new normal for `provider_not_configured`) → no
@@ -102,7 +102,7 @@ whole UI.
 
 - **Operator never has to guess provenance.** A "Provider response"
   label always means "this came back from the upstream service." A
-  "Detail" label always means "Velox's own context."
+  "Detail" label always means "Hardcount's own context."
 - **`provider_not_configured` becomes self-explanatory.** The headline
   ("Stripe Tax is selected but Stripe isn't connected for this mode")
   + the action ("Connect Stripe") + the typed code stamp are
@@ -113,12 +113,12 @@ whole UI.
   underlying `invoices.tax_pending_reason` storage is unchanged.
   Producers continue wrapping upstream payloads with `"stripe_tax: "`
   prefix; the classifier tells us whether the wrapped string is a
-  real provider response or Velox-internal.
+  real provider response or Hardcount-internal.
 - **Extensible to other reasons.** The same split applies to
   `payment_failed` (Stripe's `last_payment_error` → ProviderResponse;
-  Velox's "retried N times" context → Detail when surfaced),
+  Hardcount's "retried N times" context → Detail when surfaced),
   `payment_unconfirmed`, and any future attention reason that has
-  both Velox-side and upstream-side context.
+  both Hardcount-side and upstream-side context.
 
 ## Alternatives considered
 
@@ -127,14 +127,14 @@ whole UI.
   the API-formation split achieves the same wire shape. Reconsider if
   we ever need to query upstream-vs-internal distinctions in SQL
   (compliance reports, audits).
-- **Single field with a `detail_source: "velox" | "provider"` flag.**
+- **Single field with a `detail_source: "hardcount" | "provider"` flag.**
   Client switches on the flag to label the disclosure. Two fields is
   a cleaner API contract — no flag-handling on every render.
 - **Suppress the disclosure for known pre-flight codes only.** A
   band-aid. Doesn't fix the conflation; new codes added later inherit
   the bug.
 - **Just rename "Provider response" → "Detail" everywhere.** Loses
-  the diagnostic clarity ("this came from Stripe vs Velox"); makes
+  the diagnostic clarity ("this came from Stripe vs Hardcount"); makes
   every banner uniformly vague.
 
 ## Tests
@@ -149,5 +149,5 @@ Per typed code, assertion that the right slot is populated:
   Detail empty.
 
 The pre-flight test (`TestClassifyInvoiceAttention_ProviderNotConfiguredEmptyResponse`)
-is the canary — if a future change leaks Velox-internal strings into
+is the canary — if a future change leaks Hardcount-internal strings into
 ProviderResponse for pre-flight codes, the test fails loudly.

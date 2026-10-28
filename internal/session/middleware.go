@@ -12,7 +12,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
-// Middleware accepts a `velox_session` httpOnly cookie. On hit it
+// Middleware accepts a `hardcount_session` httpOnly cookie. On hit it
 // resolves the session, projects the parent key's tenant context onto
 // the request, and forwards. On miss it 401s without falling back to
 // API-key auth — use MiddlewareOrAPIKey for routes that should accept
@@ -76,7 +76,7 @@ func MiddlewareOrAPIKey(sessSvc *Service, keySvc *auth.Service) func(http.Handle
 
 			rawKey := extractBearer(r)
 			if rawKey == "" {
-				respond.Unauthorized(w, r, "missing credentials — sign in at /login or send Authorization: Bearer vlx_secret_...")
+				respond.Unauthorized(w, r, "missing credentials — sign in at /login or send Authorization: Bearer hc_secret_...")
 				return
 			}
 			key, err := keySvc.ValidateKey(r.Context(), rawKey)

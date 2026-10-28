@@ -107,14 +107,14 @@ func (e curatedErr) OperatorSafeMessage() string { return e.msg }
 
 // TestBillFailureText pins the allowlist for the saved error text.
 func TestBillFailureText(t *testing.T) {
-	const id = "vlx_sub_x"
+	const id = "hc_sub_x"
 	generic := "An internal error occurred. Reference: " + id
 
 	if got := billFailureText(id, errors.New("pq: duplicate key value violates unique constraint idx_secret")); got != generic {
 		t.Fatalf("raw database text: got %q, want the generic reference", got)
 	}
 	// A plain domain-looking message is still not on the allowlist.
-	if got := billFailureText(id, errors.New("get plan vlx_pln_1: not found")); got != generic {
+	if got := billFailureText(id, errors.New("get plan hc_pln_1: not found")); got != generic {
 		t.Fatalf("plain error: got %q, want the generic reference", got)
 	}
 	if got := billFailureText(id, errBillPanic); got != generic {

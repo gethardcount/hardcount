@@ -10,7 +10,7 @@ import (
 
 // A funding invoice that earlier credit notes have partly credited can take
 // only what is left of its total. When a cancel, an immediate plan swap or an
-// item change owes more than that, Velox places what fits and records the rest
+// item change owes more than that, Hardcount places what fits and records the rest
 // on the change as uncredited_cents (ADR-118 amendment 2026-10-22).
 // Before, a cancel or swap gave nothing and an item change answered 500.
 //

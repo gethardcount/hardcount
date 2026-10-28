@@ -59,14 +59,14 @@ func SumCents(a, b int64) (int64, error) {
 //     told the operator a number that reconciles against nothing.
 //
 //   - Thousands separators. Commit exposure is the first operator surface in
-//     Velox that routinely shows amounts above five digits; "10000000.00 USD"
+//     Hardcount that routinely shows amounts above five digits; "10000000.00 USD"
 //     is a number a human misreads by an order of magnitude at a glance, which
 //     defeats the point of surfacing it.
 //
 // Minor units are assumed to be hundredths. That is already baked into every
 // int64 cents field in the schema — a zero-decimal currency (JPY, KRW) would
 // need a currency-exponent table, and inventing an exponent here rather than
-// looking one up is the banned silent-fallback class. Velox has no zero-decimal
+// looking one up is the banned silent-fallback class. Hardcount has no zero-decimal
 // tenant today; when one arrives this is the single place that changes.
 func FormatMoneyMinor(cents int64, currency string) string {
 	code := strings.ToUpper(strings.TrimSpace(currency))

@@ -15,9 +15,9 @@ chapter stands alone if linked directly.
 
 ### The headline (2026-08-16, measured under the protocol below)
 
-**Rig:** `c7g.2xlarge` app (8 vCPU Graviton, Velox in its own container) +
+**Rig:** `c7g.2xlarge` app (8 vCPU Graviton, Hardcount in its own container) +
 `c7g.xlarge` load generator + `db.m7g.2xlarge` RDS PostgreSQL 16, all in
-`ap-south-1a`. **~$1.26/hr.** Live-mode ingest path (rows with livemode=true — Velox's live data,
+`ap-south-1a`. **~$1.26/hr.** Live-mode ingest path (rows with livemode=true — Hardcount's live data,
 as opposed to test mode), 200 customers, one meter,
 each request a random customer. Table seeded to **22M rows** before the first
 measurement and **47M** by the last; **10 GB+ of indexes**. Every figure below
@@ -50,7 +50,7 @@ latency 0.6 → 2.6 ms and disk queue depth 0.5 → 10.7 in the final minute. Th
 index working set had fallen out of cache and every insert was fetching index
 pages from EBS. Repeat 3, at 65M rows, delivered 4,035 of the 5,000 offered with a p99 of 9.9 s and 5,792 drops; the series was stopped there.
 
-That is a **capacity cliff, not a Velox defect**, and it is the single most
+That is a **capacity cliff, not a Hardcount defect**, and it is the single most
 useful number here for a self-hoster: on `db.m7g.2xlarge` + 100 GB gp3, steady
 inserts turn read-IOPS-bound at roughly **60M rows / 30 GB of table + index**.
 The levers are the usual ones — RAM (`db.m7g.4xlarge` = 64 GB), provisioned
@@ -85,7 +85,7 @@ this is what a 10-minute repeat is for.
 Same app node and load generator; the database doubled to **`db.m7g.4xlarge`
 (16 vCPU, 64 GB RAM, 100 GB gp3 — same 3,000 IOPS baseline)**. The three
 nodes cost **~$2.21/hr** on-demand (`ap-south-1` list prices: 1.916 + 0.196 +
-0.098), which is **~$0.041 per million events at 15,000 ev/s**. Velox ran at
+0.098), which is **~$0.041 per million events at 15,000 ev/s**. Hardcount ran at
 `db7f86b0`, which carries the fix for #818. Fresh 20M-row seed, 10-minute
 settle, then both ladders (2 × 90 s per rung), then sustained attempts. The
 first sustained attempt (10k) ran straight after the ladders on the table they
@@ -137,7 +137,7 @@ becomes bound by **write IOPS during checkpoints** — five indexes on
 `usage_events` and a 3,000-IOPS volume — before it is bound by CPU (≤67 %) or
 memory. At 15k one burst in fifty minutes crossed the line; at 25k they crossed
 every few minutes. The levers are provisioned IOPS / `io2`, `max_wal_size` and
-checkpoint spreading, or fewer indexes; none of them is Velox code, and none was
+checkpoint spreading, or fewer indexes; none of them is Hardcount code, and none was
 pulled for this run — the numbers above are the stock RDS defaults on a 100 GB
 volume.
 
@@ -153,9 +153,9 @@ interleaved A/B rounds** (`db-ceiling.sh`), right after the ceiling run:
 | leg | round 1 | round 2 | median |
 |---|---:|---:|---:|
 | A — plain batched INSERT, one transaction per 500 rows (the commit floor) | 58,444 rows/s | 46,982 | **52,713 rows/s** |
-| B — the same with Velox's per-transaction RLS protocol (`BEGIN`, three `set_config`, INSERT, `COMMIT`) | 45,195 | 36,154 | **40,674 rows/s** |
+| B — the same with Hardcount's per-transaction RLS protocol (`BEGIN`, three `set_config`, INSERT, `COMMIT`) | 45,195 | 36,154 | **40,674 rows/s** |
 
-Velox's closed loop, **41,172 ev/s, is 78 % of the raw commit floor and 101 %
+Hardcount's closed loop, **41,172 ev/s, is 78 % of the raw commit floor and 101 %
 of leg B**. At batch 500 the HTTP layer, auth, customer/meter resolve and the
 Go service add nothing measurable; the ceiling is the database's own batched
 insert path with the RLS (row-level security) protocol on it (which costs 23 % of the floor here,
@@ -163,21 +163,21 @@ insert path with the RLS (row-level security) protocol on it (which costs 23 % o
 were 60 s each and each leg added ~3M rows, and **both legs lost ~20 % from
 round 1 to round 2** as the table grew — the same growth sensitivity the
 sustained runs show, in a 4-minute window. So "101 %" is "within the
-round-to-round variance", not a claim that Velox is free.
+round-to-round variance", not a claim that Hardcount is free.
 
 And the like-for-like cell for the run-1 comparison — **batch 1**, 16 clients,
 two interleaved rounds: A **7,184** rows/s (6,890 / 7,478), B **7,106** (6,943 /
 7,269). At 16 clients a one-row commit is round-trip-bound (~2.2 ms per
 transaction, 16 in flight), so the RLS protocol costs ~1 % here against 13 % on
 the 2xlarge — the cost shows when the DB is CPU-bound, not when it is waiting
-on the client. (`db-ceiling.sh` also prints Velox-as-a-fraction lines; they are
-only meaningful when `VELOX_EVS` came from a closed-loop run at the same
+on the client. (`db-ceiling.sh` also prints Hardcount-as-a-fraction lines; they are
+only meaningful when `HARDCOUNT_EVS` came from a closed-loop run at the same
 `BATCH` — the batch-1 legs above are not compared to the batch-500 ceiling.)
 
 ### Third run, 2026-08-17: what a tail event is, caught live
 
 Same shape (`c7g.2xlarge` app, `c7g.xlarge` generator, `db.m7g.4xlarge`,
-100 GB gp3), Velox `97ef608b`, this time instrumented for attribution: a
+100 GB gp3), Hardcount `97ef608b`, this time instrumented for attribution: a
 parameter group with the logging on (`log_autovacuum_min_duration=0`,
 `log_lock_waits` with `deadlock_timeout=200ms`, `log_min_duration_statement=250`),
 Performance Insights, **Enhanced Monitoring at 1 second**, and a 5-second
@@ -494,8 +494,8 @@ event rate — is what the hot row above caps.
 
 `pgbench` on the same database and row shape (`db-ceiling.sh`) puts the
 database's own one-row commit floor at 6,840/s (16 clients) and 14,284/s (64),
-and the same with Velox's per-transaction RLS protocol at 5,961 and 11,546.
-So the three `set_config` round trips cost 13–19 % at the DB, and Velox's
+and the same with Hardcount's per-transaction RLS protocol at 5,961 and 11,546.
+So the three `set_config` round trips cost 13–19 % at the DB, and Hardcount's
 25k ev/s ceiling is a fraction of what the DB can absorb — the remainder is
 HTTP + auth + resolve + the Go service, and, at high request rates, the row.
 

@@ -1,6 +1,6 @@
 // Customer-facing "who do I contact" for the public pages (hosted invoice,
 // update payment method). The reader is the operator's end customer: they
-// know the company they pay, not Velox and not a "billing provider".
+// know the company they pay, not Hardcount and not a "billing provider".
 
 export interface SellerBranding {
   company_name?: string

@@ -145,7 +145,7 @@ and the fix is a post-dispatch scrub of secret-bearing payload fields, not
 row deletion; the mitigations listed (single-use tokens, 1 h reset expiry)
 stand. `webhook_outbox` dispatched rows are pure transport intent —
 `webhook_events`/`webhook_deliveries` are the replayable record — and are
-safe to prune at any age; Velox does not do so automatically (register:
+safe to prune at any age; Hardcount does not do so automatically (register:
 outbox-pruner, trigger recorded in velox-ops).
 
 ## Amendment 2026-10-13 — sent and skipped rows drop their secrets

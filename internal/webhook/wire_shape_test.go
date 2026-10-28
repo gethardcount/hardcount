@@ -26,7 +26,7 @@ func TestWireShape_EndpointDeliveries(t *testing.T) {
 	svc := NewTestService(store, &mockHTTPClient{statusCode: 200})
 	h := NewHandler(svc)
 
-	tenantID := "vlx_tenant_epdrill"
+	tenantID := "hc_tenant_epdrill"
 	ctx := auth.WithTenantID(postgres.WithLivemode(context.Background(), true), tenantID)
 	ep, err := svc.CreateEndpoint(ctx, tenantID, CreateEndpointInput{
 		URL: "http://localhost:9001/sink", Events: []string{"*"},
@@ -34,7 +34,7 @@ func TestWireShape_EndpointDeliveries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create endpoint: %v", err)
 	}
-	if err := svc.Dispatch(ctx, tenantID, "invoice.finalized", map[string]any{"invoice_id": "vlx_inv_42"}); err != nil {
+	if err := svc.Dispatch(ctx, tenantID, "invoice.finalized", map[string]any{"invoice_id": "hc_inv_42"}); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 
@@ -85,14 +85,14 @@ func TestWireShape_EndpointDeliveries(t *testing.T) {
 
 	// 404 contract: a made-up endpoint id must not render an empty-but-
 	// healthy-looking history.
-	req404 := httptest.NewRequest("GET", "/v1/webhook-endpoints/endpoints/vlx_whe_nope/deliveries", nil).WithContext(ctx)
+	req404 := httptest.NewRequest("GET", "/v1/webhook-endpoints/endpoints/hc_whe_nope/deliveries", nil).WithContext(ctx)
 	rec404 := httptest.NewRecorder()
 	r.ServeHTTP(rec404, req404)
 	if rec404.Code != http.StatusNotFound {
 		t.Errorf("unknown endpoint: status = %d, want 404", rec404.Code)
 	}
 	rec404 = httptest.NewRecorder()
-	r.ServeHTTP(rec404, httptest.NewRequest("GET", "/v1/webhook-endpoints/endpoints/vlx_whe_nope", nil).WithContext(ctx))
+	r.ServeHTTP(rec404, httptest.NewRequest("GET", "/v1/webhook-endpoints/endpoints/hc_whe_nope", nil).WithContext(ctx))
 	if rec404.Code != http.StatusNotFound {
 		t.Errorf("GET unknown endpoint: status = %d, want 404", rec404.Code)
 	}
@@ -116,7 +116,7 @@ func TestWireShape_WebhookEventsStream_SnakeCase(t *testing.T) {
 	// Use livemode so the dashboard's default-live render path is
 	// exercised (the contract is identical for test mode but the live
 	// path is the one Track A's PR description anchors on).
-	tenantID := "vlx_tenant_wireshape"
+	tenantID := "hc_tenant_wireshape"
 	ctx := auth.WithTenantID(postgres.WithLivemode(context.Background(), true), tenantID)
 	if _, err := svc.CreateEndpoint(ctx, tenantID, CreateEndpointInput{
 		URL:    "http://localhost:9001/sink",
@@ -125,8 +125,8 @@ func TestWireShape_WebhookEventsStream_SnakeCase(t *testing.T) {
 		t.Fatalf("create endpoint: %v", err)
 	}
 	if err := svc.Dispatch(ctx, tenantID, "invoice.finalized", map[string]any{
-		"customer_id": "vlx_cus_wireshape",
-		"invoice_id":  "vlx_inv_42",
+		"customer_id": "hc_cus_wireshape",
+		"invoice_id":  "hc_inv_42",
 	}); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
@@ -211,8 +211,8 @@ func TestWireShape_WebhookEventsStream_SnakeCase(t *testing.T) {
 	if frame["event_type"] != "invoice.finalized" {
 		t.Errorf("event_type: got %v, want invoice.finalized", frame["event_type"])
 	}
-	if frame["customer_id"] != "vlx_cus_wireshape" {
-		t.Errorf("customer_id: got %v, want vlx_cus_wireshape", frame["customer_id"])
+	if frame["customer_id"] != "hc_cus_wireshape" {
+		t.Errorf("customer_id: got %v, want hc_cus_wireshape", frame["customer_id"])
 	}
 	// Snapshot frames are minted with no last_attempt yet — the value
 	// should be JSON null (present-but-nil), not the key omitted.
@@ -251,7 +251,7 @@ func TestWireShape_WebhookEventReplay(t *testing.T) {
 	svc := NewTestService(store, &mockHTTPClient{statusCode: 200})
 	h := NewHandler(svc)
 
-	tenantID := "vlx_tenant_replay"
+	tenantID := "hc_tenant_replay"
 	ctx := auth.WithTenantID(postgres.WithLivemode(context.Background(), true), tenantID)
 	if _, err := svc.CreateEndpoint(ctx, tenantID, CreateEndpointInput{
 		URL:    "http://localhost:9002/sink",
@@ -260,7 +260,7 @@ func TestWireShape_WebhookEventReplay(t *testing.T) {
 		t.Fatalf("create endpoint: %v", err)
 	}
 	if err := svc.Dispatch(ctx, tenantID, "invoice.finalized", map[string]any{
-		"invoice_id": "vlx_inv_99",
+		"invoice_id": "hc_inv_99",
 	}); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
@@ -332,7 +332,7 @@ func TestWireShape_WebhookEventDeliveries(t *testing.T) {
 	svc := NewTestService(store, &mockHTTPClient{statusCode: 200})
 	h := NewHandler(svc)
 
-	tenantID := "vlx_tenant_deliveries"
+	tenantID := "hc_tenant_deliveries"
 	ctx := auth.WithTenantID(postgres.WithLivemode(context.Background(), true), tenantID)
 	if _, err := svc.CreateEndpoint(ctx, tenantID, CreateEndpointInput{
 		URL:    "http://localhost:9003/sink",
@@ -341,8 +341,8 @@ func TestWireShape_WebhookEventDeliveries(t *testing.T) {
 		t.Fatalf("create endpoint: %v", err)
 	}
 	if err := svc.Dispatch(ctx, tenantID, "invoice.finalized", map[string]any{
-		"invoice_id":  "vlx_inv_77",
-		"customer_id": "vlx_cus_77",
+		"invoice_id":  "hc_inv_77",
+		"customer_id": "hc_cus_77",
 	}); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}

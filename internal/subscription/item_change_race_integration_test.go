@@ -98,7 +98,7 @@ type raceInvoices struct {
 func (f *raceInvoices) record(tenantID string, inv domain.Invoice) domain.Invoice {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	inv.ID = fmt.Sprintf("vlx_inv_race_%d", len(f.made)+1)
+	inv.ID = fmt.Sprintf("hc_inv_race_%d", len(f.made)+1)
 	inv.TenantID = tenantID
 	f.made = append(f.made, inv)
 	return inv
@@ -181,12 +181,12 @@ func (f *raceCredits) all() []raceCredit {
 func (f *raceCredits) CreateAdjustmentDraftTx(_ context.Context, _ *sql.Tx, _, invoiceID string, gross int64, _, _ string) (domain.CreditNote, error) {
 	f.gate.wait()
 	f.record(raceCredit{AmountCents: gross})
-	return domain.CreditNote{ID: "vlx_cn_race", InvoiceID: invoiceID, Status: domain.CreditNoteDraft}, nil
+	return domain.CreditNote{ID: "hc_cn_race", InvoiceID: invoiceID, Status: domain.CreditNoteDraft}, nil
 }
 
 func (f *raceCredits) CreateAndIssueAdjustment(_ context.Context, _, invoiceID string, gross int64, _, _ string) (domain.CreditNote, error) {
 	f.record(raceCredit{AmountCents: gross})
-	return domain.CreditNote{ID: "vlx_cn_race", InvoiceID: invoiceID}, nil
+	return domain.CreditNote{ID: "hc_cn_race", InvoiceID: invoiceID}, nil
 }
 
 func (f *raceCredits) LockInvoicesForDraftsTx(context.Context, *sql.Tx, string, []string) error {
@@ -319,7 +319,7 @@ func newItemRaceRig(t *testing.T, db *postgres.DB, name string, qty int64, withK
 	reader := &plansMock{plans: byID}
 	gate := newHoldFirst()
 	invoices := &raceInvoices{source: domain.Invoice{
-		ID: "vlx_inv_race_base", PaymentStatus: domain.PaymentSucceeded, Status: domain.InvoicePaid,
+		ID: "hc_inv_race_base", PaymentStatus: domain.PaymentSucceeded, Status: domain.InvoicePaid,
 		SubtotalCents: raceBasicCents * qty, TotalAmountCents: raceBasicCents * qty, CreatedAt: proPeriodStart,
 	}}
 	credits := &raceCredits{gate: gate}

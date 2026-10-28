@@ -84,7 +84,7 @@ func (s *Service) SetEmailConfigured(configured bool) { s.emailConfigured = conf
 // It names no setting: the dashboard shows it to whoever clicked Send invite,
 // who usually can't change server settings. The setting's name is in
 // docs/ops/email-setup.md and in the Team tab's Details.
-const InvitesOffNoDashboardURL = "Invites are off: this server has no dashboard address set, so it can't build the invite link. Ask whoever runs Velox to set it."
+const InvitesOffNoDashboardURL = "Invites are off: this server has no dashboard address set, so it can't build the invite link. Ask whoever runs Hardcount to set it."
 
 // CanInvite reports whether Invite can succeed on this server's settings:
 // an accept link can be built (DASHBOARD_BASE_URL) and emailed (SMTP). It is

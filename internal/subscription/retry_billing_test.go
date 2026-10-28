@@ -180,7 +180,7 @@ func TestRetryBilling_ClockPinnedIsRefused(t *testing.T) {
 	store := newMemStore()
 	subID := seedFailingSub(t, store, tenantID)
 	sub := store.subs[subID]
-	sub.TestClockID = "vlx_tclk_1"
+	sub.TestClockID = "hc_tclk_1"
 	store.subs[subID] = sub
 	svc := NewService(store, nil)
 

@@ -9,7 +9,7 @@ import (
 // helper: minimal draft invoice in healthy state
 func draft() Invoice {
 	return Invoice{
-		ID:            "vlx_inv_test",
+		ID:            "hc_inv_test",
 		Status:        InvoiceDraft,
 		PaymentStatus: PaymentPending,
 		TaxFacts: TaxFacts{
@@ -98,7 +98,7 @@ func TestClassifyInvoiceAttention_TaxFailedSubcodes(t *testing.T) {
 				t.Errorf("expected ProviderResponse to carry raw provider response, got %q", att.ProviderResponse)
 			}
 			if att.Detail != "" {
-				t.Errorf("Detail should be empty for tax codes — Velox-internal slot is reserved for our own framing, got %q", att.Detail)
+				t.Errorf("Detail should be empty for tax codes — Hardcount-internal slot is reserved for our own framing, got %q", att.Detail)
 			}
 			if att.Since == nil {
 				t.Errorf("expected Since to be set from TaxDeferredAt")
@@ -113,7 +113,7 @@ func TestClassifyInvoiceAttention_TaxFailedSubcodes(t *testing.T) {
 // TestClassifyInvoiceAttention_ProviderNotConfiguredEmptyResponse asserts
 // the ADR-025 contract for the only pre-flight tax code: provider_not_
 // configured fired before any HTTP call to Stripe, so neither slot
-// should carry the Velox-internal string ("no client configured for
+// should carry the Hardcount-internal string ("no client configured for
 // livemode=…"). The headline + Connect Stripe action carry the whole
 // UI; surfacing the internal string under "Provider response" would
 // mislead operators into thinking a 4xx came back from Stripe.
@@ -121,7 +121,7 @@ func TestClassifyInvoiceAttention_ProviderNotConfiguredEmptyResponse(t *testing.
 	inv := draft()
 	inv.TaxStatus = InvoiceTaxPending
 	inv.TaxErrorCode = "provider_not_configured"
-	inv.TaxPendingReason = "no client configured for livemode=false" // Velox-internal, NOT a provider response
+	inv.TaxPendingReason = "no client configured for livemode=false" // Hardcount-internal, NOT a provider response
 	now := time.Now()
 	inv.TaxDeferredAt = &now
 
@@ -220,9 +220,9 @@ func TestClassifyInvoiceAttention_PaymentFailed(t *testing.T) {
 	if att.Reason != AttentionReasonPaymentFailed {
 		t.Errorf("reason = %s, want %s", att.Reason, AttentionReasonPaymentFailed)
 	}
-	// Operator voice: the banner headline is Velox's sentence, never the
+	// Operator voice: the banner headline is Hardcount's sentence, never the
 	// provider's cardholder-facing string ("Your card was declined" read
-	// as Velox addressing the operator). The provider's exact wording is
+	// as Hardcount addressing the operator). The provider's exact wording is
 	// preserved verbatim in ProviderResponse.
 	if att.Message != "The customer's card was declined." {
 		t.Errorf("message = %q, want the operator-voice headline", att.Message)
@@ -246,7 +246,7 @@ func TestClassifyInvoiceAttention_PaymentFailed(t *testing.T) {
 		t.Errorf("expected ProviderResponse to carry LastPaymentError, got %q", att.ProviderResponse)
 	}
 	if att.Detail != "" {
-		t.Errorf("Detail should be empty (no Velox-internal context for this code yet), got %q", att.Detail)
+		t.Errorf("Detail should be empty (no Hardcount-internal context for this code yet), got %q", att.Detail)
 	}
 }
 
@@ -552,7 +552,7 @@ func TestClassify_PaymentProcessing_AgeAware(t *testing.T) {
 	now := time.Date(2026, 6, 7, 12, 0, 0, 0, time.UTC)
 	base := func(updatedAgo time.Duration, simulated bool) Invoice {
 		return Invoice{
-			ID: "vlx_inv_test", Status: InvoiceFinalized,
+			ID: "hc_inv_test", Status: InvoiceFinalized,
 			PaymentStatus: PaymentProcessing, TaxFacts: TaxFacts{TaxStatus: InvoiceTaxOK},
 			UpdatedAt: now.Add(-updatedAgo), IsSimulated: simulated,
 		}
@@ -598,7 +598,7 @@ func TestClassify_PaymentProcessing_AgeAware(t *testing.T) {
 // automatically (ADR-049 Phase 2); an on-demand action is deferred.
 func TestClassify_PaymentUnconfirmed_NoDeadAction(t *testing.T) {
 	inv := Invoice{
-		ID: "vlx_inv_test", Status: InvoiceFinalized,
+		ID: "hc_inv_test", Status: InvoiceFinalized,
 		PaymentStatus: PaymentUnknown, TaxFacts: TaxFacts{TaxStatus: InvoiceTaxOK},
 		// The resolving case — see the note in
 		// TestClassifyInvoiceAttention_PaymentUnknownIsInfo.
@@ -1171,7 +1171,7 @@ func TestClassifyInvoiceAttention_PendingSeverityTracksAutomaticMover(t *testing
 	}
 }
 
-// While the customer's payment page is open no Velox charge can start
+// While the customer's payment page is open no Hardcount charge can start
 // (ADR-068), so the banner must not offer Retry / Charge now — the buttons
 // would be refused — and it says why the retry date is not acted on.
 func TestClassifyInvoiceAttention_PaymentPageOpen(t *testing.T) {

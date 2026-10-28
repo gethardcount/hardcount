@@ -100,13 +100,13 @@ func TestDrainOrder_PromotionalFirst_NullSafe(t *testing.T) {
 	}
 	// Commit block via the real funding path shape (store-level, own tx).
 	var commitEntry domain.CreditLedgerEntry
-	fundingInv := seedPayableInvoice(t, db, ctx, tenantID, custID, 25000, "VLX-DRAIN-FUND")
+	fundingInv := seedPayableInvoice(t, db, ctx, tenantID, custID, 25000, "HC-DRAIN-FUND")
 	{
 		tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
 		if err != nil {
 			t.Fatalf("begin: %v", err)
 		}
-		commitEntry, err = svc.GrantCommitForInvoiceTx(ctx, tx, tenantID, custID, fundingInv, "VLX-DRAIN-FUND", "USD", 30000, nil)
+		commitEntry, err = svc.GrantCommitForInvoiceTx(ctx, tx, tenantID, custID, fundingInv, "HC-DRAIN-FUND", "USD", 30000, nil)
 		if err != nil {
 			t.Fatalf("commit grant: %v", err)
 		}
@@ -118,8 +118,8 @@ func TestDrainOrder_PromotionalFirst_NullSafe(t *testing.T) {
 	// Drain $250 into a normal invoice: promo ($100) must go first, then the
 	// paid class in created_at order — legacy ($200) absorbs the remaining
 	// $150; the commit block stays untouched.
-	target := seedPayableInvoice(t, db, ctx, tenantID, custID, 25000, "VLX-DRAIN-TARGET")
-	applied, err := svc.ApplyToInvoice(ctx, tenantID, custID, target, 25000, "VLX-DRAIN-TARGET")
+	target := seedPayableInvoice(t, db, ctx, tenantID, custID, 25000, "HC-DRAIN-TARGET")
+	applied, err := svc.ApplyToInvoice(ctx, tenantID, custID, target, 25000, "HC-DRAIN-TARGET")
 	if err != nil {
 		t.Fatalf("apply: %v", err)
 	}
@@ -205,7 +205,7 @@ func TestApplyToInvoice_CommitInvoiceIsCashInstrument(t *testing.T) {
 	}
 
 	// A finalized invoice carrying a commit line.
-	invID := seedPayableInvoice(t, db, ctx, tenantID, custID, 10000, "VLX-COMMIT-CASH")
+	invID := seedPayableInvoice(t, db, ctx, tenantID, custID, 10000, "HC-COMMIT-CASH")
 	{
 		tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
 		if err != nil {
@@ -215,7 +215,7 @@ func TestApplyToInvoice_CommitInvoiceIsCashInstrument(t *testing.T) {
 			INSERT INTO invoice_line_items (id, invoice_id, tenant_id, line_type, description,
 				quantity, unit_amount_cents, amount_cents, total_amount_cents, currency, commit_granted_cents)
 			VALUES ($1, $2, $3, 'add_on', 'Q3 commit', 1, 10000, 10000, 10000, 'USD', 12000)
-		`, postgres.NewID("vlx_ili"), invID, tenantID); err != nil {
+		`, postgres.NewID("hc_ili"), invID, tenantID); err != nil {
 			t.Fatalf("seed commit line: %v", err)
 		}
 		if err := tx.Commit(); err != nil {
@@ -223,7 +223,7 @@ func TestApplyToInvoice_CommitInvoiceIsCashInstrument(t *testing.T) {
 		}
 	}
 
-	applied, err := svc.ApplyToInvoice(ctx, tenantID, custID, invID, 10000, "VLX-COMMIT-CASH")
+	applied, err := svc.ApplyToInvoice(ctx, tenantID, custID, invID, 10000, "HC-COMMIT-CASH")
 	if err != nil {
 		t.Fatalf("apply: %v", err)
 	}
@@ -259,13 +259,13 @@ func TestApplyToInvoice_SkipsSettledInvoice(t *testing.T) {
 		t.Fatalf("grant: %v", err)
 	}
 
-	invID := seedPayableInvoice(t, db, ctx, tenantID, custID, 10000, "VLX-APPLY-SETTLED")
+	invID := seedPayableInvoice(t, db, ctx, tenantID, custID, 10000, "HC-APPLY-SETTLED")
 	if _, err := invoice.NewPostgresStore(db).MarkPaid(ctx, tenantID, invID, "pi_settled", time.Now()); err != nil {
 		t.Fatalf("mark paid: %v", err)
 	}
 
 	// The caller's stale pre-read said $100 due; the in-tx re-read sees paid.
-	applied, err := svc.ApplyToInvoice(ctx, tenantID, custID, invID, 10000, "VLX-APPLY-SETTLED")
+	applied, err := svc.ApplyToInvoice(ctx, tenantID, custID, invID, 10000, "HC-APPLY-SETTLED")
 	if err != nil {
 		t.Fatalf("apply: %v", err)
 	}
@@ -353,8 +353,8 @@ func TestBalanceCrossingEvents(t *testing.T) {
 
 	// 10000 → 3000 via drain: crosses below the 5000 threshold → low fires
 	// with balance + threshold payload.
-	target := seedPayableInvoice(t, db, ctx, tenantID, custID, 7000, "VLX-CROSS-1")
-	if _, err := svc.ApplyToInvoice(ctx, tenantID, custID, target, 7000, "VLX-CROSS-1"); err != nil {
+	target := seedPayableInvoice(t, db, ctx, tenantID, custID, 7000, "HC-CROSS-1")
+	if _, err := svc.ApplyToInvoice(ctx, tenantID, custID, target, 7000, "HC-CROSS-1"); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 	lows := outboxEvents(t, db, ctx, tenantID, domain.EventCreditBalanceLow)

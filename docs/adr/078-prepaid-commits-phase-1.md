@@ -9,7 +9,7 @@ design doc holds the full evidence and census).
 ## Summary
 
 A prepaid commit is credit a customer buys on a manual invoice and then draws
-down. Velox grants it as a `customer_credit_ledger` block with
+down. Hardcount grants it as a `customer_credit_ledger` block with
 `grant_kind='commit'` in the same transaction that finalizes the invoice, so
 the credit is spendable from the day the invoice is issued. Voiding the
 invoice retires the unused balance, but uncollectible, dunning pause and
@@ -120,7 +120,7 @@ Ship the prepaid-commit primitive on the existing credit-block ledger:
   items; `grant_kind` (promotional only) + `expires_at` on
   POST /v1/credits/grant; threshold on tenant settings; 3 outbound event
   types.
-- `VELOX_BILLING_ALERTS_INTERVAL` phantom removed from compose (nothing
+- `HARDCOUNT_BILLING_ALERTS_INTERVAL` phantom removed from compose (nothing
   read it).
 - Accepted, documented limitations (phase-2 triggers in the design doc):
   ReverseForInvoice re-grants drawn credits as NULL-kind/never-expiring
@@ -162,7 +162,7 @@ quotes rather than recollection, points the same way: Orb attaches
 `require_successful_payment` to credit *increments and top-ups*, and
 Metronome attaches payment-gating to *"threshold billing and auto-recharge"*
 while documenting full-term access — "the entire committed amount is
-available on day one" — as typical for negotiated prepaid. Velox has neither
+available on day one" — as typical for negotiated prepaid. Hardcount has neither
 self-serve nor auto-recharge. Building the gate now is building for a
 customer shape that does not exist.
 
@@ -211,7 +211,7 @@ corroborates that rather than being asked to carry it.
 
 ## Amendment 2026-10-19 — the purchase is not taxed; the usage it pays for is
 
-Issue [#1271](https://github.com/getvelox/velox/issues/1271). With a tax
+Issue [#1271](https://github.com/gethardcount/hardcount/issues/1271). With a tax
 provider on, a prepaid commit was taxed twice. The commit line was taxed on
 the purchase invoice like any other line. Later usage invoices were taxed
 again, and the credit paid their `amount_due`, which includes that tax. At
@@ -240,7 +240,7 @@ before. Lago, verified 2026-10-19:
 apply credit before tax, as Stripe applies billing credits: "Credit grants
 apply to invoices after discounts, but before taxes" ([billing
 credits](https://docs.stripe.com/billing/subscriptions/usage-based/billing-credits),
-verified 2026-10-19). In Velox, credit is a cash offset applied after tax:
+verified 2026-10-19). In Hardcount, credit is a cash offset applied after tax:
 it pays `min(amount_due, balance)`, and `amount_due` includes tax. Applying
 it before tax would change every invoice that credit pays, not only commit
 invoices. Lago's model fits the ledger as it is and changes one place.
@@ -298,10 +298,10 @@ account should check with its tax adviser:
   used;
 - whether that depends on what the credit can be spent on;
 - if it sells credit below face value, whether the use of the credit is
-  taxed on the price paid or on the usage (Velox taxes the usage);
+  taxed on the price paid or on the usage (Hardcount taxes the usage);
 - what its invoices must say about an untaxed prepayment.
 
-Velox has no setting to tax the purchase instead. Trigger to build one: an
+Hardcount has no setting to tax the purchase instead. Trigger to build one: an
 account whose country taxes prepaid credit when it is bought, selling
 commits with tax on.
 

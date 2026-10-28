@@ -1,6 +1,6 @@
-# Velox — Claude Code Context
+# Hardcount — Claude Code Context
 
-Velox is an open-source usage-based billing engine built in Go. It handles pricing, subscriptions, usage metering, invoice generation, Stripe payments, dunning, and customer credits.
+Hardcount is an open-source usage-based billing engine built in Go. It handles pricing, subscriptions, usage metering, invoice generation, Stripe payments, dunning, and customer credits.
 
 ## Rules at a glance
 Each rule is explained in the section named after it.
@@ -54,8 +54,8 @@ A concurrent-resolver fake is a test double that commits the racing transition a
 ## Running locally
 ```bash
 docker compose up -d postgres
-DATABASE_URL="postgres://velox:velox@localhost:5432/velox?sslmode=disable" go run ./cmd/velox-bootstrap
-DATABASE_URL="postgres://velox:velox@localhost:5432/velox?sslmode=disable" RUN_MIGRATIONS_ON_BOOT=true go run ./cmd/velox
+DATABASE_URL="postgres://hardcount:hardcount@localhost:5432/hardcount?sslmode=disable" go run ./cmd/hardcount-bootstrap
+DATABASE_URL="postgres://hardcount:hardcount@localhost:5432/hardcount?sslmode=disable" RUN_MIGRATIONS_ON_BOOT=true go run ./cmd/hardcount
 ```
 
 ## Testing
@@ -84,8 +84,8 @@ Two or more Claude Code sessions may work this repo at the same time. Rules:
 
 ## Important decisions
 - **Auth:** dashboard uses email + password; API uses Bearer keys. See `docs/adr/011-email-password-auth-and-clean-api-keys.md`; ADR-007 and ADR-008 are superseded.
-  - Dashboard `POST /v1/auth/login` validates against `users.password_hash` (bcrypt cost 12). It mints an httpOnly `velox_session` cookie bound to `users.id`, not to any API key.
-  - SDK / curl callers send `Authorization: Bearer <vlx_…>`. `internal/session.MiddlewareOrAPIKey` accepts either; the cookie takes precedence.
+  - Dashboard `POST /v1/auth/login` validates against `users.password_hash` (bcrypt cost 12). It mints an httpOnly `hardcount_session` cookie bound to `users.id`, not to any API key.
+  - SDK / curl callers send `Authorization: Bearer <hc_…>`. `internal/session.MiddlewareOrAPIKey` accepts either; the cookie takes precedence.
   - Password reset uses single-use 1h tokens delivered via SMTP (Mailpit in local dev: `docker compose up -d mailpit`).
   - Team invites (ADR-081): tokenized email invites, and member removal with session revocation.
   - No RBAC: every member holds the full permission set. The role is recorded but not enforced.

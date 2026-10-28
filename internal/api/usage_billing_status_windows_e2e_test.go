@@ -211,7 +211,7 @@ func TestBillingStatus_GraceEventBeforeTheNextPinIsNotFlagged(t *testing.T) {
 
 // TestBillingStatus_HeldReleaseCountsTheUnbilledMetric: rows the held-usage
 // release writes with a billing_status are counted in
-// velox_usage_unbilled_total, as every other written row is (origin
+// hardcount_usage_unbilled_total, as every other written row is (origin
 // backfill, as the release writes them).
 //
 // Mutation check: drop the count from Release → the counter does not move.
@@ -279,7 +279,7 @@ func TestBillingStatus_TrialCanceledAtPeriodEnd(t *testing.T) {
 // 18:40, before the trial scan. At 18:45 the operator undoes the cancel,
 // which the subscription still allows: it is trialing. The scan then
 // activates it at its trial end, and the first paid invoice bills the event.
-// The event is in time Velox does not check (after the trial end of a
+// The event is in time Hardcount does not check (after the trial end of a
 // subscription still trialing), so it carries no status (review round 4 on
 // #1390); the undo is a later change, and the invoice is the final answer.
 //
@@ -330,7 +330,7 @@ func TestBillingStatus_TrialExtendedAfterItsEnd(t *testing.T) {
 // (plan A, calls only) runs from Apr 1, and B (plan C, no meter) from Apr
 // 10. Neither prices seats. A seats event inside both open periods is
 // not_on_plan. A seats event after B's period end, before B's invoice is
-// built, is in B's next period, which Velox does not check: it carries no
+// built, is in B's next period, which Hardcount does not check: it carries no
 // status, although A's open period holds it and does not price seats. This
 // is the stated rule (review round 4 on #1390). After B's invoice is built,
 // the same kind of event is not_on_plan again. No invoice bills a seats

@@ -33,7 +33,7 @@ func TestMiddleware_InvalidKey(t *testing.T) {
 	}))
 
 	req := httptest.NewRequest("GET", "/", nil)
-	req.Header.Set("Authorization", "Bearer vlx_secret_0000000000000000000000000000000000000000000000000000000000000000000000000000")
+	req.Header.Set("Authorization", "Bearer hc_secret_0000000000000000000000000000000000000000000000000000000000000000000000000000")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -163,13 +163,13 @@ func TestLivemodeFromRawKey(t *testing.T) {
 		live bool
 		ok   bool
 	}{
-		{"secret_live", "vlx_secret_live_" + "ff", true, true},
-		{"secret_test", "vlx_secret_test_" + "aa", false, true},
-		{"pub_live", "vlx_pub_live_abc", true, true},
-		{"pub_test", "vlx_pub_test_abc", false, true},
-		{"platform_live", "vlx_plat_live_xyz", true, true},
+		{"secret_live", "hc_secret_live_" + "ff", true, true},
+		{"secret_test", "hc_secret_test_" + "aa", false, true},
+		{"pub_live", "hc_pub_live_abc", true, true},
+		{"pub_test", "hc_pub_test_abc", false, true},
+		{"platform_live", "hc_plat_live_xyz", true, true},
 		{"empty", "", false, false},
-		{"no_mode_infix", "vlx_cps_customer_portal_token", false, false},
+		{"no_mode_infix", "hc_cps_customer_portal_token", false, false},
 		{"random", "not-a-key", false, false},
 	}
 	for _, c := range cases {
@@ -185,14 +185,14 @@ func TestLivemodeFromRawKey(t *testing.T) {
 func TestLivemodeFromRequest(t *testing.T) {
 	// Bearer header with live key
 	r := httptest.NewRequest("GET", "/", nil)
-	r.Header.Set("Authorization", "Bearer vlx_secret_live_"+"abc")
+	r.Header.Set("Authorization", "Bearer hc_secret_live_"+"abc")
 	if live, ok := LivemodeFromRequest(r); !ok || !live {
 		t.Errorf("Bearer live: got (live=%v, ok=%v), want (true, true)", live, ok)
 	}
 
 	// X-API-Key fallback with test key
 	r = httptest.NewRequest("GET", "/", nil)
-	r.Header.Set("X-API-Key", "vlx_secret_test_xyz")
+	r.Header.Set("X-API-Key", "hc_secret_test_xyz")
 	if live, ok := LivemodeFromRequest(r); !ok || live {
 		t.Errorf("X-API-Key test: got (live=%v, ok=%v), want (false, true)", live, ok)
 	}

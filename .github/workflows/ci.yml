@@ -77,13 +77,13 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_DB: velox
-          POSTGRES_USER: velox
-          POSTGRES_PASSWORD: velox
+          POSTGRES_DB: hardcount
+          POSTGRES_USER: hardcount
+          POSTGRES_PASSWORD: hardcount
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -h 127.0.0.1 -U velox -d velox"
+          --health-cmd "pg_isready -h 127.0.0.1 -U hardcount -d hardcount"
           --health-interval 2s
           --health-timeout 5s
           --health-retries 15
@@ -105,11 +105,11 @@ jobs:
         run: |
           # docker/init.sql is the one definition of the roles, the test
           # database and its grants; local dev mounts the same file.
-          PGPASSWORD=velox psql -v ON_ERROR_STOP=1 -h localhost -U velox -d velox -f docker/init.sql
+          PGPASSWORD=hardcount psql -v ON_ERROR_STOP=1 -h localhost -U hardcount -d hardcount -f docker/init.sql
           # This database is thrown away with the job, so it does not need to
           # survive a crash. Skipping the disk flushes removes the runs where a
           # slow runner disk made the suite two to four times slower.
-          PGPASSWORD=velox psql -v ON_ERROR_STOP=1 -h localhost -U velox -d velox \
+          PGPASSWORD=hardcount psql -v ON_ERROR_STOP=1 -h localhost -U hardcount -d hardcount \
             -c "ALTER SYSTEM SET fsync = off" \
             -c "ALTER SYSTEM SET synchronous_commit = off" \
             -c "ALTER SYSTEM SET full_page_writes = off" \
@@ -118,11 +118,11 @@ jobs:
       - name: Integration Tests
         run: go test -p 1 ./... -count=1 -short=false
         env:
-          TEST_ADMIN_DATABASE_URL: postgres://velox:velox@localhost:5432/velox_test?sslmode=disable
-          TEST_DATABASE_URL: postgres://velox_test_app:velox_test_app@localhost:5432/velox_test?sslmode=disable
+          TEST_ADMIN_DATABASE_URL: postgres://hardcount:hardcount@localhost:5432/hardcount_test?sslmode=disable
+          TEST_DATABASE_URL: postgres://hardcount_test_app:hardcount_test_app@localhost:5432/hardcount_test?sslmode=disable
 
   # The pricing-shapes suite (ADR-130): each common way to price with
-  # Velox, billed end to end and checked to the cent, plus the goldens of
+  # Hardcount, billed end to end and checked to the cent, plus the goldens of
   # each price shape on every rating path. The test job runs these too;
   # this job gives them a check of their own, so a branch rule can require
   # it.
@@ -133,13 +133,13 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_DB: velox
-          POSTGRES_USER: velox
-          POSTGRES_PASSWORD: velox
+          POSTGRES_DB: hardcount
+          POSTGRES_USER: hardcount
+          POSTGRES_PASSWORD: hardcount
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -h 127.0.0.1 -U velox -d velox"
+          --health-cmd "pg_isready -h 127.0.0.1 -U hardcount -d hardcount"
           --health-interval 2s
           --health-timeout 5s
           --health-retries 15
@@ -153,8 +153,8 @@ jobs:
 
       - name: Create test database and app user
         run: |
-          PGPASSWORD=velox psql -v ON_ERROR_STOP=1 -h localhost -U velox -d velox -f docker/init.sql
-          PGPASSWORD=velox psql -v ON_ERROR_STOP=1 -h localhost -U velox -d velox \
+          PGPASSWORD=hardcount psql -v ON_ERROR_STOP=1 -h localhost -U hardcount -d hardcount -f docker/init.sql
+          PGPASSWORD=hardcount psql -v ON_ERROR_STOP=1 -h localhost -U hardcount -d hardcount \
             -c "ALTER SYSTEM SET fsync = off" \
             -c "ALTER SYSTEM SET synchronous_commit = off" \
             -c "ALTER SYSTEM SET full_page_writes = off" \
@@ -165,22 +165,22 @@ jobs:
           go test -p 1 -count=1 -short=false -v ./internal/api
           -run '^(TestPricingShapes_|TestE2E_PlanPrices_TwoPlansPriceOneMeterDifferently$|TestE2E_PlanPrices_SwapPricesEachWindowByItsPlan$)'
         env:
-          TEST_ADMIN_DATABASE_URL: postgres://velox:velox@localhost:5432/velox_test?sslmode=disable
-          TEST_DATABASE_URL: postgres://velox_test_app:velox_test_app@localhost:5432/velox_test?sslmode=disable
-          VELOX_LIVEMODE_STRICT: "true"
+          TEST_ADMIN_DATABASE_URL: postgres://hardcount:hardcount@localhost:5432/hardcount_test?sslmode=disable
+          TEST_DATABASE_URL: postgres://hardcount_test_app:hardcount_test_app@localhost:5432/hardcount_test?sslmode=disable
+          HARDCOUNT_LIVEMODE_STRICT: "true"
 
       - name: Price shape goldens, on every rating path
         run: >-
           go test -p 1 -count=1 -short=false -v ./internal/billing
           -run '^(TestPriceShapes_|TestRateShapes_)'
         env:
-          TEST_ADMIN_DATABASE_URL: postgres://velox:velox@localhost:5432/velox_test?sslmode=disable
-          TEST_DATABASE_URL: postgres://velox_test_app:velox_test_app@localhost:5432/velox_test?sslmode=disable
-          VELOX_LIVEMODE_STRICT: "true"
+          TEST_ADMIN_DATABASE_URL: postgres://hardcount:hardcount@localhost:5432/hardcount_test?sslmode=disable
+          TEST_DATABASE_URL: postgres://hardcount_test_app:hardcount_test_app@localhost:5432/hardcount_test?sslmode=disable
+          HARDCOUNT_LIVEMODE_STRICT: "true"
 
   # The same integration suite with the APP pool behind PgBouncer in
   # TRANSACTION mode (ADR-114 PR-E). Since the leader-lease cutover every
-  # statement Velox issues is meant to be self-contained; this job is what
+  # statement Hardcount issues is meant to be self-contained; this job is what
   # makes that a checked property instead of a claim. Anything that assumes
   # a session — SET without LOCAL, a session advisory lock, a prepared
   # statement reused across transactions — passes on the direct-connection
@@ -205,13 +205,13 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_DB: velox
-          POSTGRES_USER: velox
-          POSTGRES_PASSWORD: velox
+          POSTGRES_DB: hardcount
+          POSTGRES_USER: hardcount
+          POSTGRES_PASSWORD: hardcount
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -h 127.0.0.1 -U velox -d velox"
+          --health-cmd "pg_isready -h 127.0.0.1 -U hardcount -d hardcount"
           --health-interval 2s
           --health-timeout 5s
           --health-retries 15
@@ -226,8 +226,8 @@ jobs:
       - name: Create test database and app user
         run: |
           # Same setup as the test job above.
-          PGPASSWORD=velox psql -v ON_ERROR_STOP=1 -h localhost -U velox -d velox -f docker/init.sql
-          PGPASSWORD=velox psql -v ON_ERROR_STOP=1 -h localhost -U velox -d velox \
+          PGPASSWORD=hardcount psql -v ON_ERROR_STOP=1 -h localhost -U hardcount -d hardcount -f docker/init.sql
+          PGPASSWORD=hardcount psql -v ON_ERROR_STOP=1 -h localhost -U hardcount -d hardcount \
             -c "ALTER SYSTEM SET fsync = off" \
             -c "ALTER SYSTEM SET synchronous_commit = off" \
             -c "ALTER SYSTEM SET full_page_writes = off" \
@@ -254,12 +254,12 @@ jobs:
           go-version-file: go.mod
 
       - name: Build HEAD
-        run: go build -o "${{ runner.temp }}/velox" ./cmd/velox
+        run: go build -o "${{ runner.temp }}/hardcount" ./cmd/hardcount
 
       - name: Fresh install under each role setup
         run: scripts/ci/migrations-fresh-install.sh
         env:
-          VELOX_BIN: ${{ runner.temp }}/velox
+          HARDCOUNT_BIN: ${{ runner.temp }}/hardcount
           KEEP_OUT: ${{ runner.temp }}/migrations-out
 
       - name: Upload outputs on failure
@@ -285,18 +285,18 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_DB: velox
-          POSTGRES_USER: velox
-          POSTGRES_PASSWORD: velox
+          POSTGRES_DB: hardcount
+          POSTGRES_USER: hardcount
+          POSTGRES_PASSWORD: hardcount
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -h 127.0.0.1 -U velox -d velox"
+          --health-cmd "pg_isready -h 127.0.0.1 -U hardcount -d hardcount"
           --health-interval 2s
           --health-timeout 5s
           --health-retries 15
     env:
-      DATABASE_URL: postgres://velox:velox@localhost:5432/velox?sslmode=disable
+      DATABASE_URL: postgres://hardcount:hardcount@localhost:5432/hardcount?sslmode=disable
     steps:
       - uses: actions/checkout@v7
 
@@ -308,27 +308,27 @@ jobs:
         run: |
           # Same grants production init gives the runtime role — without the
           # DEFAULT PRIVILEGES line, tables created by migrations are
-          # invisible to velox_app and the API 500s (caught by this job's
+          # invisible to hardcount_app and the API 500s (caught by this job's
           # first run: permission denied for provider_cost_rates).
-          PGPASSWORD=velox psql -v ON_ERROR_STOP=1 -h localhost -U velox -d velox <<'EOSQL'
-          CREATE ROLE velox_app WITH LOGIN PASSWORD 'velox_app';
-          GRANT ALL PRIVILEGES ON DATABASE velox TO velox_app;
-          GRANT ALL ON SCHEMA public TO velox_app;
-          ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO velox_app;
-          ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO velox_app;
-          ALTER ROLE velox_app SET idle_in_transaction_session_timeout = '30s';
+          PGPASSWORD=hardcount psql -v ON_ERROR_STOP=1 -h localhost -U hardcount -d hardcount <<'EOSQL'
+          CREATE ROLE hardcount_app WITH LOGIN PASSWORD 'hardcount_app';
+          GRANT ALL PRIVILEGES ON DATABASE hardcount TO hardcount_app;
+          GRANT ALL ON SCHEMA public TO hardcount_app;
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO hardcount_app;
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO hardcount_app;
+          ALTER ROLE hardcount_app SET idle_in_transaction_session_timeout = '30s';
           CREATE EXTENSION IF NOT EXISTS pgcrypto;
           EOSQL
 
       - name: Bootstrap (migrations + demo tenant + keys)
         run: |
-          go run ./cmd/velox-bootstrap | tee bootstrap.out
-          grep -oE 'vlx_secret_test_[a-f0-9]+' bootstrap.out | head -1 > secret.key
+          go run ./cmd/hardcount-bootstrap | tee bootstrap.out
+          grep -oE 'hc_secret_test_[a-f0-9]+' bootstrap.out | head -1 > secret.key
           test -s secret.key
 
       - name: Start API
         run: |
-          nohup go run ./cmd/velox > server.log 2>&1 &
+          nohup go run ./cmd/hardcount > server.log 2>&1 &
           for i in $(seq 1 60); do
             curl -sf http://localhost:8080/health >/dev/null 2>&1 && break
             sleep 1
@@ -341,7 +341,7 @@ jobs:
             || { echo "server is not on the app connection: row-level security is off"; tail -50 server.log; exit 1; }
 
       # docs/first-invoice.md, run from its own code blocks by
-      # cmd/velox-docs-run, before the demo, as on a fresh install. The page
+      # cmd/hardcount-docs-run, before the demo, as on a fresh install. The page
       # reads the test key from the file the quick start writes, so this
       # writes that file. The first pass sends the usage both ways (5a, then
       # 5b, which deduplicates). The second takes only 5b, for a new
@@ -353,16 +353,16 @@ jobs:
           set -o pipefail
           shopt -s inherit_errexit
           jq -n --arg k "$(cat secret.key)" '{secret_key_test: $k}' > deploy/compose/quickstart-credentials.json
-          go build -o "$RUNNER_TEMP/velox-docs-run" ./cmd/velox-docs-run
+          go build -o "$RUNNER_TEMP/hardcount-docs-run" ./cmd/hardcount-docs-run
           setup() {
             for kind in plans meters; do
               curl -sf "http://localhost:8080/v1/$kind" -H "Authorization: Bearer $(cat secret.key)" \
                 | jq -ec --arg kind "$kind" '{($kind): [.data[].id] | sort}'
             done
           }
-          "$RUNNER_TEMP/velox-docs-run" docs/first-invoice.md
+          "$RUNNER_TEMP/hardcount-docs-run" docs/first-invoice.md
           after_first=$(setup)
-          "$RUNNER_TEMP/velox-docs-run" -skip 5a -replace acme-1=acme-2 docs/first-invoice.md
+          "$RUNNER_TEMP/hardcount-docs-run" -skip 5a -replace acme-1=acme-2 docs/first-invoice.md
           after_second=$(setup)
           echo "$after_first"
           [ "$after_first" = "$after_second" ] || { echo "Applying the recipe again changed the plans or meters:"; echo "$after_second"; exit 1; }
@@ -372,8 +372,8 @@ jobs:
 
       # Money-invariant sweep over rows written by the real server through its
       # API: an invoice, usage, a subscription.
-      - name: Money-invariant sweep over the demo data (velox-doctor)
-        run: go run ./cmd/velox-doctor
+      - name: Money-invariant sweep over the demo data (hardcount-doctor)
+        run: go run ./cmd/hardcount-doctor
 
       - name: Server log on failure
         if: failure()
@@ -391,13 +391,13 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_DB: velox
-          POSTGRES_USER: velox
-          POSTGRES_PASSWORD: velox
+          POSTGRES_DB: hardcount
+          POSTGRES_USER: hardcount
+          POSTGRES_PASSWORD: hardcount
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -h 127.0.0.1 -U velox -d velox"
+          --health-cmd "pg_isready -h 127.0.0.1 -U hardcount -d hardcount"
           --health-interval 2s
           --health-timeout 5s
           --health-retries 15
@@ -408,9 +408,9 @@ jobs:
         ports:
           - 1025:1025
     env:
-      DATABASE_URL: postgres://velox:velox@localhost:5432/velox?sslmode=disable
-      VELOX_BOOTSTRAP_EMAIL: e2e@example.com
-      VELOX_BOOTSTRAP_PASSWORD: e2e-password-not-secret
+      DATABASE_URL: postgres://hardcount:hardcount@localhost:5432/hardcount?sslmode=disable
+      HARDCOUNT_BOOTSTRAP_EMAIL: e2e@example.com
+      HARDCOUNT_BOOTSTRAP_PASSWORD: e2e-password-not-secret
       E2E_EMAIL: e2e@example.com
       E2E_PASSWORD: e2e-password-not-secret
       E2E_BASE_URL: http://127.0.0.1:4173
@@ -434,26 +434,26 @@ jobs:
 
       - name: Create app role (mirrors deploy/compose/postgres-init.sh)
         run: |
-          PGPASSWORD=velox psql -v ON_ERROR_STOP=1 -h localhost -U velox -d velox <<'EOSQL'
-          CREATE ROLE velox_app WITH LOGIN PASSWORD 'velox_app';
-          GRANT ALL PRIVILEGES ON DATABASE velox TO velox_app;
-          GRANT ALL ON SCHEMA public TO velox_app;
-          ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO velox_app;
-          ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO velox_app;
-          ALTER ROLE velox_app SET idle_in_transaction_session_timeout = '30s';
+          PGPASSWORD=hardcount psql -v ON_ERROR_STOP=1 -h localhost -U hardcount -d hardcount <<'EOSQL'
+          CREATE ROLE hardcount_app WITH LOGIN PASSWORD 'hardcount_app';
+          GRANT ALL PRIVILEGES ON DATABASE hardcount TO hardcount_app;
+          GRANT ALL ON SCHEMA public TO hardcount_app;
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO hardcount_app;
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO hardcount_app;
+          ALTER ROLE hardcount_app SET idle_in_transaction_session_timeout = '30s';
           CREATE EXTENSION IF NOT EXISTS pgcrypto;
           EOSQL
 
       - name: Bootstrap (migrations + demo tenant + keys)
         run: |
-          go run ./cmd/velox-bootstrap | tee bootstrap.out
-          key=$(grep -oE 'vlx_secret_test_[a-f0-9]+' bootstrap.out | head -1)
+          go run ./cmd/hardcount-bootstrap | tee bootstrap.out
+          key=$(grep -oE 'hc_secret_test_[a-f0-9]+' bootstrap.out | head -1)
           test -n "$key"
           echo "E2E_API_KEY=$key" >> "$GITHUB_ENV"
 
       - name: Start API
         run: |
-          nohup go run ./cmd/velox > server.log 2>&1 &
+          nohup go run ./cmd/hardcount > server.log 2>&1 &
           for i in $(seq 1 60); do
             curl -sf http://localhost:8080/health >/dev/null 2>&1 && break
             sleep 1
@@ -484,7 +484,7 @@ jobs:
         run: |
           cd web-v2
           npm run build
-          VELOX_API_TARGET=http://127.0.0.1:8080 nohup npx vite preview --host 127.0.0.1 --port 4173 --strictPort > preview.log 2>&1 &
+          HARDCOUNT_API_TARGET=http://127.0.0.1:8080 nohup npx vite preview --host 127.0.0.1 --port 4173 --strictPort > preview.log 2>&1 &
           for i in $(seq 1 30); do
             curl -sf http://127.0.0.1:4173/ >/dev/null 2>&1 && break
             sleep 1
@@ -568,10 +568,10 @@ jobs:
       - name: Quickstart release matches the Compose template
         run: |
           set -euo pipefail
-          QS=$(sed -n 's/^VELOX_VERSION="\(.*\)"$/\1/p' deploy/compose/quickstart.sh)
-          ENV=$(sed -n 's|^# VELOX_IMAGE=ghcr.io/getvelox/velox:\(v[0-9.]*\)$|\1|p' deploy/compose/.env.example)
+          QS=$(sed -n 's/^HARDCOUNT_VERSION="\(.*\)"$/\1/p' deploy/compose/quickstart.sh)
+          ENV=$(sed -n 's|^# HARDCOUNT_IMAGE=ghcr.io/gethardcount/hardcount:\(v[0-9.]*\)$|\1|p' deploy/compose/.env.example)
           echo "quickstart.sh: $QS   .env.example: $ENV"
-          [ -n "$QS" ] && [ "$QS" = "$ENV" ] || { echo "::error::deploy/compose/quickstart.sh VELOX_VERSION ($QS) must equal the image tag in deploy/compose/.env.example ($ENV)"; exit 1; }
+          [ -n "$QS" ] && [ "$QS" = "$ENV" ] || { echo "::error::deploy/compose/quickstart.sh HARDCOUNT_VERSION ($QS) must equal the image tag in deploy/compose/.env.example ($ENV)"; exit 1; }
 
       # Last, so a newly published advisory (the usual reason this fails, with
       # no change in this repo) does not hide the results of the steps above.
@@ -607,7 +607,7 @@ jobs:
           args: --offline --no-progress --include-fragments '**/*.md'
           fail: true
 
-  # Prose lint against docs/dev/writing-style.md (rules in .vale/styles/Velox).
+  # Prose lint against docs/dev/writing-style.md (rules in .vale/styles/Hardcount).
   # Advisory: it annotates only lines the PR adds and never fails the run, so
   # older docs are not flagged until someone edits them. Run `vale <file>`
   # locally for the same check.
@@ -724,7 +724,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       # Tag pushes (vX.Y.Z) publish a pinnable versioned image + stamp the
-      # binary (velox version / Velox-Version header). Main pushes keep the
+      # binary (hardcount version / Hardcount-Version header). Main pushes keep the
       # :sha and :latest moving tags with a dev-<sha> stamp — operators are
       # told to pin version tags (deploy/compose/README.md).
       - name: Compute image tags + version stamp
@@ -768,7 +768,7 @@ jobs:
             VERSION=${{ steps.meta.outputs.version }}
           tags: ${{ steps.meta.outputs.tags }}
 
-      # The operator dashboard image (compose's velox-dashboard service) —
+      # The operator dashboard image (compose's hardcount-dashboard service) —
       # published alongside the API so a VPC install never builds from
       # source unless it wants to.
       - name: Build and push dashboard image
@@ -806,14 +806,14 @@ jobs:
         uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
           image: ghcr.io/${{ github.repository }}:${{ steps.meta.outputs.ref_tag }}
-          artifact-name: velox-sbom.spdx.json
+          artifact-name: hardcount-sbom.spdx.json
           format: spdx-json
-          output-file: velox-sbom.spdx.json
+          output-file: hardcount-sbom.spdx.json
 
       - name: Scan SBOM (Grype)
         uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
         with:
-          sbom: velox-sbom.spdx.json
+          sbom: hardcount-sbom.spdx.json
           fail-build: true
           severity-cutoff: critical
           # Print the matches in the log. The default wrote them to a file

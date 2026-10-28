@@ -63,7 +63,7 @@ func TestLogInTx_TotalityAndVocabulary(t *testing.T) {
 		defer postgres.Rollback(tx)
 		for _, action := range vocabulary {
 			if err := logger.LogInTx(ctx, tx, audit.Entry{
-				Action: action, ResourceType: "vocab_probe", ResourceID: "vlx_probe_1",
+				Action: action, ResourceType: "vocab_probe", ResourceID: "hc_probe_1",
 			}); err != nil {
 				t.Fatalf("vocabulary value %q rejected by the schema: %v", action, err)
 			}
@@ -80,7 +80,7 @@ func TestLogInTx_TotalityAndVocabulary(t *testing.T) {
 		}
 		defer postgres.Rollback(tx)
 		if err := logger.LogInTx(ctx, tx, audit.Entry{
-			Action: "update", ResourceType: "guc_probe", ResourceID: "vlx_probe_2",
+			Action: "update", ResourceType: "guc_probe", ResourceID: "hc_probe_2",
 		}); err != nil {
 			t.Fatalf("log: %v", err)
 		}
@@ -107,7 +107,7 @@ func TestLogInTx_TotalityAndVocabulary(t *testing.T) {
 		}
 		defer postgres.Rollback(tx)
 		if err := logger.LogInTx(ctx, tx, audit.Entry{
-			Action: "update", ResourceType: "marshal_probe", ResourceID: "vlx_probe_3",
+			Action: "update", ResourceType: "marshal_probe", ResourceID: "hc_probe_3",
 			Metadata: map[string]any{"bad": func() {}}, // json.Marshal error
 		}); err != nil {
 			t.Fatalf("unmarshalable metadata must degrade, not abort the tx: %v", err)
@@ -134,9 +134,9 @@ func TestLogInTx_TotalityAndVocabulary(t *testing.T) {
 		// The sim axis is derived from the ctx's clock binding, never passed per
 		// emission (ADR-090 §5) — an emitter cannot forget it, and cannot set a
 		// clock id that disagrees with the instant.
-		simCtx := clock.WithSim(ctx, clock.Sim{At: simAt, TestClockID: "vlx_clk_1"})
+		simCtx := clock.WithSim(ctx, clock.Sim{At: simAt, TestClockID: "hc_clk_1"})
 		if err := logger.LogInTx(simCtx, tx, audit.Entry{
-			Action: "cancel", ResourceType: "sim_probe", ResourceID: "vlx_probe_4",
+			Action: "cancel", ResourceType: "sim_probe", ResourceID: "hc_probe_4",
 		}); err != nil {
 			t.Fatalf("log: %v", err)
 		}
@@ -147,10 +147,10 @@ func TestLogInTx_TotalityAndVocabulary(t *testing.T) {
 		).Scan(&colAt, &colClock, &metaJSON); err != nil {
 			t.Fatalf("read back: %v", err)
 		}
-		if !colAt.Equal(simAt) || colClock != "vlx_clk_1" {
-			t.Errorf("sim columns: got (%v, %q), want (%v, vlx_clk_1) — migration 0148", colAt, colClock, simAt)
+		if !colAt.Equal(simAt) || colClock != "hc_clk_1" {
+			t.Errorf("sim columns: got (%v, %q), want (%v, hc_clk_1) — migration 0148", colAt, colClock, simAt)
 		}
-		if !strings.Contains(metaJSON, "sim_effective_at") || !strings.Contains(metaJSON, "vlx_clk_1") {
+		if !strings.Contains(metaJSON, "sim_effective_at") || !strings.Contains(metaJSON, "hc_clk_1") {
 			t.Errorf("legacy metadata mirror missing (dashboard renders these keys today): %s", metaJSON)
 		}
 		_ = tx.Commit()
@@ -167,7 +167,7 @@ func TestLogInTx_TotalityAndVocabulary(t *testing.T) {
 		}
 		defer postgres.Rollback(tx)
 		if err := logger.LogInTx(ctx, tx, audit.Entry{
-			Action: "update", ResourceType: "wall_probe", ResourceID: "vlx_probe_8",
+			Action: "update", ResourceType: "wall_probe", ResourceID: "hc_probe_8",
 		}); err != nil {
 			t.Fatalf("log: %v", err)
 		}
@@ -192,9 +192,9 @@ func TestLogInTx_TotalityAndVocabulary(t *testing.T) {
 			t.Fatalf("begin: %v", err)
 		}
 		defer postgres.Rollback(tx)
-		halfCtx := clock.WithSim(ctx, clock.Sim{TestClockID: "vlx_clk_partial"})
+		halfCtx := clock.WithSim(ctx, clock.Sim{TestClockID: "hc_clk_partial"})
 		if err := logger.LogInTx(halfCtx, tx, audit.Entry{
-			Action: "update", ResourceType: "half_probe", ResourceID: "vlx_probe_9",
+			Action: "update", ResourceType: "half_probe", ResourceID: "hc_probe_9",
 		}); err != nil {
 			t.Fatalf("log: %v", err)
 		}
@@ -226,7 +226,7 @@ func TestLogInTx_TotalityAndVocabulary(t *testing.T) {
 			t.Fatalf("set livemode: %v", err)
 		}
 		err = logger.LogInTx(ctx, tx, audit.Entry{
-			Action: "update", ResourceType: "gucless_probe", ResourceID: "vlx_probe_6",
+			Action: "update", ResourceType: "gucless_probe", ResourceID: "hc_probe_6",
 		})
 		if err == nil {
 			t.Fatal("LogInTx on a GUC-less tx must fail loudly")
@@ -242,7 +242,7 @@ func TestLogInTx_TotalityAndVocabulary(t *testing.T) {
 			t.Fatalf("begin: %v", err)
 		}
 		if err := logger.LogInTx(ctx, tx, audit.Entry{
-			Action: "update", ResourceType: "rollback_probe", ResourceID: "vlx_probe_5",
+			Action: "update", ResourceType: "rollback_probe", ResourceID: "hc_probe_5",
 		}); err != nil {
 			t.Fatalf("log: %v", err)
 		}

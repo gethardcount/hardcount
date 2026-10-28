@@ -29,10 +29,10 @@ func TestOutboxEnqueue_StampsActor(t *testing.T) {
 		wantType, wantID string
 	}{
 		{"background worker", base, false, "system", "system"},
-		{"dashboard operator", auth.WithUserID(base, "vlx_usr_actor"), false, "user", "vlx_usr_actor"},
-		{"api key", auth.WithKeyID(base, "vlx_key_actor"), false, "api_key", "vlx_key_actor"},
-		{"customer on a public page", auth.WithCustomerActor(base, "vlx_cus_actor"), false, "customer", "vlx_cus_actor"},
-		{"in the business transaction", auth.WithUserID(base, "vlx_usr_intx"), true, "user", "vlx_usr_intx"},
+		{"dashboard operator", auth.WithUserID(base, "hc_usr_actor"), false, "user", "hc_usr_actor"},
+		{"api key", auth.WithKeyID(base, "hc_key_actor"), false, "api_key", "hc_key_actor"},
+		{"customer on a public page", auth.WithCustomerActor(base, "hc_cus_actor"), false, "customer", "hc_cus_actor"},
+		{"in the business transaction", auth.WithUserID(base, "hc_usr_intx"), true, "user", "hc_usr_intx"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

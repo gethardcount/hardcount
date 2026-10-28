@@ -81,8 +81,8 @@ test('the ledger calls credit applied to an invoice "Applied", not "Usage"', () 
 })
 
 test('expiry and usage entries read in plain words, not the server ids', () => {
-  assert.equal(ledgerEntryTitle({ entry_type: 'expiry', description: 'Expired grant vlx_ccl_123' }), 'Expired')
-  assert.equal(ledgerEntryTitle({ entry_type: 'usage', description: 'Applied to invoice vlx_inv_9' }), 'Applied')
+  assert.equal(ledgerEntryTitle({ entry_type: 'expiry', description: 'Expired grant hc_ccl_123' }), 'Expired')
+  assert.equal(ledgerEntryTitle({ entry_type: 'usage', description: 'Applied to invoice hc_inv_9' }), 'Applied')
   assert.equal(ledgerEntryTitle({ entry_type: 'grant', description: 'Welcome credit' }), 'Welcome credit')
   assert.equal(ledgerEntryTitle({ entry_type: 'adjustment', description: '' }), 'Adjustment')
 })

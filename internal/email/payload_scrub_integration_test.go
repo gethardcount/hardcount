@@ -34,7 +34,7 @@ func TestProcessBatch_TerminalMarksScrubPayload(t *testing.T) {
 			"to":                 "customer@example.com",
 			"cc":                 []string{"ap@example.com"},
 			"customer_name":      "Ada Lovelace",
-			"invoice_number":     "VLX-000042",
+			"invoice_number":     "HC-000042",
 			"credit_note_number": "CN-000007",
 			"amount_cents":       12345,
 			"currency":           "USD",
@@ -45,7 +45,7 @@ func TestProcessBatch_TerminalMarksScrubPayload(t *testing.T) {
 			"update_url":         "https://app.example/update-payment?token=raw-update-token",
 			"password_reset_url": "https://app.example/reset?token=raw-reset-token",
 			"invite_url":         "https://app.example/invite?token=raw-invite-token",
-			"public_token":       "vlx_pinv_rawpublictoken",
+			"public_token":       "hc_pinv_rawpublictoken",
 			"pdf":                "JVBERi0xLjQK",
 		}
 	}
@@ -119,7 +119,7 @@ func TestProcessBatch_TerminalMarksScrubPayload(t *testing.T) {
 	}
 
 	// The readers of sent rows still work on a scrubbed payload.
-	rows, err := store.ListByInvoice(ctx, tenantID, "VLX-000042")
+	rows, err := store.ListByInvoice(ctx, tenantID, "HC-000042")
 	if err != nil {
 		t.Fatalf("list by invoice: %v", err)
 	}

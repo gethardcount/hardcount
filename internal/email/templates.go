@@ -13,7 +13,7 @@ import (
 // TenantSettings before rendering an outbound email. Every field is
 // optional, and an unset field stays empty: no logo means no <img>, no
 // company name means no seller name in the header or the From name. The
-// email never fills in "Velox" as the seller, because Velox is the
+// email never fills in "Hardcount" as the seller, because Hardcount is the
 // software, not the business billing the customer.
 type Branding struct {
 	CompanyName string
@@ -35,7 +35,7 @@ type Branding struct {
 //   - header: tenant logo + company name, each only when set
 //   - content: per-email HTML (injected as template.HTML, pre-rendered)
 //   - optional CTA button
-//   - footer: support link + "Powered by Velox Billing" micro-credit
+//   - footer: support link + "Powered by Hardcount Billing" micro-credit
 const layoutHTML = `<!DOCTYPE html>
 <html>
 <head>
@@ -76,7 +76,7 @@ const layoutHTML = `<!DOCTYPE html>
           <tr>
             <td style="padding:20px 32px;border-top:1px solid #e5e7eb;font-size:13px;color:#6b7280;">
               {{if .SupportURL}}Need help? <a href="{{.SupportURL}}" style="color:#6b7280;text-decoration:underline;">Contact support</a><br>{{end}}
-              <span style="color:#9ca3af;">Powered by Velox Billing</span>
+              <span style="color:#9ca3af;">Powered by Hardcount Billing</span>
             </td>
           </tr>
         </table>

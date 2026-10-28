@@ -117,12 +117,12 @@ func TestSetStripeCustomerIDAudit_SharedFate(t *testing.T) {
 	// A zero-row UPDATE means the customer isn't there to map. It must emit
 	// NOTHING (evidence of a mutation that never happened) and must REPORT the
 	// miss rather than succeed silently — a silent success let the operator
-	// route hand back a Stripe session for a customer Velox does not have, and
+	// route hand back a Stripe session for a customer Hardcount does not have, and
 	// left the request with zero audit rows once the handler suppressed the
 	// catch-all. The two callers then diverge on purpose: the operator route
 	// 404s; the webhook acks (see payment.handleCheckoutCompleted).
 	t.Run("nonexistent customer emits nothing and reports ErrNotFound", func(t *testing.T) {
-		ghostID := postgres.NewID("vlx_cus") // never inserted
+		ghostID := postgres.NewID("hc_cus") // never inserted
 
 		calls := 0
 		err := store.SetStripeCustomerIDAudited(ctx, tenantID, ghostID, "cus_stripe_ghost", emitFor(ghostID, &calls))

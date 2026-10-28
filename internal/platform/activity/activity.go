@@ -170,7 +170,7 @@ func Stamp(l Line, occurred, recorded time.Time, pinned bool) Line {
 	return l
 }
 
-// Automatic is the actor for anything Velox did on its own.
+// Automatic is the actor for anything Hardcount did on its own.
 func Automatic() *Actor { return &Actor{Kind: ActorAutomatic} }
 
 // ActorFromAudit maps an audit row's actor (audit.ResolveActor's kinds:

@@ -24,9 +24,9 @@ not the canonical shape**:
 | Recurly | Multi-source assembly across `transactions`, `events`, `invoice_notes`. |
 | Chargebee | Generic `events` table for webhooks. Activity reads from events + entity tables. |
 | QuickBooks | Activity log is a multi-table query. No dedicated events table. |
-| Velox (today) | Multi-source assembly across `invoices` columns + `stripe_webhook_events` + `email_outbox` + `dunning_events`. Same pattern as Lago/Recurly/QuickBooks. |
+| Hardcount (today) | Multi-source assembly across `invoices` columns + `stripe_webhook_events` + `email_outbox` + `dunning_events`. Same pattern as Lago/Recurly/QuickBooks. |
 
-The pattern Velox already has is industry-canonical. A dedicated
+The pattern Hardcount already has is industry-canonical. A dedicated
 `invoice_events` table would be more opinionated than canonical, and
 is a multi-week refactor touching invoice / payment / email / dunning
 packages without addressing any operator pain that exists today
@@ -95,10 +95,10 @@ matches Stripe's row density. No backend or contract change.
 
 ## Consequences
 
-- **Velox stays on the canonical pattern** (multi-source assembly) which the majority of billing platforms use.
+- **Hardcount stays on the canonical pattern** (multi-source assembly) which the majority of billing platforms use.
 - **No architectural debt accrues** from speculative-built infrastructure.
 - **Future improvements are pre-designed** with trigger conditions, so we don't reinvent the design later or build the wrong thing under deadline pressure.
-- **The trigger discipline is real**: each item lists a specific signal that, if observed, justifies the cost. Without a trigger, building any of these is over-engineering for an audience (multi-operator dashboards, debugging-heavy ops teams, scale) Velox doesn't have yet.
+- **The trigger discipline is real**: each item lists a specific signal that, if observed, justifies the cost. Without a trigger, building any of these is over-engineering for an audience (multi-operator dashboards, debugging-heavy ops teams, scale) Hardcount doesn't have yet.
 
 ## Alternatives considered
 

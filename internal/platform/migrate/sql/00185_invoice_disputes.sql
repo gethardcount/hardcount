@@ -3,10 +3,10 @@
 -- payment (#979). One row per Stripe dispute, holding the newest snapshot of
 -- it that a charge.dispute.* webhook carried: last_event_at is that event's
 -- creation time, so events arriving out of order never overwrite a newer one.
--- Velox only records and reports a dispute. Nothing here changes an invoice's
+-- Hardcount only records and reports a dispute. Nothing here changes an invoice's
 -- payment status or moves money.
 CREATE TABLE invoice_disputes (
-    id                       TEXT PRIMARY KEY DEFAULT ('vlx_dsp_' || encode(gen_random_bytes(12), 'hex')),
+    id                       TEXT PRIMARY KEY DEFAULT ('hc_dsp_' || encode(gen_random_bytes(12), 'hex')),
     tenant_id                TEXT NOT NULL REFERENCES tenants(id) ON DELETE RESTRICT,
     livemode                 BOOLEAN NOT NULL DEFAULT true,
     invoice_id               TEXT NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
@@ -41,7 +41,7 @@ CREATE POLICY tenant_isolation ON invoice_disputes USING (
     (current_setting('app.bypass_rls', true) = 'on')
     OR ((tenant_id = current_setting('app.tenant_id', true))
         AND (livemode = (current_setting('app.livemode', true) IS DISTINCT FROM 'off'))));
-GRANT SELECT, INSERT, UPDATE, DELETE ON invoice_disputes TO velox_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON invoice_disputes TO hardcount_app;
 
 -- +goose Down
 DROP TABLE invoice_disputes;

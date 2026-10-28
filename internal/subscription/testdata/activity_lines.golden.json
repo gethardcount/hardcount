@@ -347,8 +347,8 @@
           {
             "link": {
               "kind": "invoice",
-              "id": "vlx_inv_1",
-              "label": "VLX-000123"
+              "id": "hc_inv_1",
+              "label": "HC-000123"
             }
           },
           {
@@ -369,7 +369,7 @@
     },
     "text": [
       "Spend threshold crossed",
-      "meta: Invoice VLX-000123 issued early · $50.00",
+      "meta: Invoice HC-000123 issued early · $50.00",
       "tone: neutral"
     ]
   },
@@ -382,7 +382,7 @@
       "detail": [
         [
           {
-            "text": "Invoice VLX-000099 issued early"
+            "text": "Invoice HC-000099 issued early"
           }
         ],
         [
@@ -399,7 +399,7 @@
     },
     "text": [
       "Spend threshold crossed",
-      "meta: Invoice VLX-000099 issued early · $50.00",
+      "meta: Invoice HC-000099 issued early · $50.00",
       "tone: neutral"
     ]
   },
@@ -453,7 +453,7 @@
       "id": "subscription.proration_failed/change_type=add",
       "kind": "subscription.proration_not_applied",
       "title": "Proration not applied",
-      "problem": "The item was added, but its prorated charge was not billed. Velox will not retry it; bill it with a one-off invoice.",
+      "problem": "The item was added, but its prorated charge was not billed. Hardcount will not retry it; bill it with a one-off invoice.",
       "detail": [
         [
           {
@@ -466,7 +466,7 @@
     },
     "text": [
       "Proration not applied",
-      "problem: The item was added, but its prorated charge was not billed. Velox will not retry it; bill it with a one-off invoice.",
+      "problem: The item was added, but its prorated charge was not billed. Hardcount will not retry it; bill it with a one-off invoice.",
       "meta: Seat",
       "tone: warning"
     ]
@@ -1215,8 +1215,8 @@
           {
             "link": {
               "kind": "invoice",
-              "id": "vlx_inv_src",
-              "label": "VLX-000120"
+              "id": "hc_inv_src",
+              "label": "HC-000120"
             }
           },
           {
@@ -1235,7 +1235,7 @@
     },
     "text": [
       "Item added",
-      "meta: Seat · Quantity 3 · Open invoice VLX-000120 adjusted by $54.44",
+      "meta: Seat · Quantity 3 · Open invoice HC-000120 adjusted by $54.44",
       "tone: neutral"
     ]
   },
@@ -1339,8 +1339,8 @@
           {
             "link": {
               "kind": "invoice",
-              "id": "vlx_inv_1",
-              "label": "VLX-000123"
+              "id": "hc_inv_1",
+              "label": "HC-000123"
             }
           },
           {
@@ -1359,7 +1359,7 @@
     },
     "text": [
       "Item added",
-      "meta: Seat · Quantity 3 · Proration invoice VLX-000123 $18.00",
+      "meta: Seat · Quantity 3 · Proration invoice HC-000123 $18.00",
       "tone: neutral"
     ]
   },
@@ -1512,8 +1512,8 @@
           {
             "link": {
               "kind": "invoice",
-              "id": "vlx_inv_src",
-              "label": "VLX-000120"
+              "id": "hc_inv_src",
+              "label": "HC-000120"
             }
           },
           {
@@ -1532,7 +1532,7 @@
     },
     "text": [
       "Item removed",
-      "meta: Seat · Open invoice VLX-000120 adjusted by $54.44",
+      "meta: Seat · Open invoice HC-000120 adjusted by $54.44",
       "tone: neutral"
     ]
   },
@@ -1621,8 +1621,8 @@
           {
             "link": {
               "kind": "invoice",
-              "id": "vlx_inv_1",
-              "label": "VLX-000123"
+              "id": "hc_inv_1",
+              "label": "HC-000123"
             }
           },
           {
@@ -1641,7 +1641,7 @@
     },
     "text": [
       "Item removed",
-      "meta: Seat · Proration invoice VLX-000123 $18.00",
+      "meta: Seat · Proration invoice HC-000123 $18.00",
       "tone: neutral"
     ]
   },
@@ -1789,8 +1789,8 @@
           {
             "link": {
               "kind": "invoice",
-              "id": "vlx_inv_src",
-              "label": "VLX-000120"
+              "id": "hc_inv_src",
+              "label": "HC-000120"
             }
           },
           {
@@ -1809,7 +1809,7 @@
     },
     "text": [
       "Plan changed",
-      "meta: Starter → Pro · Open invoice VLX-000120 adjusted by $54.44",
+      "meta: Starter → Pro · Open invoice HC-000120 adjusted by $54.44",
       "tone: neutral"
     ]
   },
@@ -1898,8 +1898,8 @@
           {
             "link": {
               "kind": "invoice",
-              "id": "vlx_inv_1",
-              "label": "VLX-000123"
+              "id": "hc_inv_1",
+              "label": "HC-000123"
             }
           },
           {
@@ -1918,7 +1918,7 @@
     },
     "text": [
       "Plan changed",
-      "meta: Starter → Pro · Proration invoice VLX-000123 $18.00",
+      "meta: Starter → Pro · Proration invoice HC-000123 $18.00",
       "tone: neutral"
     ]
   },
@@ -2130,8 +2130,8 @@
           {
             "link": {
               "kind": "invoice",
-              "id": "vlx_inv_1",
-              "label": "VLX-000123"
+              "id": "hc_inv_1",
+              "label": "HC-000123"
             }
           },
           {
@@ -2150,7 +2150,7 @@
     },
     "text": [
       "Quantity changed",
-      "meta: Seat · 3 → 5 · Proration invoice VLX-000123 $18.00",
+      "meta: Seat · 3 → 5 · Proration invoice HC-000123 $18.00",
       "tone: neutral"
     ]
   },

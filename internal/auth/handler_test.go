@@ -60,7 +60,7 @@ func TestRotateHandler_RetireStoreFailureIs500Generic(t *testing.T) {
 		t.Errorf("message: got %q, want the generic internal-error message", body.Error.Message)
 	}
 	raw := rec.Body.String()
-	for _, leak := range []string{"retire old key", "replacement", "connection refused", "vlx_"} {
+	for _, leak := range []string{"retire old key", "replacement", "connection refused", "hc_"} {
 		if strings.Contains(raw, leak) {
 			t.Errorf("response body carries internal text %q: %s", leak, raw)
 		}

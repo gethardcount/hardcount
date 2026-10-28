@@ -19,7 +19,7 @@ const (
 	RefundPending   RefundStatus = "pending"
 	RefundSucceeded RefundStatus = "succeeded"
 	RefundFailed    RefundStatus = "failed"
-	// RefundUnknown: Velox asked Stripe for the refund and got no clear
+	// RefundUnknown: Hardcount asked Stripe for the refund and got no clear
 	// answer (a timeout, a network error, a Stripe 5xx, a key already in
 	// use, a rate limit), so the customer may or may not have been refunded.
 	// Never mapped from a Stripe status. Retry refund settles it: it looks
@@ -102,7 +102,7 @@ type CreditNote struct {
 	// TaxReversalPending is the FAST-PATH marker for an issued credit note whose
 	// POST-COMMIT upstream tax reversal was attempted and FAILED (transient Stripe
 	// error). RetryPendingCreditNoteTaxReversal re-drives marked rows with the
-	// per-CN velox_tax_rev_<cn.ID> key and clears the flag on success. It is an
+	// per-CN hardcount_tax_rev_<cn.ID> key and clears the flag on success. It is an
 	// optimisation (partial-index-backed), NOT the sole recovery key: the sweep
 	// ALSO derives eligibility structurally (an issued CN with no reversal stamped
 	// against a tax-bearing source), so a failed marker write does not lose

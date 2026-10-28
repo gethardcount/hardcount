@@ -1,6 +1,6 @@
 # CODEOWNERS — default reviewer assignment for pull requests
 #
-# Velox has one maintainer today, so this only assigns the default
+# Hardcount has one maintainer today, so this only assigns the default
 # reviewer. Review is not enforced: with one maintainer there is nobody
 # else to approve, and pull requests merge on green checks. As
 # contributors join, split ownership per domain and turn on required

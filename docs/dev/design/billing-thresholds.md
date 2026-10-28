@@ -1,7 +1,7 @@
 # Billing Thresholds — Technical Design
 
-> - **Decided:** a subscription can carry a spend cap (`amount_gte`) or per-item usage caps (`usage_gte`). When the period's usage reaches one, Velox invoices that usage early and sends `subscription.threshold_crossed`. The period keeps its dates, and the base fee is billed as it would be with no threshold.
-> - **Shipped:** v0.1.0, in [#29](https://github.com/getvelox/velox/pull/29) (migration `0056_subscription_billing_thresholds`).
+> - **Decided:** a subscription can carry a spend cap (`amount_gte`) or per-item usage caps (`usage_gte`). When the period's usage reaches one, Hardcount invoices that usage early and sends `subscription.threshold_crossed`. The period keeps its dates, and the base fee is billed as it would be with no threshold.
+> - **Shipped:** v0.1.0, in [#29](https://github.com/gethardcount/hardcount/pull/29) (migration `0056_subscription_billing_thresholds`).
 > - **Current docs:** [Billing thresholds](../../features.md#subscriptions-and-invoices) in the feature list and the [threshold event](../../webhooks.md#what-subscriptionthreshold_crossed-carries). The decisions made since are listed below. Where this page and the code disagree, the code wins.
 
 > **Design document, last revised 2026-04-26** (the pre-build RFC). The body below is kept as written and is not the current design.
@@ -12,7 +12,7 @@
 >
 > 1. Validation failures return **`422 validation_error`**, not 400.
 > 2. `reset_billing_cycle` is **removed** (2026-10-23). A fire always keeps the billing period (Stripe's default), and a body that sends the field is refused with 422. Every part of the body below about resetting the cycle no longer applies.
-> 3. `usage_gte` must be **more than 0**, under 10^26, with at most 12 decimal places: the column's `CHECK (usage_gte > 0)` and `NUMERIC(38,12)`. A value outside them is a 422 naming `item_thresholds[i].usage_gte` (2026-10-24, [#1378](https://github.com/getvelox/velox/pull/1378)). Before, the service accepted 0 and the write failed in Postgres.
+> 3. `usage_gte` must be **more than 0**, under 10^26, with at most 12 decimal places: the column's `CHECK (usage_gte > 0)` and `NUMERIC(38,12)`. A value outside them is a 422 naming `item_thresholds[i].usage_gte` (2026-10-24, [#1378](https://github.com/gethardcount/hardcount/pull/1378)). Before, the service accepted 0 and the write failed in Postgres.
 > 4. The planned base-fee-only PATCH-time rejection was **not shipped** (validation checks item membership, duplicates, and decimal parse).
 > 5. The once-fired guard is the **partial unique index alone**, surfacing `errs.ErrAlreadyExists` on a retried tick. There is no invoice source-key column, and `ON CONFLICT DO NOTHING` returns no row.
 > 6. The scheduler tick is now reconcilers → auto-charge retry → dunning enrollment → threshold scan → cycle scan.
@@ -23,9 +23,9 @@
 
 ## Motivation
 
-Stripe ships **billing thresholds** as Tier 1 (top-priority in Velox's Stripe-parity feature ranking) — a tenant configures a per-subscription cap (`amount_gte` in cents, or `usage_gte` per item in units). When the in-cycle running total crosses the threshold, the engine **finalizes an invoice early** (issues it mid-cycle instead of waiting for period end), optionally **resets the billing cycle** (so the next cycle starts at zero), and emits a webhook event. This shields the tenant's customers from runaway bills mid-cycle, and shields Velox tenants from collection risk on customers whose usage suddenly explodes.
+Stripe ships **billing thresholds** as Tier 1 (top-priority in Hardcount's Stripe-parity feature ranking) — a tenant configures a per-subscription cap (`amount_gte` in cents, or `usage_gte` per item in units). When the in-cycle running total crosses the threshold, the engine **finalizes an invoice early** (issues it mid-cycle instead of waiting for period end), optionally **resets the billing cycle** (so the next cycle starts at zero), and emits a webhook event. This shields the tenant's customers from runaway bills mid-cycle, and shields Hardcount tenants from collection risk on customers whose usage suddenly explodes.
 
-Velox already has every primitive to do this:
+Hardcount already has every primitive to do this:
 
 - The cycle scan (the scheduler pass that bills each subscription at period end: `Engine.RunCycle` → `Engine.billSubscription` → `CreateInvoiceWithLineItems` → `advanceCycleOrCancel`) already builds line items from the partial-cycle window, prices them via `domain.ComputeAmountCents`, finalizes the invoice, and rolls the cycle forward.
 - `usage.AggregateByPricingRules` already computes the running total over an arbitrary window, including for multi-dim (multi-dimensional) meters — one meter carrying differently-priced slices of usage, split by dimension labels.
@@ -46,7 +46,7 @@ The unblock for Track B (the dashboard/UI workstream): the cost dashboard's proj
 
 ## Non-goals (deferred)
 
-- **Plan-level thresholds.** Stripe lets you configure thresholds on a price; Velox v1 attaches them to a subscription only. Per-plan defaults are a tenant-level concern that doesn't have a good home yet. Reproducing the precedence rule (sub overrides plan overrides product) invites the kind of decision tree that has to be unwound when wrong. Real consumer first.
+- **Plan-level thresholds.** Stripe lets you configure thresholds on a price; Hardcount v1 attaches them to a subscription only. Per-plan defaults are a tenant-level concern that doesn't have a good home yet. Reproducing the precedence rule (sub overrides plan overrides product) invites the kind of decision tree that has to be unwound when wrong. Real consumer first.
 - **Currency conversion for cross-currency thresholds.** A subscription with multiple line currencies cannot have a single `amount_gte`; v1 rejects multi-currency subscriptions with `amount_gte` set (validated at PATCH time). Multi-currency tenants surface as a documented edge in the changelog.
 - **Threshold-driven email/dashboard alerts (the soft-warning path).** That's Week 5d (billing alerts); separate slice, separate sibling worktree, separate event family. The threshold here is the **hard cap that fires an invoice**, not the "you've used 80% of your monthly $X" soft notification.
 - **Resetting the cycle to a partial-period boundary.** When `reset_billing_cycle=true`, the new cycle starts at the moment the threshold fired and runs for one full cycle's duration (calendar-month-equivalent). We do not preserve the original anniversary day (the day-of-month the cycle renewed on before the reset) — that's a Stripe quirk we can add later if a real consumer asks.
@@ -92,7 +92,7 @@ Content-Type: application/json
     "amount_gte": 100000,
     "reset_billing_cycle": true,
     "item_thresholds": [
-      { "subscription_item_id": "vlx_subi_abc", "usage_gte": "1000000" }
+      { "subscription_item_id": "hc_subi_abc", "usage_gte": "1000000" }
     ]
   }
 }
@@ -112,15 +112,15 @@ Response: the full updated subscription, hydrated with items and thresholds.
 
 ```json
 {
-  "id": "vlx_sub_xyz",
-  "customer_id": "vlx_cus_abc",
+  "id": "hc_sub_xyz",
+  "customer_id": "hc_cus_abc",
   "status": "active",
   ...,
   "billing_thresholds": {
     "amount_gte": 100000,
     "reset_billing_cycle": true,
     "item_thresholds": [
-      { "subscription_item_id": "vlx_subi_abc", "usage_gte": "1000000.000000000000" }
+      { "subscription_item_id": "hc_subi_abc", "usage_gte": "1000000.000000000000" }
     ]
   }
 }
@@ -237,7 +237,7 @@ CREATE INDEX idx_subscription_item_thresholds_subscription
 
 ALTER TABLE subscription_item_thresholds ENABLE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation ON subscription_item_thresholds
-    FOR ALL TO velox_app
+    FOR ALL TO hardcount_app
     USING (tenant_id = current_setting('app.tenant_id', TRUE))
     WITH CHECK (tenant_id = current_setting('app.tenant_id', TRUE));
 
@@ -333,7 +333,7 @@ The `item_thresholds` array is stored as an aux (auxiliary) table because per-it
 
 1. **Should `reset_billing_cycle=false` be supported in v1?** Stripe allows it. **Proposal: yes.** Simple to implement (just skip the `advanceCycleOrCancel` call), and it covers the tenant case "I want a hard cap *plus* a normal monthly bill" — the threshold-fire becomes an extra invoice rather than a cycle boundary. The integration test confirms the second invoice fires at period end.
 2. **Should the threshold-fired invoice's `billing_period_end` be the original cycle end or the fire time?** **Proposal: the fire time.** Stripe-equivalent: the invoice's billing period is the partial cycle that produced the spend. The new cycle (when reset_billing_cycle=true) starts at fire time and gets a fresh natural cycle end. When reset_billing_cycle=false, the second invoice's billing period is `(fire_time, original_period_end)`, which means the period covered by the threshold-fired invoice is `(period_start, fire_time)`.
-3. **Should we support `usage_gte` as an integer instead of a decimal?** Stripe uses integer "quantity" for usage thresholds. **Proposal: decimal.** Velox already exposes decimal quantities in customer-usage and create_preview; consistency matters. A tenant who wants integer behavior just sets `"1000.000000000000"`. The aggregation always returns a decimal anyway.
+3. **Should we support `usage_gte` as an integer instead of a decimal?** Stripe uses integer "quantity" for usage thresholds. **Proposal: decimal.** Hardcount already exposes decimal quantities in customer-usage and create_preview; consistency matters. A tenant who wants integer behavior just sets `"1000.000000000000"`. The aggregation always returns a decimal anyway.
 4. **Should we preview the threshold-fire in `create_preview`?** **Proposal: defer to v2.** The preview's job is "what will the natural-cycle invoice look like"; a threshold-fired invoice is a separate event. We could add a `would_threshold_fire: true` flag but it muddles the response shape. Real consumer first.
 5. **Should the threshold scan run independently of the cycle scan tick interval?** **Proposal: same tick.** A separate ticker would mean a second advisory-lock domain, more code paths to debug. The existing 30s tick is granular enough that the worst-case delay between threshold-cross and finalize is 30s — well within tenant tolerance for "early finalize", which is a soft-real-time event not a hard-real-time one.
 6. **Should we emit `subscription.threshold_warning` at 80% of threshold?** That's Week 5d (billing alerts) — different feature. Linked, but not co-shipped.

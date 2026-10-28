@@ -9,7 +9,7 @@ import (
 )
 
 // TestInitLeaderLeaseLost_PanickedSeriesStartAtZero: the page row is
-// increase(velox_leader_lease_lost_total[1h]) > 0. A counter series that is
+// increase(hardcount_leader_lease_lost_total[1h]) > 0. A counter series that is
 // first exported at 1 has no earlier sample, so increase() over it is empty
 // and the first panicked tick after a start never paged. Init exports every
 // role's reason="panicked" series at 0, so that first panic is an increase.
@@ -30,7 +30,7 @@ func TestInitLeaderLeaseLost_PanickedSeriesStartAtZero(t *testing.T) {
 	}
 	seen := map[string]float64{}
 	for _, fam := range families {
-		if fam.GetName() != "velox_leader_lease_lost_total" {
+		if fam.GetName() != "hardcount_leader_lease_lost_total" {
 			continue
 		}
 		for _, m := range fam.GetMetric() {
@@ -48,7 +48,7 @@ func TestInitLeaderLeaseLost_PanickedSeriesStartAtZero(t *testing.T) {
 	for _, role := range roles {
 		v, ok := seen[role]
 		if !ok {
-			t.Errorf("no velox_leader_lease_lost_total{role=%q, reason=\"panicked\"} series after init", role)
+			t.Errorf("no hardcount_leader_lease_lost_total{role=%q, reason=\"panicked\"} series after init", role)
 		} else if v != 0 {
 			t.Errorf("role %q: panicked series = %v, want 0", role, v)
 		}

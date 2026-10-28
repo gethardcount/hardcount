@@ -173,7 +173,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // path (localStorage write below also fires a `storage` event
     // in other tabs, picked up by the listener in useEffect).
     try {
-      const ch = new BroadcastChannel('velox-mode')
+      const ch = new BroadcastChannel('hardcount-mode')
       ch.postMessage({ livemode })
       ch.close()
     } catch {
@@ -181,7 +181,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     try {
       // eslint-disable-next-line no-restricted-syntax -- cross-tab sync timestamp; genuinely wall-clock, unrelated to any test clock
-      localStorage.setItem('velox:mode-sync', JSON.stringify({ livemode, ts: Date.now() }))
+      localStorage.setItem('hardcount:mode-sync', JSON.stringify({ livemode, ts: Date.now() }))
     } catch {
       // Private-mode Safari throws on localStorage write — accept
       // single-tab behavior in that case.
@@ -202,7 +202,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     let ch: BroadcastChannel | null = null
     try {
-      ch = new BroadcastChannel('velox-mode')
+      ch = new BroadcastChannel('hardcount-mode')
       ch.onmessage = ev => {
         if (ev.data && typeof ev.data.livemode === 'boolean') {
           apply(ev.data.livemode)
@@ -212,7 +212,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Fall through to storage-event path.
     }
     const onStorage = (ev: StorageEvent) => {
-      if (ev.key !== 'velox:mode-sync' || !ev.newValue) return
+      if (ev.key !== 'hardcount:mode-sync' || !ev.newValue) return
       try {
         const { livemode } = JSON.parse(ev.newValue) as { livemode: boolean }
         if (typeof livemode === 'boolean') apply(livemode)

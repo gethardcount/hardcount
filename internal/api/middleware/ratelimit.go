@@ -43,7 +43,7 @@ type RateLimiter struct {
 // OpenRedis parses url, opens a client and verifies it with a Ping bounded
 // by ctx. An empty url is not an error — it returns (nil, nil), the
 // fail-open shape every limiter accepts. The caller decides the verdict:
-// production REFUSES to boot on an error (cmd/velox/main.go), because
+// production REFUSES to boot on an error (cmd/hardcount/main.go), because
 // the general and hosted-invoice limiters fail CLOSED without Redis and a
 // replica would otherwise boot green and 429 its share of traffic; other
 // environments warn and continue fail-open.
@@ -215,7 +215,7 @@ func (rl *RateLimiter) bucketKey(key string) string {
 //
 //  1. API key id when present — per-key buckets so a runaway integration
 //     can't starve the tenant's dashboard or a parallel worker. Each key
-//     has a fixed livemode (vlx_secret_test_* vs vlx_secret_live_*) so
+//     has a fixed livemode (hc_secret_test_* vs hc_secret_live_*) so
 //     per-key keying is naturally per-mode.
 //  2. Tenant id for session-authed UI traffic (no key attached). Suffixed
 //     with the active mode so dashboard test-mode exploration and live-mode

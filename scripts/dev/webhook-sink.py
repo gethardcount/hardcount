@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Local webhook receiver for testing Velox's outbound deliveries.
+"""Local webhook receiver for testing Hardcount's outbound deliveries.
 
 Runs a bare HTTP server (default 127.0.0.1:9099) and appends one JSON line
-per delivery to the log file: UTC time, path, the Velox-Signature header,
+per delivery to the log file: UTC time, path, the Hardcount-Signature header,
 and the body. Register endpoints against it with any path:
 
     http://localhost:9099/ok      -> 200 (any path not starting with /fail)
@@ -34,7 +34,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         rec = {
             "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "path": self.path,
-            "sig": self.headers.get("Velox-Signature", ""),
+            "sig": self.headers.get("Hardcount-Signature", ""),
             "body": body.decode(errors="replace"),
         }
         with open(LOG, "a") as f:

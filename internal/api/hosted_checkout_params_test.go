@@ -13,7 +13,7 @@ import (
 
 func hostedCheckoutTestInputs() (payment.CheckoutClaim, domain.Invoice) {
 	claim := payment.CheckoutClaim{
-		ID:          "vlx_cks_1",
+		ID:          "hc_cks_1",
 		TenantID:    "t1",
 		AmountCents: 1029,
 		Currency:    "USD",
@@ -42,12 +42,12 @@ func TestHostedInvoiceCheckoutParams_ChargesInInvoiceCurrency(t *testing.T) {
 	v := encodeHostedCheckoutParams(claim, inv)
 
 	for key, want := range map[string]string{
-		"adaptive_pricing[enabled]":                       "false",
-		"mode":                                            "payment",
-		"line_items[0][price_data][currency]":             "usd",
-		"line_items[0][price_data][unit_amount]":          "1029",
-		"payment_intent_data[metadata][velox_purpose]":    payment.PurposeHostedInvoicePay,
-		"payment_intent_data[metadata][velox_invoice_id]": "inv_1",
+		"adaptive_pricing[enabled]":                           "false",
+		"mode":                                                "payment",
+		"line_items[0][price_data][currency]":                 "usd",
+		"line_items[0][price_data][unit_amount]":              "1029",
+		"payment_intent_data[metadata][hardcount_purpose]":    payment.PurposeHostedInvoicePay,
+		"payment_intent_data[metadata][hardcount_invoice_id]": "inv_1",
 	} {
 		if got := v.Get(key); !slices.Equal(got, []string{want}) {
 			t.Errorf("%s = %q, want [%q]", key, got, want)

@@ -39,7 +39,7 @@ func schemaOf(t *testing.T, db *sql.DB, tables ...string) string {
 			`SELECT 'pol ' || policyname || ' ' || COALESCE(qual, '') || ' ' || COALESCE(with_check, '') FROM pg_policies WHERE schemaname = 'public' AND tablename = $1 ORDER BY policyname`,
 			`SELECT 'rls ' || relrowsecurity::text || ' ' || relforcerowsecurity::text FROM pg_class WHERE oid = ('public.' || $1)::regclass`,
 			`SELECT 'grant ' || grantee || ' ' || string_agg(privilege_type, ',' ORDER BY privilege_type) FROM information_schema.role_table_grants
-			  WHERE table_schema = 'public' AND table_name = $1 AND grantee = 'velox_app' GROUP BY grantee`,
+			  WHERE table_schema = 'public' AND table_name = $1 AND grantee = 'hardcount_app' GROUP BY grantee`,
 		} {
 			rows, err := db.Query(q, table)
 			if err != nil {
@@ -91,7 +91,7 @@ INSERT INTO invoice_line_items (id, tenant_id, invoice_id, line_type, descriptio
 // Mutation: a down that leaves out an index, a trigger or a policy of a
 // table it puts back turns this red.
 func TestPlanPrices_UpAndDown(t *testing.T) {
-	dsn, db := scratchDB(t, "velox_test_plan_prices")
+	dsn, db := scratchDB(t, "hardcount_test_plan_prices")
 	ctx := context.Background()
 	if err := up(ctx, dsn, filesBefore(t, planPricesVersion)); err != nil {
 		t.Fatalf("up to before %d: %v", planPricesVersion, err)
@@ -151,7 +151,7 @@ func TestPlanPrices_UpAndDown(t *testing.T) {
 //
 // Mutation: drop the guard and the up succeeds (dropping the rows), red.
 func TestPlanPrices_RefusesPricesItDoesNotMove(t *testing.T) {
-	dsn, db := scratchDB(t, "velox_test_plan_prices_refuse")
+	dsn, db := scratchDB(t, "hardcount_test_plan_prices_refuse")
 	ctx := context.Background()
 	if err := up(ctx, dsn, filesBefore(t, planPricesVersion)); err != nil {
 		t.Fatalf("up to before %d: %v", planPricesVersion, err)

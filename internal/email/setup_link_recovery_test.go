@@ -61,7 +61,7 @@ func TestSetupLinkCopy_DoesNotPromiseAutoCollectOnWriteOff(t *testing.T) {
 
 	_, writtenOff, _, _ := renderPaymentSetupLinkHTML(paymentSetupLinkContext{
 		CustomerName: "Ada", SetupURL: "https://example.test/s",
-		InvoiceNumber: "VLX-000003", AmountDueLabel: "$60.00", WrittenOff: true,
+		InvoiceNumber: "HC-000003", AmountDueLabel: "$60.00", WrittenOff: true,
 	})
 	if strings.Contains(writtenOff, autoPromise) {
 		t.Errorf("written-off setup link promises automatic collection — no machine charges a written-off invoice (ADR-110), so this is a promise the engine cannot keep")
@@ -72,7 +72,7 @@ func TestSetupLinkCopy_DoesNotPromiseAutoCollectOnWriteOff(t *testing.T) {
 
 	_, live, _, _ := renderPaymentSetupLinkHTML(paymentSetupLinkContext{
 		CustomerName: "Ada", SetupURL: "https://example.test/s",
-		InvoiceNumber: "VLX-000006", AmountDueLabel: "$10.00", WrittenOff: false,
+		InvoiceNumber: "HC-000006", AmountDueLabel: "$10.00", WrittenOff: false,
 	})
 	if !strings.Contains(live, autoPromise) {
 		t.Errorf("CONTROL: a live invoice must still promise automatic collection — the auto-charge sweep really does collect it once a card is attached; got:\n%s", live)

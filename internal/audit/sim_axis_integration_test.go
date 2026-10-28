@@ -66,8 +66,8 @@ func TestSimAxis_FilterAndWindow(t *testing.T) {
 	tenantID := testutil.CreateTestTenant(t, db, "Sim Axis Read")
 	logger := audit.NewLogger(db)
 
-	clockA := "vlx_tclk_aaa"
-	clockB := "vlx_tclk_bbb"
+	clockA := "hc_tclk_aaa"
+	clockB := "hc_tclk_bbb"
 	jan := time.Date(2027, 1, 15, 0, 0, 0, 0, time.UTC)
 	feb := time.Date(2027, 2, 15, 0, 0, 0, 0, time.UTC)
 	mar := time.Date(2027, 3, 15, 0, 0, 0, 0, time.UTC)
@@ -254,7 +254,7 @@ func TestSimAxis_UsesPartialClockIndex(t *testing.T) {
 	// every wall-clock row to collect the clock's newest 50. The clock index is
 	// only worth its write cost if it wins THIS shape.
 	frozen := time.Date(2027, 5, 1, 0, 0, 0, 0, time.UTC)
-	clockID := "vlx_tclk_explain"
+	clockID := "hc_tclk_explain"
 	for i := 0; i < 40; i++ {
 		emit(t, db, clock.WithSim(ctx, clock.Sim{At: frozen.Add(time.Duration(i) * time.Hour), TestClockID: clockID}),
 			tenantID, logger, audit.Entry{Action: "finalize", ResourceType: "invoice", ResourceID: fmt.Sprintf("inv_%d", i)})

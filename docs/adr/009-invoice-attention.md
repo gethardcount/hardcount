@@ -15,7 +15,7 @@ Every invoice in an API response carries one `attention` field that says whether
 
 ## Context
 
-When an invoice gets stuck — tax calculation failed, payment declined, payment outcome ambiguous, past due — the operator's first question is *"why, and what do I do about it?"*. Until now, Velox surfaced these signals piecemeal:
+When an invoice gets stuck — tax calculation failed, payment declined, payment outcome ambiguous, past due — the operator's first question is *"why, and what do I do about it?"*. Until now, Hardcount surfaced these signals piecemeal:
 
 - `tax_status` + free-form `tax_pending_reason` for tax deferrals
 - `payment_status='failed'` + `last_payment_error` for payment declines
@@ -33,7 +33,7 @@ A 2026-04-30 industry survey across Stripe (`last_finalization_error` / `last_pa
 4. 2–4 prescribed action verbs (Retry / Edit / Mark Paid / Void / Stop Dunning)
 5. Per-cause webhook events (no aggregate "attention_changed")
 
-The two platforms that diverged (Lago, Zuora) underinvest in operator UX — Lago's dashboard is thinner because they expect external tooling; Zuora hands the operator a `BillRun` job result and lets enterprise tooling teams build the resolution flows. Velox's positioning ("AI-native billing engine you can self-host") matches the first cluster.
+The two platforms that diverged (Lago, Zuora) underinvest in operator UX — Lago's dashboard is thinner because they expect external tooling; Zuora hands the operator a `BillRun` job result and lets enterprise tooling teams build the resolution flows. Hardcount's positioning ("AI-native billing engine you can self-host") matches the first cluster.
 
 ## Decision
 
@@ -51,7 +51,7 @@ Wire shape:
     { "code": "retry_tax", "label": "Retry tax" }
   ],
   "code": "tax.customer_data_invalid",
-  "doc_url": "https://docs.velox.dev/errors/tax-location-required",
+  "doc_url": "https://docs.hardcount.dev/errors/tax-location-required",
   "param": "customer.address.postal_code",
   "detail": "stripe tax: {\"message\":\"...\",\"code\":\"customer_tax_location_invalid\"}",
   "since": "2026-04-30T18:22:11Z"
@@ -69,7 +69,7 @@ Healthy invoices return no `attention` key (omitempty). Terminal-state invoices 
 | `code` | Open dotted string | Programmatic clients route on this. Stripe parity (`code` is open). New codes ship without a major version bump. |
 | `message` | Free text | Human-readable headline. Safe to render verbatim. |
 | `actions` | Closed enum codes + labels | Prescribed CTAs. Closed because every code maps to a server endpoint or frontend route, and audit logs key off the code. |
-| `doc_url` | Computed `docs.velox.dev/errors/<reason>` | Stripe parity. Required so operators get a "Learn more" path, not silence. |
+| `doc_url` | Computed `docs.hardcount.dev/errors/<reason>` | Stripe parity. Required so operators get a "Learn more" path, not silence. |
 | `param` | Dotted-path field pointer | Stripe parity. Lets the dashboard's Edit CTA deep-link to the broken field. |
 | `detail` | Raw provider payload | Stripe Tax JSON envelope, last payment error message. Disclosed in collapsible section. |
 | `since` | `tax_deferred_at` / `due_at` / `updated_at` | Operators triage by age. |
@@ -109,7 +109,7 @@ Mirrors the Stripe / Recurly / Chargebee verb cluster identified in the research
 
 **Aggregate `invoice.attention_changed` webhook event.** Zero precedent across the six platforms researched. Per-cause events (`invoice.tax_failed`, `invoice.payment_failed`, etc.) match Stripe and let consumers subscribe selectively. Webhook event work is deferred to a follow-up commit.
 
-**Subscription-scoped attention (Maxio pattern).** Velox is invoice-scoped per the existing data model; the subscription page can summarize by aggregating its invoices' attention.
+**Subscription-scoped attention (Maxio pattern).** Hardcount is invoice-scoped per the existing data model; the subscription page can summarize by aggregating its invoices' attention.
 
 **Free-form action codes.** Audit logging requires stable codes; closed enum.
 
@@ -132,6 +132,6 @@ Mirrors the Stripe / Recurly / Chargebee verb cluster identified in the research
 
 - Per-cause webhook events (deferred — research-recommended over aggregate).
 - SQL-level "needs attention" filter on `GET /v1/invoices` — promote `attention.reason` to a persisted projection when list volume justifies it.
-- Doc site pages at `docs.velox.dev/errors/<reason>` — currently linked but the URLs return 404.
+- Doc site pages at `docs.hardcount.dev/errors/<reason>` — currently linked but the URLs return 404.
 - Background tax retry worker — today the only tax retry is operator-triggered. A worker that runs every N minutes against `tax_status='pending'` invoices closes the loop.
 - Rate limiting on the `retry-tax` endpoint — `tax_retry_count` already exists; cap at e.g. 5 manual retries per invoice per hour once volume warrants.

@@ -10,7 +10,7 @@ Cancelling a trial before it converts never bills, even when the job that activa
 ## Context
 
 Canceling a trial before it converts was broken three ways: the schedule
-flag's meaning on a trialing sub was undefined (Velox's
+flag's meaning on a trialing sub was undefined (Hardcount's
 `current_billing_period_end` while trialing is the end of the first **paid**
 period — unlike Stripe, where it equals the trial end), `cancel_at` values
 before period-end were rejected outright (making cancel-at-trial-end

@@ -94,7 +94,7 @@ func newHardDeclineRig(t *testing.T, name string) *hardDeclineRig {
 	r.charger = payment.NewStripe(r.charges, r.invoices, payment.NewPostgresWebhookStore(db), setups)
 	// The card-saving webhooks, wired as router.go does: setup_intent.succeeded
 	// and checkout.session.completed attach through the payment-methods
-	// service; a SetupIntent with no Velox metadata is matched by its Stripe
+	// service; a SetupIntent with no Hardcount metadata is matched by its Stripe
 	// customer.
 	r.cards = &latestCardFetcher{}
 	r.charger.SetCardFetcher(r.cards)
@@ -123,7 +123,7 @@ func (r *hardDeclineRig) customerWithCard(key, pm string) string {
 }
 
 // addCard records a card by the store's default rule, as every attach that
-// is not a Velox setup flow does (a hosted-page payment, a SetupIntent Velox
+// is not a Hardcount setup flow does (a hosted-page payment, a SetupIntent Hardcount
 // did not create): the first card, or one replacing a default the bank
 // refused for good, becomes the default; any other is added beside.
 func (r *hardDeclineRig) addCard(custID, pm string) paymentmethods.PaymentMethod {
@@ -138,8 +138,8 @@ func (r *hardDeclineRig) addCard(custID, pm string) paymentmethods.PaymentMethod
 
 // setupIntentSucceeded delivers Stripe's setup_intent.succeeded for a card
 // saved on the Stripe customer to the real webhook handler. metadata is the
-// SetupIntent's own: a Velox setup session stamps velox_customer_id (and the
-// flow's velox_purpose); nil is a SetupIntent Velox did not create.
+// SetupIntent's own: a Hardcount setup session stamps hardcount_customer_id (and the
+// flow's hardcount_purpose); nil is a SetupIntent Hardcount did not create.
 func (r *hardDeclineRig) setupIntentSucceeded(evtID, stripeCustomerID, pm string, metadata map[string]string) {
 	r.t.Helper()
 	if metadata == nil {
@@ -166,7 +166,7 @@ func (r *hardDeclineRig) hostedPayCompleted(evtID, custID, stripeCustomerID, pm 
 	r.pmStripe.last4, r.pmStripe.fingerprint = "4242", "fp_"+pm
 	body, _ := json.Marshal(map[string]any{"id": evtID, "type": "checkout.session.completed", "data": map[string]any{"object": map[string]any{
 		"id": "cs_" + evtID, "mode": "payment", "customer": stripeCustomerID,
-		"metadata": map[string]string{"velox_customer_id": custID, "velox_purpose": payment.PurposeHostedInvoicePay},
+		"metadata": map[string]string{"hardcount_customer_id": custID, "hardcount_purpose": payment.PurposeHostedInvoicePay},
 	}}})
 	if err := r.charger.HandleWebhook(r.ctx, r.tenantID, domain.StripeWebhookEvent{
 		StripeEventID: evtID, EventType: "checkout.session.completed", Payload: map[string]any{"raw": string(body)},
@@ -321,11 +321,11 @@ func TestHardDecline_RetrySkipsTheRefusedCardUntilANewCardArrives_RealStore(t *t
 }
 
 // Control: an ordinary decline does not stop the next retry from charging
-// the same card. A card saved by a path that is not a Velox setup flow is
+// the same card. A card saved by a path that is not a Hardcount setup flow is
 // added beside the working default and does not change which card the retry
 // charges: a hosted-page payment's card (checkout.session.completed, which
 // takes the newest card on the Stripe customer as a guess) and a SetupIntent
-// Velox did not create (no velox metadata, matched by its Stripe customer).
+// Hardcount did not create (no hardcount metadata, matched by its Stripe customer).
 func TestHardDecline_OrdinaryDeclineIsRetriedOnTheSameCard_RealStore(t *testing.T) {
 	r := newHardDeclineRig(t, "Ordinary Decline Retry")
 	custID := r.customerWithCard("nsf", "pm_nsf")
@@ -358,7 +358,7 @@ func TestHardDecline_OrdinaryDeclineIsRetriedOnTheSameCard_RealStore(t *testing.
 }
 
 // E2/H3 (Stripe sandbox walk, 2026-10-22): after an ordinary decline the
-// customer, or the operator for them, saves a new card through a Velox setup
+// customer, or the operator for them, saves a new card through a Hardcount setup
 // flow. That card becomes the default (ADR-021, amended), as the success
 // page promises, and the next retry charges it. Before, it sat beside the
 // declining card, and every retry charged the old card again. Driven through
@@ -387,9 +387,9 @@ func TestSetupLinkCard_AfterOrdinaryDecline_NextRetryChargesIt_RealStore(t *test
 				t.Errorf("attention %q, want payment.declined", code)
 			}
 
-			meta := map[string]string{"velox_customer_id": custID, "velox_tenant_id": r.tenantID}
+			meta := map[string]string{"hardcount_customer_id": custID, "hardcount_tenant_id": r.tenantID}
 			if purpose != "" {
-				meta["velox_purpose"] = purpose
+				meta["hardcount_purpose"] = purpose
 			}
 			r.setupIntentSucceeded("evt_e2_"+name, "cus_stripe_e2", "pm_4242", meta)
 			r.assertOnlyDefault(custID, "pm_4242")
@@ -407,7 +407,7 @@ func TestSetupLinkCard_AfterOrdinaryDecline_NextRetryChargesIt_RealStore(t *test
 	}
 }
 
-// The decline reaches Velox only through the payment_intent.payment_failed
+// The decline reaches Hardcount only through the payment_intent.payment_failed
 // webhook (the charge call's own report was lost). The webhook puts the
 // decline code and card on record just the same, so the retry still skips
 // the card, and a retry that itself draws a hard decline is flagged for the
@@ -421,7 +421,7 @@ func TestHardDecline_WebhookReportStopsTheRetry_RealStore(t *testing.T) {
 	  "data": {"object": {"id": "pi_stolen_1", "object": "payment_intent", "amount": 5000, "currency": "usd",
 	    "last_payment_error": {"code": "card_declined", "decline_code": "stolen_card", "message": "Your card was declined.",
 	      "payment_method": {"id": "pm_stolen", "object": "payment_method", "type": "card"}, "type": "card_error"},
-	    "metadata": {"velox_invoice_id": "` + inv.ID + `", "velox_tenant_id": "` + r.tenantID + `"},
+	    "metadata": {"hardcount_invoice_id": "` + inv.ID + `", "hardcount_tenant_id": "` + r.tenantID + `"},
 	    "payment_method": null, "status": "requires_payment_method"}}}`
 	if err := r.charger.HandleWebhook(r.ctx, r.tenantID, domain.StripeWebhookEvent{
 		StripeEventID: "evt_hd_3", EventType: "payment_intent.payment_failed", PaymentIntentID: "pi_stolen_1",

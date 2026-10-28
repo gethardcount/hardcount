@@ -261,7 +261,7 @@ func TestActivityLines_InvoiceWire(t *testing.T) {
 		}
 	})
 
-	t.Run("a retry with no attempt row keeps the provider's words without Velox's wrapper", func(t *testing.T) {
+	t.Run("a retry with no attempt row keeps the provider's words without Hardcount's wrapper", func(t *testing.T) {
 		events := fetchWire(t, wireCase{
 			inv:    finalized,
 			runs:   []domain.InvoiceDunningRun{{ID: "run_1", State: domain.DunningActive}},
@@ -325,7 +325,7 @@ func TestActivityLines_InvoiceWire(t *testing.T) {
 		})
 		row := oneRow(t, events, "credit_note.issued")
 		wantRow(t, row, "Credit note issued", "success", "",
-			"CN-000012 · Plan downgrade · $15.00 refunded to card · $5.00 to credit balance · $3.00 refunded outside Velox · by alice@example.com")
+			"CN-000012 · Plan downgrade · $15.00 refunded to card · $5.00 to credit balance · $3.00 refunded outside Hardcount · by alice@example.com")
 		if row.Amount != 2300 {
 			t.Errorf("credit note amount %d, want the total 2300", row.Amount)
 		}

@@ -61,7 +61,7 @@ func TestCustomerCreateAndStatus_Validated(t *testing.T) {
 		return n
 	}
 
-	rr := do(http.MethodPost, "/", `{"external_id":"cus_dpol","display_name":"Dunning","dunning_policy_id":"vlx_dpol_x"}`)
+	rr := do(http.MethodPost, "/", `{"external_id":"cus_dpol","display_name":"Dunning","dunning_policy_id":"hc_dpol_x"}`)
 	if rr.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("dunning_policy_id on create: status %d, want 422; body %s", rr.Code, rr.Body.String())
 	}

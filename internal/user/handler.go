@@ -369,7 +369,7 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 		// Deliberately NO ClearCookie here. "No cookie arrived" does not mean the
 		// browser holds none — SameSite=Lax withholds it from every cross-site
 		// request, so this branch is exactly what an attacker's cross-site POST
-		// lands in. Clearing here emitted Set-Cookie: velox_session=; Max-Age=0,
+		// lands in. Clearing here emitted Set-Cookie: hardcount_session=; Max-Age=0,
 		// which the browser honours: any website could force-logout any operator
 		// (drive-by, via an auto-submitting form) while the session it could not
 		// see stayed LIVE server-side for its full TTL — an orphaned credential
@@ -531,7 +531,7 @@ func (h *Handler) checkPasswordResetToken(w http.ResponseWriter, r *http.Request
 // confirmPasswordReset validates the reset token, applies the new
 // password, and revokes every active session for the user (forces a
 // fresh login). Revoking matters for the threat the reset is most
-// often run against: a thief who already has a live velox_session
+// often run against: a thief who already has a live hardcount_session
 // cookie. Without the fan-out revoke the stolen cookie would ride out
 // its 7-day TTL even after the operator resets. Surface the
 // password-validation error inline (e.g. "must be at least 12

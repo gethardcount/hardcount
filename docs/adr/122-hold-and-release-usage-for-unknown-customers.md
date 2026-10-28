@@ -6,13 +6,13 @@
 ## Summary
 
 When the LiteLLM callback gets a token row whose customer or meter does not
-exist, Velox keeps the row in `usage_held_events`, counts it as `held` in the
+exist, Hardcount keeps the row in `usage_held_events`, counts it as `held` in the
 200 response, and shows it on the Usage page. An operator releases the rows
 once the customer exists. A release writes each row to `usage_events` under
 its original idempotency key and time, so a row is recorded at most once,
 whatever order a release, a LiteLLM resend and a second release arrive in.
 A released row bills only if its time falls in a billing period whose invoice
-is not built yet. Velox never moves it onto a later invoice (ADR-120). There
+is not built yet. Hardcount never moves it onto a later invoice (ADR-120). There
 is no automatic release when a customer is created.
 
 ## Context
@@ -54,7 +54,7 @@ What other usage-billing engines do with an event for an unknown customer
 - **Flexprice** answers 202 and the event does not show up; its fix is
   "Create the customer first"
   ([troubleshooting](https://docs.flexprice.io/docs/event-ingestion/troubleshooting.md)).
-  This was Velox's behaviour too.
+  This was Hardcount's behaviour too.
 
 None of them silently drops the event while telling the sender it was
 delivered. None moves late usage onto a later invoice; Lago and Kong attribute
@@ -69,7 +69,7 @@ does move late usage onto a later invoice (see
 `1c23b81` (2026-10-22): `internal/ee/service/meter_usage_tracking_post_insert.go:200-244`,
 `internal/temporal/models/workflow.go:28-32`.
 
-One fact shapes the value of a release. In Velox a subscription cannot start
+One fact shapes the value of a release. In Hardcount a subscription cannot start
 in the past (`subscription.CreateInput` has no start date: a subscription
 starts now or is a draft), and an invoice adds up only the usage inside its
 own period. So rows that arrived before the
@@ -119,7 +119,7 @@ release it once with an honest statement of what it will bill.
    Since 2026-10-27 (ADR-120 amendment of that date) it reads the plan
    stretches the close bills by, so such a row is judged by the plan it was
    on, and a row that plan prices but no price of it takes counts as
-   `no_price`. The counts are what Velox found when the release wrote the
+   `no_price`. The counts are what Hardcount found when the release wrote the
    rows, as for ingest's `billing_status` (ADR-120 amendment of
    2026-10-27). An `outside_open_period` row was then outside every
    subscription's billed time, in a period already invoiced (whatever plan
@@ -180,7 +180,7 @@ synchronously, so its caller already knows.
   LiteLLM response gains `held`.
 - `usage_held_events` grows only with misrouted traffic; there is no retention
   job. Released and discarded rows stay as a record.
-- A row with no payload time is stamped with the time Velox received it.
+- A row with no payload time is stamped with the time Hardcount received it.
   Released to a customer on a test clock frozen before that time, it stays
   held until the clock passes it.
-- Metric `velox_usage_held_events_total{reason}` counts new held rows.
+- Metric `hardcount_usage_held_events_total{reason}` counts new held rows.

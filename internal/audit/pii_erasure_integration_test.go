@@ -122,11 +122,11 @@ func TestLog_UnmarshalableMetadata_StillWritesTheRow(t *testing.T) {
 	// bytes. A real telemetry bug looks exactly like this.
 	bad := map[string]any{"ratio": math.Inf(1)}
 
-	if err := logger.Log(ctx, tenantID, domain.AuditActionUpdate, "invoice", "vlx_inv_marshal", "INV-1", bad); err != nil {
+	if err := logger.Log(ctx, tenantID, domain.AuditActionUpdate, "invoice", "hc_inv_marshal", "INV-1", bad); err != nil {
 		t.Fatalf("Log returned an error for an unmarshalable bag — it must DEGRADE, never lose the row: %v", err)
 	}
 
-	rows, _, err := logger.Query(ctx, tenantID, audit.QueryFilter{ResourceID: "vlx_inv_marshal"})
+	rows, _, err := logger.Query(ctx, tenantID, audit.QueryFilter{ResourceID: "hc_inv_marshal"})
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}

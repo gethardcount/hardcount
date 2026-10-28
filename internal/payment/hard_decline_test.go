@@ -52,7 +52,7 @@ func stripeCardErrorJSON(declineCode, message, piID, pmID string) string {
       "payment_method": {"id": %[4]q, "object": "payment_method", "type": "card"},
       "type": "card_error"
     },
-    "metadata": {"velox_invoice_id": "inv_1"},
+    "metadata": {"hardcount_invoice_id": "inv_1"},
     "payment_method": null,
     "status": "requires_payment_method"
   },
@@ -168,7 +168,7 @@ func paymentFailedEventBody(lastPaymentError string) string {
     "amount": 5000,
     "currency": "usd",
     "last_payment_error": ` + lastPaymentError + `,
-    "metadata": {"velox_invoice_id": "inv_1", "velox_tenant_id": "t1"},
+    "metadata": {"hardcount_invoice_id": "inv_1", "hardcount_tenant_id": "t1"},
     "payment_method": null,
     "status": "requires_payment_method"
   }}
@@ -251,7 +251,7 @@ func TestPaymentIntentResult_ReadsLastPaymentError(t *testing.T) {
     "payment_method": {"id": "pm_pickup", "object": "payment_method", "type": "card"},
     "type": "card_error"
   },
-  "metadata": {"velox_invoice_id": "inv_1", "velox_purpose": "dunning_retry"},
+  "metadata": {"hardcount_invoice_id": "inv_1", "hardcount_purpose": "dunning_retry"},
   "payment_method": null,
   "status": "requires_payment_method"
 }`), &pi); err != nil {

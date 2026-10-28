@@ -60,14 +60,14 @@ const (
 
 	piPage1 = `{"object":"list","url":"/v1/payment_intents","has_more":true,"data":[
 		{"id":"pi_a","object":"payment_intent","status":"succeeded","created":1760000100,"amount_received":5000,
-		 "metadata":{"velox_invoice_id":"inv_1"},
+		 "metadata":{"hardcount_invoice_id":"inv_1"},
 		 "latest_charge":{"id":"ch_a","object":"charge","refunded":false}},
 		{"id":"pi_b","object":"payment_intent","status":"succeeded","created":1760000050,"amount_received":5000,
-		 "metadata":{"velox_invoice_id":"inv_1","velox_purpose":"dunning_retry"},
+		 "metadata":{"hardcount_invoice_id":"inv_1","hardcount_purpose":"dunning_retry"},
 		 "latest_charge":{"id":"ch_b","object":"charge","refunded":true}}]}`
 	piPage2 = `{"object":"list","url":"/v1/payment_intents","has_more":false,"data":[
 		{"id":"pi_c","object":"payment_intent","status":"processing","created":1760000010,"amount_received":0,
-		 "metadata":{"velox_invoice_id":"inv_2","velox_purpose":"hosted_invoice_pay"},"latest_charge":null}]}`
+		 "metadata":{"hardcount_invoice_id":"inv_2","hardcount_purpose":"hosted_invoice_pay"},"latest_charge":null}]}`
 )
 
 func listClient() (*LiveStripeClient, context.Context) {

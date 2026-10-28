@@ -1,7 +1,7 @@
 # API keys
 
 An API key is the password your server sends with every API call. It tells
-Velox which account the call is for, and whether it works on test data or
+Hardcount which account the call is for, and whether it works on test data or
 live data.
 
 ## Get a key
@@ -21,8 +21,8 @@ To make a new key in the dashboard:
    again." Copy it into your secret store.
 
 The new key gets the mode the dashboard is in. In test mode you get a
-`vlx_secret_test_…` key; switch to live mode first to get a
-`vlx_secret_live_…` key.
+`hc_secret_test_…` key; switch to live mode first to get a
+`hc_secret_live_…` key.
 
 You can also create a key with the API: `POST /v1/api-keys` with
 `{"name": "…", "key_type": "secret"}`. The response's `raw_key` is the full
@@ -33,17 +33,17 @@ key, and it is shown only this once.
 Put the key in the `Authorization` header as a Bearer token:
 
 ```bash
-export VELOX=http://localhost:8080
-export VELOX_KEY=vlx_secret_test_…   # your key
+export HARDCOUNT=http://localhost:8080
+export HARDCOUNT_KEY=hc_secret_test_…   # your key
 
-curl -s "$VELOX/v1/whoami" -H "Authorization: Bearer $VELOX_KEY"
+curl -s "$HARDCOUNT/v1/whoami" -H "Authorization: Bearer $HARDCOUNT_KEY"
 ```
 
 **You see:** JSON with your `tenant_id` (your account's ID), `"livemode":
 false` for a test key, and `"key_type": "secret"`.
 
 A call with no key gets `401` and the message `missing credentials — sign
-in at /login or send Authorization: Bearer vlx_secret_...`.
+in at /login or send Authorization: Bearer hc_secret_...`.
 
 ## Test mode and live mode
 
@@ -52,8 +52,8 @@ picks the set.
 
 | Mode | Key starts with | What happens |
 |---|---|---|
-| Test | `vlx_secret_test_` | Works on test data only. Test mode connects only to Stripe test keys (`sk_test_…`), so no real card is charged. |
-| Live | `vlx_secret_live_` | Works on live data. Charges real cards once you connect Stripe's live keys. |
+| Test | `hc_secret_test_` | Works on test data only. Test mode connects only to Stripe test keys (`sk_test_…`), so no real card is charged. |
+| Live | `hc_secret_live_` | Works on live data. Charges real cards once you connect Stripe's live keys. |
 
 Build and try everything with a test key. Switch to a live key when you go
 live. Customers, prices and invoices made in test mode do not appear in live
@@ -63,9 +63,9 @@ mode.
 
 | Type | Starts with | Use it for |
 |---|---|---|
-| Secret | `vlx_secret_` | All API calls from your server. It can read and change everything in one account, so keep it out of browsers and out of source control. |
-| Publishable | `vlx_pub_` | Places a key can be seen, such as a web page. It only proves which account it belongs to: it cannot read or change any data. |
-| Platform | `vlx_platform_` | Managing accounts across a whole Velox server. You cannot create one in the dashboard or with a secret key. |
+| Secret | `hc_secret_` | All API calls from your server. It can read and change everything in one account, so keep it out of browsers and out of source control. |
+| Publishable | `hc_pub_` | Places a key can be seen, such as a web page. It only proves which account it belongs to: it cannot read or change any data. |
+| Platform | `hc_platform_` | Managing accounts across a whole Hardcount server. You cannot create one in the dashboard or with a secret key. |
 
 ## Rotate a key
 
@@ -92,9 +92,9 @@ once. The longest wait is 7 days (`604800`).
 To turn a key off without a replacement, click **Revoke**, or call
 `DELETE /v1/api-keys/{id}`. It stops working at once.
 
-## How Velox keeps keys safe
+## How Hardcount keeps keys safe
 
-Velox stores only a salted SHA-256 hash of each key, never the key itself.
+Hardcount stores only a salted SHA-256 hash of each key, never the key itself.
 That is why a key is shown only once, when it is created.
 
 **Next:** [make your first API call](api-surface.md#make-your-first-call).

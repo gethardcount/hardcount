@@ -234,11 +234,11 @@ export interface paths {
         put?: never;
         /**
          * Rotate the public cost-dashboard token (ADR-032)
-         * @description Mints a fresh `vlx_pcd_…` token and writes it to the customer
+         * @description Mints a fresh `hc_pcd_…` token and writes it to the customer
          *     row. The previous token is invalidated immediately (read-only
          *     public surface; no grace window). The plaintext token is the
          *     sole credential for `GET /v1/public/cost-dashboard/{token}`
-         *     and is shown ONCE — Velox never returns it again after this
+         *     and is shown ONCE — Hardcount never returns it again after this
          *     response. Audit log records the rotation without the token.
          */
         post: {
@@ -269,9 +269,9 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            /** @example vlx_pcd_a3f9c4... */
+                            /** @example hc_pcd_a3f9c4... */
                             token: string;
-                            /** @example https://api.example.com/v1/public/cost-dashboard/vlx_pcd_a3f9c4... */
+                            /** @example https://api.example.com/v1/public/cost-dashboard/hc_pcd_a3f9c4... */
                             public_url: string;
                         };
                     };
@@ -493,7 +493,7 @@ export interface paths {
          * @description Creates a Stripe Checkout setup link (as `setup-session` does)
          *     and queues an email with it to the customer's primary email. The
          *     link is never sent to the CC list. The card details go from the
-         *     customer's browser to Stripe; Velox does not see them. The card
+         *     customer's browser to Stripe; Hardcount does not see them. The card
          *     is saved when Stripe reports the setup succeeded.
          *
          *     At most one call per customer per minute when the server has Redis
@@ -549,7 +549,7 @@ export interface paths {
         post?: never;
         /**
          * Detach a payment method
-         * @description Detaches the card in Stripe and marks it detached in Velox. If it
+         * @description Detaches the card in Stripe and marks it detached in Hardcount. If it
          *     was the default, the newest remaining card becomes the default in
          *     the same step, and that change is copied to Stripe (best effort).
          *     Both changes are written to the audit log. A Stripe error on the
@@ -572,7 +572,7 @@ export interface paths {
         put?: never;
         /**
          * Make a payment method the default
-         * @description Makes this card the one Velox charges and clears the flag on the
+         * @description Makes this card the one Hardcount charges and clears the flag on the
          *     others. The change is copied to the Stripe customer (best effort;
          *     a Stripe failure is recorded on the audit row and does not fail
          *     the call).
@@ -593,7 +593,7 @@ export interface paths {
         };
         /**
          * Public cost-dashboard projection (ADR-032)
-         * @description Unauthenticated. The `vlx_pcd_…` token in the URL is the sole
+         * @description Unauthenticated. The `hc_pcd_…` token in the URL is the sole
          *     credential — partners embed via iframe / fetch from their own
          *     app without an API key. Sanitized projection: customer_id,
          *     tenant_id, livemode, billing_period, subscriptions, usage[],
@@ -781,7 +781,7 @@ export interface paths {
         /**
          * Start paying the invoice in Stripe Checkout
          * @description The hosted page's Pay button. Returns a Stripe Checkout URL for the
-         *     amount due. Velox has already worked out the tax, so Stripe adds
+         *     amount due. Hardcount has already worked out the tax, so Stripe adds
          *     none. After paying, Stripe sends the customer back to the hosted
          *     page with `?paid=1`. The Stripe webhook, not this redirect, marks
          *     the invoice paid.
@@ -1344,7 +1344,7 @@ export interface paths {
          * Create webhook endpoint
          * @description Returns the endpoint plus its signing secret (shown once). Event
          *     names are validated against the emit catalog — subscribing to an
-         *     event Velox never emits is a 422, not silence. Omitted/empty
+         *     event Hardcount never emits is a 422, not silence. Omitted/empty
          *     events = all events ("*"); "invoice.*"-style prefix wildcards are
          *     supported.
          */
@@ -1587,7 +1587,7 @@ export interface paths {
         /**
          * Resend one delivery to its endpoint
          * @description Sends the delivery's event again to this one endpoint only. Other
-         *     endpoints are not contacted. Velox copies the event to a new event
+         *     endpoints are not contacted. Hardcount copies the event to a new event
          *     (`replay_of` points to the original) and queues a new delivery.
          *     The message sent carries the original event's `id` and
          *     `created_at`. The original delivery is not changed. Sending happens in the
@@ -1778,7 +1778,7 @@ export interface paths {
          *     The request is checked against the `Stripe-Signature` header and
          *     that mode's signing secret. The body can be at most 64 KB.
          *
-         *     Events for objects Velox did not create are answered 200 with
+         *     Events for objects Hardcount did not create are answered 200 with
          *     `status: skipped`. A 500 means a temporary failure, and Stripe
          *     sends the event again.
          */
@@ -1800,7 +1800,7 @@ export interface paths {
         put?: never;
         /**
          * Receive a Postmark delivery webhook
-         * @description Postmark calls this route; your code does not. Velox reads
+         * @description Postmark calls this route; your code does not. Hardcount reads
          *     `Delivery`, `Bounce` and `SpamComplaint` records and ignores other
          *     record types and soft bounces. Without `POSTMARK_WEBHOOK_USER` and
          *     `POSTMARK_WEBHOOK_PASS` set, every request gets 401. See
@@ -1808,7 +1808,7 @@ export interface paths {
          *
          *     Error bodies are `{"error": "<reason>"}`, not the usual error
          *     object. A body that a retry cannot fix is answered 200, so Postmark
-         *     stops retrying: over 64 KB, invalid JSON, or no known Velox email
+         *     stops retrying: over 64 KB, invalid JSON, or no known Hardcount email
          *     id in its metadata.
          */
         post: operations["receivePostmarkWebhook"];
@@ -2445,7 +2445,7 @@ export interface paths {
          * @description Cancels the subscription immediately. Works on `draft`, `trialing`
          *     and `active` subscriptions.
          *
-         *     In the same transaction, Velox writes the final invoice for the
+         *     In the same transaction, Hardcount writes the final invoice for the
          *     part of the current period that has been used, and credits the
          *     unused part of any base fee that was billed in advance. If a
          *     billing period has already ended, it is billed first. If a
@@ -2533,7 +2533,7 @@ export interface paths {
          * Pause collection
          * @description Pauses payment collection. The subscription keeps running: each
          *     period still closes and its invoice is created, but the invoice
-         *     stays a draft. Velox does not finalize it, charge it or start
+         *     stays a draft. Hardcount does not finalize it, charge it or start
          *     dunning (automatic payment retries).
          *
          *     Invoices finalized before the pause are not drafts. Payment retries
@@ -2629,7 +2629,7 @@ export interface paths {
         get?: never;
         /**
          * Set billing thresholds
-         * @description Sets the billing thresholds: limits that make Velox invoice before
+         * @description Sets the billing thresholds: limits that make Hardcount invoice before
          *     the period ends. A threshold bills sooner; it does not cap or
          *     block usage. Set `amount_gte`, `item_thresholds`, or both. The
          *     first threshold reached triggers the invoice.
@@ -2729,7 +2729,7 @@ export interface paths {
          *       `DELETE /v1/subscriptions/{id}/items/{itemID}/pending-change`.
          *
          *     For a change that takes effect now on a plan billed in advance,
-         *     Velox settles the rest of the period at once. An increase is
+         *     Hardcount settles the rest of the period at once. An increase is
          *     invoiced. A decrease is credited to the customer's balance with a
          *     credit note, or reduces the amount due when the period's invoice
          *     is still unpaid. `proration` in the response describes the result.
@@ -2875,7 +2875,7 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
-                        /** @description The customer's external_id (your identifier), not the internal vlx_cus_ id. */
+                        /** @description The customer's external_id (your identifier), not the internal hc_cus_ id. */
                         external_customer_id: string;
                         /** @description The meter's `event_name` (e.g. "tokens"). */
                         event_name: string;
@@ -2926,7 +2926,7 @@ export interface paths {
                     };
                 };
                 /**
-                 * @description Event ingested. A `billing_status` is what Velox found when the
+                 * @description Event ingested. A `billing_status` is what Hardcount found when the
                  *     event arrived (see `UsageBillingStatus`); the event is stored
                  *     all the same.
                  */
@@ -3006,7 +3006,7 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
-                        /** @description The customer's external_id (your identifier), not the internal vlx_cus_ id. */
+                        /** @description The customer's external_id (your identifier), not the internal hc_cus_ id. */
                         external_customer_id: string;
                         /** @description The meter's `event_name` (e.g. "tokens"). */
                         event_name: string;
@@ -3113,7 +3113,7 @@ export interface paths {
          *     only if that period's invoice has not been built yet. An event for
          *     an already-invoiced period is stored, but that invoice does not
          *     bill it; bill it with a one-off invoice if needed. Its 201 carries
-         *     the `billing_status` Velox found (see `UsageBillingStatus`):
+         *     the `billing_status` Hardcount found (see `UsageBillingStatus`):
          *     `after_close` while the subscription that invoiced the period is
          *     active or trialing, `outside_subscription` once it has ended. A
          *     billing period of another subscription that is not invoiced yet and
@@ -3179,7 +3179,7 @@ export interface paths {
          *     rows; `more_to_release` counts the rest, and another call takes
          *     them. A released row counts toward
          *     the billing period its time falls in only if that period's invoice
-         *     has not been built yet; Velox does not move it onto a later
+         *     has not been built yet; Hardcount does not move it onto a later
          *     invoice. Writes an audit log entry. Requires usage write permission.
          */
         post: operations["releaseHeldUsage"];
@@ -3641,7 +3641,7 @@ export interface paths {
          *     is final. In the same transaction, credits that were applied to the
          *     invoice go back to the customer's credit balance.
          *
-         *     After the void, Velox stops collection at Stripe (expires open
+         *     After the void, Hardcount stops collection at Stripe (expires open
          *     Checkout sessions and cancels the PaymentIntent where Stripe allows
          *     it) and resolves any active dunning run with `invoice_voided`.
          *     Fires the `invoice.voided` webhook event.
@@ -3673,8 +3673,8 @@ export interface paths {
         /**
          * Resend the payment-method setup link
          * @description Emails the customer the link to add a payment method again. It is
-         *     the same email Velox sends when an invoice is finalized and the
-         *     customer has no card on file. Once a card is added, Velox charges
+         *     the same email Hardcount sends when an invoice is finalized and the
+         *     customer has no card on file. Once a card is added, Hardcount charges
          *     the invoice automatically.
          *
          *     Works on unpaid invoices that are `finalized` or `uncollectible`.
@@ -3801,7 +3801,7 @@ export interface paths {
          *
          *     1. The customer's credit balance is applied first. If it covers the
          *        whole amount, the invoice is marked paid and no card is charged.
-         *     2. Otherwise Velox charges the remaining amount to the customer's
+         *     2. Otherwise Hardcount charges the remaining amount to the customer's
          *        saved payment method with a Stripe PaymentIntent.
          *
          *     After a successful card charge, any active dunning run is resolved
@@ -3829,7 +3829,7 @@ export interface paths {
         put?: never;
         /**
          * Refund a paid invoice
-         * @description Refunds a `paid` invoice to the customer's card. Velox creates and
+         * @description Refunds a `paid` invoice to the customer's card. Hardcount creates and
          *     issues a credit note (a document that reduces what the customer
          *     owes) for the refund, and sends the refund to Stripe.
          *
@@ -3900,9 +3900,9 @@ export interface paths {
          * List the card disputes on an invoice
          * @description Returns the card disputes (chargebacks) Stripe reported against the
          *     invoice's payments, oldest first. An invoice without any returns an
-         *     empty list. Velox records them from Stripe's `charge.dispute.*`
+         *     empty list. Hardcount records them from Stripe's `charge.dispute.*`
          *     webhook events, which must be turned on for the Stripe webhook
-         *     endpoint. Velox never changes the invoice because of a dispute:
+         *     endpoint. Hardcount never changes the invoice because of a dispute:
          *     respond to it in Stripe, and if it is lost, record the loss with a
          *     credit note or a write-off in your books.
          */
@@ -4074,7 +4074,7 @@ export interface paths {
          *       with `unknown`: the customer may already be refunded. Retry either
          *       with `POST /v1/credit-notes/{id}/retry-refund`.
          *     - If the invoice's charge is still running, or the invoice is still
-         *       a draft, nothing changes and the note stays `draft`. Velox issues
+         *       a draft, nothing changes and the note stays `draft`. Hardcount issues
          *       it later.
          *     - If the invoice was voided or written off, the draft is voided
          *       instead and returned with `status` `voided`.
@@ -4099,9 +4099,9 @@ export interface paths {
          * Retry a failed credit-note refund
          * @description Sends the refund part of an `issued` credit note to Stripe again,
          *     when its `refund_status` is `failed`, `unknown`, `pending` or
-         *     `none`. Before creating a refund, Velox asks Stripe for one already
+         *     `none`. Before creating a refund, Hardcount asks Stripe for one already
          *     made for this note and records it if found. For `unknown` and
-         *     `none`, Velox then resends the earlier request whose result it
+         *     `none`, Hardcount then resends the earlier request whose result it
          *     never recorded, with the same idempotency key. While Stripe keeps
          *     that key (at least 24 hours), Stripe returns the earlier request's
          *     result instead of making a second refund.
@@ -4307,12 +4307,12 @@ export interface paths {
         /**
          * Sign in with email and password; mint an httpOnly session cookie
          * @description Validates email + password, mints a server-side session row, and
-         *     sets `Set-Cookie: velox_session=...; HttpOnly; SameSite=Lax; Path=/`.
+         *     sets `Set-Cookie: hardcount_session=...; HttpOnly; SameSite=Lax; Path=/`.
          *     Subsequent dashboard requests authenticate via the cookie; sessions
          *     are bound to `users.id` and are independent of API key lifecycle.
          *     See ADR-011.
          *
-         *     A successful sign-in also sets `velox_device` (HttpOnly,
+         *     A successful sign-in also sets `hardcount_device` (HttpOnly,
          *     `Path=/v1/auth`, 180 days). It marks the browser as one that signed
          *     in to this email, so the sign-in throttle counts its attempts on
          *     their own. It never replaces the password.
@@ -4884,7 +4884,7 @@ export interface paths {
         /**
          * Resolve the current credential to its tenant context
          * @description Returns the resolved auth context for whichever credential the
-         *     request carries — `velox_session` cookie (dashboard) or
+         *     request carries — `hardcount_session` cookie (dashboard) or
          *     `Authorization: Bearer` (SDK / curl). Cookie path returns
          *     `user_id` + `email`; Bearer path returns `key_id` + `key_type`.
          *     All callers get `tenant_id`, `livemode`,
@@ -5424,7 +5424,7 @@ export interface paths {
          * @description How much credit the customer has left right now, per currency: the
          *     settled balance less the usage no invoice has billed yet in that
          *     currency. Use it to decide in your
-         *     own code whether to keep serving a prepaid customer; Velox records
+         *     own code whether to keep serving a prepaid customer; Hardcount records
          *     usage and never refuses it.
          *
          *     The read aggregates the customer's usage events for the current
@@ -6568,7 +6568,7 @@ export interface paths {
          * Create an API key
          * @description Creates a key in the caller's mode: a test-mode caller gets a test
          *     key, a live-mode caller gets a live key. The full key (`raw_key`)
-         *     is returned once and is never shown again. Velox stores only a
+         *     is returned once and is never shown again. Hardcount stores only a
          *     salted hash. `key_type` defaults to `secret`.
          *
          *     A `platform` key can only be issued by an existing platform key.
@@ -6645,7 +6645,7 @@ export interface paths {
          *     numbering, payment terms, tax setup and the company details printed
          *     on invoices. Settings are shared by test and live mode. A tenant
          *     that never saved settings gets the defaults (USD, UTC, prefix
-         *     `VLX`, net 30, tax provider `manual`).
+         *     `HC`, net 30, tax provider `manual`).
          *     Requires the `apikey:write` permission (secret keys and dashboard
          *     sessions).
          */
@@ -6745,7 +6745,7 @@ export interface paths {
          *     and `pk_live_` for live. Secrets are stored encrypted and are never
          *     returned.
          *
-         *     Velox then calls Stripe to check the key. A failed check still
+         *     Hardcount then calls Stripe to check the key. A failed check still
          *     returns 200: the keys are saved and `last_verified_error` says why
          *     the check failed. On success, `verified_at` and the account fields
          *     are set, and invoices that were stuck waiting for Stripe keys are
@@ -6777,7 +6777,7 @@ export interface paths {
         /**
          * Set the Stripe webhook signing secret
          * @description Saves the `whsec_` signing secret for a mode that is already
-         *     connected, without entering the API keys again. Velox does not call
+         *     connected, without entering the API keys again. Hardcount does not call
          *     Stripe here; the secret is checked on each incoming webhook.
          *     Writes an audit row (never the secret).
          */
@@ -6796,7 +6796,7 @@ export interface paths {
         post?: never;
         /**
          * Disconnect Stripe for one mode
-         * @description Deletes the saved Stripe keys for the mode. Velox cannot reach
+         * @description Deletes the saved Stripe keys for the mode. Hardcount cannot reach
          *     Stripe in that mode until you connect again. Writes an audit row.
          */
         delete: operations["disconnectStripe"];
@@ -6822,7 +6822,7 @@ export interface paths {
         put?: never;
         /**
          * Create a tenant
-         * @description Platform keys only (`vlx_platform_`), sent as
+         * @description Platform keys only (`hc_platform_`), sent as
          *     `Authorization: Bearer`. Dashboard sessions are not accepted.
          *     Creates an active tenant. It has no users and no API keys yet.
          *     Writes an audit row.
@@ -6866,18 +6866,18 @@ export interface paths {
         /**
          * Set up a new installation
          * @description One-time setup for a new installation. It works only while no
-         *     tenant exists and only when the server has `VELOX_BOOTSTRAP_TOKEN`
+         *     tenant exists and only when the server has `HARDCOUNT_BOOTSTRAP_TOKEN`
          *     set. Send that token as `token` in the body or as
          *     `Authorization: Bearer <token>`. Never send it in the query string.
          *
          *     In one transaction it creates the first tenant, its owner user, a
          *     test secret key, a live secret key and a test publishable key. The
          *     response is the only place the keys appear, and the password too
-         *     when Velox generated it. The response has `Cache-Control: no-store`.
+         *     when Hardcount generated it. The response has `Cache-Control: no-store`.
          *
          *     Defaults: tenant name "Demo Tenant", owner email
-         *     `admin@velox.local`, and a generated password when
-         *     `owner_password` is empty. The `velox-bootstrap` command does the
+         *     `admin@hardcount.local`, and a generated password when
+         *     `owner_password` is empty. The `hardcount-bootstrap` command does the
          *     same setup from the shell.
          */
         post: operations["bootstrap"];
@@ -6977,7 +6977,7 @@ export interface components {
             };
         };
         MemberInvitation: {
-            /** @example vlx_minv_1a2b3c4d5e6f7890 */
+            /** @example hc_minv_1a2b3c4d5e6f7890 */
             id: string;
             email: string;
             /** @description Recorded for the future role split; not enforced (every member holds the full permission set). */
@@ -6998,7 +6998,7 @@ export interface components {
             revoked_at?: string;
         };
         Customer: {
-            /** @example vlx_cus_42014438d82ddf33 */
+            /** @example hc_cus_42014438d82ddf33 */
             id: string;
             external_id: string;
             display_name: string;
@@ -7150,7 +7150,7 @@ export interface components {
          *     and `dimension_match` are its identity and never change.
          */
         PlanPrice: {
-            /** @example vlx_prc_1a2b3c4d5e6f7890abcdef12 */
+            /** @example hc_prc_1a2b3c4d5e6f7890abcdef12 */
             id: string;
             tenant_id?: string;
             plan_id: string;
@@ -7378,7 +7378,7 @@ export interface components {
             billing_status?: components["schemas"]["UsageBillingStatus"];
         };
         /**
-         * @description What Velox found when the event arrived. It checked the event
+         * @description What Hardcount found when the event arrived. It checked the event
          *     against the customer's subscriptions, the plans and prices in force,
          *     and the invoices already built at that moment. Sent only on the
          *     answer that wrote the event; the event is stored all the same.
@@ -7400,11 +7400,11 @@ export interface components {
          *       `dimension_match`, compared as strings: the number `1` is not the
          *       string `"1"`.
          *
-         *     No `billing_status` means Velox found no reason then. It is not a
-         *     promise that the event will be billed. Velox checks only the
+         *     No `billing_status` means Hardcount found no reason then. It is not a
+         *     promise that the event will be billed. Hardcount checks only the
          *     customer's current billing periods: time after a period end whose
          *     invoice is not built yet is not checked, nor is time after a trial's
-         *     end before Velox ends the trial. A later change can change the
+         *     end before Hardcount ends the trial. A later change can change the
          *     outcome either way: a subscription created, activated or changed, a
          *     trial extended, a scheduled cancel undone, or a price added. The
          *     invoice is the final answer.
@@ -7497,8 +7497,8 @@ export interface components {
          * @description Payment-attempt status. `unknown` marks a Stripe charge attempt that
          *     returned an ambiguous error (5xx, timeout, connection reset) where
          *     we cannot tell whether Stripe processed the charge. With a payment
-         *     intent recorded, Velox asks Stripe for it after a short wait. With
-         *     none (a parked invoice), Velox lists the customer's payments at
+         *     intent recorded, Hardcount asks Stripe for it after a short wait. With
+         *     none (a parked invoice), Hardcount lists the customer's payments at
          *     Stripe every billing tick: it records a payment for the invoice that
          *     appears, and if none has appeared 24 hours after the attempt the
          *     invoice goes back to `pending` (`failed` after a dunning retry) and
@@ -7509,7 +7509,7 @@ export interface components {
         /**
          * @description Whether tax has been calculated. `ok`: it has. `pending`: the
          *     calculation failed, and `tax_error_code` says why and whether
-         *     Velox retries it. A pending invoice cannot be finalized, so a wrong
+         *     Hardcount retries it. A pending invoice cannot be finalized, so a wrong
          *     tax amount is never sent.
          * @enum {string}
          */
@@ -7546,7 +7546,7 @@ export interface components {
          *     not treat the reason code as the presence test for exposure
          *     (2026-08-04). `dispute_lost` reports a payment on the invoice that
          *     the customer disputed with their bank and that the dispute took
-         *     back (the dispute closed as `lost`). Velox leaves the invoice paid
+         *     back (the dispute closed as `lost`). Hardcount leaves the invoice paid
          *     and moves no money; the operator records the loss. Surfaced on paid
          *     invoices. On an invoice that bought prepaid credit, the message
          *     also says how much of the credit is still spendable and names
@@ -7577,7 +7577,7 @@ export interface components {
          *     refusing to record it would only make the books wrong too.
          *
          *     A written-off invoice is settled by RECORDING writers only — an
-         *     offline payment, or Velox recording a card charge that Stripe shows
+         *     offline payment, or Hardcount recording a card charge that Stripe shows
          *     succeeded (its webhook, or the check of an unresolved charge).
          *     Nothing initiates a card
          *     charge against one (ADR-113): recovery of a returned customer runs on
@@ -7606,7 +7606,7 @@ export interface components {
          *     refund or correction is made there. `mark_uncollectible` opens
          *     the write-off and is offered only on a parked invoice (payment
          *     status unknown with no payment intent recorded), for a customer
-         *     who paid another way: Velox records a payment that Stripe shows,
+         *     who paid another way: Hardcount records a payment that Stripe shows,
          *     and charges the invoice again if none appears within 24 hours.
          *     Dashboards render it as a secondary action. `void_invoice` is offered
          *     on prepaid-commit exposure, only while some of the granted
@@ -7676,8 +7676,8 @@ export interface components {
              */
             param?: string;
             /**
-             * @description Velox's own explanation behind `message`: why the state
-             *     holds, what Velox does on its own, and ids support may ask
+             * @description Hardcount's own explanation behind `message`: why the state
+             *     holds, what Hardcount does on its own, and ids support may ask
              *     for (for example the payment intent ids of a payment
              *     anomaly). Plain text; may contain blank-line paragraph
              *     breaks. Never a provider payload — that is
@@ -7687,7 +7687,7 @@ export interface components {
             /**
              * @description The provider's own response (Stripe Tax error envelope,
              *     Stripe's last payment error), exactly as received. Present
-             *     only when Velox called the provider.
+             *     only when Hardcount called the provider.
              */
             provider_response?: string;
             /**
@@ -7699,13 +7699,13 @@ export interface components {
             since?: string;
             /**
              * Format: date-time
-             * @description When Velox will next retry on its own. Today only a tax
+             * @description When Hardcount will next retry on its own. Today only a tax
              *     retry sets it. Absent when no automatic retry is scheduled.
              */
             next_attempt_at?: string;
             /**
              * Format: date-time
-             * @description The invoice's payment deadline (its `due_at`). Velox does not
+             * @description The invoice's payment deadline (its `due_at`). Hardcount does not
              *     act on this date; it is shown so the operator knows it.
              *     Absent when the invoice has no due date.
              */
@@ -7731,11 +7731,11 @@ export interface components {
          */
         ItemChangeType: "plan" | "quantity" | "add" | "remove";
         /**
-         * @description A Velox invoice. Returned from create, finalize, void, list, get,
+         * @description A Hardcount invoice. Returned from create, finalize, void, list, get,
          *     rotate-public-token, and collect-payment endpoints.
          */
         Invoice: {
-            /** @example vlx_inv_42014438d82ddf33 */
+            /** @example hc_inv_42014438d82ddf33 */
             id: string;
             /**
              * @description Owning tenant. Returned for diagnostic clarity but redundant
@@ -7890,12 +7890,12 @@ export interface components {
              *     invoice, or of its last charge that is in progress or failed. It
              *     can be absent after a charge was sent: for example when the
              *     invoice was then paid without a card (by credits, with nothing
-             *     due, or outside Velox: `paid_out_of_band`), or when Stripe
+             *     due, or outside Hardcount: `paid_out_of_band`), or when Stripe
              *     refused the last charge as below its minimum.
              */
             stripe_payment_intent_id?: string;
             /**
-             * @description True when the payment was recorded as made outside Velox, such as
+             * @description True when the payment was recorded as made outside Hardcount, such as
              *     a bank transfer or cheque (`POST /v1/invoices/{id}/record-payment`,
              *     or a payment recovery run resolved as `payment_recovered`). Such
              *     an invoice has no `stripe_payment_intent_id`, so there is no card
@@ -7911,9 +7911,9 @@ export interface components {
              */
             no_pm_notified_at?: string;
             /**
-             * @description Stripe's PaymentIntent status the last time Velox checked it,
+             * @description Stripe's PaymentIntent status the last time Hardcount checked it,
              *     word for word. For information only: `payment_status` is the
-             *     invoice's payment state. Absent until Velox has checked. An
+             *     invoice's payment state. Absent until Hardcount has checked. An
              *     invoice checked by the Stripe Search sweep of releases before
              *     this one may still show `search_not_found`,
              *     `search_terminal_only` or `search_error`.
@@ -7921,7 +7921,7 @@ export interface components {
             provider_payment_status?: string;
             /**
              * Format: date-time
-             * @description When Velox last asked Stripe about this invoice's payment, whether
+             * @description When Hardcount last asked Stripe about this invoice's payment, whether
              *     or not Stripe answered: a read of `provider_payment_status`, or a
              *     check of a charge whose result was lost.
              */
@@ -8007,7 +8007,7 @@ export interface components {
              * @description Stripe-canonical structured `taxability_reason`
              *     (`standard_rated`, `reverse_charge`, `not_collecting`,
              *     `customer_exempt`, `product_exempt`, `zero_rated`, etc.).
-             *     `prepaid_credit_purchase` is Velox's own value, on a prepaid
+             *     `prepaid_credit_purchase` is Hardcount's own value, on a prepaid
              *     commit purchase line under the manual or Stripe Tax provider:
              *     the line is not taxed, and the usage the credit pays for is
              *     taxed when invoiced. Otherwise empty for non-Stripe providers.
@@ -8346,7 +8346,7 @@ export interface components {
             email_type: "invoice" | "payment_receipt" | "payment_failed" | "payment_setup_request" | "dunning_warning" | "dunning_escalation" | "credit_note";
             recipient: string;
             /**
-             * @description Velox's send state. `dispatched` means the mail server accepted it.
+             * @description Hardcount's send state. `dispatched` means the mail server accepted it.
              * @enum {string}
              */
             status: "pending" | "dispatched" | "failed" | "skipped";
@@ -8467,7 +8467,7 @@ export interface components {
                 /** @description Price per unit in cents, as a decimal string; the same figure the invoice line shows. */
                 unit_amount_decimal?: string;
                 /**
-                 * @description True for usage no price of the plan took. Velox bills
+                 * @description True for usage no price of the plan took. Hardcount bills
                  *     nothing for it, and it is left out of the meter's totals.
                  */
                 no_price?: boolean;
@@ -8603,7 +8603,7 @@ export interface components {
             /**
              * Format: date-time
              * @description When collection resumes. Absent when the pause lasts until it is
-             *     cleared. On a pause set by dunning, it is when Velox recorded the
+             *     cleared. On a pause set by dunning, it is when Hardcount recorded the
              *     payment of the invoice the pause was set for.
              */
             resumes_at?: string;
@@ -8619,7 +8619,7 @@ export interface components {
             readonly set_by: "operator" | "dunning";
         };
         /**
-         * @description Limits that make Velox invoice before the period ends. A threshold
+         * @description Limits that make Hardcount invoice before the period ends. A threshold
          *     invoice bills the period's usage so far, and no base fee. The period
          *     keeps its dates, the base fee is billed as it would be with no
          *     threshold, and the period's next invoice bills the rest of the usage.
@@ -8637,7 +8637,7 @@ export interface components {
             /** @description Usage quantity threshold, as a decimal string. */
             usage_gte: string;
         };
-        /** @description What Velox did to settle the rest of the period for an item change. */
+        /** @description What Hardcount did to settle the rest of the period for an item change. */
         SubscriptionItemProration: {
             old_plan_id: string;
             new_plan_id: string;
@@ -9050,7 +9050,7 @@ export interface components {
          * @description A credit note reduces what a customer owes on an invoice, or gives
          *     money back after it was paid. Its total is split three ways: refund
          *     to the card (`refund_amount_cents`), credit to the customer's
-         *     balance (`credit_amount_cents`), and money returned outside Velox
+         *     balance (`credit_amount_cents`), and money returned outside Hardcount
          *     (`out_of_band_amount_cents`).
          */
         CreditNote: {
@@ -9102,7 +9102,7 @@ export interface components {
             tax_transaction_id?: string;
             /** @description True when `issued_at` is test-clock time. */
             is_simulated: boolean;
-            /** @description True on a draft that Velox will issue automatically. */
+            /** @description True on a draft that Hardcount will issue automatically. */
             issue_pending: boolean;
             /** @description True when the tax reversal failed and will be retried. */
             tax_reversal_pending: boolean;
@@ -9189,7 +9189,7 @@ export interface components {
         /**
          * @description Who did it. `person` and `api_key` carry the name (a person's email
          *     when they have no name), `customer` says where through `via`, and
-         *     `automatic` is anything Velox did on its own. Absent when no fact
+         *     `automatic` is anything Hardcount did on its own. Absent when no fact
          *     written with the row names one.
          */
         ActivityActor: {
@@ -9238,11 +9238,11 @@ export interface components {
          *     invoice's payments, recorded from Stripe's `charge.dispute.created`,
          *     `.updated` and `.closed` webhook events. It holds the dispute as the
          *     newest of those events showed it, whatever order they arrived in.
-         *     Velox records and reports a dispute, and nothing else: the invoice
+         *     Hardcount records and reports a dispute, and nothing else: the invoice
          *     stays paid and no money moves.
          */
         InvoiceDispute: {
-            /** @example vlx_dsp_6f1c0a7e9b2d4c8e1a3b5d7f */
+            /** @example hc_dsp_6f1c0a7e9b2d4c8e1a3b5d7f */
             id: string;
             invoice_id: string;
             /** @example du_1MtJUT2eZvKYlo2CNaw2HvEv */
@@ -9298,7 +9298,7 @@ export interface components {
          *     disputed payment paid and the dispute, each as the API returns it.
          *     Both are saved in the same transaction that records the dispute, so
          *     a crash cannot drop them. `payment.dispute_opened` is sent once per
-         *     dispute, when Velox first records it; if the first event Velox
+         *     dispute, when Hardcount first records it; if the first event Hardcount
          *     receives is already the close, both are sent, and both carry the
          *     closed status and `closed_at`. Their delivery order is not
          *     guaranteed. `payment.dispute_closed` is sent when the dispute
@@ -9449,7 +9449,7 @@ export interface components {
          *     It takes the plan's currency.
          */
         CustomerPriceOverride: {
-            /** @example vlx_cpo_1a2b3c4d5e6f7890 */
+            /** @example hc_cpo_1a2b3c4d5e6f7890 */
             id: string;
             tenant_id?: string;
             customer_id: string;
@@ -9529,7 +9529,7 @@ export interface components {
             final_invoice_action: "none" | "mark_uncollectible";
         };
         DunningPolicy: {
-            /** @example vlx_dpol_1a2b3c4d5e6f7890 */
+            /** @example hc_dpol_1a2b3c4d5e6f7890 */
             id: string;
             tenant_id?: string;
             name: string;
@@ -9611,7 +9611,7 @@ export interface components {
             }[];
         };
         /**
-         * @description The fields of a LiteLLM `StandardLoggingPayload` that Velox reads.
+         * @description The fields of a LiteLLM `StandardLoggingPayload` that Hardcount reads.
          *     Other fields are accepted and ignored.
          */
         LitellmSpendLog: {
@@ -9627,7 +9627,7 @@ export interface components {
             cache_hit?: boolean | null;
             /**
              * @description A record bills on its token counts unless its call type is one
-             *     Velox does not bill (images, audio, realtime, moderation,
+             *     Hardcount does not bill (images, audio, realtime, moderation,
              *     batches, files, A2A, response retrieval, ...); those are
              *     skipped, and a skipped record that carries tokens is logged.
              */
@@ -9738,7 +9738,7 @@ export interface components {
             last_event_at: string;
             /**
              * Format: date-time
-             * @description When Velox last received a row for this group.
+             * @description When Hardcount last received a row for this group.
              */
             last_received_at: string;
             /** @description The customer whose external ID now matches, or empty when none does yet. */
@@ -9747,7 +9747,7 @@ export interface components {
             meter_exists: boolean;
         };
         /**
-         * @description The counts are what Velox found when the release wrote the rows, as
+         * @description The counts are what Hardcount found when the release wrote the rows, as
          *     for `billing_status` (see `UsageBillingStatus`). The invoice is the
          *     final answer.
          */
@@ -9776,7 +9776,7 @@ export interface components {
             more_to_release: number;
             /**
              * @description Released rows in a billing period not invoiced yet that a price
-             *     of its plan takes. Rows Velox does not check count here too:
+             *     of its plan takes. Rows Hardcount does not check count here too:
              *     rows after the current period's end, while the subscription
              *     continues, and rows after a trial's end while the subscription
              *     still trials. Rows of a sum or count meter stamped before the end
@@ -9861,11 +9861,11 @@ export interface components {
             }[];
         };
         APIKey: {
-            /** @example vlx_key_1a2b3c4d5e6f7890 */
+            /** @example hc_key_1a2b3c4d5e6f7890 */
             id: string;
             /**
              * @description The start of the key (type, mode and a few characters), enough to tell keys apart. Never the full key.
-             * @example vlx_secret_test_1a2b3c4d
+             * @example hc_secret_test_1a2b3c4d
              */
             key_prefix: string;
             /** @enum {string} */
@@ -9892,7 +9892,7 @@ export interface components {
             key: components["schemas"]["APIKey"];
             /**
              * @description The full key. Shown only once; store it now.
-             * @example vlx_secret_test_4f9c...
+             * @example hc_secret_test_4f9c...
              */
             raw_key: string;
         };
@@ -9914,7 +9914,7 @@ export interface components {
              * @example UTC
              */
             timezone?: string;
-            /** @description Starts every invoice number, such as `VLX-000001`. */
+            /** @description Starts every invoice number, such as `HC-000001`. */
             invoice_prefix?: string;
             /**
              * @description Starts every credit note number, such as `CN-000001`. A change
@@ -10050,7 +10050,7 @@ export interface components {
             retries_queued?: number;
         };
         Tenant: {
-            /** @example vlx_ten_1a2b3c4d5e6f7890 */
+            /** @example hc_ten_1a2b3c4d5e6f7890 */
             id: string;
             name: string;
             /** @enum {string} */
@@ -10067,11 +10067,11 @@ export interface components {
             /** @description Dashboard login password (the one you sent, or the generated one). */
             owner_password: string;
             password_generated: boolean;
-            /** @description Test-mode secret key (`vlx_secret_test_...`). */
+            /** @description Test-mode secret key (`hc_secret_test_...`). */
             secret_key_test: string;
-            /** @description Live-mode secret key (`vlx_secret_live_...`). */
+            /** @description Live-mode secret key (`hc_secret_live_...`). */
             secret_key_live: string;
-            /** @description Test-mode publishable key (`vlx_pub_test_...`). */
+            /** @description Test-mode publishable key (`hc_pub_test_...`). */
             publishable_key_test: string;
             message: string;
         };
@@ -10095,7 +10095,7 @@ export interface components {
                 [key: string]: unknown;
             };
             ip_address?: string;
-            /** @description Matches the `Velox-Request-Id` header of the request that made the change. */
+            /** @description Matches the `Hardcount-Request-Id` header of the request that made the change. */
             request_id?: string;
             /** Format: date-time */
             created_at: string;
@@ -10462,7 +10462,7 @@ export interface components {
         /** @description A new webhook endpoint and its signing secret. The secret is shown only here. */
         WebhookEndpointCreated: {
             endpoint: components["schemas"]["WebhookEndpoint"];
-            /** @description The signing secret (`whsec_…`). Store it now; Velox does not show it again. */
+            /** @description The signing secret (`whsec_…`). Store it now; Hardcount does not show it again. */
             secret: string;
         };
         /** @description The endpoint's new signing secret. It is shown only here. */
@@ -10474,7 +10474,7 @@ export interface components {
              */
             secondary_valid_until?: string;
         };
-        /** @description One outbound webhook event, as Velox created it. */
+        /** @description One outbound webhook event, as Hardcount created it. */
         WebhookEvent: {
             id: string;
             tenant_id?: string;
@@ -11296,7 +11296,7 @@ export interface operations {
             header?: never;
             path: {
                 customer_id: string;
-                /** @description Velox payment method ID. */
+                /** @description Hardcount payment method ID. */
                 pmID: string;
             };
             cookie?: never;
@@ -11339,7 +11339,7 @@ export interface operations {
             };
             path: {
                 customer_id: string;
-                /** @description Velox payment method ID. */
+                /** @description Hardcount payment method ID. */
                 pmID: string;
             };
             cookie?: never;
@@ -12198,7 +12198,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Bad signature, an unreadable body or invalid JSON, or the event's mode or Velox account does not match the endpoint. */
+            /** @description Bad signature, an unreadable body or invalid JSON, or the event's mode or Hardcount account does not match the endpoint. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -13602,7 +13602,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description The customer's external_id (your identifier), not the internal vlx_cus_ id. */
+                    /** @description The customer's external_id (your identifier), not the internal hc_cus_ id. */
                     external_customer_id: string;
                     /** @description The meter's `event_name` (e.g. "tokens"). */
                     event_name: string;
@@ -13653,7 +13653,7 @@ export interface operations {
                 };
             };
             /**
-             * @description Event recorded. A `billing_status` is what Velox found when the
+             * @description Event recorded. A `billing_status` is what Hardcount found when the
              *     event arrived (see `UsageBillingStatus`); the event is stored
              *     all the same.
              */
@@ -13747,7 +13747,7 @@ export interface operations {
                     /** @description The external ID the rows were held under. */
                     external_customer_id: string;
                     /**
-                     * @description Release into this customer (a `vlx_cus_` id) instead of
+                     * @description Release into this customer (an `hc_cus_` id) instead of
                      *     the one whose external ID matches, for a `user` value
                      *     that had a typo.
                      */
@@ -14096,7 +14096,7 @@ export interface operations {
              *     `invalid_state` (already paid or already voided),
              *     `payment_in_flight` (a charge is still running), or
              *     `payment_unidentifiable` (Stripe's answer to a charge was unclear
-             *     and named no payment; Velox finds out from Stripe within a day).
+             *     and named no payment; Hardcount finds out from Stripe within a day).
              */
             409: {
                 headers: {
@@ -14383,9 +14383,9 @@ export interface operations {
             /**
              * @description An earlier charge must be resolved first. Code
              *     `payment_in_flight`: a charge on the invoice is running, or its
-             *     result was lost and Velox is confirming it with Stripe (within
+             *     result was lost and Hardcount is confirming it with Stripe (within
              *     about an hour). Code `payment_unidentifiable`: Stripe's answer
-             *     to the earlier charge was unclear and named no payment; Velox
+             *     to the earlier charge was unclear and named no payment; Hardcount
              *     records a payment that appears, and the invoice is charged again
              *     as usual if none has appeared 24 hours after that charge. Code
              *     `amount_below_minimum`: the amount is below Stripe's minimum
@@ -14424,7 +14424,7 @@ export interface operations {
              *     API key, or none is connected for this mode; nothing was charged
              *     and the invoice is unchanged. Update the key under Settings →
              *     Payments, then retry. Code `payment_outcome_unknown`: Stripe never
-             *     answered, so the card may have been charged; Velox checks with
+             *     answered, so the card may have been charged; Hardcount checks with
              *     Stripe and updates the invoice. Do not retry until it does.
              */
             502: {
@@ -16483,7 +16483,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @example vlx_key_1a2b3c4d5e6f7890 */
+                /** @example hc_key_1a2b3c4d5e6f7890 */
                 id: string;
             };
             cookie?: never;
@@ -17086,7 +17086,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @example vlx_ten_1a2b3c4d5e6f7890 */
+                /** @example hc_ten_1a2b3c4d5e6f7890 */
                 id: string;
             };
             cookie?: never;
@@ -17141,16 +17141,16 @@ export interface operations {
         requestBody?: {
             content: {
                 "application/json": {
-                    /** @description The value of `VELOX_BOOTSTRAP_TOKEN`. Or send it as a Bearer token. */
+                    /** @description The value of `HARDCOUNT_BOOTSTRAP_TOKEN`. Or send it as a Bearer token. */
                     token?: string;
                     /** @default Demo Tenant */
                     tenant_name?: string;
                     /**
                      * @description Must contain `@`.
-                     * @default admin@velox.local
+                     * @default admin@hardcount.local
                      */
                     owner_email?: string;
-                    /** @description 12 or more characters, at most 72 bytes, and not a common password from a leaked-password list. Omit to have Velox generate one. */
+                    /** @description 12 or more characters, at most 72 bytes, and not a common password from a leaked-password list. Omit to have Hardcount generate one. */
                     owner_password?: string;
                 };
             };
@@ -17165,7 +17165,7 @@ export interface operations {
                     "application/json": components["schemas"]["BootstrapResult"];
                 };
             };
-            /** @description Bootstrap is disabled (`VELOX_BOOTSTRAP_TOKEN` not set) or the token is wrong */
+            /** @description Bootstrap is disabled (`HARDCOUNT_BOOTSTRAP_TOKEN` not set) or the token is wrong */
             403: {
                 headers: {
                     [name: string]: unknown;

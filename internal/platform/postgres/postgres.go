@@ -147,7 +147,7 @@ func (db *DB) WithTenantTx(ctx context.Context, tenantID string, fn func(tx *sql
 	return tx.Commit()
 }
 
-// NewID generates a prefixed, time-sortable ID (e.g., vlx_cus_cv2q6ktjml6ng3v2q0tg).
+// NewID generates a prefixed, time-sortable ID (e.g., hc_cus_cv2q6ktjml6ng3v2q0tg).
 // Uses xid: globally unique, 20-char, URL-safe, naturally ordered by creation time.
 func NewID(prefix string) string {
 	return fmt.Sprintf("%s_%s", prefix, xid.New().String())

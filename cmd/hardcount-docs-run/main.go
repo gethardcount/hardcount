@@ -1,9 +1,9 @@
-// velox-docs-run runs the commands of a Markdown page, in order, in one bash
+// hardcount-docs-run runs the commands of a Markdown page, in order, in one bash
 // shell, and checks that each prints what the page says it prints. CI runs
 // docs/first-invoice.md with it, so the tutorial cannot drift from the API.
 //
-//	go run ./cmd/velox-docs-run docs/first-invoice.md
-//	go run ./cmd/velox-docs-run -skip 5a -replace acme-1=acme-2 docs/first-invoice.md
+//	go run ./cmd/hardcount-docs-run docs/first-invoice.md
+//	go run ./cmd/hardcount-docs-run -skip 5a -replace acme-1=acme-2 docs/first-invoice.md
 //
 // The page marks each fenced block as a command or as the output of the
 // command above it (see page.go). The run stops at the first command that
@@ -40,22 +40,22 @@ func main() {
 	timeout := flag.Duration("timeout", 2*time.Minute, "longest one command may take")
 	flag.Parse()
 	if flag.NArg() != 1 {
-		fmt.Fprintln(os.Stderr, "usage: velox-docs-run [-skip name] [-replace old=new] page.md")
+		fmt.Fprintln(os.Stderr, "usage: hardcount-docs-run [-skip name] [-replace old=new] page.md")
 		os.Exit(2)
 	}
 	page := flag.Arg(0)
 	src, err := os.ReadFile(page)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "velox-docs-run: %v\n", err)
+		fmt.Fprintf(os.Stderr, "hardcount-docs-run: %v\n", err)
 		os.Exit(2)
 	}
 	plan, err := makePlan(string(src), skips, replaces)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "velox-docs-run: %s:\n%v\n", page, err)
+		fmt.Fprintf(os.Stderr, "hardcount-docs-run: %s:\n%v\n", page, err)
 		os.Exit(2)
 	}
 	if err := execute(page, plan, *dir, *tries, *timeout); err != nil {
-		fmt.Fprintf(os.Stderr, "\nvelox-docs-run: FAIL: %v\n", err)
+		fmt.Fprintf(os.Stderr, "\nhardcount-docs-run: FAIL: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -191,7 +191,7 @@ func execute(page string, p *plan, dir string, tries int, timeout time.Duration)
 	for s := range p.skipped {
 		skipped = append(skipped, s)
 	}
-	fmt.Printf("\nvelox-docs-run: PASS: %s: %d commands ran, %d outputs matched", page, ran, checked)
+	fmt.Printf("\nhardcount-docs-run: PASS: %s: %d commands ran, %d outputs matched", page, ran, checked)
 	if len(skipped) > 0 {
 		fmt.Printf(", skipped %s", strings.Join(skipped, ", "))
 	}

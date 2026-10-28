@@ -129,7 +129,7 @@ var requestBodies = map[string]requestBody{
 var dunningPolicyReadOnly = readOnly("id", "tenant_id", "is_default", "seeded", "created_at", "updated_at")
 
 // providerBody is why the inbound webhook bodies are not checked.
-const providerBody = "The provider defines this body, not Velox. The handler reads the few fields it needs from it."
+const providerBody = "The provider defines this body, not Hardcount. The handler reads the few fields it needs from it."
 
 // bodiesNotChecked lists spec operations with a request body that the check
 // skips, each with the reason.

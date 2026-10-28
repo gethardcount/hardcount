@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Velox Database Restore Script
+# Hardcount Database Restore Script
 #
 # Restores a database from a pg_dump backup file, in one transaction, with
 # each restored object's privileges as the backup holds them.
@@ -10,11 +10,11 @@
 # no default privileges (see "The backup's privileges" below).
 #
 # Usage:
-#   DATABASE_URL="postgres://velox:velox@localhost:5432/velox?sslmode=disable" \
-#     ./scripts/restore.sh /var/backups/velox/velox_20260415_030000.dump
+#   DATABASE_URL="postgres://hardcount:hardcount@localhost:5432/hardcount?sslmode=disable" \
+#     ./scripts/restore.sh /var/backups/hardcount/hardcount_20260415_030000.dump
 #
 # Optional environment variables:
-#   VELOX_RESTORE_CONFIRM=yes   Skip the interactive confirmation prompt (for automation).
+#   HARDCOUNT_RESTORE_CONFIRM=yes   Skip the interactive confirmation prompt (for automation).
 #
 # Exit codes:
 #   0  Success
@@ -34,12 +34,12 @@ if [ -z "$BACKUP_FILE" ]; then
   echo "Usage: ./scripts/restore.sh <backup-file>"
   echo ""
   echo "Examples:"
-  echo "  ./scripts/restore.sh /var/backups/velox/velox_20260415_030000.dump"
-  echo "  ./scripts/restore.sh /var/backups/velox/latest.dump"
+  echo "  ./scripts/restore.sh /var/backups/hardcount/hardcount_20260415_030000.dump"
+  echo "  ./scripts/restore.sh /var/backups/hardcount/latest.dump"
   echo ""
   echo "Environment:"
   echo "  DATABASE_URL              Required. Target database connection string."
-  echo "  VELOX_RESTORE_CONFIRM=yes  Skip interactive confirmation (for CI/automation)."
+  echo "  HARDCOUNT_RESTORE_CONFIRM=yes  Skip interactive confirmation (for CI/automation)."
   exit 1
 fi
 
@@ -71,7 +71,7 @@ die() {
 # privileges (ALTER DEFAULT PRIVILEGES) have already given the new table
 # theirs, and nothing takes back what the backup does not grant. Compose's
 # deploy/compose/postgres-init.sh and docs/ops/postgres-requirements.md give
-# velox_app ALL on new tables, so audit_log, where velox_app may only read
+# hardcount_app ALL on new tables, so audit_log, where hardcount_app may only read
 # and add rows (migration 0150), came back with UPDATE, DELETE and TRUNCATE.
 #
 # It reads only the backup's privilege entries, each headed by a
@@ -160,17 +160,17 @@ command -v psql >/dev/null 2>&1 || die "psql not found in PATH." 1
 RESTORE_TOOL_MAJOR=$($PG_RESTORE --version | sed -E 's/.* ([0-9]+)(\.[0-9]+)?.*/\1/')
 TARGET_MAJOR=$(psql "$DATABASE_URL" -tAc "SHOW server_version" 2>/dev/null | sed -E 's/^([0-9]+).*/\1/')
 if [ -n "$TARGET_MAJOR" ] && [ -n "$RESTORE_TOOL_MAJOR" ] && [ "$RESTORE_TOOL_MAJOR" -gt "$TARGET_MAJOR" ] \
-   && [ "${VELOX_RESTORE_TOOL_MISMATCH_OK:-no}" != "yes" ]; then
-  die "pg_restore major ($RESTORE_TOOL_MAJOR) is newer than the target server major ($TARGET_MAJOR) — its client SET commands will roll the restore back. Use matching tools (e.g. PG_RESTORE=\"docker run --rm -i --network host postgres:${TARGET_MAJOR}-alpine pg_restore\") or set VELOX_RESTORE_TOOL_MISMATCH_OK=yes." 1
+   && [ "${HARDCOUNT_RESTORE_TOOL_MISMATCH_OK:-no}" != "yes" ]; then
+  die "pg_restore major ($RESTORE_TOOL_MAJOR) is newer than the target server major ($TARGET_MAJOR) — its client SET commands will roll the restore back. Use matching tools (e.g. PG_RESTORE=\"docker run --rm -i --network host postgres:${TARGET_MAJOR}-alpine pg_restore\") or set HARDCOUNT_RESTORE_TOOL_MISMATCH_OK=yes." 1
 fi
 
-# Velox archives carry GRANTs to the velox_app runtime role (ADR-073). On a
+# Hardcount archives carry GRANTs to the hardcount_app runtime role (ADR-073). On a
 # FRESH target — the disaster-recovery case — that role does not exist, one
 # GRANT fails, and --single-transaction rolls the whole restore back. Roles
 # are cluster-level, so pg_dump of a database cannot carry them; the target
 # must provision them first. Fail before touching anything, with the remedy.
-if ! psql "$DATABASE_URL" -tAc "SELECT 1 FROM pg_roles WHERE rolname='velox_app'" 2>/dev/null | grep -q 1; then
-  die "Target cluster has no 'velox_app' role — the archive's GRANTs will roll the restore back. Create it first (CREATE ROLE velox_app LOGIN PASSWORD '<your-password>'; see docker/init.sql for the dev shape and docs/ops/backup-considerations.md for the restore runbook), then re-run." 1
+if ! psql "$DATABASE_URL" -tAc "SELECT 1 FROM pg_roles WHERE rolname='hardcount_app'" 2>/dev/null | grep -q 1; then
+  die "Target cluster has no 'hardcount_app' role — the archive's GRANTs will roll the restore back. Create it first (CREATE ROLE hardcount_app LOGIN PASSWORD '<your-password>'; see docker/init.sql for the dev shape and docs/ops/backup-considerations.md for the restore runbook), then re-run." 1
 fi
 
 # The backup's privileges: SQL the restore runs last (see privilege_sql).
@@ -187,7 +187,7 @@ elif [ "$FILE_TYPE" = "sql" ]; then
   HAS_DEFAULT_PRIVILEGES=$(psql "$DATABASE_URL" -X -tAc \
     "SELECT EXISTS (SELECT 1 FROM pg_default_acl WHERE defaclrole = current_user::regrole)" 2>/dev/null || echo "unknown")
   if [ "$HAS_DEFAULT_PRIVILEGES" != "f" ]; then
-    die "The target database gives the restoring user's new tables default privileges (ALTER DEFAULT PRIVILEGES), or the check failed, and restore.sh cannot take those back from a plain SQL dump: tables such as audit_log would come back with more access for velox_app than the backup gives. Restore a custom-format backup (scripts/backup.sh makes one), or restore this file into a database without default privileges." 1
+    die "The target database gives the restoring user's new tables default privileges (ALTER DEFAULT PRIVILEGES), or the check failed, and restore.sh cannot take those back from a plain SQL dump: tables such as audit_log would come back with more access for hardcount_app than the backup gives. Restore a custom-format backup (scripts/backup.sh makes one), or restore this file into a database without default privileges." 1
   fi
 fi
 
@@ -210,8 +210,8 @@ echo "  Size:    $(numfmt --to=iec "$BACKUP_SIZE" 2>/dev/null || echo "${BACKUP_
 echo "================================================================"
 echo ""
 
-if [ "${VELOX_RESTORE_CONFIRM:-}" = "yes" ]; then
-  log "VELOX_RESTORE_CONFIRM=yes — skipping interactive prompt."
+if [ "${HARDCOUNT_RESTORE_CONFIRM:-}" = "yes" ]; then
+  log "HARDCOUNT_RESTORE_CONFIRM=yes — skipping interactive prompt."
 else
   printf "Type 'yes' to proceed: "
   read -r CONFIRM
@@ -312,7 +312,7 @@ POST_COUNTS=$(psql "$DATABASE_URL" -t -A -c "
 
 log "Post-restore total rows: ${POST_COUNTS}"
 
-# Check critical Velox tables exist.
+# Check critical Hardcount tables exist.
 CRITICAL_TABLES="tenants customers subscriptions invoices customer_credit_ledger"
 MISSING_TABLES=""
 
@@ -343,7 +343,7 @@ log "All critical tables present."
 
 log "Checking migration state..."
 
-# Report the record as it is; `velox migrate status` decides what this
+# Report the record as it is; `hardcount migrate status` decides what this
 # release would do with the database.
 GOOSE_VERSION=$(psql "$DATABASE_URL" -t -A -c "
   SELECT CASE WHEN to_regclass('public.goose_db_version') IS NULL THEN ''
@@ -356,7 +356,7 @@ if [ -n "$GOOSE_VERSION" ]; then
 else
   log "WARNING: No migration record found."
 fi
-log "NOTE: Run \"velox migrate status\" with the Velox release you will start, to check it can upgrade this database."
+log "NOTE: Run \"hardcount migrate status\" with the Hardcount release you will start, to check it can upgrade this database."
 
 # ---------------------------------------------------------------------------
 # Summary

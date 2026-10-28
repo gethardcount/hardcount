@@ -5,7 +5,7 @@
 
 ## Summary
 
-The "Invoice paid" row on the invoice timeline names the card that was charged, for example "via Visa •••• 4242". When a payment settles, Velox looks the card up from the PaymentIntent at Stripe and stamps `payment_card_brand` and `payment_card_last4` on the invoice, so one-off Checkout cards show too. The rules below that drop duplicate Stripe webhook rows are superseded by [ADR-103](103-single-payment-source.md): payment rows now come only from charge-attempt records. Status: active for the card detail, superseded for the timeline rules.
+The "Invoice paid" row on the invoice timeline names the card that was charged, for example "via Visa •••• 4242". When a payment settles, Hardcount looks the card up from the PaymentIntent at Stripe and stamps `payment_card_brand` and `payment_card_last4` on the invoice, so one-off Checkout cards show too. The rules below that drop duplicate Stripe webhook rows are superseded by [ADR-103](103-single-payment-source.md): payment rows now come only from charge-attempt records. Status: active for the card detail, superseded for the timeline rules.
 
 ## Context
 
@@ -21,7 +21,7 @@ Payment succeeded     $29.00         May 4, 7:28 PM
 Two rows, same minute, same amount. The lifecycle column flip
 (`invoices.status='paid'`) and the Stripe webhook
 (`payment_intent.succeeded`) describe the same fact from two
-angles: Velox's internal state vs Stripe's wire event. The
+angles: Hardcount's internal state vs Stripe's wire event. The
 webhook IS the trigger; the duplication is mechanical, not
 informational.
 
@@ -113,7 +113,7 @@ alternative — adds ~50ms per webhook, but is robust to changes
 in Stripe's webhook payload shape. Given PI succeeded webhooks
 aren't high-volume per tenant, the latency is acceptable.
 
-### Why not look up via Velox's `payment_methods` table?
+### Why not look up via Hardcount's `payment_methods` table?
 
 That works for setup-intent-attached PMs but misses one-off
 Checkout cards (the customer's "I don't want to save" choice).

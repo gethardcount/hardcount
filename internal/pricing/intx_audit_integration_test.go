@@ -174,7 +174,7 @@ func TestMeterUpdateAudit_SharedFate(t *testing.T) {
 	})
 
 	t.Run("nonexistent meter emits nothing", func(t *testing.T) {
-		ghostID := postgres.NewID("vlx_mtr") // never inserted
+		ghostID := postgres.NewID("hc_mtr") // never inserted
 		emitter := &countingEmitter{}
 
 		// Straight at the store: the service's pre-flight GetMeter would 404
@@ -270,7 +270,7 @@ func TestPriceWriteAudit_SharedFate(t *testing.T) {
 		emitter := &countingEmitter{}
 		svc := pricing.NewService(f.store)
 		svc.SetAuditLogger(emitter)
-		ghost := postgres.NewID("vlx_prc")
+		ghost := postgres.NewID("hc_prc")
 		if _, err := svc.RemovePrice(f.ctx, f.tenantID, plan.ID, ghost); !errors.Is(err, errs.ErrNotFound) {
 			t.Fatalf("removing a price that does not exist must be a 404; got %v", err)
 		}

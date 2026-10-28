@@ -26,7 +26,7 @@ const (
 	stripeRefundKeyInUse = `{"error":{"code":"idempotency_key_in_use","message":"The idempotency key provided is currently being used in another request.","type":"invalid_request_error"}}`
 	// Stripe's answer to a revoked or mistyped secret key.
 	stripeBadKey = `{"error":{"message":"Invalid API Key provided: sk_test_****FAKE","type":"invalid_request_error"}}`
-	// Stripe's answer to a restricted key (rk_, which Velox accepts) that
+	// Stripe's answer to a restricted key (rk_, which Hardcount accepts) that
 	// lacks refund permission: 403, "The API key doesn't have permissions to
 	// perform the request" (https://docs.stripe.com/api/errors).
 	stripeKeyNoPermission = `{"error":{"message":"The provided key 'rk_test_****FAKE' does not have the required permissions for this endpoint on account 'acct_FAKE'.","type":"invalid_request_error"}}`
@@ -40,7 +40,7 @@ type refundOutcome interface {
 }
 
 // noAnswer fails every request at the transport, like a timeout or a dropped
-// connection: Velox never sees Stripe's answer.
+// connection: Hardcount never sees Stripe's answer.
 type noAnswer struct{ calls int }
 
 func (n *noAnswer) RoundTrip(*http.Request) (*http.Response, error) {
@@ -52,7 +52,7 @@ func (n *noAnswer) RoundTrip(*http.Request) (*http.Response, error) {
 // later one with a fixed response. stripe-go resends a request lost on the
 // wire, under the same idempotency key, and stops at any answer from Stripe
 // but a 429 lock_timeout (stripe-go v82 stripe.go shouldRetry, error.go
-// canRetry). So the error Velox reads can be the answer to a second attempt
+// canRetry). So the error Hardcount reads can be the answer to a second attempt
 // while the first one ran.
 type lostThenCanned struct {
 	status int
@@ -120,7 +120,7 @@ func TestCreateRefund_SaysWhetherTheRefundMayExist(t *testing.T) {
 			// Stripe sends 429 before it runs a request, and saves no result
 			// for it (https://docs.stripe.com/error-low-level#content-errors).
 			// But stripe-go may have sent the request before, and lost it on
-			// the wire (next case), and Velox cannot tell. stripe429 is a
+			// the wire (next case), and Hardcount cannot tell. stripe429 is a
 			// real test-mode reply.
 			name:    "rate limit: an earlier attempt may have run",
 			stripe:  func(t *testing.T) { withCannedStripe(t, http.StatusTooManyRequests, stripe429) },
@@ -179,7 +179,7 @@ func TestCreateRefund_SaysWhetherTheRefundMayExist(t *testing.T) {
 			r := NewStripeRefunder(NewStripeClients(fixedCreds{}))
 			ctx := auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1")
 
-			_, _, err := r.CreateRefund(ctx, "pi_x", 500, "velox_cn_x", "cn_x")
+			_, _, err := r.CreateRefund(ctx, "pi_x", 500, "hardcount_cn_x", "cn_x")
 			if err == nil {
 				t.Fatal("CreateRefund returned no error")
 			}

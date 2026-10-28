@@ -1,6 +1,6 @@
 # A replica will not start: "REDIS_URL is required" or "Redis is invalid or unreachable"
 
-In production, Velox uses Redis for rate limiting and refuses to start
+In production, Hardcount uses Redis for rate limiting and refuses to start
 without it. Back to the [runbook index](index.md).
 
 ## Symptom

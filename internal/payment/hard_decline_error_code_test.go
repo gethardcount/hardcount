@@ -44,7 +44,7 @@ const incorrectNumberErrorJSON = `{
       "payment_method": {"id": "pm_on_file", "object": "payment_method", "type": "card"},
       "type": "card_error"
     },
-    "metadata": {"velox_invoice_id": "inv_1"},
+    "metadata": {"hardcount_invoice_id": "inv_1"},
     "payment_method": null,
     "status": "requires_payment_method"
   },

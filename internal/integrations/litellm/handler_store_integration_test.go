@@ -102,7 +102,7 @@ func TestSpend_HeldThenReleasedOnce_RealStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	customerID, meterID := postgres.NewID("vlx_cus"), postgres.NewID("vlx_mtr")
+	customerID, meterID := postgres.NewID("hc_cus"), postgres.NewID("hc_mtr")
 	if _, err := tx.ExecContext(ctx, `INSERT INTO customers (id, tenant_id, external_id, display_name, email) VALUES ($1, $2, 'cus_not_yet', 'Late', 'late@example.com')`, customerID, tenantID); err != nil {
 		t.Fatalf("customer: %v", err)
 	}
@@ -169,10 +169,10 @@ func TestSpend_DiscardedRowsStayUnbilledOnResend_RealStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO customers (id, tenant_id, external_id, display_name, email) VALUES ($1, $2, 'cus_discarded', 'Gone', 'gone@example.com')`, postgres.NewID("vlx_cus"), tenantID); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO customers (id, tenant_id, external_id, display_name, email) VALUES ($1, $2, 'cus_discarded', 'Gone', 'gone@example.com')`, postgres.NewID("hc_cus"), tenantID); err != nil {
 		t.Fatalf("customer: %v", err)
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO meters (id, tenant_id, name, event_name, unit, aggregation) VALUES ($1, $2, 'Tokens', 'tokens', 'tokens', 'sum')`, postgres.NewID("vlx_mtr"), tenantID); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO meters (id, tenant_id, name, event_name, unit, aggregation) VALUES ($1, $2, 'Tokens', 'tokens', 'tokens', 'sum')`, postgres.NewID("hc_mtr"), tenantID); err != nil {
 		t.Fatalf("meter: %v", err)
 	}
 	if err := tx.Commit(); err != nil {

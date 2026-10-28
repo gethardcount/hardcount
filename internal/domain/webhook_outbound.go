@@ -18,7 +18,7 @@ type WebhookEndpoint struct {
 	// During a grace-period rotation, SecondarySecret carries the previous
 	// signing key and SecondarySecretExpiresAt is set 72h in the future.
 	// The dispatcher signs outbound events with both during the window
-	// (two v1= entries in Velox-Signature, Stripe-style) so partners can
+	// (two v1= entries in Hardcount-Signature, Stripe-style) so partners can
 	// stage a verifier update without breaking production webhooks. After
 	// expiry, both fields are skipped at sign time; the row keeps them as
 	// cold data until the next rotation overwrites them.
@@ -94,7 +94,7 @@ type EventDispatcher interface {
 	Dispatch(ctx context.Context, tenantID, eventType string, payload map[string]any) error
 }
 
-// Well-known event types emitted by Velox.
+// Well-known event types emitted by Hardcount.
 const (
 	EventInvoiceFinalized = "invoice.finalized"
 	EventInvoicePaid      = "invoice.paid"
@@ -125,7 +125,7 @@ const (
 	// card metadata. Payload: customer_id, stripe_customer_id, card_brand,
 	// card_last4. Both payment_method.* events were EMITTED long before
 	// they were admitted to this catalog — subscriptions to them were
-	// rejected as "Velox never emits it" (2026-07-10 design census).
+	// rejected as "Hardcount never emits it" (2026-07-10 design census).
 	EventPaymentMethodUpdated = "payment_method.updated"
 	// EventPaymentDuplicateCharge fires when a SECOND, different
 	// PaymentIntent succeeds against an already-paid invoice (two devices,
@@ -141,8 +141,8 @@ const (
 	EventPaymentAmountMismatch = "payment.amount_mismatch"
 	// EventPaymentCurrencyMismatch fires when a charge settles in a currency
 	// different from the invoice header's — Stripe's independently-reported
-	// charge currency vs Velox's label, compared case-folded on the webhook
-	// settle path (the one entry point carrying Stripe's value). Velox
+	// charge currency vs Hardcount's label, compared case-folded on the webhook
+	// settle path (the one entry point carrying Stripe's value). Hardcount
 	// creates the PaymentIntent from the header, so this firing means the
 	// label moved (or an out-of-band charge) — detection-only. ADR-100.
 	EventPaymentCurrencyMismatch = "payment.currency_mismatch"
@@ -151,9 +151,9 @@ const (
 	// leg failed and the customer paid inside the residual. Distinct cause
 	// from duplicate_charge: the money is owed BACK, not double-collected.
 	EventPaymentReceivedOnVoidedInvoice = "payment.received_on_voided_invoice"
-	// EventPaymentDisputeOpened fires once per Stripe dispute, when Velox
+	// EventPaymentDisputeOpened fires once per Stripe dispute, when Hardcount
 	// first records it against an invoice (charge.dispute.*, #979). Queued in
-	// the transaction that records it. Velox changes nothing else: the invoice
+	// the transaction that records it. Hardcount changes nothing else: the invoice
 	// stays paid and no money moves.
 	EventPaymentDisputeOpened = "payment.dispute_opened"
 	// EventPaymentDisputeClosed fires when a recorded dispute reaches a closed
@@ -228,7 +228,7 @@ const (
 // validates subscriptions against it: pre-2026-07-05 any string was
 // accepted and matchesEvent silently never fired, so a Stripe-trained
 // subscriber to "invoice.payment_failed" (real name: payment.failed) got
-// silence forever — Velox's own shipped recipes carried two such phantom
+// silence forever — Hardcount's own shipped recipes carried two such phantom
 // names. Keep in lockstep with the constants above, the dashboard's
 // EVENT_GROUPS picker (web-v2/src/pages/Webhooks.tsx) and docs/webhooks.md;
 // webhook_catalog_test.go fails when they differ.

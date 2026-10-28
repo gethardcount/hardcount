@@ -146,7 +146,7 @@ func TestListDueRunsForClock_ChargeHoldIsSkipped(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	tenantID := "tnt_hold_clock"
-	const clockID = "vlx_tclk_hold"
+	const clockID = "hc_tclk_hold"
 	frozen := time.Date(2027, 6, 1, 0, 0, 0, 0, time.UTC)
 
 	tx, err := db.BeginTx(ctx, postgres.TxBypass, "")

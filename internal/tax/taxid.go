@@ -8,8 +8,8 @@ import (
 
 // Tax-ID kind canonical codes. We use Stripe's documented codes as primary
 // (see https://stripe.com/docs/api/customer_tax_ids/object) so operators see
-// the same identifiers in Stripe webhooks, the Stripe Dashboard, and Velox.
-// Velox shorthand (gstin/vat/abn) is still accepted on input — see
+// the same identifiers in Stripe webhooks, the Stripe Dashboard, and Hardcount.
+// Hardcount shorthand (gstin/vat/abn) is still accepted on input — see
 // NormalizeTaxIDType — so existing data continues to work without a backfill.
 const (
 	TaxIDKindINGST = "in_gst" // India GSTIN — Stripe canonical
@@ -40,7 +40,7 @@ var australianABNPattern = regexp.MustCompile(`^[0-9]{11}$`)
 
 // NormalizeTaxIDType maps any accepted alias for a tax-ID kind to its
 // canonical Stripe code so storage stays consistent. Unknown kinds pass
-// through untouched (lowercased + trimmed) — Velox doesn't reject
+// through untouched (lowercased + trimmed) — Hardcount doesn't reject
 // jurisdictions it hasn't added explicit format support for. Empty input
 // returns empty.
 func NormalizeTaxIDType(kind string) string {
@@ -63,7 +63,7 @@ func NormalizeTaxIDType(kind string) string {
 // field is required.
 //
 // Both the canonical Stripe code (in_gst, eu_vat, au_abn) and the legacy
-// Velox shorthand (gstin, vat, abn) are accepted as input so previously
+// Hardcount shorthand (gstin, vat, abn) are accepted as input so previously
 // stored data still validates after the canonical-rename. New writes
 // normalize to the Stripe code via NormalizeTaxIDType before persistence.
 //

@@ -44,7 +44,7 @@ INSERT INTO usage_held_events (id, tenant_id, source, external_customer_id, mete
 // Mutation: an up that keeps aggregation_mode, or a down that does not
 // restore the rule modes, turns this red.
 func TestMeterOneAggregation_UpAndDown(t *testing.T) {
-	dsn, db := scratchDB(t, "velox_test_meteragg_b_migrate")
+	dsn, db := scratchDB(t, "hardcount_test_meteragg_b_migrate")
 	ctx := context.Background()
 	if err := up(ctx, dsn, filesBefore(t, meterOneAggregationVersion)); err != nil {
 		t.Fatalf("up to before %d: %v", meterOneAggregationVersion, err)
@@ -129,7 +129,7 @@ func TestMeterOneAggregation_RefusesRulesThatAggregateDifferently(t *testing.T) 
 		"a last_ever rule on a last meter": `('mpr_x', 'ten_ma', 'mtr_last', 'rrv_mx', '{}', 'last_ever', 100)`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			dsn, db := scratchDB(t, "velox_test_meteragg_b_migrate_refuse")
+			dsn, db := scratchDB(t, "hardcount_test_meteragg_b_migrate_refuse")
 			ctx := context.Background()
 			if err := up(ctx, dsn, filesBefore(t, meterOneAggregationVersion)); err != nil {
 				t.Fatalf("up to before %d: %v", meterOneAggregationVersion, err)
@@ -168,7 +168,7 @@ func TestMeterOneAggregation_RefusesMetersWithAnotherAggregation(t *testing.T) {
 	const section = "docs/ops/runbook/migration-failed-midway.md#00208-found-rows-it-cannot-keep-as-they-bill"
 	for name, agg := range map[string]string{"an empty aggregation": "", "an unknown aggregation": "average"} {
 		t.Run(name, func(t *testing.T) {
-			dsn, db := scratchDB(t, "velox_test_meteragg_f2_migrate_meters")
+			dsn, db := scratchDB(t, "hardcount_test_meteragg_f2_migrate_meters")
 			ctx := context.Background()
 			if err := up(ctx, dsn, filesBefore(t, meterOneAggregationVersion)); err != nil {
 				t.Fatalf("up to before %d: %v", meterOneAggregationVersion, err)

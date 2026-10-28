@@ -33,7 +33,7 @@ func (m *memStore) Ingest(_ context.Context, tenantID string, e domain.UsageEven
 			}
 		}
 	}
-	e.ID = fmt.Sprintf("vlx_evt_%d", len(m.events)+1)
+	e.ID = fmt.Sprintf("hc_evt_%d", len(m.events)+1)
 	e.TenantID = tenantID
 	m.events[e.ID] = e
 	return e, nil

@@ -1,10 +1,10 @@
 import { env } from './env'
 
-// A thin client for the Velox API, authenticated with the bootstrap test key.
+// A thin client for the Hardcount API, authenticated with the bootstrap test key.
 // Any status outside 2xx throws with the response body, so a seeding problem
 // stops the run at the call that caused it.
 export async function api<T>(method: string, path: string, body?: unknown): Promise<T> {
-  if (!env.apiKey) throw new Error('E2E_API_KEY is not set (use the vlx_secret_test_ key from velox-bootstrap)')
+  if (!env.apiKey) throw new Error('E2E_API_KEY is not set (use the hc_secret_test_ key from hardcount-bootstrap)')
   const res = await fetch(`${env.apiURL}/v1${path}`, {
     method,
     headers: { Authorization: `Bearer ${env.apiKey}`, 'Content-Type': 'application/json' },

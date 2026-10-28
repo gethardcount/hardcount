@@ -1,9 +1,9 @@
 # Design — Provider cost tables + margin (LOCKED)
 
-> - **Decided:** you save what each AI provider charges you per token (`/v1/provider-costs`). Velox stamps that cost on each usage event when it arrives, and `GET /v1/customers/{id}/margin` shows usage revenue against it.
-> - **Shipped:** v0.1.0, in [#373](https://github.com/getvelox/velox/pull/373) (migration `0137_provider_cost_rates`). Design written 2026-07-05.
+> - **Decided:** you save what each AI provider charges you per token (`/v1/provider-costs`). Hardcount stamps that cost on each usage event when it arrives, and `GET /v1/customers/{id}/margin` shows usage revenue against it.
+> - **Shipped:** v0.1.0, in [#373](https://github.com/gethardcount/hardcount/pull/373) (migration `0137_provider_cost_rates`). Design written 2026-07-05.
 > - **Current docs:** [See your margin](../../ai-pricing.md#see-your-margin) in the AI pricing reference. The current rules are [ADR-079](../../adr/079-provider-cost-tables.md). Where this page and the code disagree, the code wins.
-> - **2026-10-25:** the price and cost fields this page names were renamed ([ADR-130](../../adr/130-usage-prices-belong-to-the-plan.md) §3, [#1381](https://github.com/getvelox/velox/pull/1381)): `flat`/`flat_amount_cents` is `per_unit`/`unit_amount_cents`, `graduated_tiers` is `tiers` (last tier `up_to: null`), a package rounds up with no overage, and a provider cost is `unit_cost_cents`, with `provider_cost_cents` and `cost_cents` on the wire.
+> - **2026-10-25:** the price and cost fields this page names were renamed ([ADR-130](../../adr/130-usage-prices-belong-to-the-plan.md) §3, [#1381](https://github.com/gethardcount/hardcount/pull/1381)): `flat`/`flat_amount_cents` is `per_unit`/`unit_amount_cents`, `graduated_tiers` is `tiers` (last tier `up_to: null`), a package rounds up with no overage, and a provider cost is `unit_cost_cents`, with `provider_cost_cents` and `cost_cents` on the wire.
 
 **Status:** LOCKED for build (2026-07-05) after a 4-platform quote-verified
 sweep (workflow run wf_2edadfc3: 37/40 claims) and a 5-lens adversarial panel
@@ -12,19 +12,19 @@ siteset — all folds, i.e. panel amendments, applied below). Decision record: A
 
 ## Why
 
-Wedge margin story (the differentiation Velox bets on): billed revenue
+Wedge margin story (the differentiation Hardcount bets on): billed revenue
 vs provider COGS (cost of goods sold — what the upstream provider
 charges for the usage) per customer.
 **Verified differentiation:** no billing engine (Orb/Metronome/OpenMeter)
 has a first-class provider-cost table or in-app margin report — Metronome
 pushes COGS joins to the operator's warehouse. LLM tooling (LiteLLM/
-Langfuse/Helicone) all model cost as a rate table. Velox builds the table
+Langfuse/Helicone) all model cost as a rate table. Hardcount builds the table
 the billing engines lack, in the LLM-tooling shape, joined in-app.
 
 **Correction (2026-10-23):** the "verified differentiation" is wrong for
 OpenMeter and Flexprice. OpenMeter has an LLM price table (`llmcost`, synced
 from models.dev) and a per-feature cost query. Flexprice's cost sheets report
-margin and margin percent from cost prices. What Velox does differently is
+margin and margin percent from cost prices. What Hardcount does differently is
 record the provider cost on each usage event when it arrives. Checked in
 OpenMeter `f04b561f` (`openmeter/ent/schema/llmcostprice.go`,
 `openmeter/llmcost/sync/fetcher_modelsdev.go:17`,
@@ -34,7 +34,7 @@ OpenMeter `f04b561f` (`openmeter/ent/schema/llmcostprice.go`,
 ## Corrected census (panel-verified; the pre-panel RFC was wrong)
 
 - LiteLLM observed cost (the cost LiteLLM itself reports) is **never persisted**: mapper stamps
-  `velox.litellm_*_usd` onto ExternalIngest.Metadata (mapper.go:269) but
+  `hardcount.litellm_*_usd` onto ExternalIngest.Metadata (mapper.go:269) but
   litellm/handler.go persist() drops it — IngestInput, domain.UsageEvent,
   and the INSERT have no metadata carrier; usage_events has NO metadata
   column. payload.go:80-84's "metadata column" comment is doc-code drift —
@@ -155,7 +155,7 @@ ingest.
   Google Vertex with provider `vertex_ai`, not `anthropic`. Add rates for those
   providers too, or those events get no cost and count as unresolved.
 - **Unknown customers are not kept.** LiteLLM usage for a customer that does not
-  exist in Velox comes back in the response's `errors[]` with a 200. It is not
+  exist in Hardcount comes back in the response's `errors[]` with a 200. It is not
   stored for a later retry, so it never reaches the margin report.
 - **Usage margin only.** Revenue is rated usage. Base fees, credits and tax are
   left out.

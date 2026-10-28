@@ -185,7 +185,7 @@ func (s *PostgresStore) CreateAudited(ctx context.Context, tenantID string, c do
 	}
 	defer postgres.Rollback(tx)
 
-	id := postgres.NewID("vlx_cus")
+	id := postgres.NewID("hc_cus")
 	now := clock.Now(ctx)
 
 	storedCC, err := s.additionalEmailsStored(c.AdditionalEmails)
@@ -311,7 +311,7 @@ func (s *PostgresStore) GetMany(ctx context.Context, tenantID string, ids []stri
 }
 
 // SetStripeCustomerID writes (or backfills) the Stripe Customer ID
-// against this Velox customer. It is set ONCE: a re-write of the same value
+// against this Hardcount customer. It is set ONCE: a re-write of the same value
 // is a no-op, and a write of a different value to a row that already has one
 // is refused with ErrStripeCustomerAlreadySet, so callers read the existing
 // value rather than blow it away. The stale-hold sweep relies on it (ADR-127):
@@ -356,7 +356,7 @@ func (s *PostgresStore) SetStripeCustomerIDAudited(ctx context.Context, tenantID
 	// before a late webhook). Report it as ErrNotFound and emit NOTHING: the
 	// mutation did not happen, so evidence of it would be fabricated, and a
 	// silent success would let the caller hand back a Stripe session for a
-	// customer Velox does not have.
+	// customer Hardcount does not have.
 	//
 	// The two callers want opposite handling and BOTH are correct, so the
 	// store reports the fact and lets them decide: EnsureStripeCustomer
@@ -509,8 +509,8 @@ func (s *PostgresStore) GetByExternalID(ctx context.Context, tenantID, externalI
 // The (tenant_id, livemode, stripe_customer_id) index is unique, so the
 // TxTenant RLS scope (tenant + livemode) makes this a 1:1 lookup. Used by
 // the setup_intent.succeeded webhook to map the SetupIntent's authoritative
-// `customer` field back to the Velox customer when the SetupIntent carries
-// no velox_customer_id metadata (Stripe Checkout doesn't copy session
+// `customer` field back to the Hardcount customer when the SetupIntent carries
+// no hardcount_customer_id metadata (Stripe Checkout doesn't copy session
 // metadata onto the SetupIntent). An empty id never matches — the partial
 // unique index excludes blank ids — so we fail closed rather than scan.
 func (s *PostgresStore) GetByStripeCustomerID(ctx context.Context, tenantID, stripeCustomerID string) (domain.Customer, error) {

@@ -101,7 +101,7 @@ func (s *CheckoutSessionStore) ClaimOpenAudited(ctx context.Context, tenantID, i
 	if paymentStatus == "processing" || paymentStatus == "unknown" {
 		return CheckoutClaim{}, false, ErrChargeInFlight
 	}
-	// A set charge hold is a Velox charge on its way to Stripe (its
+	// A set charge hold is a Hardcount charge on its way to Stripe (its
 	// payment_status is still pending/failed until the call returns), or one
 	// whose result was lost and may have charged the card: an expired hold
 	// counts too, until the stale-hold sweep has asked Stripe (ADR-127). The
@@ -134,7 +134,7 @@ func (s *CheckoutSessionStore) ClaimOpenAudited(ctx context.Context, tenantID, i
 	}
 
 	claim := CheckoutClaim{
-		ID:          postgres.NewID("vlx_cks"),
+		ID:          postgres.NewID("hc_cks"),
 		TenantID:    tenantID,
 		InvoiceID:   invoiceID,
 		Livemode:    livemode,
@@ -375,7 +375,7 @@ func (s *CheckoutSessionStore) ReleaseRefused(ctx context.Context, tenantID, cla
 var ErrSessionCompleted = errors.New("checkout session already completed")
 
 // ListHostedToReconcile is the hosted sweep's input (reconciler_hosted.go):
-//   - recorded sessions whose outcome Velox has not seen ('open',
+//   - recorded sessions whose outcome Hardcount has not seen ('open',
 //     'superseded', and 'invoice_settled', where the customer may have paid in
 //     the same moment the invoice was settled another way); and
 //   - 'completed' sessions whose invoice is still unpaid: the

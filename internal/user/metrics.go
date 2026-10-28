@@ -17,7 +17,7 @@ var loginAttempts *prometheus.CounterVec
 
 func init() {
 	c := prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "velox_auth_login_total",
+		Name: "hardcount_auth_login_total",
 		Help: "Dashboard sign-in attempts by outcome: ok, bad_credentials, throttled (refused by the sign-in throttle before the password check), refused (the right password for a user who cannot sign in) or error (a server failure).",
 	}, []string{"outcome"})
 	if err := prometheus.DefaultRegisterer.Register(c); err != nil {
