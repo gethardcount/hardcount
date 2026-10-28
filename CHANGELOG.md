@@ -19,7 +19,7 @@ original text.
 
 ## [Unreleased]
 
-## [0.9.0] - TBD
+## [0.9.0] - 2026-10-28
 
 The first release named Hardcount. Usage prices belong to the plan, a usage event says when it will not be billed, prepaid credit carries its currency, and migrations run with goose. It installs fresh only: it refuses a database made by Velox or by any earlier build.
 
