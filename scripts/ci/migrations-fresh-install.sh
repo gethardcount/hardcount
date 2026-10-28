@@ -25,7 +25,7 @@
 #
 # Needs Docker, psql and pg_restore on the host, and Go to build HEAD.
 #   HARDCOUNT_BIN   a HEAD build of cmd/hardcount (default: built into a temp dir)
-#   KEEP_OUT    a directory to keep the outputs in (CI uploads it on failure)
+#   KEEP_OUT        a directory to keep the outputs in (CI uploads it on failure)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"

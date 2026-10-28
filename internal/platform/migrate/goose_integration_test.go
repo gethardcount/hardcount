@@ -561,19 +561,19 @@ func TestDownRoundTrip(t *testing.T) {
 	}
 }
 
-// A database with Hardcount's tables but no goose record for 180: a Hardcount
-// 0.8.x database, or a backup restored without its migration table. It has
+// A database with tables but no goose record for 180: a Velox 0.8.x
+// database, or a backup restored without its migration table. It has
 // no upgrade path. Status says so, the boot check refuses, and Up refuses
 // before it takes the lock or creates anything; goose's own table included.
 // Mutation: drop the refusal from decide; status then says "empty", and
 // Up runs the baseline, which fails and leaves goose_db_version behind.
-func TestHardcountTablesWithoutRecordAreRefused(t *testing.T) {
+func TestTablesWithoutRecordAreRefused(t *testing.T) {
 	ctx := context.Background()
 	for i, tc := range []struct {
 		name  string
 		build func(t *testing.T, db *sql.DB)
 	}{
-		{"Hardcount 0.8.x database", buildV08},
+		{"Velox 0.8.x database", buildV08},
 		{"restored without its migration table", func(t *testing.T, db *sql.DB) {
 			mustExec(t, db, `DROP TABLE public.goose_db_version`)
 		}},
@@ -585,7 +585,7 @@ func TestHardcountTablesWithoutRecordAreRefused(t *testing.T) {
 		// them in the admin user's own schema, which Postgres's default
 		// search_path ("$user", public) lists before public. public is
 		// then empty, and only the search_path finds the tables.
-		{"Hardcount 0.8.x database outside public", func(t *testing.T, db *sql.DB) {
+		{"Velox 0.8.x database outside public", func(t *testing.T, db *sql.DB) {
 			mustExec(t, db, `DROP TABLE public.goose_db_version`)
 			mustExec(t, db, `DO $$ BEGIN EXECUTE format('ALTER SCHEMA public RENAME TO %I', current_user); END $$`)
 			mustExec(t, db, `CREATE SCHEMA public`)
@@ -621,7 +621,7 @@ func TestHardcountTablesWithoutRecordAreRefused(t *testing.T) {
 				t.Errorf("status: state %q with %d pending, want %q and none", p.State, len(p.Pending), PlanUnrecorded)
 			}
 			out := FormatPlan(p, "v0.9.1")
-			if !strings.Contains(out, "Hardcount tables, no migration record") || strings.Contains(out, `run "hardcount migrate"`) {
+			if !strings.Contains(out, "tables, no migration record") || strings.Contains(out, `run "hardcount migrate"`) {
 				t.Errorf("status output:\n%s", out)
 			}
 
@@ -634,7 +634,7 @@ func TestHardcountTablesWithoutRecordAreRefused(t *testing.T) {
 			if !errors.Is(err, ErrNoMigrationRecord) || errors.As(err, &fe) {
 				t.Errorf("Up: want a refusal before any migration runs, got %v", err)
 			} else {
-				for _, want := range []string{"Hardcount tables but no migration record", "Nothing was changed", "Upgrading from Hardcount 0.8.x is not supported", RunbookPath} {
+				for _, want := range []string{"has tables but no migration record", "Nothing was changed", "Upgrading from Velox 0.8.x is not supported", RunbookPath} {
 					if !strings.Contains(err.Error(), want) {
 						t.Errorf("Up's message lacks %q: %v", want, err)
 					}
@@ -650,6 +650,65 @@ func TestHardcountTablesWithoutRecordAreRefused(t *testing.T) {
 				t.Errorf("a refused command changed the database:\nbefore %s\nafter  %s", before, after)
 			}
 		})
+	}
+}
+
+// A database a build of Velox, Hardcount's old name, made: goose has 180
+// and every later file, but public.tenants gives vlx_ ids. v0.9.0 installs
+// fresh only, so status, the boot check, Up and Down all refuse it and
+// change nothing. The setup changes only what a Velox baseline wrote
+// differently that the check reads: the tenants id default.
+// Mutation: drop the veloxSchema case from decide; status then says "up to
+// date", the boot check passes and Up returns nil.
+func TestVeloxDatabaseIsRefused(t *testing.T) {
+	ctx := context.Background()
+	dsn, db := scratchDB(t, "hardcount_migrate_velox")
+	if err := up(ctx, dsn, migrationFiles()); err != nil {
+		t.Fatalf("Up: %v", err)
+	}
+	if err := CheckSchemaReady(db); err != nil {
+		t.Fatalf("a Hardcount database must pass the boot check: %v", err)
+	}
+	mustExec(t, db, `ALTER TABLE public.tenants ALTER COLUMN id SET DEFAULT ('vlx_ten_' || encode(gen_random_bytes(12), 'hex'))`)
+	before := fingerprint(t, db)
+
+	pool, err := openPool(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = pool.Close() }()
+	p, err := readPlan(ctx, pool, migrationFiles())
+	if err != nil {
+		t.Fatalf("readPlan: %v", err)
+	}
+	if p.State != PlanVelox || len(p.Pending) != 0 || len(p.Ahead) != 0 {
+		t.Errorf("status: state %q with %d pending, want %q and none", p.State, len(p.Pending), PlanVelox)
+	}
+	out := FormatPlan(p, "v0.9.1")
+	if !strings.Contains(out, "made by Velox, hardcount migrate will not run") || !strings.Contains(out, VeloxRunbookPath) {
+		t.Errorf("status output:\n%s", out)
+	}
+	if ready := CheckSchemaReady(db); !errors.Is(ready, ErrVeloxDatabase) {
+		t.Errorf("CheckSchemaReady: want ErrVeloxDatabase, got %v", ready)
+	}
+	err = up(ctx, dsn, migrationFiles())
+	if !errors.Is(err, ErrVeloxDatabase) {
+		t.Errorf("Up: want ErrVeloxDatabase, got %v", err)
+	} else {
+		for _, want := range []string{"made by Velox", "Nothing was changed", "install fresh", VeloxRunbookPath} {
+			if !strings.Contains(strings.ToLower(err.Error()), strings.ToLower(want)) {
+				t.Errorf("Up's message lacks %q: %v", want, err)
+			}
+		}
+		if strings.Contains(err.Error(), "\n") {
+			t.Errorf("Up's message is not one line: %q", err)
+		}
+	}
+	if _, err := down(ctx, dsn, migrationFiles(), -1); !errors.Is(err, ErrVeloxDatabase) {
+		t.Errorf("Down: want ErrVeloxDatabase, got %v", err)
+	}
+	if after := fingerprint(t, db); after != before {
+		t.Errorf("a refused command changed the database:\nbefore %s\nafter  %s", before, after)
 	}
 }
 

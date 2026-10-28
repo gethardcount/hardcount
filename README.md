@@ -23,7 +23,7 @@ One month of AI usage for one customer, straight from the [demo](#quick-start).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme-invoice-dark.png">
-  <img alt="The demo invoice HC-000001 in the Hardcount dashboard: input, output and cache_read lines for claude-sonnet-4.5 and input and output lines for claude-haiku-4.5, priced per 1M tokens, $5.73 due, with the activity timeline below." src="docs/assets/readme-invoice-light.png" width="100%">
+  <img alt="The demo invoice in the dashboard: input, output and cache_read lines for claude-sonnet-4.5 and input and output lines for claude-haiku-4.5, priced per 1M tokens, $5.73 due, with the activity timeline below." src="docs/assets/readme-invoice-light.png" width="100%">
 </picture>
 
 **2. Your margin, per model.** What each model earned you: Sonnet 67.1%, Haiku 20.0%.

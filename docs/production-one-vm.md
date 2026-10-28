@@ -374,7 +374,7 @@ Check each line before the first real customer.
 
 ## Upgrade to a new release
 
-Upgrading from Hardcount 0.8.x is not supported; install fresh.
+Hardcount was called Velox before v0.9.0. v0.9.0 installs fresh only: it refuses a database made by Velox, a 0.8.x release or a build of `main` ([why](ops/runbook/migration-failed-midway.md#the-database-was-made-by-velox)).
 
 Database changes (migrations) run by themselves as the new version starts.
 
@@ -407,7 +407,7 @@ Database changes (migrations) run by themselves as the new version starts.
    docker compose run --rm hardcount-api migrate status
    ```
 
-   **You see:** a few `Container … Running` lines, then the plan. It lists the migrations to apply. If it says `no migration record`, stop: the upgrade will not run ([why](ops/runbook/migration-failed-midway.md#hardcount-tables-but-no-migration-record)). A Hardcount 0.8.x install says this, and cannot be upgraded.
+   **You see:** a few `Container … Running` lines, then the plan. It lists the migrations to apply. If it says `no migration record`, stop: the upgrade will not run ([why](ops/runbook/migration-failed-midway.md#tables-but-no-migration-record)). A Velox 0.8.x install says this, a later Velox build says `made by Velox`, and neither can be upgraded.
 
 5. Start the new images.
 

@@ -133,7 +133,7 @@ func gooseRows(t *testing.T, db *sql.DB, version int64) int {
 	return n
 }
 
-// buildV08 turns a database that Up has migrated into what Hardcount v0.8.x
+// buildV08 turns a database that Up has migrated into what Velox v0.8.x
 // leaves: the tables, no goose record, and golang-migrate's two-column
 // record at (180, false). The baseline was generated from v0.8.1's schema
 // (ADR-125).

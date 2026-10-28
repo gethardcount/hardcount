@@ -37,7 +37,7 @@ A migration is a versioned script that changes the database schema. Hardcount ap
 
 ## Upgrading
 
-Upgrading from Hardcount 0.8.x is not supported; install fresh.
+Hardcount was called Velox before v0.9.0. v0.9.0 installs fresh only: it refuses a database made by Velox, a 0.8.x release or a build of `main` ([why](ops/runbook/migration-failed-midway.md#the-database-was-made-by-velox)).
 
 Read the changelog notes and take a backup first. Then follow [Upgrade on one VM](production-one-vm.md#upgrade-to-a-new-release) or [Upgrade two or more copies](ops/high-availability.md#upgrades).
 

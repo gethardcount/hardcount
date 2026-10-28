@@ -55,6 +55,7 @@ row-level-security role you see only one tenant's rows, or none.
 | A replica will not boot and names Redis | [A replica will not start](replica-will-not-start.md) |
 | Someone cannot sign in: "Too many sign-in attempts", or `hardcount_auth_login_total{outcome="throttled"}` rising | [Sign-in says "Too many sign-in attempts"](sign-in-throttled.md) |
 | `hardcount migrate` or the start-up stops with `migration … failed`, `goose_db_version`, `no migration record` or `another Hardcount process is migrating` | [A database upgrade stopped](migration-failed-midway.md) |
+| `hardcount migrate` or the start-up stops with `this database was made by Velox` | [The database was made by Velox](migration-failed-midway.md#the-database-was-made-by-velox) |
 | An upgrade stops with `waited 5s for a table lock` | [A database upgrade stopped: table lock](migration-failed-midway.md#it-waited-5s-for-a-table-lock) |
 | `hardcount_stripe_key_unusable_total` rising, or "Stripe refused this tenant's API key" in the logs: charges paused until the key is fixed in Settings → Payments | [Health checks, alerts and logs](monitoring.md) |
 | `hardcount_parked_invoices{disposition="open"}` above zero | [A charge's result is unclear: parked](unclear-charge.md#parked-no-paymentintent) |

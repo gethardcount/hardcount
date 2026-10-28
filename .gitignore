@@ -35,7 +35,7 @@ hardcount-api
 /*.jpg
 /*.jpeg
 
-# Compiled binaries at the repo root (an 18.8MB hardcount-bootstrap Mach-O
+# Compiled binaries at the repo root (an 18.8MB velox-bootstrap Mach-O, the old name,
 # slipped into git via #374 — go build drops artifacts named after the
 # package in CWD; bin/ is already ignored, the root wasn't).
 /hardcount
@@ -44,7 +44,7 @@ hardcount-api
 /hardcount-doctor
 /hardcount-bench-seed
 #
-# ...and the enumeration failed anyway: a 54MB `hardcount-api-adr101` sat untracked
+# ...and the enumeration failed anyway: a 54MB `velox-api-adr101` (the old name) sat untracked
 # at the root because the list above names exact binaries and a
 # branch-suffixed build isn't one of them. Glob the prefixes rather than
 # extending the list a third time.

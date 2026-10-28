@@ -36,6 +36,8 @@ func down(ctx context.Context, dsn string, fsys fs.FS, to int64) (int64, error) 
 	switch decide(st) {
 	case actRefuse:
 		return 0, ErrNoMigrationRecord
+	case actRefuseVelox:
+		return 0, ErrVeloxDatabase
 	case actBaseline:
 		return 0, ErrNothingToRollBack
 	}

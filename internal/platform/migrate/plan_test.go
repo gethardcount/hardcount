@@ -27,9 +27,11 @@ func TestPlanFor(t *testing.T) {
 		{"up to date", state{gooseTable: true, applied: []int64{180, 181, 182}}, PlanUpToDate, 182, nil, nil},
 		{"ahead", state{gooseTable: true, applied: []int64{180, 181, 182, 183, 184}}, PlanAhead, 184, nil, []int64{183, 184}},
 		{"rolled-back 180: row 0 only", state{gooseTable: true}, PlanEmpty, 0, []int64{180, 181, 182}, nil},
-		{"Hardcount tables, no record", state{hardcountTables: true}, PlanUnrecorded, 0, nil, nil},
-		{"Hardcount tables, goose row 0 only", state{hardcountTables: true, gooseTable: true}, PlanUnrecorded, 0, nil, nil},
-		{"Hardcount tables, goose rows but not 180", state{hardcountTables: true, gooseTable: true, applied: []int64{183}}, PlanUnrecorded, 183, nil, nil},
+		{"tables, no record", state{tenantsTable: true}, PlanUnrecorded, 0, nil, nil},
+		{"tables, goose row 0 only", state{tenantsTable: true, gooseTable: true}, PlanUnrecorded, 0, nil, nil},
+		{"tables, goose rows but not 180", state{tenantsTable: true, gooseTable: true, applied: []int64{183}}, PlanUnrecorded, 183, nil, nil},
+		{"made by Velox, up to date", state{tenantsTable: true, veloxSchema: true, gooseTable: true, applied: []int64{180, 181, 182}}, PlanVelox, 182, nil, nil},
+		{"made by Velox, behind", state{tenantsTable: true, veloxSchema: true, gooseTable: true, applied: []int64{180}}, PlanVelox, 180, nil, nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -83,11 +85,21 @@ next: take a backup, then run "hardcount migrate". A server started with RUN_MIG
 		{
 			name: "no migration record",
 			plan: Plan{State: PlanUnrecorded, Latest: 182},
-			want: `database:     Hardcount tables, no migration record
+			want: `database:     tables, no migration record
 this release: 182 (hardcount v0.9.1)
 state:        no migration record, hardcount migrate will not run
 running now:  no
-next: restore the backup together with its migration table, or use an empty database. Upgrading from Hardcount 0.8.x is not supported; install fresh. Steps: docs/ops/runbook/migration-failed-midway.md
+next: restore the backup together with its migration table, or use an empty database. Upgrading from Velox 0.8.x is not supported; install fresh. Steps: docs/ops/runbook/migration-failed-midway.md
+`,
+		},
+		{
+			name: "made by Velox",
+			plan: Plan{State: PlanVelox, Database: 182, Latest: 182},
+			want: `database:     made by Velox (new rows get vlx_ ids)
+this release: 182 (hardcount v0.9.1)
+state:        made by Velox, hardcount migrate will not run
+running now:  no
+next: install fresh on an empty database; Hardcount does not take over a Velox database. Steps: docs/ops/runbook/migration-failed-midway.md#the-database-was-made-by-velox
 `,
 		},
 		{

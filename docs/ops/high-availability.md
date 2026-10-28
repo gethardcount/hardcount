@@ -78,7 +78,7 @@ Read the upgrade notes in the [changelog](../../CHANGELOG.md) first. Then take a
 
 - **A release whose notes say it has migrations:** stop every old copy, run `hardcount migrate` once (or start one new copy with `RUN_MIGRATIONS_ON_BOOT=true`), then start the other new copies.
 - **A release with no migrations:** upgrade one copy at a time.
-- Upgrading from Hardcount 0.8.x is not supported; install fresh.
+- Hardcount was called Velox before v0.9.0. v0.9.0 installs fresh only: it refuses a database made by Velox, a 0.8.x release or a build of `main` ([why](runbook/migration-failed-midway.md#the-database-was-made-by-velox)).
 
 Run `hardcount migrate status` with the new release first to see the plan. Never roll a migration back in production; see [Self-host](../self-host.md#database-upgrades-migrations).
 

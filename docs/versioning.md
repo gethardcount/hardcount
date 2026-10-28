@@ -23,8 +23,9 @@ Hardcount versions look like `0.MINOR.PATCH`, for example `0.8.2`.
 - **Settings.** A setting Hardcount used to ignore when it could not read it can
   now stop start-up.
 - **The upgrade path.** A release can drop the upgrade from older versions.
-  The next release, v0.9.0, cannot take over a v0.8.x database: you install
-  it fresh.
+  The next release, v0.9.0, is the first named Hardcount (the project was
+  called Velox). It cannot take over a database Velox made, from v0.8.x or
+  from a build of `main`: you install it fresh.
 
 Hardcount has one API version, `/v1`. Before 1.0, a breaking change goes into
 `/v1` itself. There is no older version to stay on.

@@ -1005,7 +1005,7 @@ export default function InvoiceDetailPage() {
           <div className="flex items-start justify-between">
             <div>
               {/* The tenant's company name, or nothing: never a placeholder
-                  seller (the PDF used to print "Hardcount", this page "HARDCOUNT"). */}
+                  seller (the PDF used to print "Velox", this page "VELOX"). */}
               {seller.name && (
                 <p className="text-2xl font-bold tracking-tight text-foreground">{seller.name}</p>
               )}

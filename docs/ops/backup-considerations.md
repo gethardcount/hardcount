@@ -142,7 +142,7 @@ Run these before you let traffic back in.
 
 Run the `hardcount migrate status` of the release you will start, against the restored database.
 
-**You see:** `state:        up to date, nothing to apply`. `behind` lists what `hardcount migrate` will do. `no migration record` means the backup was restored without its migration table: restore it again, with the table, into an empty database. A backup from Hardcount 0.8.x gives the same state, and it cannot be upgraded: install fresh.
+**You see:** `state:        up to date, nothing to apply`. `behind` lists what `hardcount migrate` will do. `no migration record` means the backup was restored without its migration table: restore it again, with the table, into an empty database. A backup from Velox 0.8.x gives the same state, and one from a later Velox build gives `made by Velox`. Neither can be upgraded: install fresh.
 
 The record itself, if you want to look:
 

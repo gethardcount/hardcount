@@ -3,7 +3,7 @@
 //
 // Two rules:
 // - Never print a made-up seller. The page used to show "HARDCOUNT" and "Your
-//   Company" when the company name was unset, while the PDF printed "Hardcount".
+//   Company" when the company name was unset, while the PDF printed "Velox" (the old product name).
 //   Now an unset name shows nothing on the document and the page says the
 //   seller details are missing, with a link to Settings.
 // - A draft is not issued. Its issue (and, for a composed invoice, due) date

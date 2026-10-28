@@ -9,8 +9,11 @@ first. Every shipped change, with its date, is in the
 
 **v0.9.0**, not released yet:
 
+- **Done:** Velox is now Hardcount: the binaries, settings, key and id
+  prefixes, image, metrics and headers carry the new name.
 - **Done:** migrations run with goose, and `hardcount migrate force` is gone.
-  There is no upgrade from v0.8.x: install fresh.
+  There is no upgrade from Velox (v0.8.x or a build of `main`): install
+  fresh.
 - **Done:** a card payment the customer's bank wants them to confirm (3-D
   Secure) is no longer treated as a declined card.
 - **Done:** each prepaid credit carries its own currency and pays only

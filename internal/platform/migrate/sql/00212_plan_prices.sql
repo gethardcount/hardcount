@@ -7,7 +7,7 @@
 -- so plans.meter_ids goes, and so do the rating rules, the meter pricing
 -- rules and the meter's default price.
 --
--- This release has no upgrade path from Hardcount 0.8.x, so no price is moved:
+-- This release has no upgrade path from Velox 0.8.x, so no price is moved:
 -- if any rating rule, pricing rule, override, plan meter list or invoice line
 -- that names a rating rule exists, the upgrade stops here before changing
 -- anything, and the error counts them.
@@ -35,7 +35,7 @@ BEGIN
     IF n > 0 THEN found := found || format(E'\n  %s invoice line(s) priced by a rating rule', n); END IF;
     IF found <> '' THEN
         RAISE EXCEPTION 'migration 00212 moves usage prices from meters to plans, and this database has prices it does not move:%', found
-            USING HINT = 'This release has no upgrade path from Hardcount 0.8.x: install fresh (see the v0.9.0 release notes). On a development database, re-create it: docs/ops/runbook/migration-failed-midway.md#00212-found-prices-it-does-not-move';
+            USING HINT = 'This release has no upgrade path from Velox 0.8.x: install fresh (see the v0.9.0 release notes). On a development database, re-create it: docs/ops/runbook/migration-failed-midway.md#00212-found-prices-it-does-not-move';
     END IF;
 END
 $$;

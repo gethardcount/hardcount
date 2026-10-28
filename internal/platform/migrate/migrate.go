@@ -170,8 +170,11 @@ func up(ctx context.Context, dsn string, fsys fs.FS) error {
 		return fmt.Errorf("read migration state: %w", err)
 	}
 	// Before the provider runs: goose creates goose_db_version first thing.
-	if decide(st) == actRefuse {
+	switch decide(st) {
+	case actRefuse:
 		return ErrNoMigrationRecord
+	case actRefuseVelox:
+		return ErrVeloxDatabase
 	}
 	p, err := newProvider(db, fsys, true)
 	if err != nil {

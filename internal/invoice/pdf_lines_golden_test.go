@@ -67,7 +67,7 @@ func TestRenderPDF_LinesRenderUnchanged(t *testing.T) {
 	if again := render(); again != got {
 		t.Fatalf("the render is not deterministic: %s then %s", got, again)
 	}
-	const want = "dcb3d46437ecb2cc08b773f0bd6169b0871c07c3733dd5acfa5ad8c6a3196cc2"
+	const want = "37c8432b5204498407d77add0372b64d0bbc459e799b1e73b75689fde3d516ac"
 	if got != want {
 		t.Errorf("PDF sha256 = %s, want %s (what the issued document shows changed)", got, want)
 	}

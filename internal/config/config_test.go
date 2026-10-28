@@ -119,7 +119,7 @@ func TestValidate_EncryptionKeyWarnings(t *testing.T) {
 	warnings = cfg.Validate()
 	found = false
 	for _, w := range warnings {
-		if len(w) > 20 && w[:20] == "HARDCOUNT_ENCRYPTION_KEY" {
+		if strings.HasPrefix(w, "HARDCOUNT_ENCRYPTION_KEY") {
 			found = true
 		}
 	}

@@ -468,9 +468,11 @@ Converted to the keep-anchor fire:
 `TestScanThresholds_ResetAdvanceFailure_IsLoud` is now
 `TestScanThresholds_PeriodCASFailure_IsLoud`.
 
-**Data.** There is no upgrade from 0.8.x, but an install that ran a build
-of `main` from the switch to goose (#1198) on can upgrade, and those builds
-accepted `reset_billing_cycle: true`. The migration drops the column; it
+**Data.** There is no upgrade from Velox, Hardcount's old name: not from
+0.8.x, and since the rename not from a build of `main` either. When this
+was written, an install that ran a build of `main` from the switch to goose
+(#1198) on could upgrade, and those builds accepted
+`reset_billing_cycle: true`. The migration drops the column; it
 does not refuse. The value was configuration read only
 when a threshold fired, so no issued invoice changes, and keep-anchor is a
 true value for every such subscription from its next fire on. Its open

@@ -133,7 +133,7 @@ rule of the meter bills under it. The migration stops for two kinds of rows:
   any other value.
 
 It does not convert them, and nothing was changed. This release has no
-upgrade path from Hardcount 0.8.x, so a production database never reaches this
+upgrade path from Velox 0.8.x, so a production database never reaches this
 step: install fresh (see the v0.9.0 release notes).
 
 **Fix:** on a development database, find the rows (as the database owner,
@@ -168,7 +168,7 @@ migration 00210_price_shapes.sql failed: ERROR: migration 00210 renames the pric
 package up to a whole one, and a provider cost rate is in cents, not
 dollars. Every row of these tables would need converting, and so would
 every invoice line labelled `flat`. The migration converts nothing, and
-nothing was changed. This release has no upgrade path from Hardcount 0.8.x, so a
+nothing was changed. This release has no upgrade path from Velox 0.8.x, so a
 production database never reaches this step: install fresh (see the v0.9.0
 release notes).
 
@@ -194,7 +194,7 @@ migration 00212_plan_prices.sql failed: ERROR: migration 00212 moves usage price
 rules, meter pricing rules and a meter's default price are gone, a price
 override names a plan price, and a plan's meters are the meters it has a
 price for. The migration moves no price, and nothing was changed. This
-release has no upgrade path from Hardcount 0.8.x, so a production database never
+release has no upgrade path from Velox 0.8.x, so a production database never
 reaches this step: install fresh (see the v0.9.0 release notes).
 
 **Fix:** a development database cannot keep these rows. Re-create it (drop
@@ -274,34 +274,55 @@ names a duplicated key: remove or merge the duplicate rows. Then run
 `hardcount migrate` again. Every index-build file drops its index first, so
 the INVALID index goes away and is built again.
 
-## Hardcount tables, but no migration record
+## Tables, but no migration record
 
 **Symptom:** `hardcount migrate`, or Hardcount at start-up, stops with:
 
 ```
-this database has Hardcount tables but no migration record (goose_db_version has no row for 180), so Hardcount cannot tell which version they are at. Nothing was changed. ...
+this database has tables but no migration record (goose_db_version has no row for 180), so Hardcount cannot tell which version they are at. Nothing was changed. ...
 ```
 
 `hardcount migrate status` prints
 `state:        no migration record, hardcount migrate will not run`.
 
-**Why:** the database has Hardcount's tables but no row 180 in
+**Why:** the database has a `tenants` table but no row 180 in
 `goose_db_version`, the migration record. Hardcount cannot tell which version
 the tables are at, so it changes nothing. This happens when a backup was
 restored without its migration table, when the record was dropped by hand,
-or when the database is from Hardcount 0.8.x. Hardcount looks for a `tenants`
-table in `public` and in every schema on the connecting user's
-`search_path`, so Hardcount 0.8.x tables kept in the admin user's own schema
-count too.
+or when the database is from Velox 0.8.x, Hardcount's old name. Hardcount
+looks for a `tenants` table in `public` and in every schema on the
+connecting user's `search_path`, so Velox 0.8.x tables kept in the admin
+user's own schema count too.
 
 **Fix:** restore the backup again, with its migration table, into an empty
 database, or point Hardcount at an empty database. Then run `hardcount migrate`.
-Upgrading from Hardcount 0.8.x is not supported; install fresh.
+Upgrading from Velox 0.8.x is not supported; install fresh.
 
 If `hardcount migrate` instead stops with
 `migration 00180 baseline failed: ... already exists`, the database holds
 some of the objects the baseline creates but no `tenants` table. Point
 Hardcount at an empty database.
+
+## The database was made by Velox
+
+**Symptom:** `hardcount migrate`, or Hardcount at start-up, stops with:
+
+```
+this database was made by Velox, Hardcount's old name (its tables give new rows vlx_ ids), and Hardcount does not take over a Velox database. Nothing was changed. ...
+```
+
+`hardcount migrate status` prints
+`state:        made by Velox, hardcount migrate will not run`.
+
+**Why:** Hardcount was called Velox until v0.9.0. A build of Velox made this
+database: its `tenants` table gives new rows `vlx_` ids, where Hardcount's
+gives `hc_` ids. v0.9.0 installs fresh only, so Hardcount changes nothing.
+A Velox 0.8.x database stops earlier, with
+[no migration record](#tables-but-no-migration-record).
+
+**Fix:** point `DATABASE_URL` (and `APP_DATABASE_URL`) at an empty database
+and start again. The limited database user is now `hardcount_app`
+([the two database users](../postgres-requirements.md#the-two-database-users)).
 
 ## Verify
 

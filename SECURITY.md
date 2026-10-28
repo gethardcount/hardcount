@@ -21,7 +21,7 @@ Hardcount is pre-1.0. Only the latest release gets security fixes.
 
 - A fix lands in `main` and ships in the next release, a patch or a minor release.
 - Older releases get no backported fixes. To get a fix, upgrade to the latest release.
-- The next release, 0.9.0, cannot take over a 0.8.x database: you install it fresh. So on 0.8.x, a fix released after 0.8.2 needs a fresh install.
+- The next release, 0.9.0, is the first named Hardcount (the project was called Velox). It cannot take over a database Velox made, from 0.8.x or from a build of `main`: you install it fresh. So on 0.8.x, a fix released after 0.8.2 needs a fresh install.
 - Before 1.0, an upgrade can need more than a restart: read **Before upgrading** in the [CHANGELOG](CHANGELOG.md) first. See [Versioning before 1.0](docs/versioning.md).
 
 ## In scope

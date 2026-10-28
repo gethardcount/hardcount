@@ -667,7 +667,7 @@ in_arrears.
 
 ### 17. No data migration
 
-There is no upgrade from Hardcount 0.8.x, so this ADR moves no data, replays no
+There is no upgrade from Velox 0.8.x, so this ADR moves no data, replays no
 old invoices and keeps no list of old rows to refuse. Each migration is
 plain DDL with a working Down. One that drops an old pricing table first
 checks it is empty, and stops with "install fresh" if not. PR-1's new rater

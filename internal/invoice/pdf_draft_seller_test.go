@@ -78,7 +78,7 @@ func TestWatermarkFor(t *testing.T) {
 }
 
 // The PDF never invents a seller: an unset company name prints nothing
-// (it used to print "Hardcount").
+// (it used to print "Velox", the old product name).
 func TestSellerName_NeverAPlaceholder(t *testing.T) {
 	if got := sellerName(); got != "" {
 		t.Errorf("no company: got %q, want empty", got)

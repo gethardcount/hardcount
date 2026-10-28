@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Velox are documented here.
+All notable changes to Hardcount, called Velox before v0.9.0, are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -19,7 +19,21 @@ original text.
 
 ## [Unreleased]
 
-**There is no upgrade path from Velox 0.8.x: install fresh ([#1354](https://github.com/getvelox/velox/pull/1354)).** Pointed at a v0.8.x database, `velox migrate status` says `no migration record`, and `velox migrate` and start-up stop without changing anything.
+**Velox is now Hardcount ([#PRNUM](https://github.com/gethardcount/hardcount/pull/PRNUM)).** The old names are not read. Rename what you run and call:
+
+- Commands: `velox`, `velox-bootstrap`, `velox-doctor` are `hardcount`, `hardcount-bootstrap`, `hardcount-doctor`.
+- Settings: every `VELOX_*` variable is `HARDCOUNT_*`, such as `HARDCOUNT_ENCRYPTION_KEY`.
+- API keys start `hc_` (`hc_secret_live_…`, `hc_pub_…`, `hc_platform_…`), and ids too (`hc_cus_…`). The default invoice prefix is `HC`.
+- Images: `ghcr.io/gethardcount/hardcount` and `ghcr.io/gethardcount/hardcount-dashboard`.
+- Compose: services `hardcount-api` and `hardcount-dashboard`; database and admin user `hardcount`.
+- Limited database user: `hardcount_app`.
+- Metrics: `hardcount_*`.
+- Headers: `Hardcount-Signature`, `Hardcount-Event-Type`, `Hardcount-Request-Id`, `Hardcount-Version`; Postmark metadata `hc-outbox-id`.
+- Cookies: `hardcount_session`, `hardcount_device`.
+- Stripe metadata keys and idempotency keys: `hardcount_*`, such as `hardcount_invoice_id`.
+- Repository: `github.com/gethardcount/hardcount`. The Go module path stays `github.com/sagarsuperuser/velox` for now.
+
+**v0.9.0 needs a fresh database ([#1354](https://github.com/getvelox/velox/pull/1354), [#PRNUM](https://github.com/gethardcount/hardcount/pull/PRNUM)).** A database made by Velox is refused, and nothing in it changes. From a build of `main`, `hardcount migrate` and start-up stop with `this database was made by Velox`; from v0.8.x, with `no migration record`.
 
 **Pricing: prices belong to the plan ([ADR-130](docs/adr/130-usage-prices-belong-to-the-plan.md)).**
 
@@ -37,7 +51,7 @@ original text.
 - Yearly plans bill usage once a year, on the invoice at the end of the year. For monthly usage beside a yearly fee, use two subscriptions ([how](docs/ai-pricing.md#usage-on-a-yearly-plan)).
 - Recipes create meters and plans only. They no longer change your dunning policy or add a webhook endpoint.
 
-**Before upgrading** an install that ran a build of `main` from the switch to goose on ([#1198](https://github.com/getvelox/velox/pull/1198)), which these notes call "the previous release":
+**Before upgrading:** v0.9.0 cannot upgrade a database. It needs a fresh one, and refuses a database from any earlier build. The notes below say what changed since a build of `main` from the switch to goose on ([#1198](https://github.com/getvelox/velox/pull/1198)), which they call "the previous release". Their migration steps no longer apply; the API and settings changes do.
 
 - **`velox migrate status` prints a plan now.** A script that reads its old `version: N, dirty: …` line must change.
 - **`velox migrate force` is removed, and `velox migrate rollback` runs only with `APP_ENV=local`.** To go back, restore the backup taken before the upgrade. The restore loses everything written after the backup ([Going back](docs/production-one-vm.md#going-back)).

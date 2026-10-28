@@ -25,9 +25,12 @@ const (
 	PlanUpToDate PlanState = "up to date"
 	// PlanAhead: the database has migrations this binary does not ship.
 	PlanAhead PlanState = "ahead"
-	// PlanUnrecorded: Hardcount tables, but goose has not recorded 180.
+	// PlanUnrecorded: tables, but goose has not recorded 180.
 	// `hardcount migrate` refuses it (ErrNoMigrationRecord).
 	PlanUnrecorded PlanState = "no migration record"
+	// PlanVelox: a build of Velox made the database. `hardcount migrate`
+	// refuses it (ErrVeloxDatabase).
+	PlanVelox PlanState = "made by Velox"
 )
 
 // PlanFile is one migration `hardcount migrate` would apply.
@@ -136,6 +139,8 @@ func planFor(st state, files []PlanFile) Plan {
 	}
 	p.Database = st.gooseVersion()
 	switch {
+	case decide(st) == actRefuseVelox:
+		p.State, p.Pending, p.Ahead = PlanVelox, nil, nil
 	case decide(st) == actRefuse:
 		p.State, p.Pending, p.Ahead = PlanUnrecorded, nil, nil
 	case decide(st) == actBaseline:
@@ -188,7 +193,9 @@ func FormatPlan(p Plan, release string) string {
 	case PlanEmpty:
 		row("database", "empty")
 	case PlanUnrecorded:
-		row("database", "Hardcount tables, no migration record")
+		row("database", "tables, no migration record")
+	case PlanVelox:
+		row("database", "made by Velox (new rows get vlx_ ids)")
 	default:
 		row("database", fmt.Sprintf("%d (goose_db_version)", p.Database))
 	}
@@ -205,6 +212,8 @@ func FormatPlan(p Plan, release string) string {
 		row("state", "up to date, nothing to apply")
 	case PlanUnrecorded:
 		row("state", "no migration record, hardcount migrate will not run")
+	case PlanVelox:
+		row("state", "made by Velox, hardcount migrate will not run")
 	case PlanAhead:
 		row("state", "ahead, the database has migrations this release does not ship")
 		for _, a := range p.Ahead {
@@ -232,7 +241,10 @@ func FormatPlan(p Plan, release string) string {
 		b.WriteString("next: this binary is older than the database; to go back, restore the backup taken before the upgrade\n")
 	case PlanUnrecorded:
 		b.WriteString("next: restore the backup together with its migration table, or use an empty database. " +
-			"Upgrading from Hardcount 0.8.x is not supported; install fresh. Steps: " + RunbookPath + "\n")
+			"Upgrading from Velox 0.8.x is not supported; install fresh. Steps: " + RunbookPath + "\n")
+	case PlanVelox:
+		b.WriteString("next: install fresh on an empty database; Hardcount does not take over a Velox database. Steps: " +
+			VeloxRunbookPath + "\n")
 	}
 	return b.String()
 }
