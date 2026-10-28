@@ -29,10 +29,10 @@ func (e *DomainError) Error() string {
 func (e *DomainError) Unwrap() error { return e.Cause }
 
 // WithCode attaches a stable, machine-readable error code to a DomainError.
-// Used to add domain-specific codes (e.g. "coupon_expired") on top of the
-// generic Kind routing. Safe to chain onto any constructor:
+// Used to add domain-specific codes (e.g. "invoice_number_taken") on top of
+// the generic Kind routing. Safe to chain onto any constructor:
 //
-//	return errs.InvalidState("coupon has expired").WithCode(coupon.CodeExpired)
+//	return errs.AlreadyExists("invoice_number", "invoice number taken").WithCode("invoice_number_taken")
 //
 // Promised codes are part of the public API — integrators switch on them.
 // Change the code string only when the underlying failure semantics change.
@@ -106,7 +106,7 @@ func Invalid(field, reason string) *DomainError {
 
 // AlreadyExists marks a duplicate resource, optionally naming the offending
 // field. Maps to HTTP 409. Use when a user-submitted value collides with an
-// existing record (customer.external_id, plan.code, coupon.code, etc.).
+// existing record (customer.external_id, plan.code, etc.).
 //
 //	return errs.AlreadyExists("code", fmt.Sprintf("plan code %q already exists", code))
 func AlreadyExists(field, message string) *DomainError {

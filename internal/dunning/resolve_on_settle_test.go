@@ -243,11 +243,10 @@ func TestProcessRun_GatesOnStatusNotAmountDue(t *testing.T) {
 // terminal floor resolves without retrying — and the resolution says WHICH
 // terminal state it found.
 //
-// The two arms are the whole point of the 0170 split. Before it, both wrote
-// manually_resolved, so a resolved run could not tell you whether the invoice
-// had been annulled or written off — two different things for revenue. Run
-// them together: one arm alone passes on an implementation that ignores
-// inv.Status and hardcodes either value.
+// Annulled and written off are two different things for revenue, so a
+// resolved run must say which. Run the two arms together: one arm alone
+// passes on an implementation that ignores inv.Status and hardcodes either
+// value.
 func TestProcessRun_TerminalInvoice_ResolutionNamesWhichTerminal(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -272,9 +271,6 @@ func TestProcessRun_TerminalInvoice_ResolutionNamesWhichTerminal(t *testing.T) {
 			if got.State != domain.DunningResolved || got.Resolution != tc.want {
 				t.Errorf("%s invoice: got state=%q resolution=%q, want resolved/%s",
 					tc.status, got.State, got.Resolution, tc.want)
-			}
-			if got.Resolution == domain.ResolutionManuallyResolved {
-				t.Errorf("no writer may emit the legacy manually_resolved value (0170)")
 			}
 			if retrier.calls != 0 {
 				t.Errorf("retrier must not run on a %s invoice: calls=%d", tc.status, retrier.calls)

@@ -20,7 +20,5 @@ export interface BootstrapResult {
   secret_key_test: string;
   /** Live-mode secret key (`hc_secret_live_...`). */
   secret_key_live: string;
-  /** Test-mode publishable key (`hc_pub_test_...`). */
-  publishable_key_test: string;
   message: string;
 }

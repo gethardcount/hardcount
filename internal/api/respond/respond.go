@@ -107,7 +107,7 @@ func ValidationField(w http.ResponseWriter, r *http.Request, field, message stri
 
 // ValidationCoded writes a 422 response with a domain-specific error code
 // in the envelope's Code slot, the offending field (optional) in Param, and
-// the message. Use when the caller has a stable code (e.g. "coupon_expired")
+// the message. Use when the caller has a stable code (e.g. "invoice_number_taken")
 // that API integrators will switch on.
 //
 // An empty code falls back to "validation_error" so the envelope is never

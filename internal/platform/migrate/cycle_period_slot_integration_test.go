@@ -48,6 +48,9 @@ func cycleSlotInvoice(id, reason string) string {
 // shares a period with a cycle invoice, and works once one of them is
 // voided. The up then runs again.
 //
+// The first up stops before oldDataVersion, which drops an invoice column
+// the row snapshot reads.
+//
 // Mutation: an up that keeps manual invoices in the slot turns this red.
 func TestCyclePeriodSlot_ManualInvoicesDoNotHoldIt(t *testing.T) {
 	dsn, db := scratchDB(t, "hardcount_test_cycleslot_migrate")
@@ -63,7 +66,7 @@ func TestCyclePeriodSlot_ManualInvoicesDoNotHoldIt(t *testing.T) {
 	}
 	before := cycleSlotManualRow(t, db)
 
-	if err := up(ctx, dsn, migrationFiles()); err != nil {
+	if err := up(ctx, dsn, filesBefore(t, oldDataVersion)); err != nil {
 		t.Fatalf("up: %v", err)
 	}
 	wantSlotIndexes(t, db, "after the up", false, true)

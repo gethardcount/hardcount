@@ -139,17 +139,20 @@ func TestE2E_APIKeyLifecycle(t *testing.T) {
 		t.Errorf("its replacement: %d, want 200", got)
 	}
 
-	// A publishable key proves which account it belongs to and reads no
-	// data (docs/api-keys.md, "Key types").
-	pubID, pubRaw := createKey("Checkout page", "publishable")
-	if !strings.HasPrefix(pubRaw, "hc_pub_test_") {
-		t.Errorf("publishable raw key %q: want hc_pub_test_", pubRaw)
+	// Publishable keys were removed before v0.9.0. The type is refused, and a
+	// key with the old hc_pub_ prefix is an unknown key: the ordinary 401.
+	flowDo(t, ts, "POST", "/v1/api-keys", flowReq{cookie: owner, body: map[string]any{
+		"name": "Checkout page", "key_type": "publishable",
+	}}).want(t, 422, "create a key of the removed publishable type")
+	madeUp := "hc_pub_test_" + strings.Repeat("0", 32)
+	if got := flowDo(t, ts, "GET", "/v1/whoami", flowReq{bearer: madeUp}).status; got != 401 {
+		t.Errorf("whoami with a made-up hc_pub_ key: %d, want 401", got)
 	}
-	if got := flowStr(flowDo(t, ts, "GET", "/v1/whoami", flowReq{bearer: pubRaw}).want(t, 200, "whoami with a publishable key").body, "key_id"); got != pubID {
-		t.Errorf("whoami with the publishable key names %q, want %q", got, pubID)
+	if got := readCustomers(madeUp); got != 401 {
+		t.Errorf("GET /v1/customers with a made-up hc_pub_ key: %d, want 401", got)
 	}
-	if got := readCustomers(pubRaw); got != 403 {
-		t.Errorf("GET /v1/customers with a publishable key: %d, want 403", got)
+	if _, ok := boot["publishable_key_test"]; ok {
+		t.Errorf("the bootstrap response still carries publishable_key_test: %v", boot)
 	}
 	// Only a platform key may mint a platform key.
 	flowDo(t, ts, "POST", "/v1/api-keys", flowReq{cookie: owner, body: map[string]any{
@@ -165,7 +168,7 @@ func TestE2E_APIKeyLifecycle(t *testing.T) {
 		got[id] = strings.TrimPrefix(got[id]+","+flowStr(e, "action"), ",")
 	}
 	for id, want := range map[string]string{
-		oldID: "create", pubID: "create", newID: "rotate", thirdID: "rotate",
+		oldID: "create", newID: "rotate", thirdID: "rotate",
 	} {
 		if got[id] != want {
 			t.Errorf("audit rows for key %s: %q, want %q", id, got[id], want)

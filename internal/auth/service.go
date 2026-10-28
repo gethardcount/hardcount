@@ -95,8 +95,8 @@ func (s *Service) CreateKey(ctx context.Context, tenantID string, input CreateKe
 	if keyType == "" {
 		keyType = KeyTypeSecret
 	}
-	if keyType != KeyTypePlatform && keyType != KeyTypeSecret && keyType != KeyTypePublishable {
-		return CreateKeyResult{}, errs.Invalid("key_type", "must be one of: platform, secret, publishable")
+	if keyType != KeyTypePlatform && keyType != KeyTypeSecret {
+		return CreateKeyResult{}, errs.Invalid("key_type", "must be one of: platform, secret")
 	}
 
 	// Platform keys are a privileged credential: they carry tenant-management
@@ -201,7 +201,7 @@ func (s *Service) ValidateKey(ctx context.Context, rawKey string) (domain.APIKey
 		keyType    KeyType
 		fullPrefix string
 	)
-	for _, kt := range []KeyType{KeyTypePlatform, KeyTypeSecret, KeyTypePublishable} {
+	for _, kt := range []KeyType{KeyTypePlatform, KeyTypeSecret} {
 		typeP := kt.TypePrefix()
 		if !strings.HasPrefix(rawKey, typeP) {
 			continue

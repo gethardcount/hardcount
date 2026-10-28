@@ -113,7 +113,7 @@ func TestPaymentTimeline_ResolvedRowFoldsIntoCauseRow(t *testing.T) {
 		h, id := seed(t, func(i *domain.Invoice) {
 			i.Status = domain.InvoiceVoided
 			i.VoidedAt = &at
-		}, "manually_resolved")
+		}, "invoice_voided")
 		n, descs := countResolved(fetch(t, h, id))
 		if n != 0 {
 			t.Errorf("bare 'Dunning resolved' twin survived the void fold: %v", descs)
@@ -124,7 +124,7 @@ func TestPaymentTimeline_ResolvedRowFoldsIntoCauseRow(t *testing.T) {
 		h, id := seed(t, func(i *domain.Invoice) {
 			i.Status = domain.InvoiceVoided
 			i.VoidedAt = &at
-		}, "invoice_voided")
+		}, "invoice_"+string(domain.InvoiceVoided))
 		if n, descs := countResolved(fetch(t, h, id)); n != 0 {
 			t.Errorf("sweep-reason twin survived: %v", descs)
 		}
@@ -132,11 +132,11 @@ func TestPaymentTimeline_ResolvedRowFoldsIntoCauseRow(t *testing.T) {
 
 	t.Run("EVERY reason spelling folds — the gate is the invoice field, not the string", func(t *testing.T) {
 		// Each resolver spells its event reason differently; the
-		// ResolveByInvoice path writes "invoice manually_resolved"
-		// (with a space), which survived the reason-matched fold on
+		// ResolveByInvoice path writes "invoice <resolution>" (with a
+		// space); such a spelling survived the reason-matched fold on
 		// NIM-000233. Any spelling — including ones that don't exist
 		// yet — must fold once the invoice actually transitioned.
-		for _, reason := range []string{"invoice manually_resolved", "some_future_spelling"} {
+		for _, reason := range []string{"invoice invoice_voided", "some_future_spelling"} {
 			h, id := seed(t, func(i *domain.Invoice) {
 				i.Status = domain.InvoiceVoided
 				i.VoidedAt = &at

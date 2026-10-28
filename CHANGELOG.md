@@ -23,7 +23,7 @@ original text.
 
 - Commands: `velox`, `velox-bootstrap`, `velox-doctor` are `hardcount`, `hardcount-bootstrap`, `hardcount-doctor`.
 - Settings: every `VELOX_*` variable is `HARDCOUNT_*`, such as `HARDCOUNT_ENCRYPTION_KEY`.
-- API keys start `hc_` (`hc_secret_live_…`, `hc_pub_…`, `hc_platform_…`), and ids too (`hc_cus_…`). The default invoice prefix is `HC`.
+- API keys start `hc_` (`hc_secret_live_…`, `hc_platform_…`), and ids too (`hc_cus_…`). The default invoice prefix is `HC`.
 - Images: `ghcr.io/gethardcount/hardcount` and `ghcr.io/gethardcount/hardcount-dashboard`.
 - Compose: services `hardcount-api` and `hardcount-dashboard`; database and admin user `hardcount`.
 - Limited database user: `hardcount_app`.
@@ -54,6 +54,7 @@ original text.
 **Before upgrading:** v0.9.0 cannot upgrade a database. It needs a fresh one, and refuses a database from any earlier build. The notes below say what changed since a build of `main` from the switch to goose on ([#1198](https://github.com/gethardcount/hardcount/pull/1198)), which they call "the previous release". Their migration steps no longer apply; the API and settings changes do.
 
 - **`hardcount migrate status` prints a plan now.** A script that reads its old `version: N, dirty: …` line must change.
+- **API callers: publishable keys (`hc_pub_…`) are removed (PRNUM).** A request with one gets the usual 401 for an unknown key. Use a secret key, from your server only.
 - **`hardcount migrate force` is removed, and `hardcount migrate rollback` runs only with `APP_ENV=local`.** To go back, restore the backup taken before the upgrade. The restore loses everything written after the backup ([Going back](docs/production-one-vm.md#going-back)).
 - **Hardcount's three extensions (`pgcrypto`, `citext`, `btree_gist`) must be in schema `public`.** Migrations now run with `search_path = public`, so an extension kept in another schema is not found, and the migration stops without changing anything ([Postgres requirements](docs/ops/postgres-requirements.md#extensions)).
 - **If you price LiteLLM traffic yourself, add `cache_write_5m` and `cache_write_1h` prices for each Anthropic model ([#1349](https://github.com/gethardcount/hardcount/pull/1349)).** Cache writes billed as `input`; they now bill under those token types, and with no price they bill $0 and show as unmatched usage. The `anthropic_style` recipe already has them.
@@ -220,6 +221,12 @@ original text.
 
 ### Removed
 
+- **Breaking for API callers: publishable API keys (2026-10-28, PRNUM).** They could read and change nothing. Hardcount keeps two key types, secret and platform. A request with an `hc_pub_` key gets 401, and `POST /v1/api-keys` with `key_type: publishable` gets 422. The bootstrap no longer makes one, so its response has no `publishable_key_test`, and the dashboard's **Create API key** dialog makes secret keys only. Stripe's publishable key (`pk_…`) under **Settings → Payments** is not affected.
+- **Breaking for API callers: values and tables kept only for data an earlier version wrote (2026-10-28, PRNUM).** v0.9.0 installs fresh, so nothing holds them. Code that lists these can drop them:
+  - dunning run `resolution` `manually_resolved`;
+  - invoice line `line_type` `discount` and `tax` (a new line already could not use them);
+  - an invoice's `stripe_invoice_id`;
+  - the `coupons`, `coupon_redemptions` and `customer_discounts` tables.
 - **Breaking for API callers: duplicate fields and a second dedup key (2026-10-23, [#1374](https://github.com/gethardcount/hardcount/pull/1374)).** Old → new:
   - an invoice line's `quantity` (the integer, truncated) and `quantity_decimal` → `quantity`, the exact decimal string; `unit_amount_cents` → `unit_amount_decimal`. The same on the hosted invoice data. Amounts, PDFs and the dashboard do not change. The hosted page now writes a whole quantity of 1,000 or more on a line that is not usage as `1,500`, not `1500`, as the dashboard does;
   - a usage event's `properties` → `dimensions`; an event whose `properties` has a key is a 422, and `null` or `{}` is ignored;

@@ -147,21 +147,27 @@ func TestCreateKey_Secret(t *testing.T) {
 	}
 }
 
-func TestCreateKey_Publishable(t *testing.T) {
+// Publishable keys were removed before v0.9.0: the type is refused on
+// create, and a key with the old hc_pub_ prefix is an unknown key.
+func TestCreateKey_RefusesRemovedPublishableType(t *testing.T) {
 	svc := NewService(newMemStore())
 
-	result, err := svc.CreateKey(postgres.WithLivemode(context.Background(), true), "tenant1", CreateKeyInput{
+	_, err := svc.CreateKey(postgres.WithLivemode(context.Background(), true), "tenant1", CreateKeyInput{
 		Name:    "Frontend Key",
-		KeyType: KeyTypePublishable,
+		KeyType: KeyType("publishable"),
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if !errors.Is(err, errs.ErrValidation) {
+		t.Fatalf("create with key_type publishable: got %v, want a validation error", err)
 	}
-	if !strings.HasPrefix(result.RawKey, "hc_pub_live_") {
-		t.Errorf("raw key should start with hc_pub_live_")
-	}
-	if result.Key.KeyType != "publishable" {
-		t.Errorf("key_type: got %q, want publishable", result.Key.KeyType)
+}
+
+func TestValidateKey_OldPublishablePrefixIsInvalid(t *testing.T) {
+	svc := NewService(newMemStore())
+
+	for _, raw := range []string{"hc_pub_live_0123456789abcdef0123", "hc_pub_test_0123456789abcdef0123"} {
+		if _, err := svc.ValidateKey(postgres.WithLivemode(context.Background(), true), raw); !errors.Is(err, ErrInvalidKey) {
+			t.Errorf("ValidateKey(%q): got %v, want ErrInvalidKey", raw, err)
+		}
 	}
 }
 
@@ -198,7 +204,6 @@ func TestCreateKey_Platform_RejectedForNonPlatformCaller(t *testing.T) {
 		"no key-type (raw ctx)": context.Background(),
 		"secret key":            WithKeyType(context.Background(), KeyTypeSecret),
 		"dashboard session":     WithKeyType(context.Background(), KeyTypeSession),
-		"publishable key":       WithKeyType(context.Background(), KeyTypePublishable),
 	}
 	for name, ctx := range callers {
 		t.Run(name, func(t *testing.T) {
@@ -301,10 +306,10 @@ func TestValidateKey_AllTypes(t *testing.T) {
 	ctx := postgres.WithLivemode(context.Background(), true)
 
 	// A platform principal may mint any key type; use it so the platform
-	// iteration passes the privileged-mint guard (secret/publishable are
-	// unrestricted either way).
+	// iteration passes the privileged-mint guard (secret is unrestricted
+	// either way).
 	mintCtx := WithKeyType(ctx, KeyTypePlatform)
-	types := []KeyType{KeyTypeSecret, KeyTypePublishable, KeyTypePlatform}
+	types := []KeyType{KeyTypeSecret, KeyTypePlatform}
 	for _, kt := range types {
 		t.Run(string(kt), func(t *testing.T) {
 			result, _ := svc.CreateKey(mintCtx, "tenant1", CreateKeyInput{

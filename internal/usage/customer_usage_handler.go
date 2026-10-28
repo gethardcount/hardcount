@@ -26,7 +26,7 @@ func NewCustomerUsageHandler(svc *CustomerUsageService) *CustomerUsageHandler {
 // CustomerUsageRoutes returns the sub-router. Mount at
 // /v1/customers/{id}/usage with the requireRead guard (auth.PermUsageRead);
 // the customer ID is read from chi.URLParam(r, "id") after the
-// sibling-mount, mirroring the /customers/{id}/coupon precedent.
+// sibling-mount.
 func (h *CustomerUsageHandler) CustomerUsageRoutes(requireRead func(http.Handler) http.Handler) chi.Router {
 	r := chi.NewRouter()
 	r.With(requireRead).Get("/", h.get)

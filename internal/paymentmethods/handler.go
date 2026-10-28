@@ -131,8 +131,8 @@ type SetupSessionResponse struct {
 
 // operatorIdentity reads tenant from the auth ctx and customer from
 // the URL path. The path arg name is "customer_id" to match the
-// existing /v1/customers/{customer_id}/... convention used elsewhere
-// (coupons, usage). Returns ok=false on either missing piece so the
+// existing /v1/customers/{customer_id}/... convention used elsewhere.
+// Returns ok=false on either missing piece so the
 // handler can 400 rather than silently fall through.
 func operatorIdentity(r *http.Request) (tenantID, customerID string, ok bool) {
 	tenantID = auth.TenantID(r.Context())

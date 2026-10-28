@@ -14,5 +14,4 @@ export type GetV1Whoami200KeyType = typeof GetV1Whoami200KeyType[keyof typeof Ge
 export const GetV1Whoami200KeyType = {
   platform: 'platform',
   secret: 'secret',
-  publishable: 'publishable',
 } as const;

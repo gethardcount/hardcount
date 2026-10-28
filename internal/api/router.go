@@ -1641,9 +1641,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// killed it mid-file — which, pre-P12, produced a silently
 	// truncated CSV (see exportAbort). Same auth chain as /v1;
 	// idempotency skipped (GET-only). Each endpoint requires the
-	// corresponding *Read permission. A publishable key holds the EMPTY
-	// permission set (auth/permission.go: KeyTypePublishable: {}), so it can
-	// export NOTHING — not "only what it can list". MANUAL_TEST asserts the 403.
+	// corresponding *Read permission.
 	//
 	// The audit catch-all used to be mounted here too — and it BUFFERED the
 	// whole response to sniff a label out of it. Its buffer implemented no
@@ -1753,10 +1751,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		// /customers subtree mixes reads (GET list/get/billing-profile) and
 		// writes (POST create, PATCH update, PUT billing-profile, GDPR
 		// delete-data). RequireMethod splits the gate by HTTP method so a
-		// read-tier key can list/get but cannot create/update/delete. (NOT a
-		// publishable key: those hold the EMPTY permission set and cannot read
-		// customers at all — auth/permission.go. Pre-fix the entire subtree was
-		// gated on PermCustomerRead, letting any read-tier key write.)
+		// read-tier key can list/get but cannot create/update/delete. (Pre-fix
+		// the entire subtree was gated on PermCustomerRead, letting any
+		// read-tier key write.)
 		r.With(auth.RequireMethod(auth.PermCustomerRead, auth.PermCustomerWrite)).Mount("/customers", customerH.Routes())
 		// Customer-scoped usage view — composes usage aggregation with
 		// customer / subscription / pricing reads. PermUsageRead so the
@@ -1787,7 +1784,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		r.With(auth.RequireMethod(auth.PermSubscriptionRead, auth.PermSubscriptionWrite)).Mount("/subscriptions", subH.Routes())
 		// Backfill is mounted ahead of the /usage-events subtree so chi picks
 		// the more-specific pattern; PermUsageWrite gates it to secret-tier
-		// keys (publishable keys are read-only).
+		// keys.
 		r.With(auth.Require(auth.PermUsageWrite)).Post("/usage-events/backfill", usageH.Backfill)
 		r.With(auth.RequireMethod(auth.PermUsageRead, auth.PermUsageWrite)).Mount("/usage-events", usageH.Routes())
 		// LiteLLM adapter — POST /v1/integrations/litellm/spend.

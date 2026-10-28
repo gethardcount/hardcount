@@ -153,7 +153,7 @@ function CreateClockDialog({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate()
   // ADR-010: every operator-picked civil datetime is interpreted in
   // tenant TZ. Date + time edited independently so the branded
-  // DatePicker (consistent with API Keys / Coupons / Credits) handles
+  // DatePicker (consistent with API Keys / Credits) handles
   // the date and a small text input handles HH:mm.
   const tz = getTenantTimezone() || 'UTC'
   // A brand-new clock's start defaults to the real present — genuinely wall-clock

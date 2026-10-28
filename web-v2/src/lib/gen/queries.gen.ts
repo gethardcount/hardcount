@@ -17160,7 +17160,7 @@ export const getBootstrapUrl = () => {
  * `Authorization: Bearer <token>`. Never send it in the query string.
  *
  * In one transaction it creates the first tenant, its owner user, a
- * test secret key, a live secret key and a test publishable key. The
+ * test secret key and a live secret key. The
  * response is the only place the keys appear, and the password too
  * when Hardcount generated it. The response has `Cache-Control: no-store`.
  *

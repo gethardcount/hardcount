@@ -47,7 +47,7 @@ func FromError(w http.ResponseWriter, r *http.Request, err error, resource strin
 	// Pull the offending field (if any) off a DomainError in the chain. Empty
 	// when the error came from a legacy fmt.Errorf site or a sentinel wrap.
 	field := errs.Field(err)
-	// Stable, domain-specific error code (e.g. "coupon_expired"). When
+	// Stable, domain-specific error code (e.g. "invoice_number_taken"). When
 	// non-empty, we plumb it into the envelope's Code slot instead of the
 	// generic category ("validation_error", "already_exists"). Integrators
 	// switch on the domain code for differential UX.

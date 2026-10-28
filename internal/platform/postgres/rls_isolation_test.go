@@ -231,7 +231,6 @@ func TestRLSIsolation_AllModeAwareTablesHaveLivemodePredicate(t *testing.T) {
 		"tenant_settings":              "account-level config, shared across modes by design (0020)",
 		"user_tenants":                 "account-level membership; no mode axis",
 		"member_invitations":           "account-level invites; unique key is a random token hash",
-		"customer_discounts":           "FK-scoped to customers (mode-aware parent)",
 		"subscription_item_thresholds": "FK-scoped to subscription items (mode-aware parent)",
 		"tax_calculations":             "FK-scoped to invoices (mode-aware parent)",
 	}

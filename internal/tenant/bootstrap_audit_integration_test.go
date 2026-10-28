@@ -64,8 +64,8 @@ func TestBootstrap_AuditsItsProvisioning(t *testing.T) {
 	}
 	// One row per minted credential — this is the whole point: a LIVE secret
 	// key must not appear in a running system with no record of its birth.
-	if got := byResource["api_key"]; len(got) != 3 {
-		t.Errorf("api_key rows: got %d, want 3 (test secret, LIVE secret, test publishable)", len(got))
+	if got := byResource["api_key"]; len(got) != 2 {
+		t.Errorf("api_key rows: got %d, want 2 (test secret, LIVE secret)", len(got))
 	}
 	// The seeded dunning policies (ADR-123): one row per mode, each in its
 	// own mode's log. The live one is here; the test-mode one below.

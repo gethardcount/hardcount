@@ -13,7 +13,9 @@ import (
 )
 
 // deadContractVersion is 00201_remove_dead_contract.sql; 00202 validates
-// the CHECKs it narrows or adds.
+// the CHECKs it narrows or adds. The tests below stop before
+// oldDataVersion (00217), which removes what 00201 kept for rows an
+// earlier version wrote.
 const deadContractVersion = 201
 
 // deadContractExec runs one statement with row-level security bypassed, in
@@ -165,7 +167,7 @@ func TestDeadContract_KeepsIssuedInvoiceLinesAndActivatesDraftPlans(t *testing.T
 		('li_disc', 'ten_dc', 'inv_paid', 'discount', 'Discount', -100, -100),
 		('li_tax', 'ten_dc', 'inv_dc', 'tax', 'Tax', 0, 0)`)
 
-	if err := up(ctx, dsn, migrationFiles()); err != nil {
+	if err := up(ctx, dsn, filesBefore(t, oldDataVersion)); err != nil {
 		t.Fatalf("Up over a paid invoice's discount line, a tax line and a draft plan: %v", err)
 	}
 
@@ -236,7 +238,7 @@ func TestDeadContract_KeepsHistoryEarlierVersionsWrote(t *testing.T) {
 	exec(`INSERT INTO coupon_redemptions (id, tenant_id, coupon_id, customer_id, invoice_id, discount_cents) VALUES ('crd_dc', 'ten_dc', 'cpn_dc', 'cus_dc', 'inv_dc', 100)`)
 	exec(`INSERT INTO customer_discounts (tenant_id, customer_id, coupon_id) VALUES ('ten_dc', 'cus_dc', 'cpn_dc')`)
 
-	if err := up(ctx, dsn, migrationFiles()); err != nil {
+	if err := up(ctx, dsn, filesBefore(t, oldDataVersion)); err != nil {
 		t.Fatalf("Up over rows an earlier version wrote: %v", err)
 	}
 
@@ -274,7 +276,7 @@ func TestDeadContract_KeepsHistoryEarlierVersionsWrote(t *testing.T) {
 func TestDeadContract_UpNarrowsAndDownRestores(t *testing.T) {
 	dsn, db := scratchDB(t, "hardcount_test_deadc_b_migrate_round")
 	ctx := context.Background()
-	if err := up(ctx, dsn, migrationFiles()); err != nil {
+	if err := up(ctx, dsn, filesBefore(t, oldDataVersion)); err != nil {
 		t.Fatalf("Up: %v", err)
 	}
 	if err := deadContractExec(ctx, db, deadContractSeedNow); err != nil {
@@ -368,7 +370,7 @@ func TestDeadContract_UpNarrowsAndDownRestores(t *testing.T) {
 		}
 	}
 
-	if _, err := down(ctx, dsn, migrationFiles(), deadContractVersion-1); err != nil {
+	if _, err := down(ctx, dsn, filesBefore(t, oldDataVersion), deadContractVersion-1); err != nil {
 		t.Fatalf("Down to before %d: %v", deadContractVersion, err)
 	}
 	if !tableExists(t, db, "public.billed_entries") {
@@ -411,7 +413,7 @@ func TestDeadContract_UpNarrowsAndDownRestores(t *testing.T) {
 		t.Errorf("after the Down, billing_threshold_reset_cycle defaults to %q (%v), want true", resetDefault, err)
 	}
 
-	if err := up(ctx, dsn, migrationFiles()); err != nil {
+	if err := up(ctx, dsn, filesBefore(t, oldDataVersion)); err != nil {
 		t.Fatalf("Up again: %v", err)
 	}
 }

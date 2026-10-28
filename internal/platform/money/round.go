@@ -1,5 +1,5 @@
 // Package money holds small, dependency-free helpers for integer-cents math
-// shared across billing, subscription proration, coupon discounts, and tax.
+// shared across billing, subscription proration, and tax.
 //
 // Keeping these helpers in a platform package (not a domain package) avoids
 // cross-domain imports: billing and subscription both depend on money, but

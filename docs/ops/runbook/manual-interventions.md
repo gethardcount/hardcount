@@ -42,9 +42,6 @@ this only when the dashboard **Resolve** action is unavailable.
    COMMIT;
    ```
 
-   Do not write `manually_resolved`; it is kept only so old rows stay
-   readable.
-
 4. **Change the invoice too.** This SQL resolves the run only; it does not
    touch the invoice. The endpoint makes the matching invoice change (void,
    mark uncollectible, or record a payment), and this SQL does not. If you

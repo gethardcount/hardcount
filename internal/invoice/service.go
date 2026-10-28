@@ -2394,9 +2394,6 @@ func buildLineItem(input AddLineItemInput, currency string) (domain.InvoiceLineI
 	switch domain.InvoiceLineItemType(lineType) {
 	case domain.LineTypeBaseFee, domain.LineTypeUsage, domain.LineTypeAddOn:
 		// Quantity and unit amount are positive, so every line adds money.
-		// A "discount" line would raise the total, and a "tax" line would
-		// be taxed again at finalize, so neither is accepted. The DB CHECK
-		// still allows both: rows written before this rule may exist.
 	default:
 		return domain.InvoiceLineItem{}, errs.Invalid("line_type", "must be one of: add_on, base_fee, usage")
 	}

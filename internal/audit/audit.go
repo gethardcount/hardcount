@@ -114,7 +114,7 @@ func (l *Logger) decryptActorName(e *domain.AuditEntry) {
 // renders ("Updated arrears-mon" instead of the generic "Updated
 // subscription"). Each caller passes the appropriate field — typically
 // sub.Code, invoice.InvoiceNumber, customer.DisplayName, plan.Code,
-// coupon.Code, etc. Pass "" when no label is available (event happens
+// etc. Pass "" when no label is available (event happens
 // before the resource is hydratable, or the resource has no operator-
 // facing name); the page falls back to the resource_type.
 func (l *Logger) Log(ctx context.Context, tenantID, action, resourceType, resourceID, resourceLabel string, metadata map[string]any) error {

@@ -50,7 +50,7 @@ import {
 } from '@/components/ui/form'
 import { CardListSkeleton } from '@/components/ui/TableSkeleton'
 
-import { Plus, Key, Shield, Eye, ChevronDown, Loader2, Clock, RotateCw } from 'lucide-react'
+import { Plus, Key, Shield, ChevronDown, Loader2, Clock, RotateCw } from 'lucide-react'
 import { EmptyState } from '@/components/EmptyState'
 
 const createApiKeySchema = z.object({
@@ -71,7 +71,6 @@ function relativeTime(dateStr: string, now: EffectiveNow): string {
 function keyTypeVariant(type: string): 'default' | 'secondary' | 'outline' {
   switch (type) {
     case 'secret': return 'default'
-    case 'publishable': return 'secondary'
     default: return 'outline'
   }
 }
@@ -81,7 +80,6 @@ function keyTypeVariant(type: string): 'default' | 'secondary' | 'outline' {
 function keyTypeLabel(type: string): string {
   switch (type) {
     case 'secret': return 'Secret'
-    case 'publishable': return 'Publishable'
     case 'platform': return 'Platform'
     default: return type
   }
@@ -194,7 +192,7 @@ export default function ApiKeysPage() {
                       )}>
                         {k.key_type === 'secret'
                           ? <Shield size={16} className="text-violet-500" />
-                          : <Eye size={16} className="text-blue-500" />}
+                          : <Key size={16} className="text-blue-500" />}
                       </div>
                       <div>
                         <div className="flex items-center gap-2">
@@ -404,11 +402,10 @@ export default function ApiKeysPage() {
 type ExpiryPreset = 'never' | '30d' | '90d' | '1y' | 'custom'
 
 // Date-grade helpers (endOfDayInTZ, addDaysInTZ, formatExpiryHintInTZ)
-// live in @/lib/dates so Coupons / Credits / future pickers can reuse
+// live in @/lib/dates so Credits / future pickers can reuse
 // the same TZ-grounded arithmetic. See ADR-010.
 
 function CreateKeyDialog({ onClose, onCreated }: { onClose: () => void; onCreated: (rawKey: string) => void }) {
-  const [keyType, setKeyType] = useState('secret')
   const [expiryPreset, setExpiryPreset] = useState<ExpiryPreset>('never')
   const [customDate, setCustomDate] = useState('')
   const [customDateError, setCustomDateError] = useState('')
@@ -448,7 +445,7 @@ function CreateKeyDialog({ onClose, onCreated }: { onClose: () => void; onCreate
     try {
       const res = await api.createApiKey({
         name: data.name,
-        key_type: keyType,
+        key_type: 'secret',
         expires_at: getExpiresAt(),
       })
       onCreated(res.raw_key)
@@ -504,29 +501,12 @@ function CreateKeyDialog({ onClose, onCreated }: { onClose: () => void; onCreate
 
             <div>
               <Label className="mb-2 block">Key type</Label>
-              <div className="grid grid-cols-2 gap-3">
-                <button type="button" onClick={() => setKeyType('secret')}
-                  className={cn(
-                    'flex items-start gap-3 p-3 rounded-xl border-2 text-left transition-colors',
-                    keyType === 'secret' ? 'border-primary bg-primary/5' : 'border-border hover:border-border/80'
-                  )}>
-                  <Shield size={18} className={cn('mt-0.5', keyType === 'secret' ? 'text-primary' : 'text-muted-foreground')} />
-                  <div>
-                    <p className={cn('text-sm font-medium', keyType === 'secret' ? 'text-primary' : 'text-foreground')}>Secret</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">Full access. Keep it on your server.</p>
-                  </div>
-                </button>
-                <button type="button" onClick={() => setKeyType('publishable')}
-                  className={cn(
-                    'flex items-start gap-3 p-3 rounded-xl border-2 text-left transition-colors',
-                    keyType === 'publishable' ? 'border-primary bg-primary/5' : 'border-border hover:border-border/80'
-                  )}>
-                  <Eye size={18} className={cn('mt-0.5', keyType === 'publishable' ? 'text-primary' : 'text-muted-foreground')} />
-                  <div>
-                    <p className={cn('text-sm font-medium', keyType === 'publishable' ? 'text-primary' : 'text-foreground')}>Publishable</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">Identifies your account only; safe to use in a browser.</p>
-                  </div>
-                </button>
+              <div className="flex items-start gap-3 p-3 rounded-xl border border-border">
+                <Shield size={18} className="mt-0.5 text-primary" />
+                <div>
+                  <p className="text-sm font-medium text-foreground">Secret</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Full access. Keep it on your server.</p>
+                </div>
               </div>
             </div>
 

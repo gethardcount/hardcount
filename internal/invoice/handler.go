@@ -746,13 +746,10 @@ func (h *Handler) markUncollectible(w http.ResponseWriter, r *http.Request) {
 	// change, and dunning runs scan the invoice status on next tick
 	// anyway.
 	//
-	// The resolution NAMES this outcome (0170 split). This site used to pass
-	// ResolutionManuallyResolved on the written grounds that "passing the
-	// matching resolution would recurse via ResolveRun's cross-flow branch" —
-	// which was false, and cost the column its precision for months: the
-	// cross-flow branch that calls MarkUncollectible lives on ResolveRun, and
-	// this calls ResolveByInvoice, which has no such branch and cannot
-	// recurse. Pinned by TestMarkUncollectible_ResolvesRunAsNotCollectible.
+	// The resolution names this outcome. It cannot recurse: the cross-flow
+	// branch that calls MarkUncollectible lives on ResolveRun, and this calls
+	// ResolveByInvoice, which has no such branch. Pinned by
+	// TestMarkUncollectible_ResolvesRunAsNotCollectible.
 	if h.dunning != nil {
 		if err := h.dunning.ResolveByInvoice(r.Context(), tenantID, id, domain.ResolutionInvoiceNotCollectible); err != nil {
 			slog.WarnContext(r.Context(), "failed to resolve dunning on mark-uncollectible", "invoice_id", id, "error", err)

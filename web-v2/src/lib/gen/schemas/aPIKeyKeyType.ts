@@ -14,5 +14,4 @@ export type APIKeyKeyType = typeof APIKeyKeyType[keyof typeof APIKeyKeyType];
 export const APIKeyKeyType = {
   platform: 'platform',
   secret: 'secret',
-  publishable: 'publishable',
 } as const;

@@ -13,10 +13,10 @@ printed a test key and saved it in
 To make a new key in the dashboard:
 
 1. Open **API keys** and click **Create API Key**.
-   **You see:** a dialog with a name field, the key types **Secret** and
-   **Publishable**, and an expiry choice.
-2. Give the key a name, such as `Production server`, pick **Secret**, and
-   click **Create Key**.
+   **You see:** a dialog with a name field, the key type **Secret**, and an
+   expiry choice.
+2. Give the key a name, such as `Production server`, and click **Create
+   Key**.
    **You see:** the full key, with "Save this key now. It won't be shown
    again." Copy it into your secret store.
 
@@ -64,7 +64,6 @@ mode.
 | Type | Starts with | Use it for |
 |---|---|---|
 | Secret | `hc_secret_` | All API calls from your server. It can read and change everything in one account, so keep it out of browsers and out of source control. |
-| Publishable | `hc_pub_` | Places a key can be seen, such as a web page. It only proves which account it belongs to: it cannot read or change any data. |
 | Platform | `hc_platform_` | Managing accounts across a whole Hardcount server. You cannot create one in the dashboard or with a secret key. |
 
 ## Rotate a key

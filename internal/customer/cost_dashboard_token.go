@@ -10,7 +10,7 @@ import (
 // costDashboardTokenPrefix — visible in logs, distinguishes the public
 // embeddable cost-dashboard credential from the magic-link
 // (hc_cpml_), portal session (hc_cps_), and API keys (hc_secret_,
-// hc_publishable_). 32 bytes of entropy → 64 hex chars after the
+// hc_platform_). 32 bytes of entropy → 64 hex chars after the
 // prefix, matching the hosted-invoice public token shape.
 const costDashboardTokenPrefix = "hc_pcd_"
 

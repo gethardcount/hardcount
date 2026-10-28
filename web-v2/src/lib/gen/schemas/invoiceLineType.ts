@@ -8,10 +8,6 @@
  * OpenAPI spec version: 2026-04-07
  */
 
-/**
- * `discount` and `tax` appear only on lines added before 2026-10-22;
- * a new line cannot use them.
- */
 export type InvoiceLineType = typeof InvoiceLineType[keyof typeof InvoiceLineType];
 
 
@@ -19,6 +15,4 @@ export const InvoiceLineType = {
   base_fee: 'base_fee',
   usage: 'usage',
   add_on: 'add_on',
-  discount: 'discount',
-  tax: 'tax',
 } as const;

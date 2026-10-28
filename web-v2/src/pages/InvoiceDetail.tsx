@@ -96,8 +96,6 @@ const LINE_TYPE_LABELS: Record<string, string> = {
   base_fee: 'Base fee',
   usage: 'Usage',
   add_on: 'Add-on',
-  discount: 'Discount',
-  tax: 'Tax',
 }
 
 function formatLineType(raw: string): string {

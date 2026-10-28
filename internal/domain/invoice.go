@@ -421,16 +421,6 @@ type Invoice struct {
 	// scan re-tick is idempotent under retry.
 	BillingReason InvoiceBillingReason `json:"billing_reason,omitempty"`
 
-	// StripeInvoiceID is the source Stripe invoice id (in_xxx) for an invoice
-	// imported from a Stripe account. Empty for Hardcount-native invoices. The
-	// column and its partial unique index (idx_invoices_stripe_invoice_id;
-	// migration 0063) remain from the Stripe importer that was deliberately
-	// removed in the 2026-04-29 lean-cut — nothing currently writes this
-	// field. The importer is deferred until a design partner announces a
-	// cutover; the index already enforces dedup so a rebuilt importer is
-	// idempotent on rerun without ever overwriting an existing row.
-	StripeInvoiceID string `json:"stripe_invoice_id,omitempty"`
-
 	// IsSimulated records, at write time, whether this invoice's domain
 	// timestamps (created/issued/due/paid) were stamped on a test clock's
 	// simulated time rather than wall-clock. Set true when the creating

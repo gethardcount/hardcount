@@ -103,9 +103,6 @@ func TestBootstrap_Success(t *testing.T) {
 	if !strings.HasPrefix(resp.SecretKeyLive, "hc_secret_live_") {
 		t.Errorf("live secret key prefix: got %q", resp.SecretKeyLive)
 	}
-	if !strings.HasPrefix(resp.PublishableKeyTest, "hc_pub_test_") {
-		t.Errorf("publishable key prefix: got %q", resp.PublishableKeyTest)
-	}
 	if resp.OwnerEmail != "admin@hardcount.local" || !resp.PasswordGenerated || len(resp.OwnerPassword) < 12 {
 		t.Errorf("owner defaults: email=%q generated=%v pwlen=%d", resp.OwnerEmail, resp.PasswordGenerated, len(resp.OwnerPassword))
 	}
