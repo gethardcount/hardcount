@@ -209,7 +209,17 @@ test('a subscription created as a draft bills nothing until it is activated', as
   expect(await invoicesFor(customer.id)).toHaveLength(0)
 
   await page.goto(`/subscriptions/${subs.data[0].id}`)
+  // Activate asks first: billing starts now, and this plan is billed in
+  // advance, so the first period is invoiced at once. Cancel changes nothing.
   await page.getByRole('button', { name: 'Activate' }).click()
+  const activateConfirm = page.getByRole('alertdialog', { name: 'Activate this subscription?' })
+  await expect(activateConfirm).toContainText('The first billing period starts now.')
+  await expect(activateConfirm).toContainText('It is invoiced now')
+  await activateConfirm.getByRole('button', { name: 'Cancel' }).click()
+  await expect(activateConfirm).toBeHidden()
+  expect((await api<Subscription>('GET', `/subscriptions/${subs.data[0].id}`)).status).toBe('draft')
+  await page.getByRole('button', { name: 'Activate' }).click()
+  await activateConfirm.getByRole('button', { name: 'Activate', exact: true }).click()
   await expect(page.getByRole('region', { name: /^Notifications/ }).getByText('Subscription activated', { exact: true })).toBeVisible()
   const after = await api<Subscription>('GET', `/subscriptions/${subs.data[0].id}`)
   expect(after.status).toBe('active')

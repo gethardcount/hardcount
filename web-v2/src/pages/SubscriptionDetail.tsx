@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
-import { cancelImmediatelyText, changePlanNowHelper, changeQuantityText, PAUSE_DIALOG_SENTENCE, pauseCollectionToast, planChangeToast, removeItemText, scheduleCancelToast } from '@/lib/subscriptionCopy'
+import { cancelImmediatelyText, changePlanNowHelper, changeQuantityText, PAUSE_DIALOG_SENTENCE, pauseCollectionToast, planChangeToast, removeItemText, scheduleCancelToast, startBillingLines } from '@/lib/subscriptionCopy'
 import { api, formatCents, formatCentsBare, prorationText, formatDate, formatDateTime, getTenantTimezone, type Subscription, type SubscriptionItem, type Plan, type ItemChangeResult } from '@/lib/api'
 import { civilDateFrom, formatCivilDate, formatCivilPeriod, startOfDayInTZ } from '@/lib/dates'
 import { showApiError } from '@/lib/formErrors'
@@ -87,6 +87,8 @@ export default function SubscriptionDetailPage() {
   // doesn't escalate. Operator picks "immediately" deliberately.
   const [cancelMode, setCancelMode] = useState<'period_end' | 'immediately'>('period_end')
   const [showPauseConfirm, setShowPauseConfirm] = useState(false)
+  // Activate and End trial start paid billing at once, so each asks first.
+  const [confirmStart, setConfirmStart] = useState<'activate' | 'end_trial' | null>(null)
   const [showExtendTrial, setShowExtendTrial] = useState(false)
   const [extendTrialDate, setExtendTrialDate] = useState('')
   const [extendTrialTime, setExtendTrialTime] = useState('')
@@ -110,12 +112,13 @@ export default function SubscriptionDetailPage() {
   // Shift-left no-card warning (2026-07-22 audit, P1-5): fetch the
   // customer's payment methods only when this subscription actually
   // auto-charges — a paused/terminal sub won't, so no query and no
-  // warning. One existing call, no new endpoint.
+  // warning. One existing call, no new endpoint. A draft reads it too: the
+  // Activate confirm says whether a card is charged at once.
   const subAutoCharges = !!sub && subscriptionWillAutoCharge(sub)
   const { data: subCustomerPMs } = useQuery({
     queryKey: ['customer-payment-methods', sub?.customer_id],
     queryFn: () => api.listCustomerPaymentMethods(sub!.customer_id),
-    enabled: !!sub?.customer_id && subAutoCharges,
+    enabled: !!sub?.customer_id && (subAutoCharges || sub?.status === 'draft'),
   })
   const subNeedsCard = subAutoCharges && !!subCustomerPMs && !hasUsableCard(subCustomerPMs.data ?? [])
 
@@ -210,8 +213,8 @@ export default function SubscriptionDetailPage() {
 
   const activateMutation = useMutation({
     mutationFn: () => api.activateSubscription(id!),
-    onSuccess: () => { invalidateAll(); toast.success('Subscription activated') },
-    onError: (err) => showApiError(err, 'Failed to activate'),
+    onSuccess: () => { invalidateAll(); setConfirmStart(null); toast.success('Subscription activated') },
+    onError: (err) => { setConfirmStart(null); showApiError(err, 'Failed to activate') },
   })
 
   const retryBillingMutation = useMutation({
@@ -286,8 +289,8 @@ export default function SubscriptionDetailPage() {
 
   const endTrialMutation = useMutation({
     mutationFn: () => api.endSubscriptionTrial(id!),
-    onSuccess: () => { invalidateAll(); toast.success('Trial ended — subscription is now active') },
-    onError: (err) => showApiError(err, 'Failed to end trial'),
+    onSuccess: () => { invalidateAll(); setConfirmStart(null); toast.success('Trial ended — subscription is now active') },
+    onError: (err) => { setConfirmStart(null); showApiError(err, 'Failed to end trial') },
   })
 
   const extendTrialMutation = useMutation({
@@ -465,7 +468,7 @@ export default function SubscriptionDetailPage() {
             Audit log
           </Button>
           {sub.status === 'draft' && (
-            <Button onClick={() => activateMutation.mutate()} disabled={acting}>
+            <Button onClick={() => setConfirmStart('activate')} disabled={acting}>
               {activateMutation.isPending ? <><Loader2 size={14} className="animate-spin mr-1.5" />Activating…</> : 'Activate'}
             </Button>
           )}
@@ -505,7 +508,7 @@ export default function SubscriptionDetailPage() {
               <Button
                 variant="outline"
                 className="border-primary text-primary hover:bg-primary/10"
-                onClick={() => endTrialMutation.mutate()}
+                onClick={() => setConfirmStart('end_trial')}
                 disabled={acting || !!(sub.cancel_at_period_end || sub.cancel_at)}
                 title={sub.cancel_at_period_end || sub.cancel_at ? 'Clear the scheduled cancellation first' : undefined}
               >
@@ -1186,6 +1189,39 @@ export default function SubscriptionDetailPage() {
           auto-clears pause_collection at that timestamp. Matches
           Stripe's dashboard UX where the same modal exposes both
           options. */}
+      {/* Activate / End trial confirm: both start the first paid period at
+          once, and an in-advance plan is invoiced and charged on the spot. */}
+      <AlertDialog open={confirmStart !== null} onOpenChange={(open) => { if (!open && !activateMutation.isPending && !endTrialMutation.isPending) setConfirmStart(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{confirmStart === 'end_trial' ? 'End the trial now?' : 'Activate this subscription?'}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {customer?.display_name || 'This customer'} on {items.map(i => planById(i.plan_id)?.name).filter(Boolean).join(', ') || 'this plan'}.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-2 text-sm text-muted-foreground">
+            {startBillingLines({
+              trial: confirmStart === 'end_trial',
+              inAdvance: items.length > 0 && items.every(i => planById(i.plan_id))
+                ? items.some(i => planById(i.plan_id)?.base_bill_timing === 'in_advance')
+                : undefined,
+              hasCard: subCustomerPMs ? hasUsableCard(subCustomerPMs.data ?? []) : undefined,
+            }).map(line => <p key={line}>{line}</p>)}
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={activateMutation.isPending || endTrialMutation.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => (confirmStart === 'end_trial' ? endTrialMutation.mutate() : activateMutation.mutate())}
+              disabled={activateMutation.isPending || endTrialMutation.isPending}
+            >
+              {activateMutation.isPending || endTrialMutation.isPending
+                ? <><Loader2 size={14} className="animate-spin mr-1.5" />{confirmStart === 'end_trial' ? 'Ending trial…' : 'Activating…'}</>
+                : confirmStart === 'end_trial' ? 'End trial' : 'Activate'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <Dialog open={showPauseConfirm} onOpenChange={(open) => { if (!open) { setShowPauseConfirm(false); setPauseResumesAt('') } }}>
         <DialogContent>
           <DialogHeader>
