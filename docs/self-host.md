@@ -37,7 +37,7 @@ A migration is a versioned script that changes the database schema. Hardcount ap
 
 ## Upgrading
 
-Hardcount was called Velox before v0.9.0. v0.9.0 installs fresh only: it refuses a database made by Velox, a 0.8.x release or a build of `main` ([why](ops/runbook/migration-failed-midway.md#the-database-was-made-by-velox)).
+Hardcount was called Velox before v0.9.0. v0.9.0 installs fresh only: it refuses a database made by Velox: a 0.8.x release, or a build of Velox's `main` ([why](ops/runbook/migration-failed-midway.md#the-database-was-made-by-velox)).
 
 Read the changelog notes and take a backup first. Then follow [Upgrade on one VM](production-one-vm.md#upgrade-to-a-new-release) or [Upgrade two or more copies](ops/high-availability.md#upgrades).
 
@@ -54,14 +54,14 @@ Hardcount reads its settings from environment variables. The tables below list t
 | `DATABASE_URL` | Postgres connection URL for the admin user |
 | `APP_DATABASE_URL` | Postgres connection URL for the limited user. Required in `staging` and `production`. |
 | `HARDCOUNT_ENCRYPTION_KEY` | Encrypts stored personal data. 64 hex characters. Required in `production`. |
-| `REDIS_URL` | Redis, for rate limiting. Required in `production`. If Redis goes down later, sign-in stays rate-limited, but each copy counts on its own. |
+| `REDIS_URL` | Redis, for rate limiting. Required in `production`. If Redis goes down later in production, API and dashboard requests answer 429 until it is back (usage ingest keeps working, and sign-in counts on each copy): [Redis going down after boot](ops/runbook/replica-will-not-start.md#redis-going-down-after-boot). |
 | `TRUST_PROXY` | The addresses of your proxy or load balancer, comma-separated. Hardcount then trusts the client address they forward in `X-Forwarded-For`; it does not read `X-Real-IP`. Use `none` if there is no proxy. Required in `production`. Hardcount refuses to start if an entry is not an IP address or CIDR. |
 
 Why `TRUST_PROXY` is required: without it, every request behind a load balancer appears to come from the load balancer. All users then share one rate limit, the audit log shows the load balancer's address, and 5 wrong passwords for an email, from anyone, make every new browser wait to sign in with it.
 
 To check it, sign in, switch the dashboard to test mode and open the audit log. The newest `login` entry shows the address Hardcount saw. It should be yours, not the load balancer's.
 
-**Read once, when creating the first tenant** (by `make bootstrap`, not by the server)
+**Read once, by `hardcount-bootstrap`** (`make bootstrap`), which creates the first account on a local development database. On a server, create the first account with `POST /v1/bootstrap` instead: [step 2 of Production on one VM](production-one-vm.md#2-create-your-account-and-first-login).
 
 | Variable | What it is |
 |---|---|

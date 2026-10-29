@@ -23,10 +23,11 @@
 # Only hardcount_app gets it: migrations run as $POSTGRES_USER.
 #
 # Existing pgdata volumes: this script does NOT re-run. Rotate the role
-# password manually instead:
-#   docker compose exec postgres psql -U hardcount -d hardcount \
-#     -v pw="$HARDCOUNT_APP_DB_PASSWORD" \
-#     -c "ALTER ROLE hardcount_app PASSWORD :'pw'"
+# password manually instead (on stdin: psql -c does not fill in :'pw'):
+#   set -a; . ./.env; set +a
+#   echo "ALTER ROLE hardcount_app PASSWORD :'pw';" | docker compose exec -T postgres \
+#     psql -v ON_ERROR_STOP=1 -U hardcount -d hardcount \
+#     -v pw="${HARDCOUNT_APP_DB_PASSWORD:?set it in .env first}"
 # and set the timeout once (new connections pick it up):
 #   docker compose exec postgres psql -U hardcount -d hardcount \
 #     -c "ALTER ROLE hardcount_app SET idle_in_transaction_session_timeout = '30s'"

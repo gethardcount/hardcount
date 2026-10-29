@@ -6,12 +6,18 @@ Downtime during a restart is fine for you? Use [Production on one VM](../product
 
 ## What you need
 
-- Two or more `hardcount-api` copies behind a load balancer.
+- Two or more copies of the Hardcount server behind a load balancer that ends HTTPS. In the Compose stack this is the `hardcount-api` service.
 - A managed Postgres with automatic failover and point-in-time restore.
 - A managed Redis. Hardcount uses it only for rate limiting, and all copies share its counts. If Redis goes down after start-up, see [Redis going down after boot](runbook/replica-will-not-start.md#redis-going-down-after-boot).
 - A connection pooler is optional: [Postgres requirements → Connection poolers](postgres-requirements.md#connection-poolers).
 
-The settings for each copy are in [Self-host](../self-host.md#settings). Every copy uses the same settings and the same database.
+The settings for each copy are in [Settings](../settings.md). Every copy uses the same settings and the same database.
+
+## What runs
+
+- **The server:** the image `ghcr.io/gethardcount/hardcount:<release>`, for example `v0.9.1`. Its entrypoint is `hardcount`; with no arguments it serves the API and runs the background jobs, on port 8080 (`PORT`). Run `hardcount migrate` once before new copies start on a new release: [Upgrades](#upgrades).
+- **The dashboard:** the image `ghcr.io/gethardcount/hardcount-dashboard:<release>`, static files on port 80. It holds no state, so any number of copies works. It calls the API on its own address, so serve both from one address: send `/v1/` and `/health` to the server copies and everything else to the dashboard. The Compose stack's nginx does exactly this ([`deploy/compose/nginx.conf`](../../deploy/compose/nginx.conf)).
+- **HTTPS at the load balancer.** In `staging` and `production` the sign-in cookie is `Secure`, so the dashboard's sign-in works only over HTTPS.
 
 ## How the copies share the work
 
@@ -44,7 +50,9 @@ A few features still assume one copy: the dashboard's live webhook stream, test-
 
 4. Set the shutdown grace period (Kubernetes `terminationGracePeriodSeconds`) above `SHUTDOWN_DRAIN_DELAY` plus 90 seconds: 120s with the 5s default, 180s with `SHUTDOWN_DRAIN_DELAY=60s`. The Compose stack sets `stop_grace_period: 120s`.
 
-5. Check the database connections. Each copy opens up to `DB_MAX_OPEN_CONNS` connections (default 20). Copies × `DB_MAX_OPEN_CONNS` must stay below your Postgres `max_connections`.
+5. Set the load balancer's timeouts. Its read or idle timeout must be above 35 seconds, the server's write timeout. Then a slow request gets the server's own 504, not a dropped connection. The Compose stack's nginx uses 40s. The dashboard's live webhook log (`/v1/webhook_events/stream`) is a long-lived stream: turn response buffering off for that path and allow it at least an hour, or the log stops updating.
+
+6. Check the database connections. Each copy opens up to `DB_MAX_OPEN_CONNS` connections (default 20), plus a few while it starts. Copies × `DB_MAX_OPEN_CONNS` must stay below your Postgres `max_connections`.
 
 ## Health checks
 
@@ -78,7 +86,7 @@ Read the upgrade notes in the [changelog](../../CHANGELOG.md) first. Then take a
 
 - **A release whose notes say it has migrations:** stop every old copy, run `hardcount migrate` once (or start one new copy with `RUN_MIGRATIONS_ON_BOOT=true`), then start the other new copies.
 - **A release with no migrations:** upgrade one copy at a time.
-- Hardcount was called Velox before v0.9.0. v0.9.0 installs fresh only: it refuses a database made by Velox, a 0.8.x release or a build of `main` ([why](runbook/migration-failed-midway.md#the-database-was-made-by-velox)).
+- Hardcount was called Velox before v0.9.0. v0.9.0 installs fresh only: it refuses a database made by Velox: a 0.8.x release, or a build of Velox's `main` ([why](runbook/migration-failed-midway.md#the-database-was-made-by-velox)).
 
 Run `hardcount migrate status` with the new release first to see the plan. Never roll a migration back in production; see [Self-host](../self-host.md#database-upgrades-migrations).
 

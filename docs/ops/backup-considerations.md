@@ -59,7 +59,7 @@ Options, all set as environment variables:
 
 Exit codes: `0` success, `1` a setting is wrong, `2` `pg_dump` failed, `3` the dump could not be read back, `4` the S3 upload failed.
 
-**Use tools that match the server.** A `pg_dump` newer than the Postgres server writes a dump that server cannot restore, so the script stops. Run a matching one in a container:
+**Use tools that match the server.** A `pg_dump` newer than the Postgres server writes a dump that server cannot restore, so the script stops. It can tell only when `psql` is installed, because it asks the server's version with `psql`; without `psql` it skips the check and dumps anyway. Run a matching `pg_dump` in a container:
 
 ```bash
 PG_DUMP="docker run --rm -i --network host postgres:16-alpine pg_dump" ./scripts/backup.sh
@@ -130,7 +130,7 @@ Each run adds one line to `~/.hardcount/drill.log`, so you can see how long back
 
 Exit codes: `0` passed, `1` a setting is wrong, `2` the backup failed, `3` the restore failed, `4` row counts differ, `5` the container did not start.
 
-After a drill passes, you can also start Hardcount against a restored copy, check that `/health/ready` answers 200, and run `go run ./cmd/hardcount-doctor` against it. It should report no problems.
+After a drill passes, you can also start Hardcount against a restored copy, check that `/health/ready` answers 200, and run the money checks against it. They are `go run ./cmd/hardcount-doctor`, from a source checkout of the same release with `DATABASE_URL` set to the restored copy; the release image does not include them. They should report no problems.
 Run it as the database owner. The app role (`hardcount_app`) sees no rows and
 reports clean.
 
@@ -238,7 +238,7 @@ Some tables matter more than others when you decide what a restore must bring ba
 | `tenants` | Every other row belongs to an account |
 | `customers`, `customer_billing_profiles` | Who the customers are, with tax details and personal data |
 | `subscriptions`, `subscription_items` | What each customer is billed for |
-| `plans`, `meters`, `plan_prices`, `plan_price_versions`, `customer_price_overrides` | Prices, with each price's past rates and each customer's negotiated rates. Invoice amounts depend on them. |
+| `plans`, `meters`, `plan_prices`, `plan_price_versions`, `customer_price_overrides` (and, for test clocks, `plan_price_version_clocks`) | Prices, with each price's past rates and each customer's negotiated rates. Invoice amounts depend on them. |
 | `invoices`, `invoice_line_items` | Issued invoices: a financial record |
 | `credit_notes`, `credit_note_line_items` | Refunds and adjustments: a financial record |
 | `customer_credit_ledger` | Customer credit balances. Every entry is needed to work out a balance. |

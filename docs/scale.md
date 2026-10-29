@@ -13,13 +13,15 @@ tokens on one model.
    32 GB memory), with 10 events in each request. It passed all five
    10-minute runs.
 2. **12,000 events per second** on a larger one (`db.m7g.4xlarge`, 64 GB
-   memory), with 10 events in each request. It passed all five runs after one
-   Postgres setting change ([WAL pool size](failure-modes/rfm-001-wal-pool-exhaustion.md)),
-   and four of five without it.
-3. After one Hardcount fix ([#818](https://github.com/gethardcount/hardcount/issues/818)),
-   the database was the limit every time: first its memory, then how fast
-   its disk could write. The Hardcount process was never short of CPU. Need
-   more? See [If you need more](#if-you-need-more).
+   memory), with 10 events in each request. With stock Postgres settings it
+   passed four of five runs in one series and five of five in another. Sizing
+   the [WAL pool](failure-modes/rfm-001-wal-pool-exhaustion.md) took out the
+   latency spikes: the worst 10-second p99 fell from 177 ms to 52 ms.
+3. Apart from one Hardcount bottleneck, fixed in
+   [#818](https://github.com/gethardcount/hardcount/issues/818), the database
+   was the limit every time: its memory on the smaller machine, and how fast
+   its disk could write on the larger one. The Hardcount process was never
+   short of CPU. Need more? See [If you need more](#if-you-need-more).
 
 ## What one small server handles
 
@@ -30,7 +32,8 @@ The server was a Hetzner CX23: 2 shared vCPU, 4 GB memory and a 40 GB disk.
 Its list price was €6.49 a month before VAT, checked on 2026-10-17
 ([Hetzner cloud prices](https://www.hetzner.com/cloud/)). It ran the whole
 stack from [Run Hardcount in production on one VM](production-one-vm.md), with the
-published v0.8.0 images and stock Postgres 16 settings. A second server in the
+published Velox v0.8.0 images (Hardcount's name before v0.9.0) and stock
+Postgres 16 settings. A second server in the
 same data center sent the load through Caddy, over plain HTTP.
 
 | What | Result |
