@@ -11,9 +11,11 @@ import { api, formatDate, formatDateTime, getTenantTimezone, type TestClock } fr
 import { applyApiError, showApiError } from '@/lib/formErrors'
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz'
 import { Layout } from '@/components/Layout'
+import { cn } from '@/lib/utils'
 import { statusBadgeVariant } from '@/lib/status'
 import { EmptyState } from '@/components/EmptyState'
 import { CardListSkeleton } from '@/components/ui/TableSkeleton'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
 import { LoadError } from '@/components/LoadError'
 import { Badge } from '@/components/ui/badge'
@@ -31,6 +33,11 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useNavigate } from 'react-router-dom'
 import { useEffect } from 'react'
 import { Plus, Clock as ClockIcon, Loader2 } from 'lucide-react'
+
+// The list standard (UI plan 1.4): 12 px muted headers on a row shorter than
+// the data rows, and rows tall enough to tap on a phone (1.14).
+const HEAD = 'h-9 text-xs font-medium text-muted-foreground'
+const ROW = 'h-11'
 
 const createSchema = z.object({
   name: z.string().max(200, 'Name must be at most 200 characters').optional(),
@@ -76,7 +83,7 @@ export default function TestClocksPage() {
     <Layout>
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-foreground">Test Clocks</h1>
+          <h1 className="text-2xl font-semibold text-foreground">Test clocks</h1>
           <p className="text-sm text-muted-foreground mt-1">
             A pretend clock for test customers, so you can see months of billing in minutes.
             Test mode only.
@@ -114,33 +121,42 @@ export default function TestClocksPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className="mt-6 space-y-3">
-          {clocks.map(c => (
-            <Link key={c.id} to={`/test-clocks/${c.id}`} className="block">
-              <Card className="hover:bg-accent/30 transition-colors">
-                <CardContent className="px-6 py-4 flex items-center gap-4">
-                  <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-                    <ClockIcon size={16} className="text-primary" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-medium text-foreground truncate">
+        // One row per clock (UI plan 4.24): the name opens the clock.
+        <Card className="mt-6">
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className={HEAD}>Name</TableHead>
+                  <TableHead className={HEAD}>Simulated time</TableHead>
+                  <TableHead className={HEAD}>Status</TableHead>
+                  <TableHead className={cn(HEAD, "hidden md:table-cell")}>Created</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {clocks.map(c => (
+                  <TableRow
+                    key={c.id}
+                    className={cn(ROW, 'cursor-pointer hover:bg-muted/50 transition-colors')}
+                    onClick={(e) => {
+                      if ((e.target as HTMLElement).closest('a, button')) return
+                      navigate(`/test-clocks/${c.id}`)
+                    }}
+                  >
+                    <TableCell>
+                      <Link to={`/test-clocks/${c.id}`} className="text-sm font-medium text-foreground hover:text-primary transition-colors">
                         {c.name || 'Unnamed clock'}
-                      </p>
-                      {statusBadge(c.status)}
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      Clock time: <span className="font-mono">{formatDateTime(c.frozen_time)}</span>
-                    </p>
-                  </div>
-                  <p className="text-xs text-muted-foreground shrink-0">
-                    Created {formatDate(c.created_at)}
-                  </p>
-                </CardContent>
-              </Card>
-            </Link>
-          ))}
-        </div>
+                      </Link>
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{formatDateTime(c.frozen_time)}</TableCell>
+                    <TableCell>{statusBadge(c.status)}</TableCell>
+                    <TableCell className="hidden md:table-cell text-sm text-muted-foreground">{formatDate(c.created_at)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
       )}
 
       {showCreate && <CreateClockDialog onClose={() => setShowCreate(false)} />}

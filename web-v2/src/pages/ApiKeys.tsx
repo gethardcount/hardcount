@@ -6,12 +6,13 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { toast } from 'sonner'
 import { api, formatDate, type ApiKeyInfo } from '@/lib/api'
-import { timeAgo, sinceMs, untilMs, wallClockNow, type EffectiveNow } from '@/lib/effectiveNow'
+import { timeAgo, sinceMs, untilMs, daysUntil, wallClockNow, type EffectiveNow } from '@/lib/effectiveNow'
 import { addDaysInTZ, endOfDayInTZ, formatExpiryHintInTZ } from '@/lib/dates'
 import { applyApiError, showApiError } from '@/lib/formErrors'
-import { ExpiryBadge } from '@/components/ExpiryBadge'
+import { StatusBadge } from '@/components/StatusBadge'
+import { NoticeRow } from '@/components/NoticeRow'
+import type { StatusDisplay } from '@/lib/statusLabels'
 import { Layout } from '@/components/Layout'
-import { statusBadgeVariant } from '@/lib/status'
 import { cn } from '@/lib/utils'
 
 import { Button } from '@/components/ui/button'
@@ -19,7 +20,6 @@ import { LoadError } from '@/components/LoadError'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { DatePicker } from '@/components/ui/date-picker'
-import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import {
   Dialog,
@@ -49,9 +49,18 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { CardListSkeleton } from '@/components/ui/TableSkeleton'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 
-import { Plus, Key, Shield, ChevronDown, Loader2, Clock, RotateCw } from 'lucide-react'
+import { Plus, Key, Shield, ChevronDown, Loader2, RotateCw, MoreHorizontal } from 'lucide-react'
 import { EmptyState } from '@/components/EmptyState'
+
+// The list standard (UI plan 1.4): 12 px muted headers on a row shorter than
+// the data rows, and rows tall enough to tap on a phone (1.14).
+const HEAD = 'h-9 text-xs font-medium text-muted-foreground'
+const ROW = 'h-11'
 
 const createApiKeySchema = z.object({
   name: z.string().min(1, 'Name is required'),
@@ -68,13 +77,6 @@ function relativeTime(dateStr: string, now: EffectiveNow): string {
   return formatDate(dateStr)
 }
 
-function keyTypeVariant(type: string): 'default' | 'secondary' | 'outline' {
-  switch (type) {
-    case 'secret': return 'secondary'
-    default: return 'outline'
-  }
-}
-
 // Human label for a key type — the raw enum ("secret") is a backend
 // identifier, not operator copy.
 function keyTypeLabel(type: string): string {
@@ -89,6 +91,25 @@ function isExpired(key: ApiKeyInfo): boolean {
   return !!key.expires_at && untilMs(key.expires_at, wallClockNow()) < 0
 }
 
+// keyStatus is the one status word a key shows: Active, a warning in the
+// last week before it expires, Expired or Revoked.
+function keyStatus(key: ApiKeyInfo): StatusDisplay {
+  if (key.revoked_at) return { label: 'Revoked', tone: 'neutral' }
+  if (isExpired(key)) return { label: 'Expired', tone: 'neutral' }
+  if (key.expires_at) {
+    const days = daysUntil(key.expires_at, wallClockNow())
+    if (days <= 7) return { label: days === 0 ? 'Expires today' : `Expires in ${days} day${days === 1 ? '' : 's'}`, tone: 'warning' }
+  }
+  return { label: 'Active', tone: 'success' }
+}
+
+function inactiveLabel(expired: number, revoked: number): string {
+  const parts: string[] = []
+  if (expired > 0) parts.push(`${expired} expired`)
+  if (revoked > 0) parts.push(`${revoked} revoked`)
+  return `${parts.join(' and ')} key${expired + revoked === 1 ? '' : 's'}`
+}
+
 export default function ApiKeysPage() {
   usePageTitle('API keys')
   const [showCreate, setShowCreate] = useState(false)
@@ -96,8 +117,7 @@ export default function ApiKeysPage() {
   const [revokeTarget, setRevokeTarget] = useState<ApiKeyInfo | null>(null)
   const [revoking, setRevoking] = useState(false)
   const [rotateTarget, setRotateTarget] = useState<ApiKeyInfo | null>(null)
-  const [showRevoked, setShowRevoked] = useState(false)
-  const [showExpired, setShowExpired] = useState(false)
+  const [showInactive, setShowInactive] = useState(false)
   const queryClient = useQueryClient()
 
   // Tenant timezone for displaying expires_at — see CreateKeyDialog
@@ -149,6 +169,17 @@ export default function ApiKeysPage() {
         </Button>
       </div>
 
+      {/* Said once for every key, not on each row. */}
+      {keys.length > 0 && (
+        <NoticeRow
+          className="mt-4"
+          icon={Shield}
+          title="Keep secret keys on your server"
+        >
+          A secret key has full access. Never put one in browser or mobile app code.
+        </NoticeRow>
+      )}
+
       {loadError ? (
         <Card className="mt-6">
           <CardContent className="p-0">
@@ -176,132 +207,79 @@ export default function ApiKeysPage() {
         </Card>
       ) : (
         <>
-          {/* Active keys. Per ADR-011 dashboard sessions are user-bound,
-              not key-bound — there's no "current session key" concept on
-              this page anymore, so Revoke is always enabled (server still
-              enforces tier-level permissions). */}
-          <div className="mt-6 space-y-3">
-            {activeKeys.map(k => (
-              <Card key={k.id}>
-                <CardContent className="px-6 py-4">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-start gap-3">
-                      <div className={cn(
-                        'w-9 h-9 rounded-lg flex items-center justify-center shrink-0 mt-0.5',
-                        k.key_type === 'secret' ? 'bg-primary/10' : 'bg-blue-50 dark:bg-blue-500/10'
-                      )}>
-                        {k.key_type === 'secret'
-                          ? <Shield size={16} className="text-primary" />
-                          : <Key size={16} className="text-blue-500" />}
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <p className="text-sm font-medium text-foreground">{k.name}</p>
-                          <ExpiryBadge expiresAt={k.expires_at} now={wallClockNow()} />
-                        </div>
-                        <code className="text-xs font-mono text-muted-foreground bg-muted px-2 py-0.5 rounded mt-1 inline-block">
-                          {k.key_prefix}--------
-                        </code>
-                        <div className="flex items-center gap-4 mt-2">
-                          <Badge variant={keyTypeVariant(k.key_type)}>{keyTypeLabel(k.key_type)}</Badge>
-                          <span className="text-xs text-muted-foreground">Created {relativeTime(k.created_at, wallClockNow())}</span>
-                          <span className="text-xs text-muted-foreground">
-                            {k.last_used_at ? `Last used ${relativeTime(k.last_used_at, wallClockNow())}` : 'Never used'}
-                          </span>
-                          {k.expires_at && (
-                            <span className="text-xs text-muted-foreground flex items-center gap-1">
-                              <Clock size={11} />
-                              Expires {formatDate(k.expires_at, tenantTZ)}
-                            </span>
+          {/* One row per key (UI plan 4.22): the type, the key's start, its
+              status and dates, and the actions in the row's menu. Per
+              ADR-011 dashboard sessions are user-bound, not key-bound, so
+              every active key can be revoked (the server still enforces
+              permissions). */}
+          <Card className="mt-6">
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className={HEAD}>Name</TableHead>
+                    <TableHead className={cn(HEAD, "hidden md:table-cell")}>Type</TableHead>
+                    <TableHead className={cn(HEAD, "hidden md:table-cell")}>Key</TableHead>
+                    <TableHead className={HEAD}>Status</TableHead>
+                    <TableHead className={cn(HEAD, "hidden md:table-cell")}>Expires</TableHead>
+                    <TableHead className={cn(HEAD, "hidden md:table-cell")}>Last used</TableHead>
+                    <TableHead className={cn(HEAD, "w-12")}><span className="sr-only">Actions</span></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {[...activeKeys, ...(showInactive ? [...expiredKeys, ...revokedKeys] : [])].map(k => {
+                    const revoked = !!k.revoked_at
+                    const expired = !revoked && isExpired(k)
+                    return (
+                      <TableRow key={k.id} className={cn(ROW, (revoked || expired) && 'text-muted-foreground')}>
+                        <TableCell className={cn('text-sm font-medium', revoked || expired ? 'text-muted-foreground' : 'text-foreground')}>
+                          {k.name}
+                        </TableCell>
+                        <TableCell className="hidden md:table-cell text-sm text-muted-foreground">{keyTypeLabel(k.key_type)}</TableCell>
+                        <TableCell className="hidden md:table-cell">
+                          <code className="text-xs font-mono text-muted-foreground">{k.key_prefix}…</code>
+                        </TableCell>
+                        <TableCell><StatusBadge status={keyStatus(k)} /></TableCell>
+                        <TableCell className="hidden md:table-cell text-sm text-muted-foreground">
+                          {k.expires_at ? formatDate(k.expires_at, tenantTZ) : 'Never'}
+                        </TableCell>
+                        <TableCell className="hidden md:table-cell text-sm text-muted-foreground">
+                          {k.last_used_at ? relativeTime(k.last_used_at, wallClockNow()) : 'Never'}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {!revoked && (
+                            <DropdownMenu>
+                              <DropdownMenuTrigger render={<Button variant="ghost" size="icon" className="size-10 md:size-8" aria-label={`Actions for ${k.name}`} />}>
+                                <MoreHorizontal size={16} />
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-40">
+                                {!expired && (
+                                  <DropdownMenuItem onClick={() => setRotateTarget(k)}>
+                                    <RotateCw size={14} className="mr-2" />
+                                    Rotate
+                                  </DropdownMenuItem>
+                                )}
+                                <DropdownMenuItem onClick={() => setRevokeTarget(k)} className="text-destructive focus:text-destructive">
+                                  Revoke
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           )}
-                        </div>
-                        <p className="text-xs text-muted-foreground mt-1.5">
-                          {k.key_type === 'secret'
-                            ? 'Full access. Keep it on your server; never put it in browser or mobile app code.'
-                            : 'Manages accounts across this Hardcount server. Keep it on your server.'}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <Button variant="outline" size="sm" onClick={() => setRotateTarget(k)}>
-                        <RotateCw size={14} className="mr-1.5" />
-                        Rotate
-                      </Button>
-                      <Button variant="outline" size="sm"
-                        className="text-destructive hover:text-destructive"
-                        onClick={() => setRevokeTarget(k)}>
-                        Revoke
-                      </Button>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
 
-          {/* Expired keys */}
-          {expiredKeys.length > 0 && (
-            <div className="mt-6">
-              <button onClick={() => setShowExpired(!showExpired)}
-                className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
-                <ChevronDown size={14} className={cn('transition-transform', showExpired && 'rotate-180')} />
-                {expiredKeys.length} expired key{expiredKeys.length !== 1 ? 's' : ''}
-              </button>
-              {showExpired && (
-                <div className="mt-3 space-y-2">
-                  {expiredKeys.map(k => (
-                    <Card key={k.id} className="opacity-60">
-                      <CardContent className="px-6 py-3">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <p className="text-sm text-muted-foreground">{k.name}</p>
-                            <code className="text-xs font-mono text-muted-foreground">{k.key_prefix}----</code>
-                            <Badge variant={statusBadgeVariant('expired')}>expired</Badge>
-                            <span className="text-xs text-muted-foreground">
-                              Expired {k.expires_at ? relativeTime(k.expires_at, wallClockNow()) : ''}
-                            </span>
-                          </div>
-                          <Button variant="outline" size="sm"
-                            className="shrink-0 text-destructive hover:text-destructive"
-                            onClick={() => setRevokeTarget(k)}>
-                            Revoke
-                          </Button>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Revoked keys */}
-          {revokedKeys.length > 0 && (
-            <div className="mt-6">
-              <button onClick={() => setShowRevoked(!showRevoked)}
-                className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
-                <ChevronDown size={14} className={cn('transition-transform', showRevoked && 'rotate-180')} />
-                {revokedKeys.length} revoked key{revokedKeys.length !== 1 ? 's' : ''}
-              </button>
-              {showRevoked && (
-                <div className="mt-3 space-y-2">
-                  {revokedKeys.map(k => (
-                    <Card key={k.id} className="opacity-60">
-                      <CardContent className="px-6 py-3">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <p className="text-sm text-muted-foreground line-through">{k.name}</p>
-                            <code className="text-xs font-mono text-muted-foreground">{k.key_prefix}----</code>
-                            <Badge variant="destructive">revoked</Badge>
-                          </div>
-                          <span className="text-xs text-muted-foreground">Revoked {k.revoked_at ? relativeTime(k.revoked_at, wallClockNow()) : ''}</span>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              )}
-            </div>
+          {expiredKeys.length + revokedKeys.length > 0 && (
+            <button onClick={() => setShowInactive(!showInactive)}
+              className="mt-3 flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
+              <ChevronDown size={14} className={cn('transition-transform', showInactive && 'rotate-180')} />
+              {showInactive ? 'Hide' : 'Show'} {inactiveLabel(expiredKeys.length, revokedKeys.length)}
+            </button>
           )}
         </>
       )}
