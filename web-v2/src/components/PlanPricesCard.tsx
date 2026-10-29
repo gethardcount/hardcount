@@ -1,11 +1,12 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Loader2, Pencil, Plus, Trash2 } from 'lucide-react'
 import { api, type Meter, type PlanDetail, type PlanPrice, type PriceWrite } from '@/lib/api'
 import { showApiError } from '@/lib/formErrors'
-import { priceRate } from '@/lib/priceDisplay'
+import { money, priceRate, unitScale } from '@/lib/priceDisplay'
+import { buildRateCard, rowMatches } from '@/lib/rateCard'
 import { planPricesNotice, priceRemoveSentence, priceWriteToast } from '@/lib/pricingCopy'
 import { PriceShapeFields, buildPriceShape, usePriceShape } from '@/components/PriceShapeFields'
 import { Combobox } from '@/components/Combobox'
@@ -13,6 +14,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
@@ -21,6 +23,11 @@ import {
 // removes them. When a change applies is said before the operator saves:
 // at once on a plan no one has used, from each subscriber's next period
 // otherwise.
+//
+// A meter whose prices fit a grid reads as a rate card (lib/rateCard): an AI
+// plan's 125 prices are one row per model with a column per token type,
+// about 30 rows instead of 125 blocks. Other prices keep one row each. A
+// search box appears once there are more prices than a glance takes in.
 
 export function Labels({ match }: { match: Record<string, string> }) {
   const entries = Object.entries(match ?? {})
@@ -41,7 +48,20 @@ export function PlanPricesCard({ plan, meters }: { plan: PlanDetail; meters: Met
   const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState<PlanPrice | null>(null)
   const [removing, setRemoving] = useState<PlanPrice | null>(null)
+  const [query, setQuery] = useState('')
   const meterOf = (id: string) => meters.find(m => m.id === id)
+  // Prices grouped by meter, in the plan's order.
+  const groups = useMemo(() => {
+    const out: { meterId: string; prices: PlanPrice[] }[] = []
+    for (const p of plan.prices) {
+      const g = out.find(x => x.meterId === p.meter_id)
+      if (g) g.prices.push(p)
+      else out.push({ meterId: p.meter_id, prices: [p] })
+    }
+    return out
+  }, [plan.prices])
+  const searchable = plan.prices.length > 8
+  const q = searchable ? query : ''
 
   const saved = (w: PriceWrite) => {
     queryClient.invalidateQueries({ queryKey: ['plan', plan.id] })
@@ -54,41 +74,64 @@ export function PlanPricesCard({ plan, meters }: { plan: PlanDetail; meters: Met
       <CardHeader>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <CardTitle className="text-sm">Usage prices ({plan.prices.length})</CardTitle>
-          <Button size="sm" onClick={() => setAdding(true)} disabled={meters.length === 0}>
-            <Plus size={14} className="mr-1.5" />
-            Add price
-          </Button>
+          <div className="flex items-center gap-2">
+            {searchable && (
+              <Input
+                type="search"
+                aria-label="Search prices"
+                placeholder="Search model or label…"
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                className="h-8 w-48 sm:w-56"
+              />
+            )}
+            <Button size="sm" onClick={() => setAdding(true)} disabled={meters.length === 0}>
+              <Plus size={14} className="mr-1.5" />
+              Add price
+            </Button>
+          </div>
         </div>
         <p className="text-xs text-muted-foreground mt-1" data-testid="plan-prices-notice">{planPricesNotice(plan.used)}</p>
       </CardHeader>
       <CardContent className="p-0">
         {plan.prices.length > 0 ? (
-          <div className="divide-y divide-border border-t border-border">
-            {plan.prices.map(p => {
-              const m = meterOf(p.meter_id)
+          <div className="border-t border-border">
+            {groups.map(g => {
+              const m = meterOf(g.meterId)
+              const card = buildRateCard(g.prices)
+              if (card) return <RateCardTable key={g.meterId} card={card} meter={m} meterId={g.meterId} currency={plan.currency} query={q} onEdit={setEditing} />
+              const shown = g.prices.filter(p => rowMatches(p.dimension_match ?? {}, m?.name ?? '', q))
+              if (shown.length === 0) return null
               return (
-                <div key={p.id} data-testid="plan-price-row" className="flex items-start justify-between gap-3 px-6 py-3">
-                  <div className="min-w-0 space-y-1">
-                    <p className="flex flex-wrap items-baseline gap-x-2">
-                      <Link to={`/meters/${p.meter_id}`} className="text-sm font-medium text-foreground hover:text-primary transition-colors">
-                        {m?.name ?? p.meter_id}
-                      </Link>
-                      {m && <span className="text-xs text-muted-foreground font-mono">{m.event_name}</span>}
-                    </p>
-                    <Labels match={p.dimension_match} />
-                    <p className="text-sm text-foreground">{priceRate({ ...p, currency: plan.currency }, m?.unit ?? '')}</p>
-                  </div>
-                  <div className="flex shrink-0 items-center">
-                    <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" aria-label="Edit price" onClick={() => setEditing(p)}>
-                      <Pencil size={14} />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" aria-label="Remove price" onClick={() => setRemoving(p)}>
-                      <Trash2 size={14} />
-                    </Button>
-                  </div>
+                <div key={g.meterId} className="divide-y divide-border border-b border-border last:border-b-0">
+                  {shown.map(p => (
+                    <div key={p.id} data-testid="plan-price-row" className="flex items-start justify-between gap-3 px-6 py-3">
+                      <div className="min-w-0 space-y-1">
+                        <p className="flex flex-wrap items-baseline gap-x-2">
+                          <Link to={`/meters/${p.meter_id}`} className="text-sm font-medium text-foreground hover:text-primary transition-colors">
+                            {m?.name ?? p.meter_id}
+                          </Link>
+                          {m && <span className="text-xs text-muted-foreground font-mono">{m.event_name}</span>}
+                        </p>
+                        <Labels match={p.dimension_match} />
+                        <p className="text-sm text-foreground">{priceRate({ ...p, currency: plan.currency }, m?.unit ?? '')}</p>
+                      </div>
+                      <div className="flex shrink-0 items-center">
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" aria-label="Edit price" onClick={() => setEditing(p)}>
+                          <Pencil size={14} />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" aria-label="Remove price" onClick={() => setRemoving(p)}>
+                          <Trash2 size={14} />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )
             })}
+            {q && !plan.prices.some(p => rowMatches(p.dimension_match ?? {}, meterOf(p.meter_id)?.name ?? '', q)) && (
+              <p className="text-sm text-muted-foreground text-center py-8 px-6">No price matches "{q}".</p>
+            )}
           </div>
         ) : (
           <p className="text-sm text-muted-foreground text-center py-8 px-6">
@@ -103,12 +146,87 @@ export function PlanPricesCard({ plan, meters }: { plan: PlanDetail; meters: Met
         <AddPriceDialog plan={plan} meters={meters} onClose={() => setAdding(false)} onSaved={(w) => { setAdding(false); saved(w) }} />
       )}
       {editing && (
-        <EditPriceDialog plan={plan} price={editing} meter={meterOf(editing.meter_id)} onClose={() => setEditing(null)} onSaved={(w) => { setEditing(null); saved(w) }} />
+        <EditPriceDialog plan={plan} price={editing} meter={meterOf(editing.meter_id)} onClose={() => setEditing(null)} onSaved={(w) => { setEditing(null); saved(w) }}
+          onRemove={() => { setRemoving(editing); setEditing(null) }} />
       )}
       {removing && (
         <RemovePriceDialog plan={plan} price={removing} meter={meterOf(removing.meter_id)} onClose={() => setRemoving(null)} onRemoved={(w) => { setRemoving(null); saved(w) }} />
       )}
     </Card>
+  )
+}
+
+// RateCardTable is one meter's prices as a grid: the row labels in one
+// column (the first label as the name, any other as a small tag, so a label
+// few rows carry does not cost a column of dashes), then one column per value
+// of the column label. The label column stays put while a phone scrolls the
+// prices sideways. A cell is the per-unit rate in the
+// meter's display unit (per 1M tokens for tokens); clicking it opens the
+// price, where it can be changed or removed. An empty cell has no price.
+function RateCardTable({ card, meter, meterId, currency, query, onEdit }: {
+  card: NonNullable<ReturnType<typeof buildRateCard<PlanPrice>>>
+  meter?: Meter
+  meterId: string
+  currency: string
+  query: string
+  onEdit: (p: PlanPrice) => void
+}) {
+  const { scale, per } = unitScale(meter?.unit ?? '')
+  const rows = card.rows.filter(r => rowMatches(r.labels, meter?.name ?? '', query))
+  if (rows.length === 0) return null
+  return (
+    <div data-testid="plan-rate-card" className="border-b border-border last:border-b-0">
+      <p className="flex flex-wrap items-baseline gap-x-2 px-6 pt-3 pb-2">
+        <Link to={`/meters/${meterId}`} className="text-sm font-medium text-foreground hover:text-primary transition-colors">
+          {meter?.name ?? meterId}
+        </Link>
+        {meter && <span className="text-xs text-muted-foreground font-mono">{meter.event_name}</span>}
+        <span className="text-xs text-muted-foreground">
+          Price per {per}, by {card.columnKey}. Select a price to change or remove it.
+        </span>
+      </p>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="sticky left-0 z-10 bg-card px-3 sm:px-6 font-mono text-xs">{card.rowKeys[0] ?? ''}</TableHead>
+            {card.columns.map(c => <TableHead key={c} className="text-right font-mono text-xs">{c}</TableHead>)}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map(r => (
+            <TableRow key={JSON.stringify(r.labels)}>
+              {/* On a phone the pinned column is capped and its tags wrap, so the
+                  prices have room to scroll into view beside it. */}
+              <TableCell className="sticky left-0 z-10 bg-card px-3 sm:px-6 font-mono text-xs w-40 min-w-40 max-w-40 whitespace-normal sm:w-auto sm:min-w-0 sm:max-w-none sm:whitespace-nowrap">
+                {card.rowKeys[0] !== undefined && r.labels[card.rowKeys[0]]}
+                {card.rowKeys.slice(1).filter(k => r.labels[k] !== undefined).map(k => (
+                  <span key={k} className="mt-1 flex w-fit max-w-full items-center break-all rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground sm:ml-2 sm:mt-0 sm:inline-flex sm:break-normal">
+                    {k}={r.labels[k]}
+                  </span>
+                ))}
+              </TableCell>
+              {card.columns.map(c => {
+                const p = r.cells[c]
+                return (
+                  <TableCell key={c} className="text-right">
+                    {p ? (
+                      <button
+                        type="button"
+                        onClick={() => onEdit(p)}
+                        aria-label={`Change price: ${Object.entries(p.dimension_match ?? {}).map(([k, v]) => `${k}=${v}`).join(', ')}`}
+                        className="font-mono tabular-nums text-sm text-foreground hover:text-primary hover:underline underline-offset-2"
+                      >
+                        {money(p.unit_amount_cents ?? '0', scale, currency)}
+                      </button>
+                    ) : <span className="text-muted-foreground" aria-label="No price">—</span>}
+                  </TableCell>
+                )
+              })}
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
   )
 }
 
@@ -205,7 +323,7 @@ function AddPriceDialog({ plan, meters, onClose, onSaved }: { plan: PlanDetail; 
   )
 }
 
-function EditPriceDialog({ plan, price, meter, onClose, onSaved }: { plan: PlanDetail; price: PlanPrice; meter?: Meter; onClose: () => void; onSaved: (w: PriceWrite) => void }) {
+function EditPriceDialog({ plan, price, meter, onClose, onSaved, onRemove }: { plan: PlanDetail; price: PlanPrice; meter?: Meter; onClose: () => void; onSaved: (w: PriceWrite) => void; onRemove: () => void }) {
   const shape = usePriceShape(price)
   const [formError, setFormError] = useState('')
   const [saving, setSaving] = useState(false)
@@ -241,6 +359,8 @@ function EditPriceDialog({ plan, price, meter, onClose, onSaved }: { plan: PlanD
           <PriceShapeFields f={shape} currency={plan.currency} idPrefix="edit-price" />
           {formError && <p className="text-sm text-destructive">{formError}</p>}
           <DialogFooter>
+            {/* The rate card's cells have no remove icon; removing starts here. */}
+            <Button type="button" variant="ghost" className="sm:mr-auto text-destructive hover:text-destructive" onClick={onRemove}>Remove price</Button>
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
             <Button type="submit" disabled={saving}>
               {saving ? <><Loader2 size={14} className="animate-spin mr-2" /> Saving...</> : 'Save'}

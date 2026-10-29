@@ -1,6 +1,6 @@
 import { test, expect, type Locator, type Page, type Response } from '@playwright/test'
 import { api, usd, uniq } from './fixtures/api'
-import { createClock, createCustomer, createSubscription, waitForClockReady, type Plan, type TestClock } from './fixtures/seed'
+import { createClock, createCustomer, createPlan, createSubscription, waitForClockReady, type Plan, type TestClock } from './fixtures/seed'
 
 // Setting up what you sell and how you collect, through the screen: a meter,
 // a plan and the plan's price; a ready-made recipe; one customer's negotiated
@@ -647,4 +647,56 @@ test('dunning policies: create one turned off, turn it on and edit it, give it t
     // Every test shares this workspace's default: put the old one back.
     if (restoreDefault) await api('POST', `/dunning/policies/${restoreDefault}/set-default`)
   }
+})
+
+// A plan priced per model and token type reads as a rate card: one row per
+// model, a column per token type, prices per 1M tokens. A label only some
+// prices carry is a tag on the row, search narrows the rows, and a price opens
+// to change or remove it. An AI plan's 125 prices were 125 stacked blocks.
+test('a plan priced per model and token type reads as a rate card, with search', async ({ page }) => {
+  const id = uniq()
+  const plan = await createPlan()
+  const meter = await api<{ id: string; name: string }>('POST', '/meters', { event_name: `e2e_tokens_${id}`, name: `E2E Tokens ${id}`, unit: 'tokens', aggregation: 'sum' })
+  const rates: [Record<string, string>, string][] = [
+    [{ model: 'alpha', token_type: 'input' }, '0.0003'], [{ model: 'alpha', token_type: 'output' }, '0.0015'],
+    [{ model: 'beta', token_type: 'input' }, '0.0001'], [{ model: 'beta', token_type: 'output' }, '0.0005'],
+    [{ model: 'gamma', context_tier: 'long', token_type: 'input' }, '0.0006'], [{ model: 'gamma', context_tier: 'long', token_type: 'output' }, '0.003'],
+  ]
+  for (const [match, cents] of rates) {
+    await api('POST', `/plans/${plan.id}/prices`, { meter_id: meter.id, dimension_match: match, mode: 'per_unit', unit_amount_cents: cents })
+  }
+
+  await page.goto(`/plans/${plan.id}`)
+  const prices = card(page, 'Usage prices (6)')
+  const rateCard = prices.getByTestId('plan-rate-card')
+  await expect(rateCard.getByRole('columnheader')).toHaveText(['model', 'input', 'output'])
+  // 0.0003 cents a token is $3.00 per 1M tokens.
+  await expect(rateCard.getByRole('row')).toHaveText([
+    /^model\s*input\s*output$/,
+    /^alpha\s*\$3\.00\s*\$15\.00$/,
+    /^beta\s*\$1\.00\s*\$5\.00$/,
+    /^gamma\s*context_tier=long\s*\$6\.00\s*\$30\.00$/,
+  ])
+  await expect(prices.getByTestId('plan-price-row')).toHaveCount(0)
+
+  // Six prices fit at a glance, so there is no search box; the cell opens the
+  // price, which can be changed or removed from there.
+  await expect(prices.getByLabel('Search prices')).toHaveCount(0)
+  await rateCard.getByRole('button', { name: 'Change price: model=beta, token_type=output' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Change price' })
+  await expect(dialog.getByRole('button', { name: 'Remove price' })).toBeVisible()
+  await dialog.getByRole('button', { name: 'Cancel' }).click()
+
+  // More prices than a glance takes in: search narrows the rows.
+  for (const model of ['delta', 'epsilon']) {
+    for (const t of ['input', 'output']) {
+      await api('POST', `/plans/${plan.id}/prices`, { meter_id: meter.id, dimension_match: { model, token_type: t }, mode: 'per_unit', unit_amount_cents: '0.0002' })
+    }
+  }
+  await page.reload()
+  const more = card(page, 'Usage prices (10)')
+  await more.getByLabel('Search prices').fill('gam')
+  await expect(more.getByTestId('plan-rate-card').getByRole('row')).toHaveCount(2)
+  await more.getByLabel('Search prices').fill('zeta')
+  await expect(more.getByText('No price matches "zeta".')).toBeVisible()
 })

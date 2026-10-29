@@ -215,6 +215,8 @@ plan in that period. So:
   the clock first.
 
 On the dashboard, open the plan under **Pricing**. Its **Usage prices**
+card shows the prices as a rate card, one row per model with a column per
+token type, priced per 1M tokens. Select a price to change or remove it; the
 card says which of the two applies before you save.
 
 The meter's aggregation has its own rule: it can change until the meter has
