@@ -236,7 +236,9 @@ this deploy, and works for the hosted page's PaymentIntents.
   was not while the Search sweep used the column as its cool-off).
 - Not in this ADR: unclear answers with no PaymentIntent id still park when
   the caller's context is alive (follow-up B, ADR-107). A recorded off-session
-  `requires_*` PaymentIntent still never ends (follow-up C).
+  `requires_*` PaymentIntent still never ends (follow-up C; closed
+  2026-10-29 for Hardcount's own charges, which set
+  `error_on_requires_action`: see ADR-107's amendment).
 
 ## References
 

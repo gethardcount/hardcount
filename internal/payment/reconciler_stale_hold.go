@@ -241,8 +241,9 @@ func (r *Reconciler) checkStaleHold(ctx context.Context, h domain.StaleChargeHol
 			// (Checkout's cannot be canceled, only its session expired), and
 			// the hosted block already keeps charges off while a session may
 			// be paid. A PaymentIntent the invoice already records as in
-			// flight is the processing sweep's (and follow-up C's), not a lost
-			// result.
+			// flight is the processing sweep's, not a lost result. Hardcount's
+			// own charges no longer end here: they set error_on_requires_action
+			// (ADR-107 amendment 2026-10-29).
 			if pi.Purpose == PurposeHostedInvoicePay {
 				continue
 			}
