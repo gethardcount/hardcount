@@ -91,7 +91,7 @@ p99 means 99 of every 100 requests finished within that time.
 | `db.m7g.2xlarge` (32 GB) | 5,000 events/s, 100 per request | 51 ms, then 116 ms, then 9.9 s | 1 of 3 |
 | `db.m7g.4xlarge` (64 GB) | 12,000 events/s, 10 per request | 22.6 ms | 4 of 5 |
 | `db.m7g.4xlarge` (64 GB) | 15,000 events/s, 100 per request | 43.8 ms | 4 of 5 |
-| `db.m7g.4xlarge`, WAL pool sized | 12,000 events/s, 10 per request | 52 ms in the worst 10 seconds | 5 of 5 |
+| `db.m7g.4xlarge`, WAL pool sized | 12,000 events/s, 10 per request | 22.4–23.3 ms | 5 of 5 (a stock control in the same run: 5 of 5 too) |
 | `db.m7g.4xlarge`, WAL pool sized | 15,000 events/s, 100 per request | 40.2–42.8 ms | 5 of 5 |
 
 - **The 5,000 row slowed down as the table grew.** Once the table and its

@@ -128,8 +128,8 @@ whether the crash left some *other* invariant broken. Examples are an orphaned
 line item, a ledger entry without its counterpart, or a subscription whose
 period bounds no longer agree with its invoices.
 
-`hardcount-doctor` (Hardcount's invariant-checking CLI) sweeps **28 money invariants**
-as read-only SQL. After every scenario above:
+`hardcount-doctor` (Hardcount's invariant-checking CLI) swept **28 money invariants**
+at the time (32 now) as read-only SQL. After every scenario above:
 
 ```
 doctor: 28 checks, 0 violations, 0 errors, ~23ms

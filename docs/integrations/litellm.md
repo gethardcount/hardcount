@@ -188,6 +188,8 @@ Each event also carries these labels (dimensions):
   ([more](../ai-pricing.md#see-your-margin)).
 - `provider`: the provider, from LiteLLM's `custom_llm_provider`.
 - `team_id`, when the call has one in `metadata`.
+- `request_tags`, when the call has them in `metadata`: the tags, sorted
+  and joined with commas.
 
 Hardcount keeps the call ID only in the idempotency keys (`<call>`, above).
 LiteLLM's `response_cost` and the call's other metadata
@@ -337,7 +339,10 @@ at all?
 
 | Status | Meaning | What to do |
 |---|---|---|
-| 400 | The body is not valid. | Fix the request. |
+| 400 | The body is not valid JSON, or it is over 1 MB. The batch was not saved. | Fix the request. A batch over 1 MB gets this answer every time, so have LiteLLM send fewer records at once. |
+| 401 | The API key is missing, wrong, revoked or expired. The batch was not saved. | Fix the `Authorization` header. |
+| 403 | The key cannot send usage: it is a publishable or platform key. The batch was not saved. | Use a secret key. |
+| `429 rate_limited` | Too many requests. The batch was not saved. | Send the whole batch again after `Retry-After` seconds. |
 | `503 authentication_unavailable` | Hardcount could not check the API key. The batch was not saved. | Send the whole batch again. |
 | `503 ingest_unavailable` | Hardcount could not reach or write its usage store. The batch was not saved. | Send the whole batch again. |
 

@@ -92,6 +92,9 @@ the built dashboard (`vite preview`, which forwards `/v1` to the API).
   default a dunning policy.
   `invoices.spec.ts` issues, settles, corrects and closes invoices: draft to
   finalized, credit notes, an offline payment, void and write-off.
+  `dunning.spec.ts` bills a customer with no card so payment retries start,
+  closes a retry run by hand, and checks that a policy that has run cannot
+  be deleted.
 - **Activity screenshots:** `activity.spec.ts` screenshots the invoice and
   subscription Activity cards, a Dunning run and Sent emails, each on the
   real clock and on a test clock. They are for comparing a PR with main by

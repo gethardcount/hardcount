@@ -259,6 +259,11 @@ secrets.
 | `e2e` | Playwright tests against a real API and dashboard. Setup: [`web-v2/e2e/README.md`](web-v2/e2e/README.md) | `cd web-v2 && npm run test:e2e` |
 | `doc-links` | Every internal Markdown link and `#anchor` resolves. It turns red on a broken link; fix it before merging | `lychee --offline --include-fragments '**/*.md'` |
 | `doc-style` | Vale prose lint on the lines your PR adds. It comments only and never fails | `vale <changed .md files>` |
+| `pricing-shapes` | Each common way to price, billed end to end and checked to the cent, plus the expected results of each price shape. The `test` job runs these too; this job gives them a check of their own | The `go test` lines in this job in `.github/workflows/ci.yml` (needs Postgres) |
+| `migrations` | A fresh install on an empty database under three role setups, then a second run that has nothing to do. Also a backup-restore drill and an install on Postgres 14 | `scripts/ci/migrations-fresh-install.sh` (needs Docker, `psql` and `pg_restore`) |
+
+The `docker` job builds and publishes the images. It runs only on `main`
+and on release tags, after the jobs above pass.
 
 Notes on three of them:
 
