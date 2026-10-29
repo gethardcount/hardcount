@@ -2,10 +2,11 @@ import { useState } from 'react'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Pencil, Trash2, Plus, Star, AlertTriangle } from 'lucide-react'
+import { Pencil, Trash2, Plus, Star, AlertTriangle, MoreHorizontal } from 'lucide-react'
 
 import { api, type DunningPolicy, type DunningPolicyWithCount } from '@/lib/api'
 import { Layout } from '@/components/Layout'
+import { cn } from '@/lib/utils'
 import { EmptyState } from '@/components/EmptyState'
 import { LoadError } from '@/components/LoadError'
 import { FeedSkeleton } from '@/components/ui/TableSkeleton'
@@ -14,13 +15,18 @@ import { showApiError } from '@/lib/formErrors'
 import { Button } from '@/components/ui/button'
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel } from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { finalActionSummary } from '@/lib/dunningActions'
 import { newPolicyDefaultNote, retriesOffNotice, SEEDED_POLICY_NOTE } from '@/lib/dunningCoverage'
 import { Callout } from '@/components/Callout'
+import { StatusBadge } from '@/components/StatusBadge'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { parseRetryDays, retryPlanText } from '@/lib/dunningSchedule'
 import {
   Select,
@@ -36,6 +42,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+
+// The list standard (UI plan 1.4): 12 px muted headers on a row shorter than
+// the data rows, and rows tall enough to tap on a phone (1.14).
+const HEAD = 'h-9 text-xs font-medium text-muted-foreground'
+const ROW = 'h-11'
+
+// sentenceStart capitalizes a summary written to sit inside a sentence
+// ("no action") so it can start a table cell.
+function sentenceStart(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1)
+}
 
 // DunningPoliciesPage — admin surface for the campaigns model
 // (ADR-036). Operators create named policies ("Enterprise — Net 30",
@@ -155,9 +172,6 @@ export default function DunningPoliciesPage() {
         )}
 
         <Card>
-          <CardHeader>
-            <CardTitle className="text-sm">Policies ({policies.length})</CardTitle>
-          </CardHeader>
           <CardContent className="p-0">
             {isLoading && <FeedSkeleton rows={3} />}
             {!isLoading && policiesError && (
@@ -171,47 +185,69 @@ export default function DunningPoliciesPage() {
                 action={{ label: 'New policy', onClick: () => setShowCreate(true), icon: Plus }}
               />
             )}
-            <div className="divide-y divide-border">
-              {policies.map(p => (
-                <div key={p.id} className="px-6 py-4 flex items-start justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="text-sm font-medium text-foreground">{p.name || '(unnamed policy)'}</p>
-                      {p.is_default && <Badge variant="default"><Star size={10} className="mr-1" /> default</Badge>}
-                      {!p.enabled && <Badge variant="outline">disabled</Badge>}
-                      <Badge variant="outline">{p.assigned_customers} assigned</Badge>
-                    </div>
-                    <div className="mt-1 flex flex-col gap-y-1 text-xs text-muted-foreground sm:flex-row sm:flex-wrap sm:gap-x-6">
-                      <span className="text-foreground">{retryPlanText(p.retry_days)}</span>
-                      <span>On exhaustion: <span className="text-foreground">{finalActionSummary(p)}</span></span>
-                    </div>
-                    {p.seeded && (
-                      <p className="mt-2 text-xs text-muted-foreground max-w-prose">{SEEDED_POLICY_NOTE}</p>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    {!p.is_default && (
-                      <Button variant="ghost" size="sm" onClick={() => handleSetDefault(p.id)}>
-                        <Star size={14} className="mr-1" /> Make default
-                      </Button>
-                    )}
-                    {/* Icon-only actions carry the policy name in their
-                        accessible name. Without it both read as bare
-                        "button" — and on a list of N policies that gives a
-                        screen-reader user no way to tell which row's
-                        DESTRUCTIVE action they are on. */}
-                    <Button variant="ghost" size="sm" aria-label={`Edit policy ${p.name}`} onClick={() => setEditingPolicy(p)}>
-                      <Pencil size={14} />
-                    </Button>
-                    {!p.is_default && (
-                      <Button variant="ghost" size="sm" aria-label={`Delete policy ${p.name}`} onClick={() => handleDelete(p)}>
-                        <Trash2 size={14} className="text-destructive" />
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
+            {/* One row per policy; the actions are in the row's menu. */}
+            {policies.length > 0 && (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className={HEAD}>Name</TableHead>
+                    <TableHead className={cn(HEAD, "hidden md:table-cell")}>Retries</TableHead>
+                    <TableHead className={cn(HEAD, "hidden md:table-cell")}>When retries run out</TableHead>
+                    <TableHead className={cn(HEAD, "hidden md:table-cell text-right")}>Customers</TableHead>
+                    <TableHead className={HEAD}>Status</TableHead>
+                    <TableHead className={cn(HEAD, "w-12")}><span className="sr-only">Actions</span></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {policies.map(p => (
+                    <TableRow key={p.id} className={ROW}>
+                      <TableCell>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-medium text-foreground">{p.name || '(unnamed policy)'}</span>
+                          {p.is_default && <Badge variant="secondary"><Star size={10} className="mr-1" /> Default</Badge>}
+                        </div>
+                      </TableCell>
+                      <TableCell className="hidden md:table-cell text-sm text-muted-foreground">{retryPlanText(p.retry_days)}</TableCell>
+                      <TableCell className="hidden md:table-cell text-sm text-muted-foreground">{sentenceStart(finalActionSummary(p))}</TableCell>
+                      <TableCell className="hidden md:table-cell text-right text-sm text-muted-foreground tabular-nums">{p.assigned_customers}</TableCell>
+                      <TableCell>
+                        <StatusBadge status={p.enabled ? { label: 'On', tone: 'success' } : { label: 'Off', tone: 'neutral' }} />
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {/* The trigger carries the policy name, so a screen
+                            reader can tell which row's actions it opens. */}
+                        <DropdownMenu>
+                          <DropdownMenuTrigger render={<Button variant="ghost" size="icon" className="size-10 md:size-8" aria-label={`Actions for policy ${p.name}`} />}>
+                            <MoreHorizontal size={16} />
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-44">
+                            <DropdownMenuItem onClick={() => setEditingPolicy(p)}>
+                              <Pencil size={14} className="mr-2" /> Edit
+                            </DropdownMenuItem>
+                            {!p.is_default && (
+                              <DropdownMenuItem onClick={() => handleSetDefault(p.id)}>
+                                <Star size={14} className="mr-2" /> Make default
+                              </DropdownMenuItem>
+                            )}
+                            {!p.is_default && (
+                              <DropdownMenuItem onClick={() => handleDelete(p)} className="text-destructive focus:text-destructive">
+                                <Trash2 size={14} className="mr-2" /> Delete
+                              </DropdownMenuItem>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+            {/* What the seeded policy does, said once under the list. */}
+            {policies.some(p => p.seeded) && (
+              <p className="border-t border-border px-4 py-3 text-xs text-muted-foreground">
+                <span className="font-medium text-foreground">Default retries came with your account.</span> {SEEDED_POLICY_NOTE}
+              </p>
+            )}
           </CardContent>
         </Card>
       </div>

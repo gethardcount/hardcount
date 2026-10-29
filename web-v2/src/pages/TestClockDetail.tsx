@@ -206,7 +206,7 @@ export default function TestClockDetailPage() {
   if (clockQ.isLoading) {
     return (
       <Layout>
-        <DetailSkeleton to="/test-clocks" parentLabel="Test Clocks" />
+        <DetailSkeleton to="/test-clocks" parentLabel="Test clocks" />
       </Layout>
     )
   }
@@ -225,7 +225,7 @@ export default function TestClockDetailPage() {
             <CardContent className="p-8 text-center">
               <p className="text-sm text-destructive mb-3">Test clock not found</p>
               <Link to="/test-clocks">
-                <Button variant="outline" size="sm">Back to Test Clocks</Button>
+                <Button variant="outline" size="sm">Back to Test clocks</Button>
               </Link>
             </CardContent>
           )}
@@ -238,7 +238,7 @@ export default function TestClockDetailPage() {
     <Layout>
       <div>
         <Link to="/test-clocks" className="inline-flex items-center text-xs text-muted-foreground hover:text-foreground transition-colors">
-          <ChevronLeft size={14} /> Back to Test Clocks
+          <ChevronLeft size={14} /> Back to Test clocks
         </Link>
       </div>
 

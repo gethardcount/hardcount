@@ -517,12 +517,16 @@ test('dunning policies: create one turned off, turn it on and edit it, give it t
   const customer = await createCustomer()
   const policies = async () => (await api<{ data: DunningPolicy[] }>('GET', '/dunning/policies')).data
   const policy = async (policyId: string) => (await policies()).find(p => p.id === policyId)
-  // A policy's row: the innermost block holding both its name and its
-  // Edit button.
-  const policyRow = (policyName: string) => page.getByRole('main').locator('div')
+  // A policy's row in the policies table, and its cells by column:
+  // Name, Retries, When retries run out, Customers, Status, actions.
+  const policyRow = (policyName: string) => page.getByRole('main').getByRole('row')
     .filter({ has: page.getByText(policyName, { exact: true }) })
-    .filter({ has: page.getByRole('button', { name: `Edit policy ${policyName}`, exact: true }) })
-    .last()
+  const cell = (policyName: string, column: number) => policyRow(policyName).getByRole('cell').nth(column)
+  // The row's actions are in its menu.
+  const menu = async (policyName: string) => {
+    await page.getByRole('button', { name: `Actions for policy ${policyName}`, exact: true }).click()
+    return page.getByRole('menu')
+  }
   let restoreDefault: string | undefined
 
   try {
@@ -555,14 +559,14 @@ test('dunning policies: create one turned off, turn it on and edit it, give it t
       final_subscription_action: 'none', final_invoice_action: 'none',
     })
     await expect(toasts(page).getByText('Policy created', { exact: true })).toBeVisible()
-    const row = policyRow(name)
-    for (const text of ['disabled', '0 assigned', '3 retries, on day 2, 5 and 10', 'On exhaustion: no action']) {
-      await expect(row).toContainText(text)
-    }
+    await expect(cell(name, 1)).toHaveText('3 retries, on day 2, 5 and 10')
+    await expect(cell(name, 2)).toHaveText('No action')
+    await expect(cell(name, 3)).toHaveText('0')
+    await expect(cell(name, 4)).toHaveText('Off')
 
     // Turn it on with four retries: a fourth wait is a fourth retry. A
     // wait that is not whole days is refused before it is sent.
-    await row.getByRole('button', { name: `Edit policy ${name}` }).click()
+    await (await menu(name)).getByRole('menuitem', { name: 'Edit', exact: true }).click()
     const edit = page.getByRole('dialog', { name: 'Edit policy' })
     await edit.getByRole('switch').click()
     await expect(edit.getByRole('switch')).toBeChecked()
@@ -579,8 +583,8 @@ test('dunning policies: create one turned off, turn it on and edit it, give it t
     expect(await policy(created.id)).toMatchObject({
       enabled: true, is_default: false, retry_days: [2, 3, 5, 7],
     })
-    await expect(row).not.toContainText('disabled')
-    await expect(row).toContainText('4 retries, on day 2, 5, 10 and 17')
+    await expect(cell(name, 4)).toHaveText('On')
+    await expect(cell(name, 1)).toHaveText('4 retries, on day 2, 5, 10 and 17')
 
     // Give it to one customer: their page names it instead of the default.
     await page.goto(`/customers/${customer.id}`)
@@ -603,8 +607,8 @@ test('dunning policies: create one turned off, turn it on and edit it, give it t
     // why and asks nothing.
     await page.goto('/dunning-policies')
     expect((await policy(created.id))?.assigned_customers).toBe(1)
-    await expect(row).toContainText('1 assigned')
-    await row.getByRole('button', { name: `Delete policy ${name}` }).click()
+    await expect(cell(name, 3)).toHaveText('1')
+    await (await menu(name)).getByRole('menuitem', { name: 'Delete', exact: true }).click()
     await expect(toasts(page).getByText('1 customer(s) assigned — reassign them first', { exact: true })).toBeVisible()
     await expect(page.getByRole('alertdialog')).toHaveCount(0)
     expect(await policy(created.id)).toBeDefined()
@@ -613,17 +617,21 @@ test('dunning policies: create one turned off, turn it on and edit it, give it t
     const previous = (await policies()).find(p => p.is_default)
     restoreDefault = previous?.id
     const settingDefault = apiCall(page, 'POST', new RegExp(`/dunning/policies/${created.id}/set-default$`))
-    await row.getByRole('button', { name: 'Make default' }).click()
+    await (await menu(name)).getByRole('menuitem', { name: 'Make default', exact: true }).click()
     expect((await settingDefault).ok()).toBe(true)
     await expect(toasts(page).getByText('Default policy updated', { exact: true })).toBeVisible()
     expect((await policies()).filter(p => p.is_default).map(p => p.id)).toEqual([created.id])
-    await expect(row.getByText('default', { exact: true })).toBeVisible()
-    await expect(row.getByRole('button', { name: 'Make default' })).toHaveCount(0)
-    await expect(row.getByRole('button', { name: `Delete policy ${name}` })).toHaveCount(0)
+    await expect(policyRow(name).getByText('Default', { exact: true })).toBeVisible()
+    // The default can be edited, not made default again or deleted.
+    const own = await menu(name)
+    await expect(own.getByRole('menuitem', { name: 'Edit', exact: true })).toBeVisible()
+    await expect(own.getByRole('menuitem', { name: 'Make default', exact: true })).toHaveCount(0)
+    await expect(own.getByRole('menuitem', { name: 'Delete', exact: true })).toHaveCount(0)
+    await page.keyboard.press('Escape')
     if (previous?.name) {
-      const old = policyRow(previous.name)
-      await expect(old.getByText('default', { exact: true })).toHaveCount(0)
-      await expect(old.getByRole('button', { name: 'Make default' })).toBeVisible()
+      await expect(policyRow(previous.name).getByText('Default', { exact: true })).toHaveCount(0)
+      await expect((await menu(previous.name)).getByRole('menuitem', { name: 'Make default', exact: true })).toBeVisible()
+      await page.keyboard.press('Escape')
     }
   } finally {
     // Every test shares this workspace's default: put the old one back.

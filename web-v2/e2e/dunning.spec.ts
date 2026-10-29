@@ -121,7 +121,8 @@ test('a dunning policy that has run cannot be deleted, and the page says why', a
   await api('PATCH', `/customers/${customerId}`, { dunning_policy_id: '' })
 
   await page.goto('/dunning-policies')
-  await page.getByRole('button', { name: `Delete policy ${name}`, exact: true }).click()
+  await page.getByRole('button', { name: `Actions for policy ${name}`, exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Delete', exact: true }).click()
   const confirm = page.getByRole('alertdialog')
   await expect(confirm).toContainText(name)
   const deleting = page.waitForResponse(r => r.request().method() === 'DELETE' && new URL(r.url()).pathname.endsWith(`/dunning/policies/${policyId}`))
@@ -134,5 +135,5 @@ test('a dunning policy that has run cannot be deleted, and the page says why', a
   // The policy is still there.
   const left = (await api<{ data: { id: string }[] }>('GET', '/dunning/policies')).data
   expect(left.map(p => p.id)).toContain(policyId)
-  await expect(page.getByRole('button', { name: `Delete policy ${name}`, exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: `Actions for policy ${name}`, exact: true })).toBeVisible()
 })

@@ -39,8 +39,10 @@ export function retriesOffNotice(policies: PolicyLike[]): RetriesNotice | null {
 }
 
 /** Shown on the policy an account was created with, until it is edited or chosen. */
+// Shown once under the policies list, after "Default retries came with your
+// account."
 export const SEEDED_POLICY_NOTE =
-  'Created with your account. When retries run out nothing changes: the subscription keeps billing, so each new unpaid invoice is retried on its own. Choose "Pause collection" to stop that. The first enabled policy you create becomes the default instead, unless you edit this one or make it the default first.'
+  'When retries run out nothing changes: the subscription keeps billing, so each new unpaid invoice is retried on its own. Choose "Pause collection" to stop that. The first enabled policy you create becomes the default instead, unless you edit this one or make it the default first.'
 
 /**
  * What saving a new policy does to the default, shown in the create dialog
