@@ -304,7 +304,7 @@ export default function TestClockDetailPage() {
       <Card className="mt-6">
         <CardContent className="px-6 py-5">
           <div className="flex items-center gap-3">
-            <ClockIcon size={20} className="text-violet-500" />
+            <ClockIcon size={20} className="text-primary" />
             <div>
               <p className="text-xs uppercase tracking-wider text-muted-foreground">Current clock time</p>
               <p className="text-lg font-mono mt-0.5">{formatDateTime(clock.frozen_time)}</p>

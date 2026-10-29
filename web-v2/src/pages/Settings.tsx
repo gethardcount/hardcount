@@ -1000,8 +1000,8 @@ function PaymentsSection() {
   return (
     <section>
       <div className="flex items-center gap-2 mb-4">
-        <div className="w-8 h-8 rounded-lg bg-violet-50 dark:bg-violet-500/10 flex items-center justify-center">
-          <CreditCard size={16} className="text-violet-600 dark:text-violet-400" />
+        <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+          <CreditCard size={16} className="text-primary" />
         </div>
         <div className="flex-1 min-w-0">
           <h2 className="text-sm font-semibold text-foreground">Payments</h2>
