@@ -448,3 +448,30 @@ a write-off. The title stays: ADR titles are history.
 
 A caller's deadline that ends the Stripe call now parks too: its outcome is
 saved on a context detached from the caller (ADR-127, "By cause").
+
+## Amendment 2026-10-29 — engine charges set `error_on_requires_action`
+
+The open question above is settled, and the flag is set. Stripe documents what
+it raises
+([Card payments without bank authentication](https://docs.stripe.com/payments/without-card-authentication),
+"Make a payment", with the error JSON). A payment the bank wants confirmed
+fails with HTTP 402: a `card_error` with code `authentication_required` and
+decline code `authentication_not_handled`. The PaymentIntent is left in
+`requires_payment_method`. A `card_error` is a definite failure in
+`classifyStripeError`, so the invoice goes `failed` with dunning started. It is
+never `unknown`, the worse outcome this ADR would not trade for.
+
+`declineCodeOf` reads the error code `authentication_required` as the decline
+code whatever the decline code says. The customer gets the "confirm your
+payment" email, and the next dunning retry does not charge that card again
+(`domain.RetryBlock`), exactly as for the bank's own `authentication_required`
+decline. Tests: `TestCreatePaymentIntent_PaymentNeedingTheCustomerFailsAsConfirmDecline`
+replays Stripe's documented answer and checks the request carries the flag.
+The release checklist adds the live test-mode charge with `4000002500003155`
+that this ADR asked for.
+
+Sagar chose this on 2026-10-29 (#1289 panel): an off-session payment that needs
+the customer ends at once and the customer is asked to confirm, rather than
+waiting or being cancelled later. Nothing cancels a PaymentIntent: Stripe never
+leaves one waiting. ADR-127's follow-up C is closed for Hardcount's own charges.
+

@@ -984,14 +984,13 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 	// the operator's Advance on the simulated timeline — instead of sitting in
 	// `processing` until a wall-clock webhook that may never arrive in local
 	// dev. The webhook + reconciler stay idempotent backstops (SettleSucceeded
-	// skips an already-paid invoice). Genuinely-async statuses (processing /
-	// requires_action / requires_confirmation / requires_capture — delayed
-	// methods; or a non-terminal PI Stripe can return because
-	// error_on_requires_action is not set, see ADR-107) stay `processing` and
-	// await the webhook. NOT "off-session SCA": that raises the
-	// authentication_required DECLINE (a card error → definite failure,
-	// domain.IsAuthenticationRequired), it does not park a PI here — the
-	// phrase was retracted 2026-07-31.
+	// skips an already-paid invoice). A genuinely-async status (processing,
+	// for a delayed method) stays `processing` and awaits the webhook. A
+	// payment the bank wants the customer to confirm never gets here: the
+	// create sets error_on_requires_action, so Stripe answers it with the
+	// authentication_required decline (a card error → definite failure,
+	// domain.IsAuthenticationRequired) instead of a requires_action
+	// PaymentIntent no customer could reach (ADR-107 amendment 2026-10-29).
 	if result.Status == "succeeded" {
 		if serr := s.SettleSucceeded(withChargeAnchor(ctx), tenantID, inv, result.ID, inv.AmountDueCents, SourceChargeResponse); serr != nil {
 			return domain.Invoice{}, fmt.Errorf("settle succeeded inline: %w", serr)

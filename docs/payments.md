@@ -109,9 +109,6 @@ payment failures, and the gaps still open.
   recovered**, although the invoice is unpaid. If that payment then fails,
   nothing retries the invoice; collect it by hand
   ([#1289](https://github.com/gethardcount/hardcount/issues/1289)).
-- **A Hardcount charge that Stripe left waiting for the customer
-  (`requires_action`) never ends** once its result was saved. The invoice
-  stays `processing`, and dunning's final action waits on it.
 - **Collect payment still charges a card refused for good, or one whose
   bank wants the customer to confirm.** The invoice notice no longer offers
   a retry, but the invoice page's **Collect payment** reaches Stripe with

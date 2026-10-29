@@ -265,6 +265,13 @@ func isIdempotencyConflict(err error) bool {
 // that decline keeps Stripe's own message and the ordinary retry schedule,
 // as before.
 func declineCodeOf(errType, code, declineCode string) string {
+	// error_on_requires_action fails a payment the bank wants confirmed with
+	// code authentication_required and decline code
+	// authentication_not_handled. It is the same ask of the customer as the
+	// bank's own authentication_required decline, so it is read as that one.
+	if errType == string(stripe.ErrorTypeCard) && code == domain.AuthenticationRequiredCode {
+		return domain.AuthenticationRequiredCode
+	}
 	if declineCode != "" {
 		return declineCode
 	}
@@ -464,6 +471,14 @@ func (c *LiveStripeClient) CreatePaymentIntent(ctx context.Context, params Payme
 		PaymentMethod: stripe.String(params.PaymentMethodID),
 		Confirm:       stripe.Bool(true),
 		OffSession:    stripe.Bool(true),
+		// A payment the bank wants the customer to confirm fails now, as a
+		// card_error with code authentication_required, instead of waiting in
+		// requires_action: no customer can reach an off-session
+		// PaymentIntent to confirm it, so it never ended and held the
+		// invoice (ADR-107, ADR-127 follow-up C). The customer confirms on
+		// the hosted invoice page, which the decline's email links to.
+		// https://docs.stripe.com/payments/without-card-authentication
+		ErrorOnRequiresAction: stripe.Bool(true),
 		Params: stripe.Params{
 			IdempotencyKey: stripe.String(SentIdempotencyKey(params.IdempotencyKey, params.PaymentMethodID)),
 			Metadata:       metadata,
