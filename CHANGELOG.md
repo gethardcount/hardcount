@@ -21,7 +21,7 @@ original text.
 
 ### Changed
 
-- **The quickstart and its docs no longer say how long the demo takes.** The "about two minutes" guess was never measured (the demo runs in seconds). `docs/first-invoice.md` now says to read it at your release's tag, instead of linking to itself.
+- **The quickstart and its docs no longer say how long the demo takes.** The "about two minutes" guess was never measured (the demo runs in seconds). `docs/first-invoice.md` no longer says it "matches the newest code on `main`" when read at a release.
 
 ## [0.9.0] - 2026-10-28
 

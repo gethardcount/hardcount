@@ -24,10 +24,9 @@ You need:
 - `curl` and `jq` (a tool that reads JSON). On macOS: `brew install jq`.
   On Debian or Ubuntu: `sudo apt install jq`.
 
-Read this page at the same version as your Hardcount. The quick start runs
-the newest release; open this page at that release's tag (listed on the
-[releases page](https://github.com/gethardcount/hardcount/releases)) if the
-`main` copy answers a step differently.
+Read this page at the version you run. The quick start runs v0.9.0, and
+[this page as of v0.9.0](https://github.com/gethardcount/hardcount/blob/v0.9.0/docs/first-invoice.md)
+matches it. The copy on `main` can be ahead of that release.
 
 Open a terminal in the `hardcount` folder that the quick start downloaded. Save
 the address and your test API key in two variables. Every command below
