@@ -293,7 +293,7 @@ func TestPricingShapes_5_YearlyBasePlusUsage(t *testing.T) {
 	yearly, yIDs := r.shapePlan("yearly", "yearly", 120000, "in_arrears", perUnit(calls, "1", nil))
 	cust := r.customer("shape-5", "")
 	sub, p0, p1 := r.subscribe(time.Time{}, cust, yearly)
-	if !p1.Equal(p0.AddDate(1, 0, 0)) {
+	if !p1.Equal(yearAfter(p0, p0.Day())) {
 		t.Fatalf("yearly period = [%v, %v), want a year", p0, p1)
 	}
 	r.must(time.Time{}, http.MethodPut, "/v1/subscriptions/"+sub+"/billing-thresholds", map[string]any{"amount_gte": 500}, http.StatusOK)
@@ -350,7 +350,7 @@ usage "seats (units)" qty=10 amount=1000 price=seats`)
 	cust2 := r.customer("shape-5b", "")
 	feeSub, f0, f1 := r.subscribe(time.Time{}, cust2, fee)
 	useSub, u0, u1 := r.subscribe(time.Time{}, cust2, monthly)
-	if !f1.Equal(f0.AddDate(1, 0, 0)) || !u1.Equal(u0.AddDate(0, 1, 0)) {
+	if !f1.Equal(yearAfter(f0, f0.Day())) || !u1.Equal(monthAfter(u0, u0.Day())) {
 		t.Fatalf("periods: fee [%v, %v), usage [%v, %v), want a year and a month", f0, f1, u0, u1)
 	}
 	r.ingest(time.Time{}, "shape-5b", "calls", 250, recent(u0), nil)
@@ -447,7 +447,7 @@ func TestPricingShapes_8_GrandfatheredRateIsANewPlan(t *testing.T) {
 	r.ingest(between.Add(time.Minute), "shape-8a", "calls", 10, between, nil)
 	r.ingest(between.Add(time.Minute), "shape-8b", "calls", 10, between, nil)
 	r.run(b1.Add(time.Hour))
-	r.run(a1.AddDate(0, 1, 0).Add(time.Hour))
+	r.run(monthAfter(a1, a0.Day()).Add(time.Hour))
 	r.run(c1.Add(time.Hour))
 
 	nm := names(eIDs[0], "early", cIDs[0], "current")

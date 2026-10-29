@@ -14,6 +14,7 @@ import (
 
 	"github.com/shopspring/decimal"
 
+	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/testutil"
@@ -303,6 +304,22 @@ func sortedCents(m map[string]int64) []string {
 // midpoint is an instant halfway through [a, b).
 func midpoint(a, b time.Time) time.Time { return a.Add(b.Sub(a) / 2) }
 
+// monthAfter is the end of the anniversary-monthly period that starts at p,
+// for a subscription whose anchor day is anchorDay (its first period's start
+// day; the rigs' tenants bill in UTC). It is the engine's own step.
+// p.AddDate(0, 1, 0) is not: it overflows a short month (Aug 31 + 1 month =
+// Oct 1), where the engine clamps to the anchor day (ADR-055: Jul 31, Aug 31,
+// Sep 30, Oct 31).
+func monthAfter(p time.Time, anchorDay int) time.Time {
+	return domain.NextBillingPeriodEnd(p, domain.BillingTimeAnniversary, domain.BillingMonthly, time.UTC, anchorDay)
+}
+
+// yearAfter is monthAfter for a yearly period: a Feb 29 anchor ends on
+// Feb 28 the next year, where AddDate(1, 0, 0) gives Mar 1.
+func yearAfter(p time.Time, anchorDay int) time.Time {
+	return domain.NextBillingPeriodEnd(p, domain.BillingTimeAnniversary, domain.BillingYearly, time.UTC, anchorDay)
+}
+
 // recent is an instant between start and now, for usage in the open period.
 func recent(start time.Time) time.Time {
 	now := time.Now().UTC()
@@ -515,7 +532,7 @@ func TestE2E_PlanPrices_UsedPlanAppliesNextPeriod(t *testing.T) {
 	catchAll := ids[0]
 	cust := r.customer("pp-used", "")
 	sub, p0, p1 := r.subscribe(time.Time{}, cust, plan)
-	p2 := p1.AddDate(0, 1, 0)
+	p2 := monthAfter(p1, p0.Day())
 	r.ingest(time.Time{}, "pp-used", "tokens", 10, recent(p0), map[string]string{"model": "a"})
 
 	edit := r.must(time.Time{}, http.MethodPatch, "/v1/plans/"+plan+"/prices/"+catchAll, map[string]any{"mode": "per_unit", "unit_amount_cents": "2"}, http.StatusOK)
@@ -572,7 +589,7 @@ func TestE2E_PlanPrices_RemovalEndsOverrides(t *testing.T) {
 	plan, ids := r.plan("pro", perUnit(calls, "10", nil))
 	cust := r.customer("pp-ro", "")
 	sub, p0, p1 := r.subscribe(time.Time{}, cust, plan)
-	p2 := p1.AddDate(0, 1, 0)
+	p2 := monthAfter(p1, p0.Day())
 	o := r.must(time.Time{}, http.MethodPost, "/v1/price-overrides", map[string]any{
 		"customer_id": cust, "price_id": ids[0], "mode": "per_unit", "unit_amount_cents": "4", "reason": "negotiated",
 	}, http.StatusCreated)
@@ -616,7 +633,7 @@ func TestE2E_PlanPrices_OverrideFromTheNextPeriod(t *testing.T) {
 	plan, ids := r.plan("pro", perUnit(calls, "10", nil))
 	cust := r.customer("pp-onp", "")
 	sub, p0, p1 := r.subscribe(time.Time{}, cust, plan)
-	p2 := p1.AddDate(0, 1, 0)
+	p2 := monthAfter(p1, p0.Day())
 	r.must(time.Time{}, http.MethodPost, "/v1/price-overrides", map[string]any{
 		"customer_id": cust, "price_id": ids[0], "mode": "per_unit", "unit_amount_cents": "4",
 	}, http.StatusCreated)
