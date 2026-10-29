@@ -598,370 +598,555 @@ export default function CustomerDetailPage() {
         </CardContent>
       </Card>
 
-      {/* Details */}
-      <Card className="mt-6">
-        <CardHeader>
-          <CardTitle className="text-sm">Details</CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          <div className="divide-y divide-border">
-            <DetailRow label="External ID">
-              <span className="min-w-0 font-mono">{customer.external_id}</span>
-              {/* external_id is the identifier operators paste into
-                  API calls and support threads — same copy affordance
-                  as the internal ID below. */}
-              <CopyButton text={customer.external_id} />
-            </DetailRow>
-            <DetailRow label="Email">
-              <span className="min-w-0">{customer.email || '—'}</span>
-              {customer.email_status === 'bounced' && customer.email_last_bounced_at && (
-                <Badge variant="destructive" className="text-xs" title={customer.email_bounce_reason || 'Permanent delivery failure'}>
-                  Bounced · {formatDate(customer.email_last_bounced_at)}
-                </Badge>
-              )}
-            </DetailRow>
-            <DetailRow label="Status">
-              <StatusBadge status={genericStatus(customer.status)} />
-            </DetailRow>
-            <DetailRow label="Created">{formatDateTime(customer.created_at)}</DetailRow>
-            <DetailRow label="ID">
-              <span className="min-w-0 font-mono">{customer.id}</span>
-              <CopyButton text={customer.id} />
-            </DetailRow>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Billing profile */}
-      <Card className="mt-6">
-        {profileCard === 'profile' && billingProfile ? (
-          <>
+      {/* Two columns on a wide screen (L-02): what the customer pays for and
+          owes on the left, their account on the right with the payment method
+          first, since a missing card stops renewals. One column on a phone, in
+          the same order: payment method, then the main column, then the rest.
+          The page was 14 cards in one 3,460 px column, the card ninth. */}
+      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3 lg:grid-rows-[auto_1fr] lg:items-start">
+        <div className="min-w-0 space-y-6 lg:col-start-3 lg:row-start-1">
+          {/* Payment methods — multi-card operator panel.
+              Industry-standard surface (Stripe, Chargebee, Recurly, Lago,
+              Orb): operator can list, set-default, detach. Card capture
+              happens browser → Stripe.js → Stripe via the setup-session
+              URL — operator never touches PAN, tenant stays in PCI SAQ-A.
+              The "Send setup link" button mints a Stripe Checkout URL
+              the operator copies and hands to the customer. */}
+          <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
-                <CardTitle className="text-sm">Billing profile</CardTitle>
+                <CardTitle className="text-sm">Payment methods</CardTitle>
                 {!isArchived && (
-                  <Button variant="outline" size="sm" onClick={() => setShowEditBilling(true)}>
-                    <Pencil size={12} className="mr-1.5" />
-                    Edit
+                  <Button size="sm" onClick={() => setSetupLinkDialogOpen(true)}>
+                    Add payment method
                   </Button>
                 )}
               </div>
             </CardHeader>
-            <CardContent className="space-y-6">
-              {/* Contact */}
-              <section>
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-3">Contact</p>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
-                  <div>
-                    <p className="text-xs text-muted-foreground">Legal name</p>
-                    <p className="text-sm text-foreground mt-1">{billingProfile.legal_name || '—'}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">Phone</p>
-                    <p className="text-sm text-foreground mt-1">{billingProfile.phone || '—'}</p>
-                  </div>
-                </div>
-              </section>
-
-              <Separator />
-
-              {/* Address */}
-              <section>
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-3">Address</p>
-                {billingProfile.address_line1 || billingProfile.city || billingProfile.country ? (
-                  <div className="text-sm text-foreground leading-relaxed">
-                    {billingProfile.address_line1 && <p>{billingProfile.address_line1}</p>}
-                    {billingProfile.address_line2 && <p>{billingProfile.address_line2}</p>}
-                    {(billingProfile.city || billingProfile.state || billingProfile.postal_code) && (
-                      <p>
-                        {[billingProfile.city, billingProfile.state].filter(Boolean).join(', ')}
-                        {billingProfile.postal_code && ` ${billingProfile.postal_code}`}
-                      </p>
-                    )}
-                    {billingProfile.country && <p>{COUNTRY_NAME[billingProfile.country] || billingProfile.country}</p>}
-                  </div>
+            <CardContent className="p-0">
+              {paymentMethods.length === 0 ? (
+                needsCard ? (
+                  <Callout
+                    tone="amber"
+                    className="mx-6 my-4"
+                    title={NO_CARD_TITLE}
+                  >
+                    {NO_CARD_SENTENCE}
+                  </Callout>
                 ) : (
-                  <p className="text-sm text-muted-foreground">No address on file</p>
-                )}
-              </section>
-
-              <Separator />
-
-              {/* Tax */}
-              <section>
-                <div className="flex items-center justify-between mb-3">
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Tax</p>
-                  {billingProfile.tax_status === 'exempt' && <Badge variant="warning">Exempt</Badge>}
-                  {billingProfile.tax_status === 'reverse_charge' && <Badge variant="outline">Reverse charge</Badge>}
-                </div>
-                {billingProfile.tax_status === 'exempt' ? (
-                  <div className="space-y-2">
-                    <p className="text-sm text-muted-foreground">Tax-exempt — invoices issue with zero tax and an audit note.</p>
-                    {billingProfile.tax_exempt_reason && (
-                      <p className="text-sm text-foreground">
-                        <span className="text-xs text-muted-foreground">Reason: </span>
-                        {billingProfile.tax_exempt_reason}
-                      </p>
-                    )}
+                  <div className="px-6 py-8 text-center">
+                    <CreditCard size={28} className="text-muted-foreground mx-auto mb-2" />
+                    <p className="text-sm text-foreground">No payment methods</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Use Add payment method to email or copy a secure setup link for the customer.
+                    </p>
                   </div>
-                ) : billingProfile.tax_status === 'reverse_charge' ? (
-                  <p className="text-sm text-muted-foreground">
-                    Reverse charge: no tax on the invoice; the business customer pays the VAT/GST themselves.
-                  </p>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
-                    <div>
-                      <p className="text-xs text-muted-foreground">Tax ID type</p>
-                      <p className="text-sm text-foreground mt-1 uppercase">{billingProfile.tax_id_type || '—'}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Tax ID</p>
-                      <p className="text-sm text-foreground mt-1 font-mono">{billingProfile.tax_id || '—'}</p>
-                    </div>
-                  </div>
-                )}
-              </section>
-
-              <Separator />
-
-              {/* Currency */}
-              <section>
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-3">Currency</p>
-                <p className="text-sm text-foreground">
-                  {billingProfile.currency
-                    ? billingProfile.currency.toUpperCase()
-                    : <span className="text-muted-foreground">Use account default</span>}
-                </p>
-              </section>
-            </CardContent>
-          </>
-        ) : profileCard !== 'absent' ? (
-          // Loading or failed: whether a profile exists is not known, so
-          // neither Set Up nor Edit is offered.
-          <>
-            <CardHeader>
-              <CardTitle className="text-sm">Billing profile</CardTitle>
-            </CardHeader>
-            <CardContent className="text-center py-8">
-              {profileCard === 'error' ? (
-                <>
-                  <p className="text-sm text-destructive mb-3">Couldn&apos;t load the billing profile</p>
-                  <Button variant="outline" size="sm" onClick={() => refetchBillingProfile()}>Retry</Button>
-                </>
+                )
               ) : (
-                <Loader2 size={16} className="animate-spin text-muted-foreground mx-auto" />
-              )}
-            </CardContent>
-          </>
-        ) : (
-          <>
-            <CardHeader>
-              <CardTitle className="text-sm">Billing profile</CardTitle>
-            </CardHeader>
-            <CardContent className="text-center py-8">
-              <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center mx-auto mb-3">
-                <CreditCard size={18} className="text-muted-foreground" />
-              </div>
-              <p className="text-sm text-foreground">No billing profile</p>
-              <p className="text-sm text-muted-foreground mt-1 max-w-xs mx-auto">Set up billing details to enable invoicing and payments for this customer</p>
-              {!isArchived && (
-                <Button size="sm" className="mt-4" onClick={() => setShowEditBilling(true)}>
-                  Set up billing profile
-                </Button>
-              )}
-            </CardContent>
-          </>
-        )}
-      </Card>
-
-      {/* Dunning policy — Stripe / Lago / Recurly campaigns shape
-          (ADR-036). Operator either assigns a named policy or leaves
-          the customer on the tenant default. */}
-      <Card className="mt-6">
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-sm">Dunning policy</CardTitle>
-            {!isArchived && (
-              <Button variant="outline" size="sm" onClick={() => setShowDunningOverride(true)}>
-                Change
-              </Button>
-            )}
-          </div>
-        </CardHeader>
-        <CardContent className="p-0">
-          {effectiveDunningPolicy ? (
-            <div className="divide-y divide-border">
-              <div className="flex items-center justify-between px-6 py-3">
-                <span className="text-sm text-muted-foreground">Policy</span>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-foreground">{effectiveDunningPolicy.name || 'Default'}</span>
-                  {!assignedDunningPolicy && (
-                    <Badge variant="outline">Account default</Badge>
-                  )}
-                </div>
-              </div>
-              <div className="flex items-center justify-between gap-4 px-6 py-3">
-                <span className="text-sm text-muted-foreground">Schedule</span>
-                <span className="text-sm text-foreground text-right">{retryPlanText(effectiveDunningPolicy.retry_days)}</span>
-              </div>
-              <div className="flex items-center justify-between px-6 py-3">
-                <span className="text-sm text-muted-foreground">Final action</span>
-                <Badge variant="outline">{humanizeStatus(finalActionSummary(effectiveDunningPolicy))}</Badge>
-              </div>
-            </div>
-          ) : (
-            <p className="px-6 py-6 text-sm text-muted-foreground text-center">No dunning policies configured</p>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Usage This Period — multi-dim cost dashboard backed by
-          GET /v1/customers/{id}/usage. Operator-facing surface.
-          customerTestClockId pins its relative-time/window surfaces to the
-          customer's simulated clock (ADR-027) instead of wall-clock. */}
-      <div className="mt-6">
-        <CostDashboard customerId={id!} customerTestClockId={customer.test_clock_id} currency={customerCurrency?.currency} />
-      </div>
-
-      {/* Margin — rated usage revenue vs provider COGS (ADR-079).
-          Operator-only; never rendered on customer-facing surfaces. */}
-      <div className="mt-6">
-        <MarginCard customerId={id!} customerTestClockId={customer.test_clock_id} currency={customerCurrency?.currency} />
-      </div>
-
-      {/* Credits: balance per currency with granted/used/expired, every
-          grant including used-up ones, the latest ledger entries, and Grant
-          credits. Each amount carries its own currency; the customer's
-          currency is only the grant dialog's default. */}
-      <div className="mt-6">
-        <CustomerCreditsSection
-          customerId={id!}
-          customerName={customer.display_name}
-          currency={creditCurrency}
-          testClockId={customer.test_clock_id}
-          readOnly={isArchived}
-        />
-      </div>
-
-      {/* Public cost-dashboard token — ADR-031 / MANUAL_TEST CU8. Operator
-          rotates to mint a shareable URL the customer can embed (iframe
-          or fetch) without an API key. Rotation invalidates the previous
-          token immediately. */}
-      <div className="mt-6">
-        <PublicCostDashboardCard customerId={id!} readOnly={isArchived} />
-      </div>
-
-      {/* Payment methods — multi-card operator panel.
-          Industry-standard surface (Stripe, Chargebee, Recurly, Lago,
-          Orb): operator can list, set-default, detach. Card capture
-          happens browser → Stripe.js → Stripe via the setup-session
-          URL — operator never touches PAN, tenant stays in PCI SAQ-A.
-          The "Send setup link" button mints a Stripe Checkout URL
-          the operator copies and hands to the customer. */}
-      <Card className="mt-6">
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-sm">Payment methods</CardTitle>
-            {!isArchived && (
-              <Button size="sm" onClick={() => setSetupLinkDialogOpen(true)}>
-                Add payment method
-              </Button>
-            )}
-          </div>
-        </CardHeader>
-        <CardContent className="p-0">
-          {paymentMethods.length === 0 ? (
-            needsCard ? (
-              <Callout
-                tone="amber"
-                className="mx-6 my-4"
-                title={NO_CARD_TITLE}
-              >
-                {NO_CARD_SENTENCE}
-              </Callout>
-            ) : (
-              <div className="px-6 py-8 text-center">
-                <CreditCard size={28} className="text-muted-foreground mx-auto mb-2" />
-                <p className="text-sm text-foreground">No payment methods</p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Use Add payment method to email or copy a secure setup link for the customer.
-                </p>
-              </div>
-            )
-          ) : (
-            <div className="divide-y divide-border">
-              {paymentMethods.map(pm => (
-                <div key={pm.id} className="flex items-center justify-between px-6 py-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-9 h-9 rounded-lg bg-muted flex items-center justify-center shrink-0">
-                      <CreditCard size={16} className="text-foreground" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm font-medium text-foreground truncate">
-                          {cardLabel(pm)}
-                        </p>
-                        {pm.is_default && <Badge variant="outline" className="shrink-0 text-[10px]">Default</Badge>}
+                <div className="divide-y divide-border">
+                  {paymentMethods.map(pm => (
+                    <div key={pm.id} className="flex items-center justify-between px-6 py-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-9 h-9 rounded-lg bg-muted flex items-center justify-center shrink-0">
+                          <CreditCard size={16} className="text-foreground" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm font-medium text-foreground truncate">
+                              {cardLabel(pm)}
+                            </p>
+                            {pm.is_default && <Badge variant="outline" className="shrink-0 text-[10px]">Default</Badge>}
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            {pm.card_exp_month && pm.card_exp_year
+                              ? `Expires ${String(pm.card_exp_month).padStart(2, '0')}/${pm.card_exp_year}`
+                              : 'Saved card'}
+                          </p>
+                        </div>
                       </div>
-                      <p className="text-xs text-muted-foreground">
-                        {pm.card_exp_month && pm.card_exp_year
-                          ? `Expires ${String(pm.card_exp_month).padStart(2, '0')}/${pm.card_exp_year}`
-                          : 'Saved card'}
-                      </p>
-                    </div>
-                  </div>
-                  {!isArchived && (
-                    <div className="flex items-center gap-2 shrink-0">
-                      {!pm.is_default && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleSetPMDefault(pm.id)}
-                          disabled={pmActionLoading === pm.id}
-                        >
-                          {pmActionLoading === pm.id ? <><Loader2 size={14} className="animate-spin mr-1.5" />Updating…</> : 'Set as default'}
-                        </Button>
-                      )}
-                      <AlertDialog>
-                        <AlertDialogTrigger
-                          render={
+                      {!isArchived && (
+                        <div className="flex items-center gap-2 shrink-0">
+                          {!pm.is_default && (
                             <Button
                               variant="ghost"
                               size="sm"
+                              onClick={() => handleSetPMDefault(pm.id)}
                               disabled={pmActionLoading === pm.id}
-                            />
-                          }
-                        >
-                          {pmActionLoading === pm.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>Remove {cardLabel(pm)}?</AlertDialogTitle>
-                            <AlertDialogDescription>
-                              {removeCardSentence({ onlyCard: paymentMethods.length === 1, isDefault: pm.is_default })}
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel>Cancel</AlertDialogCancel>
-                            <AlertDialogAction onClick={() => void handleDetachPM(pm.id)}>Remove</AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
+                            >
+                              {pmActionLoading === pm.id ? <><Loader2 size={14} className="animate-spin mr-1.5" />Updating…</> : 'Set as default'}
+                            </Button>
+                          )}
+                          <AlertDialog>
+                            <AlertDialogTrigger
+                              render={
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  disabled={pmActionLoading === pm.id}
+                                />
+                              }
+                            >
+                              {pmActionLoading === pm.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Remove {cardLabel(pm)}?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  {removeCardSentence({ onlyCard: paymentMethods.length === 1, isDefault: pm.is_default })}
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => void handleDetachPM(pm.id)}>Remove</AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </div>
+                      )}
                     </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+        </div>
+        <div className="min-w-0 space-y-6 lg:col-span-2 lg:col-start-1 lg:row-span-2 lg:row-start-1">
+          {/* Subscriptions and invoices first: what the customer pays for and owes. */}
+          <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+            {/* Subscriptions — compact one-line rows, sorted by status
+                priority (trialing → active → past_due). Terminal subs
+                (canceled / ended) collapse under a toggle so they don't
+                inflate the card on heavy-use customers. Anchored to
+                Stripe / Lago / Orb / Recurly customer-page conventions. */}
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-sm">Subscriptions ({subsTotal})</CardTitle>
+                  {!isArchived && <Button size="sm" onClick={() => setShowCreateSub(true)}>Create subscription</Button>}
+                </div>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="divide-y divide-border">
+                  {activeSubsToShow.map(sub => (
+                    // Wraps on a narrow screen, so the date drops below rather
+                    // than the chips squeezing the name out.
+                    <Link key={sub.id} to={`/subscriptions/${sub.id}`} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-6 py-2.5 hover:bg-accent/50 transition-colors">
+                      <div className="flex items-center gap-2 min-w-0 grow">
+                        <StatusBadge status={subscriptionStatus(sub)} className="shrink-0" />
+                        {(() => {
+                          const paused = collectionPausedFlag(sub, invoiceNow)
+                          return paused && <StatusBadge status={paused} className="shrink-0" />
+                        })()}
+                        <span className="text-sm font-medium text-foreground truncate">{sub.display_name}</span>
+                      </div>
+                      <span className="text-xs text-muted-foreground whitespace-nowrap">{subMeta(sub)}</span>
+                    </Link>
+                  ))}
+                  {subBuckets.active.length > SUB_VISIBLE_CAP && !showAllActiveSubs && (
+                    <button
+                      type="button"
+                      onClick={() => setShowAllActiveSubs(true)}
+                      className="flex items-center gap-1 w-full px-6 py-2 text-xs text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
+                    >
+                      <ChevronDown className="h-3 w-3" />
+                      Show {subBuckets.active.length - SUB_VISIBLE_CAP} more
+                    </button>
+                  )}
+                  {subBuckets.terminal.length > 0 && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setShowTerminalSubs(v => !v)}
+                        aria-expanded={showTerminalSubs}
+                        className="flex items-center gap-1 w-full px-6 py-2 text-xs text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
+                      >
+                        {showTerminalSubs ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                        {subBuckets.terminal.length} past {subBuckets.terminal.length === 1 ? 'subscription' : 'subscriptions'}
+                      </button>
+                      {showTerminalSubs && subBuckets.terminal.map(sub => (
+                        <Link key={sub.id} to={`/subscriptions/${sub.id}`} className="flex items-center justify-between gap-3 px-6 py-2.5 hover:bg-accent/50 transition-colors">
+                          <div className="flex items-center gap-2 min-w-0 flex-1">
+                            <StatusBadge status={subscriptionStatus(sub)} className="shrink-0" />
+                            <span className="text-sm font-medium text-muted-foreground truncate">{sub.display_name}</span>
+                          </div>
+                          <span className="text-xs text-muted-foreground whitespace-nowrap">{subMeta(sub)}</span>
+                        </Link>
+                      ))}
+                    </>
+                  )}
+                  {(!allSubs || allSubs.length === 0) && (
+                    <p className="px-6 py-6 text-sm text-muted-foreground text-center">No subscriptions</p>
+                  )}
+                  {allSubs && subsTotal > allSubs.length && (
+                    <p className="px-6 py-2 text-xs text-muted-foreground">Showing the first {allSubs.length} of {subsTotal}.</p>
                   )}
                 </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+              </CardContent>
+            </Card>
 
-      {/* Price overrides — negotiated per-customer prices (ADR-070). The
-          card is the deal's only operator-visible home: without it an
-          override exists purely as unexplained math on the usage card
-          and the invoice. */}
-      <div className="mt-6">
-        <PriceOverridesCard customerId={id!} readOnly={isArchived} />
+            {/* Recent invoices */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm">Recent invoices</CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="divide-y divide-border">
+                  {overview?.recent_invoices.map(inv => {
+                    return (
+                      <Link key={inv.id} to={`/invoices/${inv.id}`} className="flex items-center justify-between px-6 py-3 hover:bg-accent/50 transition-colors">
+                        <div>
+                          <p className="text-sm font-medium text-foreground">{inv.invoice_number}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {formatDate(inv.created_at)}
+                            {/* Why amount due is below the total: Outstanding
+                                sums amount due, after credit. */}
+                            {invoiceCreditNote(inv) && <> · {invoiceCreditNote(inv)}</>}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <StatusBadge status={invoiceStatus(inv, invoiceNow)} />
+                          <span className="text-sm font-medium">{formatCents(inv.total_amount_cents, inv.currency)}</span>
+                        </div>
+                      </Link>
+                    )
+                  })}
+                  {(!overview?.recent_invoices.length) && (
+                    <p className="px-6 py-4 text-sm text-muted-foreground">No invoices</p>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+          </div>
+          {/* Usage This Period — multi-dim cost dashboard backed by
+              GET /v1/customers/{id}/usage. Operator-facing surface.
+              customerTestClockId pins its relative-time/window surfaces to the
+              customer's simulated clock (ADR-027) instead of wall-clock. */}
+          <div>
+            <CostDashboard customerId={id!} customerTestClockId={customer.test_clock_id} currency={customerCurrency?.currency} />
+          </div>
+
+          {/* Margin — rated usage revenue vs provider COGS (ADR-079).
+              Operator-only; never rendered on customer-facing surfaces. */}
+          <div>
+            <MarginCard customerId={id!} customerTestClockId={customer.test_clock_id} currency={customerCurrency?.currency} />
+          </div>
+
+          {/* Price overrides — negotiated per-customer prices (ADR-070). The
+              card is the deal's only operator-visible home: without it an
+              override exists purely as unexplained math on the usage card
+              and the invoice. */}
+          <div>
+            <PriceOverridesCard customerId={id!} readOnly={isArchived} />
+          </div>
+
+          {/* Sent emails — anchored on Stripe's customer-page email log
+              (docs.stripe.com/invoicing/send-email; verified
+              customer-page placement specifically, 30-day window). Other
+              platforms vary — Recurly explicitly lacks this surface, so
+              this isn't an industry-converging pattern. Kept for the
+              operator-audit gap it fills ("did the customer get the
+              dunning warning?"). */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-sm">
+                  Sent emails {sentEmails.length > 0 && <span className="text-muted-foreground font-normal">({sentEmails.length})</span>}
+                </CardTitle>
+                <span className="text-xs text-muted-foreground">Last 30 days</span>
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              <ScrollPane className={sentEmailsExpanded && sentEmails.length > 5 ? 'max-h-96' : ''}>
+                <div className="divide-y divide-border">
+                  {(sentEmailsExpanded ? sentEmails : sentEmails.slice(0, 5)).map(em => (
+                    <div key={em.id} className="px-6 py-3 flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-sm font-medium text-foreground">{sentEmailLabel(em.email_type)}</p>
+                          {/* ?search= is the Invoices page's URL key (was
+                              ?q=, which the page never read — dead link). */}
+                          {em.invoice_number && (
+                            <Link to={`/invoices?search=${encodeURIComponent(em.invoice_number)}`} className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline">
+                              {em.invoice_number}
+                            </Link>
+                          )}
+                        </div>
+                        {/* Both carry a title because neither string is restated
+                            anywhere else on the page: a clipped recipient and a
+                            clipped provider error had ZERO recovery channels. */}
+                        <p className="text-xs text-muted-foreground truncate" title={em.recipient}>to {em.recipient}</p>
+                        {em.status === 'failed' && em.last_error && (
+                          <p className="mt-1 text-xs text-destructive truncate" title={em.last_error}>{em.last_error}</p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <StatusBadge status={sentEmailStatus(em)} />
+                        <span className="text-xs text-muted-foreground whitespace-nowrap">
+                          {formatDateTime(em.dispatched_at ?? em.created_at)}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                  {sentEmails.length === 0 && (
+                    <p className="px-6 py-4 text-sm text-muted-foreground">No emails sent in the last 30 days</p>
+                  )}
+                </div>
+              </ScrollPane>
+              {sentEmails.length > 5 && (
+                <div className="border-t border-border px-6 py-2 flex justify-center">
+                  <button
+                    type="button"
+                    className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                    onClick={() => setSentEmailsExpanded(v => !v)}
+                  >
+                    {sentEmailsExpanded
+                      ? 'Show recent only'
+                      : `Show all (${sentEmails.length})`}
+                  </button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+        <div className="min-w-0 space-y-6 lg:col-start-3 lg:row-start-2">
+          {/* Details */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">Details</CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="divide-y divide-border">
+                <DetailRow label="External ID">
+                  <span className="min-w-0 font-mono">{customer.external_id}</span>
+                  {/* external_id is the identifier operators paste into
+                      API calls and support threads — same copy affordance
+                      as the internal ID below. */}
+                  <CopyButton text={customer.external_id} />
+                </DetailRow>
+                <DetailRow label="Email">
+                  <span className="min-w-0">{customer.email || '—'}</span>
+                  {customer.email_status === 'bounced' && customer.email_last_bounced_at && (
+                    <Badge variant="destructive" className="text-xs" title={customer.email_bounce_reason || 'Permanent delivery failure'}>
+                      Bounced · {formatDate(customer.email_last_bounced_at)}
+                    </Badge>
+                  )}
+                </DetailRow>
+                <DetailRow label="ID">
+                  <span className="min-w-0 font-mono">{customer.id}</span>
+                  <CopyButton text={customer.id} />
+                </DetailRow>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Billing profile */}
+          <Card>
+            {profileCard === 'profile' && billingProfile ? (
+              <>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-sm">Billing profile</CardTitle>
+                    {!isArchived && (
+                      <Button variant="outline" size="sm" onClick={() => setShowEditBilling(true)}>
+                        <Pencil size={12} className="mr-1.5" />
+                        Edit
+                      </Button>
+                    )}
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  {/* Contact */}
+                  <section>
+                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-3">Contact</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
+                      <div>
+                        <p className="text-xs text-muted-foreground">Legal name</p>
+                        <p className="text-sm text-foreground mt-1">{billingProfile.legal_name || '—'}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Phone</p>
+                        <p className="text-sm text-foreground mt-1">{billingProfile.phone || '—'}</p>
+                      </div>
+                    </div>
+                  </section>
+
+                  <Separator />
+
+                  {/* Address */}
+                  <section>
+                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-3">Address</p>
+                    {billingProfile.address_line1 || billingProfile.city || billingProfile.country ? (
+                      <div className="text-sm text-foreground leading-relaxed">
+                        {billingProfile.address_line1 && <p>{billingProfile.address_line1}</p>}
+                        {billingProfile.address_line2 && <p>{billingProfile.address_line2}</p>}
+                        {(billingProfile.city || billingProfile.state || billingProfile.postal_code) && (
+                          <p>
+                            {[billingProfile.city, billingProfile.state].filter(Boolean).join(', ')}
+                            {billingProfile.postal_code && ` ${billingProfile.postal_code}`}
+                          </p>
+                        )}
+                        {billingProfile.country && <p>{COUNTRY_NAME[billingProfile.country] || billingProfile.country}</p>}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">No address on file</p>
+                    )}
+                  </section>
+
+                  <Separator />
+
+                  {/* Tax */}
+                  <section>
+                    <div className="flex items-center justify-between mb-3">
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Tax</p>
+                      {billingProfile.tax_status === 'exempt' && <Badge variant="warning">Exempt</Badge>}
+                      {billingProfile.tax_status === 'reverse_charge' && <Badge variant="outline">Reverse charge</Badge>}
+                    </div>
+                    {billingProfile.tax_status === 'exempt' ? (
+                      <div className="space-y-2">
+                        <p className="text-sm text-muted-foreground">Tax-exempt — invoices issue with zero tax and an audit note.</p>
+                        {billingProfile.tax_exempt_reason && (
+                          <p className="text-sm text-foreground">
+                            <span className="text-xs text-muted-foreground">Reason: </span>
+                            {billingProfile.tax_exempt_reason}
+                          </p>
+                        )}
+                      </div>
+                    ) : billingProfile.tax_status === 'reverse_charge' ? (
+                      <p className="text-sm text-muted-foreground">
+                        Reverse charge: no tax on the invoice; the business customer pays the VAT/GST themselves.
+                      </p>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
+                        <div>
+                          <p className="text-xs text-muted-foreground">Tax ID type</p>
+                          <p className="text-sm text-foreground mt-1 uppercase">{billingProfile.tax_id_type || '—'}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Tax ID</p>
+                          <p className="text-sm text-foreground mt-1 font-mono">{billingProfile.tax_id || '—'}</p>
+                        </div>
+                      </div>
+                    )}
+                  </section>
+
+                  <Separator />
+
+                  {/* Currency */}
+                  <section>
+                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-3">Currency</p>
+                    <p className="text-sm text-foreground">
+                      {billingProfile.currency
+                        ? billingProfile.currency.toUpperCase()
+                        : <span className="text-muted-foreground">Use account default</span>}
+                    </p>
+                  </section>
+                </CardContent>
+              </>
+            ) : profileCard !== 'absent' ? (
+              // Loading or failed: whether a profile exists is not known, so
+              // neither Set Up nor Edit is offered.
+              <>
+                <CardHeader>
+                  <CardTitle className="text-sm">Billing profile</CardTitle>
+                </CardHeader>
+                <CardContent className="text-center py-8">
+                  {profileCard === 'error' ? (
+                    <>
+                      <p className="text-sm text-destructive mb-3">Couldn&apos;t load the billing profile</p>
+                      <Button variant="outline" size="sm" onClick={() => refetchBillingProfile()}>Retry</Button>
+                    </>
+                  ) : (
+                    <Loader2 size={16} className="animate-spin text-muted-foreground mx-auto" />
+                  )}
+                </CardContent>
+              </>
+            ) : (
+              <>
+                <CardHeader>
+                  <CardTitle className="text-sm">Billing profile</CardTitle>
+                </CardHeader>
+                <CardContent className="text-center py-8">
+                  <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center mx-auto mb-3">
+                    <CreditCard size={18} className="text-muted-foreground" />
+                  </div>
+                  <p className="text-sm text-foreground">No billing profile</p>
+                  <p className="text-sm text-muted-foreground mt-1 max-w-xs mx-auto">Set up billing details to enable invoicing and payments for this customer</p>
+                  {!isArchived && (
+                    <Button size="sm" className="mt-4" onClick={() => setShowEditBilling(true)}>
+                      Set up billing profile
+                    </Button>
+                  )}
+                </CardContent>
+              </>
+            )}
+          </Card>
+
+          {/* Dunning policy — Stripe / Lago / Recurly campaigns shape
+              (ADR-036). Operator either assigns a named policy or leaves
+              the customer on the tenant default. */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-sm">Dunning policy</CardTitle>
+                {!isArchived && (
+                  <Button variant="outline" size="sm" onClick={() => setShowDunningOverride(true)}>
+                    Change
+                  </Button>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              {effectiveDunningPolicy ? (
+                <div className="divide-y divide-border">
+                  <div className="flex items-center justify-between px-6 py-3">
+                    <span className="text-sm text-muted-foreground">Policy</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-foreground">{effectiveDunningPolicy.name || 'Default'}</span>
+                      {!assignedDunningPolicy && (
+                        <Badge variant="outline">Account default</Badge>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between gap-4 px-6 py-3">
+                    <span className="text-sm text-muted-foreground">Schedule</span>
+                    <span className="text-sm text-foreground text-right">{retryPlanText(effectiveDunningPolicy.retry_days)}</span>
+                  </div>
+                  <div className="flex items-center justify-between px-6 py-3">
+                    <span className="text-sm text-muted-foreground">Final action</span>
+                    <Badge variant="outline">{humanizeStatus(finalActionSummary(effectiveDunningPolicy))}</Badge>
+                  </div>
+                </div>
+              ) : (
+                <p className="px-6 py-6 text-sm text-muted-foreground text-center">No dunning policies configured</p>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Credits: balance per currency with granted/used/expired, every
+              grant including used-up ones, the latest ledger entries, and Grant
+              credits. Each amount carries its own currency; the customer's
+              currency is only the grant dialog's default. */}
+          <div>
+            <CustomerCreditsSection
+              customerId={id!}
+              customerName={customer.display_name}
+              currency={creditCurrency}
+              testClockId={customer.test_clock_id}
+              readOnly={isArchived}
+            />
+          </div>
+
+          {/* Public cost-dashboard token — ADR-031 / MANUAL_TEST CU8. Operator
+              rotates to mint a shareable URL the customer can embed (iframe
+              or fetch) without an API key. Rotation invalidates the previous
+              token immediately. */}
+          <div>
+            <PublicCostDashboardCard customerId={id!} readOnly={isArchived} />
+          </div>
+
+        </div>
       </div>
 
       <SendSetupLinkDialog
@@ -970,182 +1155,6 @@ export default function CustomerDetailPage() {
         customerId={id || ''}
         customerEmail={customer?.email}
       />
-
-      {/* Subscriptions & Invoices grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
-        {/* Subscriptions — compact one-line rows, sorted by status
-            priority (trialing → active → past_due). Terminal subs
-            (canceled / ended) collapse under a toggle so they don't
-            inflate the card on heavy-use customers. Anchored to
-            Stripe / Lago / Orb / Recurly customer-page conventions. */}
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-sm">Subscriptions ({subsTotal})</CardTitle>
-              {!isArchived && <Button size="sm" onClick={() => setShowCreateSub(true)}>Create subscription</Button>}
-            </div>
-          </CardHeader>
-          <CardContent className="p-0">
-            <div className="divide-y divide-border">
-              {activeSubsToShow.map(sub => (
-                // Wraps on a narrow screen, so the date drops below rather
-                // than the chips squeezing the name out.
-                <Link key={sub.id} to={`/subscriptions/${sub.id}`} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-6 py-2.5 hover:bg-accent/50 transition-colors">
-                  <div className="flex items-center gap-2 min-w-0 grow">
-                    <StatusBadge status={subscriptionStatus(sub)} className="shrink-0" />
-                    {(() => {
-                      const paused = collectionPausedFlag(sub, invoiceNow)
-                      return paused && <StatusBadge status={paused} className="shrink-0" />
-                    })()}
-                    <span className="text-sm font-medium text-foreground truncate">{sub.display_name}</span>
-                  </div>
-                  <span className="text-xs text-muted-foreground whitespace-nowrap">{subMeta(sub)}</span>
-                </Link>
-              ))}
-              {subBuckets.active.length > SUB_VISIBLE_CAP && !showAllActiveSubs && (
-                <button
-                  type="button"
-                  onClick={() => setShowAllActiveSubs(true)}
-                  className="flex items-center gap-1 w-full px-6 py-2 text-xs text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
-                >
-                  <ChevronDown className="h-3 w-3" />
-                  Show {subBuckets.active.length - SUB_VISIBLE_CAP} more
-                </button>
-              )}
-              {subBuckets.terminal.length > 0 && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setShowTerminalSubs(v => !v)}
-                    aria-expanded={showTerminalSubs}
-                    className="flex items-center gap-1 w-full px-6 py-2 text-xs text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
-                  >
-                    {showTerminalSubs ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                    {subBuckets.terminal.length} past {subBuckets.terminal.length === 1 ? 'subscription' : 'subscriptions'}
-                  </button>
-                  {showTerminalSubs && subBuckets.terminal.map(sub => (
-                    <Link key={sub.id} to={`/subscriptions/${sub.id}`} className="flex items-center justify-between gap-3 px-6 py-2.5 hover:bg-accent/50 transition-colors">
-                      <div className="flex items-center gap-2 min-w-0 flex-1">
-                        <StatusBadge status={subscriptionStatus(sub)} className="shrink-0" />
-                        <span className="text-sm font-medium text-muted-foreground truncate">{sub.display_name}</span>
-                      </div>
-                      <span className="text-xs text-muted-foreground whitespace-nowrap">{subMeta(sub)}</span>
-                    </Link>
-                  ))}
-                </>
-              )}
-              {(!allSubs || allSubs.length === 0) && (
-                <p className="px-6 py-6 text-sm text-muted-foreground text-center">No subscriptions</p>
-              )}
-              {allSubs && subsTotal > allSubs.length && (
-                <p className="px-6 py-2 text-xs text-muted-foreground">Showing the first {allSubs.length} of {subsTotal}.</p>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Recent invoices */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm">Recent invoices</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            <div className="divide-y divide-border">
-              {overview?.recent_invoices.map(inv => {
-                return (
-                  <Link key={inv.id} to={`/invoices/${inv.id}`} className="flex items-center justify-between px-6 py-3 hover:bg-accent/50 transition-colors">
-                    <div>
-                      <p className="text-sm font-medium text-foreground">{inv.invoice_number}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {formatDate(inv.created_at)}
-                        {/* Why amount due is below the total: Outstanding
-                            sums amount due, after credit. */}
-                        {invoiceCreditNote(inv) && <> · {invoiceCreditNote(inv)}</>}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <StatusBadge status={invoiceStatus(inv, invoiceNow)} />
-                      <span className="text-sm font-medium">{formatCents(inv.total_amount_cents, inv.currency)}</span>
-                    </div>
-                  </Link>
-                )
-              })}
-              {(!overview?.recent_invoices.length) && (
-                <p className="px-6 py-4 text-sm text-muted-foreground">No invoices</p>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Sent emails — anchored on Stripe's customer-page email log
-            (docs.stripe.com/invoicing/send-email; verified
-            customer-page placement specifically, 30-day window). Other
-            platforms vary — Recurly explicitly lacks this surface, so
-            this isn't an industry-converging pattern. Kept for the
-            operator-audit gap it fills ("did the customer get the
-            dunning warning?"). */}
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-sm">
-                Sent emails {sentEmails.length > 0 && <span className="text-muted-foreground font-normal">({sentEmails.length})</span>}
-              </CardTitle>
-              <span className="text-xs text-muted-foreground">Last 30 days</span>
-            </div>
-          </CardHeader>
-          <CardContent className="p-0">
-            <ScrollPane className={sentEmailsExpanded && sentEmails.length > 5 ? 'max-h-96' : ''}>
-              <div className="divide-y divide-border">
-                {(sentEmailsExpanded ? sentEmails : sentEmails.slice(0, 5)).map(em => (
-                  <div key={em.id} className="px-6 py-3 flex items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <p className="text-sm font-medium text-foreground">{sentEmailLabel(em.email_type)}</p>
-                        {/* ?search= is the Invoices page's URL key (was
-                            ?q=, which the page never read — dead link). */}
-                        {em.invoice_number && (
-                          <Link to={`/invoices?search=${encodeURIComponent(em.invoice_number)}`} className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline">
-                            {em.invoice_number}
-                          </Link>
-                        )}
-                      </div>
-                      {/* Both carry a title because neither string is restated
-                          anywhere else on the page: a clipped recipient and a
-                          clipped provider error had ZERO recovery channels. */}
-                      <p className="text-xs text-muted-foreground truncate" title={em.recipient}>to {em.recipient}</p>
-                      {em.status === 'failed' && em.last_error && (
-                        <p className="mt-1 text-xs text-destructive truncate" title={em.last_error}>{em.last_error}</p>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <StatusBadge status={sentEmailStatus(em)} />
-                      <span className="text-xs text-muted-foreground whitespace-nowrap">
-                        {formatDateTime(em.dispatched_at ?? em.created_at)}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-                {sentEmails.length === 0 && (
-                  <p className="px-6 py-4 text-sm text-muted-foreground">No emails sent in the last 30 days</p>
-                )}
-              </div>
-            </ScrollPane>
-            {sentEmails.length > 5 && (
-              <div className="border-t border-border px-6 py-2 flex justify-center">
-                <button
-                  type="button"
-                  className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-                  onClick={() => setSentEmailsExpanded(v => !v)}
-                >
-                  {sentEmailsExpanded
-                    ? 'Show recent only'
-                    : `Show all (${sentEmails.length})`}
-                </button>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
 
       {/* Edit customer Dialog */}
       {showEditCustomer && (
