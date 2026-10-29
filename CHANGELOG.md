@@ -19,6 +19,10 @@ original text.
 
 ## [Unreleased]
 
+### Added
+
+- **One page lists every setting.** [`docs/settings.md`](docs/settings.md) names each environment variable Hardcount and its commands read, what it does, and what happens when it is unset, including the Compose-only ones. A test fails when the code reads a setting the page does not list.
+
 ## [0.9.1] - 2026-10-29
 
 Small fixes to what you see in your first hour: the dashboard shows the Hardcount logo, and the quickstart no longer guesses how long the demo takes.
