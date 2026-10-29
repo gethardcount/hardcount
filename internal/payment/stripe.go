@@ -606,6 +606,14 @@ func ChargeIdempotencyKey(invoiceID string, chargeAttemptSeq int64, purpose stri
 	return key
 }
 
+// SentIdempotencyKey is the Idempotency-Key a charge sends to Stripe: the
+// charge key plus the card, so charging a different card is a new request.
+// Logs name this value, not the bare charge key: it is the one Stripe's
+// dashboard finds the request by.
+func SentIdempotencyKey(chargeKey, paymentMethodID string) string {
+	return chargeKey + "_" + paymentMethodID
+}
+
 // chargeInvoice is the one charge path. purpose is the PaymentIntent's
 // hardcount_purpose metadata, which Stripe sees and the idempotency key carries;
 // trigger is the attempt row's trigger_source, which only Hardcount sees.
@@ -701,6 +709,8 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 		IdempotencyKey:  idempotencyKey,
 		Metadata:        metadata,
 	}
+	// Every log line below names the key as Stripe received it.
+	sentKey := SentIdempotencyKey(idempotencyKey, stripePaymentMethodID)
 
 	// The re-check right before sending (ADR-127): the hold is still this
 	// charger's own with at least ChargeSendMargin left, the counter its key
@@ -816,7 +826,7 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 			slog.Warn("payment intent outcome unknown — reconciler will resolve",
 				"invoice_id", inv.ID,
 				"stripe_payment_intent_id", pe.PaymentIntentID,
-				"idempotency_key", idempotencyKey,
+				"idempotency_key", sentKey,
 				"error", pe.Message,
 			)
 		}
@@ -834,7 +844,7 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 			slog.Error("idempotency conflict with no PaymentIntent id: a request with this key reached Stripe; the invoice is parked until Stripe's list of the customer's payments shows what it did",
 				"invoice_id", inv.ID,
 				"tenant_id", tenantID,
-				"idempotency_key", idempotencyKey,
+				"idempotency_key", sentKey,
 				"amount_due_cents", inv.AmountDueCents,
 				"error", pe.Message,
 			)
@@ -920,10 +930,10 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 					"error", serr,
 				)
 			case !res.Recorded:
-				logRefusedChargeOutcome(ctx, current, domain.PaymentFailed, pe.PaymentIntentID, idempotencyKey)
+				logRefusedChargeOutcome(ctx, current, domain.PaymentFailed, pe.PaymentIntentID, sentKey)
 			}
 		} else {
-			s.stampUnreportableOutcome(withChargeAnchor(saveCtx), tenantID, inv, pe, status, idempotencyKey)
+			s.stampUnreportableOutcome(withChargeAnchor(saveCtx), tenantID, inv, pe, status, sentKey)
 		}
 		// Count unknown outcomes as failed for the success-rate alert — a
 		// Stripe outage genuinely impairs customer charging and should page,
@@ -1015,7 +1025,7 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 		return domain.Invoice{}, err
 	}
 	if !applied {
-		logRefusedChargeOutcome(ctx, current, domain.PaymentProcessing, result.ID, idempotencyKey)
+		logRefusedChargeOutcome(ctx, current, domain.PaymentProcessing, result.ID, sentKey)
 	}
 	return current, nil
 }
@@ -1194,7 +1204,7 @@ func (s *Stripe) clearRejectedKey(ctx context.Context, tenantID string, livemode
 // a paid invoice then raises payment.duplicate_charge — but if that webhook
 // is lost, this line and the charge-attempt row are the only record. An empty
 // attemptPI is an attempt whose outcome is unknown and unnamed.
-func logRefusedChargeOutcome(ctx context.Context, current domain.Invoice, attempted domain.InvoicePaymentStatus, attemptPI, idempotencyKey string) {
+func logRefusedChargeOutcome(ctx context.Context, current domain.Invoice, attempted domain.InvoicePaymentStatus, attemptPI, sentKey string) {
 	if attemptPI != "" && current.StripePaymentIntentID == attemptPI {
 		slog.InfoContext(ctx, "charge outcome already recorded by its webhook; stamp skipped",
 			"invoice_id", current.ID, "payment_intent_id", attemptPI,
@@ -1209,7 +1219,7 @@ func logRefusedChargeOutcome(ctx context.Context, current domain.Invoice, attemp
 		"recorded_payment_intent_id", current.StripePaymentIntentID,
 		"paid_out_of_band", current.PaidOutOfBand,
 		"invoice_status", current.Status,
-		"idempotency_key", idempotencyKey,
+		"idempotency_key", sentKey,
 	)
 }
 
@@ -1295,7 +1305,7 @@ func startDunningWithRetry(ctx context.Context, dunning DunningStarter, tenantID
 // failure where the create itself failed. There is nothing for a webhook to
 // match and nothing to notify about, so it is stamped through the seq CAS
 // (P13) rather than reported. A definite failure still starts dunning.
-func (s *Stripe) stampUnreportableOutcome(ctx context.Context, tenantID string, inv domain.Invoice, pe *PaymentError, status domain.InvoicePaymentStatus, idempotencyKey string) {
+func (s *Stripe) stampUnreportableOutcome(ctx context.Context, tenantID string, inv domain.Invoice, pe *PaymentError, status domain.InvoicePaymentStatus, sentKey string) {
 	// current is the invoice as it stands after the outcome write — which is
 	// refused if another outcome was recorded during the call (P13). The
 	// dunning gate below keys off it, not off the pre-call snapshot.
@@ -1303,7 +1313,7 @@ func (s *Stripe) stampUnreportableOutcome(ctx context.Context, tenantID string, 
 	if fresh, applied, perr := persistChargeOutcomeWithRetry(ctx, s.invoices, tenantID, inv, status, pe.PaymentIntentID, pe.Message); perr == nil {
 		current = fresh
 		if !applied {
-			logRefusedChargeOutcome(ctx, current, status, pe.PaymentIntentID, idempotencyKey)
+			logRefusedChargeOutcome(ctx, current, status, pe.PaymentIntentID, sentKey)
 		}
 		if applied && current.Parked() {
 			// PARKED (ADR-107). With no PaymentIntent id the GetPaymentIntent
@@ -1324,7 +1334,7 @@ func (s *Stripe) stampUnreportableOutcome(ctx context.Context, tenantID string, 
 				// After any 409 an attempt under this key reached Stripe (the
 				// fact isIdempotencyConflict names the key for), so the park
 				// line names it too.
-				"idempotency_key", idempotencyKey,
+				"idempotency_key", sentKey,
 				"error", pe.Message)
 		}
 	} else if pe.Unknown {
@@ -1338,7 +1348,7 @@ func (s *Stripe) stampUnreportableOutcome(ctx context.Context, tenantID string, 
 			"invoice_id", inv.ID,
 			"payment_status", string(status),
 			"stripe_payment_intent_id", pe.PaymentIntentID,
-			"idempotency_key", idempotencyKey,
+			"idempotency_key", sentKey,
 			"error", perr,
 		)
 	} else {

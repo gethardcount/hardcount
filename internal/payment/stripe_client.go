@@ -465,7 +465,7 @@ func (c *LiveStripeClient) CreatePaymentIntent(ctx context.Context, params Payme
 		Confirm:       stripe.Bool(true),
 		OffSession:    stripe.Bool(true),
 		Params: stripe.Params{
-			IdempotencyKey: stripe.String(fmt.Sprintf("%s_%s", params.IdempotencyKey, params.PaymentMethodID)),
+			IdempotencyKey: stripe.String(SentIdempotencyKey(params.IdempotencyKey, params.PaymentMethodID)),
 			Metadata:       metadata,
 		},
 		Description: stripe.String(params.Description),

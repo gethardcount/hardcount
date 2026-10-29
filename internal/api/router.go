@@ -560,8 +560,15 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// stripeAdapter. Keep this declaration near the constructor; the
 	// resolver-wiring block is the canonical place to find clock.Resolver
 	// hookups across the router.
+	// Where Stripe returns a customer who added a card from the "add a
+	// payment method" email. Unset, the handler falls back to the Vite dev
+	// server, like CUSTOMER_PORTAL_URL above, so it warns as that one does.
+	paymentUpdateReturnURL := strings.TrimSpace(os.Getenv("PAYMENT_UPDATE_RETURN_URL"))
+	if paymentUpdateReturnURL == "" {
+		slog.Warn("PAYMENT_UPDATE_RETURN_URL NOT SET — after a customer adds a card from the \"add a payment method\" email, Stripe sends them to http://localhost:5173/payment-method-added, which only exists in local development. The card is still saved. Set this to your dashboard's /payment-method-added page, e.g. https://app.example.com/payment-method-added")
+	}
 	publicPaymentH := payment.NewPublicPaymentHandler(tokenSvc, db, stripeClients, customerSvc, paymentMethodsStripe,
-		strings.TrimSpace(os.Getenv("PAYMENT_UPDATE_RETURN_URL")))
+		paymentUpdateReturnURL)
 
 	// paymentmethods.StripeAdapter constructed early so the hosted-invoice
 	// Pay flow can use it to ensure a Stripe customer exists for the Hardcount

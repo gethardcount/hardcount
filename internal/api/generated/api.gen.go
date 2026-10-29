@@ -1846,16 +1846,13 @@ func (e TenantStatus) Valid() bool {
 
 // Defines values for TenantSettingsTaxOnFailure.
 const (
-	TenantSettingsTaxOnFailureBlock          TenantSettingsTaxOnFailure = "block"
-	TenantSettingsTaxOnFailureFallbackManual TenantSettingsTaxOnFailure = "fallback_manual"
+	TenantSettingsTaxOnFailureBlock TenantSettingsTaxOnFailure = "block"
 )
 
 // Valid indicates whether the value is a known member of the TenantSettingsTaxOnFailure enum.
 func (e TenantSettingsTaxOnFailure) Valid() bool {
 	switch e {
 	case TenantSettingsTaxOnFailureBlock:
-		return true
-	case TenantSettingsTaxOnFailureFallbackManual:
 		return true
 	default:
 		return false
@@ -1885,16 +1882,13 @@ func (e TenantSettingsTaxProvider) Valid() bool {
 
 // Defines values for TenantSettingsInputTaxOnFailure.
 const (
-	TenantSettingsInputTaxOnFailureBlock          TenantSettingsInputTaxOnFailure = "block"
-	TenantSettingsInputTaxOnFailureFallbackManual TenantSettingsInputTaxOnFailure = "fallback_manual"
+	TenantSettingsInputTaxOnFailureBlock TenantSettingsInputTaxOnFailure = "block"
 )
 
 // Valid indicates whether the value is a known member of the TenantSettingsInputTaxOnFailure enum.
 func (e TenantSettingsInputTaxOnFailure) Valid() bool {
 	switch e {
 	case TenantSettingsInputTaxOnFailureBlock:
-		return true
-	case TenantSettingsInputTaxOnFailureFallbackManual:
 		return true
 	default:
 		return false
@@ -6482,7 +6476,7 @@ type TenantSettings struct {
 	// TaxName Label for the tax line, such as `VAT`.
 	TaxName string `json:"tax_name,omitempty"`
 
-	// TaxOnFailure What to do when the tax provider fails. `block` holds the invoice until tax succeeds.
+	// TaxOnFailure What to do when the tax provider fails. `block`, the only value, holds the invoice until tax succeeds.
 	TaxOnFailure TenantSettingsTaxOnFailure `json:"tax_on_failure,omitempty"`
 
 	// TaxProvider `none` = no tax, `manual` = the flat `tax_rate`, `stripe_tax` = Stripe Tax.
@@ -6497,7 +6491,7 @@ type TenantSettings struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// TenantSettingsTaxOnFailure What to do when the tax provider fails. `block` holds the invoice until tax succeeds.
+// TenantSettingsTaxOnFailure What to do when the tax provider fails. `block`, the only value, holds the invoice until tax succeeds.
 type TenantSettingsTaxOnFailure string
 
 // TenantSettingsTaxProvider `none` = no tax, `manual` = the flat `tax_rate`, `stripe_tax` = Stripe Tax.
@@ -6574,7 +6568,7 @@ type TenantSettingsInput struct {
 	// TaxName Label for the tax line, such as `VAT`.
 	TaxName string `json:"tax_name,omitempty"`
 
-	// TaxOnFailure What to do when the tax provider fails. `block` holds the invoice until tax succeeds.
+	// TaxOnFailure What to do when the tax provider fails. `block`, the only value, holds the invoice until tax succeeds.
 	TaxOnFailure TenantSettingsInputTaxOnFailure `json:"tax_on_failure,omitempty"`
 
 	// TaxProvider `none` = no tax, `manual` = the flat `tax_rate`, `stripe_tax` = Stripe Tax.
@@ -6587,7 +6581,7 @@ type TenantSettingsInput struct {
 	Timezone string `json:"timezone,omitempty"`
 }
 
-// TenantSettingsInputTaxOnFailure What to do when the tax provider fails. `block` holds the invoice until tax succeeds.
+// TenantSettingsInputTaxOnFailure What to do when the tax provider fails. `block`, the only value, holds the invoice until tax succeeds.
 type TenantSettingsInputTaxOnFailure string
 
 // TenantSettingsInputTaxProvider `none` = no tax, `manual` = the flat `tax_rate`, `stripe_tax` = Stripe Tax.

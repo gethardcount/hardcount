@@ -700,10 +700,11 @@ func validateSettings(ts *domain.TenantSettings) error {
 	if ts.TaxOnFailure == "" {
 		ts.TaxOnFailure = "block"
 	}
-	switch ts.TaxOnFailure {
-	case "block", "fallback_manual":
-	default:
-		return errs.Invalid("tax_on_failure", "must be 'block' or 'fallback_manual'")
+	// 'block' is the only value (ADR-041 removed 'fallback_manual'); the
+	// tenant_settings_tax_on_failure_check CHECK refuses anything else, so
+	// accepting more here turned a 422 into a database error.
+	if ts.TaxOnFailure != "block" {
+		return errs.Invalid("tax_on_failure", "must be 'block'")
 	}
 	if ts.TaxRate < 0 || ts.TaxRate > 100 {
 		return errs.Invalid("tax_rate", "must be from 0 to 100 (for 18.5% enter 18.5)")

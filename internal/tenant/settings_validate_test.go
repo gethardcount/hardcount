@@ -126,3 +126,24 @@ func TestValidateSettings_CreditNotePrefixDiffersFromInvoicePrefix(t *testing.T)
 		t.Errorf("distinct prefixes refused: %v", err)
 	}
 }
+
+// tax_on_failure has one value, block (ADR-041). The validator also took
+// fallback_manual, which tenant_settings_tax_on_failure_check refuses, so
+// sending it failed in the database instead of naming the field.
+func TestValidateSettings_TaxOnFailureBlockOnly(t *testing.T) {
+	for _, v := range []string{"fallback_manual", "allow", "Block"} {
+		err := validateSettings(&domain.TenantSettings{TaxOnFailure: v})
+		if !errors.Is(err, errs.ErrValidation) || errs.Field(err) != "tax_on_failure" {
+			t.Errorf("%q: got %v (field %q), want a tax_on_failure validation error", v, err, errs.Field(err))
+		}
+	}
+	for _, v := range []string{"block", ""} {
+		ts := &domain.TenantSettings{TaxOnFailure: v}
+		if err := validateSettings(ts); errs.Field(err) == "tax_on_failure" {
+			t.Errorf("%q refused: %v", v, err)
+		}
+		if ts.TaxOnFailure != "block" {
+			t.Errorf("%q stored as %q, want block", v, ts.TaxOnFailure)
+		}
+	}
+}
