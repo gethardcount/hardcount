@@ -11,6 +11,7 @@ import {
   planChangeToast,
   removeItemText,
   scheduleCancelToast,
+  startBillingLines,
 } from '../src/lib/subscriptionCopy.ts'
 import { cardLabel, removeCardSentence } from '../src/lib/paymentMethodCopy.ts'
 
@@ -120,4 +121,24 @@ test('remove card: only card, default with others left, non-default', () => {
   assert.doesNotMatch(removeCardSentence({ onlyCard: true, isDefault: true }), /emailed/)
   assert.match(removeCardSentence({ onlyCard: false, isDefault: true }), /newest remaining card becomes the default/)
   assert.match(removeCardSentence({ onlyCard: false, isDefault: false }), /default card stays the same/)
+})
+
+// Activate and End trial bill day 1: the confirm says when the first invoice
+// comes and whether a card is charged now, and guesses nothing it hasn't
+// loaded.
+test('startBillingLines says when the first period is invoiced and charged', () => {
+  assert.deepEqual(startBillingLines({ trial: false, inAdvance: true, hasCard: true }), [
+    'The first billing period starts now.',
+    "It is invoiced now and charged to the customer's card at once.",
+  ])
+  assert.deepEqual(startBillingLines({ trial: true, inAdvance: true, hasCard: false }), [
+    'The trial ends now, and the first paid billing period starts.',
+    'It is invoiced now. The customer has no card on file, so nothing is charged until they add one.',
+  ])
+  assert.deepEqual(startBillingLines({ trial: false, inAdvance: false, hasCard: true }), [
+    'The first billing period starts now.',
+    'It is invoiced at the end of the period, with any usage.',
+  ])
+  assert.deepEqual(startBillingLines({ trial: false }), ['The first billing period starts now.'])
+  assert.deepEqual(startBillingLines({ trial: false, inAdvance: true }), ['The first billing period starts now.', 'It is invoiced now.'])
 })

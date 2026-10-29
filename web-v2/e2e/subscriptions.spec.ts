@@ -482,10 +482,16 @@ test('extend a trial, end it now (the first period is invoiced), then pause coll
   expect(Math.round((Date.parse(extended.trial_end_at!) - Date.parse(subscription.trial_end_at!)) / DAY)).toBe(7)
   await expect(summaryCell(page, 'Trial')).toContainText(`21-day trial · ends ${endsOn}`)
 
-  // End it now: the subscription is active and, billed in advance, its first
-  // period is invoiced at once; the page lists that invoice.
-  const ending = apiCall(page, 'POST', /\/end-trial$/)
+  // End it now: it asks first, since the first paid period starts at once.
+  // Billed in advance, that period is invoiced now; this customer has no
+  // card (CI connects no Stripe), so nothing is charged. Then the
+  // subscription is active and the page lists that invoice.
   await main.getByRole('button', { name: 'End trial now' }).click()
+  const endConfirm = page.getByRole('alertdialog', { name: 'End the trial now?' })
+  await expect(endConfirm).toContainText('The trial ends now, and the first paid billing period starts.')
+  await expect(endConfirm).toContainText('It is invoiced now. The customer has no card on file, so nothing is charged until they add one.')
+  const ending = apiCall(page, 'POST', /\/end-trial$/)
+  await endConfirm.getByRole('button', { name: 'End trial', exact: true }).click()
   expect((await ending).ok()).toBe(true)
   await expect(toasts(page).getByText('Trial ended — subscription is now active', { exact: true })).toBeVisible()
   const active = await getSub(subscription.id)
