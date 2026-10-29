@@ -59,7 +59,7 @@ func clockFlow(t *testing.T, name string, frozen time.Time) {
 	plan, ids := r.plan("pro", perUnit(calls, "1", nil))
 	clk := r.clock(name, frozen)
 	sub, p0, p1 := r.clockSub("pp-clk", clk, plan)
-	p2 := p1.AddDate(0, 1, 0)
+	p2 := monthAfter(p1, p0.Day())
 	r.ingest(time.Time{}, "pp-clk", "calls", 10, midpoint(p0, frozen), nil)
 
 	r.editTo(plan, ids[0], "2", "next_period")
@@ -102,8 +102,9 @@ func TestE2E_PlanPrices_ClockAtAPeriodBoundary(t *testing.T) {
 	plan, ids := r.plan("pro", perUnit(calls, "1", nil))
 	frozen := time.Now().UTC().AddDate(0, 0, -100).Truncate(time.Second)
 	clk := r.clock("boundary", frozen)
-	sub, _, p1 := r.clockSub("pp-bnd", clk, plan)
-	p2, p3 := p1.AddDate(0, 1, 0), p1.AddDate(0, 2, 0)
+	sub, p0, p1 := r.clockSub("pp-bnd", clk, plan)
+	p2 := monthAfter(p1, p0.Day())
+	p3 := monthAfter(p2, p0.Day())
 	r.advance(clk, p1)
 	r.editTo(plan, ids[0], "2", "next_period")
 	r.ingest(time.Time{}, "pp-bnd", "calls", 10, p1, nil)
@@ -166,7 +167,8 @@ func TestE2E_PlanPrices_TestClockOverride(t *testing.T) {
 	clk := r.clock("override", frozen)
 	cust := r.customer("pp-co", clk)
 	sub, p0, p1 := r.subscribe(time.Time{}, cust, plan)
-	p2, p3 := p1.AddDate(0, 1, 0), p1.AddDate(0, 2, 0)
+	p2 := monthAfter(p1, p0.Day())
+	p3 := monthAfter(p2, p0.Day())
 	o := r.must(time.Time{}, http.MethodPost, "/v1/price-overrides", map[string]any{
 		"customer_id": cust, "price_id": ids[0], "mode": "per_unit", "unit_amount_cents": "4",
 	}, http.StatusCreated)
