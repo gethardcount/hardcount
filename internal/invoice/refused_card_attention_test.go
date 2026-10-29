@@ -13,6 +13,10 @@ import (
 // by invoice id.
 type refusedCards map[string]string
 
+func (r refusedCards) RetryBlockingDecline(_ context.Context, _, invoiceID, _ string) (string, error) {
+	return r[invoiceID], nil
+}
+
 func (r refusedCards) RetryBlockingDeclinesOnDefaultCards(_ context.Context, _ string, ids []string) (map[string]string, error) {
 	out := map[string]string{}
 	for _, id := range ids {

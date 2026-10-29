@@ -14389,7 +14389,11 @@ export interface operations {
              *     `payment_status` `pending`, and no dunning starts. Collect
              *     applies the credit balance first and asks Stripe each time
              *     anything is still owed: for a converted charge, Stripe's minimum
-             *     follows the account's settlement currency.
+             *     follows the account's settlement currency. Code `card_refused`:
+             *     the customer's bank refused the saved card for good on this
+             *     invoice (a hard decline such as `lost_card`), so Hardcount does
+             *     not charge it again and nothing reached Stripe; the customer needs
+             *     a different card, or can pay on the hosted invoice page.
              */
             409: {
                 headers: {
