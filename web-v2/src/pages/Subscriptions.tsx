@@ -11,8 +11,7 @@ import { useSortable, type SortDir } from '@/hooks/useSortable'
 import { useUrlState } from '@/hooks/useUrlState'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 import { cn } from '@/lib/utils'
-import { statusBadgeVariant, statusBorderColor } from '@/lib/status'
-import { collectionPausedFlag } from '@/lib/statusLabels'
+import { collectionPausedFlag, subscriptionStatus } from '@/lib/statusLabels'
 import { SUBSCRIPTION_TABS, subscriptionTabEmptyTitle, subscriptionTabParams } from '@/lib/subscriptionListFilters'
 import { StatusBadge } from '@/components/StatusBadge'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
@@ -309,7 +308,7 @@ export default function SubscriptionsPage() {
                   {sorted.map((sub: Subscription) => (
                     <TableRow
                       key={sub.id}
-                      className={cn('cursor-pointer hover:bg-muted/50 transition-colors border-l-[3px]', statusBorderColor(sub.status))}
+                      className="cursor-pointer hover:bg-muted/50 transition-colors"
                       onClick={(e) => {
                         const target = e.target as HTMLElement
                         if (target.closest('button, a, input, select')) return
@@ -363,7 +362,7 @@ export default function SubscriptionsPage() {
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
-                          <Badge variant={statusBadgeVariant(sub.status)}>{sub.status}</Badge>
+                          <StatusBadge status={subscriptionStatus(sub)} />
                           {(() => {
                             const paused = collectionPausedFlag(sub, effectiveNow(sub.test_clock_id ? clockFrozenMap[sub.test_clock_id] : undefined))
                             return paused && <StatusBadge status={paused} />

@@ -195,7 +195,7 @@ test('create a meter and a plan, then price the meter on the plan; the change ap
   // The plans list counts the price; the meter's page lists the plan.
   await page.goto('/pricing')
   const planRow = page.getByRole('row').filter({ hasText: planCode })
-  await expect(planRow.getByRole('cell')).toHaveText([planName, planCode, 'monthly', 'active', usd(2900), '1'])
+  await expect(planRow.getByRole('cell')).toHaveText([planName, planCode, 'Monthly', 'Active', usd(2900), '1'])
   await page.goto(`/meters/${meter.id}`)
   const pricedBy = card(page, 'Plans that price this meter (1)')
   await expect(pricedBy).toContainText(planName)
@@ -599,7 +599,7 @@ test('dunning policies: create one turned off, turn it on and edit it, give it t
     // Give it to one customer: their page names it instead of the default.
     await page.goto(`/customers/${customer.id}`)
     const dunning = card(page, 'Dunning policy')
-    await expect(dunning.getByText('account default', { exact: true })).toBeVisible()
+    await expect(dunning.getByText('Account default', { exact: true })).toBeVisible()
     await dunning.getByRole('button', { name: 'Change' }).click()
     const assign = page.getByRole('dialog', { name: 'Dunning policy' })
     await assign.getByRole('button', { name: /^Account default/ }).click()
@@ -610,7 +610,7 @@ test('dunning policies: create one turned off, turn it on and edit it, give it t
     await expect(toasts(page).getByText('Dunning policy assignment saved', { exact: true })).toBeVisible()
     expect((await api<{ dunning_policy_id?: string }>('GET', `/customers/${customer.id}`)).dunning_policy_id).toBe(created.id)
     await expect(dunning).toContainText(name)
-    await expect(dunning.getByText('account default', { exact: true })).toHaveCount(0)
+    await expect(dunning.getByText('Account default', { exact: true })).toHaveCount(0)
     await expect(field(dunning, 'Schedule')).toContainText('4 retries, on day 2, 5, 10 and 17')
 
     // While a customer has it, the policy cannot be deleted: the page says

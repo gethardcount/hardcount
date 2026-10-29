@@ -2,10 +2,9 @@
 //
 // The same invoice used to read "Open" (tab), "finalized" (badge),
 // "Showing finalized" (subtitle) and "pending" (payment badge) on one
-// screen. The invoice badges (invoice list, invoice page, Home and the
-// customer page's recent invoices) go through these functions, so an
-// invoice state has one name and one colour. Other badges still use
-// lib/status; move them here when you touch them.
+// screen. Every status badge goes through these functions and StatusBadge,
+// so a state has one name and one colour on every page; no page prints a raw
+// code ("active", "dispatched") or picks its own colour.
 
 import { isTerminalInvoiceStatus } from './invoiceTerminal.ts'
 
@@ -47,21 +46,6 @@ export function invoiceStatus(inv: InvoiceStatusInput, nowMs: number): StatusDis
     return { label: 'Open', tone: 'info' }
   }
   return { label: humanizeStatus(inv.status), tone: 'neutral' }
-}
-
-// toneBorderColor is a list row's left border in its badge's tone, so the
-// border and the badge never disagree (the invoice list coloured the border
-// from payment_status, and a void kept the amber of "pending").
-const TONE_BORDER: Record<StatusTone, string> = {
-  neutral: 'border-l-gray-300 dark:border-l-gray-600',
-  info: 'border-l-blue-500',
-  success: 'border-l-emerald-500',
-  warning: 'border-l-amber-500',
-  danger: 'border-l-red-500',
-}
-
-export function toneBorderColor(tone: StatusTone): string {
-  return TONE_BORDER[tone]
 }
 
 // invoicePaymentChip is the payment chip shown beside the invoice badge, or
@@ -138,18 +122,51 @@ export function subscriptionFlags(sub: SubscriptionStatusInput, nowMs: number): 
   return flags
 }
 
-// genericStatus covers everything else (customers, dunning runs, webhook
-// deliveries, API keys, test clocks): a known tone per code and a
-// sentence-case label.
+// dunningRunStatus is a dunning run's badge. An active run is a payment
+// being chased, so it is amber, not the green "active" means elsewhere; an
+// escalated one ran out of retries. The words match the Dunning page's tabs.
+export function dunningRunStatus(state: string): StatusDisplay {
+  switch (state) {
+    case 'active': return { label: 'Active', tone: 'warning' }
+    case 'escalated': return { label: 'Escalated', tone: 'danger' }
+    case 'resolved': return { label: 'Resolved', tone: 'success' }
+  }
+  return { label: humanizeStatus(state), tone: 'neutral' }
+}
+
+// sentEmailStatus is a sent email's badge on the customer page: what the
+// mail provider reported when it did (delivered, bounced, marked as spam),
+// else where the email is in our outbox. "Dispatched" is our word for handed
+// to the mail server, so the customer-facing reader sees "Sent".
+export function sentEmailStatus(em: { status: string; delivery_state?: string }): StatusDisplay {
+  switch (em.delivery_state) {
+    case 'delivered': return { label: 'Delivered', tone: 'success' }
+    case 'bounced': return { label: 'Bounced', tone: 'danger' }
+    case 'complained': return { label: 'Marked as spam', tone: 'danger' }
+  }
+  switch (em.status) {
+    case 'pending': return { label: 'Queued', tone: 'neutral' }
+    case 'dispatched': return { label: 'Sent', tone: 'info' }
+    case 'failed': return { label: 'Failed', tone: 'danger' }
+    case 'skipped': return { label: 'Not sent: settled first', tone: 'neutral' }
+  }
+  return { label: humanizeStatus(em.delivery_state && em.delivery_state !== 'unknown' ? em.delivery_state : em.status), tone: 'neutral' }
+}
+
+// genericStatus covers everything else (customers, plans, credit notes,
+// invitations, webhook deliveries, API keys, test clocks): a known tone per
+// code and a sentence-case label.
 const TONES: Record<string, StatusTone> = {
   active: 'success', succeeded: 'success', delivered: 'success', resolved: 'success', ready: 'success', recovered: 'success',
   pending: 'warning', paused: 'warning', escalated: 'warning', advancing: 'info', processing: 'info', trialing: 'info',
   failed: 'danger', revoked: 'danger', expired: 'danger', internal_failure: 'danger', disabled: 'neutral',
   archived: 'neutral', canceled: 'neutral', draft: 'neutral', skipped: 'neutral', no_endpoints: 'neutral',
+  issued: 'info', accepted: 'success', voided: 'neutral',
 }
 const LABELS: Record<string, string> = {
   no_endpoints: 'No endpoint',
   internal_failure: 'Failed',
+  voided: 'Void',
 }
 
 export function genericStatus(code: string): StatusDisplay {

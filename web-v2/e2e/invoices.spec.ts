@@ -485,7 +485,7 @@ test('the credit notes page issues a note against an invoice, and issues or void
   expect((await getInvoice(invoice.id)).invoice.amount_due_cents).toBe(invoice.amount_due_cents - issued.total_cents)
   await page.getByPlaceholder('Search by number, customer, invoice, or reason...').fill(invoice.invoice_number)
   const row = (note: CreditNote) => page.getByRole('row').filter({ has: page.getByText(note.credit_note_number, { exact: true }) })
-  await expect(row(issued)).toContainText('issued')
+  await expect(row(issued)).toContainText('Issued')
   await expect(row(issued)).toContainText(usd(issued.total_cents))
   await expect(row(issued)).toContainText('applied to invoice')
 
@@ -507,14 +507,14 @@ test('the credit notes page issues a note against an invoice, and issues or void
 
   await row(toIssue).getByRole('button', { name: 'Issue', exact: true }).click()
   await page.getByRole('alertdialog', { name: 'Issue credit note' }).getByRole('button', { name: 'Issue credit note' }).click()
-  await expect(row(toIssue)).toContainText('issued')
+  await expect(row(toIssue)).toContainText('Issued')
 
   await row(toVoid).getByRole('button', { name: 'Void', exact: true }).click()
   const voidDialog = page.getByRole('alertdialog', { name: 'Void credit note' })
   await voidDialog.getByLabel(/^Type VOID to confirm/).fill('VOID')
   await voidDialog.getByRole('button', { name: 'Void credit note' }).click()
   await expect(voidDialog).toBeHidden()
-  await expect(row(toVoid)).toContainText('voided')
+  await expect(row(toVoid)).toContainText('Void')
 
   const notes = await creditNotesFor(invoice.id)
   expect(notes.find(n => n.id === toIssue.id)?.status).toBe('issued')

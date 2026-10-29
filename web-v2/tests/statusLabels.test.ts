@@ -1,7 +1,7 @@
 // One status vocabulary: each state has one label and one tone everywhere.
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { genericStatus, humanizeStatus, invoicePaymentChip, invoiceStatus, subscriptionFlags, subscriptionStatus, trialBadgeEndsAt } from '../src/lib/statusLabels.ts'
+import { dunningRunStatus, genericStatus, humanizeStatus, invoicePaymentChip, invoiceStatus, sentEmailStatus, subscriptionFlags, subscriptionStatus, trialBadgeEndsAt } from '../src/lib/statusLabels.ts'
 
 const now = Date.parse('2026-10-16T12:00:00Z')
 
@@ -68,4 +68,33 @@ test('trialBadgeEndsAt: only a subscription still in its trial shows a trial bad
     assert.equal(trialBadgeEndsAt({ status, trial_end_at: end }), null, status)
   }
   assert.equal(trialBadgeEndsAt({ status: 'trialing' }), null)
+})
+
+// A dunning run being chased is amber, never the green "active" means for a
+// subscription; the words match the Dunning page's tabs.
+test('a dunning run reads Active in amber, Escalated in red, Resolved in green', () => {
+  assert.deepEqual(dunningRunStatus('active'), { label: 'Active', tone: 'warning' })
+  assert.deepEqual(dunningRunStatus('escalated'), { label: 'Escalated', tone: 'danger' })
+  assert.deepEqual(dunningRunStatus('resolved'), { label: 'Resolved', tone: 'success' })
+  assert.deepEqual(genericStatus('active'), { label: 'Active', tone: 'success' }, 'control: a subscription or customer stays green')
+})
+
+// A sent email says what the mail provider reported, else where it is in the
+// outbox, in words a reader knows: never "dispatched".
+test('a sent email reads Queued, Sent, Delivered, Bounced, Marked as spam, Failed', () => {
+  assert.deepEqual(sentEmailStatus({ status: 'pending' }), { label: 'Queued', tone: 'neutral' })
+  assert.deepEqual(sentEmailStatus({ status: 'dispatched' }), { label: 'Sent', tone: 'info' })
+  assert.deepEqual(sentEmailStatus({ status: 'dispatched', delivery_state: 'unknown' }), { label: 'Sent', tone: 'info' })
+  assert.deepEqual(sentEmailStatus({ status: 'dispatched', delivery_state: 'delivered' }), { label: 'Delivered', tone: 'success' })
+  assert.deepEqual(sentEmailStatus({ status: 'dispatched', delivery_state: 'bounced' }), { label: 'Bounced', tone: 'danger' })
+  assert.deepEqual(sentEmailStatus({ status: 'dispatched', delivery_state: 'complained' }), { label: 'Marked as spam', tone: 'danger' })
+  assert.deepEqual(sentEmailStatus({ status: 'failed' }), { label: 'Failed', tone: 'danger' })
+  assert.deepEqual(sentEmailStatus({ status: 'skipped' }), { label: 'Not sent: settled first', tone: 'neutral' })
+})
+
+test('credit notes and invitations have words and tones', () => {
+  assert.deepEqual(genericStatus('issued'), { label: 'Issued', tone: 'info' })
+  assert.deepEqual(genericStatus('voided'), { label: 'Void', tone: 'neutral' })
+  assert.deepEqual(genericStatus('accepted'), { label: 'Accepted', tone: 'success' })
+  assert.deepEqual(genericStatus('paused'), { label: 'Paused', tone: 'warning' })
 })

@@ -12,7 +12,8 @@ import { applyApiError, showApiError } from '@/lib/formErrors'
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz'
 import { Layout } from '@/components/Layout'
 import { cn } from '@/lib/utils'
-import { statusBadgeVariant } from '@/lib/status'
+import { StatusBadge } from '@/components/StatusBadge'
+import { genericStatus } from '@/lib/statusLabels'
 import { EmptyState } from '@/components/EmptyState'
 import { CardListSkeleton } from '@/components/ui/TableSkeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -47,7 +48,7 @@ type CreateData = z.infer<typeof createSchema>
 function statusBadge(status: TestClock['status']) {
   switch (status) {
     case 'ready':
-      return <Badge variant={statusBadgeVariant('ready')}>Ready</Badge>
+      return <StatusBadge status={genericStatus('ready')} />
     case 'advancing':
       return (
         <Badge variant="outline" className="border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-400">
@@ -55,7 +56,7 @@ function statusBadge(status: TestClock['status']) {
         </Badge>
       )
     case 'internal_failure':
-      return <Badge variant={statusBadgeVariant('failed')}>Failed</Badge>
+      return <StatusBadge status={genericStatus('internal_failure')} />
   }
 }
 
