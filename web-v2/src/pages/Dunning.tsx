@@ -1,8 +1,7 @@
 import { Fragment, useState, useMemo } from 'react'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { Link } from 'react-router-dom'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
+import { useQuery } from '@tanstack/react-query'
 import {
   api,
   formatDateTime,
@@ -15,29 +14,19 @@ import {
 import { effectiveNow, sinceMs, untilMs, type EffectiveNow } from '@/lib/effectiveNow'
 import { Layout } from '@/components/Layout'
 import { TestClockBadge } from '@/components/TestClockBadge'
-import { showApiError } from '@/lib/formErrors'
 import { dunningReasonLabel } from '@/lib/dunningReasons'
 import { retriesOffNotice } from '@/lib/dunningCoverage'
 import { Callout } from '@/components/Callout'
-import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
 import { atRiskText } from '@/lib/money'
-import { dunningAmountDue, dunningRunAmount } from '@/lib/invoiceTerminal'
+import { dunningRunAmount } from '@/lib/invoiceTerminal'
 import { cn } from '@/lib/utils'
 import { statusBadgeVariant, statusBorderColor } from '@/lib/status'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 
-import { Button } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import { LoadError } from '@/components/LoadError'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
-import { Label } from '@/components/ui/label'
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
 import {
   Table,
   TableBody,
@@ -155,12 +144,10 @@ export default function DunningPage() {
 const RUNS_PAGE_SIZE = 25
 
 function RunsTab() {
-  const [resolveTarget, setResolveTarget] = useState<DunningRun | null>(null)
   const [expandedRun, setExpandedRun] = useState<string | null>(null)
   const [runEvents, setRunEvents] = useState<Record<string, DunningEvent[]>>({})
   const [filterStatus, setFilterStatus] = useState('')
   const [page, setPage] = useState(1)
-  const queryClient = useQueryClient()
 
   const queryParams = useMemo(() => {
     const params = new URLSearchParams()
@@ -398,11 +385,16 @@ function RunsTab() {
                               {run.resolution && run.resolution !== run.state && (
                                 <Badge variant={run.resolution === 'payment_recovered' ? 'success' : run.resolution === 'invoice_voided' ? 'info' : run.resolution === 'invoice_not_collectible' ? 'warning' : 'outline'}>{RESOLUTION_LABELS[run.resolution] ?? run.resolution}</Badge>
                               )}
+                              {/* Closing a run is done on its invoice: Record offline
+                                  payment, Void or Write off each close the run, with
+                                  the invoice page's safeguards (a reference note,
+                                  the typed word). A second, weaker copy here
+                                  recorded a payment with no reference (R-01). */}
                               {!isFinished && (
-                                <Button variant="outline" size="sm" className="h-6 text-xs ml-1"
-                                  onClick={(e) => { e.stopPropagation(); setResolveTarget(run) }}>
-                                  Resolve
-                                </Button>
+                                <Link to={`/invoices/${run.invoice_id}`} onClick={e => e.stopPropagation()}
+                                  className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-6 text-xs ml-1')}>
+                                  Open invoice
+                                </Link>
                               )}
                             </div>
                           </TableCell>
@@ -495,23 +487,6 @@ function RunsTab() {
         </CardContent>
       </Card>
 
-      {resolveTarget && (
-        <ResolveDialog
-          run={resolveTarget}
-          invoiceMap={invoiceMap}
-          onClose={() => setResolveTarget(null)}
-          onResolved={() => {
-            setResolveTarget(null)
-            queryClient.invalidateQueries({ queryKey: ['dunning-runs'] })
-            queryClient.invalidateQueries({ queryKey: ['dunning-stats'] })
-            // Resolution settles/voids the invoice and can reverse
-            // applied credits — refresh every money-bearing family
-            // (2026-07-21 audit: stale lists invited double collection).
-            invalidateMoneySurfaces(queryClient)
-            toast.success('Dunning run resolved')
-          }}
-        />
-      )}
     </>
   )
 }
@@ -563,107 +538,5 @@ function RunTimeline({ events }: { events?: DunningEvent[]; run: DunningRun }) {
         )
       })}
     </div>
-  )
-}
-
-/* ─── Resolve Dialog ─── */
-
-function ResolveDialog({ run, invoiceMap, onClose, onResolved }: {
-  run: DunningRun
-  invoiceMap: Record<string, Invoice>
-  onClose: () => void
-  onResolved: () => void
-}) {
-  // No choice is made for the operator: each one changes the invoice, and
-  // "Payment recovered" records a payment (#1234).
-  const [resolution, setResolution] = useState<string | null>(null)
-  const [saving, setSaving] = useState(false)
-
-  const inv = invoiceMap[run.invoice_id]
-
-  const resolutionOptions = [
-    { value: 'payment_recovered', label: 'Payment recovered', description: 'The customer paid you another way. Records the payment, marks the invoice paid and stops the retries.', variant: 'default' as const },
-    { value: 'invoice_voided', label: 'Void invoice', description: 'Annul the invoice and stop collection — e.g. billed in error or waived. Reverses any applied credits and cancels the pending charge; the invoice no longer counts as revenue. For a payment collected offline, use "Payment recovered" instead.', variant: 'destructive' as const },
-    { value: 'invoice_not_collectible', label: 'Write off invoice', description: 'Marks the invoice as uncollectible (bad debt). Halts dunning automation. The invoice stays on the books for audit. Subscription stays active — cancel separately if needed.', variant: 'destructive' as const },
-  ]
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!resolution) return
-    setSaving(true)
-    try {
-      await api.resolveDunningRun(run.id, resolution)
-      onResolved()
-    } catch (err) {
-      showApiError(err, 'Failed to resolve dunning run')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Resolve Dunning Run</DialogTitle>
-        </DialogHeader>
-        <form onSubmit={handleSubmit} noValidate className="space-y-4">
-          {/* Context */}
-          <div className="bg-muted rounded-lg p-3 flex items-center justify-between">
-            <div>
-              <p className="text-xs text-muted-foreground">Invoice</p>
-              <p className="text-sm font-mono font-medium text-foreground">{inv?.invoice_number || run.invoice_id.slice(0, 8) + '...'}</p>
-            </div>
-            <div className="text-right">
-              <p className="text-xs text-muted-foreground">Amount due</p>
-              <p className="text-sm font-semibold text-foreground tabular-nums">{dunningAmountDue(run, inv) ?? '\u2014'}</p>
-            </div>
-          </div>
-
-          {/* Resolution options */}
-          <div>
-            <Label className="mb-2 block">Resolution</Label>
-            <div className="space-y-2">
-              {resolutionOptions.map(opt => {
-                const selected = resolution === opt.value
-                return (
-                  <button key={opt.value} type="button" aria-pressed={selected}
-                    onClick={() => setResolution(opt.value)}
-                    className={cn(
-                      'w-full text-left px-4 py-3 rounded-lg border-2 transition-all',
-                      selected
-                        ? opt.variant === 'destructive'
-                          ? 'border-destructive bg-destructive/5 ring-1 ring-destructive/20'
-                          : 'border-primary bg-primary/5 ring-1 ring-primary/20'
-                        : 'border-border hover:border-border/80 hover:bg-accent'
-                    )}>
-                    <p className={cn('text-sm font-medium', selected ? (opt.variant === 'destructive' ? 'text-destructive' : 'text-primary') : 'text-foreground')}>
-                      {opt.label}
-                    </p>
-                    <p className="text-xs text-muted-foreground mt-0.5">{opt.description}</p>
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-
-          {resolution === 'invoice_not_collectible' && (
-            <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3">
-              <p className="text-xs font-medium text-amber-800 dark:text-amber-300">
-                Marks the invoice <strong>uncollectible</strong> — recorded as bad debt. No refund, no credit reversal, no void. The invoice can still be recovered later via Record Payment (Stripe-parity uncollectible → paid) or reclassified via Void if the situation changes.
-              </p>
-            </div>
-          )}
-
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-            <Button type="submit" disabled={saving || !resolution}
-              variant={resolution === 'invoice_not_collectible' ? 'destructive' : 'default'}>
-              {saving ? 'Resolving...' : 'Resolve'}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
   )
 }

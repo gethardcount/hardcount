@@ -18,7 +18,7 @@ import {
   setActiveCurrency,
   sumByCurrency,
 } from '../src/lib/money.ts'
-import { dunningAmountDue, dunningRunAmount } from '../src/lib/invoiceTerminal.ts'
+import { dunningRunAmount } from '../src/lib/invoiceTerminal.ts'
 
 beforeEach(() => setActiveCurrency('USD'))
 
@@ -71,36 +71,6 @@ test('amountInputToCents is what both the form and its confirm use', () => {
   assert.equal(amountInputToCents('abc'), 0)
   // The confirm shows these cents, so it can't disagree with what is sent.
   assert.equal(formatCents(amountInputToCents('0.1'), 'USD'), '$0.10')
-})
-
-test('dunning amount uses the run invoice currency', () => {
-  assert.equal(
-    dunningAmountDue({ invoice_amount_due_cents: 4200, invoice_currency: 'EUR' }),
-    '€42.00',
-  )
-})
-
-test('dunning amount falls back to the loaded invoice, in its currency', () => {
-  // The join came back empty (amount 0) — the invoice on the page decides.
-  assert.equal(
-    dunningAmountDue({ invoice_amount_due_cents: 0 }, { amount_due_cents: 990, currency: 'GBP' }),
-    '£9.90',
-  )
-  assert.equal(dunningAmountDue({}), null)
-})
-
-test('a run on a voided invoice is chasing nothing, whatever the join says', () => {
-  // amount_due survives a void, so the joined figure still read "$29.00"
-  // in the resolve dialog's "Amount due" (sweep A7 / E1).
-  assert.equal(
-    dunningAmountDue({ invoice_amount_due_cents: 2900, invoice_currency: 'USD' }, { status: 'voided', amount_due_cents: 2900, currency: 'USD' }),
-    '$0.00',
-  )
-  // Negative control: an open invoice still shows what is due.
-  assert.equal(
-    dunningAmountDue({ invoice_amount_due_cents: 2900, invoice_currency: 'USD' }, { status: 'finalized', amount_due_cents: 2900, currency: 'USD' }),
-    '$29.00',
-  )
 })
 
 test('the Dunning list shows the invoice amount of a run, a void included', () => {

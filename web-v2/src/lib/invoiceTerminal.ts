@@ -182,17 +182,6 @@ function dunningJoinAmount(run: DunningRunInvoiceJoin): string | null {
 }
 
 /**
- * The amount a dunning run is chasing, in its invoice's currency: the resolve
- * dialog's "Amount due". The invoice loaded on the page decides, because it
- * carries the status: a run on a voided invoice is chasing nothing, though the
- * joined amount_due survived the void (sweep A7 / E1).
- */
-export function dunningAmountDue(run: DunningRunInvoiceJoin, inv?: InvoiceMoneyInput): string | null {
-  if (inv) return formatCents(invoiceDueCents(inv), inv.currency)
-  return dunningJoinAmount(run)
-}
-
-/**
  * The Dunning list's "Amount": the run's invoice amount (invoiceAmountCents),
  * so a run closed by a void reads the amount it was voided at. Showing what
  * was owed instead turned the whole Resolved tab into $0.00 rows (sign-off of
