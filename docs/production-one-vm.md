@@ -25,7 +25,7 @@ Every example uses `billing.example.com`. Replace it with your own address.
 
 ## 1. Install a pinned release
 
-A release is a tested version with a number, such as `v0.9.1`. Production runs a release, not the newest code: the newest code can hold changes that are not released yet. Find the newest release on the [releases page](https://github.com/gethardcount/hardcount/releases). This page uses `v0.9.1`. A Velox install (v0.8.x) cannot be upgraded to Hardcount: install fresh.
+A release is a tested version with a number, such as `v0.9.1`. Production runs a release, not the newest code: the newest code can hold changes that are not released yet. Find the newest release on the [releases page](https://github.com/gethardcount/hardcount/releases). This page uses `v0.9.1`. A Velox install (v0.8.x) cannot be upgraded: see [Coming from Velox](upgrades.md#coming-from-velox).
 
 1. Get the files for that release.
 
@@ -383,101 +383,12 @@ Check each line before the first real customer.
 
 ## Upgrade to a new release
 
-Hardcount was called Velox before v0.9.0. v0.9.0 installs fresh only: it refuses a database made by Velox: a 0.8.x release, or a build of Velox's `main` ([why](ops/runbook/migration-failed-midway.md#the-database-was-made-by-velox)). A Velox install does not get that far with these steps: its `.env` names `VELOX_*` settings, so `docker compose pull` in step 4 stops with `required variable HARDCOUNT_APP_DB_PASSWORD is missing a value`. Install Hardcount fresh, from [step 1](#1-install-a-pinned-release) of this page, with an empty database: a new VM, or a new Compose data volume.
-
-Database changes (migrations) run by themselves as the new version starts.
-
-1. Read the upgrade notes in the [changelog](../CHANGELOG.md) for every release between yours and the new one.
-2. Take a backup. If the upgrade goes wrong, it is how you go back ([Going back](#going-back)).
-
-   ```bash
-   sudo hardcount-backup
-   ```
-
-   **You see:** `Verified:  yes`.
-
-3. Get the new release's files and point `.env` at its images. This example moves to `v0.9.1`.
-
-   ```bash
-   HARDCOUNT_VERSION=v0.9.1
-   cd /opt/hardcount
-   git fetch --tags
-   git checkout "$HARDCOUNT_VERSION"
-   cd deploy/compose
-   sed -i "s|^HARDCOUNT_IMAGE=.*|HARDCOUNT_IMAGE=ghcr.io/gethardcount/hardcount:${HARDCOUNT_VERSION}|; s|^HARDCOUNT_DASHBOARD_IMAGE=.*|HARDCOUNT_DASHBOARD_IMAGE=ghcr.io/gethardcount/hardcount-dashboard:${HARDCOUNT_VERSION}|" .env
-   ```
-
-   **You see:** `HEAD is now at …` from git.
-
-4. Pull the new images and see what the upgrade will change. `migrate status` only reads.
-
-   ```bash
-   docker compose pull
-   docker compose run --rm hardcount-api migrate status
-   ```
-
-   **You see:** a few `Container … Running` lines, then the plan. It lists the migrations to apply. If it says `no migration record`, stop: the upgrade will not run ([why](ops/runbook/migration-failed-midway.md#tables-but-no-migration-record)).
-
-5. Start the new images. `--no-build` makes sure Compose runs the images you pulled and never builds from the checkout instead.
-
-   ```bash
-   docker compose up -d --no-build
-   docker compose exec hardcount-api /usr/local/bin/hardcount version
-   ```
-
-   **You see:** `hardcount v0.9.1`, and `curl -fsS http://localhost:8080/health/ready` answers `"status":"ok"` again.
-
-If the upgrade stops with an error, Hardcount does not start, and nothing needs repair: a failed migration is undone. `docker compose logs --tail 20 hardcount-api` shows the error. Compose keeps starting the API again, and each start tries the upgrade again, so stop it while you find the cause:
-
-```bash
-docker compose stop hardcount-api
-```
-
-Then follow [A database upgrade stopped](ops/runbook/migration-failed-midway.md). If the error says `waited 5s for a table lock`, something held a lock on a table the upgrade changes, often a long-running query: see [An upgrade waited for a table lock](ops/runbook/migration-failed-midway.md#it-waited-5s-for-a-table-lock). When the cause is fixed, start the API again:
-
-```bash
-docker compose up -d hardcount-api
-```
+[Upgrade Hardcount](upgrades.md) has the steps: what to do before you
+upgrade, the upgrade on one VM, and what to do if it stops.
 
 ### Going back
 
-Never roll the database back with `hardcount migrate rollback`: it runs only with `APP_ENV=local`, because it loses data the newer release wrote. To go back, restore the backup from step 2. That is why every upgrade starts with a backup: without one, a database upgrade cannot be undone.
-
-**A restore loses everything written after the backup.** The old release kept running after step 2, and the new one ran after step 5. The restore removes what both wrote: usage events your app sent, invoices Hardcount built and charged, payments and refunds, and changes made in the dashboard or through the API. The longer the new release runs, the more a restore loses.
-
-To go back with a restore:
-
-1. Stop the API, so nothing more is written.
-
-   ```bash
-   docker compose stop hardcount-api
-   ```
-
-   **You see:** a `Container … Stopped` line.
-
-2. Find the backup from step 2. Its name holds the time it started, in UTC. Use that file, not a newer nightly backup: a backup taken after step 5 already holds the new release's changes.
-
-   ```bash
-   ls -l /var/backups/hardcount/
-   ```
-
-   **You see:** files such as `hardcount_20261019_143000.dump`, a backup started at 14:30:00 UTC on 19 October 2026.
-
-3. List the invoices created or changed since that time, and keep the list. Run this in the database shell (`docker compose exec postgres psql -U hardcount -d hardcount`), with your backup's time:
-
-   ```sql
-   SELECT id, livemode, status, payment_status, total_amount_cents, updated_at
-   FROM invoices
-   WHERE updated_at >= '2026-10-19 14:30:00+00'
-   ORDER BY updated_at;
-   ```
-
-   **You see:** one row for each invoice that the restore removes, or takes back to how it was at the backup.
-
-4. Restore the backup into an empty database, then start the old release. See [Restore a backup](ops/backup-considerations.md#4-restore-a-backup).
-5. Put back what the restore removed.
-   - **Usage events.** Have your app send again every event it sent after the backup time, with the same `idempotency_key`. Hardcount counts each key once, so an event the backup already holds is not counted twice. An event that is not sent again is not billed.
-   - **Payments.** The restored database does not know about a payment Stripe took after the backup. A subscription's invoice built after the backup is built again by the next billing run, and the customer's card can be charged again. Check each invoice on your list in Stripe, and refund a second charge.
-   - **Everything else.** Run the [checks after a restore](ops/backup-considerations.md#checks-after-a-restore).
+To undo an upgrade, restore the backup you took before it:
+[Going back](upgrades.md#going-back).
 
 **Next:** send your first usage event and bill it: [First invoice](first-invoice.md).

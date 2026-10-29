@@ -32,14 +32,12 @@ A migration is a versioned script that changes the database schema. Hardcount ap
 - Set `RUN_MIGRATIONS_ON_BOOT=true` and Hardcount applies any new ones when it starts. The Compose stack sets it. The default is `false`: then run `hardcount migrate` before you start a new release, because Hardcount refuses to start while a migration is missing.
 - If several copies start at once, they take turns: one applies the migrations and the others wait, then find nothing left to do.
 - **A failed migration leaves nothing to repair.** Fix the cause the error names and run the upgrade again. See [A database upgrade stopped](ops/runbook/migration-failed-midway.md).
-- **Never roll back in production.** `hardcount migrate rollback` runs only with `APP_ENV=local`. To go back after an upgrade, restore the backup you took before it; see [Going back](production-one-vm.md#going-back).
+- **Never roll back in production.** `hardcount migrate rollback` runs only with `APP_ENV=local`. To go back after an upgrade, restore the backup you took before it; see [Going back](upgrades.md#going-back).
 - **Each migration waits at most 5 seconds for a table lock**, then stops and leaves nothing behind. `MIGRATION_LOCK_TIMEOUT` changes the limit. See [It waited 5s for a table lock](ops/runbook/migration-failed-midway.md#it-waited-5s-for-a-table-lock).
 
 ## Upgrading
 
-Hardcount was called Velox before v0.9.0. v0.9.0 installs fresh only: it refuses a database made by Velox: a 0.8.x release, or a build of Velox's `main` ([why](ops/runbook/migration-failed-midway.md#the-database-was-made-by-velox)).
-
-Read the changelog notes and take a backup first. Then follow [Upgrade on one VM](production-one-vm.md#upgrade-to-a-new-release) or [Upgrade two or more copies](ops/high-availability.md#upgrades).
+[Upgrade Hardcount](upgrades.md): what to do before you upgrade, the upgrade on one VM or on several copies, and how to go back. A Velox install cannot be upgraded: see [Coming from Velox](upgrades.md#coming-from-velox).
 
 ## Settings
 
