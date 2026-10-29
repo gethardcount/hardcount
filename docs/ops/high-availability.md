@@ -80,14 +80,6 @@ A grace period shorter than that can kill a copy (SIGKILL) halfway through. Hard
 
 ## Upgrades
 
-Read the upgrade notes in the [changelog](../../CHANGELOG.md) first. Then take a backup, or note the time if your Postgres has point-in-time restore: going back after an upgrade means restoring the database to that point ([Going back](../production-one-vm.md#going-back)). Whether you can upgrade one copy at a time (a rolling upgrade) depends on the release's migrations, below.
-
-**Database upgrades (migrations):** `RUN_MIGRATIONS_ON_BOOT=true` is safe when several copies start at once: they take turns through a Postgres lock, and each one applies only what is still missing. A waiting copy gives up after 30 minutes and is restarted. What is not covered is old code running on a new schema, so the release notes decide the order:
-
-- **A release whose notes say it has migrations:** stop every old copy, run `hardcount migrate` once (or start one new copy with `RUN_MIGRATIONS_ON_BOOT=true`), then start the other new copies.
-- **A release with no migrations:** upgrade one copy at a time.
-- Hardcount was called Velox before v0.9.0. v0.9.0 installs fresh only: it refuses a database made by Velox: a 0.8.x release, or a build of Velox's `main` ([why](runbook/migration-failed-midway.md#the-database-was-made-by-velox)).
-
-Run `hardcount migrate status` with the new release first to see the plan. Never roll a migration back in production; see [Self-host](../self-host.md#database-upgrades-migrations).
+[Upgrade two or more copies](../upgrades.md#upgrade-two-or-more-copies) says in which order to upgrade the copies, and [Going back](../upgrades.md#going-back) how to undo an upgrade.
 
 **Next:** [A background job is stuck](runbook/background-job-stuck.md): what to check when billing or another background job stops.

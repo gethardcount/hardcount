@@ -11,7 +11,7 @@ Migration 180 is the starting schema in one file,
 It runs only on an empty database. New files go in
 `internal/platform/migrate/sql/` and start at `00181`.
 
-Hardcount was called Velox before v0.9.0. v0.9.0 installs fresh only: it refuses a database made by Velox: a 0.8.x release, or a build of Velox's `main` ([why](../ops/runbook/migration-failed-midway.md#the-database-was-made-by-velox)).
+A database made by Velox, Hardcount's name before v0.9.0, is refused: see [Coming from Velox](../upgrades.md#coming-from-velox).
 
 ## Add a migration in three steps
 

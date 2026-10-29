@@ -53,12 +53,14 @@
    Compose, then HTTPS, email, Stripe, nightly backups and a go-live
    checklist.
 3. [High availability](ops/high-availability.md): run two or more copies
-   behind a load balancer, with health checks, shutdown and rolling upgrades.
-4. [Postgres requirements](ops/postgres-requirements.md),
+   behind a load balancer, with health checks and shutdown.
+4. [Upgrade Hardcount](upgrades.md): before you upgrade, the upgrade on one
+   VM or on several copies, and how to go back.
+5. [Postgres requirements](ops/postgres-requirements.md),
    [email setup](ops/email-setup.md),
    [backups](ops/backup-considerations.md) and
    [tax calculation](ops/tax-calculation.md).
-5. When something breaks: the [operations runbook](ops/runbook/index.md).
+6. When something breaks: the [operations runbook](ops/runbook/index.md).
    Find what you see, then follow its steps.
 
 ## Engineering

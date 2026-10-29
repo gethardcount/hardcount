@@ -53,7 +53,7 @@ Read these before every upgrade:
    upgrade**. v0.4.0 has them too.
 
 Take a backup before you upgrade. To go back, restore that backup: see
-[Upgrading](self-host.md#upgrading).
+[Going back](upgrades.md#going-back).
 
 ## Security fixes
 

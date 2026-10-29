@@ -441,7 +441,7 @@ func runMigrateStatus() {
 
 // rollbackRefused is what `hardcount migrate rollback` prints outside local.
 const rollbackRefused = `hardcount migrate rollback runs only with APP_ENV=local.
-Rolling back in staging or production loses data the newer release wrote. To go back, restore the backup taken before the upgrade: docs/production-one-vm.md#going-back`
+Rolling back in staging or production loses data the newer release wrote. To go back, restore the backup taken before the upgrade: docs/upgrades.md#going-back`
 
 // runMigrateRollback undoes the latest migration, one step, on a local
 // database: the loop for writing a new migration. Migration 180, the

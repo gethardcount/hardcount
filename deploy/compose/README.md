@@ -11,7 +11,7 @@ Production on one VM runs the published release images, set by `HARDCOUNT_IMAGE`
 
 To upgrade a stack built from source, run these in `deploy/compose`. This example moves to `v0.9.1`.
 
-A Velox install (Hardcount's name before v0.9.0) cannot be upgraded. Its `.env` names `VELOX_*` settings, so `docker compose build` in step 2 stops with `required variable HARDCOUNT_APP_DB_PASSWORD is missing a value`. Install Hardcount fresh, with an empty database: a new VM, or a new Compose data volume ([why](../../docs/ops/runbook/migration-failed-midway.md#the-database-was-made-by-velox)).
+A Velox install (Hardcount's name before v0.9.0) cannot be upgraded: see [Coming from Velox](../../docs/upgrades.md#coming-from-velox).
 
 1. Take a backup. [Production on one VM, step 7](../../docs/production-one-vm.md#7-back-up-every-night) sets up this command. If your checkout is not in `/opt/hardcount`, change its two `/opt/hardcount` paths.
 
@@ -71,7 +71,7 @@ ssh -L 8080:localhost:80 you@server   # localhost:8080 instead if NGINX_HTTP_POR
 | See the database's version and the upgrades still to apply | `docker compose run --rm hardcount-api migrate status` |
 | Open a database shell | `docker compose exec postgres psql -U hardcount -d hardcount` |
 
-To upgrade, see [Upgrade to a new release](../../docs/production-one-vm.md#upgrade-to-a-new-release), or [Build from source instead](#build-from-source-instead).
+To upgrade, see [Upgrade on one VM](../../docs/upgrades.md#upgrade-on-one-vm), or [Build from source instead](#build-from-source-instead).
 
 ## If something goes wrong
 
