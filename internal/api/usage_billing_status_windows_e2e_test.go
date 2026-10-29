@@ -185,7 +185,7 @@ func TestBillingStatus_GraceEventBeforeTheNextPinIsNotFlagged(t *testing.T) {
 	tokens := r.meter("tokens", "sum")
 	plan, _ := r.plan("pro", perUnit(tokens, "1", map[string]string{"model": "a"}))
 	clk := r.clock("pin ahead", time.Now().UTC().AddDate(0, 0, -100).Truncate(time.Second))
-	sub, _, p1 := r.clockSub("pp-pin", clk, plan)
+	sub, p0, p1 := r.clockSub("pp-pin", clk, plan)
 	parked := p1.Add(-3 * time.Minute)
 	r.advance(clk, parked)
 
@@ -203,7 +203,7 @@ func TestBillingStatus_GraceEventBeforeTheNextPinIsNotFlagged(t *testing.T) {
 	if got := flowStr(added, "effective"); got != "next_period" {
 		t.Fatalf("price add: effective %q, want next_period", got)
 	}
-	r.advance(clk, p1.AddDate(0, 1, 0).Add(time.Hour))
+	r.advance(clk, monthAfter(p1, p0.Day()).Add(time.Hour))
 	if got := r.cycle(sub, p1).usageCents(); got != 9 {
 		t.Errorf("next period usage = %dc, want 9c: the price saved before P1 bills the event", got)
 	}
