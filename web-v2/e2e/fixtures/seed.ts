@@ -2,7 +2,7 @@ import { expect } from '@playwright/test'
 import { api, uniq } from './api'
 
 // The few API shapes the suite reads. Only the fields used here are listed.
-export interface Customer { id: string; display_name: string; external_id: string }
+export interface Customer { id: string; display_name: string; external_id: string; email: string }
 export interface Plan { id: string; name: string; code: string }
 export interface Meter { id: string; name: string }
 export interface TestClock { id: string; name: string; frozen_time: string; status: string }

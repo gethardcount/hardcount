@@ -27,3 +27,27 @@ export function dollarsToRateCents(input: string): string | null {
   out = out.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '')
   return out === '0' || out === '' ? '0' : `${sign}${out}`
 }
+
+// dollarsToWholeCents converts an amount typed in currency units ("25",
+// "25.50") into whole cents, for fields that take money, not a rate: an
+// invoice line's unit price, credits sold. It returns null for a blank box,
+// a negative, a comma ("9,50": the box never guesses which one you meant),
+// more than two decimals, or an amount too large to hold exactly. String
+// math, like dollarsToRateCents, so 0.29 is 29 cents, never 28.999….
+export function dollarsToWholeCents(input: string): number | null {
+  const m = /^(\d*)(?:\.(\d{0,2}))?$/.exec(input.trim())
+  if (!m || (!m[1] && !m[2])) return null
+  const whole = m[1] || '0'
+  if (whole.replace(/^0+/, '').length > 13) return null
+  return Number(whole) * 100 + Number((m[2] || '').padEnd(2, '0'))
+}
+
+// wholeUnits reads a unit count typed in a box (a tier's "up to", a package
+// size): digits only and greater than 0, or null. parseInt read "" as 0,
+// "1000.5" as 1000 and "1e3" as 1, and the form then saved those.
+export function wholeUnits(input: string): number | null {
+  const t = input.trim()
+  if (!/^\d+$/.test(t)) return null
+  const n = Number(t)
+  return n > 0 && Number.isSafeInteger(n) ? n : null
+}
