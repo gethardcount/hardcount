@@ -1,32 +1,30 @@
 # Hardcount
 
-### Meter every token. Sell prepaid credits. Know your margin.
-
 [![CI](https://github.com/gethardcount/hardcount/actions/workflows/ci.yml/badge.svg)](https://github.com/gethardcount/hardcount/actions/workflows/ci.yml)
 [![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go)](https://go.dev)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 [![Release](https://img.shields.io/github/v/tag/gethardcount/hardcount?label=release)](CHANGELOG.md)
 
-**Open-source billing for AI and usage-based products, on your own servers.**
+**Usage billing for AI products, on your own servers.**
 
-Hardcount counts what each customer uses, such as tokens, minutes or API calls, prices it, makes the invoice and its PDF, and charges the card through Stripe. Your billing data stays in your own database.
+Price tokens per model, sell prepaid credit, and see what each customer costs you. Hardcount makes the invoices, and Stripe charges the card. Your billing data stays in your own Postgres.
 
-Built for the gaps small teams hit: no Stripe Billing fee, nothing held back behind a paid licence, and light enough to run yourself. [Why Hardcount →](#why-hardcount)
+An open-source alternative to Stripe Billing and Lago: no Stripe Billing fee, no paid edition, and light enough to run yourself. [Why Hardcount →](#why-hardcount)
 
 ---
 
 ## What it looks like
 
-One month of AI usage for one customer, straight from the [demo](#quick-start).
+One month of AI usage for one customer, from the [demo](#quick-start) in test mode.
 
-**1. The invoice your customer gets.** One line per model and token type, priced per million tokens.
+**1. The demo invoice.** One line per model and token type, priced per million tokens.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme-invoice-dark.png">
-  <img alt="The demo invoice in the dashboard: input, output and cache_read lines for claude-sonnet-4.5 and input and output lines for claude-haiku-4.5, priced per 1M tokens, $5.73 due, with the activity timeline below." src="docs/assets/readme-invoice-light.png" width="100%">
+  <img alt="Invoice HC-000001 in the dashboard, from Example AI Ltd to ACME Corp: input, output and cache_read lines for claude-sonnet-4.5 and input and output lines for claude-haiku-4.5, priced per 1M tokens, $5.73 due." src="docs/assets/readme-invoice-light.png" width="100%">
 </picture>
 
-**2. Your margin, per model.** What each model earned you: Sonnet 67.1%, Haiku 20.0%.
+**2. Your margin, per model.** What you billed against what the AI provider charged you: Sonnet 67.1%, Haiku 20.0%. Only you see this.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme-margin-dark.png">
@@ -64,7 +62,7 @@ curl -X POST http://localhost:8080/v1/usage-events \
 
 ## Quick start
 
-Try Hardcount on your own computer in about five minutes. Think of it as a demo car at a showroom: you drive it, you don't build it.
+Try Hardcount on your own computer. It runs in test mode, where no real money moves.
 
 You need git and Docker 24 or newer with the Compose plugin. On Windows, run it inside WSL.
 
@@ -86,7 +84,7 @@ Open `http://localhost:8080` and sign in. Hardcount opens in test mode, where no
 ./quickstart.sh demo
 ```
 
-In about two minutes, the demo sets up AI token prices, creates a customer and sends token usage the way a LiteLLM proxy would. Then it moves the customer's test clock (a pretend clock for test customers) to the end of the month, and Hardcount makes the invoice, its PDF and the margin report shown above.
+The demo sets up AI token prices, creates a customer and sends token usage the way a LiteLLM proxy would. Then it moves the customer's test clock (a pretend clock for test customers) to the end of the month, and Hardcount makes the invoice, its PDF and the margin report shown above.
 
 **You see:** nine steps, each ending in a green ✓, then links to the invoice and the customer. Home still reads $0, because its totals leave out test-clock customers; use the links instead. [Each demo step, and where to click](docs/quick-start.md)
 
@@ -100,19 +98,19 @@ In about two minutes, the demo sets up AI token prices, creates a customer and s
 
 ## Why Hardcount
 
-Small AI teams kept running into the same gaps. Hardcount is built for them.
+The gaps Hardcount is built for:
 
 | The gap | What Hardcount does |
 |---|---|
 | **Stripe Billing takes a cut:** 0.7% of billing volume on its pay-as-you-go plan, and its basic usage billing can't price each model and token type on one meter. | **No Stripe Billing fee.** Stripe only charges the card. One meter prices every model and token type. |
-| **Key parts sit behind a paid licence,** such as automatic failed-payment retries and invoice previews in Lago. | **One MIT licence, nothing held back.** |
-| **They are heavy to run:** some default setups run nine or eleven services, including Kafka and ClickHouse. | **Three parts:** the Hardcount server, Postgres and Redis. |
-| **No way to fast-forward time** to test a billing change. | **Test clocks:** months of billing in minutes. |
+| **Key parts sit behind a paid licence,** such as automatic failed-payment retries and invoice previews in Lago. | **One free edition.** MIT, with no paid edition. |
+| **Some are heavy to run,** with extra services such as Kafka and ClickHouse. | **Three parts:** the Hardcount server, Postgres and Redis. |
+| **No way to fast-forward time** to test a billing change. | **Test clocks:** move a test customer forward a month and see the invoice before any real customer gets it. |
 | **A customer can cost you more than they pay,** because AI costs move with usage. | **Margin per customer and per model,** from the provider cost Hardcount records on each usage event as it arrives. OpenMeter and Flexprice report cost too. |
 
 Stripe still charges its normal card fee, and Stripe Tax's fee if you use it. Every claim above has a source in [Why Hardcount exists](docs/why-hardcount.md), and [How it compares](docs/comparison.md) lists where the other projects are ahead.
 
-**Pre-1.0.** Hardcount is young: one maintainer, Stripe and cards only, no SDKs yet. Until 1.0.0, a minor release can break the API, and a patch release can change something you rely on ([versioning before 1.0](docs/versioning.md)).
+**Pre-1.0.** Hardcount is young: one maintainer, Stripe and cards only, no SDKs yet, no production users yet. Until 1.0.0, a minor release can break the API, and a patch release can change something you rely on ([versioning before 1.0](docs/versioning.md)).
 
 ---
 
@@ -123,7 +121,7 @@ Stripe still charges its normal card fee, and Stripe Tax's fee if you use it. Ev
 - **You charge by usage,** most of all an AI product that prices per token, by model and token type.
 - **You want billing on your own servers.** Usage and invoice records stay in your own Postgres. Stripe sees each charge, and the invoice lines too if you use Stripe Tax.
 - **You are a small or mid-size team.** One engineer can run it, on one server or several.
-- **Your volume is up to about a million usage events a day,** roughly 400,000 AI requests, however many tokens each one uses. In a 20-minute test, a €6.49-a-month server (2 CPUs, 4 GB) handled that rate with no errors. Hardcount keeps every raw event, so plan about 15 to 20 GB of database disk per month at that volume. [How we measured](docs/scale.md)
+- **Your volume is up to about a million usage events a day,** roughly 400,000 AI requests, however many tokens each one uses. In a 20-minute test on v0.8.0, a server listed at €6.49 a month before VAT (2 shared CPUs, 4 GB memory) took 12 events a second with no errors, about 1 million a day at that rate. Hardcount keeps every raw event, so plan 15 to 18 GB of database disk per month at that volume. [How we measured](docs/scale.md)
 
 **Not a fit if you need:**
 
