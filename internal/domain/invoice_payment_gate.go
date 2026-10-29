@@ -160,16 +160,27 @@ func PaymentBlocksAction(inv Invoice, action InvoiceAction) PaymentBlock {
 // paid), and it is the exit when Stripe can never answer (disconnected, the
 // customer deleted) — ADR-107's carve-out reasoning.
 //
-// Only 'pending' and 'failed' consult the hold. 'processing' and 'unknown' are
-// decided above, and an unknown outcome keeps its hold, so applying the hold
-// to 'unknown' would refuse the write-off of a parked invoice — the exit for a
-// customer who paid another way (ADR-107).
+// A parked invoice consults the hold only while it is LIVE. A park keeps its
+// claim's hold, so a stale hold on a park is the normal waiting state, and
+// write-off stays allowed then: the exit for a customer who paid another way
+// (ADR-107). A live hold on a park belongs to a charge request made for it:
+// today, the charge that parked it, in its first five minutes; once the
+// stale-hold sweep resends a parked charge, that resend. A write-off must not
+// land while such a request may still reach Stripe, or it can charge an
+// invoice written off because the customer paid another way. So write-off
+// waits a few minutes, like every other action (ADR-127 amendment 2026-10-29).
+//
+// Otherwise only 'pending' and 'failed' consult the hold. 'processing' is
+// decided above.
 //
 // The card settlement path must never call this: the charge holding the hold
 // has to be able to record its own success.
 func PaymentBlocksActionHeld(inv Invoice, action InvoiceAction, hold ChargeHoldState) PaymentBlock {
 	if b := PaymentBlocksAction(inv, action); b.Blocked {
 		return b
+	}
+	if inv.Parked() && hold == ChargeHoldLive {
+		return PaymentBlock{Blocked: true, Code: "payment_in_flight", Message: ChargeHoldRefusalMessage}
 	}
 	if inv.PaymentStatus != PaymentPending && inv.PaymentStatus != PaymentFailed {
 		return PaymentBlock{}

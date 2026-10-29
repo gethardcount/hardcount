@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/testutil"
@@ -110,5 +111,61 @@ func execBypassStamp(t *testing.T, db *postgres.DB, q string, args ...any) {
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit: %v", err)
+	}
+}
+
+// A park keeps its hold until it ends (ADR-127 amendment 2026-10-29): the
+// stale-hold sweep finds parks only by their hold, so a parked invoice whose
+// hold is cleared refuses every charge and is never looked at again. Neither
+// write that clears a hold without ending a park may clear a park's: the
+// owner's release (with the exact token its claim wrote) and the sweep's
+// clear (with the exact stale value and counter it read). Each answers as for
+// a row that changed under it.
+func TestParkedHold_NeverClearedWhileParked(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	ctx := postgres.WithLivemode(context.Background(), false)
+	tenantID := testutil.CreateTestTenant(t, db, "Parked Hold Kept")
+	store := invoice.NewPostgresStore(db)
+
+	inv := seedClaimableInvoice(t, db, ctx, tenantID, "INV-PARK-KEEP")
+	hold, err := store.ClaimAutoCharge(ctx, tenantID, inv.ID)
+	if err != nil || !hold.Held() {
+		t.Fatalf("claim: held=%v err=%v", hold.Held(), err)
+	}
+	stampOutcome(t, store, ctx, tenantID, inv.ID, domain.PaymentUnknown, "", "stripe: 500")
+
+	if err := store.ReleaseChargeHold(ctx, tenantID, inv.ID, hold); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	if !holdIsSet(t, db, inv.ID) {
+		t.Fatal("the owner's release cleared a parked invoice's hold: nothing would ever check it again")
+	}
+
+	setHoldAgo(t, db, inv.ID, 20*time.Minute)
+	stale, err := listStaleHolds(ctx, store, 10)
+	if err != nil || len(stale) != 1 {
+		t.Fatalf("setup: %d stale holds (err %v), want the park's", len(stale), err)
+	}
+	h := stale[0]
+	cleared, err := store.ClearStaleChargeHold(ctx, tenantID, inv.ID, h.Hold, h.Invoice.ChargeAttemptSeq, false)
+	if err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	if cleared || !holdIsSet(t, db, inv.ID) {
+		t.Fatalf("the sweep's clear cleared a parked invoice's hold (reported %v)", cleared)
+	}
+
+	// Negative control: once the park has ended (here, its payment found and
+	// recorded), the same clear works.
+	if _, err := store.MarkPaid(ctx, tenantID, inv.ID, "pi_found_later", time.Now().UTC()); err != nil {
+		t.Fatalf("pay: %v", err)
+	}
+	paid, err := store.Get(ctx, tenantID, inv.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleared, err = store.ClearStaleChargeHold(ctx, tenantID, inv.ID, h.Hold, paid.ChargeAttemptSeq, false)
+	if err != nil || !cleared || holdIsSet(t, db, inv.ID) {
+		t.Fatalf("clear after the park ended: cleared=%v err=%v hold set=%v, want cleared", cleared, err, holdIsSet(t, db, inv.ID))
 	}
 }

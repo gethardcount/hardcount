@@ -229,12 +229,14 @@ func TestEmailActionsRefuseAnUnresolvedPayment(t *testing.T) {
 	}
 }
 
-// TestPaymentBlocksActionHeld_Matrix (#975, ADR-127): the charge hold refuses
-// only on 'pending' and 'failed'. A live hold refuses all three actions; a
-// stale one (a charge whose result was lost) refuses void and offline payment
-// but allows write-off, which moves no money. On 'unknown' the hold is
-// ignored, so a parked invoice stays writable-off with a hold (ADR-107);
-// 'processing' and 'unknown' with a PaymentIntent keep their own refusal.
+// TestPaymentBlocksActionHeld_Matrix (#975, ADR-127): a live hold refuses all
+// three actions; a stale one (a charge whose result was lost) refuses void
+// and offline payment but allows write-off, which moves no money. A parked
+// invoice consults the hold only while it is live (ADR-127 amendment
+// 2026-10-29): a request for it may still reach Stripe, so write-off waits;
+// with a stale hold, its normal waiting state, write-off is the exit
+// (ADR-107). 'processing' and 'unknown' with a PaymentIntent keep their own
+// refusal.
 func TestPaymentBlocksActionHeld_Matrix(t *testing.T) {
 	actions := []InvoiceAction{ActionVoid, ActionMarkUncollectible, ActionRecordOfflinePayment}
 	cases := []struct {
@@ -255,8 +257,10 @@ func TestPaymentBlocksActionHeld_Matrix(t *testing.T) {
 		{"pending free", PaymentPending, "", ChargeHoldNone, "", ""},
 		{"failed free", PaymentFailed, "pi_1", ChargeHoldNone, "", ""},
 		{"processing free", PaymentProcessing, "pi_1", ChargeHoldNone, "", "payment_in_flight"},
-		{"parked live, write-off", PaymentUnknown, "", ChargeHoldLive, ActionMarkUncollectible, ""},
+		{"parked live, write-off", PaymentUnknown, "", ChargeHoldLive, ActionMarkUncollectible, "payment_in_flight"},
 		{"parked stale, write-off", PaymentUnknown, "", ChargeHoldStale, ActionMarkUncollectible, ""},
+		{"parked no hold, write-off", PaymentUnknown, "", ChargeHoldNone, ActionMarkUncollectible, ""},
+		{"unknown naming its payment, live", PaymentUnknown, "pi_1", ChargeHoldLive, ActionMarkUncollectible, "payment_in_flight"},
 		{"parked live, void", PaymentUnknown, "", ChargeHoldLive, ActionVoid, "payment_unidentifiable"},
 		{"parked live, offline", PaymentUnknown, "", ChargeHoldLive, ActionRecordOfflinePayment, "payment_unidentifiable"},
 	}
