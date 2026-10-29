@@ -30,7 +30,7 @@ One of these:
   webhook endpoint must have three events turned on:
   `charge.dispute.created`, `charge.dispute.updated` and
   `charge.dispute.closed`. The Hardcount settings page lists them under the
-  webhook address. In v0.9.0 it did not, so an endpoint set up from that
+  webhook address. In v0.9.0 and v0.9.1 it did not, so an endpoint set up from that
   list may lack them. To check, in Stripe open **Developers → Webhooks**,
   open the endpoint, and add any of the three that is missing.
 
