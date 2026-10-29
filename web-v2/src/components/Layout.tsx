@@ -153,7 +153,9 @@ function ModeToggle({ livemode, busy, onToggle }: { livemode: boolean; busy: boo
           <span
             className={cn(
               'h-1.5 w-1.5 rounded-full transition-colors duration-200',
-              active ? (label === 'Live' ? 'bg-emerald-500' : 'bg-amber-500') : 'bg-muted-foreground/40',
+              // On the amber Test thumb an amber dot would vanish, so it
+              // takes the thumb's dark text colour.
+              active ? (label === 'Live' ? 'bg-emerald-500' : 'bg-test-mode-foreground') : 'bg-muted-foreground/40',
               // Live is real money moving — the dot breathes like a record
               // light (stilled under prefers-reduced-motion). Test stays still.
               active && label === 'Live' && 'animate-pulse motion-reduce:animate-none',
@@ -170,16 +172,18 @@ function ModeToggle({ livemode, busy, onToggle }: { livemode: boolean; busy: boo
           positions (200ms ease-out; instant under prefers-reduced-motion).
           Width is half the track minus the 4px padding ring; translate-x
           moves it exactly one thumb-width. Driven by the OPTIMISTIC visual
-          position (see above) so the glide is actually visible. */}
+          position (see above) so the glide is actually visible. On Test the
+          thumb is the test-mode band's amber, so the switch and the band say
+          the same thing; on Live it is the plain raised surface. */}
       <span
         aria-hidden="true"
         className={cn(
-          'absolute left-1 top-1 bottom-1 w-[calc(50%-4px)] rounded-md bg-card shadow-sm ring-1 ring-black/5 dark:ring-white/10',
-          'transition-transform duration-200 ease-out motion-reduce:transition-none',
-          visual && 'translate-x-full',
+          'absolute left-1 top-1 bottom-1 w-[calc(50%-4px)] rounded-md shadow-sm ring-1 ring-black/5 dark:ring-white/10',
+          'transition-[transform,background-color] duration-200 ease-out motion-reduce:transition-none',
+          visual ? 'translate-x-full bg-card' : 'bg-test-mode',
         )}
       />
-      {segment(false, 'Test', 'text-amber-700 dark:text-amber-300')}
+      {segment(false, 'Test', 'text-test-mode-foreground')}
       {segment(true, 'Live', 'text-emerald-700 dark:text-emerald-400')}
     </div>
   )
