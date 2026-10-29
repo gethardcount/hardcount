@@ -474,8 +474,8 @@ Commands:
 
 Environment:
   DATABASE_URL               PostgreSQL connection string — admin/migration role (or the
-                             split DB_HOST/DB_NAME/DB_USER/DB_PASSWORD shape; full list in
-                             deploy/compose/.env.example)
+                             split DB_HOST/DB_NAME/DB_USER/DB_PASSWORD shape; every setting is in
+                             docs/settings.md)
   APP_DATABASE_URL           Runtime connection for the least-privilege hardcount_app role (RLS
                              enforced). Used verbatim; REQUIRED in staging/production. Local
                              dev derives hardcount_app:hardcount_app from DATABASE_URL when unset.

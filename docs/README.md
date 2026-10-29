@@ -48,6 +48,7 @@
 ## Run it for real
 
 1. [Self-host](self-host.md): what you need and how the pieces fit.
+   Every environment variable, with its default: [Settings reference](settings.md).
 2. [Production on one VM](production-one-vm.md): install with Docker
    Compose, then HTTPS, email, Stripe, nightly backups and a go-live
    checklist.

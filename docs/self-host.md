@@ -43,7 +43,9 @@ Read the changelog notes and take a backup first. Then follow [Upgrade on one VM
 
 ## Settings
 
-Hardcount reads its settings from environment variables. The tables below list the main ones. More settings, each with a comment, are in the repository's [`.env.example`](../.env.example). The Compose stack reads its own [`deploy/compose/.env.example`](../deploy/compose/.env.example).
+Every setting, with its default and what it does, is in the [Settings reference](settings.md).
+
+Hardcount reads its settings from environment variables. The tables below list the main ones. The repository's [`.env.example`](../.env.example) is for running from source. The Compose stack reads its own [`deploy/compose/.env.example`](../deploy/compose/.env.example).
 
 **Required**
 
@@ -77,7 +79,7 @@ To check it, sign in, switch the dashboard to test mode and open the audit log. 
 | `DASHBOARD_BASE_URL` | unset | The dashboard's address, for password-reset and invite links. What breaks without it: [Email setup](ops/email-setup.md#what-breaks-when-a-setting-is-missing). For local development use `http://localhost:5173`. |
 | `CUSTOMER_PORTAL_URL` | unset | The dashboard's address, with no path. Stripe returns a customer here after they save a card ([Email setup](ops/email-setup.md#what-breaks-when-a-setting-is-missing)). |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:3000`, `:5173` and `:5174` | Other web addresses whose pages may call the API from a browser, comma-separated, each in full, such as `https://app.example.com`. A dashboard at the API's own address, as in the Compose stack, needs none. A listed address may send the sign-in cookie, so a dashboard at another address can sign in. `*` on its own lets any site call the API with an API key, never with the sign-in cookie. Hardcount refuses to start on an entry with a `*` inside, such as `https://*.example.com`, or on `*` beside other addresses. |
-| `SMTP_HOST`, `SMTP_PORT` | unset | Your email server. If unset, Hardcount sends no email. See [email setup](ops/email-setup.md). |
+| `SMTP_HOST`, `SMTP_PORT` | `SMTP_HOST` unset, `SMTP_PORT` `587` | Your email server. If unset, Hardcount sends no email. See [email setup](ops/email-setup.md). |
 | `HARDCOUNT_BOOTSTRAP_TOKEN` | unset | Allows the `POST /v1/bootstrap` call that creates the first tenant. At least 16 characters outside `local`. |
 | `METRICS_TOKEN` | unset | The bearer token a scraper must send to read `/metrics`. If unset, `/metrics` answers 401 in `production` and is open elsewhere. |
 | `HARDCOUNT_RATE_LIMIT_GENERAL_PER_MIN` | `100` | Requests a minute for each API key, for each tenant's dashboard users together, or for each client address before sign-in. Sign-in attempts from one address use the same limit. A whole number of 1 or more; any other value stops start-up. |
