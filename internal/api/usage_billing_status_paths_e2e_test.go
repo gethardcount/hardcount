@@ -72,7 +72,7 @@ func TestBillingStatus_TestClockPricesAtTheSimulatedPin(t *testing.T) {
 	tokens := r.meter("tokens", "sum")
 	plan, _ := r.plan("pro", perUnit(tokens, "1", map[string]string{"model": "a"}))
 	clk := r.clock("pin prices", time.Now().UTC().AddDate(0, 0, -100).Truncate(time.Second))
-	sub, _, p1 := r.clockSub("pp-clock-pin", clk, plan)
+	sub, p0, p1 := r.clockSub("pp-clock-pin", clk, plan)
 	added := r.must(time.Time{}, http.MethodPost, "/v1/plans/"+plan+"/prices", perUnit(tokens, "1", map[string]string{"model": "c"}), http.StatusCreated)
 	if got := flowStr(added, "effective"); got != "next_period" {
 		t.Fatalf("price add: effective %q, want next_period", got)
@@ -94,7 +94,7 @@ func TestBillingStatus_TestClockPricesAtTheSimulatedPin(t *testing.T) {
 	wantStatus(t, "model c event the added price takes", post("clock-c", "c", 9), "")
 	wantStatus(t, "model d event no price takes", post("clock-d", "d", 4), "no_price")
 
-	r.advance(clk, p1.AddDate(0, 1, 0).Add(2*time.Hour))
+	r.advance(clk, monthAfter(p1, p0.Day()).Add(2*time.Hour))
 	if got := r.cycle(sub, p1).usageCents(); got != 9 {
 		t.Errorf("second simulated period usage = %dc, want 9c: the model c event only", got)
 	}
