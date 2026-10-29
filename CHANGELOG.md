@@ -19,6 +19,10 @@ original text.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The dashboard shows the Hardcount logo.** The sidebar, sign-in pages and browser tab icon showed the old purple lightning bolt. They now show the tally mark used on gethardcount.com. Nothing else in the dashboard's colours changes. ([#1418](https://github.com/gethardcount/hardcount/pull/1418))
+
 ## [0.9.0] - 2026-10-28
 
 The first release named Hardcount. Usage prices belong to the plan, a usage event says when it will not be billed, prepaid credit carries its currency, and migrations run with goose. It installs fresh only: it refuses a database made by Velox or by any earlier build.
