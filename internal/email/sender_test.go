@@ -22,7 +22,7 @@ func TestSender_NotConfigured(t *testing.T) {
 	// SMTP_HOST is unset. Silent stdout fallback was removed so
 	// misconfiguration is an operator-visible failure, not invisible
 	// drops.
-	err := s.SendInvoice(context.Background(), "t1", "test@example.com", nil, "Test Customer", "HC-000001", 19900, "USD", []byte("%PDF"), "")
+	err := s.SendInvoice(context.Background(), "t1", "test@example.com", nil, "Test Customer", "HC-000001", 19900, "USD", []byte("%PDF"), "", false)
 	if !errors.Is(err, ErrSMTPNotConfigured) {
 		t.Errorf("unconfigured sender should return ErrSMTPNotConfigured, got: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestFormatAmount(t *testing.T) {
 // of during a live send. The full HTML isn't byte-matched — we check the
 // key substrings industry-standard verifiers look for.
 func TestRenderInvoiceHTML(t *testing.T) {
-	subject, content, ctaURL, ctaLabel := renderInvoiceHTML("Acme Corp", "INV-42", "USD 199.00", "https://app.hardcount.dev/invoice/hc_pinv_abc", false)
+	subject, content, ctaURL, ctaLabel := renderInvoiceHTML("Acme Corp", "INV-42", "USD 199.00", "https://app.hardcount.dev/invoice/hc_pinv_abc", false, false)
 	if subject != "Invoice INV-42 — USD 199.00" {
 		t.Errorf("subject = %q", subject)
 	}
@@ -98,7 +98,7 @@ func TestRenderInvoiceHTML(t *testing.T) {
 	// No raw "<script" even if a hostile customer name got in — html-escape
 	// happens inside renderInvoiceHTML because we wrap interpolations in
 	// html.EscapeString before concatenation.
-	hostile, _, _, _ := renderInvoiceHTML("<script>alert(1)</script>", "INV-42", "USD 0.01", "", false)
+	hostile, _, _, _ := renderInvoiceHTML("<script>alert(1)</script>", "INV-42", "USD 0.01", "", false, false)
 	if strings.Contains(hostile, "<script>") {
 		t.Errorf("renderInvoiceHTML should escape customer name, got %q", hostile)
 	}
@@ -218,7 +218,7 @@ func TestHostedInvoiceURL(t *testing.T) {
 // credit-covered) must not title itself "— USD 0.00" with a "View & pay"
 // CTA. Both the HTML and plaintext twins adapt on the same fact.
 func TestInvoiceEmail_ZeroDueCopy(t *testing.T) {
-	subject, html, _, ctaLabel := renderInvoiceHTML("C", "NIM-7", "USD 0.00", "https://h/x", true)
+	subject, html, _, ctaLabel := renderInvoiceHTML("C", "NIM-7", "USD 0.00", "https://h/x", true, false)
 	if subject != "Invoice NIM-7 — no payment due" {
 		t.Errorf("zero-due subject: got %q", subject)
 	}
@@ -229,7 +229,7 @@ func TestInvoiceEmail_ZeroDueCopy(t *testing.T) {
 		t.Errorf("zero-due CTA: got %q, want 'View invoice' (never 'View & pay')", ctaLabel)
 	}
 
-	subject, _, _, ctaLabel = renderInvoiceHTML("C", "NIM-7", "USD 11.00", "https://h/x", false)
+	subject, _, _, ctaLabel = renderInvoiceHTML("C", "NIM-7", "USD 11.00", "https://h/x", false, false)
 	if subject != "Invoice NIM-7 — USD 11.00" {
 		t.Errorf("due subject changed: got %q", subject)
 	}
@@ -237,7 +237,7 @@ func TestInvoiceEmail_ZeroDueCopy(t *testing.T) {
 		t.Errorf("due CTA changed: got %q", ctaLabel)
 	}
 
-	text := invoiceTextBody("C", "NIM-7", "USD 0.00", "usd", "https://h/x", true)
+	text := invoiceTextBody("C", "NIM-7", "USD 0.00", "usd", "https://h/x", true, false)
 	if !strings.Contains(text, "no payment is needed") || strings.Contains(text, "View or pay") {
 		t.Errorf("zero-due text twin must match the HTML's promise: %q", text)
 	}

@@ -1004,12 +1004,15 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 	// card" copy, and a payment the bank wants the customer to confirm the
 	// "confirm your payment" copy, on the retry that drew the decline and
 	// on every retry that then skips the card: "we'll try again on <date>"
-	// would promise a charge that cannot succeed.
+	// would promise a charge that cannot succeed. A retry that found no card
+	// gets the "no payment method on file" copy: it charged nothing, so
+	// "Retry 1 of 3 didn't go through" would describe a charge that never
+	// happened.
 	var warnTx func(tx *sql.Tx) error
 	if run.AttemptCount < retries && s.emailNotifier != nil && s.customerEmail != nil {
 		ask := retryAsk(retryErr)
 		reason := activity.StripWrapper(retryErr.Error())
-		if errors.Is(retryErr, domain.ErrNoPaymentMethodOnRetry) || ask != domain.DeclineAskNone {
+		if ask != domain.DeclineAskNone {
 			reason = ""
 		}
 		warnTx = s.buildDunningWarningTx(ctx, tenantID, run, policy, reason, ask)
@@ -1954,13 +1957,16 @@ func (s *Service) buildDunningWarningTx(ctx context.Context, tenantID string, ru
 	}
 }
 
-// retryAsk is what a failed retry asks of the customer: a different card
+// retryAsk is what a failed retry asks of the customer: to pay the invoice
+// when no card is on file (domain.ErrNoPaymentMethodOnRetry), a different card
 // (#966) when the retry skipped a card the bank had refused for good
 // (domain.ErrCardNeedsReplacing), the confirmation the bank wants when it
 // skipped a card for that (domain.ErrCardNeedsConfirmation), or what its
 // charge drew (RetryError.Ask).
 func retryAsk(retryErr error) domain.DeclineAsk {
 	switch {
+	case errors.Is(retryErr, domain.ErrNoPaymentMethodOnRetry):
+		return domain.DeclineAskAddCard
 	case errors.Is(retryErr, domain.ErrCardNeedsReplacing):
 		return domain.DeclineAskNewCard
 	case errors.Is(retryErr, domain.ErrCardNeedsConfirmation):

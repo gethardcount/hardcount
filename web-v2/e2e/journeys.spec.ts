@@ -50,7 +50,7 @@ test.describe('signed out', () => {
     await api('POST', `/invoices/${invoice.id}/mark-uncollectible`)
     await page.goto(`/invoice/${invoice.public_token}`)
     await expect(page.getByText('This invoice is closed')).toBeVisible()
-    await expect(page.getByText(/Contact .+ to settle it or restore service\./)).toBeVisible()
+    await expect(page.getByText(/Contact .+ to pay it\./)).toBeVisible()
     await expect(page.getByText(/contact support/i)).toHaveCount(0)
   })
 

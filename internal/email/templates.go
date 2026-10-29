@@ -128,13 +128,21 @@ func escape(s string) string { return html.EscapeString(s) }
 // credit-covered at send time). The copy adapts: the old rendering titled
 // a settled invoice "Invoice X — USD 0.00" with a "View & pay" CTA —
 // asking the customer to pay nothing (2026-07-19 FLOW E copy finding).
-func renderInvoiceHTML(customerName, invoiceNumber, amount string, hostedURL string, zeroDue bool) (subject, contentHTML, ctaURL, ctaLabel string) {
+//
+// writtenOff is the invoice's uncollectible status. Its hosted page has no
+// Pay button (ADR-110), so the email offers "View invoice" and asks the
+// customer to contact the seller, never "View & pay".
+func renderInvoiceHTML(customerName, invoiceNumber, amount string, hostedURL string, zeroDue, writtenOff bool) (subject, contentHTML, ctaURL, ctaLabel string) {
 	subject = "Invoice " + invoiceNumber + " — " + amount
 	if zeroDue {
 		subject = "Invoice " + invoiceNumber + " — no payment due"
 	}
+	heading := "Your invoice is ready"
+	if writtenOff && !zeroDue {
+		heading = "Your invoice"
+	}
 	var b strings.Builder
-	b.WriteString(`<h1 style="margin:0 0 12px;font-size:20px;color:#111827;">Your invoice is ready</h1>`)
+	b.WriteString(`<h1 style="margin:0 0 12px;font-size:20px;color:#111827;">` + heading + `</h1>`)
 	b.WriteString(`<p style="margin:0 0 8px;color:#4b5563;">Hi ` + escape(customerName) + `,</p>`)
 	b.WriteString(`<p style="margin:0 0 20px;color:#4b5563;">Invoice <strong style="color:#111827;">` + escape(invoiceNumber) + `</strong> is now available.</p>`)
 	b.WriteString(`<div style="background:#f9fafb;border-radius:8px;padding:16px 20px;margin:8px 0 16px;">`)
@@ -153,6 +161,12 @@ func renderInvoiceHTML(customerName, invoiceNumber, amount string, hostedURL str
 		ctaLabel = "View invoice"
 	case zeroDue:
 		b.WriteString(`<p style="margin:0 0 16px;color:#4b5563;">This invoice is settled — no payment is needed. The PDF is attached for your records.</p>`)
+	case writtenOff:
+		b.WriteString(`<p style="margin:0 0 16px;color:#4b5563;">` + escape(closedForOnlinePayment) + ` The PDF is attached for your records.</p>`)
+		if hostedURL != "" {
+			ctaURL = hostedURL
+			ctaLabel = "View invoice"
+		}
 	case hostedURL != "":
 		b.WriteString(`<p style="margin:0 0 16px;color:#4b5563;">Tap the button below to view or pay your invoice. The PDF is also attached for your records.</p>`)
 		ctaURL = hostedURL
@@ -186,7 +200,7 @@ func renderDunningWarningHTML(customerName, invoiceNumber string, attemptNumber,
 	var b strings.Builder
 	b.WriteString(`<h1 style="margin:0 0 12px;font-size:20px;color:#111827;">We weren't able to process your payment</h1>`)
 	b.WriteString(`<p style="margin:0 0 8px;color:#4b5563;">Hi ` + escape(customerName) + `,</p>`)
-	b.WriteString(`<p style="margin:0 0 12px;color:#4b5563;">Attempt <strong style="color:#111827;">` + escape(itoa(attemptNumber)) + ` of ` + escape(itoa(maxAttempts)) + `</strong> to charge invoice <strong style="color:#111827;">` + escape(invoiceNumber) + `</strong> didn't go through.</p>`)
+	b.WriteString(`<p style="margin:0 0 12px;color:#4b5563;">` + escape(retryFailedSentence(invoiceNumber, attemptNumber, maxAttempts)) + `</p>`)
 	// Surface the decline reason inline so customers can act
 	// (insufficient_funds → top up; lost_card → swap card). Empty
 	// reason = no callout, no false noise.
@@ -195,12 +209,58 @@ func renderDunningWarningHTML(customerName, invoiceNumber string, attemptNumber,
 		b.WriteString(`Reason: ` + escape(failureReason))
 		b.WriteString(`</div>`)
 	}
-	b.WriteString(`<p style="margin:0 0 16px;color:#4b5563;">We'll try again on <strong style="color:#111827;">` + escape(nextRetryDate) + `</strong>. To avoid further retries, please pay the invoice or update your payment method.</p>`)
+	b.WriteString(`<p style="margin:0 0 16px;color:#4b5563;">` + escape(retryNextSentence(nextRetryDate)) + `</p>`)
 	if hostedURL != "" {
 		ctaURL = hostedURL
 		ctaLabel = "Pay invoice"
 	}
 	return subject, b.String(), ctaURL, ctaLabel
+}
+
+// retryFailedSentence and retryNextSentence are the ordinary warning's copy,
+// shared by its HTML and plain-text parts so the two cannot drift. The count
+// is of retries: the charge that started dunning came first and is not one of
+// them, so "Attempt 1 of 3" understated what the customer had been through.
+func retryFailedSentence(invoiceNumber string, retry, retries int) string {
+	return "Retry " + itoa(retry) + " of " + itoa(retries) + " to charge invoice " + invoiceNumber + " didn't go through."
+}
+
+func retryNextSentence(nextRetryDate string) string {
+	return "We'll try again on " + nextRetryDate + ". To avoid further retries, please pay the invoice or update your payment method."
+}
+
+// renderNoCardWarningHTML is the dunning warning for a retry that found no
+// card on file (domain.DeclineAskAddCard). It charged nothing, so it says
+// nothing about a charge that didn't go through, shows no retry count, and
+// promises no retry date: no retry can succeed until a card is added, and the
+// hosted invoice page it links to takes a payment but cannot save a card.
+func renderNoCardWarningHTML(customerName, invoiceNumber, hostedURL string) (subject, contentHTML, ctaURL, ctaLabel string) {
+	subject = "Action required — payment for invoice " + invoiceNumber
+	var b strings.Builder
+	b.WriteString(`<h1 style="margin:0 0 12px;font-size:20px;color:#111827;">Your invoice is unpaid</h1>`)
+	b.WriteString(`<p style="margin:0 0 8px;color:#4b5563;">Hi ` + escape(customerName) + `,</p>`)
+	b.WriteString(`<p style="margin:0 0 12px;color:#4b5563;">` + escape(noCardSentence(invoiceNumber)) + `</p>`)
+	b.WriteString(`<p style="margin:0 0 16px;color:#4b5563;">` + escape(payOrContactAsk(hostedURL != "")) + `</p>`)
+	if hostedURL != "" {
+		ctaURL = hostedURL
+		ctaLabel = "Pay invoice"
+	}
+	return subject, b.String(), ctaURL, ctaLabel
+}
+
+// noCardSentence is the no-card warning's copy, shared by its HTML and
+// plain-text parts.
+func noCardSentence(invoiceNumber string) string {
+	return "We couldn't charge invoice " + invoiceNumber + " because there is no payment method on file."
+}
+
+// payOrContactAsk asks the customer to pay on the hosted invoice page, or,
+// when this server has no hosted page to link, to contact the seller.
+func payOrContactAsk(hasLink bool) string {
+	if hasLink {
+		return "Please pay the invoice using the link below."
+	}
+	return "Please contact us to pay the invoice."
 }
 
 // renderCardRefusedWarningHTML is the dunning warning for a card the bank
@@ -274,7 +334,7 @@ func renderDunningEscalationHTML(customerName, invoiceNumber string, outcome dom
 	var b strings.Builder
 	b.WriteString(`<h1 style="margin:0 0 12px;font-size:20px;color:#111827;">We couldn't collect payment</h1>`)
 	b.WriteString(`<p style="margin:0 0 8px;color:#4b5563;">Hi ` + escape(customerName) + `,</p>`)
-	b.WriteString(`<p style="margin:0 0 16px;color:#4b5563;">All payment attempts for invoice <strong style="color:#111827;">` + escape(invoiceNumber) + `</strong> were unsuccessful.</p>`)
+	b.WriteString(`<p style="margin:0 0 16px;color:#4b5563;">` + escape(escalationLead(invoiceNumber)) + `</p>`)
 
 	// Never render the internal enum — that leak (P13) showed the debtor
 	// "Action taken: mark_uncollectible". dunningEscalationCopy composes
@@ -291,6 +351,19 @@ func renderDunningEscalationHTML(customerName, invoiceNumber string, outcome dom
 	}
 	return subject, b.String(), ctaURL, ctaLabel
 }
+
+// escalationLead opens the escalation email in both parts. It says only that
+// the invoice is unpaid: "All payment attempts were unsuccessful" was false
+// for a customer with no card on file, whose retries charged nothing.
+func escalationLead(invoiceNumber string) string {
+	return "Invoice " + invoiceNumber + " is still unpaid."
+}
+
+// closedForOnlinePayment is what a customer is told about a written-off
+// invoice: the hosted page offers no Pay button (ADR-110) and nothing charges
+// it, but the money is still owed. Shared by the escalation and invoice
+// emails.
+const closedForOnlinePayment = "This invoice is closed for online payment. Please contact us to arrange payment."
 
 // dunningEscalationCopy composes the customer-facing sentence used by BOTH
 // multipart/alternative parts of the escalation email. Single source on
@@ -324,7 +397,7 @@ func dunningEscalationCopy(o domain.DunningEscalationOutcome) (sentence string, 
 	if o.InvoiceWrittenOff {
 		// Closed for online payment, and the balance is NOT described as
 		// still collectible through the link — it isn't.
-		s := "This invoice has been closed for online payment. Please contact support to arrange payment."
+		s := closedForOnlinePayment
 		if subClause != "" {
 			s = subClause + " " + s
 		}
@@ -338,7 +411,7 @@ func dunningEscalationCopy(o domain.DunningEscalationOutcome) (sentence string, 
 	// Nothing applied: a (none, none) policy, a one-off invoice whose
 	// policy only acts on subscriptions, or an unwired mover. Neutral — no
 	// state change is asserted.
-	return "The invoice remains due. Please settle it using the link below or reach out to support.", true
+	return "The invoice remains due. Please settle it using the link below or contact us.", true
 }
 
 func renderPaymentFailedHTML(customerName, invoiceNumber, reason, hostedURL string) (subject, contentHTML, ctaURL, ctaLabel string) {
@@ -390,7 +463,8 @@ type paymentSetupLinkContext struct {
 	// `finalized`), so the ordinary "we'll collect it automatically" promise
 	// would be a commitment the engine cannot keep. Adding a card is still
 	// genuinely useful — it serves the fresh recovery invoice and future
-	// billing — but the customer must be told a person will follow up.
+	// billing — but the customer is asked to contact the seller to settle
+	// this one. Not "we'll be in touch": nothing sends that follow-up.
 	WrittenOff bool
 }
 
@@ -430,12 +504,9 @@ func renderPaymentSetupLinkHTML(ctx paymentSetupLinkContext) (subject, contentHT
 		// the template shouldn't try to autocompose.
 		b.WriteString(`<p style="margin:0 0 16px;color:#4b5563;">` + escape(ctx.OperatorNote) + `</p>`)
 	case hasInvoice:
-		b.WriteString(`<p style="margin:0 0 8px;color:#4b5563;">Invoice <strong style="color:#111827;">` + escape(ctx.InvoiceNumber) + `</strong> (<strong style="color:#111827;">` + escape(ctx.AmountDueLabel) + `</strong>) is ready.</p>`)
-		if ctx.WrittenOff {
-			b.WriteString(`<p style="margin:0 0 16px;color:#4b5563;">Add a payment method with the secure link below and we'll be in touch to settle it — your card details go directly to our payment processor and never touch our servers.</p>`)
-		} else {
-			b.WriteString(`<p style="margin:0 0 16px;color:#4b5563;">Add a payment method with the secure link below and we'll collect it automatically — your card details go directly to our payment processor and never touch our servers.</p>`)
-		}
+		lead, ask := setupLinkInvoiceCopy(ctx.InvoiceNumber, ctx.AmountDueLabel, ctx.WrittenOff)
+		b.WriteString(`<p style="margin:0 0 8px;color:#4b5563;">` + escape(lead) + `</p>`)
+		b.WriteString(`<p style="margin:0 0 16px;color:#4b5563;">` + escape(ask) + `</p>`)
 	default:
 		b.WriteString(`<p style="margin:0 0 16px;color:#4b5563;">Please add a payment method on file so we can process your billing. Use the secure link below — your card details go directly to our payment processor and never touch our servers.</p>`)
 	}
@@ -443,6 +514,20 @@ func renderPaymentSetupLinkHTML(ctx paymentSetupLinkContext) (subject, contentHT
 	ctaURL = ctx.SetupURL
 	ctaLabel = "Add payment method"
 	return subject, b.String(), ctaURL, ctaLabel
+}
+
+// setupLinkInvoiceCopy is the setup-link email's invoice copy, shared by its
+// HTML and plain-text parts. The text part used to promise "we'll collect it
+// automatically" on a written-off invoice, which nothing collects, while the
+// HTML part had been fixed.
+func setupLinkInvoiceCopy(invoiceNumber, amountDue string, writtenOff bool) (lead, ask string) {
+	const secure = " Your card details go directly to our payment processor and never touch our servers."
+	if writtenOff {
+		return "Invoice " + invoiceNumber + " (" + amountDue + ") is unpaid.",
+			"Add a payment method with the secure link below for future billing. It won't pay this invoice automatically, so please contact us to settle it." + secure
+	}
+	return "Invoice " + invoiceNumber + " (" + amountDue + ") is ready.",
+		"Add a payment method with the secure link below and we'll collect it automatically." + secure
 }
 
 // itoa is a local shim to avoid pulling strconv just for escape() input.

@@ -268,7 +268,7 @@ func TestEmailOutbox_OutboxSender_RoundTrip(t *testing.T) {
 	sender := email.NewOutboxSender(store)
 
 	pdf := []byte("%PDF-fake")
-	if err := sender.SendInvoice(ctx, tenantID, "ada@example.com", []string{"finance@example.com"}, "Ada", "HC-7", 25_000, "USD", pdf, "hc_pinv_roundtrip"); err != nil {
+	if err := sender.SendInvoice(ctx, tenantID, "ada@example.com", []string{"finance@example.com"}, "Ada", "HC-7", 25_000, "USD", pdf, "hc_pinv_roundtrip", true); err != nil {
 		t.Fatalf("enqueue SendInvoice: %v", err)
 	}
 
@@ -308,6 +308,11 @@ func TestEmailOutbox_OutboxSender_RoundTrip(t *testing.T) {
 	// dispatch means the operator's configured recipients never receive).
 	if len(fake.lastCc) != 1 || fake.lastCc[0] != "finance@example.com" {
 		t.Errorf("cc not round-tripped: got %v, want [finance@example.com]", fake.lastCc)
+	}
+	// A written-off invoice's email offers "View invoice", not "View & pay":
+	// the flag must survive the queue too.
+	if !fake.lastWrittenOff {
+		t.Error("written-off flag not round-tripped: the customer would be offered View & pay")
 	}
 }
 
@@ -418,10 +423,12 @@ type fakeDeliverer struct {
 	lastPDF           []byte
 	lastPublicToken   string
 	lastCc            []string
+	lastWrittenOff    bool
 }
 
-func (f *fakeDeliverer) SendInvoice(_ context.Context, tenantID, to string, cc []string, name, inv string, total int64, cur string, pdf []byte, publicToken string) error {
+func (f *fakeDeliverer) SendInvoice(_ context.Context, tenantID, to string, cc []string, name, inv string, total int64, cur string, pdf []byte, publicToken string, writtenOff bool) error {
 	f.calls++
+	f.lastWrittenOff = writtenOff
 	f.lastType, f.lastTenant, f.lastTo, f.lastName, f.lastInvoice = email.TypeInvoice, tenantID, to, name, inv
 	f.lastAmount, f.lastCurrency, f.lastPDF = total, cur, pdf
 	f.lastCc = cc
@@ -533,7 +540,7 @@ func callDeliverer(ctx context.Context, d email.EmailDeliverer, row email.Outbox
 	}
 	switch row.EmailType {
 	case email.TypeInvoice:
-		return d.SendInvoice(ctx, row.TenantID, m.To, m.Cc, m.CustomerName, m.InvoiceNumber, m.AmountCents, m.Currency, m.PDF, m.PublicToken)
+		return d.SendInvoice(ctx, row.TenantID, m.To, m.Cc, m.CustomerName, m.InvoiceNumber, m.AmountCents, m.Currency, m.PDF, m.PublicToken, m.InvoiceWrittenOff)
 	case email.TypePaymentReceipt:
 		return d.SendPaymentReceipt(ctx, row.TenantID, m.To, m.Cc, m.CustomerName, m.InvoiceNumber, m.AmountCents, m.Currency, m.PublicToken)
 	case email.TypeDunningWarning:

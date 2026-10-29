@@ -58,10 +58,13 @@ func TestWireFormat_EverySendPath(t *testing.T) {
 		wantText []string // must appear in the decoded text/plain part
 	}{
 		{"invoice", func() error {
-			return s.SendInvoice(ctx, "t1", "ap@acme.test", []string{"finance@acme.test"}, cust, "INV-000123", 123456, "eur", pdf, "tok_abc")
+			return s.SendInvoice(ctx, "t1", "ap@acme.test", []string{"finance@acme.test"}, cust, "INV-000123", 123456, "eur", pdf, "tok_abc", false)
 		}, []string{cust, "INV-000123"}},
+		{"invoice-written-off", func() error {
+			return s.SendInvoice(ctx, "t1", "ap@acme.test", nil, cust, "INV-000125", 123456, "eur", pdf, "tok_abc", true)
+		}, []string{cust, closedForOnlinePayment, "View online: https://pay.example.com/invoice/tok_abc"}},
 		{"invoice-zero", func() error {
-			return s.SendInvoice(ctx, "t1", "ap@acme.test", nil, cust, "INV-000124", 0, "eur", pdf, "tok_abc")
+			return s.SendInvoice(ctx, "t1", "ap@acme.test", nil, cust, "INV-000124", 0, "eur", pdf, "tok_abc", false)
 		}, []string{cust, "settled"}},
 		{"receipt", func() error {
 			return s.SendPaymentReceipt(ctx, "t1", "ap@acme.test", nil, cust, "INV-000123", 123456, "eur", "tok_abc")
@@ -72,6 +75,9 @@ func TestWireFormat_EverySendPath(t *testing.T) {
 		{"dunning-warning-card-refused", func() error {
 			return s.SendDunningWarning(ctx, "t1", "ap@acme.test", nil, cust, "INV-000123", 1, 4, "2026-10-20", "", "tok_abc", domain.DeclineAskNewCard)
 		}, []string{cust, "different card"}},
+		{"dunning-warning-no-card", func() error {
+			return s.SendDunningWarning(ctx, "t1", "ap@acme.test", nil, cust, "INV-000123", 1, 4, "2026-10-20", "", "tok_abc", domain.DeclineAskAddCard)
+		}, []string{cust, noCardSentence("INV-000123")}},
 		{"dunning-escalation", func() error {
 			return s.SendDunningEscalation(ctx, "t1", "ap@acme.test", nil, cust, "INV-000123", domain.DunningEscalationOutcome{}, "tok_abc")
 		}, []string{cust}},
@@ -84,6 +90,9 @@ func TestWireFormat_EverySendPath(t *testing.T) {
 		{"setup-request", func() error {
 			return s.SendPaymentSetupRequest(ctx, "t1", "ap@acme.test", cust, "INV-000123", 123456, "eur", "https://pay.example.com/u/abc", false, "")
 		}, []string{cust, "https://pay.example.com/u/abc"}},
+		{"setup-request-written-off", func() error {
+			return s.SendPaymentSetupRequest(ctx, "t1", "ap@acme.test", cust, "INV-000123", 123456, "eur", "https://pay.example.com/u/abc", true, "")
+		}, []string{cust, "please contact us to settle it"}},
 		{"credit-note", func() error {
 			return s.SendCreditNote(ctx, "t1", "ap@acme.test", nil, cust, "CN-0001", "INV-000123", 5000, "eur", pdf)
 		}, []string{cust, "CN-0001"}},

@@ -1,6 +1,7 @@
 package email
 
 import (
+	stdhtml "html"
 	"strings"
 	"testing"
 )
@@ -55,26 +56,42 @@ func TestSetupLinkServesRecovery_ExemptsOnlyWrittenOff(t *testing.T) {
 //
 // The control is the point: the SAME template on a live invoice must still
 // make the automatic promise, because there it is true.
+//
+// Both parts are checked. The HTML part was fixed first and the plain-text
+// part kept promising automatic collection (F-02). Nor does either part say
+// "we'll be in touch": nothing sends that follow-up, so the customer is asked
+// to contact the seller instead (F-13).
 func TestSetupLinkCopy_DoesNotPromiseAutoCollectOnWriteOff(t *testing.T) {
 	const autoPromise = "we'll collect it automatically"
-	const humanPromise = "we'll be in touch to settle it"
+	const contactAsk = "please contact us to settle it"
 
-	_, writtenOff, _, _ := renderPaymentSetupLinkHTML(paymentSetupLinkContext{
+	_, writtenOffHTML, _, _ := renderPaymentSetupLinkHTML(paymentSetupLinkContext{
 		CustomerName: "Ada", SetupURL: "https://example.test/s",
 		InvoiceNumber: "HC-000003", AmountDueLabel: "$60.00", WrittenOff: true,
 	})
-	if strings.Contains(writtenOff, autoPromise) {
-		t.Errorf("written-off setup link promises automatic collection — no machine charges a written-off invoice (ADR-110), so this is a promise the engine cannot keep")
-	}
-	if !strings.Contains(writtenOff, humanPromise) {
-		t.Errorf("written-off setup link should say a person will follow up; got:\n%s", writtenOff)
+	writtenOffText := paymentUpdateRequestTextBody("Ada", "HC-000003", "$60.00", "https://example.test/s", true)
+	for part, body := range map[string]string{"html": stdhtml.UnescapeString(writtenOffHTML), "text": writtenOffText} {
+		if strings.Contains(body, autoPromise) {
+			t.Errorf("written-off setup link (%s part) promises automatic collection — no machine charges a written-off invoice (ADR-110), so this is a promise the engine cannot keep:\n%s", part, body)
+		}
+		if !strings.Contains(body, contactAsk) {
+			t.Errorf("written-off setup link (%s part) should ask the customer to contact us; got:\n%s", part, body)
+		}
+		for _, never := range []string{"be in touch", "reach out", "is ready"} {
+			if strings.Contains(body, never) {
+				t.Errorf("written-off setup link (%s part) says %q:\n%s", part, never, body)
+			}
+		}
 	}
 
-	_, live, _, _ := renderPaymentSetupLinkHTML(paymentSetupLinkContext{
+	_, liveHTML, _, _ := renderPaymentSetupLinkHTML(paymentSetupLinkContext{
 		CustomerName: "Ada", SetupURL: "https://example.test/s",
 		InvoiceNumber: "HC-000006", AmountDueLabel: "$10.00", WrittenOff: false,
 	})
-	if !strings.Contains(live, autoPromise) {
-		t.Errorf("CONTROL: a live invoice must still promise automatic collection — the auto-charge sweep really does collect it once a card is attached; got:\n%s", live)
+	liveText := paymentUpdateRequestTextBody("Ada", "HC-000006", "$10.00", "https://example.test/s", false)
+	for part, body := range map[string]string{"html": stdhtml.UnescapeString(liveHTML), "text": liveText} {
+		if !strings.Contains(body, autoPromise) {
+			t.Errorf("CONTROL: a live invoice (%s part) must still promise automatic collection — the auto-charge sweep really does collect it once a card is attached; got:\n%s", part, body)
+		}
 	}
 }

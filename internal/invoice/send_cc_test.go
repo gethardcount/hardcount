@@ -14,17 +14,20 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 )
 
-// ccCapturingSender records the cc list handed to SendInvoice.
+// ccCapturingSender records the cc list and written-off flag handed to
+// SendInvoice.
 type ccCapturingSender struct {
-	called bool
-	to     string
-	cc     []string
+	called     bool
+	to         string
+	cc         []string
+	writtenOff bool
 }
 
-func (c *ccCapturingSender) SendInvoice(_ context.Context, _, to string, cc []string, _, _ string, _ int64, _ string, _ []byte, _ string) error {
+func (c *ccCapturingSender) SendInvoice(_ context.Context, _, to string, cc []string, _, _ string, _ int64, _ string, _ []byte, _ string, writtenOff bool) error {
 	c.called = true
 	c.to = to
 	c.cc = cc
+	c.writtenOff = writtenOff
 	return nil
 }
 
@@ -125,6 +128,40 @@ func TestSendEmail_CCTriState(t *testing.T) {
 	}
 	if sender.called {
 		t.Error("nothing may be sent on a validation failure")
+	}
+}
+
+// TestSendEmail_WrittenOffInvoiceSaysSo: an uncollectible invoice has no Pay
+// button on its hosted page (ADR-110), so its email must not offer "View &
+// pay". The handler tells the sender which invoice is written off.
+func TestSendEmail_WrittenOffInvoiceSaysSo(t *testing.T) {
+	for _, tc := range []struct {
+		status domain.InvoiceStatus
+		want   bool
+	}{
+		{domain.InvoiceUncollectible, true},
+		{domain.InvoiceFinalized, false},
+	} {
+		t.Run(string(tc.status), func(t *testing.T) {
+			store := newMemStore()
+			inv, err := store.Create(context.Background(), "t1", domain.Invoice{
+				InvoiceNumber: "INV-WO-" + string(tc.status), Status: tc.status,
+				PaymentStatus: domain.PaymentPending, CustomerID: "cus_cc", Currency: "USD",
+				TotalAmountCents: 10000, AmountDueCents: 10000,
+			})
+			if err != nil {
+				t.Fatalf("seed invoice: %v", err)
+			}
+			sender := &ccCapturingSender{}
+			h := &Handler{svc: NewService(store, nil, nil), emailSender: sender, emailConfigured: true}
+			h.customers = staticCustomerGetter{cust: domain.Customer{ID: "cus_cc", DisplayName: "CC Co", Email: "ap@acme.test"}}
+			if rr := sendReq(t, h, inv.ID, `{"email":"ap@acme.test"}`); rr.Code != http.StatusOK {
+				t.Fatalf("status %d; body=%s", rr.Code, rr.Body.String())
+			}
+			if !sender.called || sender.writtenOff != tc.want {
+				t.Errorf("sent %v with writtenOff %v, want %v", sender.called, sender.writtenOff, tc.want)
+			}
+		})
 	}
 }
 
