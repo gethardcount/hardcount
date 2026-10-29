@@ -19,6 +19,10 @@ original text.
 
 ## [Unreleased]
 
+### Changed
+
+- **The quickstart and its docs no longer say how long the demo takes.** The "about two minutes" guess was never measured (the demo runs in seconds). `docs/first-invoice.md` no longer says it "matches the newest code on `main`" when read at a release. ([#1417](https://github.com/gethardcount/hardcount/pull/1417))
+
 ### Fixed
 
 - **The dashboard shows the Hardcount logo.** The sidebar, sign-in pages and browser tab icon showed the old purple lightning bolt. They now show the tally mark used on gethardcount.com. Nothing else in the dashboard's colours changes. ([#1418](https://github.com/gethardcount/hardcount/pull/1418))

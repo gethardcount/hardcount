@@ -82,8 +82,7 @@ You do not need Go, Node, jq or a database. Docker downloads everything else.
    curl or jq. The first run downloads that container, which adds a few
    seconds.
 
-   **You see:** nine numbered steps, each ending in a green ✓ line. The
-   whole run takes about two minutes.
+   **You see:** nine numbered steps, each ending in a green ✓ line.
 
 The demo checks every step. If one fails, it stops there with a ✗ line that
 says what went wrong. So a finished run means each step below worked. The IDs (the `hc_…` values), dates and PDF size differ on every run.
