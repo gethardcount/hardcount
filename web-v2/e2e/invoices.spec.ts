@@ -564,3 +564,42 @@ test('issuing a credit note again after its answer was lost makes one note, from
   await expect(again).toBeHidden()
   expect(await creditNotesFor(invoice.id)).toHaveLength(3)
 })
+
+// Collect payment charges the customer's card at once, so it asks first,
+// naming the amount and the card (C-01). The card list is stubbed in the
+// browser (CI connects no Stripe); Cancel sends nothing. A card the bank
+// refused for good gets no Collect button: the server refuses that charge
+// (#966) and the notice offers Update payment method instead.
+test('Collect payment asks first, naming the amount and the card, and is not offered on a card refused for good', async ({ page }) => {
+  const { customer, invoice } = await billedCustomer()
+  expect(invoice.status).toBe('finalized')
+  await page.route(url => url.pathname === `/v1/customers/${customer.id}/payment-methods`, route => route.fulfill({
+    json: { data: [{ id: 'pm_e2e', customer_id: customer.id, stripe_payment_method_id: 'pm_e2e', card_brand: 'visa', card_last4: '4242', is_default: true, created_at: new Date().toISOString() }], has_more: false },
+  }))
+  const collects: string[] = []
+  page.on('request', r => { if (r.method() === 'POST' && new URL(r.url()).pathname.endsWith('/collect')) collects.push(r.url()) })
+
+  await page.goto(`/invoices/${invoice.id}`)
+  await page.getByRole('button', { name: 'Collect payment' }).click()
+  const amount = usd(invoice.amount_due_cents)
+  const confirm = page.getByRole('alertdialog', { name: `Collect ${amount} now?` })
+  await expect(confirm).toContainText(`${amount} due on ${invoice.invoice_number} from ${customer.display_name}.`)
+  await expect(confirm).toContainText('Any credit balance the customer has is used first.')
+  await expect(confirm).toContainText('Whatever is left is charged to Visa ····4242 right away.')
+  await expect(confirm.getByRole('button', { name: `Charge ${amount}` })).toBeVisible()
+  await confirm.getByRole('button', { name: 'Cancel' }).click()
+  await expect(confirm).toBeHidden()
+  expect(collects, 'Cancel charges nothing').toHaveLength(0)
+
+  // The bank refused this card for good: no Collect button.
+  await page.route(url => url.pathname === `/v1/invoices/${invoice.id}`, async route => {
+    const answer = await route.fetch()
+    const body = await answer.json()
+    body.invoice.attention = { severity: 'critical', reason: 'payment_failed', code: 'payment.card_refused', message: "The customer's bank refused this card for good.", actions: [{ code: 'update_payment_method', label: 'Update payment method' }] }
+    await route.fulfill({ response: answer, json: body })
+  })
+  await page.reload()
+  await expect(page.getByRole('heading', { level: 1, name: invoice.invoice_number, exact: true })).toBeVisible()
+  await expect(page.getByText("The customer's bank refused this card for good.")).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Collect payment' })).toHaveCount(0)
+})

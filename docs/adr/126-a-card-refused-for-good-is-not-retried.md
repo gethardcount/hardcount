@@ -1,7 +1,7 @@
 # ADR-126: A card the bank refused for good is not retried until another card is the default
 
 **Date:** 2026-10-18
-**Status:** Accepted (amended 2026-10-22, 2026-10-23)
+**Status:** Accepted (amended 2026-10-22, 2026-10-23, 2026-10-29)
 
 ## Summary
 
@@ -173,8 +173,8 @@ customer as a plain decline, never with the reason
 - The customer is asked for a different card instead of being told "we'll
   try again on" a date when the charge cannot succeed.
 - The operator sees why retries are not charging. The notice offers no
-  **Retry payment** for the refused card. **Collect payment** on the invoice
-  page still charges it (see the risks).
+  **Retry payment** for the refused card. **Collect payment** refuses it
+  (amended 2026-10-29).
 - A card the customer saves after the refusal is charged by the next retry,
   with no operator step.
 
@@ -205,7 +205,8 @@ customer as a plain decline, never with the reason
 - **An operator's manual charge is not blocked.** **Collect payment** in the
   invoice header still charges the refused card through the same endpoint
   the notice's old **Retry payment** used. Hiding it, or asking to confirm,
-  while the notice shows is a dashboard change for a later PR.
+  while the notice shows is a dashboard change for a later PR. (Amended
+  2026-10-29: Collect refuses it; see below.)
 - **The migration adds two columns** with a constant default: instant, and
   older copies ignore them.
 
@@ -251,6 +252,32 @@ Decision:
    becomes the default (the payment-methods store keeps one copy per card
    fingerprint), so the next retry or invoice charges it. A card saved through a
    setup or update link becomes the default, as for every customer.
+
+## Amendment 2026-10-29: Collect payment refuses a card refused for good
+
+**Collect payment** (`POST /v1/invoices/{id}/collect`) charged the refused
+card, the one charge path left that did. The charge cannot succeed, the card
+networks charge merchants for retrying it, and the operator got one more
+decline for nothing. Sagar decided on 2026-10-22 that the server refuses it.
+
+Decision:
+
+1. **The server refuses.** Before charging, Collect asks the same question
+   the dunning retry asks (`RetryBlockingDecline`), for the card it is about
+   to charge on this invoice. A hard decline answers 409 with code
+   `card_refused`, names Stripe's decline code, and says what to do instead:
+   a setup link for a different card, or the hosted invoice page. Nothing
+   reaches Stripe, and the charge hold is released. Credit is still applied
+   first, as before; a credit balance that covers the invoice pays it with no
+   card involved.
+2. **The dashboard does not offer it.** The invoice header hides **Collect
+   payment** while the notice says the card was refused for good
+   (`payment.card_refused`). Collect and the notice's **Charge now** ask
+   first, naming the amount and the card.
+3. **Not changed.** `authentication_required` is still charged by Collect:
+   it is not final, and the operator may be charging right after the
+   customer confirmed. The customer's next invoice still charges the card,
+   as Stripe Billing does.
 
 ## References
 

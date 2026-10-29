@@ -58,7 +58,7 @@ payment failures, and the gaps still open.
 | Case | Hardcount | Operator |
 |---|---|---|
 | Card declined on a Hardcount charge | Payment `failed`, customer emailed (if SMTP is set), `payment.failed` sent, dunning starts (new accounts' default policy: day 3, 7, 14). A decline on the hosted page leaves the invoice as it was. A card the customer saves through a setup or update link becomes the default; the next retry charges it. | Nothing, or ask for a new card (**Update payment method**). |
-| Card refused for good: lost, stolen, pick up card, revoked authorization and the rest of Stripe's hard decline codes | As above, but retries no longer charge that card for this invoice. They keep their schedule and count, and charge only once another card is the customer's default. A card saved after the refusal becomes the default, as above (paying on the hosted page also saves one). The customer is asked for a different card; the reason is not named. The invoice says "needs a different card". | Ask for a new card (**Update payment method**), or let the customer pay on the hosted page. A card saved before the refusal needs **Set as default** on the customer's page ([ADR-126](adr/126-a-card-refused-for-good-is-not-retried.md)). |
+| Card refused for good: lost, stolen, pick up card, revoked authorization and the rest of Stripe's hard decline codes | As above, but retries no longer charge that card for this invoice. They keep their schedule and count, and charge only once another card is the customer's default. A card saved after the refusal becomes the default, as above (paying on the hosted page also saves one). The customer is asked for a different card; the reason is not named. The invoice says "needs a different card". | Ask for a new card (**Update payment method**), or let the customer pay on the hosted page. **Collect payment** refuses that card with a 409 (`card_refused`) and charges nothing. A card saved before the refusal needs **Set as default** on the customer's page ([ADR-126](adr/126-a-card-refused-for-good-is-not-retried.md)). |
 | The bank wants the customer to confirm the payment (3-D Secure, Stripe's `authentication_required`) | Payment `failed` and dunning starts, as for a decline. Retries count but don't charge that card while it is the default, as in Stripe Billing; a card saved through a setup or update link becomes the default and the next retry charges it. The customer's email and each reminder ask them to confirm on the hosted invoice page, with nothing about a decline. The invoice says "Customer must confirm payment". | **Email payment link**: the customer pays and confirms on the hosted invoice page ([runbook](ops/runbook/customer-must-confirm-payment.md)). |
 | Stripe 5xx that names a PaymentIntent | `unknown` ("Confirming payment"); the reconciler reads the PaymentIntent on the first scheduled run once it is a minute old, or a webhook settles it. | Nothing. If it lasts hours: [runbook](ops/runbook/unclear-charge.md#unconfirmed-with-a-paymentintent). |
 | An unclear answer with no PaymentIntent ID: a 5xx, any 409, a network error, or a request past the caller's time limit (15 s for dunning, 30 s for auto-charge and **Collect payment**) | Invoice *parked* ("Payment status unknown"); nothing charges it. Every run from 10 minutes after the claim ended, the reconciler lists the customer's payments in Stripe: a succeeded payment marks the invoice paid, a processing one is followed. If none has appeared 24 hours after the attempt, the invoice goes back to `pending` (`failed` after a dunning retry) and is charged again as usual, under a new idempotency key ([ADR-127](adr/127-a-lost-charge-result-is-resolved-by-asking-stripe.md)). | Nothing. If the customer paid another way, **Mark uncollectible** within the 24 hours. In the park's first few minutes it is refused while the charge's claim is still live; try again shortly. [Runbook](ops/runbook/unclear-charge.md#parked-no-paymentintent). |
@@ -109,12 +109,11 @@ payment failures, and the gaps still open.
   recovered**, although the invoice is unpaid. If that payment then fails,
   nothing retries the invoice; collect it by hand
   ([#1289](https://github.com/gethardcount/hardcount/issues/1289)).
-- **Collect payment still charges a card refused for good, or one whose
-  bank wants the customer to confirm.** The invoice notice no longer offers
-  a retry, but the invoice page's **Collect payment** reaches Stripe with
-  that card; for a confirmation, Stripe asks again and the customer gets
-  another email
-  ([ADR-126](adr/126-a-card-refused-for-good-is-not-retried.md)).
+- **Collect payment still charges a card whose bank wants the customer to
+  confirm.** The invoice notice no longer offers a retry, but the invoice
+  page's **Collect payment** reaches Stripe with that card; Stripe asks
+  again and the customer gets another email. (A card refused for good is
+  refused, [ADR-126](adr/126-a-card-refused-for-good-is-not-retried.md).)
 - **A different card the customer pays with on the hosted page does not
   replace a default that needed confirmation.** It pays that invoice; the
   next invoice charges the old default again, and the bank may ask again.

@@ -1159,6 +1159,25 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A card the bank refused for good on this invoice (lost, stolen and the
+	// rest of domain.IsHardDecline, #966) is not charged again: the charge
+	// cannot succeed, and the card networks charge merchants for retrying it.
+	// Dunning retries already skip it; Collect used to charge it anyway.
+	// Provably pre-Stripe, so the hold is released. A read error refuses too:
+	// "no refusal" is not known.
+	refusedCode, err := h.svc.CardRefusedForGood(r.Context(), tenantID, id, ps.StripePaymentMethodID)
+	if err != nil {
+		h.releaseCollectHold(r.Context(), tenantID, id, hold)
+		respond.InternalError(w, r)
+		return
+	}
+	if refusedCode != "" {
+		h.releaseCollectHold(r.Context(), tenantID, id, hold)
+		respond.ConflictCoded(w, r, "", "card_refused",
+			"the customer's bank refused this card for good (Stripe's decline code is "+refusedCode+"), so Hardcount won't charge it again. Send the customer a setup link to add a different card, or they can pay on the hosted invoice page")
+		return
+	}
+
 	// Bound to the invoice's clock, as finalize binds its collect: on a
 	// clock-pinned invoice the charge records its simulated instant (the PI's
 	// hardcount_anchor_at), which dates paid_at and a decline's first dunning

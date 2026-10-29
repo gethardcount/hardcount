@@ -532,16 +532,38 @@ func (s *Service) SetPaymentPageReader(r PaymentPageReader) {
 // dunning retry would skip the customer's current default card: invoice id →
 // Stripe's decline code, a hard decline (#966) or authentication_required.
 // Satisfied by *PostgresStore (RetryBlockingDeclinesOnDefaultCards), the same
-// rule the dunning retry skips the card on.
+// rule the dunning retry skips the card on. RetryBlockingDecline asks the same
+// of one invoice and one card: the card a Collect is about to charge.
 type CardRefusalReader interface {
 	RetryBlockingDeclinesOnDefaultCards(ctx context.Context, tenantID string, invoiceIDs []string) (map[string]string, error)
+	RetryBlockingDecline(ctx context.Context, tenantID, invoiceID, stripePaymentMethodID string) (string, error)
 }
 
 // SetCardRefusalReader wires the refused-card lookup for the attention
-// banner. Optional: when nil a refused card reads as an ordinary decline,
-// whose banner still offers Update payment method first.
+// banner and Collect's refusal. Optional: when nil a refused card reads as an
+// ordinary decline, whose banner still offers Update payment method first,
+// and Collect charges it.
 func (s *Service) SetCardRefusalReader(r CardRefusalReader) {
 	s.cardRefusals = r
+}
+
+// CardRefusedForGood returns Stripe's decline code when the bank refused this
+// card for good on this invoice (a hard decline, #966), else "". Collect asks
+// before it charges: the card cannot succeed, and the card networks charge
+// merchants for retrying it. A decline that asks the customer to confirm the
+// payment is not a refusal, and returns "".
+func (s *Service) CardRefusedForGood(ctx context.Context, tenantID, invoiceID, stripePaymentMethodID string) (string, error) {
+	if s.cardRefusals == nil {
+		return "", nil
+	}
+	code, err := s.cardRefusals.RetryBlockingDecline(ctx, tenantID, invoiceID, stripePaymentMethodID)
+	if err != nil {
+		return "", err
+	}
+	if !domain.IsHardDecline(code) {
+		return "", nil
+	}
+	return code, nil
 }
 
 // DisputeReader reads the card disputes Stripe reported against invoices

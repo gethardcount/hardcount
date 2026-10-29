@@ -37,6 +37,7 @@ import { StatusBadge } from '@/components/StatusBadge'
 import { Layout } from '@/components/Layout'
 import { cn } from '@/lib/utils'
 import { creditNoteReasonLabel } from '@/lib/status'
+import { cardLabel } from '@/lib/paymentMethodCopy'
 import { invoiceAwaitingPayment, invoiceCanCollect, invoiceDueCents, invoicePaymentInFlight, invoiceShowsCollect } from '@/lib/invoiceTerminal'
 
 import { Button } from '@/components/ui/button'
@@ -151,6 +152,7 @@ export default function InvoiceDetailPage() {
   const queryClient = useQueryClient()
   const [showVoidConfirm, setShowVoidConfirm] = useState(false)
   const [showFinalizeConfirm, setShowFinalizeConfirm] = useState(false)
+  const [showCollectConfirm, setShowCollectConfirm] = useState(false)
   const [showRotatePublicTokenConfirm, setShowRotatePublicTokenConfirm] = useState(false)
   const [showEmailModal, setShowEmailModal] = useState(false)
   const [showCreditModal, setShowCreditModal] = useState(false)
@@ -334,7 +336,8 @@ export default function InvoiceDetailPage() {
     queryFn: () => api.listCustomerPaymentMethods(invoice!.customer_id),
     enabled: !!invoice?.customer_id,
   })
-  const hasPaymentMethod = (paymentMethodsList?.data ?? []).some(pm => pm.is_default)
+  const defaultCard = (paymentMethodsList?.data ?? []).find(pm => pm.is_default)
+  const hasPaymentMethod = !!defaultCard
 
   // Dunning runs + operator-context (diagnosis/resolution) card. Shown
   // only when the invoice is in an actionable mid-flight state — the
@@ -430,11 +433,11 @@ export default function InvoiceDetailPage() {
     mutationFn: () => api.collectPayment(id!),
     // The returned invoice says what happened — paid outright (card or
     // credit), still confirming, or an outcome recorded during the call.
-    onSuccess: (updated) => { invalidateAll(); showOutcome(collectOutcome(updated)) },
+    onSuccess: (updated) => { invalidateAll(); setShowCollectConfirm(false); showOutcome(collectOutcome(updated)) },
     // A refusal means nothing was charged; "Couldn't charge" says that and
     // no more. No answer (or Stripe never answering) gets "result unknown"
     // from errorToast, since the card may have been charged.
-    onError: (err) => showApiError(err, "Couldn't charge"),
+    onError: (err) => { setShowCollectConfirm(false); showApiError(err, "Couldn't charge") },
   })
 
   // No-payment-method nudge: re-send the SAME setup-link email the engine sent
@@ -716,8 +719,10 @@ export default function InvoiceDetailPage() {
               collect action when it cannot run). A below-minimum invoice
               keeps it: Collect applies the credit balance there, which
               needs no card. */}
-          {invoiceShowsCollect(invoice, hasPaymentMethod, invoice.attention?.reason) && (
-            <Button size="sm" onClick={() => collectMutation.mutate()} disabled={acting}>
+          {/* Not on a card the bank refused for good: the server refuses that
+              charge (#966), and the notice offers Update payment method. */}
+          {invoiceShowsCollect(invoice, hasPaymentMethod, invoice.attention?.reason) && invoice.attention?.code !== 'payment.card_refused' && (
+            <Button size="sm" onClick={() => setShowCollectConfirm(true)} disabled={acting}>
               {collectMutation.isPending ? <><Loader2 size={14} className="animate-spin mr-1.5" />Collecting…</> : 'Collect payment'}
             </Button>
           )}
@@ -957,7 +962,7 @@ export default function InvoiceDetailPage() {
         <InvoiceAttention
           invoice={invoice as unknown as ApiInvoice}
           onRetryTax={() => retryTaxMutation.mutate()}
-          onChargeNow={() => collectMutation.mutate()}
+          onChargeNow={() => setShowCollectConfirm(true)}
           // send_reminder is state-aware. At the no_payment_method stage the
           // matching action is to re-send the payment-METHOD setup link the
           // engine already emailed (Checkout setup mode → add a card → engine
@@ -1543,6 +1548,37 @@ export default function InvoiceDetailPage() {
             <AlertDialogCancel disabled={finalizeMutation.isPending}>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={() => finalizeMutation.mutate()} disabled={finalizeMutation.isPending}>
               {finalizeMutation.isPending ? <><Loader2 size={14} className="animate-spin mr-1.5" />Finalizing…</> : 'Finalize'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Collect Confirm — Collect payment and the notice's Charge now both
+          charge the customer's card at once, so they ask first and name the
+          amount and the card. Credit is applied before the card, as the
+          server does (ADR-088), so the charge can be smaller. */}
+      <AlertDialog open={showCollectConfirm} onOpenChange={(open) => { if (!open && !collectMutation.isPending) setShowCollectConfirm(false) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Collect {formatCents(invoiceDueCents(invoice), invoice.currency)} now?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {formatCents(invoiceDueCents(invoice), invoice.currency)} due on {invoice.invoice_number} from {customer?.display_name || invoice.bill_to_snapshot?.display_name || 'this customer'}.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-2 text-sm text-muted-foreground">
+            <p>Any credit balance the customer has is used first.</p>
+            <p>
+              {defaultCard
+                ? `Whatever is left is charged to ${defaultCard.card_last4 ? cardLabel(defaultCard) : "the customer's default card"} right away.`
+                : 'No card is on file, so only the credit balance can pay it.'}
+            </p>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={collectMutation.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => collectMutation.mutate()} disabled={collectMutation.isPending}>
+              {collectMutation.isPending
+                ? <><Loader2 size={14} className="animate-spin mr-1.5" />Collecting…</>
+                : defaultCard ? `Charge ${formatCents(invoiceDueCents(invoice), invoice.currency)}` : 'Apply credit'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

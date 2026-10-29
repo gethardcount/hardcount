@@ -307,8 +307,8 @@ type PaymentFailure struct {
 // It does not say why: Stripe asks that lost, stolen and fraud declines be
 // shown to the customer as a plain decline
 // (https://docs.stripe.com/declines/codes). It says what to do. It does not
-// say the card won't be charged again: only dunning retries skip it, while
-// Collect payment and the customer's next invoice still charge it.
+// say the card won't be charged again: dunning retries and Collect payment
+// skip it on this invoice, but the customer's next invoice still charges it.
 const refusedCardCustomerMessage = "Your bank declined this card. Please pay with a different card."
 
 // customerFailureReason is the reason the payment-failed email shows the
