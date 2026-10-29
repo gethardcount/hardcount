@@ -8,7 +8,8 @@ Words used in the Hardcount docs and dashboard. For the big picture, read
 
 - **tenant**: One business account in Hardcount, with its own customers, data,
   dashboard users and API keys. One Hardcount install can hold many tenants, and each sees only its own data.
-  Dashboard users can belong to several tenants. [More](self-host.md)
+  A dashboard user signs in to one tenant: the first one they joined. There
+  is no way yet to switch to another. [More](self-host.md)
 - **operator**: Has two meanings. Usually the business that runs Hardcount to
   bill its customers, or its staff who sign in to the dashboard. In
   self-host and ops docs, the engineer who deploys and runs the install.
@@ -113,12 +114,12 @@ Words used in the Hardcount docs and dashboard. For the big picture, read
 - **day-grade billing**: Billing counts whole days, not hours. Normal period
   starts and ends snap to midnight in the billing timezone, and the start
   day counts in full. Day counts are rounded, so daylight saving time never
-  adds or loses a day. A spend threshold that restarts the cycle can start a
-  period during the day. [More](adr/012-day-grade-calendar-billing.md)
+  adds or loses a day. [More](adr/012-day-grade-calendar-billing.md)
 - **bill timing (in advance / in arrears)**: A plan setting for when its
   fixed base fee is invoiced. In advance: at the start of the period it
-  covers. In arrears: at the end. The default is in arrears. Usage is always
-  billed in arrears. [More](adr/031-per-plan-base-bill-timing.md)
+  covers. In arrears: at the end. There is no default: a plan with a base
+  fee must say which, and a plan with no base fee bills in arrears. Usage is
+  always billed in arrears. [More](adr/031-per-plan-base-bill-timing.md)
 - **proration**: Charging only for the whole days a price was active in a
   billing period. For a plan billed in advance, a change in the middle of a
   period charges the difference now, or credits it on a downgrade, and a
@@ -191,8 +192,10 @@ Words used in the Hardcount docs and dashboard. For the big picture, read
   [More](adr/053-explicit-payment-method-at-charge.md)
 - **unknown payment status**: A charge got an unclear answer (a timeout, a
   server error, a dropped connection), so Hardcount cannot tell if money moved.
-  Nothing retries it. A Stripe webhook or Hardcount's regular Stripe check
-  settles it. If no PaymentIntent ID was recorded, the invoice is parked.
+  Nothing charges the invoice while the status is unknown. A Stripe webhook
+  or Hardcount's regular Stripe check settles it. If no PaymentIntent ID was
+  recorded, the invoice is parked (next entry), which can end in a new
+  charge.
   [More](adr/107-unknown-is-terminal-until-a-human.md)
 - **parked invoice**: An invoice whose charge result is unknown and that has
   no PaymentIntent ID recorded, so Hardcount cannot yet tell if the customer

@@ -65,8 +65,9 @@ flowchart LR
    covers it all, the invoice is marked paid with no charge. Otherwise, if
    the customer has a saved card and your Stripe account is connected,
    Hardcount asks Stripe to charge that card for what is left. With no saved
-   card, Hardcount can email the customer a link to add one, once email is set
-   up.
+   card, Hardcount starts dunning (step 6) and, once email is set up, emails
+   the customer a link to add one; the next retry after they add it charges
+   the card.
 
    **You see:** the invoice reads **Paid**, with a "Credits applied" line
    if credit paid part of it. The payment shows in your Stripe dashboard.
@@ -78,8 +79,8 @@ flowchart LR
    every retry fails, it does what your dunning policy says: pause or
    cancel the subscription, write off the invoice, both, or neither. A
    pause from dunning lifts by itself once the customer pays that
-   invoice, unless the subscription was canceled; a pause you set stays
-   until you resume it.
+   invoice, unless the subscription was canceled; a pause you set lasts
+   until you resume it, or until its end date if you gave one.
 
    **You see:** the invoice on the **Dunning** page while it is being
    retried. The schedule is under **Dunning policies**. A new account
@@ -89,7 +90,8 @@ flowchart LR
 ## See it without waiting a month
 
 Move a customer's [test clock](glossary.md#testing-with-simulated-time)
-forward a month, and steps 4 to 6 happen in seconds. The quick start does
+forward, and steps 4 to 6 happen in seconds. A month brings the invoice and
+its charge; two more weeks bring the retries (day 3, 7 and 14 by default). The quick start does
 this for a demo customer, up to the invoice: it connects no Stripe account,
 so nothing is charged.
 

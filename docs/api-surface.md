@@ -201,7 +201,7 @@ See [test clock](glossary.md#testing-with-simulated-time).
 |---|---|---|
 | `GET` | `/v1/dunning/runs` | List dunning runs (Hardcount retrying a failed payment and emailing the customer) |
 | `POST` | `/v1/webhook-endpoints/endpoints` | Register a URL in your app that Hardcount calls when something happens. See [Webhooks](webhooks.md). |
-| `GET` | `/v1/audit-log` | Search the audit log: who changed what, and when. Entries cannot be edited. |
+| `GET` | `/v1/audit-log` | Search the audit log: who changed what, and when. Hardcount cannot edit or delete entries. |
 
 ## Sending usage safely
 

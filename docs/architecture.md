@@ -66,7 +66,7 @@ A paid invoice cannot be voided or written off; issue a credit note instead.
   - the database refuses an insert into a table with a `livemode` column when `app.livemode` is not `on` or `off`, and its RLS policies show no row (migrations 00213 and 00214).
 - **PaymentIntent-only Stripe.** No Stripe Billing or Stripe Invoices. Hardcount owns invoices end to end; Stripe executes the card charge.
 - **Billing engine as coordinator.** `billing` is the one package that works across domains. It calls usage, pricing, invoice, payment and the others only through small interfaces it defines itself (`UsageAggregator`, `PricingReader`, `InvoiceWriter`, `InvoiceCharger` and so on). The other domains do not know about each other, and the engine can be tested with fakes.
-- **Ledger and audit records for money.** Credit grants, usage, expiry and adjustments are entries in one credit ledger. The ledger is not strictly append-only: each grant entry keeps a running count of what has been used of it (`consumed_cents`, `cn_retired_cents`), updated in place. The audit log is append-only: the database refuses any change or delete in it.
+- **Ledger and audit records for money.** Credit grants, usage, expiry and adjustments are entries in one credit ledger. The ledger is not strictly append-only: each grant entry keeps a running count of what has been used of it (`consumed_cents`, `cn_retired_cents`), updated in place. The audit log is append-only: triggers refuse any change or delete, and the limited database user (`hardcount_app`) has no right to make one. A database owner could still remove the triggers.
 
 ## Package layout
 

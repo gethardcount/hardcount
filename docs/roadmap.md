@@ -16,8 +16,9 @@ Right after v0.9.0:
 
 **v0.10.0**, planned after v0.9.0:
 
-- **Spend alerts.** A spend threshold on each subscription, checked
-  against live usage, with an optional repeat. When usage crosses it, Hardcount
+- **Spend alerts.** An alert level on each subscription, checked
+  against live usage, with an optional repeat. It is not the
+  [spend threshold](glossary.md#subscriptions-and-invoices) that bills early. When usage crosses it, Hardcount
   sends a webhook and an email. Cutting a customer off stays in your app
   ([how](stop-usage-when-credit-runs-out.md)).
 - **Generated SDKs for Go and TypeScript,** built from
@@ -76,7 +77,10 @@ Each item waits until someone using Hardcount needs it:
   customers on an old price means a separate plan.
 - A double-entry accounting ledger or revenue recognition.
 - Dedup that is optional or expires, money in floating-point numbers, and
-  retrying an unclear card charge under a new key.
+  retrying an unclear card charge under a new key while Stripe may still
+  finish the first. A new key is used only once Stripe has shown no payment
+  for that charge for 24 hours
+  ([ADR-127](adr/127-a-lost-charge-result-is-resolved-by-asking-stripe.md)).
 - Coupons, a customer portal, quotes, contracts and minimum spend.
 - Telemetry of any kind.
 - A separate docs site. The docs stay in this repo.
@@ -111,7 +115,7 @@ July to September 2026:
 - Provider cost tables and per-customer margin.
 - Team invites.
 - Safer handling of card charges whose outcome is unclear, and of unpaid invoices.
-- An automated check that runs 30 money consistency rules in CI.
+- An automated check that runs 32 money consistency rules in CI.
 - Running several copies of Hardcount at once, with background jobs handed over in seconds when one stops.
 
 **Next:** try it on your computer with the [quick start](quick-start.md).

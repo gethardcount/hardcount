@@ -25,7 +25,7 @@ labels on a usage event, such as `model` or `token_type`.
 |---|---|---|
 | One program to run | Hardcount is a single Go program. Background jobs run inside it, so there is no queue, worker fleet or separate scheduler to run. The Compose file adds Postgres, Redis (for rate limits only), the dashboard and nginx in front: five containers, one of them Hardcount. | [Self-host](self-host.md) |
 | Nothing held back, nothing sent home | MIT with no licence key or paid tier. No telemetry; data goes only to services you set up, such as Stripe, your email server and your tracing collector. Billing data lives in your own Postgres. | [Why Hardcount](why-hardcount.md) |
-| Audit log that cannot be edited | A log of who changed what in your account. The database refuses to change or delete any entry in it. | [Architecture](architecture.md) |
+| Audit log Hardcount cannot edit | A log of who changed what in your account. Database triggers refuse any change or delete, and Hardcount's own database user has no right to make one. A database owner could still remove the triggers. | [Architecture](architecture.md) |
 | Data kept apart | On most API requests, each account's data, and its test and live data, are kept apart by Postgres Row-Level Security (RLS) as well as by the application code. Some work runs outside RLS and filters by account in the application code. That includes background jobs, sign-in and sessions, public links such as the hosted invoice page, incoming webhooks, Stripe credential settings, and team members and invites ([full list](architecture.md#design-rules)). With `APP_ENV` set to `staging` or `production`, Hardcount will not start without RLS. | [Postgres requirements](ops/postgres-requirements.md#the-two-database-users) |
 
 Hardcount has no SSO; [ADR-014](adr/014-sso-direction-embedded-oidc-saml.md)
@@ -57,7 +57,7 @@ bills those charges too ([runbook](ops/runbook/invoice-timing-late-usage.md)).
 
 | Feature | What it does for you | Learn more |
 |---|---|---|
-| Credit balance | Give customers credit and see every change to it. Each change is a new record; nothing is overwritten. | [The Hardcount API](api-surface.md#credits-and-refunds) |
+| Credit balance | Give customers credit and see every change to it. Each grant, use, expiry and adjustment is its own record; a grant also keeps a running count of how much of it is used. | [The Hardcount API](api-surface.md#credits-and-refunds) |
 | Live balance | The credit left after usage not yet invoiced, so your app can stop serving a customer whose credit has run out. | [Stop usage when credit runs out](stop-usage-when-credit-runs-out.md) |
 | Credit notes and refunds | A credit note lowers what a customer owes on an invoice, as a balance credit or a refund to the card. | [The Hardcount API](api-surface.md#credits-and-refunds) |
 

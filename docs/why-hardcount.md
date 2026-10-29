@@ -78,7 +78,7 @@ project is ahead, [How Hardcount compares](comparison.md) says so.
      cannot change what you billed last month.
    - Every usage line links to the usage events for that customer, meter and
      period.
-   - The audit log cannot be edited: database triggers refuse any change or
-     delete.
+   - Hardcount cannot edit the audit log: database triggers refuse any
+     change or delete, and its own database user has no right to make one.
 
 **Next:** run it on your computer with the [quick start](quick-start.md).

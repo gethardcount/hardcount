@@ -55,7 +55,11 @@ dimension. A LiteLLM proxy does this for you: Hardcount turns a name such as
   inference and batch prices are not applied.
 
 The two AI recipes share the `tokens` meter, so you can apply both. Each
-adds its own plan with its own prices, in the plan's currency.
+adds its own plan with its own prices, in the plan's currency. One customer
+cannot be on both plans at once: two live subscriptions of one customer
+cannot price the same meter (409 `meter_overlap`), so usage is never billed
+twice. To sell both providers' models to one customer, apply one recipe,
+then add the other provider's model prices to its plan.
 
 To see the recipes, and to apply one with your own plan name:
 
@@ -382,9 +386,12 @@ sell commits with tax on. The decision and its reasons are in
 
 ## See your margin
 
-Your margin on a customer is the price of their usage rated in the window,
-invoiced or not, against what that usage cost you. Only you see it, never
-the customer.
+Your margin on a customer is what their usage in the window earns at your
+current prices, against what that usage cost you. It is an estimate:
+revenue is rated at each subscription's current-period prices, over active
+and trialing subscriptions only, invoiced or not. After a price change, or
+for a canceled subscription, it differs from what you billed. Only you see
+it, never the customer.
 
 1. **Save what your provider charges you per token.** Do this before the
    usage arrives. Hardcount records the cost on each event when it arrives, so
@@ -452,8 +459,8 @@ the customer.
    }
    ```
 
-   Billed $6.00, cost $2.10 (`cost_cents` is in cents, as a decimal string),
-   and a 65% margin (`margin_bps` is in hundredths of a percent).
+   Usage revenue $6.00, cost $2.10 (`cost_cents` is in cents, as a decimal
+   string), and a 65% margin (`margin_bps` is in hundredths of a percent).
 
 The margin covers usage only: base fees, credits and taxes are left out.
 Revenue Hardcount cannot match to a model is shown apart, in
@@ -461,8 +468,11 @@ Revenue Hardcount cannot match to a model is shown apart, in
 `token_type` and `model` but matches no cost rate is counted in
 `unresolved_events`. So is an event whose cost, quantity ×
 `unit_cost_cents`, is too large to record (about $9.2 trillion or more);
-it is still billed. While any such event is in the window,
-`margin_bps` is left out. An event sent through the usage API without one
+it is still billed. `margin_bps` is left out while any such event is in
+the window. It is also left out when no event in the window carries a
+cost, when revenue is 0, and when revenue and cost are in different
+currencies. Provider costs are in USD, so a plan priced in EUR or GBP shows
+no margin. An event sent through the usage API without one
 of those three labels, such as usage on a meter that is not for tokens,
 gets no cost and is not counted. Its price is still in `revenue_cents`, so
 `margin_bps` reads higher than your real margin.
