@@ -25,12 +25,12 @@ Every example uses `billing.example.com`. Replace it with your own address.
 
 ## 1. Install a pinned release
 
-A release is a tested version with a number, such as `v0.9.0`. Production runs a release, not the newest code: the newest code can hold changes that are not released yet. Find the newest release on the [releases page](https://github.com/gethardcount/hardcount/releases). This page uses `v0.9.0`, the first release named Hardcount. A Velox install (v0.8.x) cannot be upgraded to it: install fresh.
+A release is a tested version with a number, such as `v0.9.1`. Production runs a release, not the newest code: the newest code can hold changes that are not released yet. Find the newest release on the [releases page](https://github.com/gethardcount/hardcount/releases). This page uses `v0.9.1`. A Velox install (v0.8.x) cannot be upgraded to Hardcount: install fresh.
 
 1. Get the files for that release.
 
    ```bash
-   HARDCOUNT_VERSION=v0.9.0
+   HARDCOUNT_VERSION=v0.9.1
    sudo git clone --branch "$HARDCOUNT_VERSION" https://github.com/gethardcount/hardcount.git /opt/hardcount
    sudo chown -R "$USER" /opt/hardcount
    cd /opt/hardcount/deploy/compose
@@ -76,7 +76,7 @@ A release is a tested version with a number, such as `v0.9.0`. Production runs a
    docker compose exec hardcount-api /usr/local/bin/hardcount version
    ```
 
-   **You see:** five containers start, then `hardcount v0.9.0`.
+   **You see:** five containers start, then `hardcount v0.9.1`.
 
 4. Check that it is healthy. On the first start Hardcount sets up its database (runs its migrations), which takes about 10 seconds. Until then the check fails with a 502, so this command retries every 2 seconds and gives up after 2 minutes.
 

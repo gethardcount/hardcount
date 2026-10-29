@@ -24,8 +24,8 @@ You need:
 - `curl` and `jq` (a tool that reads JSON). On macOS: `brew install jq`.
   On Debian or Ubuntu: `sudo apt install jq`.
 
-Read this page at the version you run. The quick start runs v0.9.0, and
-[this page as of v0.9.0](https://github.com/gethardcount/hardcount/blob/v0.9.0/docs/first-invoice.md)
+Read this page at the version you run. The quick start runs v0.9.1, and
+[this page as of v0.9.1](https://github.com/gethardcount/hardcount/blob/v0.9.1/docs/first-invoice.md)
 matches it. The copy on `main` can be ahead of that release.
 
 Open a terminal in the `hardcount` folder that the quick start downloaded. Save

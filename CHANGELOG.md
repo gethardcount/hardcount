@@ -19,6 +19,12 @@ original text.
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-10-29
+
+Small fixes to what you see in your first hour: the dashboard shows the Hardcount logo, and the quickstart no longer guesses how long the demo takes.
+
+**Before upgrading:** nothing to do. There are no migrations and no setting changes. On a Compose install, change the image tags in `.env` to `v0.9.1`, then run `docker compose pull` and `docker compose up -d --no-build`.
+
 ### Changed
 
 - **The quickstart and its docs no longer say how long the demo takes.** The "about two minutes" guess was never measured (the demo runs in seconds). `docs/first-invoice.md` no longer says it "matches the newest code on `main`" when read at a release. ([#1417](https://github.com/gethardcount/hardcount/pull/1417))
@@ -5376,7 +5382,8 @@ Documentation only: the README heading "Fewer dependencies" uses typographic quo
 
 ---
 
-[Unreleased]: https://github.com/gethardcount/hardcount/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/gethardcount/hardcount/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/gethardcount/hardcount/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/gethardcount/hardcount/compare/v0.8.2...v0.9.0
 [0.8.2]: https://github.com/gethardcount/hardcount/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/gethardcount/hardcount/compare/v0.8.0...v0.8.1

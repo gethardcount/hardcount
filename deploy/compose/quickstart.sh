@@ -23,7 +23,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 # The release this script starts. Bumped with each release.
-HARDCOUNT_VERSION="v0.9.0"
+HARDCOUNT_VERSION="v0.9.1"
 # The dashboard and API are served on this port. Override: HARDCOUNT_PORT=9000 ./quickstart.sh
 PORT_DEFAULT="${HARDCOUNT_PORT:-8080}"
 CREDS=quickstart-credentials.json
