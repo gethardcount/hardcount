@@ -17,7 +17,6 @@ import { collectionPausedFlag, genericStatus, subscriptionStatus } from '@/lib/s
 import { StatusBadge } from '@/components/StatusBadge'
 
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
