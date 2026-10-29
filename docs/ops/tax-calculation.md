@@ -35,7 +35,7 @@ If Stripe Tax fails, the invoice waits; Hardcount never falls back to a guessed 
 
 1. Connect Stripe under **Settings → Payments**, in each mode you use. Test mode and live mode use separate Stripe keys, so connect both.
 2. In your Stripe account, add your tax registrations.
-3. Choose **Stripe Tax** and save. You can also set a **Default product tax code**, which Stripe uses for a plan that does not name its own.
+3. Choose **Stripe Tax** and save. You can also set a **Default product tax code**, which Stripe uses for a plan that does not name its own. Left empty, Hardcount saves `txcd_10103001`, Stripe's code for software as a service bought by a business.
 4. Make sure each customer has a full address, at least the country. Stripe Tax cannot work out tax without it.
 
    **You see:** the next invoice has a tax line that matches Stripe's calculation.
@@ -46,7 +46,7 @@ If Stripe Tax fails, the invoice waits; Hardcount never falls back to a guessed 
 - **A customer's tax status**, set in the customer's **Billing Profile**:
   - **Standard**: tax applies as usual.
   - **Exempt**: no tax. Hardcount asks for the reason.
-  - **Reverse charge**: no tax on the invoice, because the business customer pays the VAT or GST themselves in their own country.
+  - **Reverse charge**: no tax on the invoice, because the business customer pays the VAT or GST themselves in their own country. Hardcount asks for the customer's tax ID.
 - **Tax IDs**, such as a VAT or GST number, are shown on the invoice. Hardcount checks only that an ID has the right shape, not that the tax authority knows it.
 
 ## When tax cannot be worked out
@@ -66,7 +66,7 @@ After 8 automatic tries, Hardcount stops and the notice says so. Click **Retry t
 
 ## What to watch
 
-Hardcount counts every invoice that waits for tax on the metric `hardcount_tax_outcome_total`, with `outcome="deferred"` and a `reason`. Successful calculations are not counted, so any increase means something needs a look: alert when its rate is above zero.
+Hardcount counts every tax calculation that fails on the metric `hardcount_tax_outcome_total`, with `outcome="deferred"` and a `reason`. It counts attempts, not invoices: an invoice whose tax keeps failing adds one for each automatic retry. Successful calculations are not counted, so any increase means something needs a look: alert when its rate is above zero.
 
 | `reason` | Meaning |
 |---|---|

@@ -102,12 +102,16 @@ retries on the schedule below.
 2. **Events can arrive out of order.** Do not work out the current state
    from the order they arrive. Read the event's data, or fetch the
    invoice or subscription from the API.
-3. **Events marked *(always sent)* are never lost; others can be.** Those
+3. **Events marked *(always sent)* survive a crash; others may not.** Those
    events in the [catalog](#event-catalog) are saved together with the
-   change that caused them. If the change is saved, the event will be sent,
-   even after a crash. Other events, including `invoice.finalized`, are
-   queued just after the change is saved, and a crash or a database error
-   at that moment can drop one.
+   change that caused them, so a crash cannot drop them. Other events,
+   including `invoice.finalized`, are queued just after the change is
+   saved, and a crash or a database error at that moment can drop one.
+   Any event can still go undelivered. To an endpoint that keeps failing,
+   it is marked failed after 6 attempts over about 26.5 hours
+   ([Retries](#retries)). And the queue gives up on an event it could not
+   hand on after 15 tries over about 52 hours. Send either again from the
+   dashboard.
 
 ## What a message looks like
 
@@ -232,8 +236,9 @@ the [API reference](api-surface.md#the-full-reference)):
   network address, IPv4 or IPv6, such as `10.0.0.1`, `169.254.169.254`,
   `fd00::1` or `fe80::1`. Hardcount checks the address when you save the URL
   and again each time it sends.
-- On a server (`APP_ENV=production`), `localhost` is refused too. In local
-  development, `localhost` is allowed, over `http://` as well.
+- With `APP_ENV=production`, `localhost` and loopback addresses
+  (`127.0.0.1`, `::1`) are refused too. With any other `APP_ENV`, staging
+  included, they are allowed, over `http://` as well.
 
 ## Retries
 
@@ -259,7 +264,8 @@ other failure: register the URL that answers with the `2xx` itself.
 the dashboard, with each endpoint's success rate and each event's delivery
 history. Send any event again from there, or with
 `POST /v1/webhook_events/{id}/replay`. `GET /v1/webhook-endpoints/events`
-lists the newest 50 events; it has no filters.
+lists events, newest first, 50 to a page by default (`limit` up to 100,
+`offset`, and the `total`); it has no filters.
 
 ## Event catalog
 
@@ -343,7 +349,7 @@ raised the event and `captured_cents` is what it took. Match the charge by
   `stripe_payment_intent_id` may be this charge, an earlier one, or none.
 
 `dispute` is the dispute as `GET /v1/invoices/{id}/disputes` lists it, with
-`stripe_dispute_id`, `status`, `reason`, `amount_cents`, `currency`,
+every field it has there, including `stripe_dispute_id`, `status`, `reason`, `amount_cents`, `currency`,
 `evidence_due_by` (the deadline to respond in Stripe), `opened_at`, and
 `closed_at` once it is closed. On `payment.dispute_closed`, `status` is
 `won`, `lost`, `warning_closed` (an inquiry that never became a chargeback)
@@ -380,8 +386,8 @@ schedule's is its `cancel_at` and `cancel_effective_at`.
 | `subscription.trial_ended` | A trial ended. `triggered_by` is `operator` or `schedule`, and `ended_at` is when it ended. *(always sent)* | `ended_at`, `triggered_by` |
 | `subscription.trial_extended` | A trial's end date moved later. The new end is the subscription's `trial_end_at`. `triggered_by` is `operator` | `triggered_by` |
 | `subscription.cancel_scheduled` / `.cancel_cleared` | A cancel at period end was scheduled, or the schedule was removed. Clearing when no cancel is scheduled sends nothing | — |
-| `subscription.collection_paused` | Collection was paused: invoices stay drafts. The subscription's `pause_collection` says how and until when. `triggered_by` is `operator` or `dunning` (payment retries ran out and your policy pauses). Dunning's pause is saved with the change, so its event is never lost ([rule 3](#three-rules-for-your-receiver)). Dunning never resumes collection itself: the pause lasts until that invoice is paid (`subscription.collection_resumed` with `triggered_by: payment`) or you resume it. On a canceled subscription, paying the invoice does not lift the pause; resume it yourself | `triggered_by` |
-| `subscription.collection_resumed` | Collection resumed; a resume call on a subscription that is not paused sends nothing. `triggered_by` is `operator`, `schedule` (its resume date came) or `payment` (a payment ended a pause that dunning set). A `schedule` or `payment` resume carries `resumed_at` and is saved with the change, so it is never lost. Each pause that ends sends one, with its own trigger, even when a new pause or a resume call reaches it first; that resume call sends no `operator` resume | `triggered_by`, `resumed_at` |
+| `subscription.collection_paused` | Collection was paused: invoices stay drafts. The subscription's `pause_collection` says how and until when. `triggered_by` is `operator` or `dunning` (payment retries ran out and your policy pauses). Dunning's pause is saved with the change, so a crash cannot drop its event ([rule 3](#three-rules-for-your-receiver)). Dunning never resumes collection itself: the pause lasts until that invoice is paid (`subscription.collection_resumed` with `triggered_by: payment`) or you resume it. On a canceled subscription, paying the invoice does not lift the pause; resume it yourself | `triggered_by` |
+| `subscription.collection_resumed` | Collection resumed; a resume call on a subscription that is not paused sends nothing. `triggered_by` is `operator`, `schedule` (its resume date came) or `payment` (a payment ended a pause that dunning set). A payment lifts the pause when it is recorded, and this event follows on the next scheduled billing run, once any period that ended under the pause has closed. A `schedule` or `payment` resume carries `resumed_at` and is saved with the change, so a crash cannot drop it. Each pause that ends sends one, with its own trigger, even when a new pause or a resume call reaches it first; that resume call sends no `operator` resume | `triggered_by`, `resumed_at` |
 | `subscription.item.added` / `.updated` / `.removed` | A plan or quantity on the subscription was added, changed or removed. `item_id` names the item; a removed item is no longer in `items` | `item_id` |
 | `subscription.pending_change.scheduled` / `.canceled` | A plan change for the next billing period was scheduled or canceled. The item's `pending_plan_id` and `pending_plan_effective_at` show it | `item_id` |
 | `subscription.pending_change.applied` | A scheduled plan change was applied at the period end. The item's `plan_id` is the new plan, `old_plan_id` the one it left, and `applied_at` when. The subscription is as it was before the close that starts the next period | `item_id`, `old_plan_id`, `applied_at` |
