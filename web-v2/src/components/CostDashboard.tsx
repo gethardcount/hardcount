@@ -719,7 +719,7 @@ function MeterRow({ meter }: { meter: CustomerUsageMeter }) {
             <p className="text-sm font-medium text-foreground truncate">
               {meter.meter_name}
               {hasUnmatched && (
-                <span className="ml-2 inline-flex items-center text-[10px] font-medium text-amber-500 border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 rounded">
+                <span className="ml-2 inline-flex items-center text-[10px] font-medium text-warning-foreground border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 rounded">
                   usage with no price
                 </span>
               )}
@@ -787,10 +787,10 @@ function RuleRow({
     return (
       <div className="px-5 py-3 border-b border-border last:border-b-0 space-y-1">
         <div className="flex items-baseline justify-between gap-4">
-          <span className="text-xs font-medium text-amber-500">
+          <span className="text-xs font-medium text-warning-foreground">
             No price matches this usage
           </span>
-          <span className="text-xs font-semibold text-amber-500 shrink-0">not billed</span>
+          <span className="text-xs font-semibold text-warning-foreground shrink-0">not billed</span>
         </div>
         <div className="text-[10px] text-muted-foreground font-mono">
           {qty.toLocaleString(undefined, { maximumFractionDigits: 4 })} {unit}

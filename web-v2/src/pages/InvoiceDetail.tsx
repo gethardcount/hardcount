@@ -83,7 +83,7 @@ function TaxReversedLine({ cn, currency }: { cn: CreditNote; currency: string })
   const taxTxID = cn.tax_transaction_id
   return (
     <div
-      className="text-[11px] mt-0.5 leading-snug pl-3 text-muted-foreground/80"
+      className="text-[11px] mt-0.5 leading-snug pl-3 text-muted-foreground"
       title={taxTxID ? `Stripe Tax reversal: ${taxTxID}` : undefined}
     >
       {taxTxID
@@ -1352,7 +1352,7 @@ export default function InvoiceDetailPage() {
                 return (
                   <>
                     {prePaymentCNs.map(cn => (
-                      <div key={cn.id} className="text-sm text-emerald-600">
+                      <div key={cn.id} className="text-sm text-success-foreground">
                         <div className="flex justify-between gap-2">
                           <span className="truncate mr-2">
                             Credit {cn.credit_note_number}
@@ -1365,7 +1365,7 @@ export default function InvoiceDetailPage() {
                     ))}
 
                     {invoice.credits_applied_cents > 0 && (
-                      <div className="flex justify-between text-sm text-emerald-600">
+                      <div className="flex justify-between text-sm text-success-foreground">
                         <span>Credits applied</span>
                         <span className="font-mono tabular-nums">-{formatCents(invoice.credits_applied_cents, invoice.currency)}</span>
                       </div>

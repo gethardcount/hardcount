@@ -255,7 +255,7 @@ export default function PricingPage() {
                                   {n > 0 ? (
                                     <span className="text-muted-foreground">{n} plan{n !== 1 ? 's' : ''}</span>
                                   ) : (
-                                    <span className="text-amber-500">No plan prices it — usage won't be billed</span>
+                                    <span className="text-warning-foreground">No plan prices it — usage won't be billed</span>
                                   )}
                                 </TableCell>
                               )

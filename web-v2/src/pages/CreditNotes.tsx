@@ -305,9 +305,9 @@ export default function CreditNotesPage() {
               <p className="text-xl font-semibold text-primary mt-1 tabular-nums">{stats.refunded}</p>
               {(stats.refundPending || stats.refundFailed) && (
                 <p className="text-xs mt-0.5">
-                  {stats.refundPending && <span className="text-amber-600">{stats.refundPending} not confirmed yet</span>}
+                  {stats.refundPending && <span className="text-warning-foreground">{stats.refundPending} not confirmed yet</span>}
                   {stats.refundPending && stats.refundFailed && <span className="text-muted-foreground"> · </span>}
-                  {stats.refundFailed && <span className="text-red-600">{stats.refundFailed} failed — not returned</span>}
+                  {stats.refundFailed && <span className="text-danger-foreground">{stats.refundFailed} failed — not returned</span>}
                 </p>
               )}
             </CardContent>
@@ -315,14 +315,14 @@ export default function CreditNotesPage() {
           <Card>
             <CardContent className="px-5 py-4">
               <p className="text-xs font-medium text-muted-foreground">Applied to Balance</p>
-              <p className="text-xl font-semibold text-emerald-600 mt-1 tabular-nums">{stats.credited}</p>
+              <p className="text-xl font-semibold text-success-foreground mt-1 tabular-nums">{stats.credited}</p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="px-5 py-4">
               <p className="text-xs font-medium text-muted-foreground">Issued</p>
               <p className="text-xl font-semibold text-foreground mt-1">{stats.counts.issued}</p>
-              {stats.counts.draft > 0 && <p className="text-xs text-amber-600 mt-0.5">{stats.counts.draft} draft</p>}
+              {stats.counts.draft > 0 && <p className="text-xs text-warning-foreground mt-0.5">{stats.counts.draft} draft</p>}
             </CardContent>
           </Card>
         </div>
@@ -349,7 +349,7 @@ export default function CreditNotesPage() {
                 )}
               >
                 {f.label}
-                {f.count > 0 && <span className="ml-1 text-muted-foreground/60">{f.count}</span>}
+                {f.count > 0 && <span className="ml-1 text-muted-foreground">{f.count}</span>}
               </button>
             ))}
           </div>

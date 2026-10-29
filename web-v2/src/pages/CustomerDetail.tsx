@@ -548,7 +548,7 @@ export default function CustomerDetailPage() {
                 <p className="text-sm text-muted-foreground">Credit balance</p>
                 {/* One figure per currency, never added together. A customer
                     with no credit yet reads zero in its billing currency. */}
-                <p className={cn('text-sm font-medium mt-1', anyCredit ? 'text-emerald-600' : 'text-foreground')}>
+                <p className={cn('text-sm font-medium mt-1', anyCredit ? 'text-success-foreground' : 'text-foreground')}>
                   {!balanceData
                     ? '—'
                     : creditBalances.length === 0
@@ -575,7 +575,7 @@ export default function CustomerDetailPage() {
             {outstandingAmounts && (
               <Link to={`/invoices?customer=${id}`} className="flex-1 min-w-0 px-6 py-4 hover:bg-accent/50 transition-colors">
                 <p className="text-sm text-muted-foreground">Outstanding</p>
-                <p className="text-sm font-medium mt-1 text-red-600">
+                <p className="text-sm font-medium mt-1 text-danger-foreground">
                   {outstandingAmounts}
                   <span className="text-xs text-muted-foreground ml-1.5 font-normal">
                     · {overview?.outstanding_balance?.unpaid_count} invoice{overview?.outstanding_balance?.unpaid_count === 1 ? '' : 's'}
