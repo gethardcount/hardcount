@@ -12,7 +12,7 @@ import (
 // recordingDeliverer counts sends per type; every send succeeds.
 type recordingDeliverer struct{ sent []string }
 
-func (r *recordingDeliverer) SendInvoice(_ context.Context, _, _ string, _ []string, _, _ string, _ int64, _ string, _ []byte, _ string) error {
+func (r *recordingDeliverer) SendInvoice(_ context.Context, _, _ string, _ []string, _, _ string, _ int64, _ string, _ []byte, _ string, _ bool) error {
 	r.sent = append(r.sent, TypeInvoice)
 	return nil
 }

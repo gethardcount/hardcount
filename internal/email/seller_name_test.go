@@ -39,7 +39,7 @@ func TestCustomerEmail_NoInventedSellerName(t *testing.T) {
 			s.SetSettingsGetter(c.settings)
 			sends := map[string]func() error{
 				"invoice": func() error {
-					return s.SendInvoice(context.Background(), "t1", "ap@buyer.test", nil, "Buyer", "INV-1", 1000, "usd", pdf, "")
+					return s.SendInvoice(context.Background(), "t1", "ap@buyer.test", nil, "Buyer", "INV-1", 1000, "usd", pdf, "", false)
 				},
 				"credit note": func() error {
 					return s.SendCreditNote(context.Background(), "t1", "ap@buyer.test", nil, "Buyer", "CN-1", "INV-1", 1000, "usd", pdf)

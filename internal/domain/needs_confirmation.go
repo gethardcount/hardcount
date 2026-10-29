@@ -36,8 +36,8 @@ func IsAuthenticationRequired(declineCode string) bool {
 // different card once it is the default.
 var ErrCardNeedsConfirmation = errors.New("the bank asked the customer to confirm the payment; an off-session retry cannot")
 
-// DeclineAsk is what a failed card payment asks of the customer, and the
-// copy their emails use for it.
+// DeclineAsk is what a failed card payment, or a retry that found no card,
+// asks of the customer, and the copy their emails use for it.
 type DeclineAsk string
 
 const (
@@ -51,6 +51,11 @@ const (
 	// (IsAuthenticationRequired). Pay on the hosted invoice page, where the
 	// bank asks for the confirmation; no retry charges this card.
 	DeclineAskConfirm DeclineAsk = "confirm"
+	// DeclineAskAddCard: no card is on file, so the retry charged nothing
+	// (ErrNoPaymentMethodOnRetry). Nothing was declined and no retry can
+	// succeed until a card is added, so the email asks the customer to pay
+	// the invoice and promises no retry.
+	DeclineAskAddCard DeclineAsk = "add_card"
 )
 
 // DeclineAskOf is the ask for a Stripe decline code.

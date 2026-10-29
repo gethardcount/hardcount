@@ -36,7 +36,7 @@ type DispatcherConfig struct {
 // Dispatcher.handle from the email_outbox row) so brand lookups inside
 // the Sender resolve against the correct tenant_settings row.
 type EmailDeliverer interface {
-	SendInvoice(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, totalCents int64, currency string, pdfBytes []byte, publicToken string) error
+	SendInvoice(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, totalCents int64, currency string, pdfBytes []byte, publicToken string, writtenOff bool) error
 	SendPaymentReceipt(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, amountCents int64, currency, publicToken string) error
 	SendDunningWarning(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string, ask domain.DeclineAsk) error
 	SendDunningEscalation(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, outcome domain.DunningEscalationOutcome, publicToken string) error
@@ -224,7 +224,7 @@ func (d *Dispatcher) handle(ctx context.Context, row OutboxRow) error {
 	switch row.EmailType {
 	case TypeInvoice:
 		return d.sender.SendInvoice(ctx, row.TenantID, msg.To, msg.Cc, msg.CustomerName, msg.InvoiceNumber,
-			msg.AmountCents, msg.Currency, msg.PDF, msg.PublicToken)
+			msg.AmountCents, msg.Currency, msg.PDF, msg.PublicToken, msg.InvoiceWrittenOff)
 	case TypePaymentReceipt:
 		return d.sender.SendPaymentReceipt(ctx, row.TenantID, msg.To, msg.Cc, msg.CustomerName, msg.InvoiceNumber,
 			msg.AmountCents, msg.Currency, msg.PublicToken)

@@ -98,6 +98,7 @@ func TestDispatcher_SendsTheQueuedCopyAndReason(t *testing.T) {
 	}{
 		{"warning, confirm", TypeDunningWarning, map[string]any{"decline_ask": "confirm"}, domain.DeclineAskConfirm, ""},
 		{"warning, new card", TypeDunningWarning, map[string]any{"decline_ask": "new_card", "card_needs_replacing": true}, domain.DeclineAskNewCard, ""},
+		{"warning, no card on file", TypeDunningWarning, map[string]any{"decline_ask": "add_card"}, domain.DeclineAskAddCard, ""},
 		{"warning queued by the older binary", TypeDunningWarning, map[string]any{"card_needs_replacing": true}, domain.DeclineAskNewCard, ""},
 		{"warning, ordinary", TypeDunningWarning, map[string]any{"failure_reason": "Your card has insufficient funds."}, domain.DeclineAskNone, "Your card has insufficient funds."},
 		{"payment failed, confirm", TypePaymentFailed, map[string]any{"decline_ask": "confirm"}, domain.DeclineAskConfirm, ""},

@@ -428,12 +428,12 @@ func (s *Sender) hostedInvoiceURL(publicToken string) string {
 // ctx must carry livemode for the branding lookup; the request handler
 // sets it via auth middleware, the outbox dispatcher derives it from
 // the email_outbox row.
-func (s *Sender) SendInvoice(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, totalCents int64, currency string, pdfBytes []byte, publicToken string) error {
+func (s *Sender) SendInvoice(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, totalCents int64, currency string, pdfBytes []byte, publicToken string, writtenOff bool) error {
 	brand := s.brandingFor(ctx, tenantID)
 	hostedURL := s.hostedInvoiceURL(publicToken)
 	amount := formatAmount(totalCents, currency)
 
-	subject, contentHTML, ctaURL, ctaLabel := renderInvoiceHTML(customerName, invoiceNumber, amount, hostedURL, totalCents == 0)
+	subject, contentHTML, ctaURL, ctaLabel := renderInvoiceHTML(customerName, invoiceNumber, amount, hostedURL, totalCents == 0, writtenOff)
 	htmlBody, err := renderLayout(layoutInputs{
 		Subject: subject, CompanyName: brand.CompanyName, LogoURL: brand.LogoURL,
 		BrandColor: brand.BrandColor, SupportURL: brand.SupportURL,
@@ -443,7 +443,7 @@ func (s *Sender) SendInvoice(ctx context.Context, tenantID, to string, cc []stri
 	if err != nil {
 		return fmt.Errorf("render invoice html: %w", err)
 	}
-	textBody := invoiceTextBody(customerName, invoiceNumber, amount, currency, hostedURL, totalCents == 0)
+	textBody := invoiceTextBody(customerName, invoiceNumber, amount, currency, hostedURL, totalCents == 0, writtenOff)
 
 	return s.sendRich(ctx, richMessage{
 		TenantID:       tenantID,
@@ -493,9 +493,9 @@ func (s *Sender) SendDunningWarning(ctx context.Context, tenantID, to string, cc
 	brand := s.brandingFor(ctx, tenantID)
 	hostedURL := s.hostedInvoiceURL(publicToken)
 
-	// A card the bank refused for good (#966), and a payment the bank wants
-	// the customer to confirm, get their own copy: no retry date is
-	// promised, because dunning retries skip that card.
+	// A card the bank refused for good (#966), a payment the bank wants the
+	// customer to confirm, and a retry that found no card on file get their
+	// own copy: no retry date is promised, because no retry can succeed.
 	subject, contentHTML, ctaURL, ctaLabel := renderDunningWarningHTML(customerName, invoiceNumber, attemptNumber, maxAttempts, nextRetryDate, failureReason, hostedURL)
 	textBody := dunningWarningTextBody(customerName, invoiceNumber, attemptNumber, maxAttempts, nextRetryDate, failureReason, hostedURL)
 	switch ask {
@@ -505,6 +505,9 @@ func (s *Sender) SendDunningWarning(ctx context.Context, tenantID, to string, cc
 	case domain.DeclineAskConfirm:
 		subject, contentHTML, ctaURL, ctaLabel = renderConfirmPaymentHTML(customerName, invoiceNumber, hostedURL)
 		textBody = confirmPaymentTextBody(customerName, invoiceNumber, hostedURL)
+	case domain.DeclineAskAddCard:
+		subject, contentHTML, ctaURL, ctaLabel = renderNoCardWarningHTML(customerName, invoiceNumber, hostedURL)
+		textBody = noCardWarningTextBody(customerName, invoiceNumber, hostedURL)
 	}
 	htmlBody, err := renderLayout(layoutInputs{
 		Subject: subject, CompanyName: brand.CompanyName, LogoURL: brand.LogoURL,
@@ -637,7 +640,7 @@ func (s *Sender) SendPaymentSetupRequest(ctx context.Context, tenantID, to, cust
 	if err != nil {
 		return fmt.Errorf("render payment update request html: %w", err)
 	}
-	textBody := paymentUpdateRequestTextBody(customerName, invoiceNumber, amount, updateURL)
+	textBody := paymentUpdateRequestTextBody(customerName, invoiceNumber, amount, updateURL, writtenOff)
 
 	return s.sendRich(ctx, richMessage{
 		TenantID: tenantID, To: to, Subject: subject,
@@ -720,13 +723,19 @@ If you weren't expecting this invitation, you can safely ignore this email.
 
 // ---- Plaintext fallback bodies (multipart/alternative text part) ----
 
-func invoiceTextBody(customerName, invoiceNumber, amount, currency, hostedURL string, zeroDue bool) string {
+func invoiceTextBody(customerName, invoiceNumber, amount, currency, hostedURL string, zeroDue, writtenOff bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Hi %s,\n\n", customerName)
 	if zeroDue {
 		// Plumbed amount_due==0: same fact the HTML twin adapts on —
 		// never ask the customer to pay a settled invoice.
 		fmt.Fprintf(&b, "Invoice %s is ready. It is settled — no payment is needed.\n\n", invoiceNumber)
+		if hostedURL != "" {
+			fmt.Fprintf(&b, "View online: %s\n\n", hostedURL)
+		}
+	} else if writtenOff {
+		// Same fact the HTML twin adapts on: no Pay button on the hosted page.
+		fmt.Fprintf(&b, "Invoice %s is now available.\n\nAmount due: %s\nCurrency: %s\n\n%s\n\n", invoiceNumber, amount, strings.ToUpper(currency), closedForOnlinePayment)
 		if hostedURL != "" {
 			fmt.Fprintf(&b, "View online: %s\n\n", hostedURL)
 		}
@@ -754,11 +763,23 @@ func dunningWarningTextBody(customerName, invoiceNumber string, attemptNumber, m
 	// dunning service never sends a warning on the exhausting attempt.
 	var b strings.Builder
 	fmt.Fprintf(&b, "Hi %s,\n\n", customerName)
-	fmt.Fprintf(&b, "Attempt %d of %d to charge invoice %s didn't go through.\n", attemptNumber, maxAttempts, invoiceNumber)
+	fmt.Fprintf(&b, "%s\n", retryFailedSentence(invoiceNumber, attemptNumber, maxAttempts))
 	if strings.TrimSpace(failureReason) != "" {
 		fmt.Fprintf(&b, "Reason: %s\n", failureReason)
 	}
-	fmt.Fprintf(&b, "\nWe'll try again on %s.\n\n", nextRetryDate)
+	fmt.Fprintf(&b, "\n%s\n\n", retryNextSentence(nextRetryDate))
+	if hostedURL != "" {
+		fmt.Fprintf(&b, "Pay invoice: %s\n", hostedURL)
+	}
+	return b.String()
+}
+
+// noCardWarningTextBody is the plain-text part of the no-card warning
+// (renderNoCardWarningHTML).
+func noCardWarningTextBody(customerName, invoiceNumber, hostedURL string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Hi %s,\n\n", customerName)
+	fmt.Fprintf(&b, "%s\n%s\n\n", noCardSentence(invoiceNumber), payOrContactAsk(hostedURL != ""))
 	if hostedURL != "" {
 		fmt.Fprintf(&b, "Pay invoice: %s\n", hostedURL)
 	}
@@ -797,7 +818,7 @@ func dunningEscalationTextBody(customerName, invoiceNumber string, outcome domai
 	// for invoices the hosted page refuses payment on.
 	sentence, stillPayable := dunningEscalationCopy(outcome)
 	var b strings.Builder
-	fmt.Fprintf(&b, "Hi %s,\n\nAll payment attempts for invoice %s were unsuccessful.\n\n%s\n\n", customerName, invoiceNumber, sentence)
+	fmt.Fprintf(&b, "Hi %s,\n\n%s\n\n%s\n\n", customerName, escalationLead(invoiceNumber), sentence)
 	if hostedURL != "" {
 		if stillPayable {
 			fmt.Fprintf(&b, "Pay invoice: %s\n", hostedURL)
@@ -820,17 +841,18 @@ func paymentFailedTextBody(customerName, invoiceNumber, reason, hostedURL string
 	return b.String()
 }
 
-func paymentUpdateRequestTextBody(customerName, invoiceNumber, amount, updateURL string) string {
+func paymentUpdateRequestTextBody(customerName, invoiceNumber, amount, updateURL string, writtenOff bool) string {
 	// No-PM path only (see renderPaymentSetupLinkHTML) — never claim a
-	// decline the customer didn't have.
+	// decline the customer didn't have. Same copy as the HTML part.
+	lead, ask := setupLinkInvoiceCopy(invoiceNumber, amount, writtenOff)
 	return fmt.Sprintf(`Hi %s,
 
-Invoice %s (%s) is ready. Add a payment method using the secure link below and we'll collect it automatically.
+%s %s
 
 The link expires in 24 hours and can only be used once.
 
 %s
-`, customerName, invoiceNumber, amount, updateURL)
+`, customerName, lead, ask, updateURL)
 }
 
 func paymentSetupLinkTextBody(customerName, operatorNote, setupURL string) string {

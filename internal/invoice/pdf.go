@@ -974,7 +974,7 @@ func RenderPDF(ctx context.Context, inv domain.Invoice, lineItems []domain.Invoi
 			} else if inv.PaymentStatus == domain.PaymentSucceeded && inv.PaidAt != nil {
 				textAt(margin, y, fmt.Sprintf("Paid on %s - Thank you!", inv.PaidAt.In(docLoc).Format("January 2, 2006")))
 			} else {
-				textAt(margin, y, paymentTermsLine(inv.NetPaymentTermDays))
+				textAt(margin, y, paymentTermsLine(inv.Status, inv.NetPaymentTermDays))
 			}
 
 			if inv.Memo != "" {
@@ -1269,9 +1269,14 @@ func aggregateTaxByJurisdiction(lineItems []domain.InvoiceLineItem) []jurisdicti
 	return rows
 }
 
-// paymentTermsLine is the footer line for an open invoice. Net 0 reads "due on
-// receipt", matching the dashboard's Terms label, not "within 0 days".
-func paymentTermsLine(netDays int) string {
+// paymentTermsLine is the footer line for an unpaid invoice. Net 0 reads "due
+// on receipt", matching the dashboard's Terms label, not "within 0 days". A
+// written-off invoice is past its terms and has no Pay button (ADR-110), so
+// it asks the customer to contact the seller instead of naming a deadline.
+func paymentTermsLine(status domain.InvoiceStatus, netDays int) string {
+	if status == domain.InvoiceUncollectible {
+		return "This invoice is closed for online payment. Please contact us to arrange payment."
+	}
 	if netDays == 0 {
 		return "Payment due on receipt."
 	}

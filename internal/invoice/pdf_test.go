@@ -676,11 +676,19 @@ func TestCNChannelDescription_RefundStateAnnotated(t *testing.T) {
 }
 
 func TestPaymentTermsLine(t *testing.T) {
-	if got := paymentTermsLine(0); got != "Payment due on receipt." {
+	if got := paymentTermsLine(domain.InvoiceFinalized, 0); got != "Payment due on receipt." {
 		t.Errorf("Net 0: got %q, want %q", got, "Payment due on receipt.")
 	}
-	if got := paymentTermsLine(30); got != "Payment due within 30 days of issue date." {
+	if got := paymentTermsLine(domain.InvoiceFinalized, 30); got != "Payment due within 30 days of issue date." {
 		t.Errorf("Net 30: got %q", got)
+	}
+	// F-07: a written-off invoice has no Pay button (ADR-110) and is past its
+	// terms, so its PDF names no deadline.
+	const closed = "This invoice is closed for online payment. Please contact us to arrange payment."
+	for _, net := range []int{0, 30} {
+		if got := paymentTermsLine(domain.InvoiceUncollectible, net); got != closed {
+			t.Errorf("uncollectible, Net %d: got %q, want %q", net, got, closed)
+		}
 	}
 }
 

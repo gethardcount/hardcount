@@ -124,9 +124,12 @@ type outboxMessage struct {
 	// PublicToken is the Stripe-equivalent hosted_invoice_url credential
 	// (T0-17). Carried on invoice-related email types so the dispatcher
 	// can build the hosted-invoice CTA URL for the rendered HTML body.
-	// InvoiceWrittenOff drives the setup-link email's promise: a written-off
-	// invoice is never collected by a machine (ADR-110), so the copy says a
-	// person will follow up rather than "we'll collect it automatically".
+	// InvoiceWrittenOff marks an uncollectible invoice. A written-off
+	// invoice is never collected by a machine and its hosted page has no
+	// Pay button (ADR-110), so the setup-link email asks the customer to
+	// contact the seller rather than promising "we'll collect it
+	// automatically", and the invoice email offers "View invoice", not
+	// "View & pay".
 	InvoiceWrittenOff bool   `json:"invoice_written_off,omitempty"`
 	PublicToken       string `json:"public_token,omitempty"`
 	PDF               []byte `json:"pdf,omitempty"`
@@ -267,7 +270,7 @@ func (s *OutboxSender) enqueueTx(ctx context.Context, tx *sql.Tx, tenantID, emai
 }
 
 // SendInvoice enqueues an invoice email. Satisfies invoice.EmailSender.
-func (s *OutboxSender) SendInvoice(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, totalCents int64, currency string, pdfBytes []byte, publicToken string) error {
+func (s *OutboxSender) SendInvoice(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, totalCents int64, currency string, pdfBytes []byte, publicToken string, writtenOff bool) error {
 	return s.enqueue(ctx, tenantID, TypeInvoice, outboxMessage{
 		To:            to,
 		Cc:            cc,
@@ -277,6 +280,8 @@ func (s *OutboxSender) SendInvoice(ctx context.Context, tenantID, to string, cc 
 		Currency:      currency,
 		PublicToken:   publicToken,
 		PDF:           pdfBytes,
+		// Rows an older binary queued decode to false: the ordinary copy.
+		InvoiceWrittenOff: writtenOff,
 	})
 }
 

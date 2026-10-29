@@ -153,6 +153,23 @@ func TestProcessRun_OrdinaryDecline_KeepsTheRetryWarning(t *testing.T) {
 	}
 }
 
+// F-01: a retry that found no card on file charged nothing. Its warning asks
+// the customer to pay (the no-card copy), with no reason line and no retry
+// promised, instead of "Retry 1 of 3 didn't go through".
+func TestProcessRun_NoCardOnFile_AsksToPay(t *testing.T) {
+	h := newHardDeclineHarness(t, &scriptedRetrier{results: []error{domain.ErrNoPaymentMethodOnRetry}})
+
+	run := h.tick()
+
+	if run.AttemptCount != 1 || run.State != domain.DunningActive {
+		t.Fatalf("run attempt %d state %s, want 1 active", run.AttemptCount, run.State)
+	}
+	if h.emails.warnings != 1 || h.emails.lastWarnAsk != domain.DeclineAskAddCard || h.emails.lastWarnReason != "" {
+		t.Errorf("warnings %d (ask %q, reason %q), want 1 no-card warning with no reason",
+			h.emails.warnings, h.emails.lastWarnAsk, h.emails.lastWarnReason)
+	}
+}
+
 // The card is replaced mid-dunning: the first retry draws the hard decline,
 // the second skips the refused card, and once a different card is the
 // default the third charges it and the run resolves as recovered.

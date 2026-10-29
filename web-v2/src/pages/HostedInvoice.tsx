@@ -321,8 +321,7 @@ export default function HostedInvoicePage() {
             <p className="font-medium text-foreground">This invoice is closed</p>
             <p className="text-muted-foreground">
               Online payment is no longer available for this invoice. Contact{' '}
-              <SellerContactLink contact={sellerContact(branding)} /> to settle it or
-              restore service.
+              <SellerContactLink contact={sellerContact(branding)} /> to pay it.
             </p>
           </div>
         </div>
@@ -647,7 +646,7 @@ export default function HostedInvoicePage() {
                   <p className="text-sm text-amber-700/80 dark:text-amber-400/80 mt-1">
                     {invoicePaymentInFlight(data.invoice) === 'processing'
                       ? "You don't need to do anything — we'll email a receipt once it completes."
-                      : "Payment is paused here so you can't be charged twice while we confirm it with our payment provider. If you've already been charged, nothing further is needed; otherwise we'll be in touch."}
+                      : "Payment is paused here so you can't be charged twice while we confirm it with our payment provider. If you've already been charged, nothing further is needed."}
                   </p>
                 </div>
               )}
