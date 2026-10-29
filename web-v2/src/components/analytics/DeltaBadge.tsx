@@ -31,7 +31,7 @@ export function DeltaBadge({ current, previous, inverse, hideIfZero, className }
     : direction === 'flat'
       ? 'text-muted-foreground'
       : good
-        ? 'text-emerald-600 dark:text-emerald-400'
+        ? 'text-success-foreground'
         : bad
           ? 'text-destructive'
           : 'text-muted-foreground'

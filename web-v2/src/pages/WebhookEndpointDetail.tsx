@@ -304,7 +304,7 @@ export default function WebhookEndpointDetailPage() {
 }
 
 function rateColor(rate: number) {
-  return rate >= 95 ? 'text-green-600' : rate >= 70 ? 'text-amber-600' : 'text-red-600'
+  return rate >= 95 ? 'text-success-foreground' : rate >= 70 ? 'text-warning-foreground' : 'text-danger-foreground'
 }
 
 function statusBadge(status: EndpointDelivery['status']) {

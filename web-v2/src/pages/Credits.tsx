@@ -293,7 +293,7 @@ export default function CreditsPage() {
               // currency and is never converted.
               <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1 mt-1">
                 {selectedBalances.map(b => (
-                  <p key={b.currency} className={cn('text-3xl font-semibold tabular-nums', b.balance_cents > 0 ? 'text-emerald-600' : 'text-muted-foreground')}>
+                  <p key={b.currency} className={cn('text-3xl font-semibold tabular-nums', b.balance_cents > 0 ? 'text-success-foreground' : 'text-muted-foreground')}>
                     {formatCents(b.balance_cents, b.currency)}
                   </p>
                 ))}
@@ -430,7 +430,7 @@ export default function CreditsPage() {
                             )
                           })()}
                         </TableCell>
-                        <TableCell className={cn('text-right tabular-nums font-mono text-sm', entry.amount_cents >= 0 ? 'text-emerald-600' : 'text-destructive')}>
+                        <TableCell className={cn('text-right tabular-nums font-mono text-sm', entry.amount_cents >= 0 ? 'text-success-foreground' : 'text-destructive')}>
                           {entry.amount_cents >= 0 ? '+' : ''}{formatCents(entry.amount_cents, entry.currency)}
                         </TableCell>
                         {/* The balance in this entry's own currency. */}
@@ -588,7 +588,7 @@ export default function CreditsPage() {
                       </div>
                     </TableCell>
                     <TableCell className={cn('text-right tabular-nums font-mono text-sm',
-                      balance.balance_cents > 0 ? 'text-emerald-600' : balance.balance_cents === 0 ? 'text-muted-foreground' : 'text-destructive'
+                      balance.balance_cents > 0 ? 'text-success-foreground' : balance.balance_cents === 0 ? 'text-muted-foreground' : 'text-destructive'
                     )}>
                       {formatCents(balance.balance_cents, balance.currency)}
                     </TableCell>

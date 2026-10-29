@@ -574,7 +574,7 @@ export default function CustomerDetailPage() {
                 <p className="text-sm text-muted-foreground">Credit balance</p>
                 {/* One figure per currency, never added together. A customer
                     with no credit yet reads zero in its billing currency. */}
-                <p className={cn('text-sm font-medium mt-1', anyCredit ? 'text-emerald-600' : 'text-foreground')}>
+                <p className={cn('text-sm font-medium mt-1', anyCredit ? 'text-success-foreground' : 'text-foreground')}>
                   {!balanceData
                     ? '—'
                     : creditBalances.length === 0

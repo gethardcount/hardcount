@@ -222,7 +222,7 @@ function EndpointsTab() {
                         const s = stats[ep.id]
                         if (!s || s.total_deliveries === 0) return <span className="text-muted-foreground">{'\u2014'}</span>
                         const rate = s.success_rate
-                        const color = rate >= 95 ? 'text-green-600' : rate >= 70 ? 'text-amber-600' : 'text-red-600'
+                        const color = rate >= 95 ? 'text-success-foreground' : rate >= 70 ? 'text-warning-foreground' : 'text-danger-foreground'
                         return <span className={color}>{rate.toFixed(1)}%</span>
                       })()}
                     </TableCell>
