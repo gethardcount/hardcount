@@ -601,7 +601,7 @@ export default function CustomerDetailPage() {
             {outstandingAmounts && (
               <Link to={`/invoices?customer=${id}`} className="flex-1 min-w-0 px-6 py-4 hover:bg-accent/50 transition-colors">
                 <p className="text-sm text-muted-foreground">Outstanding</p>
-                <p className="text-sm font-medium mt-1 text-red-600">
+                <p className="text-sm font-medium mt-1 text-danger-foreground">
                   {outstandingAmounts}
                   <span className="text-xs text-muted-foreground ml-1.5 font-normal">
                     · {overview?.outstanding_balance?.unpaid_count} invoice{overview?.outstanding_balance?.unpaid_count === 1 ? '' : 's'}

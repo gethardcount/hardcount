@@ -136,6 +136,55 @@ function seeThroughPinned(page: Page): Promise<string[]> {
   })
 }
 
+// Text below the WCAG 2.2 AA contrast minimum: 4.5:1, or 3:1 for large text
+// (24px, or 18.66px bold). Each element with its own text is measured against
+// the colour behind it, with see-through layers and faded text blended in.
+// Customer-facing pages measured 2.68:1 (a faded footer) and the dashboard
+// 3.47:1 (a hard-coded red with no dark-mode colour) before this check.
+function lowContrastText(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const canvas = document.createElement('canvas').getContext('2d')!
+    const rgba = (c: string): number[] => {
+      canvas.clearRect(0, 0, 1, 1)
+      canvas.fillStyle = '#000'
+      canvas.fillStyle = c
+      canvas.fillRect(0, 0, 1, 1)
+      const p = canvas.getImageData(0, 0, 1, 1).data
+      return [p[0], p[1], p[2], p[3] / 255]
+    }
+    const lum = (rgb: number[]) => {
+      const f = (x: number) => { x /= 255; return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4 }
+      return 0.2126 * f(rgb[0]) + 0.7152 * f(rgb[1]) + 0.0722 * f(rgb[2])
+    }
+    const behind = (el: Element): number[] => {
+      const layers: number[][] = []
+      for (let n: Element | null = el; n; n = n.parentElement) {
+        const c = rgba(getComputedStyle(n).backgroundColor)
+        if (c[3] > 0) layers.push(c)
+        if (c[3] >= 1) break
+      }
+      let base = [255, 255, 255]
+      for (const c of layers.reverse()) base = base.map((v, i) => v * (1 - c[3]) + c[i] * c[3])
+      return base
+    }
+    const out: string[] = []
+    for (const el of document.querySelectorAll<HTMLElement>('body *')) {
+      if (![...el.childNodes].some(n => n.nodeType === Node.TEXT_NODE && n.textContent?.trim())) continue
+      const cs = getComputedStyle(el)
+      if (cs.visibility === 'hidden' || cs.display === 'none' || el.getBoundingClientRect().width === 0) continue
+      const bg = behind(el)
+      const fg = rgba(cs.color)
+      const text = fg.slice(0, 3).map((v, i) => v * fg[3] + bg[i] * (1 - fg[3]))
+      const [hi, lo] = [lum(text), lum(bg)].sort((a, b) => b - a)
+      const ratio = (hi + 0.05) / (lo + 0.05)
+      const size = parseFloat(cs.fontSize)
+      const large = size >= 24 || (size >= 18.66 && parseInt(cs.fontWeight) >= 700)
+      if (ratio < (large ? 3 : 4.5)) out.push(`"${el.textContent!.trim().slice(0, 40)}": ${ratio.toFixed(2)}:1`)
+    }
+    return out
+  })
+}
+
 for (const vp of viewports) {
   test.describe(`${vp.name} ${vp.size.width}px`, () => {
     test.use({ viewport: vp.size })
@@ -169,13 +218,18 @@ for (const vp of viewports) {
         }
         expect(problems, 'problems reported while the page loaded').toEqual([])
 
-        // Pinned bars stay solid in both themes: the test-mode band was a
-        // see-through tint in dark mode, and every row scrolled visibly
-        // under it. The theme is the `dark` class on <html> (useDarkMode,
-        // chosen once at load), so the check sets it directly.
+        // Pinned bars stay solid, and text meets the contrast minimum, in both
+        // themes: the test-mode band was a see-through tint in dark mode, and
+        // every row scrolled visibly under it. The theme is the `dark` class
+        // on <html> (useDarkMode, chosen once at load), so the check sets it
+        // directly.
+        // Colours change with a transition; measured mid-way, a dark page
+        // reads as text on its own colour. Turn transitions off first.
+        await page.addStyleTag({ content: '*, *::before, *::after { transition: none !important; animation: none !important }' })
         for (const theme of ['light', 'dark'] as const) {
           await page.evaluate(dark => document.documentElement.classList.toggle('dark', dark), theme === 'dark')
           expect(await seeThroughPinned(page), `see-through sticky or fixed bars (${theme})`).toEqual([])
+          expect(await lowContrastText(page), `text below the WCAG AA contrast minimum (${theme})`).toEqual([])
         }
       })
     }

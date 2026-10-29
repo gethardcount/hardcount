@@ -83,7 +83,7 @@ function TaxReversedLine({ cn, currency }: { cn: CreditNote; currency: string })
   const taxTxID = cn.tax_transaction_id
   return (
     <div
-      className="text-[11px] mt-0.5 leading-snug pl-3 text-muted-foreground/80"
+      className="text-[11px] mt-0.5 leading-snug pl-3 text-muted-foreground"
       title={taxTxID ? `Stripe Tax reversal: ${taxTxID}` : undefined}
     >
       {taxTxID

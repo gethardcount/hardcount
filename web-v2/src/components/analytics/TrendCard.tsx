@@ -63,7 +63,7 @@ export function TrendCard({
             <Sparkline data={sparkline} tone={sparklineTone} ariaLabel={`${label} trend`} />
           </div>
         )}
-        {definition && <p className="text-xs text-muted-foreground/80 mt-2">{definition}</p>}
+        {definition && <p className="text-xs text-muted-foreground mt-2">{definition}</p>}
       </CardContent>
     </Card>
   )

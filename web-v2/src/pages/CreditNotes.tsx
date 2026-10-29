@@ -347,7 +347,7 @@ export default function CreditNotesPage() {
                 )}
               >
                 {f.label}
-                {f.count > 0 && <span className="ml-1 text-muted-foreground/60">{f.count}</span>}
+                {f.count > 0 && <span className="ml-1 text-muted-foreground">{f.count}</span>}
               </button>
             ))}
           </div>

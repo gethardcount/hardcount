@@ -368,7 +368,7 @@ export default function SettingsPage() {
           <p className="text-sm text-muted-foreground mt-1">Your business details, invoice defaults, tax and payment setup</p>
         </div>
         {!hasChanges && !loading && (
-          <span className="text-sm text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 bg-emerald-50 dark:bg-emerald-500/10 px-3 py-1.5 rounded-lg">
+          <span className="text-sm text-success-foreground flex items-center gap-1.5 bg-success-subtle px-3 py-1.5 rounded-lg">
             <Check size={14} /> Saved
           </span>
         )}
