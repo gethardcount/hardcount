@@ -13,6 +13,8 @@ import { StatusBadge } from '@/components/StatusBadge'
 import { NoticeRow } from '@/components/NoticeRow'
 import type { StatusDisplay } from '@/lib/statusLabels'
 import { Layout } from '@/components/Layout'
+import { TypedConfirmDialog } from '@/components/TypedConfirmDialog'
+import { revokeNeedsTypedWord } from '@/lib/apiKeyRisk'
 import { cn } from '@/lib/utils'
 
 import { Button } from '@/components/ui/button'
@@ -349,8 +351,20 @@ export default function ApiKeysPage() {
         </Dialog>
       )}
 
-      {/* Revoke confirmation */}
-      <AlertDialog open={!!revokeTarget} onOpenChange={(open) => { if (!open) setRevokeTarget(null) }}>
+      {/* Revoke confirmation: friction follows risk (revokeNeedsTypedWord). */}
+      {revokeTarget && revokeNeedsTypedWord(revokeTarget) && (
+        <TypedConfirmDialog
+          open
+          onOpenChange={(open) => { if (!open) setRevokeTarget(null) }}
+          title="Revoke live API key"
+          description={`Requests using "${revokeTarget.name}" (${revokeTarget.key_prefix}…) will fail from now on, in production. This can't be undone.`}
+          confirmWord="REVOKE"
+          confirmLabel="Revoke key"
+          onConfirm={handleRevoke}
+          loading={revoking}
+        />
+      )}
+      <AlertDialog open={!!revokeTarget && !revokeNeedsTypedWord(revokeTarget)} onOpenChange={(open) => { if (!open) setRevokeTarget(null) }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Revoke API key?</AlertDialogTitle>

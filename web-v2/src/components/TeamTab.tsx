@@ -46,6 +46,7 @@ export function TeamTab() {
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviting, setInviting] = useState(false)
   const [removeTarget, setRemoveTarget] = useState<MemberView | null>(null)
+  const [revokeTarget, setRevokeTarget] = useState<InvitationView | null>(null)
   const [removing, setRemoving] = useState(false)
 
   // can_send_invites is the server's own check (dashmembers CanInvite):
@@ -99,6 +100,8 @@ export function TeamTab() {
       invalidate()
     } catch (err) {
       showApiError(err, 'Failed to revoke invitation')
+    } finally {
+      setRevokeTarget(null)
     }
   }
 
@@ -238,7 +241,7 @@ export function TeamTab() {
                           variant="outline"
                           size="sm"
                           className="text-destructive hover:text-destructive"
-                          onClick={() => handleRevoke(inv)}
+                          onClick={() => setRevokeTarget(inv)}
                         >
                           Revoke
                         </Button>
@@ -251,6 +254,23 @@ export function TeamTab() {
           )}
         </>
       )}
+
+      {/* Revoking an invite asks first: the emailed link stops working at
+          once. Plain confirm, since inviting again is easy. */}
+      <AlertDialog open={!!revokeTarget} onOpenChange={(open) => { if (!open) setRevokeTarget(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Revoke the invitation?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {revokeTarget ? `The link emailed to ${revokeTarget.email} stops working. You can invite them again later.` : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={() => revokeTarget && handleRevoke(revokeTarget)}>Revoke invitation</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={!!removeTarget} onOpenChange={(open) => { if (!open) setRemoveTarget(null) }}>
         <AlertDialogContent>
