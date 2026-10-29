@@ -159,3 +159,55 @@ func TestSendEmail_RefusesWhenEmailNotConfigured(t *testing.T) {
 		t.Error("an email was queued on a server that cannot send it")
 	}
 }
+
+// TestSendEmail_RefusesDraftAndVoided: the email reads "Your invoice is
+// ready" over the amount due and a pay button. A draft is not issued yet and a
+// voided invoice is cancelled, so sending either asks the customer for money
+// they do not owe. Both are refused and nothing is queued; every issued status
+// still sends (a paid or written-off invoice's document is the customer's
+// record).
+func TestSendEmail_RefusesDraftAndVoided(t *testing.T) {
+	cases := []struct {
+		status   domain.InvoiceStatus
+		wantCode int
+	}{
+		{domain.InvoiceDraft, http.StatusConflict},
+		{domain.InvoiceVoided, http.StatusConflict},
+		{domain.InvoiceFinalized, http.StatusOK},
+		{domain.InvoicePaid, http.StatusOK},
+		{domain.InvoiceUncollectible, http.StatusOK},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.status), func(t *testing.T) {
+			store := newMemStore()
+			inv, err := store.Create(context.Background(), "t1", domain.Invoice{
+				InvoiceNumber: "INV-ST-" + string(tc.status), Status: tc.status,
+				PaymentStatus: domain.PaymentPending, CustomerID: "cus_cc", Currency: "USD",
+				TotalAmountCents: 10000, AmountDueCents: 10000,
+			})
+			if err != nil {
+				t.Fatalf("seed invoice: %v", err)
+			}
+			sender := &ccCapturingSender{}
+			h := &Handler{svc: NewService(store, nil, nil), emailSender: sender, emailConfigured: true}
+			h.customers = staticCustomerGetter{cust: domain.Customer{ID: "cus_cc", DisplayName: "CC Co", Email: "ap@acme.test"}}
+
+			rr := sendReq(t, h, inv.ID, `{"email":"ap@acme.test"}`)
+			if rr.Code != tc.wantCode {
+				t.Fatalf("status %d, want %d; body=%s", rr.Code, tc.wantCode, rr.Body.String())
+			}
+			if tc.wantCode == http.StatusOK {
+				if !sender.called {
+					t.Error("an issued invoice must still be emailed")
+				}
+				return
+			}
+			if !bytes.Contains(rr.Body.Bytes(), []byte(`"code":"invoice_not_sendable"`)) {
+				t.Errorf("want code invoice_not_sendable, got %s", rr.Body.String())
+			}
+			if sender.called {
+				t.Errorf("a %s invoice was emailed to the customer", tc.status)
+			}
+		})
+	}
+}

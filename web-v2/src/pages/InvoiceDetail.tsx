@@ -627,6 +627,13 @@ export default function InvoiceDetailPage() {
   // Mark uncollectible is the one action a parked charge allows (ADR-107).
   const showRecordOffline = invoiceCanCollect(invoice) || invoice.status === 'uncollectible'
   const showMarkUncollectible = invoiceAwaitingPayment(invoice)
+  const showRetryTax = invoice.status === 'draft' && !!invoice.tax_calculation_id && !invoice.tax_transaction_id
+  // Hidden on a draft (not issued yet) and a voided invoice (cancelled), and
+  // while the payment is unresolved: the server refuses all three, because
+  // the email asks the customer to pay (and for a parked invoice the hosted
+  // page will not even show a Pay button). Offering it is discovery-by-failure.
+  const showEmailInvoice = invoice.status !== 'draft' && invoice.status !== 'voided' && invoicePaymentInFlight(invoice) === null
+  const showCopyLink = !!invoice.public_token && invoice.status !== 'draft'
 
   return (
     <Layout>
@@ -757,7 +764,7 @@ export default function InvoiceDetailPage() {
                   no banner, so without this item the toast names a remedy
                   the page nowhere offers. The server gates misuse: a fresh
                   calculation answers with a clear 409. */}
-              {invoice.status === 'draft' && !!invoice.tax_calculation_id && !invoice.tax_transaction_id && (
+              {showRetryTax && (
                 <DropdownMenuItem onClick={() => retryTaxMutation.mutate()} disabled={acting || retryTaxMutation.isPending}>
                   <RotateCw size={14} className="mr-2" />
                   Retry tax
@@ -782,19 +789,15 @@ export default function InvoiceDetailPage() {
                   Mark uncollectible
                 </DropdownMenuItem>
               )}
-              {(showRecordOffline || showMarkUncollectible) && <DropdownMenuSeparator />}
+              {(showRetryTax || showRecordOffline || showMarkUncollectible) && <DropdownMenuSeparator />}
 
-              {/* Hidden while the payment is unresolved: the server refuses it
-                  (the email carries a pay call-to-action, and for a parked
-                  invoice the hosted page will not even show a Pay button), so
-                  offering it here is discovery-by-failure. */}
-              {invoice.status !== 'voided' && invoicePaymentInFlight(invoice) === null && (
+              {showEmailInvoice && (
                 <DropdownMenuItem onClick={() => setShowEmailModal(true)} disabled={acting}>
                   <Mail size={14} className="mr-2" />
                   Email invoice
                 </DropdownMenuItem>
               )}
-              {invoice.public_token && invoice.status !== 'draft' && (
+              {showCopyLink && (
                 <DropdownMenuItem onClick={copyPublicLink} disabled={acting}>
                   <Link2 size={14} className="mr-2" />
                   Copy public link
@@ -806,7 +809,7 @@ export default function InvoiceDetailPage() {
                   Rotate public link
                 </DropdownMenuItem>
               )}
-              {(invoice.status !== 'voided' || invoice.public_token) && <DropdownMenuSeparator />}
+              {(showEmailInvoice || showCopyLink) && <DropdownMenuSeparator />}
 
               <DropdownMenuItem
                 onClick={async () => {
