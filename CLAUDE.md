@@ -62,7 +62,7 @@ How we test, which test to write for which change, and how to run each layer:
 **[docs/testing.md](docs/testing.md)**.
 
 ```bash
-go test ./... -race -short -count=1          # unit tests only (what CI runs)
+go test ./... -race -short -count=1          # unit tests only (CI's unit job)
 go test -p 1 ./... -count=1 -short=false  # includes integration tests (needs postgres)
 ```
 

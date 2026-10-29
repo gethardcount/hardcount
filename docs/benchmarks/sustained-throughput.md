@@ -9,8 +9,11 @@
 The test ran on `db.m7g.4xlarge` with the #818 hot-row fix. On stock
 settings, Hardcount sustained **12,000 events/s at batch 10 (p99 22.6 ms)** and
 **15,000 events/s at batch 100 (p99 43.8 ms)** in 4 of 5 ten-minute repeats.
-With the WAL pool sized, both passed 5 of 5 (12k: worst 10-s p99 52 ms; 15k:
-p99 40.2–42.8 ms).
+With the WAL pool sized (third run), both passed 5 of 5: 12k at p99
+22.4–23.3 ms, 15k at p99 40.2–42.8 ms. At 12k a stock control in that same
+run passed 5 of 5 too (p99 21.8–24.5 ms). Sizing removed its slow windows
+(worst 10-s p99 177 ms → 52 ms), not failed repeats. At 15k no stock control
+ran beside it; the stock run the night before passed 4 of 5.
 
 - **Conditions:** AWS `ap-south-1`, everything in one availability zone,
   open-loop load (requests sent at a fixed rate whether or not the server
@@ -34,9 +37,9 @@ tables and the evidence for each row are in
 
 | what a self-hoster can plan on | on `db.m7g.2xlarge` (32 GB) | on `db.m7g.4xlarge` (64 GB), #818 fixed |
 |---|---|---|
-| single events, 200 ev/s | p99 **4.9 ms** | — |
-| batch 10, the recommended client shape | 1,000 ev/s at p99 **8.2 ms** (5/5), and a wall at ~570 req/s (#818) | **12,000 ev/s** (1,200 req/s) at p99 **22.6 ms** (4/5) stock. **5/5, worst 10-s p99 52 ms with the WAL pool sized** (third run) |
-| batch 100 | 5,000 ev/s until the table outgrew RAM (~60M rows) | **15,000 ev/s** at p99 **43.8 ms** (4/5) stock. **p99 40.2–42.8 ms, 5/5 with the WAL pool sized** (third run) |
+| single events, 200 ev/s | p99 **4.9 ms** (4/5) | — |
+| batch 10, the recommended client shape | 1,000 ev/s at p99 **8.2 ms** (5/5), and a wall at ~570 req/s (#818) | **12,000 ev/s** (1,200 req/s) at p99 **22.6 ms** (4/5) stock. **5/5, p99 22.4–23.3 ms with the WAL pool sized** (third run; worst 10-s p99 52 ms). The third run's stock control also passed 5/5 |
+| batch 100 | 5,000 ev/s until the table outgrew RAM (~60M rows) | **15,000 ev/s** at p99 **43.8 ms** (4/5) stock. **5/5, p99 40.2–42.8 ms with the WAL pool sized** (third run; worst 10-s p99 88 ms) |
 | batch 100 at 10,000 ev/s | 0/2, a knee | p99 47.3 ms (4/5) on a table growing 61M → 85M rows |
 | batch 100 at 25,000 ev/s | — | 2/5 stock with drops. With a 16 GB pool: **4/5, p50 36 ms, p99 49–120 ms, 0 drops**; the sampler shows that pool is still one size too small at that rate |
 | what stops it | RAM (index working set falls out of cache) | At 15–25k: the 100 GB gp3 volume (3,000 IOPS / 125 MiB/s). At any rate after a lull: RDS's default WAL segment pool (third run; one parameter fixes it). The app was never the limit (RDS CPU ≤ 67 %, app node ≥ 75 % idle) |

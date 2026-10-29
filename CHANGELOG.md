@@ -30,6 +30,7 @@ original text.
 
 ### Fixed
 
+- **API and internals docs that described the code wrongly, fixed.** Among them: where `/openapi.yaml` is served, which routes honour `Idempotency-Key`, which subscription changes bill the ended period at once, four missing error codes, every CI job in CONTRIBUTING, and the sustained-throughput headline (a stock control at 12,000 events/s also passed 5 of 5). ([#1427](https://github.com/gethardcount/hardcount/pull/1427))
 - **The dashboard lists the card-dispute events to turn on for Stripe.** The Stripe settings card now includes `charge.dispute.created`, `.updated` and `.closed`, so disputes are recorded without reading the runbook. It no longer lists `payment_intent.canceled`, which Hardcount ignores. An endpoint set up from the v0.9.0 list may lack the dispute events: add them in Stripe. ([#1426](https://github.com/gethardcount/hardcount/pull/1426))
 - **Logs name the idempotency key Stripe received.** A charge's key carries the card, but the logs of an unclear or parked charge named it without the card, so searching Stripe's dashboard for it found nothing. ([#1426](https://github.com/gethardcount/hardcount/pull/1426))
 - **`tax_on_failure: fallback_manual` is refused with a 422.** The value was removed in ADR-041, but the API still accepted it and then failed in the database. The spec lists `block` only. ([#1426](https://github.com/gethardcount/hardcount/pull/1426))

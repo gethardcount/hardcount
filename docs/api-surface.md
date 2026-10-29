@@ -40,8 +40,11 @@ This page covers the routes most integrations use. Every route, field and
 status is in the OpenAPI file (a standard, machine-readable API
 description):
 
-- On a running server: `http://localhost:8080/openapi.yaml`. Open it in any
-  OpenAPI viewer, or import it into Postman or Insomnia.
+- On a running install, the dashboard serves it:
+  `http://localhost/openapi.yaml` with the Compose stack, or
+  `http://localhost:5173/openapi.yaml` under `make dev`. The API itself, on
+  `:8080`, does not. Open it in any OpenAPI viewer, or import it into
+  Postman or Insomnia.
 - In the repository: [`api/openapi.yaml`](../api/openapi.yaml).
 
 There is no official SDK (client library) yet. Call the API with any HTTP
@@ -170,15 +173,18 @@ the call returns `409` with code `unbilled_period`.
 | `POST` | `/v1/billing/run` | Bill this account's subscriptions that are due now |
 | `POST` | `/v1/invoices/create_preview` | Preview the next invoice without creating it |
 
-`/v1/billing/run` skips subscriptions that are waiting after a failed
-attempt, and ones set aside after too many failed attempts (`retry-billing`
-brings them back).
+`/v1/billing/run` bills what the hourly run would: periods whose
+`INVOICE_GRACE_PERIOD` has passed. It skips subscriptions on a test clock
+(advancing the clock bills those), ones waiting after a failed attempt, and
+ones set aside after too many failed attempts (`retry-billing` brings them
+back). It answers 206 when some subscriptions could not be billed, and 403
+to a platform key.
 
 ### Credits and refunds
 
 | Method | Path | What it does |
 |---|---|---|
-| `POST` | `/v1/credit-notes` | Issue a credit note: lower what a customer owes, as a balance credit or a refund |
+| `POST` | `/v1/credit-notes` | Create a credit note that lowers what a customer owes, as a balance credit or a refund. It is a draft until you issue it (`POST /v1/credit-notes/{id}/issue`); send `auto_issue: true` to issue it at once |
 | `POST` | `/v1/credits/grant` | Give a customer prepaid credit in one currency. It pays only invoices in that currency |
 | `GET` | `/v1/credits/balance/{customer_id}` | The settled balance, one per currency: changes when an invoice, grant, adjustment or expiry is written |
 | `GET` | `/v1/credits/balance/{customer_id}/live` | The balance you can spend now, per currency: settled, without expired grants, minus usage not yet invoiced. Poll it and cache it. |
@@ -218,7 +224,8 @@ request.
 3. **Keep it to 255 characters or fewer.** A longer key is refused with
    `422`.
 4. **Never reuse a key for a different event.** Keys are unique per account
-   and mode, forever. When a key was already used, Hardcount keeps the first
+   and mode, forever. Only deleting a test clock frees keys: it deletes its
+   customers' events. When a key was already used, Hardcount keeps the first
    event and drops the new one without comparing them. A single event gets
    `200` with the first event and `Idempotent-Replayed: true`; a batch
    counts it in `deduplicated`. So do not build keys from a batch index or a
@@ -307,11 +314,13 @@ An event counts toward the billing period its `timestamp` falls in.
   spend-threshold invoice keeps its usage billed. So the answer flags such
   an event only when the spend-threshold invoice is already paid: a paid
   invoice cannot be voided. Bill a flagged event the same way.
-- These build the ended period's invoice at once, with no grace period:
+- These build the ended period's invoice at once, with no grace period,
+  whether they come through the API or the dashboard. Setting or clearing
+  spend thresholds does not.
   - an immediate cancel;
-  - any other change to a subscription, through the API or the dashboard
-    (an item change, a pause or resume of collection, a scheduled cancel or
-    its removal);
+  - an item added, changed or removed, or a pending item change canceled;
+  - a pause or resume of collection;
+  - a scheduled cancel, or its removal;
   - `retry-billing`;
   - a spend-threshold invoice;
   - a test-clock advance.
@@ -351,7 +360,7 @@ problem.
 `type`, `code`, `message` and `request_id` are always there. When `param`
 is there, it names the field that failed. Read `code` in your code;
 `message` is meant for people. Some endpoints put a more specific code in
-`code` (for example `clock_advancing`, `not_payable`, `cooldown_active`) in
+`code` (for example `unbilled_period`, `not_payable`, `cooldown_active`) in
 place of the default code shown below.
 
 | Status | type | When |
@@ -363,11 +372,11 @@ place of the default code shown below.
 | 405 | `invalid_request_error` | The path exists but does not accept this method (`method_not_allowed`). The `Allow` header lists the methods it does accept. |
 | 409 | `invalid_request_error` | The value already exists (`already_exists`), or the resource is in the wrong state for this action (`invalid_state` or a more specific code). |
 | 413 | `invalid_request_error` | The usage batch (`batch_too_large`) or the Stripe webhook body (`payload_too_large`) is too large. |
-| 422 | `invalid_request_error` | A field or business rule failed (`validation_error`, or a specific code). |
-| 429 | `rate_limit_error` | Too many requests (`rate_limited`, or `cooldown_active` for a repeated setup-link email). Wait for the number of seconds in `Retry-After`. |
+| 422 | `invalid_request_error` | A field or business rule failed (`validation_error`, or a specific code). A bad `limit` or `offset` is a 422 too. |
+| 429 | `rate_limit_error` | Too many requests (`rate_limited`; `cooldown_active` for a repeated setup-link email; `login_throttled` after too many failed sign-ins). Wait for the number of seconds in `Retry-After`. |
 | 500 | `api_error` | Unexpected server error (`internal_error`). The details are logged on the server, not returned. A few operations return a specific code with instructions instead, for example `proration_failed`. |
 | 502 | `api_error` | An upstream call failed. See the 502 codes below. |
-| 503 | `api_error` | A dependency is down for a short time (`authentication_unavailable`, `ingest_unavailable`, `idempotency_unavailable`), so you can retry. `stripe_unavailable` and `email_unavailable` mean the feature is not set up on this server, and retrying will not help. |
+| 503 | `api_error` | A dependency is down for a short time (`authentication_unavailable`, `ingest_unavailable`, `idempotency_unavailable`, `currency_unavailable`), so you can retry. `stripe_unavailable` and `email_unavailable` mean the feature is not set up on this server, and retrying will not help. |
 | 504 | `api_error` | The request ran past its time limit before the server wrote any answer (`timeout`). |
 
 The 502 codes:
@@ -377,6 +386,10 @@ The 502 codes:
 - `payment_outcome_unknown`: the payment provider never answered. The
   charge may have gone through, so check before you retry.
 - `email_enqueue_failed`: an email could not be queued.
+- `stripe_key_unusable`: Stripe refused the account's API key, or no key is
+  connected for this mode. Nothing was charged.
+- `smtp_error`: the email server did not accept the test email. The message
+  says what it answered.
 
 A request body may hold only the fields its operation lists in the API
 reference. Any other field is refused with 422, and `param` names it: a
@@ -401,7 +414,7 @@ specific status for a body that is too large.
   - `conflict_idempotency` (409): another request with this key is still running, or did not finish. Retry later.
   - `conflict_idempotency_unresolved` (409): an earlier request with this key started more than 5 minutes ago and never recorded an outcome. Check whether the resource exists before you retry with a new key.
   - `invalid_request` (400): the body could not be read. This includes any body over 1 MB.
-- **A replayed key** (POST, PUT or PATCH under `/v1` with the same key, method, path and body) returns the first response's status and body, plus `Idempotent-Replayed: true`. The body's `request_id` is the first request's; the `Hardcount-Request-Id` header is the new request's. The response's other headers are not sent again. A first response of 409 or 422 is not stored: the key is freed, and a retry with the same key runs the request again. The usage routes (`/v1/usage-events…`, `/v1/integrations/litellm/spend`) ignore the header. If a database error stops the server from freeing the key or storing the first response, the key stays reserved: a retry gets `conflict_idempotency`, then `conflict_idempotency_unresolved` once 5 minutes have passed. The request does not run twice.
+- **A replayed key** (POST, PUT or PATCH under `/v1` with the same key, method, path and body) returns the first response's status and body, plus `Idempotent-Replayed: true`. The body's `request_id` is the first request's; the `Hardcount-Request-Id` header is the new request's. The response's other headers are not sent again. A first response of 409 or 422 is not stored: the key is freed, and a retry with the same key runs the request again. The usage routes (`/v1/usage-events…`, `/v1/integrations/litellm/spend`) ignore the header. So do the routes outside the main `/v1` group: `/v1/auth…`, `/v1/bootstrap`, `/v1/tenants…`, `/v1/public/…`, `/v1/webhooks…` and `/v1/exports…`. If a database error stops the server from freeing the key or storing the first response, the key stays reserved: a retry gets `conflict_idempotency`, then `conflict_idempotency_unresolved` once 5 minutes have passed. The request does not run twice.
 - **A plain-text error** comes from two places:
   - The HTTP server itself, before Hardcount sees the request. A request too malformed to parse, such as bad syntax or headers that are too large, gets 400 or 431 with no `Hardcount-Request-Id` header.
   - `/metrics`, the Prometheus scrape route. If it cannot read the metrics, it answers a plain-text 500.
