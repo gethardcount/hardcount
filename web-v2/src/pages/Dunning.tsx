@@ -237,16 +237,16 @@ function RunsTab() {
   }
 
   const statCards = [
-    { label: 'Active', value: stats?.active_count ?? 0, color: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-500/10', ring: 'ring-blue-200 dark:ring-blue-500/20' },
-    { label: 'Escalated', value: stats?.escalated_count ?? 0, color: 'text-violet-600', bg: 'bg-violet-50 dark:bg-violet-500/10', ring: 'ring-violet-200 dark:ring-violet-500/20' },
+    { label: 'Active', value: stats?.active_count ?? 0, color: 'text-info-foreground', bg: 'bg-info-subtle', ring: 'ring-info/20' },
+    { label: 'Escalated', value: stats?.escalated_count ?? 0, color: 'text-danger-foreground', bg: 'bg-danger-subtle', ring: 'ring-danger/20' },
     // Recovered = closed by a payment. A run closed by a void, a write-off or
     // a credit that left nothing due is resolved but recovered nothing (sweep
     // A6/E7; the server decides).
-    { label: 'Recovered', value: stats?.recovered_count ?? 0, color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-500/10', ring: 'ring-emerald-200 dark:ring-emerald-500/20' },
+    { label: 'Recovered', value: stats?.recovered_count ?? 0, color: 'text-success-foreground', bg: 'bg-success-subtle', ring: 'ring-success/20' },
     // One figure per currency (mixed currencies cannot be added). A
     // default-only figure read "At risk (CAD) CA$0.00" while USD runs were
     // active once the workspace default changed.
-    { label: 'At risk', value: stats ? atRiskText(stats) : '\u2014', color: 'text-red-600', bg: 'bg-red-50 dark:bg-red-500/10', ring: 'ring-red-200 dark:ring-red-500/20' },
+    { label: 'At risk', value: stats ? atRiskText(stats) : '\u2014', color: 'text-danger-foreground', bg: 'bg-danger-subtle', ring: 'ring-danger/20' },
   ]
 
   const totalPages = Math.ceil(total / RUNS_PAGE_SIZE)
@@ -521,7 +521,7 @@ function RunsTab() {
 const EVENT_LABELS: Record<string, { label: string; color: string }> = {
   dunning_started: { label: 'Dunning started', color: 'bg-blue-400' },
   retry_attempted: { label: 'Retry attempted', color: 'bg-blue-400' },
-  escalated: { label: 'Escalated', color: 'bg-violet-500' },
+  escalated: { label: 'Escalated', color: 'bg-danger' },
   resolved: { label: 'Resolved', color: 'bg-emerald-500' },
 }
 

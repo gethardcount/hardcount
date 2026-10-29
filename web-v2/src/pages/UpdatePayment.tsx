@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { usePageTitle } from '@/hooks/usePageTitle'
+import { useCustomerSurface } from '@/hooks/useCustomerSurface'
 import { useQuery } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import { formatCents } from '@/lib/api'
@@ -91,6 +92,7 @@ function isHexColor(c: string | undefined): c is string {
 }
 
 export default function UpdatePaymentPage() {
+  useCustomerSurface()
   usePageTitle('Update payment method')
   const [searchParams] = useSearchParams()
   const token = searchParams.get('token') || ''

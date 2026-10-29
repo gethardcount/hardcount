@@ -70,7 +70,7 @@ function relativeTime(dateStr: string, now: EffectiveNow): string {
 
 function keyTypeVariant(type: string): 'default' | 'secondary' | 'outline' {
   switch (type) {
-    case 'secret': return 'default'
+    case 'secret': return 'secondary'
     default: return 'outline'
   }
 }
@@ -188,10 +188,10 @@ export default function ApiKeysPage() {
                     <div className="flex items-start gap-3">
                       <div className={cn(
                         'w-9 h-9 rounded-lg flex items-center justify-center shrink-0 mt-0.5',
-                        k.key_type === 'secret' ? 'bg-violet-50 dark:bg-violet-500/10' : 'bg-blue-50 dark:bg-blue-500/10'
+                        k.key_type === 'secret' ? 'bg-primary/10' : 'bg-blue-50 dark:bg-blue-500/10'
                       )}>
                         {k.key_type === 'secret'
-                          ? <Shield size={16} className="text-violet-500" />
+                          ? <Shield size={16} className="text-primary" />
                           : <Key size={16} className="text-blue-500" />}
                       </div>
                       <div>

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { usePageTitle } from '@/hooks/usePageTitle'
+import { useCustomerSurface } from '@/hooks/useCustomerSurface'
 import { useQuery } from '@tanstack/react-query'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { formatCents, formatRate, formatLineQuantity, formatDate, formatTaxRate } from '@/lib/api'
@@ -121,6 +122,7 @@ function formatAddress(parts: (string | undefined)[]): string[] {
 }
 
 export default function HostedInvoicePage() {
+  useCustomerSurface()
   const { token = '' } = useParams<{ token: string }>()
   const [searchParams] = useSearchParams()
   const paidSignal = searchParams.get('paid') === '1'

@@ -119,8 +119,8 @@ export default function TestClocksPage() {
             <Link key={c.id} to={`/test-clocks/${c.id}`} className="block">
               <Card className="hover:bg-accent/30 transition-colors">
                 <CardContent className="px-6 py-4 flex items-center gap-4">
-                  <div className="h-9 w-9 rounded-lg bg-violet-50 dark:bg-violet-500/10 flex items-center justify-center shrink-0">
-                    <ClockIcon size={16} className="text-violet-500" />
+                  <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                    <ClockIcon size={16} className="text-primary" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
