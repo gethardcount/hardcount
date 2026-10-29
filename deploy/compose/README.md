@@ -86,17 +86,22 @@ The output holds passwords and keys, so keep it private.
 **The API exits with `HARDCOUNT_ENCRYPTION_KEY is required in production`.**
 Set the key in `.env` (`openssl rand -hex 32`) and run `docker compose up -d` again.
 
-**The API exits with `APP_DATABASE_URL is required in production` or `default/guessable password`.**
-Set `HARDCOUNT_APP_DB_PASSWORD` in `.env` and start the stack again. Compose builds `APP_DATABASE_URL` from it.
+**`docker compose` refuses with `HARDCOUNT_APP_DB_PASSWORD is required`, or the API exits with `default/guessable password`.**
+Set `HARDCOUNT_APP_DB_PASSWORD` in `.env` to a random value (`openssl rand -hex 24`) and start the stack again. Compose builds `APP_DATABASE_URL` from it. On an existing data volume, also set the new password on the `hardcount_app` user, as in the next entry.
 
 **The API exits with `could not open the app database connection`.**
 The `hardcount_app` user is missing, or its password differs from `HARDCOUNT_APP_DB_PASSWORD`. Postgres creates that user only on its very first start, on an empty data volume. On an existing volume, set the password yourself:
 
 ```bash
-docker compose exec -e HARDCOUNT_APP_DB_PASSWORD postgres \
-  psql -U hardcount -d hardcount -v pw="$HARDCOUNT_APP_DB_PASSWORD" \
-  -c "ALTER ROLE hardcount_app PASSWORD :'pw'"
+set -a; . ./.env; set +a
+echo "ALTER ROLE hardcount_app PASSWORD :'pw';" | docker compose exec -T postgres \
+  psql -v ON_ERROR_STOP=1 -U "${POSTGRES_USER:-hardcount}" -d "${POSTGRES_DB:-hardcount}" \
+  -v pw="${HARDCOUNT_APP_DB_PASSWORD:?set it in .env first}"
 ```
+
+The first line loads `.env`, so the password is the one the API uses; the
+command stops if it is empty rather than set an empty password. The SQL goes
+in on standard input because `psql -c` does not fill in `:'pw'`.
 
 If the user does not exist at all, create it with the SQL in [Postgres requirements](../../docs/ops/postgres-requirements.md#the-two-database-users).
 

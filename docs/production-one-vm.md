@@ -141,12 +141,13 @@ Hardcount reads each visitor's real address from the headers Caddy and nginx for
 
 Emails and Stripe send people to pages in Hardcount: your customers to the invoice page and the page to add a card, and your team to the password-reset page. Hardcount needs your address to build those links. It never guesses the address from a request.
 
-1. Add four lines to `.env`. With this setup the dashboard and the customer pages share one address.
+1. Add five lines to `.env`. With this setup the dashboard and the customer pages share one address.
 
    ```bash
    cat >> .env <<'EOF'
    HOSTED_INVOICE_BASE_URL=https://billing.example.com
    PAYMENT_UPDATE_URL=https://billing.example.com/update-payment
+   PAYMENT_UPDATE_RETURN_URL=https://billing.example.com/payment-method-added
    DASHBOARD_BASE_URL=https://billing.example.com
    CUSTOMER_PORTAL_URL=https://billing.example.com
    EOF
@@ -162,7 +163,15 @@ Emails and Stripe send people to pages in Hardcount: your customers to the invoi
      | grep -E "(HOSTED_INVOICE_BASE_URL|PAYMENT_UPDATE_URL|DASHBOARD_BASE_URL|CUSTOMER_PORTAL_URL) NOT SET"
    ```
 
-   **You see:** nothing. Each of these settings that is still missing logs a warning that starts with its name and `NOT SET`.
+   **You see:** nothing. Each of these four settings that is still missing logs a warning that starts with its name and `NOT SET`.
+
+   `PAYMENT_UPDATE_RETURN_URL` logs no warning when it is missing, so check it in `.env`:
+
+   ```bash
+   grep '^PAYMENT_UPDATE_RETURN_URL=https://' .env
+   ```
+
+   **You see:** the line you added. Without it, a customer who adds a card from the "add a payment method" email lands on `http://localhost:5173/payment-method-added` instead of your site.
 
 ### Other start-up warnings
 
@@ -236,7 +245,7 @@ Start in test mode. Connect live mode the same way when you are ready to take re
 4. In Stripe, open **Developers → Webhooks** and add an endpoint. Paste the URL and pick the events that Hardcount lists under the URL. They include the three `charge.dispute.*` events, so Hardcount records card disputes ([Card disputes](ops/runbook/card-disputes.md)).
 5. Stripe shows the endpoint's signing secret (`whsec_…`). Paste it into step 2 in Hardcount and click **Finish setup**.
 
-   **You see:** the card's badge reads **Connected**.
+   **You see:** the card reads **Stripe test mode connected**, with a **Ready** badge.
 
 Without step 5, Stripe's page tells a customer their card is saved, but Hardcount never hears about it.
 
@@ -365,7 +374,7 @@ Check each line before the first real customer.
 - [ ] `docker compose exec postgres psql -U hardcount_app -d hardcount -tAc "SHOW idle_in_transaction_session_timeout"` shows `30s`. If it shows `0`, set it as [Postgres requirements](ops/postgres-requirements.md#timeouts-on-the-limited-user) says.
 - [ ] You can sign in at `https://billing.example.com`.
 - [ ] A password-reset email arrived, and its link opens your `https://` address.
-- [ ] **Settings → Payments** reads **Connected** in test mode, and a test charge worked ([Stripe end-to-end test](dev/stripe-end-to-end-test.md)).
+- [ ] **Settings → Payments** reads **Stripe test mode connected**, and a test charge worked ([Stripe end-to-end test](dev/stripe-end-to-end-test.md)).
 - [ ] The **Dunning policies** page shows the policy you want as the default. Dunning means retrying a failed card payment and emailing the customer. A new account starts with "Default retries": three retries over two weeks, then the subscription keeps billing and the invoice stays open. Edit it, or create your own, if you want collection paused or the invoice written off instead.
 - [ ] `/var/log/hardcount-backup.log` shows a nightly backup, a copy is off the VM, and a restore test passed.
 - [ ] `.env` is stored somewhere safe, apart from the backups.
@@ -374,7 +383,7 @@ Check each line before the first real customer.
 
 ## Upgrade to a new release
 
-Hardcount was called Velox before v0.9.0. v0.9.0 installs fresh only: it refuses a database made by Velox, a 0.8.x release or a build of `main` ([why](ops/runbook/migration-failed-midway.md#the-database-was-made-by-velox)). A Velox install does not get that far with these steps: its `.env` names `VELOX_*` settings, so `docker compose pull` in step 4 stops with `required variable HARDCOUNT_APP_DB_PASSWORD is missing a value`. Install Hardcount fresh, from [step 1](#1-install-a-pinned-release) of this page, with an empty database: a new VM, or a new Compose data volume.
+Hardcount was called Velox before v0.9.0. v0.9.0 installs fresh only: it refuses a database made by Velox: a 0.8.x release, or a build of Velox's `main` ([why](ops/runbook/migration-failed-midway.md#the-database-was-made-by-velox)). A Velox install does not get that far with these steps: its `.env` names `VELOX_*` settings, so `docker compose pull` in step 4 stops with `required variable HARDCOUNT_APP_DB_PASSWORD is missing a value`. Install Hardcount fresh, from [step 1](#1-install-a-pinned-release) of this page, with an empty database: a new VM, or a new Compose data volume.
 
 Database changes (migrations) run by themselves as the new version starts.
 
@@ -409,10 +418,10 @@ Database changes (migrations) run by themselves as the new version starts.
 
    **You see:** a few `Container … Running` lines, then the plan. It lists the migrations to apply. If it says `no migration record`, stop: the upgrade will not run ([why](ops/runbook/migration-failed-midway.md#tables-but-no-migration-record)).
 
-5. Start the new images.
+5. Start the new images. `--no-build` makes sure Compose runs the images you pulled and never builds from the checkout instead.
 
    ```bash
-   docker compose up -d
+   docker compose up -d --no-build
    docker compose exec hardcount-api /usr/local/bin/hardcount version
    ```
 

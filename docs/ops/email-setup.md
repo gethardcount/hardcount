@@ -241,7 +241,7 @@ If the email is `failed` at once with `email: recipient is not a single valid em
 
 A bounce is an email that could not be delivered. Hardcount stops emailing an address that bounced or that marked Hardcount's email as spam.
 
-Both ways below need `HARDCOUNT_EMAIL_BIDX_KEY` (64 hex characters, `openssl rand -hex 32`). Hardcount uses it to find the customer by email address, because stored emails are encrypted. Without it, Hardcount cannot mark a customer as bounced, and it logs a warning at start-up.
+Both ways below need `HARDCOUNT_EMAIL_BIDX_KEY` (64 hex characters, `openssl rand -hex 32`). Hardcount uses it to find the customer by email address, because stored emails are encrypted. Without it, Hardcount cannot mark a customer as bounced, and it logs a warning at start-up. Set it before you add customers. Hardcount indexes a customer's email address only when the customer is created or edited. A customer added before the key is set is not found until their record is edited. Keep the key once set: a different key cannot find customers indexed with the old one.
 
 ### When the SMTP server rejects the address
 

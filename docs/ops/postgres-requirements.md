@@ -43,14 +43,14 @@ Hardcount connects as two users. The second one is what keeps each account's dat
 | `DATABASE_URL` | The admin user, usually the database owner | Database upgrades (migrations) | Create tables and extensions in the database |
 | `APP_DATABASE_URL` | A limited user, usually `hardcount_app` | Every API request and background job | Read and write the tables. It must not be a superuser and must not have `BYPASSRLS`. |
 
-Postgres hides each account's rows from the others with a feature called Row-Level Security (RLS). A superuser, or a user with `BYPASSRLS`, skips that check. So with `APP_ENV` set to `staging` or `production`, Hardcount refuses to start when `APP_DATABASE_URL`:
+Postgres hides each account's rows from the others with a feature called Row-Level Security (RLS). A superuser, or a user with `BYPASSRLS`, skips that check. So with any `APP_ENV` other than `local`, Hardcount refuses to start when `APP_DATABASE_URL`:
 
 - is missing,
-- uses the default password `hardcount_app`, or an empty one,
+- has an empty password, the default `hardcount_app`, or one equal to its user name,
 - cannot connect, or
 - points at a superuser or a user with `BYPASSRLS`. This catches a copied `DATABASE_URL`.
 
-With `APP_ENV=local` it builds `hardcount_app:hardcount_app` from `DATABASE_URL` and logs a warning instead.
+With `APP_ENV=local` and no `APP_DATABASE_URL`, it builds `hardcount_app:hardcount_app` from `DATABASE_URL`. If that user can connect, it is used. If not, the server runs on the admin connection and logs a warning; RLS is then not enforced.
 
 Create the limited user as the admin user, before the first start:
 
@@ -126,7 +126,7 @@ With RDS Proxy, size it for the number of copies × `DB_MAX_OPEN_CONNS` connecti
 | `DB_CONN_MAX_LIFETIME_MIN` | 30 | Lower it to 5 to 10 behind a pooler with a short `server_lifetime` |
 | `DB_CONN_MAX_IDLE_TIME_SEC` | 120 | Lower it where connections are scarce |
 
-The default 20 connections carried 1,200 requests a second for one account in the benchmark, and 60 was slower ([sustained throughput](../benchmarks/sustained-throughput.md)). Raise it only if requests wait for a connection. Above about 100 connections per copy, put PgBouncer or RDS Proxy in front.
+The default 20 connections carried 1,200 requests a second for one account in the benchmark ([sustained throughput](../benchmarks/sustained-throughput.md)). An earlier run with 60 was slower, but one locked row was the limit then, since fixed (#818), so it shows only that more connections did not help with that bottleneck. Raise it only if requests wait for a connection. Above about 100 connections per copy, put PgBouncer or RDS Proxy in front.
 
 ## How the data grows
 
@@ -142,7 +142,7 @@ The default 20 connections carried 1,200 requests a second for one account in th
 | `invoices`, `invoice_line_items`, `credit_notes`, `credit_note_line_items` | Each invoice, line and credit note | All. These are financial records. |
 | `subscriptions`, `subscription_items`, `customers`, `customer_billing_profiles` | Slowly | All. There is no automatic deletion of a customer's personal data yet. |
 
-**How much space:** 10,000 subscriptions sending 100 events a day each make about 30 million `usage_events` rows a month. One event takes about 0.5 to 0.6 KB, counting indexes: on the benchmark rig, 62 million rows used 14 GB of table plus 18 GB of indexes ([sustained throughput](../benchmarks/sustained-throughput.md)). Plan for about 15 GB a month, or 185 GB a year. Hardcount cannot yet split the table by month or delete events by age ([If you need more](../scale.md#if-you-need-more)), so the table keeps every event: size the disk for that.
+**How much space:** 10,000 subscriptions sending 100 events a day each make about 30 million `usage_events` rows a month. One event takes about 0.5 to 0.6 KB, counting indexes: on the benchmark rig, 62 million rows used 14 GB of table plus 18 GB of indexes ([run journal](../dev/records/sustained-throughput-runs-2026-08.md)). Plan for about 15 GB a month, or 185 GB a year. Hardcount cannot yet split the table by month or delete events by age ([If you need more](../scale.md#if-you-need-more)), so the table keeps every event: size the disk for that.
 
 ## Indexes
 
