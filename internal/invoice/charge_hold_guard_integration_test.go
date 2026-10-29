@@ -150,12 +150,15 @@ func TestChargeHold_RefusesVoidWriteOffAndOfflinePayment(t *testing.T) {
 	}
 }
 
-// TestChargeHold_ParkedInvoiceStillWritableOff: an unknown outcome keeps its
-// hold for the full five minutes (the charge path releases it only on a
-// definite outcome). A PARKED invoice — unknown with no PaymentIntent id —
-// has write-off as its only exit (ADR-107), so the hold must not refuse it.
-// Void and offline payment stay refused, by the parked rule.
-func TestChargeHold_ParkedInvoiceStillWritableOff(t *testing.T) {
+// TestChargeHold_ParkedInvoice_WriteOffWaitsForALiveHold: an unknown outcome
+// keeps its hold (the charge path releases it only on a definite outcome). A
+// PARKED invoice — unknown with no PaymentIntent id — has write-off as its
+// exit for a customer who paid another way (ADR-107). While its hold is live
+// a request for it may still reach Stripe, so the write-off waits a few
+// minutes like every other action; once the hold is stale, the park's normal
+// waiting state, the write-off goes through (ADR-127 amendment 2026-10-29).
+// Void and offline payment stay refused throughout, by the parked rule.
+func TestChargeHold_ParkedInvoice_WriteOffWaitsForALiveHold(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	tenantID := testutil.CreateTestTenant(t, db, "Charge Hold Parked")
@@ -169,8 +172,12 @@ func TestChargeHold_ParkedInvoiceStillWritableOff(t *testing.T) {
 		t.Fatal("a parked invoice must still refuse a void")
 	}
 	got, err := svc.MarkUncollectible(ctx, tenantID, inv.ID)
+	requireHoldRefusal(t, store, ctx, tenantID, inv.ID, got, err)
+
+	setHoldAgo(t, db, inv.ID, 20*time.Minute)
+	got, err = svc.MarkUncollectible(ctx, tenantID, inv.ID)
 	if err != nil {
-		t.Fatalf("parked invoice with a live hold must stay writable-off (ADR-107's only exit): %v", err)
+		t.Fatalf("parked invoice with a stale hold must stay writable-off (ADR-107's exit): %v", err)
 	}
 	if got.Status != domain.InvoiceUncollectible {
 		t.Fatalf("status %s, want uncollectible", got.Status)

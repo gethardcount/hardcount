@@ -1,7 +1,7 @@
 # ADR-127: A lost charge result is resolved by asking Stripe before anything irreversible
 
 **Date:** 2026-10-19
-**Status:** Accepted (amended 2026-10-20; amended 2026-10-23: a written-off park keeps its hold when Stripe refuses)
+**Status:** Accepted (amended 2026-10-20; amended 2026-10-23: a written-off park keeps its hold when Stripe refuses; amended 2026-10-29: a park keeps one attempt row and its hold)
 **Supersedes:** [ADR-106](106-charge-intent-ledger.md) (the charge-intent
 ledger, parked since 2026-07-31), and since the 2026-10-20 amendment
 [ADR-108](108-parked-invoices-search-and-adopt.md) (the Stripe Search sweep). PR #1291 drafted a second record-based
@@ -440,3 +440,59 @@ end, so it would have waited for good. The kept hold refuses nothing new: a
 parked invoice already refuses void and offline payment, and nothing
 charges a written-off one (ADR-113). Once Stripe answers, the table above
 applies. Test: `TestParked_WrittenOff_StripeRefusedForGood_KeptUntilStripeAnswers`.
+
+## Amendment 2026-10-29: a park keeps one attempt row and its hold
+
+Three findings from the adversarial panel on the parked-charge resend design
+(a planned follow-up that resends a parked charge under its own key inside
+Stripe's 24 hours). Each stands on its own, and the resend needs all three
+in place on every replica first.
+
+**One row per attempt.** A park's attempt row names no PaymentIntent. When
+the park ended with a payment (its webhook, or this sweep's settle or adopt),
+the write that recorded it upserted a row keyed on the PaymentIntent, so the
+parked row stayed `unknown` beside it. The paid invoice's Activity card then
+said "Payment result unknown" under "Invoice paid", and a declined one said
+it beside the decline. Now every transition that ends a park (the paid flip,
+a failure report that moves the invoice, a stamp that names a
+PaymentIntent) first gives the newest parked row that PaymentIntent, in the
+same transaction, under the invoice row lock, and the upsert then updates
+that row. Its reason is cleared: it was Stripe's words about the request,
+not about the payment.
+
+- Only while no row names the PaymentIntent. A report can insert one before
+  the park ends (its decline arrived while the invoice still waited on an
+  older payment); linking then would break the unique index on
+  `(tenant_id, stripe_payment_intent_id)` and roll the settle back on every
+  retry. That row stays the payment's record, and the parked row stays
+  `unknown`: a residual on the Activity card, not on the money.
+- Which attempt the payment belongs to is not certain, since the park named
+  none. It is the parked attempt's in every case but two unnamed attempts on
+  one invoice (R16).
+
+**Write-off waits for a live hold on a park.** `PaymentBlocksActionHeld`
+ignored the hold on any `unknown` invoice, so a parked invoice could be
+written off while a charge request for it might still reach Stripe. Today
+that is only the park's first five minutes, while the charge that parked it
+still holds the hold; the resend will take a live hold of its own. A
+written-off invoice charged by a request already sent is the double payment
+the "customer paid another way" exit exists to prevent. A parked invoice now
+refuses write-off while its hold is live, with the same words as every other
+held action; with a stale hold, the park's normal waiting state, write-off
+stays allowed (ADR-107's exit).
+
+**A park keeps its hold until it ends.** The sweep finds parks only by their
+hold, so a parked invoice with no hold refuses every claim and is never
+looked at again. `ReleaseChargeHold` and `ClearStaleChargeHold` now refuse
+to clear a parked invoice's hold (`holdKeptWhileParkedSQL`); only
+`UnparkAfterNoPayment` clears it, in the statement that ends the park. No
+caller cleared a park's hold before; the rule makes that a store invariant
+rather than a property of today's callers.
+
+Tests: `TestParked_EndsWithAPayment_TheParkedAttemptRecordsIt`,
+`TestParked_PaymentAlreadyHasARow_ParkStillEnds`,
+`TestParkEnded_ActivityShowsNoUnknownRow`,
+`TestChargeHold_ParkedInvoice_WriteOffWaitsForALiveHold`,
+`TestParkedHold_NeverClearedWhileParked`, and the parked rows of
+`TestPaymentBlocksActionHeld_Matrix`. Each guard was removed in turn and its
+test went red.

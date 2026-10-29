@@ -898,6 +898,17 @@ func (s *PostgresStore) StampChargeOutcome(ctx context.Context, tenantID, id str
 	}
 	defer postgres.Rollback(tx)
 
+	// A stamp that names a PaymentIntent on a parked invoice (the stale-hold
+	// sweep adopting the park's payment) ends the park: lock the row and read
+	// that first, so the parked attempt's row takes the PaymentIntent below.
+	var wasParked bool
+	if stripePaymentIntentID != "" {
+		err := tx.QueryRowContext(ctx, `SELECT `+parkedSQL+` FROM invoices WHERE id = $1 FOR UPDATE`, id).Scan(&wasParked)
+		if err != nil && err != sql.ErrNoRows {
+			return domain.Invoice{}, false, fmt.Errorf("read park before charge-outcome stamp: %w", err)
+		}
+	}
+
 	now := clock.Now(ctx)
 	var inv domain.Invoice
 	applied := true
@@ -911,6 +922,17 @@ func (s *PostgresStore) StampChargeOutcome(ctx context.Context, tenantID, id str
 		postgres.NullableString(lastPaymentError), now, id, attemptSeq,
 	).Scan(s.scanInvDest(&inv)...)
 
+	if err == nil && wasParked {
+		// processing: the payment is in flight, which the attempt row calls
+		// pending; unknown: it names the payment but its outcome is unclear.
+		outcome := domain.ChargeAttemptPending
+		if paymentStatus == domain.PaymentUnknown {
+			outcome = domain.ChargeAttemptUnknown
+		}
+		if lerr := linkParkedAttemptTx(ctx, tx, inv.ID, stripePaymentIntentID, outcome); lerr != nil {
+			return domain.Invoice{}, false, lerr
+		}
+	}
 	if err == sql.ErrNoRows {
 		// Refused, or no such invoice: the re-read tells which.
 		applied = false
@@ -1122,7 +1144,13 @@ func (s *PostgresStore) MarkPaymentFailedReportingTransition(ctx context.Context
 		}
 	}
 	// ADR-103: the attempt's outcome lands in THIS tx, so the timeline's
-	// single payment owner can never disagree with the invoice's state.
+	// single payment owner can never disagree with the invoice's state. A
+	// decline that ends a park lands on the parked attempt's row.
+	if domain.InvoicePaymentStatus(paymentStatus) == domain.PaymentUnknown && rowPI.String == "" {
+		if err := linkParkedAttemptTx(ctx, tx, inv.ID, pi, domain.ChargeAttemptFailed); err != nil {
+			return domain.Invoice{}, domain.PaymentFailureResult{}, err
+		}
+	}
 	if err := upsertChargeAttemptTx(ctx, tx, tenantID, inv.ID, pi,
 		domain.ChargeAttemptFailed, report.Message, inv.AmountDueCents, report.DeclineCode, report.PaymentMethodID, simAtOf(ctx)); err != nil {
 		return domain.Invoice{}, domain.PaymentFailureResult{}, err
@@ -1431,6 +1459,18 @@ func (s *PostgresStore) markPaidLockedTx(ctx context.Context, tx *sql.Tx, tenant
 	// PARTIAL capture, and Hardcount is PaymentIntent-only full-capture (no
 	// partial/manual-capture flow). Revisit if partial capture is added.
 	// (2026-06-15 proration audit; Parts A/B shipped #295 + ADR-059.)
+	//
+	// A parked invoice's payment ends the park: read that before the flip, so
+	// the parked attempt's row is the one that records it (linkParkedAttemptTx).
+	var wasParked bool
+	if stripePaymentIntentID != "" {
+		if err := tx.QueryRowContext(ctx, `SELECT `+parkedSQL+` FROM invoices WHERE id = $1`, id).Scan(&wasParked); err != nil {
+			if err == sql.ErrNoRows {
+				return domain.Invoice{}, errs.ErrNotFound
+			}
+			return domain.Invoice{}, fmt.Errorf("read park before mark-paid: %w", err)
+		}
+	}
 	err := tx.QueryRowContext(ctx, `
 		UPDATE invoices SET
 			status = 'paid',
@@ -1498,6 +1538,11 @@ func (s *PostgresStore) markPaidLockedTx(ctx context.Context, tx *sql.Tx, tenant
 	var attemptSimAt *time.Time
 	if _, ok := clock.SimOf(ctx); ok {
 		attemptSimAt = &paidAt
+	}
+	if wasParked {
+		if err := linkParkedAttemptTx(ctx, tx, inv.ID, stripePaymentIntentID, domain.ChargeAttemptSucceeded); err != nil {
+			return domain.Invoice{}, err
+		}
 	}
 	if err := upsertChargeAttemptTx(ctx, tx, tenantID, inv.ID, stripePaymentIntentID,
 		domain.ChargeAttemptSucceeded, "", inv.AmountPaidCents, "", "", attemptSimAt); err != nil {
@@ -2449,6 +2494,20 @@ func lockInvoiceForChargeClaim(ctx context.Context, tx *sql.Tx, id string) (bool
 // again (#976). Shared by every claim so they cannot drift apart.
 const chargeHoldFree = `auto_charge_claimed_until IS NULL`
 
+// holdKeptWhileParkedSQL is the condition every write that clears the hold
+// without ending a park carries: the invoice is not parked (domain.Invoice.Parked).
+// A park keeps its hold until it ends, because the stale-hold sweep finds
+// parks only by their hold (ListStaleChargeHolds): a parked invoice with no
+// hold refuses every claim and is never looked at again, so a payment Stripe
+// made for it is never recorded and the invoice stays blocked. Only
+// UnparkAfterNoPayment clears a park's hold, in the same statement that ends
+// the park; a write that records the park's payment moves it out of the park
+// first. ADR-127 amendment 2026-10-29.
+const holdKeptWhileParkedSQL = `NOT ` + parkedSQL
+
+// parkedSQL is domain.Invoice.Parked on the invoices row.
+const parkedSQL = `(payment_status = 'unknown' AND COALESCE(stripe_payment_intent_id, '') = '')`
+
 // chargeHoldReleaseTimeout bounds a release detached from its caller's
 // context (ReleaseChargeHold): one UPDATE, so a stalled database cannot hold
 // a request or a shutdown for longer than this.
@@ -2543,6 +2602,8 @@ func (s *PostgresStore) ClaimAutoCharge(ctx context.Context, tenantID, id string
 // auto-charge sweep on the tick's (a shutdown). A release lost that way left
 // an invoice whose charge was never sent refused by every charge, void and
 // offline payment until the stale-hold sweep asked Stripe, an hour or more.
+//
+// It never clears a parked invoice's hold (holdKeptWhileParkedSQL).
 func (s *PostgresStore) ReleaseChargeHold(ctx context.Context, tenantID, id string, hold domain.ChargeHold) error {
 	if !hold.Held() {
 		return nil
@@ -2556,7 +2617,8 @@ func (s *PostgresStore) ReleaseChargeHold(ctx context.Context, tenantID, id stri
 	defer postgres.Rollback(tx)
 
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE invoices SET auto_charge_claimed_until = NULL WHERE id = $1 AND auto_charge_claimed_until = $2`,
+		`UPDATE invoices SET auto_charge_claimed_until = NULL
+		 WHERE id = $1 AND auto_charge_claimed_until = $2 AND `+holdKeptWhileParkedSQL,
 		id, hold.Until); err != nil {
 		return err
 	}
@@ -2797,6 +2859,9 @@ func (s *PostgresStore) ListStaleChargeHolds(ctx context.Context, limit int, ski
 // outcome, so the counter moves and the next charge sends a fresh idempotency
 // key (ADR-105 amendment). Reusing the old key could be handed a 500 Stripe
 // saved under it, or a 409 when credits changed the amount.
+//
+// It never clears a parked invoice's hold (holdKeptWhileParkedSQL); on a park
+// it reports false, as for any changed row.
 func (s *PostgresStore) ClearStaleChargeHold(ctx context.Context, tenantID, id string, hold time.Time, attemptSeq int64, moveSeq bool) (bool, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -2817,7 +2882,7 @@ func (s *PostgresStore) ClearStaleChargeHold(ctx context.Context, tenantID, id s
 			UPDATE invoices
 			SET auto_charge_claimed_until = NULL
 			WHERE id = $1 AND auto_charge_claimed_until = $2 AND charge_attempt_seq = $3
-		`, id, hold, attemptSeq)
+			  AND `+holdKeptWhileParkedSQL, id, hold, attemptSeq)
 	}
 	if err != nil {
 		return false, err
@@ -4477,6 +4542,45 @@ func (s *PostgresStore) StreamForExport(ctx context.Context, tenantID string, fr
 	return rows.Err()
 }
 
+// linkParkedAttemptTx gives a parked attempt's row the PaymentIntent that ends
+// the park, with outcome, so one attempt keeps one row (ADR-127 amendment
+// 2026-10-29). A park's attempt row names no PaymentIntent, because Stripe's
+// answer named none. When a payment for the invoice turns up later (its
+// webhook, or the stale-hold sweep's list) the write that records it upserts
+// a row keyed on the PaymentIntent, so without this the parked row stayed
+// "Payment result unknown" on the Activity card of an invoice already paid or
+// failed. Its reason is cleared: it was Stripe's words about the request (a
+// 500, a 409) or Go's timeout, not about the payment; the upsert that follows
+// writes a decline's reason.
+//
+// The caller holds the invoice row lock, read the invoice parked under it, and
+// calls this before upsertChargeAttemptTx, which then updates the linked row.
+// Lock order holds: the invoice row first, then the attempt row (#989).
+//
+// Only the newest parked row is linked (an older one belongs to an earlier
+// park), and only while no row names pi: a row a report inserted earlier
+// stays the record of pi, and a link then would break the unique index on
+// (tenant_id, stripe_payment_intent_id) and roll the settle back on every
+// retry. Which attempt pi belongs to is not known for certain, since the park
+// named no PaymentIntent. It is the parked attempt's in every case but two
+// unnamed attempts on one invoice, which nothing can tell apart (ADR-127 R16).
+func linkParkedAttemptTx(ctx context.Context, tx *sql.Tx, invoiceID, pi string, outcome domain.ChargeAttemptOutcome) error {
+	if pi == "" {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE invoice_charge_attempts
+		SET stripe_payment_intent_id = $2, outcome = $3, provider_reason = '', updated_at = now()
+		WHERE id = (SELECT id FROM invoice_charge_attempts
+		            WHERE invoice_id = $1 AND outcome = 'unknown' AND stripe_payment_intent_id = ''
+		            ORDER BY created_at DESC, id DESC LIMIT 1)
+		  AND NOT EXISTS (SELECT 1 FROM invoice_charge_attempts WHERE stripe_payment_intent_id = $2)`,
+		invoiceID, pi, outcome); err != nil {
+		return fmt.Errorf("link the parked attempt to its payment: %w", err)
+	}
+	return nil
+}
+
 // upsertChargeAttemptTx resolves an attempt's outcome INSIDE the caller's
 // settle transaction (ADR-103). Atomic with the invoice's own state flip:
 // the attempt fact and the invoice's truth about that same payment can
@@ -4501,6 +4605,9 @@ func (s *PostgresStore) StreamForExport(ctx context.Context, tenantID string, fr
 // (#966); an empty value keeps what an earlier writer recorded, so a source
 // that did not say (a reconciler read, a success) never erases a hard
 // decline another source put on record.
+//
+// A park's payment updates the parked attempt's row, not a new one: the
+// transitions that end a park call linkParkedAttemptTx first.
 func upsertChargeAttemptTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, piID string, outcome domain.ChargeAttemptOutcome, reason string, amountCents int64, declineCode, paymentMethodID string, simAt *time.Time) error {
 	if piID == "" {
 		return nil

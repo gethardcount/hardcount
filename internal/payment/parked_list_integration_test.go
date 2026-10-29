@@ -314,6 +314,9 @@ func TestParked_WrittenOff_StripeShowsNothing_LeavesThePark(t *testing.T) {
 	r := newSHRig(t, "Parked Written Off")
 	inv := r.seed("INV-PK-WO")
 	parked := r.park(inv, autoCharge, park500)
+	// The park's own hold is live for its first minutes, and a write-off
+	// waits for it (ADR-127 amendment 2026-10-29); after that it is allowed.
+	r.ageHold(inv.ID, time.Minute)
 	if _, err := r.invSvc.MarkUncollectible(r.ctx, r.tenantID, inv.ID); err != nil {
 		t.Fatalf("write-off on a parked invoice: %v, want allowed", err)
 	}
@@ -359,6 +362,9 @@ func TestParked_WrittenOff_StripeRefusedForGood_KeptUntilStripeAnswers(t *testin
 	r := newSHRig(t, "Parked Written Off Refused")
 	inv := r.seed("INV-PK-WO-REFUSED")
 	parked := r.park(inv, autoCharge, park500)
+	// The park's own hold is live for its first minutes, and a write-off
+	// waits for it (ADR-127 amendment 2026-10-29); after that it is allowed.
+	r.ageHold(inv.ID, time.Minute)
 	if _, err := r.invSvc.MarkUncollectible(r.ctx, r.tenantID, inv.ID); err != nil {
 		t.Fatalf("write-off on a parked invoice: %v, want allowed", err)
 	}

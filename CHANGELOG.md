@@ -23,6 +23,14 @@ original text.
 
 - **One page lists every setting.** [`docs/settings.md`](docs/settings.md) names each environment variable Hardcount and its commands read, what it does, and what happens when it is unset, including the Compose-only ones. A test fails when the code reads a setting the page does not list.
 
+### Changed
+
+- **Writing off a parked invoice waits a few minutes after its charge.** While the charge that parked it (Stripe's answer named no payment) still holds its claim, **Mark uncollectible** is refused with "being confirmed with Stripe". A request still on its way to Stripe could otherwise charge an invoice written off because the customer paid another way. Try again shortly. ([#1422](https://github.com/gethardcount/hardcount/pull/1422))
+
+### Fixed
+
+- **A parked charge's payment shows once in the invoice's Activity.** When the payment of a parked charge turned up later, paid or declined, the Activity card kept a second "Payment result unknown" row for the same attempt. That attempt now shows once, with its real outcome. ([#1422](https://github.com/gethardcount/hardcount/pull/1422))
+
 ## [0.9.1] - 2026-10-29
 
 Small fixes to what you see in your first hour: the dashboard shows the Hardcount logo, and the quickstart no longer guesses how long the demo takes.

@@ -116,7 +116,9 @@ A park with no hold is always counted.
    one too.
 2. If nothing was charged and the park does not end, or the customer paid
    another way, mark the invoice uncollectible. It is the one action the
-   invoice page allows on a parked invoice. It closes its dunning run. A
+   invoice page allows on a parked invoice. In the park's first few minutes,
+   while the charge's claim is still live, it is refused ("being confirmed
+   with Stripe"); try again a few minutes later. It closes its dunning run. A
    credit note draft held on the invoice still waits until the park ends.
 3. A write-off closes the invoice's dunning run without the policy's final
    action (cancel or pause the subscription). Check whether that action was
