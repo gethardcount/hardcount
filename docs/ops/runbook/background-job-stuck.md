@@ -46,9 +46,13 @@ Three things keep a tick from running twice:
 ## Symptom
 
 - The `scheduler` check in the `/health/ready` body starts with
-  `degraded`. The status code stays 200.
-- Subscriptions due for billing are not being invoiced, and the
-  `hardcount_billing_cycles_total` rate drops to 0.
+  `degraded`: this replica's billing loop stopped polling. The status code
+  stays 200. The check reads `ok` on every replica whose loop is alive,
+  even while billing itself is paused, waiting or wedged on another
+  replica, so it cannot show those.
+- Subscriptions due for billing are not being invoiced. On the hourly tick
+  `hardcount_billing_cycles_total` moves only when a tick ends, so a quiet
+  hour is normal; `hardcount_billing_oldest_due_age_seconds` is the signal.
 - `hardcount_leader_last_tick_age_seconds{role}` is above 3× the role's
   interval, or 5 minutes for the roles that run every few seconds.
 - An outbox keeps growing, or webhook retries stop.
@@ -118,8 +122,8 @@ The next tick starts one interval after it ends.
    - `hardcount_billing_cycle_duration_seconds` is recorded only when a tick
      ends. It shows how long past ticks took, not the one running now.
 
-4. **Look for long queries and the scheduler's last run.** Run the SQL in
-   `psql` and the `curl` line in a shell:
+4. **Look for long queries and this replica's billing loop.** Run the SQL
+   in `psql` and the `curl` line in a shell:
 
    ```sql
    -- Long-running queries
@@ -130,7 +134,8 @@ The next tick starts one interval after it ends.
    ```
 
    ```bash
-   # Scheduler last-run timestamp (in the response body)
+   # How long ago this replica's billing loop last polled (in the body).
+   # Whether billing ran is leader_status's last_tick_age_s, above.
    curl -s http://localhost:8080/health/ready
    ```
 
@@ -163,6 +168,7 @@ The next tick starts one interval after it ends.
      `step panicked` line:
 
      ```sql
+     SET app.bypass_rls = 'on';
      UPDATE invoice_dunning_runs SET paused = true WHERE id = '<run_id>';
      ```
 
@@ -184,8 +190,11 @@ The next tick starts one interval after it ends.
    replica.
 3. **A long query.** Cancel it with `SELECT pg_cancel_backend(<pid>)` if
    appropriate.
-4. **One tenant dominates the batch.** Drain it with `POST /v1/billing/run`;
-   see [Scheduler interval and batch size](#scheduler-interval-and-batch-size).
+4. **One tenant's backlog.** A tick bills every due subscription before it
+   ends, so a large backlog makes a long tick, not a skipped one. To bill one
+   tenant now instead of waiting for the next tick, run
+   `POST /v1/billing/run` with that tenant's key; see
+   [Scheduler interval and batch size](#scheduler-interval-and-batch-size).
 
 ## Verify
 
@@ -292,7 +301,8 @@ variables:
 
 - The scheduler ticks every **1 hour** in staging and production, and every
   **5 minutes** only when `APP_ENV=local`.
-- It processes a fixed **50 subscriptions per tick** (`cmd/hardcount/main.go`).
+- It reads due subscriptions **50 at a time** and keeps reading until none
+  is left, so one tick bills every subscription that is due.
 
 Drain a tenant with a backlog on demand with `POST /v1/billing/run`, not by
 tuning these. It loops until that tenant has nothing left that it will

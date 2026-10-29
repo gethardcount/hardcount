@@ -28,9 +28,10 @@ Watch `WriteIOPS` return to baseline.
 
 ## Fix
 
-If you backfill tens of millions of events
-(`POST /v1/usage-events/backfill`, or a direct load) and then need p99
-under 10 ms right away, wait for `WriteIOPS` to return to baseline first.
+This follows a load of tens of millions of past events at once: a direct
+load into the database (`POST /v1/usage-events/backfill` takes one event per
+request). If you then need p99 under 10 ms right away, wait for
+`WriteIOPS` to return to baseline first.
 Or schedule large backfills off-peak.
 
 ## Verify

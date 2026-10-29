@@ -23,21 +23,38 @@ against LiteLLM's spend page for the period.
 
 ## Check
 
-Compare Hardcount's usage for the window with LiteLLM's spend logs for the same
-window.
+Compare the window's calls in LiteLLM's spend log with what Hardcount
+stored. A call Hardcount holds has usage events whose idempotency key starts
+with its `request_id`
+(`GET /v1/usage-events?customer_id=<id>&from=<start>&to=<end>`).
 
 ## Fix
 
-Replay LiteLLM's spend logs for the window to
-`POST /v1/integrations/litellm/spend`.
+Replay the window's calls to `POST /v1/integrations/litellm/spend`.
 
-- Every row carries an idempotency key
-  (`<litellm_call_id>:input|cache_read|cache_write_5m|cache_write_1h|output`),
-  and a call's rows are saved together. The call ID is the spend log's
-  `request_id`; an ID over 240 characters goes into the key as its SHA-256,
-  which Hardcount works out the same way on the replay. Nothing else goes into
-  the key, so the spend log's millisecond times don't matter. So replaying
-  a window that was partly recorded only fills the gap. A call first saved before cache writes
+- **Rebuild each call as the record LiteLLM sends.** The endpoint takes
+  LiteLLM's logging record, not a spend-log row. Hardcount ships no tool
+  that converts one to the other yet, so build one JSON object per row of
+  LiteLLM's spend log (`LiteLLM_SpendLogs`):
+  - `id`: the row's `request_id`. It is LiteLLM's call ID, so a call
+    Hardcount already holds gets the same keys and is deduplicated.
+  - `call_type`, `model`, `custom_llm_provider`, and the customer's ID in
+    `end_user`, as the live record carries them.
+  - `usage`: `prompt_tokens`, `completion_tokens`, and the cache counts
+    (`cache_read_input_tokens`, `cache_creation_input_tokens`, or
+    `prompt_tokens_details`), as LiteLLM reported them for the call.
+
+  Send them as `{"events": [ ... ]}`. What each field is for:
+  [Send usage from LiteLLM](../../integrations/litellm.md).
+- Every billed row carries an idempotency key
+  (`<call id>:input|cache_read|cache_write_5m|cache_write_1h|output`), and a
+  call's rows are saved together. Nothing else goes into the key, so the
+  spend log's millisecond times don't matter, and replaying a window that
+  was partly recorded only fills the gap. For a call type Hardcount billed
+  before 2026-10-22 (completion, chat, embedding, text completion) the key
+  uses the call ID as it is. For the others, an ID that would make a key
+  longer than 255 characters goes in as its SHA-256, which Hardcount works
+  out the same way on the replay. A call first saved before cache writes
   were split (2026-10-22) is saved the old way again, not billed twice.
 - **Deadline:** the replay must reach Hardcount before the period's invoice is
   built. That is `INVOICE_GRACE_PERIOD` (default 1 hour) after the period

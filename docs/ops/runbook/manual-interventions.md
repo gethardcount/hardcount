@@ -5,8 +5,11 @@ directly, record it in the audit log yourself. Back to the [runbook index](index
 
 ## Force-resolve a stuck dunning run
 
-A dunning run is Hardcount's schedule of retries for one unpaid invoice. Use
-this only when the dashboard **Resolve** action is unavailable.
+A dunning run is Hardcount's schedule of retries for one unpaid invoice.
+Resolve it with the dashboard's **Resolve** action, or with
+`POST /v1/dunning/runs/{id}/resolve` and a `resolution` (one of the three
+below). Both make the matching change to the invoice too, and send
+`dunning.resolved`. Use the SQL below only when neither is available.
 
 1. **Pick the resolution that says what actually happened to the invoice.**
    Finance later reads this column to answer "why did we stop collecting
@@ -21,6 +24,7 @@ this only when the dashboard **Resolve** action is unavailable.
 2. **Find the run's mode.** `true` is a live run, `false` a test run:
 
    ```sql
+   SET app.bypass_rls = 'on';
    SELECT livemode FROM invoice_dunning_runs WHERE id = '<run_id>';
    ```
 
@@ -30,6 +34,7 @@ this only when the dashboard **Resolve** action is unavailable.
 
    ```sql
    BEGIN;
+   SET LOCAL app.bypass_rls = 'on';
    SET LOCAL app.livemode = 'on';  -- 'off' for a test run
 
    UPDATE invoice_dunning_runs
@@ -87,10 +92,11 @@ way round yet.
 
 ## A customer has no usable payment method on file
 
-Saved cards live in the
-`payment_methods` table, written by the Stripe `setup_intent.succeeded` and
-`payment_method.attached` webhooks. If a webhook was missed, do not change
-the data with SQL. Instead:
+Saved cards live in the `payment_methods` table. Hardcount writes it when
+Stripe's `setup_intent.succeeded` webhook arrives, or `checkout.session.completed`
+for a card saved on a hosted page. (`payment_method.attached` is an event
+Hardcount sends to your endpoints, not one it receives from Stripe.) If a
+webhook was missed, do not change the data with SQL. Instead:
 
 - send the webhook again from the Stripe dashboard, or
 - ask the customer to add a card again on the hosted payment-setup page.

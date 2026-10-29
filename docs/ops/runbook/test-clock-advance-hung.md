@@ -24,22 +24,28 @@ Moving a [test clock](../../glossary.md#testing-with-simulated-time) forward
 ## Check
 
 ```sql
+SET app.bypass_rls = 'on';
 SELECT id, name, status, frozen_time, updated_at
 FROM test_clocks WHERE status = 'advancing';
 
--- Catch-up progress: subscriptions on this clock
-SELECT s.id, s.next_billing_at, count(i.id) AS invoices_generated
+-- Catch-up progress. Run it twice, a minute apart: the catch-up is working
+-- if the invoice count grows or the earliest next billing moves forward.
+SELECT count(DISTINCT s.id) AS subscriptions,
+       min(s.next_billing_at) AS earliest_next_billing,
+       count(i.id) AS invoices
 FROM subscriptions s
-JOIN test_clocks tc ON tc.id = s.test_clock_id
-LEFT JOIN invoices i ON i.subscription_id = s.id AND i.created_at > tc.updated_at
-WHERE tc.id = '<clock_id>'
-GROUP BY s.id, s.next_billing_at, tc.updated_at;
+LEFT JOIN invoices i ON i.subscription_id = s.id
+WHERE s.test_clock_id = '<clock_id>';
 ```
+
+Compare the two runs, not the times in one run with the wall clock: a
+clock's invoices are dated in simulated time.
 
 ## Fix
 
-1. If there is progress (invoices are being generated), wait. Large jumps
-   take time.
+1. If there is progress (the invoice count grows or the earliest next
+   billing moves forward between the two runs), wait. Large jumps take
+   time.
 2. If the clock is in `internal_failure`, retry the advance with the
    dashboard's **Retry advance** button, or
    `POST /v1/test-clocks/<clock_id>/retry-advance`. It moves the clock back

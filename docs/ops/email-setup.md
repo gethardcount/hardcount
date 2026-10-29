@@ -67,7 +67,7 @@ Hardcount starts without any of these. It logs one warning at start-up for each 
 
 | Setting | What Hardcount uses it for | Without it |
 |---|---|---|
-| `SMTP_HOST` | Your provider's SMTP server | No email is sent. Queued emails are retried for about 72 hours, then marked failed. Actions that send email right away (send an invoice or a credit note, send a setup link, invite a teammate) refuse with 409 `email_not_configured`. |
+| `SMTP_HOST` | Your provider's SMTP server | No email is sent. Queued emails are retried for about 52 hours, then marked failed. Actions that send email right away (send an invoice or a credit note, send a setup link, invite a teammate) refuse with 409 `email_not_configured`. |
 | `HOSTED_INVOICE_BASE_URL` | The "View & pay invoice" and "View receipt" buttons. Hardcount adds `/invoice/<token>`. | Invoice, receipt, dunning and payment-failed emails have no link in their button. |
 | `PAYMENT_UPDATE_URL` | The link in the email that asks a customer to add a payment method. Hardcount adds `?token=…`. | That email is not sent. Hardcount sends it when an invoice has no payment method on file, and when you click Resend setup link. Payment-failed and dunning emails link to the invoice page instead, so they do not need it. |
 | `DASHBOARD_BASE_URL` | Password-reset and team-invite links | Password-reset emails are not sent, and team invites are refused. Hardcount never builds these links from the address in a request. |
@@ -233,7 +233,7 @@ Send one invoice email and follow it.
 
    **You see:** the email with status `dispatched`, which means your provider accepted it. With the Postmark webhook below, it then changes to `delivered`.
 
-If the email stays `pending`, Hardcount is retrying it. The server log shows the provider's error; fix the cause it names. Hardcount retries for about 72 hours, then marks the email failed.
+If the email stays `pending`, Hardcount is retrying it. The server log shows the provider's error; fix the cause it names. Hardcount retries for about 52 hours, then marks the email failed.
 
 If the email is `failed` at once with `email: recipient is not a single valid email address`, the customer's email or a CC entry is not one bare address, such as `Bob <bob@example.com>`. New addresses are checked when they are entered; an address stored earlier may still have this form. Hardcount does not retry this email. Change the address to the bare form (`bob@example.com`) and send again.
 

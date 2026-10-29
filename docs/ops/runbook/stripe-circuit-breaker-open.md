@@ -24,8 +24,9 @@ retries skipped for another reason. Back to the [runbook index](index.md).
   tenant's calls can open it for all of them on that replica.
 - Stripe is rate limiting, or a tenant's Stripe credentials could not be
   read. These skip retries without tripping the breaker.
-- A database error during the retry, such as a dropped connection. Postgres
-  connection errors have their own alert ([monitoring](monitoring.md)).
+- A database error during the retry, such as a dropped connection. The
+  readiness probe shows those: `/health/ready` answers 503 while the
+  database cannot be reached ([monitoring](monitoring.md#page-critical)).
 
 ## Check
 

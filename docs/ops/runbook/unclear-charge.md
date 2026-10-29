@@ -1,8 +1,11 @@
 # A charge's result is unclear
 
 Hardcount sent a charge to Stripe and does not know yet whether the customer
-paid. Until it knows, it does not charge that invoice again, so the customer
-is never charged twice. Most of these end on their own. Find your case, then
+paid. Until it knows, it does not charge that invoice again. One rare case
+still makes a customer pay twice: Stripe finishes the first charge after
+Hardcount has charged again, which takes an outage at Stripe. Hardcount then
+flags the second payment (`payment.duplicate_charge`) for you to refund.
+Most of these end on their own. Find your case, then
 follow its Check, Fix and Verify. Back to the [runbook index](index.md).
 
 | What you see | Case |
@@ -34,6 +37,7 @@ hours. Their `payment_status` is `unknown`, and they have a
 **Check:**
 
 ```sql
+SET app.bypass_rls = 'on';
 SELECT id, payment_status, stripe_payment_intent_id, updated_at
 FROM invoices
 WHERE payment_status = 'unknown' AND stripe_payment_intent_id <> ''
@@ -41,8 +45,10 @@ WHERE payment_status = 'unknown' AND stripe_payment_intent_id <> ''
 LIMIT 20;
 ```
 
-Search the application logs for `reconciler` lines. It runs once per
-billing tick.
+The reconciler's log lines start with `reconcile:`; a PaymentIntent it
+skips because it is still in flight is logged at DEBUG only. To see that it
+runs at all: `hardcount_reconciler_sweeps_total{reconciler="payment_unknown",outcome="run"}`
+grows once per billing tick.
 
 **Fix:**
 
@@ -177,6 +183,7 @@ charge may have taken the money.
 **Check:**
 
 ```sql
+SET app.bypass_rls = 'on';
 -- Invoices whose charge hold ended more than 10 minutes ago
 SELECT i.id, i.tenant_id, i.invoice_number, i.status, i.payment_status,
        i.auto_charge_claimed_until, i.provider_synced_at, c.stripe_customer_id

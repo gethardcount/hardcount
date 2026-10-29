@@ -33,13 +33,18 @@ A transaction opened for one tenant (`postgres.TxTenant`) sets
 2. **Check that RLS is on for every tenant-scoped table:**
 
    ```sql
-   SELECT schemaname, tablename, rowsecurity
-   FROM pg_tables WHERE schemaname = 'public' AND rowsecurity = false
-   ORDER BY tablename;
+   SELECT relname, relrowsecurity, relforcerowsecurity
+   FROM pg_class
+   WHERE relnamespace = 'public'::regnamespace AND relkind IN ('r', 'p')
+     AND NOT (relrowsecurity AND relforcerowsecurity)
+   ORDER BY relname;
    ```
 
-   **You see:** only tables that hold no tenant data. Anything unexpected
-   here means isolation is broken.
+   **You see:** exactly these six, which hold no tenant data or are read
+   before a tenant is known: `goose_db_version`, `leader_leases`,
+   `login_throttle`, `password_reset_tokens`, `tenants`, `users`. Any other
+   table here, or one with row security on but not forced (which lets its
+   owner skip it), means isolation is broken.
 3. **Check the leaked query.** Was it run with `app.tenant_id` set
    correctly? Was `app.bypass_rls` involved?
 

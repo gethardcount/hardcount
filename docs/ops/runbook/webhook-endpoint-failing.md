@@ -1,13 +1,18 @@
 # A webhook endpoint keeps failing
 
 Hardcount retries on the [schedule in Webhooks](../../webhooks.md#retries),
-then marks the delivery failed. Each attempt is a row in
-`webhook_deliveries`. Back to the [runbook index](index.md).
+then marks the delivery failed. `webhook_deliveries` holds one row per
+event and endpoint; each retry updates that row (`attempt_count`, the last
+error, the next retry time). Back to the [runbook index](index.md).
 
 ## Symptom
 
 - `hardcount_webhook_deliveries_total{status="failed"}` rises. It counts
-  deliveries marked failed after their last retry.
+  deliveries marked failed after their last retry, about 26.5 hours after
+  the first attempt, for all endpoints together (it has no endpoint label).
+- Earlier, from the first failed attempt: the WARN line
+  `webhook delivery scheduled for retry`, which names the `endpoint_id`.
+  The last failure logs `webhook delivery permanently failed` at ERROR.
 - The dashboard shows failed deliveries and a falling success rate for one
   endpoint.
 
@@ -22,6 +27,7 @@ then marks the delivery failed. Each attempt is a row in
 ## Check
 
 ```sql
+SET app.bypass_rls = 'on';
 -- Failures by endpoint
 SELECT webhook_endpoint_id, error_message, count(*)
 FROM webhook_deliveries
