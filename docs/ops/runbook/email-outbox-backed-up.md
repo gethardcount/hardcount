@@ -30,7 +30,7 @@ sends them through your SMTP relay. Back to the [runbook index](index.md).
     sandbox.
   - `email: SMTP not configured (SMTP_HOST unset)`: Hardcount has no relay.
 
-  Hardcount retries these for about 72 hours (15 tries), then dead-letters them
+  Hardcount retries these for about 52 hours (15 tries), then dead-letters them
   with `cause="max_attempts"`.
 - **The address can never get mail.** It bounced, it is suppressed after an
   earlier bounce, or it is not a valid address. These are dead-lettered at
@@ -48,6 +48,7 @@ sends them through your SMTP relay. Back to the [runbook index](index.md).
 ## Check
 
 ```sql
+SET app.bypass_rls = 'on';
 -- Emails that keep failing, and the relay's reply
 SELECT livemode, email_type, attempts, created_at, last_error
 FROM email_outbox
@@ -100,6 +101,7 @@ customer's email or CC list (or the member's email) and send again.
 3. Set `next_attempt_at` to now for every pending row:
 
    ```sql
+   SET app.bypass_rls = 'on';
    UPDATE email_outbox SET next_attempt_at = now()
    WHERE status = 'pending' AND attempts < 15;
    ```
@@ -108,6 +110,7 @@ customer's email or CC list (or the member's email) and send again.
    incident:
 
    ```sql
+   SET app.bypass_rls = 'on';
    -- status = 'failed' keeps this off emails that are being sent or were sent.
    -- attempts >= 15 keeps it to emails that ran out of tries.
    UPDATE email_outbox

@@ -33,7 +33,9 @@ have:
 
 - **`row_lost`:** treat it as a compliance incident.
   1. Take the tenant from the error log.
-  2. Identify the affected changes by their missing audit rows.
+  2. The same `audit: failed …` line names each lost row's change: its
+     `action`, `resource_type` and `resource_id`. List them; that is what
+     the audit log is missing.
 - **`mutation_refused`:** investigate the database, not the audit trail.
 
 **Verify:** the `hardcount_audit_write_errors_total` rate returns to 0.

@@ -140,6 +140,7 @@ step: install fresh (see the v0.9.0 release notes).
 with `SET LOCAL app.bypass_rls = 'on'` in a transaction):
 
 ```sql
+SET app.bypass_rls = 'on';
 SELECT r.id, r.meter_id, r.aggregation_mode, m.aggregation
 FROM meter_pricing_rules r JOIN meters m ON m.id = r.meter_id
 WHERE r.aggregation_mode IS DISTINCT FROM CASE m.aggregation WHEN 'last' THEN 'last_during_period' ELSE m.aggregation END;

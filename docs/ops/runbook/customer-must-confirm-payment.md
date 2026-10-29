@@ -65,6 +65,7 @@ retries use: on the customer's default card, a hard decline first, else
 the newest answer:
 
 ```sql
+SET app.bypass_rls = 'on';
 SELECT * FROM (
   SELECT DISTINCT ON (a.invoice_id)
          i.tenant_id, i.id, i.invoice_number, a.stripe_payment_method_id, a.decline_code, a.created_at

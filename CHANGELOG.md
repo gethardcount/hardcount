@@ -30,6 +30,8 @@ original text.
 ### Fixed
 
 - **A parked charge's payment shows once in the invoice's Activity.** When the payment of a parked charge turned up later, paid or declined, the Activity card kept a second "Payment result unknown" row for the same attempt. That attempt now shows once, with its real outcome. ([#1422](https://github.com/gethardcount/hardcount/pull/1422))
+- **Runbook SQL works on a managed database.** Every tenant table enforces row-level security for its owner too, so on RDS, Cloud SQL and the like the runbook's queries saw no rows and its updates changed none, silently. Each SQL step now starts with `SET app.bypass_rls = 'on';`. ([#1423](https://github.com/gethardcount/hardcount/pull/1423))
+- **Runbook steps that did not work, fixed.** The monitoring page's log searches name real log lines, and its alerts use metrics that exist. Other fixes: the test-clock progress check, the LiteLLM replay, the minimum-charge options, and the outbox retry window (about 52 hours, not 72). ([#1423](https://github.com/gethardcount/hardcount/pull/1423))
 
 ## [0.9.1] - 2026-10-29
 

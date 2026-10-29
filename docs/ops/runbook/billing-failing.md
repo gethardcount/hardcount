@@ -109,10 +109,12 @@ ladder.
        done
    ```
 
-   Repeat until the list is empty; each page holds at most 100. An empty
-   list does not prove that everything billed: a row printed with
-   `still_due: true` left the list without being billed. The next billing
-   run attempts it.
+   Each page holds at most 100; take the next page with `offset` until you
+   have retried every subscription once. A subscription whose retry fails
+   again stays on the list, so the list empties only once each cause is
+   fixed. An empty list does not prove that everything billed either: a row
+   printed with `still_due: true` left the list without being billed. The
+   next billing run attempts it.
 
 A cancel that arrives after the period end on a healthy subscription bills
 the ended period itself and needs no retry.

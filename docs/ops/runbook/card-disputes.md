@@ -108,7 +108,9 @@ The status tells you where the dispute is:
    win), Stripe returns the money to your balance, the disputes list shows
    `won` and the notice goes away. If you already acted on the loss, undo
    it: a credit note you issued for the loss is final, so record the money
-   again with a new invoice marked paid outside Hardcount
+   again on a new invoice. Create a manual invoice for the amount
+   (`POST /v1/invoices` with its line), finalize it
+   (`POST /v1/invoices/{id}/finalize`), then mark it paid outside Hardcount
    (`POST /v1/invoices/{id}/record-payment`). If you billed the customer
    again and they paid, they have now paid twice: refund that invoice with
    a credit note.

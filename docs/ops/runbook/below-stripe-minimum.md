@@ -12,7 +12,7 @@ One of these:
 - The log line `Stripe refused to charge this invoice because the amount is
   below its minimum charge`.
 - A payment recovery run on the Dunning page ended with "Below Stripe's
-  minimum".
+  minimum charge".
 - A customer says the hosted invoice page has no Pay button and reads "This
   amount is below the minimum for a card payment".
 
@@ -57,6 +57,7 @@ and `invoice.last_payment_error`.
 To list every such invoice of every tenant (in `psql`):
 
 ```sql
+SET app.bypass_rls = 'on';
 SELECT tenant_id, id, invoice_number, amount_due_cents, currency, below_minimum_at
 FROM invoices
 WHERE status = 'finalized' AND payment_status = 'pending' AND below_minimum_at IS NOT NULL
@@ -75,8 +76,14 @@ Choose one for each invoice:
 
 - **Record a payment** the customer made another way: **Record offline
   payment** in the invoice's ⋯ menu, or `POST /v1/invoices/{id}/record-payment`.
-- **Collect it on the next invoice.** Add the amount as a line on the
-  customer's next invoice by hand, then void this one.
+- **Bill it with something else.** A cycle invoice is created finalized,
+  and only a draft takes new lines, so this amount cannot be added to the
+  customer's next cycle invoice. When you next bill this customer by hand,
+  put it on that manual invoice instead: create it with
+  `POST /v1/invoices` (a draft), add this amount with
+  `POST /v1/invoices/{id}/line-items`, finalize it with
+  `POST /v1/invoices/{id}/finalize`, then void this one. The total must be
+  at or above Stripe's minimum, or Stripe refuses that invoice too.
 
 - **Pay it from credit.** If the customer has a credit balance, or you grant
   one, **Collect payment** applies it and pays the invoice when it covers the

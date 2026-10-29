@@ -2,7 +2,7 @@
 
 What to do when Hardcount is in trouble. This runbook is for whoever runs a
 Hardcount deployment, often during an incident. Find what you see in the table
-below and open its page. Each page follows the same order: **Symptom**,
+below and open its page. Most pages follow the same order: **Symptom**,
 **Why**, **Check** (commands), **Fix**, and **Verify**.
 
 It covers failures specific to Hardcount. General Postgres, Kubernetes and
@@ -17,8 +17,21 @@ export API=https://billing.example.com   # your Hardcount address
 export KEY=hc_secret_live_...           # a secret API key for the tenant
 ```
 
-SQL steps run in `psql` as the database owner. Under the app's
-row-level-security role you see only one tenant's rows, or none.
+SQL steps run in `psql` as the database owner. Start the session with this
+line, which every SQL step on these pages also begins with:
+
+```sql
+SET app.bypass_rls = 'on';
+```
+
+Every table that holds account data enforces row-level security, for its
+owner too. Without the line, a query sees no rows and an update changes
+none, with no error. A superuser skips row-level security, so on the Docker
+Compose setup, whose database owner is a superuser, the queries work either
+way. On a managed database (Amazon RDS, Cloud SQL and the like) the admin
+user usually is not one. To check yours:
+`SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user;`.
+A step that inserts a row also sets `app.livemode`, and says so.
 
 ## Words on these pages
 

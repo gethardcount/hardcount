@@ -11,7 +11,7 @@ before anything is sent. An endpoint that keeps failing does not grow it: see
 - `hardcount_webhook_outbox_oldest_pending_age_seconds{mode="live"}` is above
   1800. A row queued 30 minutes ago has no event yet.
 - `hardcount_webhook_outbox_dead_lettered_total` rises. Rows were given up on
-  after 15 tries over about 72 hours. Their events were never written, so
+  after 15 tries over about 52 hours. Their events were never written, so
   no endpoint gets them.
 - `hardcount_webhook_outbox_pending` is above 1000.
 - `hardcount_webhook_outbox_enqueue_failures_total` rises. An event could not
@@ -31,6 +31,7 @@ before anything is sent. An endpoint that keeps failing does not grow it: see
 ## Check
 
 ```sql
+SET app.bypass_rls = 'on';
 -- The queue, oldest first, with the last error
 SELECT livemode, event_type, status, attempts, created_at, last_error
 FROM webhook_outbox
@@ -52,6 +53,7 @@ LIMIT 20;
 Narrow the `created_at` window to the incident:
 
 ```sql
+SET app.bypass_rls = 'on';
 -- status = 'failed' keeps this off rows that are being dispatched or were
 -- dispatched. A dispatched row already has its event: dispatching it again
 -- sends a second event with a new id, which receivers cannot skip.
