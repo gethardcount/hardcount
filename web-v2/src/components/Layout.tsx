@@ -153,9 +153,7 @@ function ModeToggle({ livemode, busy, onToggle }: { livemode: boolean; busy: boo
           <span
             className={cn(
               'h-1.5 w-1.5 rounded-full transition-colors duration-200',
-              // On the amber Test thumb an amber dot would vanish, so it
-              // takes the thumb's dark text colour.
-              active ? (label === 'Live' ? 'bg-emerald-500' : 'bg-test-mode-foreground') : 'bg-muted-foreground/40',
+              active ? (label === 'Live' ? 'bg-emerald-500' : 'bg-amber-500') : 'bg-muted-foreground/40',
               // Live is real money moving — the dot breathes like a record
               // light (stilled under prefers-reduced-motion). Test stays still.
               active && label === 'Live' && 'animate-pulse motion-reduce:animate-none',
@@ -173,14 +171,14 @@ function ModeToggle({ livemode, busy, onToggle }: { livemode: boolean; busy: boo
           Width is half the track minus the 4px padding ring; translate-x
           moves it exactly one thumb-width. Driven by the OPTIMISTIC visual
           position (see above) so the glide is actually visible. On Test the
-          thumb is the test-mode band's amber, so the switch and the band say
-          the same thing; on Live it is the plain raised surface. */}
+          thumb takes the test-mode band's tint and edge, so the switch and
+          the band say the same thing; on Live it is the plain raised surface. */}
       <span
         aria-hidden="true"
         className={cn(
-          'absolute left-1 top-1 bottom-1 w-[calc(50%-4px)] rounded-md shadow-sm ring-1 ring-black/5 dark:ring-white/10',
+          'absolute left-1 top-1 bottom-1 w-[calc(50%-4px)] rounded-md shadow-sm ring-1',
           'transition-[transform,background-color] duration-200 ease-out motion-reduce:transition-none',
-          visual ? 'translate-x-full bg-card' : 'bg-test-mode',
+          visual ? 'translate-x-full bg-card ring-black/5 dark:ring-white/10' : 'bg-test-mode ring-test-mode-border',
         )}
       />
       {segment(false, 'Test', 'text-test-mode-foreground')}
@@ -531,16 +529,16 @@ export function Layout({ children }: { children: ReactNode }) {
               </Link>
             </div>
           )}
-          {/* Test mode reads at a glance: a solid amber band, the colour of
-              the sidebar's Test dot, as Stripe marks test mode. It is a normal
-              state, so it has the flask icon and its own colour pair, never the
-              warning triangle or the warning colours, which stay for real
-              problems. */}
+          {/* Test mode reads at a glance: a pale amber band with an amber
+              edge, matching the sidebar's Test button. It is a normal state,
+              so it is a tint, not a solid colour, and has the flask icon and
+              its own colours, never the warning triangle or the warning
+              colours, which stay for real problems. */}
           {user && !user.livemode && (
             <div
               role="status"
               aria-live="polite"
-              className="flex items-center justify-center gap-2 bg-test-mode px-4 py-1.5 text-xs font-medium text-test-mode-foreground"
+              className="flex items-center justify-center gap-2 border-b border-test-mode-border bg-test-mode px-4 py-1.5 text-xs font-medium text-test-mode-foreground"
             >
               <FlaskConical size={14} aria-hidden="true" />
               <span>

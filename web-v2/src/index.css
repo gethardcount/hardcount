@@ -59,11 +59,13 @@
     --color-warning: var(--warning);
     --color-warning-foreground: var(--warning-foreground);
     --color-warning-subtle: var(--warning-subtle);
-    /* The test-mode band: solid amber with dark text, so the mode reads at
-       a glance. Its own pair, not the warning colours: the band is a
-       normal state, and a warning notice must still look different. */
+    /* Test mode: a pale amber tint, dark amber text and an amber edge, so
+       the mode reads at a glance without shouting on every page. Its own
+       set, not the warning colours: test mode is a normal state, and a
+       warning notice must still look different. */
     --color-test-mode: var(--test-mode);
     --color-test-mode-foreground: var(--test-mode-foreground);
+    --color-test-mode-border: var(--test-mode-border);
     --color-info: var(--info);
     --color-info-foreground: var(--info-foreground);
     --color-info-subtle: var(--info-subtle);
@@ -149,8 +151,9 @@
     --warning: oklch(0.75 0.16 70);
     --warning-foreground: oklch(0.46 0.10 74);
     --warning-subtle: oklch(0.97 0.05 85);
-    --test-mode: oklch(0.82 0.15 78);
-    --test-mode-foreground: oklch(0.27 0.05 60);
+    --test-mode: oklch(0.95 0.06 88);
+    --test-mode-foreground: oklch(0.42 0.10 62);
+    --test-mode-border: oklch(0.84 0.12 82);
     --info: oklch(0.60 0.17 250);
     --info-foreground: oklch(0.47 0.15 255);
     --info-subtle: oklch(0.96 0.03 250);
@@ -215,8 +218,9 @@
     --warning: oklch(0.80 0.15 75);
     --warning-foreground: oklch(0.85 0.13 80);
     --warning-subtle: oklch(0.80 0.15 75 / 14%);
-    --test-mode: oklch(0.74 0.14 72);
-    --test-mode-foreground: oklch(0.20 0.04 60);
+    --test-mode: oklch(0.80 0.15 75 / 14%);
+    --test-mode-foreground: oklch(0.86 0.12 82);
+    --test-mode-border: oklch(0.80 0.15 75 / 35%);
     --info: oklch(0.70 0.15 250);
     --info-foreground: oklch(0.80 0.12 250);
     --info-subtle: oklch(0.70 0.15 250 / 14%);
