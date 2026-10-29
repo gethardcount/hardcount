@@ -527,16 +527,18 @@ export function Layout({ children }: { children: ReactNode }) {
               </Link>
             </div>
           )}
-          {/* Test mode is a normal state, so the strip is quiet: the flask
-              icon the sidebar uses for test mode, no warning triangle and no
-              amber, which stays for real problems. */}
+          {/* Test mode reads at a glance: a solid amber band, the colour of
+              the sidebar's Test dot, as Stripe marks test mode. It is a normal
+              state, so it has the flask icon and its own colour pair, never the
+              warning triangle or the warning colours, which stay for real
+              problems. */}
           {user && !user.livemode && (
             <div
               role="status"
               aria-live="polite"
-              className="flex items-center justify-center gap-2 border-b border-border bg-muted px-4 py-1.5 text-xs font-medium text-foreground"
+              className="flex items-center justify-center gap-2 bg-test-mode px-4 py-1.5 text-xs font-medium text-test-mode-foreground"
             >
-              <FlaskConical size={14} aria-hidden="true" className="text-muted-foreground" />
+              <FlaskConical size={14} aria-hidden="true" />
               <span>
                 <strong className="font-semibold">Test mode.</strong> You're viewing test data. No real money moves.
               </span>
