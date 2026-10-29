@@ -1,4 +1,6 @@
 import { Fragment, useState, useMemo } from 'react'
+import { dunningRunStatus } from '@/lib/statusLabels'
+import { StatusBadge } from '@/components/StatusBadge'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
@@ -20,7 +22,6 @@ import { Callout } from '@/components/Callout'
 import { atRiskText } from '@/lib/money'
 import { dunningRunAmount } from '@/lib/invoiceTerminal'
 import { cn } from '@/lib/utils'
-import { statusBadgeVariant, statusBorderColor } from '@/lib/status'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 
 import { Button, buttonVariants } from '@/components/ui/button'
@@ -224,7 +225,8 @@ function RunsTab() {
   }
 
   const statCards = [
-    { label: 'Active', value: stats?.active_count ?? 0, color: 'text-info-foreground', bg: 'bg-info-subtle', ring: 'ring-info/20' },
+    // Amber, as the Active badge on each run (dunningRunStatus): money being chased.
+    { label: 'Active', value: stats?.active_count ?? 0, color: 'text-warning-foreground', bg: 'bg-warning-subtle', ring: 'ring-warning/20' },
     { label: 'Escalated', value: stats?.escalated_count ?? 0, color: 'text-danger-foreground', bg: 'bg-danger-subtle', ring: 'ring-danger/20' },
     // Recovered = closed by a payment. A run closed by a void, a write-off or
     // a credit that left nothing due is resolved but recovered nothing (sweep
@@ -340,7 +342,7 @@ function RunsTab() {
 
                     return (
                       <Fragment key={run.id}>
-                        <TableRow className={cn(isExpanded && 'bg-accent', 'border-l-[3px]', statusBorderColor(run.state))}>
+                        <TableRow className={cn(isExpanded && 'bg-accent')}>
                           <TableCell className="px-3">
                             <button onClick={() => toggleExpand(run.id)}
                               className="w-6 h-6 flex items-center justify-center rounded hover:bg-accent transition-colors">
@@ -381,7 +383,7 @@ function RunsTab() {
                           </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-2">
-                              <Badge variant={statusBadgeVariant(run.state)}>{run.state}</Badge>
+                              <StatusBadge status={dunningRunStatus(run.state)} />
                               {run.resolution && run.resolution !== run.state && (
                                 <Badge variant={run.resolution === 'payment_recovered' ? 'success' : run.resolution === 'invoice_voided' ? 'info' : run.resolution === 'invoice_not_collectible' ? 'warning' : 'outline'}>{RESOLUTION_LABELS[run.resolution] ?? run.resolution}</Badge>
                               )}

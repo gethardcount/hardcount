@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { genericStatus, humanizeStatus } from '@/lib/statusLabels'
+import { StatusBadge } from '@/components/StatusBadge'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -14,7 +16,6 @@ import { Layout } from '@/components/Layout'
 import { LoadError } from '@/components/LoadError'
 import { METER_AGGREGATIONS, meterAggregationHelp, meterAggregationLabel } from '@/lib/meterLabels'
 import { showApiError } from '@/lib/formErrors'
-import { statusBadgeVariant } from '@/lib/status'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -194,8 +195,8 @@ export default function PricingPage() {
                               </Link>
                             </TableCell>
                             <TableCell className="font-mono text-muted-foreground">{p.code}</TableCell>
-                            <TableCell><Badge variant={badgeVariant(p.billing_interval)}>{p.billing_interval}</Badge></TableCell>
-                            <TableCell><Badge variant={statusBadgeVariant(p.status)}>{p.status}</Badge></TableCell>
+                            <TableCell><Badge variant={badgeVariant(p.billing_interval)}>{humanizeStatus(p.billing_interval)}</Badge></TableCell>
+                            <TableCell><StatusBadge status={genericStatus(p.status)} /></TableCell>
                             <TableCell className="text-right font-medium">{formatCents(p.base_amount_cents, p.currency)}</TableCell>
                             <TableCell className="text-right text-muted-foreground">{p.prices?.length || 0}</TableCell>
                           </TableRow>

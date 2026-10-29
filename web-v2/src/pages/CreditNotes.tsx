@@ -1,4 +1,6 @@
 import { useState, useMemo, useEffect } from 'react'
+import { genericStatus, invoiceStatus } from '@/lib/statusLabels'
+import { StatusBadge } from '@/components/StatusBadge'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -21,7 +23,7 @@ import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 import { useSortable, type SortDir } from '@/hooks/useSortable'
 import { useUrlState } from '@/hooks/useUrlState'
 import { cn } from '@/lib/utils'
-import { statusBadgeVariant, statusBorderColor, creditNoteReasonLabel } from '@/lib/status'
+import { creditNoteReasonLabel } from '@/lib/status'
 
 import { Button } from '@/components/ui/button'
 import { LoadError } from '@/components/LoadError'
@@ -437,7 +439,7 @@ export default function CreditNotesPage() {
                     // invoice's amount_due (the unpaid-downgrade path), not a refund/credit.
                     const channelLabel = channels.length === 0 ? 'applied to invoice' : channels.join(' + ')
                     return (
-                      <TableRow key={note.id} className={cn('border-l-[3px]', statusBorderColor(note.status))}>
+                      <TableRow key={note.id}>
                         <TableCell>
                           <span className="inline-flex items-center gap-2">
                             <p className="text-sm font-medium text-foreground">{note.credit_note_number}</p>
@@ -465,7 +467,7 @@ export default function CreditNotesPage() {
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-1.5">
-                            <Badge variant={statusBadgeVariant(note.status)}>{note.status}</Badge>
+                            <StatusBadge status={genericStatus(note.status)} />
                             {isRefund && refundUnconfirmed(note) && (
                               <Badge variant="danger" title="The refund's result was never recorded. Retry checks Stripe before creating a new refund.">
                                 not confirmed
@@ -807,7 +809,7 @@ function ChooseInvoiceDialog({ onClose, onChoose }: {
                       >
                         <span className="flex items-center gap-2 min-w-0">
                           <span className="font-mono truncate">{inv.invoice_number}</span>
-                          <Badge variant={statusBadgeVariant(inv.status)}>{inv.status}</Badge>
+                          <StatusBadge status={invoiceStatus(inv, wallClockNow())} />
                         </span>
                         <span className="tabular-nums text-muted-foreground whitespace-nowrap">
                           {formatCents(inv.total_amount_cents, inv.currency)}

@@ -36,8 +36,7 @@ import { useCustomerCurrency, useCustomerSubscriptions } from '@/hooks/useCustom
 import { invoiceCurrencyPin, type CustomerCurrency } from '@/lib/customerCurrency'
 import { creditTotalsLine, invoiceCreditNote, outstandingIncludesCredit } from '@/lib/customerCredits'
 import { CustomerCreditsSection } from '@/components/customer/CustomerCreditsSection'
-import { statusBadgeVariant } from '@/lib/status'
-import { collectionPausedFlag, invoiceStatus } from '@/lib/statusLabels'
+import { collectionPausedFlag, genericStatus, humanizeStatus, invoiceStatus, sentEmailStatus, subscriptionStatus } from '@/lib/statusLabels'
 import { StatusBadge } from '@/components/StatusBadge'
 
 import { Button } from '@/components/ui/button'
@@ -78,7 +77,6 @@ import { finalActionSummary } from '@/lib/dunningActions'
 import { retryPlanText } from '@/lib/dunningSchedule'
 import { ScrollPane } from '@/components/ui/scroll-pane'
 
-const statusVariant = statusBadgeVariant
 
 const editCustomerSchema = z.object({
   display_name: z.string().min(1, 'Display name is required'),
@@ -167,30 +165,6 @@ function subMeta(sub: Subscription): string {
     return `Ended ${formatDate(sub.current_billing_period_end)}`
   }
   return ''
-}
-
-// The badge shows the provider-confirmed outcome when one exists
-// (delivered / bounced / marked as spam), else the send-lifecycle
-// status — 'dispatched' alone only means our relay accepted the
-// handoff, which is a weaker claim than 'delivered'.
-function sentEmailDisplayStatus(em: { status: string; delivery_state?: string }): string {
-  if (em.delivery_state && em.delivery_state !== 'unknown') {
-    return em.delivery_state === 'complained' ? 'marked as spam' : em.delivery_state
-  }
-  if (em.status === 'skipped') return 'not sent — settled first'
-  return em.status
-}
-
-function sentEmailStatusVariant(display: string): 'default' | 'secondary' | 'destructive' | 'outline' {
-  switch (display) {
-    case 'delivered': return 'default'
-    case 'bounced': return 'destructive'
-    case 'marked as spam': return 'destructive'
-    case 'dispatched': return 'default'
-    case 'failed': return 'destructive'
-    case 'pending': return 'secondary'
-    default: return 'outline'
-  }
 }
 
 export default function CustomerDetailPage() {
@@ -508,7 +482,7 @@ export default function CustomerDetailPage() {
               </AlertDialogContent>
             </AlertDialog>
           )}
-          <Badge variant={statusVariant(customer.status)}>{customer.status}</Badge>
+          <StatusBadge status={genericStatus(customer.status)} />
         </div>
       </div>
 
@@ -647,7 +621,7 @@ export default function CustomerDetailPage() {
               )}
             </DetailRow>
             <DetailRow label="Status">
-              <Badge variant={statusVariant(customer.status)}>{customer.status}</Badge>
+              <StatusBadge status={genericStatus(customer.status)} />
             </DetailRow>
             <DetailRow label="Created">{formatDateTime(customer.created_at)}</DetailRow>
             <DetailRow label="ID">
@@ -822,7 +796,7 @@ export default function CustomerDetailPage() {
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-foreground">{effectiveDunningPolicy.name || 'Default'}</span>
                   {!assignedDunningPolicy && (
-                    <Badge variant="outline">account default</Badge>
+                    <Badge variant="outline">Account default</Badge>
                   )}
                 </div>
               </div>
@@ -832,7 +806,7 @@ export default function CustomerDetailPage() {
               </div>
               <div className="flex items-center justify-between px-6 py-3">
                 <span className="text-sm text-muted-foreground">Final action</span>
-                <Badge variant="outline">{finalActionSummary(effectiveDunningPolicy)}</Badge>
+                <Badge variant="outline">{humanizeStatus(finalActionSummary(effectiveDunningPolicy))}</Badge>
               </div>
             </div>
           ) : (
@@ -1018,7 +992,7 @@ export default function CustomerDetailPage() {
                 // than the chips squeezing the name out.
                 <Link key={sub.id} to={`/subscriptions/${sub.id}`} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-6 py-2.5 hover:bg-accent/50 transition-colors">
                   <div className="flex items-center gap-2 min-w-0 grow">
-                    <Badge variant={statusVariant(sub.status)} className="shrink-0">{sub.status}</Badge>
+                    <StatusBadge status={subscriptionStatus(sub)} className="shrink-0" />
                     {(() => {
                       const paused = collectionPausedFlag(sub, invoiceNow)
                       return paused && <StatusBadge status={paused} className="shrink-0" />
@@ -1052,7 +1026,7 @@ export default function CustomerDetailPage() {
                   {showTerminalSubs && subBuckets.terminal.map(sub => (
                     <Link key={sub.id} to={`/subscriptions/${sub.id}`} className="flex items-center justify-between gap-3 px-6 py-2.5 hover:bg-accent/50 transition-colors">
                       <div className="flex items-center gap-2 min-w-0 flex-1">
-                        <Badge variant={statusVariant(sub.status)} className="shrink-0">{sub.status}</Badge>
+                        <StatusBadge status={subscriptionStatus(sub)} className="shrink-0" />
                         <span className="text-sm font-medium text-muted-foreground truncate">{sub.display_name}</span>
                       </div>
                       <span className="text-xs text-muted-foreground whitespace-nowrap">{subMeta(sub)}</span>
@@ -1144,7 +1118,7 @@ export default function CustomerDetailPage() {
                       )}
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
-                      <Badge variant={sentEmailStatusVariant(sentEmailDisplayStatus(em))}>{sentEmailDisplayStatus(em)}</Badge>
+                      <StatusBadge status={sentEmailStatus(em)} />
                       <span className="text-xs text-muted-foreground whitespace-nowrap">
                         {formatDateTime(em.dispatched_at ?? em.created_at)}
                       </span>

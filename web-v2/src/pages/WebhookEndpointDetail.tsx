@@ -1,4 +1,6 @@
 import { useRef, useState } from 'react'
+import { genericStatus } from '@/lib/statusLabels'
+import { StatusBadge } from '@/components/StatusBadge'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -183,9 +185,7 @@ export default function WebhookEndpointDetailPage() {
           <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
             <span className="font-mono text-base text-foreground break-all">{endpoint?.url ?? '…'}</span>
             {endpoint && (
-              <Badge variant={endpoint.active ? 'success' : 'secondary'}>
-                {endpoint.active ? 'active' : 'paused'}
-              </Badge>
+              <StatusBadge status={genericStatus(endpoint.active ? 'active' : 'paused')} />
             )}
           </div>
           {endpoint?.description && (

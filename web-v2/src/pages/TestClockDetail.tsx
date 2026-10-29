@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
+import { genericStatus, subscriptionStatus } from '@/lib/statusLabels'
+import { StatusBadge as StatusPill } from '@/components/StatusBadge'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -349,7 +351,7 @@ export default function TestClockDetailPage() {
                       <p className="text-sm font-medium text-foreground truncate">{c.display_name}</p>
                       <p className="text-xs text-muted-foreground mt-0.5 font-mono">{c.id}</p>
                     </div>
-                    <Badge variant="outline">{c.status}</Badge>
+                    <StatusPill status={genericStatus(c.status)} />
                   </CardContent>
                 </Card>
               </Link>
@@ -383,7 +385,7 @@ export default function TestClockDetailPage() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <p className="text-sm font-medium text-foreground truncate">{s.display_name || s.code}</p>
-                        <Badge variant="outline">{s.status}</Badge>
+                        <StatusPill status={subscriptionStatus(s)} />
                       </div>
                       <p className="text-xs text-muted-foreground mt-0.5 font-mono">{s.id}</p>
                     </div>

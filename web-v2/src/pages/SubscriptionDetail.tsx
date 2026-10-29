@@ -24,8 +24,7 @@ import { previewView } from '@/lib/invoicePreview'
 import { ExpiryBadge } from '@/components/ExpiryBadge'
 import { effectiveNow } from '@/lib/effectiveNow'
 import { cn } from '@/lib/utils'
-import { statusBadgeVariant } from '@/lib/status'
-import { invoicePaymentChip, invoiceStatus, trialBadgeEndsAt } from '@/lib/statusLabels'
+import { invoicePaymentChip, invoiceStatus, subscriptionStatus, trialBadgeEndsAt } from '@/lib/statusLabels'
 import { StatusBadge } from '@/components/StatusBadge'
 import { subscriptionWillAutoCharge, hasUsableCard } from '@/lib/paymentReadiness'
 import { invoicePreviewNotes } from '@/lib/invoicePreviewNotes'
@@ -57,7 +56,6 @@ import { DetailBreadcrumb } from '@/components/DetailBreadcrumb'
 import { DetailSkeleton } from '@/components/ui/DetailSkeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
-const statusVariant = statusBadgeVariant
 
 // trimDecimal strips trailing zeros from a fractional decimal string while
 // leaving integers untouched ("1000.000000000000" → "1000", "3.140" → "3.14",
@@ -519,7 +517,7 @@ export default function SubscriptionDetailPage() {
               </Button>
             </>
           )}
-          <Badge variant={statusVariant(sub.status)}>{sub.status}</Badge>
+          <StatusBadge status={subscriptionStatus(sub)} />
           <ExpiryBadge expiresAt={trialBadgeEndsAt(sub)} label="Trial ends" warningDays={3} now={effectiveNow(sub.test_clock_id ? testClock?.frozen_time : undefined)} />
         </div>
       </div>
@@ -721,7 +719,7 @@ export default function SubscriptionDetailPage() {
             <div className="flex-1 min-w-0 px-6 py-4">
               <p className="text-sm text-muted-foreground">Status</p>
               <div className="mt-1.5">
-                <Badge variant={statusVariant(sub.status)}>{sub.status}</Badge>
+                <StatusBadge status={subscriptionStatus(sub)} />
               </div>
             </div>
           </div>
@@ -892,7 +890,7 @@ export default function SubscriptionDetailPage() {
               <CopyButton text={sub.customer_id} title="Copy customer ID" />
             </DetailRow>
             <DetailRow label="Status" labelClassName="sm:w-40">
-              <Badge variant={statusVariant(sub.status)}>{sub.status}</Badge>
+              <StatusBadge status={subscriptionStatus(sub)} />
             </DetailRow>
             {sub.billing_time && (
               <DetailRow

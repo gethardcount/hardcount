@@ -1071,13 +1071,13 @@ test('resuming a paused endpoint on its page shows it active', async ({ page }) 
 
   await page.goto(`/webhooks/endpoints/${id}`)
   const main = page.getByRole('main')
-  await expect(main.getByText('paused', { exact: true })).toBeVisible()
+  await expect(main.getByText('Paused', { exact: true })).toBeVisible()
   await expect(main.getByText('Endpoint paused', { exact: true })).toBeVisible()
 
   await main.getByRole('button', { name: 'Resume', exact: true }).click()
   await page.getByRole('alertdialog').getByRole('button', { name: 'Resume', exact: true }).click()
 
-  await expect(main.getByText('active', { exact: true })).toBeVisible()
+  await expect(main.getByText('Active', { exact: true })).toBeVisible()
   await expect(main.getByText('Endpoint paused', { exact: true })).toHaveCount(0)
   await expect(main.getByRole('button', { name: 'Resume', exact: true })).toHaveCount(0)
   const endpoint = await api<{ active: boolean }>('GET', `/webhook-endpoints/endpoints/${id}`)

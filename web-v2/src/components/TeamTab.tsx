@@ -1,4 +1,6 @@
 import { Link } from 'react-router-dom'
+import { genericStatus } from '@/lib/statusLabels'
+import { StatusBadge } from '@/components/StatusBadge'
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -31,14 +33,6 @@ import {
 // workspace, plus pending invitations. Minimal by design — no RBAC yet;
 // every member has full access. Roles show as informational badges only.
 
-function statusVariant(status: InvitationView['status']): 'default' | 'secondary' | 'outline' | 'destructive' {
-  switch (status) {
-    case 'pending': return 'default'
-    case 'expired': return 'outline'
-    case 'revoked': return 'destructive'
-    default: return 'secondary'
-  }
-}
 
 export function TeamTab() {
   const { user } = useAuth()
@@ -227,7 +221,7 @@ export function TeamTab() {
                       <div>
                         <div className="flex items-center gap-2">
                           <p className="text-sm text-foreground">{inv.email}</p>
-                          <Badge variant={statusVariant(inv.status)}>{inv.status}</Badge>
+                          <StatusBadge status={genericStatus(inv.status)} />
                         </div>
                         <p className="text-xs text-muted-foreground mt-0.5">
                           {inv.invited_by_email ? `Invited by ${inv.invited_by_email} · ` : ''}

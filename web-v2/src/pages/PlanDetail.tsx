@@ -13,8 +13,7 @@ import { LoadError } from '@/components/LoadError'
 import { Callout } from '@/components/Callout'
 import { TestClockBadge } from '@/components/TestClockBadge'
 import { useEffectiveNowResolver } from '@/hooks/useClockFrozenMap'
-import { statusBadgeVariant } from '@/lib/status'
-import { collectionPausedFlag } from '@/lib/statusLabels'
+import { collectionPausedFlag, genericStatus, subscriptionStatus } from '@/lib/statusLabels'
 import { StatusBadge } from '@/components/StatusBadge'
 
 import { Button } from '@/components/ui/button'
@@ -41,7 +40,6 @@ import { CopyButton } from '@/components/CopyButton'
 import { DetailBreadcrumb } from '@/components/DetailBreadcrumb'
 import { DetailSkeleton } from '@/components/ui/DetailSkeleton'
 
-const statusVariant = statusBadgeVariant
 
 // Static option sets — single source of truth for both the dropdown
 // <SelectItem>s and the Base UI `items` prop that lets <SelectValue>
@@ -170,7 +168,7 @@ export default function PlanDetailPage() {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <Badge variant={statusVariant(plan.status)}>{plan.status}</Badge>
+          <StatusBadge status={genericStatus(plan.status)} />
           <Button variant="outline" size="sm" onClick={() => setShowEdit(true)}>
             <Pencil size={14} className="mr-1.5" />
             Edit
@@ -232,7 +230,7 @@ export default function PlanDetailPage() {
             </div>
             <div className="flex items-center justify-between px-6 py-3">
               <span className="text-sm text-muted-foreground">Billing Interval</span>
-              <Badge variant="info">{plan.billing_interval === 'yearly' ? 'yearly' : 'monthly'}</Badge>
+              <Badge variant="info">{plan.billing_interval === 'yearly' ? 'Yearly' : 'Monthly'}</Badge>
             </div>
             <div className="flex items-center justify-between px-6 py-3">
               <span className="text-sm text-muted-foreground">Base fee billed</span>
@@ -246,7 +244,7 @@ export default function PlanDetailPage() {
             </div>
             <div className="flex items-center justify-between px-6 py-3">
               <span className="text-sm text-muted-foreground">Status</span>
-              <Badge variant={statusVariant(plan.status)}>{plan.status}</Badge>
+              <StatusBadge status={genericStatus(plan.status)} />
             </div>
             <div className="flex items-center justify-between px-6 py-3">
               <span className="text-sm text-muted-foreground">Created</span>
@@ -316,7 +314,7 @@ export default function PlanDetailPage() {
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
-                        <Badge variant={statusVariant(sub.status)}>{sub.status}</Badge>
+                        <StatusBadge status={subscriptionStatus(sub)} />
                         {(() => {
                           const paused = collectionPausedFlag(sub, resolveNow(sub.test_clock_id))
                           return paused && <StatusBadge status={paused} />

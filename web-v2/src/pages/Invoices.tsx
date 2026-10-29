@@ -14,7 +14,7 @@ import { useUrlState } from '@/hooks/useUrlState'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 import { cn } from '@/lib/utils'
 import { paymentStatusLabel } from '@/lib/status'
-import { humanizeStatus, invoicePaymentChip, invoiceStatus, toneBorderColor } from '@/lib/statusLabels'
+import { humanizeStatus, invoicePaymentChip, invoiceStatus } from '@/lib/statusLabels'
 import { invoiceAmountCents } from '@/lib/invoiceTerminal'
 import { StatusBadge } from '@/components/StatusBadge'
 import { attentionReasonLabel } from '@/lib/attentionLabels'
@@ -405,7 +405,7 @@ export default function InvoicesPage() {
                     return (
                     <TableRow
                       key={inv.id}
-                      className={cn('cursor-pointer hover:bg-muted/50 transition-colors border-l-[3px]', toneBorderColor(badge.tone))}
+                      className="cursor-pointer hover:bg-muted/50 transition-colors"
                       onClick={(e) => {
                         const target = e.target as HTMLElement
                         if (target.closest('button, a, input, select')) return

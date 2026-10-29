@@ -1,4 +1,6 @@
 import { useState, useMemo } from 'react'
+import { genericStatus } from '@/lib/statusLabels'
+import { StatusBadge } from '@/components/StatusBadge'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -18,13 +20,11 @@ import { useSortable, type SortDir } from '@/hooks/useSortable'
 import { useUrlState } from '@/hooks/useUrlState'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 import { cn } from '@/lib/utils'
-import { statusBadgeVariant, statusBorderColor } from '@/lib/status'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 
 import { Button } from '@/components/ui/button'
 import { LoadError } from '@/components/LoadError'
 import { Input } from '@/components/ui/input'
-import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import {
   Dialog,
@@ -326,7 +326,7 @@ export default function CustomersPage() {
                   {sorted.map((c: Customer) => (
                     <TableRow
                       key={c.id}
-                      className={cn('cursor-pointer hover:bg-muted/50 transition-colors border-l-[3px]', statusBorderColor(c.status))}
+                      className="cursor-pointer hover:bg-muted/50 transition-colors"
                       onClick={(e) => {
                         const target = e.target as HTMLElement
                         if (target.closest('button, a, input, select')) return
@@ -360,7 +360,7 @@ export default function CustomersPage() {
                         {c.email || '\u2014'}
                       </TableCell>
                       <TableCell>
-                        <Badge variant={statusBadgeVariant(c.status)}>{c.status}</Badge>
+                        <StatusBadge status={genericStatus(c.status)} />
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
                         {formatDate(c.created_at)}

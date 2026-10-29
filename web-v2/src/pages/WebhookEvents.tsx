@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { StatusBadge as SharedStatusBadge } from '@/components/StatusBadge'
+import { genericStatus } from '@/lib/statusLabels'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -496,19 +498,9 @@ function DeliveryRow({
   )
 }
 
+// A delivery's status in the shared vocabulary (lib/statusLabels).
 function StatusBadge({ status }: { status: string }) {
-  // Map service-side status strings to the dashboard variants. Anything
-  // we don't recognize falls through to the neutral 'outline' so a future
-  // server-side status (e.g. "throttled") doesn't crash the render.
-  const variant: 'default' | 'secondary' | 'destructive' | 'success' | 'outline' =
-    status === 'succeeded' || status === 'delivered'
-      ? 'success'
-      : status === 'failed'
-      ? 'destructive'
-      : status === 'pending'
-      ? 'secondary'
-      : 'outline'
-  return <Badge variant={variant}>{status}</Badge>
+  return <SharedStatusBadge status={genericStatus(status)} />
 }
 
 function ConnectionPill({ status, count }: { status: StreamStatus; count: number }) {

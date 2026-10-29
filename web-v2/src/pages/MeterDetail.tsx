@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { genericStatus } from '@/lib/statusLabels'
+import { StatusBadge } from '@/components/StatusBadge'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -15,7 +17,6 @@ import {
 import { Layout } from '@/components/Layout'
 import { LoadError } from '@/components/LoadError'
 import { Callout } from '@/components/Callout'
-import { statusBadgeVariant } from '@/lib/status'
 
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -46,7 +47,6 @@ import { CopyButton } from '@/components/CopyButton'
 import { DetailBreadcrumb } from '@/components/DetailBreadcrumb'
 import { DetailSkeleton } from '@/components/ui/DetailSkeleton'
 
-const statusVariant = statusBadgeVariant
 
 export default function MeterDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -212,7 +212,7 @@ export default function MeterDetailPage() {
                       </div>
                     </TableCell>
                     <TableCell className="text-sm font-medium text-foreground text-right">{formatCents(plan.base_amount_cents, plan.currency)}</TableCell>
-                    <TableCell><Badge variant={statusVariant(plan.status)}>{plan.status}</Badge></TableCell>
+                    <TableCell><StatusBadge status={genericStatus(plan.status)} /></TableCell>
                   </TableRow>
                 ))}
               </TableBody>

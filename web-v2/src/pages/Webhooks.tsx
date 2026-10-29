@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import { genericStatus } from '@/lib/statusLabels'
+import { StatusBadge } from '@/components/StatusBadge'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -215,7 +217,7 @@ function EndpointsTab() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge variant={ep.active ? 'success' : 'secondary'}>{ep.active ? 'active' : 'paused'}</Badge>
+                      <StatusBadge status={genericStatus(ep.active ? 'active' : 'paused')} />
                     </TableCell>
                     <TableCell className="font-medium">
                       {(() => {
