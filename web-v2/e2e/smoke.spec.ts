@@ -106,6 +106,36 @@ function watchForProblems(page: Page, signedOut: boolean): string[] {
   return problems
 }
 
+// Pinned elements (sticky or fixed) whose background lets the page show
+// through as it scrolls under them. A full-window overlay that dims the page
+// behind a dialog is see-through on purpose and is left out. An element with
+// no background of its own is judged by the first child that paints one.
+function seeThroughPinned(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const clear = (c: string) => c === 'transparent' || /^rgba\(.*,\s*0\)$/.test(c)
+    const alphaOf = (c: string) => {
+      const m = c.match(/\/\s*([\d.]+)\s*\)$/) ?? c.match(/^rgba\(.*,\s*([\d.]+)\)$/)
+      return m ? parseFloat(m[1]) : 1
+    }
+    const out: string[] = []
+    for (const el of document.querySelectorAll<HTMLElement>('body *')) {
+      const cs = getComputedStyle(el)
+      if (cs.position !== 'sticky' && cs.position !== 'fixed') continue
+      const r = el.getBoundingClientRect()
+      if (r.width < 40 || r.height < 10 || cs.display === 'none' || cs.visibility === 'hidden') continue
+      if (r.width >= innerWidth - 2 && r.height >= innerHeight - 2) continue
+      let node: Element = el
+      let bg = cs.backgroundColor
+      while (clear(bg) && node.firstElementChild) {
+        node = node.firstElementChild
+        bg = getComputedStyle(node).backgroundColor
+      }
+      if (!clear(bg) && alphaOf(bg) < 0.98) out.push(`${el.tagName.toLowerCase()} "${el.innerText.slice(0, 40).replace(/\s+/g, ' ')}": ${bg}`)
+    }
+    return out
+  })
+}
+
 for (const vp of viewports) {
   test.describe(`${vp.name} ${vp.size.width}px`, () => {
     test.use({ viewport: vp.size })
@@ -138,6 +168,15 @@ for (const vp of viewports) {
           expect(o.scrollWidth, `<${o.element}> scrolls sideways: content is wider than the window`).toBeLessThanOrEqual(o.clientWidth)
         }
         expect(problems, 'problems reported while the page loaded').toEqual([])
+
+        // Pinned bars stay solid in both themes: the test-mode band was a
+        // see-through tint in dark mode, and every row scrolled visibly
+        // under it. The theme is the `dark` class on <html> (useDarkMode,
+        // chosen once at load), so the check sets it directly.
+        for (const theme of ['light', 'dark'] as const) {
+          await page.evaluate(dark => document.documentElement.classList.toggle('dark', dark), theme === 'dark')
+          expect(await seeThroughPinned(page), `see-through sticky or fixed bars (${theme})`).toEqual([])
+        }
       })
     }
   })
