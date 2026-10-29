@@ -19,6 +19,10 @@ original text.
 
 ## [Unreleased]
 
+### Changed
+
+- **The quickstart and its docs no longer say how long the demo takes.** The "about two minutes" guess was never measured (the demo runs in seconds). `docs/first-invoice.md` now says to read it at your release's tag, instead of linking to itself.
+
 ## [0.9.0] - 2026-10-28
 
 The first release named Hardcount. Usage prices belong to the plan, a usage event says when it will not be billed, prepaid credit carries its currency, and migrations run with goose. It installs fresh only: it refuses a database made by Velox or by any earlier build.

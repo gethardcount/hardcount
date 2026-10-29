@@ -140,8 +140,8 @@ show_login() {
   say "it also holds a live key, which can charge real cards once Stripe is connected."
   say ""
   say "Next: ./quickstart.sh demo"
-  say "  It bills a demo customer for one month of AI token usage in about two"
-  say "  minutes, then prints links to the invoice and the customer."
+  say "  It bills a demo customer for one month of AI token usage, then prints"
+  say "  links to the invoice and the customer."
   say "  What each demo step does: docs/quick-start.md"
 }
 
