@@ -7,7 +7,7 @@ import { createCustomer, invoicesFor, type Invoice } from './fixtures/seed'
 // a customer with no card on file is billed, and Hardcount starts payment retries
 // on the unpaid invoice under the customer's policy.
 
-interface DunningRun { id: string; invoice_id: string; policy_id: string; state: string }
+interface DunningRun { id: string; invoice_id: string; policy_id: string; state: string; resolution?: string }
 
 function toasts(page: Page) {
   return page.getByRole('region', { name: /^Notifications/ })
@@ -76,38 +76,33 @@ async function openRunRow(page: Page, invoice: Invoice) {
   return page.getByRole('row').filter({ has: link })
 }
 
-// #1234: the Resolve dialog used to open with "Payment recovered" chosen, so
-// Resolve with no other click recorded a payment and marked the invoice paid.
-test('resolve a payment-retry run: nothing is chosen at first, and Resolve waits for a choice', async ({ page }) => {
+// An active run is closed on its invoice, not in a second dialog here. The
+// Dunning page's Resolve dialog was a weaker copy of the invoice's actions: it
+// recorded a payment with no reference and voided or wrote off with no typed
+// word (R-01; #1234 was its pre-selected "Payment recovered"). The row now
+// opens the invoice, and recording an offline payment there, with its
+// reference, closes the run as recovered.
+test('an active run opens its invoice, and recording an offline payment there closes the run', async ({ page }) => {
   const policyId = await ownPolicy(`E2E resolve ${uniq()}`)
   const { invoice, run } = await unpaidRunOn(policyId)
 
   const row = await openRunRow(page, invoice)
-  await row.getByRole('button', { name: 'Resolve', exact: true }).click()
-  const dialog = page.getByRole('dialog', { name: 'Resolve Dunning Run' })
-  const recovered = dialog.getByRole('button', { name: /^Payment recovered/ })
-  const voidIt = dialog.getByRole('button', { name: /^Void invoice/ })
-  const writeOff = dialog.getByRole('button', { name: /^Write off invoice/ })
-  const resolve = dialog.getByRole('button', { name: 'Resolve', exact: true })
+  await expect(row.getByRole('button', { name: 'Resolve', exact: true })).toHaveCount(0)
+  await row.getByRole('link', { name: 'Open invoice', exact: true }).click()
+  await expect(page).toHaveURL(new RegExp(`/invoices/${invoice.id}$`))
+  await expect(page.getByRole('heading', { level: 1, name: invoice.invoice_number, exact: true })).toBeVisible()
 
-  for (const choice of [recovered, voidIt, writeOff]) {
-    await expect(choice).toHaveAttribute('aria-pressed', 'false')
-  }
-  await expect(resolve).toBeDisabled()
-  await expect(recovered).toContainText('Records the payment, marks the invoice paid and stops the retries.')
+  await page.getByRole('button', { name: 'More invoice actions' }).click()
+  await page.getByRole('menuitem', { name: 'Record offline payment' }).click()
+  const record = page.getByRole('dialog', { name: 'Record offline payment' })
+  await record.getByLabel('Reference (optional)').fill(`Wire e2e-${uniq()}`)
+  await record.getByRole('button', { name: 'Record payment' }).click()
+  await expect(record).toBeHidden()
 
-  // A choice enables Resolve. Cancel leaves the run and the invoice as they were.
-  await voidIt.click()
-  await expect(voidIt).toHaveAttribute('aria-pressed', 'true')
-  await expect(recovered).toHaveAttribute('aria-pressed', 'false')
-  await expect(resolve).toBeEnabled()
-  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
-  await expect(dialog).toBeHidden()
-
+  const { invoice: paid } = await api<{ invoice: Invoice }>('GET', `/invoices/${invoice.id}`)
+  expect(paid.status).toBe('paid')
   const after = (await api<{ data: DunningRun[] }>('GET', `/dunning/runs?invoice_id=${invoice.id}`)).data
-  expect(after.map(r => [r.id, r.state])).toEqual([[run.id, 'active']])
-  const { invoice: still } = await api<{ invoice: Invoice }>('GET', `/invoices/${invoice.id}`)
-  expect(still.status).toBe('finalized')
+  expect(after.map(r => [r.id, r.state, r.resolution])).toEqual([[run.id, 'resolved', 'payment_recovered']])
 })
 
 // #1215: a policy that has run keeps that history pointing at it, so it
