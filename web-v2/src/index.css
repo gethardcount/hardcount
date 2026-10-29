@@ -79,31 +79,33 @@
 }
 
 :root {
-    /* The website's palette (gethardcount.com): warm paper, ink and copper.
-       Light primary is a deeper copper than the site's #B4612A so it passes
-       4.5:1 as link text and under white button text; #B4612A stays for
-       rings and charts. */
-    --background: oklch(0.957 0.017 84.6);
+    /* The website's palette (gethardcount.com), tuned for a working screen:
+       ink text and a copper accent on a warm white, lighter than the site's
+       paper (#F6F0E4), which tinted a whole day of tables yellow. Light
+       primary is a deeper copper than the site's #B4612A so it passes 4.5:1
+       as link text and under white button text; #B4612A stays for rings and
+       charts. */
+    --background: oklch(0.980 0.006 84.6);
     --foreground: oklch(0.235 0.012 67.2);
-    --card: oklch(0.977 0.011 84.6);
+    --card: oklch(0.997 0.003 84.6);
     --card-foreground: oklch(0.235 0.012 67.2);
-    --popover: oklch(0.977 0.011 84.6);
+    --popover: oklch(0.997 0.003 84.6);
     --popover-foreground: oklch(0.235 0.012 67.2);
     --primary: oklch(0.519 0.116 50.6);
     --primary-foreground: oklch(1 0 0);
-    --secondary: oklch(0.927 0.026 84.6);
+    --secondary: oklch(0.950 0.010 81.8);
     --secondary-foreground: oklch(0.235 0.012 67.2);
-    --muted: oklch(0.927 0.026 84.6);
+    --muted: oklch(0.950 0.010 81.8);
     --muted-foreground: oklch(0.510 0.020 67.4);
-    --accent: oklch(0.931 0.023 69.6);
+    --accent: oklch(0.950 0.017 70.5);
     --accent-foreground: oklch(0.486 0.110 50.6);
     --destructive: oklch(0.52 0.215 27);
     --destructive-foreground: oklch(0.985 0 0);
-    --border: oklch(0.880 0.032 82.8);
+    --border: oklch(0.906 0.018 81.3);
     /* Scroll-edge shadow (see components/ui/scroll-pane.tsx). Theme-aware
        because a black shadow is invisible on a dark surface. */
     --scroll-shadow: oklch(0 0 0 / 22%);
-    --input: oklch(0.880 0.032 82.8);
+    --input: oklch(0.906 0.018 81.3);
     --ring: oklch(0.580 0.127 50.9);
     --chart-1: oklch(0.580 0.127 50.9);
     --chart-2: oklch(0.687 0.099 56.4);
@@ -119,17 +121,17 @@
     --chart-neutral: oklch(0.70 0 0);
     --chart-grid: oklch(0.235 0.012 67.2 / 8%);
     --chart-tick: oklch(0.445 0.021 67.3);
-    --chart-tooltip-bg: oklch(0.977 0.011 84.6);
-    --chart-tooltip-border: oklch(0.880 0.032 82.8);
+    --chart-tooltip-bg: oklch(0.997 0.003 84.6);
+    --chart-tooltip-border: oklch(0.906 0.018 81.3);
     --chart-tooltip-text: oklch(0.235 0.012 67.2);
     --radius: 0.625rem;
-    --sidebar: oklch(0.930 0.022 83.3);
+    --sidebar: oklch(0.962 0.009 84.6);
     --sidebar-foreground: oklch(0.235 0.012 67.2);
     --sidebar-primary: oklch(0.519 0.116 50.6);
     --sidebar-primary-foreground: oklch(1 0 0);
-    --sidebar-accent: oklch(0.900 0.030 78.8);
+    --sidebar-accent: oklch(0.923 0.021 74.7);
     --sidebar-accent-foreground: oklch(0.486 0.110 50.6);
-    --sidebar-border: oklch(0.880 0.032 82.8);
+    --sidebar-border: oklch(0.906 0.018 81.3);
     --sidebar-ring: oklch(0.580 0.127 50.9);
     --shadow-card: 0 1px 3px 0 rgb(34 29 24 / 0.05), 0 1px 2px -1px rgb(34 29 24 / 0.04);
     --shadow-card-hover: 0 4px 6px -1px rgb(34 29 24 / 0.07), 0 2px 4px -2px rgb(34 29 24 / 0.05);
