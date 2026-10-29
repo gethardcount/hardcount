@@ -8580,7 +8580,9 @@ export const getPostV1InvoicesIdSendUrl = (id: string,) => {
 }
 
 /**
- * Sends the invoice document email. `additional_emails` is
+ * Sends the invoice document email. The invoice must be issued:
+ * finalized, paid or uncollectible. A draft or voided invoice is
+ * refused with 409. `additional_emails` is
  * tri-state (ADR-082): absent → the customer's stored
  * additional_emails are CC'd (so legacy `{email}`-only bodies now
  * CC by default); explicit `[]` → primary only for this send;

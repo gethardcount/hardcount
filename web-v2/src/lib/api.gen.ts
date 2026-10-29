@@ -3521,7 +3521,9 @@ export interface paths {
         put?: never;
         /**
          * Email the invoice (PDF attached) to a recipient
-         * @description Sends the invoice document email. `additional_emails` is
+         * @description Sends the invoice document email. The invoice must be issued:
+         *     finalized, paid or uncollectible. A draft or voided invoice is
+         *     refused with 409. `additional_emails` is
          *     tri-state (ADR-082): absent → the customer's stored
          *     additional_emails are CC'd (so legacy `{email}`-only bodies now
          *     CC by default); explicit `[]` → primary only for this send;
@@ -3577,8 +3579,9 @@ export interface paths {
                     content?: never;
                 };
                 /**
-                 * @description Nothing was sent. Codes: `email_not_configured` (this server
-                 *     has no SMTP set up), or `payment_in_flight` /
+                 * @description Nothing was sent. Codes: `invoice_not_sendable` (the invoice
+                 *     is a draft, not issued yet, or voided), `email_not_configured`
+                 *     (this server has no SMTP set up), or `payment_in_flight` /
                  *     `payment_unidentifiable` (a charge on the invoice is unresolved).
                  */
                 409: {

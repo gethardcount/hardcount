@@ -906,6 +906,20 @@ func (h *Handler) sendEmail(w http.ResponseWriter, r *http.Request) {
 		respond.InternalError(w, r)
 		return
 	}
+	// The email says "Your invoice is ready" over the amount due and a pay
+	// button. A draft is not issued yet and its lines can still change; a
+	// voided invoice is cancelled. Either way the customer would be asked for
+	// money they do not owe.
+	switch inv.Status {
+	case domain.InvoiceDraft:
+		respond.ConflictCoded(w, r, "", "invoice_not_sendable",
+			"a draft invoice can't be emailed because it isn't issued yet. Finalize it first, then email it")
+		return
+	case domain.InvoiceVoided:
+		respond.ConflictCoded(w, r, "", "invoice_not_sendable",
+			"a voided invoice can't be emailed because it is cancelled and nothing is owed. To bill the customer, create a new invoice")
+		return
+	}
 	if !h.emailConfigured {
 		respond.FromError(w, r, errs.EmailNotConfigured(), "invoice_email")
 		return

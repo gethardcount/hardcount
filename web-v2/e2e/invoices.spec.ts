@@ -170,6 +170,13 @@ test('a one-off invoice: save a draft from the customer page, add a line, finali
   await expect(page.getByRole('row').filter({ hasText: `E2E support hours ${id}` })).toContainText(usd(added!.amount_cents))
   await expect(figure(page, 'Subtotal')).toContainText(usd(twoLines.invoice.subtotal_cents))
 
+  // A draft isn't issued yet, so it can't be emailed: the email asks the
+  // customer to pay. The menu doesn't offer it (and the API refuses it).
+  const draftMenu = await invoiceActions(page)
+  await expect(draftMenu.getByRole('menuitem', { name: 'Preview PDF' })).toBeVisible()
+  await expect(draftMenu.getByRole('menuitem', { name: 'Email invoice' })).toHaveCount(0)
+  await page.keyboard.press('Escape')
+
   // Finalize asks first (#1109) and says what will happen: the invoice is
   // issued for good, its tax is worked out now (a manual invoice), and what
   // happens to anything left to pay. With Stripe not connected in this mode
@@ -213,6 +220,9 @@ test('a one-off invoice: save a draft from the customer page, add a line, finali
   await expect(figure(page, 'Issued')).toContainText(day(issued.issued_at!, issued.billing_timezone))
   await expect(figure(page, 'Due')).toContainText(day(issued.due_at!, issued.billing_timezone))
   await expect(figure(page, 'Due')).not.toContainText('from finalizing')
+  // Once issued, it can be emailed.
+  await expect((await invoiceActions(page)).getByRole('menuitem', { name: 'Email invoice' })).toBeVisible()
+  await page.keyboard.press('Escape')
 
   // Save & send: the invoice is finalized either way. Without SMTP (the CI
   // server has none) the toast says the email was not sent, never "sent".
