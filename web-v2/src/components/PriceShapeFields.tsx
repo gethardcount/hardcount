@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Trash2 } from 'lucide-react'
 import { getCurrencySymbol, type PriceShape } from '@/lib/api'
-import { dollarsToRateCents } from '@/lib/priceInput'
+import { dollarsToRateCents, wholeUnits } from '@/lib/priceInput'
 import { PRICING_MODES, pricingModeLabel, shiftDecimal } from '@/lib/priceDisplay'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -38,17 +38,19 @@ export interface PriceShapeState {
 }
 
 // usePriceShape holds the form's state, seeded from an existing shape when
-// one is given (rates shown in currency units, exactly).
+// one is given (rates shown in currency units, exactly). A new price starts
+// blank: an example in a box is saved as a price if nobody changes it, so
+// examples go in placeholders only.
 export function usePriceShape(prefill?: PriceShape): PriceShapeState {
   const [mode, setMode] = useState(prefill?.mode ?? 'per_unit')
   const [unitAmount, setUnitAmount] = useState(prefill?.unit_amount_cents ? shiftDecimal(prefill.unit_amount_cents, -2) : '')
   const [tiers, setTiers] = useState<TierRow[]>(
     prefill?.tiers?.length
       ? prefill.tiers.map(t => ({ upTo: t.up_to != null ? String(t.up_to) : '', price: shiftDecimal(t.unit_amount_cents || '0', -2) }))
-      : [{ upTo: '1000', price: '0.10' }, { upTo: '', price: '0.05' }],
+      : [{ upTo: '', price: '' }, { upTo: '', price: '' }],
   )
-  const [packageSize, setPackageSize] = useState(prefill?.package_size ? String(prefill.package_size) : '100')
-  const [packageAmount, setPackageAmount] = useState(prefill?.package_amount_cents ? shiftDecimal(prefill.package_amount_cents, -2) : '10.00')
+  const [packageSize, setPackageSize] = useState(prefill?.package_size ? String(prefill.package_size) : '')
+  const [packageAmount, setPackageAmount] = useState(prefill?.package_amount_cents ? shiftDecimal(prefill.package_amount_cents, -2) : '')
   return { mode, setMode, unitAmount, setUnitAmount, tiers, setTiers, packageSize, setPackageSize, packageAmount, setPackageAmount }
 }
 
@@ -63,24 +65,28 @@ export function buildPriceShape(f: PriceShapeState): { shape: PriceShape } | { e
   }
   if (f.mode === 'graduated') {
     const { tiers } = f
-    for (let i = 0; i < tiers.length - 1; i++) {
-      const current = parseInt(tiers[i].upTo) || 0
-      const next = i + 1 === tiers.length - 1 ? Infinity : (parseInt(tiers[i + 1].upTo) || 0)
-      if (current <= 0) return { error: `Tier ${i + 1}: "Up to" must be greater than 0` }
-      if (next !== Infinity && next <= current) return { error: `Tier ${i + 2}: "Up to" must be greater than ${current}` }
-    }
     const out: { up_to: number | null; unit_amount_cents: string }[] = []
+    let prev = 0
     for (let i = 0; i < tiers.length; i++) {
+      // The last tier has no upper bound: up_to null.
+      let upTo: number | null = null
+      if (i < tiers.length - 1) {
+        upTo = wholeUnits(tiers[i].upTo)
+        if (upTo === null) return { error: `Tier ${i + 1}: enter how many units the tier goes up to, a whole number greater than 0` }
+        if (upTo <= prev) return { error: `Tier ${i + 1}: "Up to" must be greater than ${prev}` }
+        prev = upTo
+      }
       const cents = dollarsToRateCents(tiers[i].price)
       if (cents === null) return { error: `Tier ${i + 1}: enter a price as a plain number, for example 0.01. Use 0 for free.` }
-      // The last tier has no upper bound: up_to null.
-      out.push({ up_to: i === tiers.length - 1 ? null : parseInt(tiers[i].upTo) || 0, unit_amount_cents: cents })
+      out.push({ up_to: upTo, unit_amount_cents: cents })
     }
     return { shape: { mode: 'graduated', tiers: out } }
   }
+  const size = wholeUnits(f.packageSize)
+  if (size === null) return { error: 'Units per package: enter a whole number greater than 0, for example 100.' }
   const cents = dollarsToRateCents(f.packageAmount)
   if (cents === null) return { error: 'Price per package: enter a price as a plain number, for example 10.00. Use 0 for free.' }
-  return { shape: { mode: 'package', package_size: parseInt(f.packageSize) || 1, package_amount_cents: cents } }
+  return { shape: { mode: 'package', package_size: size, package_amount_cents: cents } }
 }
 
 // PriceShapeFields renders the mode select and the mode's fields. `currency`
@@ -137,7 +143,7 @@ export function PriceShapeFields({ f, currency, hint, idPrefix = 'price' }: { f:
                   <Input type="number" step="any" min={0} value={tier.price}
                     aria-label={`Tier ${idx + 1} price`}
                     onChange={e => f.setTiers(t => t.map((r, i) => i === idx ? { ...r, price: e.target.value } : r))}
-                    placeholder="0.01" />
+                    placeholder={idx === 0 ? '0.10' : '0.05'} />
                 </div>
                 <div className="flex justify-center">
                   {f.tiers.length > 1 && (

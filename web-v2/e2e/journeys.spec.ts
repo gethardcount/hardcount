@@ -648,14 +648,16 @@ test('a commit line valid through a picked day is sent as the next midnight and 
   await page.getByRole('button', { name: 'New invoice' }).click()
   const composer = page.getByRole('dialog', { name: 'New invoice' })
   await composer.getByPlaceholder('Implementation services').fill(`E2E prepaid commit ${uniq()}`)
-  await composer.getByPlaceholder('2500', { exact: true }).fill('5000')
+  await composer.getByLabel('Line 1 unit price in USD').fill('50')
   await composer.getByText('This line sells prepaid credits').click()
-  await composer.getByLabel('Line 1 credits granted in cents').fill('5000')
+  await composer.getByLabel('Line 1 credits granted in USD').fill('50.00')
   await expect(composer.getByText('Valid through', { exact: true })).toBeVisible()
   await composer.getByLabel('Line 1 credits valid through').fill(picked)
   const creating = page.waitForRequest(r => r.method() === 'POST' && new URL(r.url()).pathname === '/v1/invoices')
   await composer.getByRole('button', { name: 'Save & send' }).click()
-  const body = (await creating).postDataJSON() as { line_items: { commit_expires_at?: string }[] }
+  await page.getByRole('alertdialog', { name: 'Finalize and send this invoice?' }).getByRole('button', { name: 'Finalize and send' }).click()
+  const body = (await creating).postDataJSON() as { line_items: { unit_amount_cents: number; commit_granted_cents?: number; commit_expires_at?: string }[] }
+  expect([body.line_items[0].unit_amount_cents, body.line_items[0].commit_granted_cents]).toEqual([5000, 5000])
   expectNextMidnight(body.line_items[0].commit_expires_at!, picked, zone)
   await expect(composer).toBeHidden()
 

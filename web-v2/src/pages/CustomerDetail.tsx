@@ -4,6 +4,10 @@ import { useEffectiveNow } from '@/hooks/useClockFrozenMap'
 import { useSingleFlight } from '@/hooks/useSingleFlight'
 import { useNavigate, useParams, Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { authApi } from '@/lib/auth'
+import { useAuth } from '@/contexts/AuthContext'
+import { finalizeConfirmLines } from '@/lib/invoiceNotice'
+import { dollarsToWholeCents } from '@/lib/priceInput'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -1243,6 +1247,7 @@ export default function CustomerDetailPage() {
           customerId={id}
           customer={customer}
           customerCurrency={customerCurrency}
+          hasCard={paymentMethodsList === undefined ? undefined : paymentMethods.some(pm => pm.is_default)}
           onClose={() => setShowNewInvoice(false)}
           onCreated={({ invoice, result }) => {
             setShowNewInvoice(false)
@@ -1710,30 +1715,33 @@ const PAYMENT_TERM_OPTIONS: { value: string; label: string }[] = [
 type ComposerLine = {
   description: string
   quantity: string         // string-bound input; coerced at submit time
-  unit_amount_cents: string  // string-bound; cent values, no decimals
+  unitAmount: string       // typed in currency units ("25.50"); dollarsToWholeCents
   line_type: string
   // Prepaid-credit sale (ADR-078): when set, finalizing the invoice grants
-  // this many cents of credits to the customer. add_on lines only; the
-  // backend enforces one commit line per invoice.
+  // this much credit to the customer. add_on lines only; the backend
+  // enforces one commit line per invoice.
   sellsCredits: boolean
-  commitGrantedCents: string // string-bound; cents
+  commitGranted: string    // typed in currency units, like unitAmount
   commitExpiresAt: string    // yyyy-mm-dd; '' = never expires
 }
 
 const blankLine = (): ComposerLine => ({
   description: '',
   quantity: '1',
-  unit_amount_cents: '',
+  unitAmount: '',
   line_type: 'add_on',
   sellsCredits: false,
-  commitGrantedCents: '',
+  commitGranted: '',
   commitExpiresAt: '',
 })
 
-function NewInvoiceDialog({ customerId, customer, customerCurrency, onClose, onCreated }: {
+function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onClose, onCreated }: {
   customerId: string
   customer: Customer
   customerCurrency: CustomerCurrency
+  // Whether the customer has a default card, for the Save & send
+  // confirmation: undefined while it loads.
+  hasCard: boolean | undefined
   onClose: () => void
   onCreated: (result: { invoice: Invoice; result: NewInvoiceResult }) => void
 }) {
@@ -1760,20 +1768,32 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, onClose, onC
   // by the no-restricted-syntax relative-time gate (ADR-086 Phase 4).
   const now = useEffectiveNow(customer?.test_clock_id)
   const [errors, setErrors] = useState<{
-    lines?: Record<number, { description?: string; quantity?: string; unit_amount_cents?: string; commit?: string }>
+    lines?: Record<number, { description?: string; quantity?: string; unitAmount?: string; commit?: string }>
     form?: string
     period?: string
   }>({})
   const [submitting, setSubmitting] = useState<null | 'draft' | 'send'>(null)
+  // Save & send finalizes the invoice, and finalizing collects payment at
+  // once, by card when there is one. It asks first, in the same words as the
+  // invoice page's Finalize.
+  const [confirmSend, setConfirmSend] = useState(false)
+  const { user } = useAuth()
+  const { data: whoami } = useQuery({ queryKey: ['whoami'], queryFn: () => authApi.whoami(), staleTime: Infinity })
+  const { data: stripeCreds } = useQuery({
+    queryKey: ['stripe-credentials'],
+    queryFn: () => api.listStripeCredentials(),
+    enabled: !!user,
+  })
+  const stripeConnected = stripeCreds && user ? stripeCreds.data.some(c => c.livemode === user.livemode) : undefined
 
   const currencySymbol = getCurrencySymbol(currency)
 
   const subtotalCents = useMemo(() => {
     return lines.reduce((acc, l) => {
       const q = Number(l.quantity)
-      const u = Number(l.unit_amount_cents)
-      if (!Number.isFinite(q) || !Number.isFinite(u) || q <= 0 || u < 0) return acc
-      return acc + Math.round(q) * Math.round(u)
+      const u = dollarsToWholeCents(l.unitAmount)
+      if (!Number.isFinite(q) || q <= 0 || u === null) return acc
+      return acc + Math.round(q) * u
     }, 0)
   }, [lines])
 
@@ -1795,7 +1815,7 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, onClose, onC
   // validate returns sanitized lines suitable for the API. Returns null on
   // any validation failure (errors are surfaced via setErrors).
   const validate = (): { description: string; line_type: string; quantity: number; unit_amount_cents: number; commit_granted_cents?: number; commit_expires_at?: string }[] | null => {
-    const lineErrors: Record<number, { description?: string; quantity?: string; unit_amount_cents?: string; commit?: string }> = {}
+    const lineErrors: Record<number, { description?: string; quantity?: string; unitAmount?: string; commit?: string }> = {}
     const cleaned: { description: string; line_type: string; quantity: number; unit_amount_cents: number; commit_granted_cents?: number; commit_expires_at?: string }[] = []
     if (lines.length === 0) {
       setErrors({ form: 'Add at least one line item.' })
@@ -1803,21 +1823,19 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, onClose, onC
     }
     let commitLines = 0
     lines.forEach((l, i) => {
-      const errs: { description?: string; quantity?: string; unit_amount_cents?: string; commit?: string } = {}
+      const errs: { description?: string; quantity?: string; unitAmount?: string; commit?: string } = {}
       const desc = l.description.trim()
       if (!desc) errs.description = 'Description is required'
       const qty = Number(l.quantity)
       if (!Number.isFinite(qty) || !Number.isInteger(qty) || qty <= 0) {
         errs.quantity = 'Whole number greater than 0'
       }
-      const unit = Number(l.unit_amount_cents)
-      if (!Number.isFinite(unit) || !Number.isInteger(unit) || unit < 0) {
-        errs.unit_amount_cents = 'Whole cents, 0 or more'
-      }
-      // Backend currently rejects unit_amount_cents <= 0. Surface that
-      // upfront so the user fixes it before the round-trip.
-      if (Number.isInteger(unit) && unit === 0) {
-        errs.unit_amount_cents = 'Must be greater than 0'
+      const unit = dollarsToWholeCents(l.unitAmount)
+      if (unit === null) {
+        errs.unitAmount = 'Enter a price like 25 or 25.50'
+      } else if (unit === 0) {
+        // The server refuses a unit price of 0; say so before the round trip.
+        errs.unitAmount = 'Must be greater than 0'
       }
       // Prepaid-credit sale: granted cents required and positive; at most
       // one commit line per invoice (the backend enforces both too).
@@ -1825,9 +1843,9 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, onClose, onC
       let commitExpires: string | undefined
       if (l.sellsCredits && (l.line_type || 'add_on') === 'add_on') {
         commitLines++
-        const granted = Number(l.commitGrantedCents)
-        if (!Number.isFinite(granted) || !Number.isInteger(granted) || granted <= 0) {
-          errs.commit = 'Credits granted: whole cents, greater than 0'
+        const granted = dollarsToWholeCents(l.commitGranted)
+        if (granted === null || granted <= 0) {
+          errs.commit = 'Credits granted: an amount like 100 or 100.50, greater than 0'
         } else if (commitLines > 1) {
           errs.commit = 'Only one line per invoice can sell prepaid credits — use a separate invoice'
         } else {
@@ -1851,7 +1869,7 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, onClose, onC
           description: desc,
           line_type: l.line_type || 'add_on',
           quantity: qty,
-          unit_amount_cents: unit,
+          unit_amount_cents: unit ?? 0,
           ...(commitGranted !== undefined ? { commit_granted_cents: commitGranted } : {}),
           ...(commitExpires !== undefined ? { commit_expires_at: commitExpires } : {}),
         })
@@ -1875,31 +1893,42 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, onClose, onC
   // for the same (customer, period) and no Idempotency-Key is sent — a same-tick
   // double-click creates TWO invoices (and, on 'send', two finalized invoices +
   // two emails). The ref collapses the double-fire the lagging `isBusy` cannot.
+  // Service period (optional): both-or-neither, start on/before end. The
+  // operator enters INCLUSIVE dates; store half-open [start, endExclusive)
+  // (ADR-058) so the invoice reads "Jun 1 – Jun 30" — endExclusive = end+1d,
+  // grounded at start-of-day in tenant TZ (same boundary math as the engine).
+  // null means an error is shown.
+  const validatePeriod = (): { billing_period_start?: string; billing_period_end?: string } | null => {
+    if (!periodStart && !periodEnd) return {}
+    if (!periodStart || !periodEnd) {
+      setErrors({ period: 'Enter both a start and end date, or leave both blank.' })
+      return null
+    }
+    if (periodStart > periodEnd) {
+      setErrors({ period: 'The start date must be on or before the end date.' })
+      return null
+    }
+    const [ey, em, ed] = periodEnd.split('-').map(Number)
+    const next = new Date(ey, em - 1, ed + 1)
+    const endExclusive = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`
+    return {
+      billing_period_start: startOfDayInTZ(periodStart),
+      billing_period_end: startOfDayInTZ(endExclusive),
+    }
+  }
+
+  // askToSend checks the form, then asks before finalizing (confirmSend).
+  const askToSend = () => {
+    if (!validate() || validatePeriod() === null) return
+    setConfirmSend(true)
+  }
+
   const submit = useSingleFlight(async (action: 'draft' | 'send') => {
     const cleaned = validate()
     if (!cleaned) return
-    // Service period (optional): both-or-neither, start on/before end. The
-    // operator enters INCLUSIVE dates; store half-open [start, endExclusive)
-    // (ADR-058) so the invoice reads "Jun 1 – Jun 30" — endExclusive = end+1d,
-    // grounded at start-of-day in tenant TZ (same boundary math as the engine).
-    let period: { billing_period_start?: string; billing_period_end?: string } = {}
-    if (periodStart || periodEnd) {
-      if (!periodStart || !periodEnd) {
-        setErrors({ period: 'Enter both a start and end date, or leave both blank.' })
-        return
-      }
-      if (periodStart > periodEnd) {
-        setErrors({ period: 'The start date must be on or before the end date.' })
-        return
-      }
-      const [ey, em, ed] = periodEnd.split('-').map(Number)
-      const next = new Date(ey, em - 1, ed + 1)
-      const endExclusive = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`
-      period = {
-        billing_period_start: startOfDayInTZ(periodStart),
-        billing_period_end: startOfDayInTZ(endExclusive),
-      }
-    }
+    const period = validatePeriod()
+    if (period === null) return
+    setConfirmSend(false)
     setSubmitting(action)
     let invoice: Invoice | null = null
     try {
@@ -2038,16 +2067,16 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, onClose, onC
                 <div className="px-3 py-2">Description</div>
                 <div className="px-3 py-2">Type</div>
                 <div className="px-3 py-2">Qty</div>
-                <div className="px-3 py-2">Unit ({currencySymbol.trim() || currency})</div>
+                <div className="px-3 py-2">Unit price ({currencySymbol.trim() || currency})</div>
                 <div className="px-3 py-2"></div>
               </div>
               <div className="divide-y divide-border">
                 {lines.map((line, idx) => {
                   const lineErrs = errors.lines?.[idx] || {}
                   const qty = Number(line.quantity)
-                  const unit = Number(line.unit_amount_cents)
-                  const totalCents = Number.isFinite(qty) && Number.isFinite(unit) && qty > 0 && unit >= 0
-                    ? Math.round(qty) * Math.round(unit)
+                  const unit = dollarsToWholeCents(line.unitAmount)
+                  const totalCents = Number.isFinite(qty) && qty > 0 && unit !== null
+                    ? Math.round(qty) * unit
                     : 0
                   return (
                     <div key={idx}>
@@ -2093,20 +2122,22 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, onClose, onC
                         {lineErrs.quantity && <p className="text-xs text-destructive">{lineErrs.quantity}</p>}
                       </div>
                       <div className="px-3 py-2 space-y-1">
-                        <span className="text-xs text-muted-foreground sm:hidden">Unit ({currencySymbol.trim() || currency})</span>
+                        <span className="text-xs text-muted-foreground sm:hidden">Unit price ({currencySymbol.trim() || currency})</span>
+                        {/* A text box, not type="number": a number box reads
+                            "9,50" as 950 in some browsers and changes on the
+                            mouse wheel. The amount is in currency units. */}
                         <Input
-                          type="number"
-                          inputMode="numeric"
-                          min={0}
-                          step={1}
-                          placeholder="2500"
-                          value={line.unit_amount_cents}
-                          onChange={e => updateLine(idx, { unit_amount_cents: e.target.value })}
-                          aria-invalid={!!lineErrs.unit_amount_cents}
+                          type="text"
+                          inputMode="decimal"
+                          placeholder="25.00"
+                          aria-label={`Line ${idx + 1} unit price in ${currency}`}
+                          value={line.unitAmount}
+                          onChange={e => updateLine(idx, { unitAmount: e.target.value })}
+                          aria-invalid={!!lineErrs.unitAmount}
                           disabled={isBusy}
                         />
-                        {lineErrs.unit_amount_cents
-                          ? <p className="text-xs text-destructive">{lineErrs.unit_amount_cents}</p>
+                        {lineErrs.unitAmount
+                          ? <p className="text-xs text-destructive">{lineErrs.unitAmount}</p>
                           : <p className="text-xs text-muted-foreground">= {formatCents(totalCents, currency)}</p>}
                       </div>
                       <div className="col-span-2 sm:col-span-1 px-3 py-2 flex justify-end sm:justify-center">
@@ -2138,15 +2169,13 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, onClose, onC
                         {line.sellsCredits && (
                           <div className="flex flex-wrap items-center gap-2 pl-6">
                             <Input
-                              type="number"
-                              inputMode="numeric"
-                              min={1}
-                              step={1}
-                              placeholder="Credits granted (cents)"
-                              aria-label={`Line ${idx + 1} credits granted in cents`}
+                              type="text"
+                              inputMode="decimal"
+                              placeholder={`Credits granted (${currencySymbol.trim() || currency})`}
+                              aria-label={`Line ${idx + 1} credits granted in ${currency}`}
                               className="w-[210px]"
-                              value={line.commitGrantedCents}
-                              onChange={e => updateLine(idx, { commitGrantedCents: e.target.value })}
+                              value={line.commitGranted}
+                              onChange={e => updateLine(idx, { commitGranted: e.target.value })}
                               disabled={isBusy}
                             />
                             <label className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -2161,8 +2190,8 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, onClose, onC
                               />
                             </label>
                             <span className="text-xs text-muted-foreground">
-                              {Number(line.commitGrantedCents) > 0
-                                ? `Grants ${formatCents(Number(line.commitGrantedCents), currency)} of credits when the invoice is finalized.`
+                              {(dollarsToWholeCents(line.commitGranted) ?? 0) > 0
+                                ? `Grants ${formatCents(dollarsToWholeCents(line.commitGranted) ?? 0, currency)} of credits when the invoice is finalized.`
                                 : 'Expiry optional — blank means the credits never expire.'}
                             </span>
                           </div>
@@ -2176,7 +2205,7 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, onClose, onC
               </div>
             </div>
             <p className="text-xs text-muted-foreground">
-              Amounts are in cents (e.g. 2500 = {formatCents(2500, currency)}). Tax is worked out from your tax settings when the invoice is finalized.
+              Tax is worked out from your tax settings when the invoice is finalized.
             </p>
           </div>
 
@@ -2265,13 +2294,45 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, onClose, onC
               ? <><Loader2 size={14} className="animate-spin mr-2" />Saving draft...</>
               : 'Save draft'}
           </Button>
-          <Button type="button" onClick={() => submit('send')} disabled={isBusy}>
+          <Button type="button" onClick={askToSend} disabled={isBusy}>
             {submitting === 'send'
               ? <><Loader2 size={14} className="animate-spin mr-2" />Finalizing...</>
               : 'Save & send'}
           </Button>
         </DialogFooter>
       </DialogContent>
+
+      <AlertDialog open={confirmSend} onOpenChange={(open) => { if (!open && !isBusy) setConfirmSend(false) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Finalize and send this invoice?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {formatCents(subtotalCents, currency)} before tax to {customer.display_name}.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-2 text-sm text-muted-foreground">
+            {finalizeConfirmLines({
+              collectionPaused: false,
+              stripeConnected,
+              hasCard,
+              hasEmail: !!customer.email,
+              canEmailSetupLinks: whoami?.can_email_setup_links,
+              taxAtFinalize: true,
+            }).map(line => <p key={line}>{line}</p>)}
+            <p>
+              {customer.email
+                ? `Then the invoice is emailed to ${customer.email}.`
+                : 'The customer has no email address, so the invoice is not emailed.'}
+            </p>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isBusy}>Back</AlertDialogCancel>
+            <AlertDialogAction onClick={() => submit('send')} disabled={isBusy}>
+              {submitting === 'send' ? <><Loader2 size={14} className="animate-spin mr-1.5" />Finalizing…</> : 'Finalize and send'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   )
 }

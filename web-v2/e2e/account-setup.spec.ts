@@ -286,6 +286,14 @@ test('the price form saves a graduated price with an open last tier, and a packa
     await expect(dialog.getByLabel('Tier 1 up to')).toBeEnabled()
     await expect(dialog.getByLabel('Tier 2 up to')).toBeDisabled()
     await expect(dialog.getByLabel('Tier 2 up to')).toHaveAttribute('placeholder', 'No limit')
+    // A new price starts blank, so nothing is saved that nobody typed.
+    await expect(dialog.getByLabel('Tier 1 up to')).toHaveValue('')
+    await expect(dialog.getByLabel('Tier 1 price')).toHaveValue('')
+    await dialog.getByRole('button', { name: 'Add price' }).click()
+    await expect(dialog.getByText('Tier 1: enter how many units the tier goes up to', { exact: false })).toBeVisible()
+    await dialog.getByLabel('Tier 1 up to').fill('1000')
+    await dialog.getByLabel('Tier 1 price').fill('0.10')
+    await dialog.getByLabel('Tier 2 price').fill('0.05')
   })
   expect([tiered.dimension_match, tiered.mode, tiered.tiers]).toEqual([{ tier: 'a' }, 'graduated', [{ up_to: 1000, unit_amount_cents: '10' }, { up_to: null, unit_amount_cents: '5' }]])
   await expect(card(page, 'Usage prices (1)').getByTestId('plan-price-row').filter({ hasText: 'tier=a' })).toHaveText(
@@ -295,6 +303,8 @@ test('the price form saves a graduated price with an open last tier, and a packa
     await dialog.getByRole('combobox', { name: 'Pricing model' }).click()
     await page.getByRole('option', { name: 'Per package' }).click()
     await expect(dialog.getByText('A part block is charged as a whole one.', { exact: false })).toBeVisible()
+    await expect(dialog.getByLabel('Units per package')).toHaveValue('')
+    await expect(dialog.getByLabel(/^Price per package/)).toHaveValue('')
     await dialog.getByLabel('Units per package').fill('1000')
     await dialog.getByLabel(/^Price per package/).fill('0.002')
   })

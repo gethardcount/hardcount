@@ -132,7 +132,8 @@ test('a one-off invoice: save a draft from the customer page, add a line, finali
   const composer = page.getByRole('dialog', { name: 'New invoice' })
   await composer.getByPlaceholder('Implementation services').fill(`E2E onboarding ${id}`)
   await composer.getByPlaceholder('1', { exact: true }).fill('2')
-  await composer.getByPlaceholder('2500', { exact: true }).fill('1250')
+  // The unit price is typed in dollars and sent in cents.
+  await composer.getByLabel('Line 1 unit price in USD').fill('12.50')
   await composer.getByRole('button', { name: 'Save draft' }).click()
   await expect(composer).toBeHidden()
   const savedToast = page.getByText(/^Draft \S+ saved$/)
@@ -219,8 +220,15 @@ test('a one-off invoice: save a draft from the customer page, add a line, finali
   await page.goto(`/customers/${customer.id}`)
   await page.getByRole('button', { name: 'New invoice' }).click()
   await composer.getByPlaceholder('Implementation services').fill(`E2E retainer ${id}`)
-  await composer.getByPlaceholder('2500', { exact: true }).fill('9900')
+  await composer.getByLabel('Line 1 unit price in USD').fill('99')
+  // Finalizing collects payment at once, so Save & send asks first, with the
+  // amount, and creates nothing until the answer.
   await composer.getByRole('button', { name: 'Save & send' }).click()
+  const sendConfirm = page.getByRole('alertdialog', { name: 'Finalize and send this invoice?' })
+  await expect(sendConfirm).toContainText(`$99.00 before tax to ${customer.display_name}.`)
+  await expect(sendConfirm).toContainText(`Then the invoice is emailed to ${customer.email}.`)
+  expect(await invoicesFor(customer.id)).toHaveLength(1)
+  await sendConfirm.getByRole('button', { name: 'Finalize and send' }).click()
   await expect(composer).toBeHidden()
   const outcome = page.getByText(email.smtp_configured ? /^Invoice \S+ sent$/ : /^Invoice \S+ finalized, email not sent$/)
   await expect(outcome).toBeVisible()
