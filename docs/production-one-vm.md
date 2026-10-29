@@ -384,6 +384,11 @@ Check each line before the first real customer.
 ## Upgrade to a new release
 
 [Upgrade Hardcount](upgrades.md) has the steps: what to do before you
-upgrade, the upgrade on one VM, what to do if it stops, and how to go back.
+upgrade, the upgrade on one VM, and what to do if it stops.
+
+### Going back
+
+To undo an upgrade, restore the backup you took before it:
+[Going back](upgrades.md#going-back).
 
 **Next:** send your first usage event and bill it: [First invoice](first-invoice.md).
