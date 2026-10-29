@@ -2350,8 +2350,13 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
 function PublicCostDashboardCard({ customerId, readOnly = false }: { customerId: string; readOnly?: boolean }) {
   const [latest, setLatest] = useState<{ token: string; public_url: string } | null>(null)
   const [rotating, setRotating] = useState(false)
+  // Asks first: the page can't tell whether a URL already exists (only its
+  // hash is stored), and a new one stops any earlier URL at once, including
+  // one the customer has embedded in their app.
+  const [confirmRotate, setConfirmRotate] = useState(false)
 
   const onRotate = async () => {
+    setConfirmRotate(false)
     setRotating(true)
     try {
       const res = await api.rotateCostDashboardToken(customerId)
@@ -2408,10 +2413,24 @@ function PublicCostDashboardCard({ customerId, readOnly = false }: { customerId:
           </div>
         ) : null}
         {!readOnly && (
-          <Button onClick={onRotate} disabled={rotating} size="sm">
+          <Button onClick={() => setConfirmRotate(true)} disabled={rotating} size="sm">
             {rotating ? <><Loader2 size={14} className="animate-spin mr-2" />Rotating…</> : (latest ? 'Rotate again' : 'Generate URL')}
           </Button>
         )}
+        <AlertDialog open={confirmRotate} onOpenChange={setConfirmRotate}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Generate a new cost-dashboard URL?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Any URL generated before for this customer stops working at once, including one embedded in their app. Send them the new one.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={onRotate}>Generate URL</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </CardContent>
     </Card>
   )

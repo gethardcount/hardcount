@@ -11,6 +11,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import {
@@ -61,13 +65,17 @@ export default function ProviderCostsPage() {
       onError: (err) => showApiError(err, 'Failed to save rate'),
     },
   })
+  // Deleting a rate asks first: new usage of that model and token type then
+  // records no cost, and there is no undo.
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; model: string; token_type: string } | null>(null)
   const remove = useDeleteV1ProviderCostsId({
     mutation: {
       onSuccess: () => {
         invalidate()
+        setDeleteTarget(null)
         toast.success('Rate deleted — already-recorded event costs are unchanged')
       },
-      onError: (err) => showApiError(err, 'Failed to delete rate'),
+      onError: (err) => { setDeleteTarget(null); showApiError(err, 'Failed to delete rate') },
     },
   })
 
@@ -187,7 +195,7 @@ export default function ProviderCostsPage() {
                     <TableCell className="text-sm font-mono text-right">{money(r.unit_cost_cents, 6, r.currency)}</TableCell>
                     <TableCell>
                       <Button variant="ghost" size="icon" aria-label={`Delete ${r.model} ${r.token_type} rate`}
-                        onClick={() => remove.mutate({ id: r.id })} disabled={remove.isPending}>
+                        onClick={() => setDeleteTarget({ id: r.id, model: r.model, token_type: r.token_type })} disabled={remove.isPending}>
                         <Trash2 size={14} />
                       </Button>
                     </TableCell>
@@ -198,6 +206,22 @@ export default function ProviderCostsPage() {
           )}
         </CardContent>
       </Card>
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open && !remove.isPending) setDeleteTarget(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this rate?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteTarget ? `New ${deleteTarget.model} ${deleteTarget.token_type} usage records no cost until you add a rate again. Costs already recorded stay as they are.` : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={remove.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={() => deleteTarget && remove.mutate({ id: deleteTarget.id })} disabled={remove.isPending}>
+              {remove.isPending ? <><Loader2 size={14} className="animate-spin mr-1.5" />Deleting…</> : 'Delete rate'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Layout>
   )
 }

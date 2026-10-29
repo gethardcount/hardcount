@@ -1675,18 +1675,26 @@ export default function InvoiceDetailPage() {
 
       {/* Rotate public-token Confirm — defensive affordance for when the
           public URL has been shared where it shouldn't be (wider email
-          thread, ticketing-system paste, archive leak). Not destructive
-          to the invoice itself, but irreversible for the old URL. */}
-      <TypedConfirmDialog
-        open={showRotatePublicTokenConfirm}
-        onOpenChange={setShowRotatePublicTokenConfirm}
-        title="Rotate public link"
-        description="This invalidates the current public URL for this invoice and mints a new one. Any email, message, or page still linking to the old URL will stop working. Use this if the current link was shared somewhere it shouldn't have been."
-        confirmWord="ROTATE"
-        confirmLabel="Rotate link"
-        onConfirm={() => rotatePublicTokenMutation.mutate()}
-        loading={rotatePublicTokenMutation.isPending}
-      />
+          thread, ticketing-system paste, archive leak). Not destructive to
+          the invoice, and the fix for a stale link is to send the new one,
+          so a plain confirm: typed words are for actions that move money or
+          can't be put right. */}
+      <AlertDialog open={showRotatePublicTokenConfirm} onOpenChange={(open) => { if (!open && !rotatePublicTokenMutation.isPending) setShowRotatePublicTokenConfirm(false) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Rotate public link?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The current public link for this invoice stops working, and a new one replaces it. Any email or page with the old link needs the new one. Use this if the link was shared somewhere it shouldn't have been.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={rotatePublicTokenMutation.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => rotatePublicTokenMutation.mutate()} disabled={rotatePublicTokenMutation.isPending}>
+              {rotatePublicTokenMutation.isPending ? <><Loader2 size={14} className="animate-spin mr-1.5" />Rotating…</> : 'Rotate link'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Record payment Dialog — Stripe-parity operator path for
           out-of-band collection. Amount is implicit (full amount_due);
