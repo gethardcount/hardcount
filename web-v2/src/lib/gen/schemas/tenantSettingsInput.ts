@@ -58,7 +58,7 @@ export interface TenantSettingsInput {
   tax_name?: string;
   /** Whether prices already include tax. */
   tax_inclusive?: boolean;
-  /** What to do when the tax provider fails. `block` holds the invoice until tax succeeds. */
+  /** What to do when the tax provider fails. `block`, the only value, holds the invoice until tax succeeds. */
   tax_on_failure?: TenantSettingsInputTaxOnFailure;
   /**
      * Stripe product tax code used when a plan has none, such as

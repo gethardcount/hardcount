@@ -86,7 +86,7 @@ const (
 // MaxOutboxAttempts is the DLQ threshold. After this many failed attempts a
 // row becomes terminal ('failed') and is no longer retried automatically.
 // Same shape as webhook_outbox — backoff ramp (see outboxBackoff) totals
-// ~72h across 15 attempts, which covers most transient SMTP provider outages.
+// about 52h across 15 attempts, which covers most transient SMTP provider outages.
 const MaxOutboxAttempts = 15
 
 // Lease arithmetic (P5 panel — lease_arithmetic). The invariant chain the
@@ -121,7 +121,7 @@ func ClaimLease(batchSize int) time.Duration {
 }
 
 // IsPermanentSendError classifies handler failures that can NEVER succeed
-// on retry: riding the ~72h backoff ramp on these wastes 15 cycles before
+// on retry: riding the ~52h backoff ramp on these wastes 15 cycles before
 // an operator sees 'failed' (and a suppressed recipient would be
 // re-attempted against a known-dead inbox every slot). ProcessBatch DLQs
 // these immediately.
@@ -216,7 +216,9 @@ func skipReasonOf(err error) any {
 
 // outboxBackoff returns the delay before the next attempt given the current
 // attempt count (1 = after the first failure). Ramp: 1s, 5s, 30s, 2m, 5m,
-// 15m, 30m, 1h, 2h, 4h, 8h, 12h, 12h, 12h, 12h — ~72h total over 15 tries.
+// 15m, 30m, 1h, 2h, 4h, 8h, 12h, 12h, 12h, 12h. 15 tries use the first 14
+// waits, about 52h; the row is given up on after the 15th, so the last entry
+// is never waited.
 func outboxBackoff(attempt int) time.Duration {
 	ramp := []time.Duration{
 		1 * time.Second,

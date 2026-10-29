@@ -29,9 +29,10 @@ One of these:
 - **Hardcount hears about disputes only if Stripe sends them.** The Stripe
   webhook endpoint must have three events turned on:
   `charge.dispute.created`, `charge.dispute.updated` and
-  `charge.dispute.closed`. They are not in the list the Hardcount settings page
-  shows under the webhook address, so add them by hand: in Stripe, open
-  **Developers → Webhooks**, open the endpoint, and add the three events.
+  `charge.dispute.closed`. The Hardcount settings page lists them under the
+  webhook address. In v0.9.0 it did not, so an endpoint set up from that
+  list may lack them. To check, in Stripe open **Developers → Webhooks**,
+  open the endpoint, and add any of the three that is missing.
 
 ## Check
 

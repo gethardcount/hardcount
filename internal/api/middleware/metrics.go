@@ -215,14 +215,14 @@ var (
 	emailOutboxDeadLettered = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "hardcount_email_outbox_dead_lettered_total",
-			Help: "Emails given up on (email_outbox status='failed'), by cause and mode. permanent = the send can never succeed: the address bounced, is suppressed or is not a valid address, or the row cannot be read; max_attempts = 15 tries over about 72 hours failed, often a relay that refuses the sender or credentials. The email is not sent unless an operator requeues it.",
+			Help: "Emails given up on (email_outbox status='failed'), by cause and mode. permanent = the send can never succeed: the address bounced, is suppressed or is not a valid address, or the row cannot be read; max_attempts = 15 tries over about 52 hours failed, often a relay that refuses the sender or credentials. The email is not sent unless an operator requeues it.",
 		},
 		[]string{"cause", "mode"},
 	)
 	webhookOutboxDeadLettered = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "hardcount_webhook_outbox_dead_lettered_total",
-			Help: "Webhook outbox rows given up on (webhook_outbox status='failed') after 15 tries over about 72 hours, by mode: the event and its deliveries were never written, so no endpoint gets it. Endpoint failures are hardcount_webhook_deliveries_total{status=\"failed\"}.",
+			Help: "Webhook outbox rows given up on (webhook_outbox status='failed') after 15 tries over about 52 hours, by mode: the event and its deliveries were never written, so no endpoint gets it. Endpoint failures are hardcount_webhook_deliveries_total{status=\"failed\"}.",
 		},
 		[]string{"cause", "mode"},
 	)
@@ -735,7 +735,7 @@ func RegisterQueueDepthGauges(invoiceGrace time.Duration, count func(query strin
 				`SELECT COALESCE(EXTRACT(EPOCH FROM now() - MIN(next_attempt_at)), 0) FROM email_outbox
 					WHERE status = 'pending' AND next_attempt_at <= now() AND livemode = %t`},
 			{"hardcount_email_outbox_failing_emails",
-				"Emails still pending after 3 or more tries and queued more than 30 minutes ago: their sends keep failing and they are retrying. Usually the SMTP relay refuses the sender or the credentials, or SMTP_HOST is unset. Left alone they are dead-lettered after about 72 hours. -1 = metric query failed.",
+				"Emails still pending after 3 or more tries and queued more than 30 minutes ago: their sends keep failing and they are retrying. Usually the SMTP relay refuses the sender or the credentials, or SMTP_HOST is unset. Left alone they are dead-lettered after about 52 hours. -1 = metric query failed.",
 				`SELECT COUNT(*) FROM email_outbox
 					WHERE status = 'pending' AND attempts >= 3 AND created_at < now() - interval '30 minutes' AND livemode = %t`},
 			// Its rows are marked dispatched in the transaction that writes the

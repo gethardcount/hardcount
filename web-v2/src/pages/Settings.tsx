@@ -1045,14 +1045,13 @@ const webhookSecretSchema = z.object({
 })
 type WebhookSecretForm = z.infer<typeof webhookSecretSchema>
 
-// Mirrors the dispatcher in internal/payment/stripe.go and the timeline filter
-// in internal/invoice/handler.go. Keep in sync when backend adds new handlers —
-// events not in this list are dropped at the default case (harmless but wasted
-// round-trips from Stripe, and they won't surface on invoice timelines).
+// Mirrors the processEvent switch in internal/payment/stripe.go: every event
+// it handles, and no other. Keep in sync when a case is added or removed — an
+// event missing here is never sent, and one listed that the switch does not
+// handle is dropped at its default case.
 const STRIPE_WEBHOOK_EVENTS: { name: string; purpose: string }[] = [
   { name: 'payment_intent.succeeded', purpose: 'marks invoice paid' },
   { name: 'payment_intent.payment_failed', purpose: 'triggers dunning retry' },
-  { name: 'payment_intent.canceled', purpose: 'shows on invoice timeline' },
   { name: 'checkout.session.completed', purpose: 'completes Stripe Checkout returns' },
   { name: 'setup_intent.succeeded', purpose: 'saves customer payment method' },
   { name: 'setup_intent.setup_failed', purpose: 'logs setup errors' },
@@ -1064,6 +1063,11 @@ const STRIPE_WEBHOOK_EVENTS: { name: string; purpose: string }[] = [
   { name: 'charge.refund.updated', purpose: 'tracks async refund status' },
   { name: 'refund.updated', purpose: 'tracks async refund status' },
   { name: 'refund.failed', purpose: 'flags refunds that failed at Stripe' },
+  // Card disputes (#979): recorded against the paid invoice, with the
+  // payment.dispute_opened / payment.dispute_closed webhooks.
+  { name: 'charge.dispute.created', purpose: 'records a card dispute' },
+  { name: 'charge.dispute.updated', purpose: 'tracks the dispute' },
+  { name: 'charge.dispute.closed', purpose: 'records how the dispute ended' },
 ]
 
 // StripeCard is the main orchestrator for a single mode. State machine,

@@ -261,10 +261,12 @@ func TestChargeInvoice_NetworkErrorThenKeyInUse_IsNotADecline(t *testing.T) {
 			}
 
 			// The park's ERROR names the key: a 409 proves an attempt under it
-			// reached Stripe, and the operator looks the attempt up by it.
+			// reached Stripe, and the operator looks the attempt up by it. So
+			// it is the key Stripe received, card included; the bare charge
+			// key finds nothing in Stripe's dashboard.
 			if line := parkAnnouncement(logs.String()); line == "" {
 				t.Errorf("park not announced at ERROR:\n%s", logs)
-			} else if field := "idempotency_key=" + ChargeIdempotencyKey("inv_1", snapshot.ChargeAttemptSeq, tc.purpose); !slices.Contains(strings.Fields(line), field) {
+			} else if field := "idempotency_key=" + wantKey; !slices.Contains(strings.Fields(line), field) {
 				t.Errorf("park announcement does not carry %s:\n%s", field, line)
 			}
 		})

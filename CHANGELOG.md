@@ -29,6 +29,11 @@ original text.
 
 ### Fixed
 
+- **The dashboard lists the card-dispute events to turn on for Stripe.** The Stripe settings card now includes `charge.dispute.created`, `.updated` and `.closed`, so disputes are recorded without reading the runbook. It no longer lists `payment_intent.canceled`, which Hardcount ignores. An endpoint set up from the v0.9.0 list may lack the dispute events: add them in Stripe.
+- **Logs name the idempotency key Stripe received.** A charge's key carries the card, but the logs of an unclear or parked charge named it without the card, so searching Stripe's dashboard for it found nothing.
+- **`tax_on_failure: fallback_manual` is refused with a 422.** The value was removed in ADR-041, but the API still accepted it and then failed in the database. The spec lists `block` only.
+- **Stated retry windows match the code.** The email and webhook outboxes give up after about 52 hours, not 72, in the metric help text and code comments. The LiteLLM endpoint's description says every call type bills on its tokens except those Hardcount does not price, as the code does.
+- **A start-up warning when `PAYMENT_UPDATE_RETURN_URL` is unset.** Without it, a customer who adds a card from the "add a payment method" email lands on a local-development address, like `CUSTOMER_PORTAL_URL` (which already warned).
 - **A parked charge's payment shows once in the invoice's Activity.** When the payment of a parked charge turned up later, paid or declined, the Activity card kept a second "Payment result unknown" row for the same attempt. That attempt now shows once, with its real outcome. ([#1422](https://github.com/gethardcount/hardcount/pull/1422))
 
 ## [0.9.1] - 2026-10-29

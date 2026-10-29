@@ -9,12 +9,11 @@
  */
 
 /**
- * What to do when the tax provider fails. `block` holds the invoice until tax succeeds.
+ * What to do when the tax provider fails. `block`, the only value, holds the invoice until tax succeeds.
  */
 export type TenantSettingsInputTaxOnFailure = typeof TenantSettingsInputTaxOnFailure[keyof typeof TenantSettingsInputTaxOnFailure];
 
 
 export const TenantSettingsInputTaxOnFailure = {
   block: 'block',
-  fallback_manual: 'fallback_manual',
 } as const;
