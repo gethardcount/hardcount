@@ -1217,9 +1217,11 @@ export default function InvoiceDetailPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[50%]">Item</TableHead>
-                  <TableHead className="text-right">Qty</TableHead>
-                  <TableHead className="text-right">Unit price</TableHead>
+                  <TableHead className="sm:w-[50%]">Item</TableHead>
+                  {/* On a phone, quantity and unit price go under the item
+                      so Amount stays on screen (plan 1.14, L-04). */}
+                  <TableHead className="text-right hidden sm:table-cell">Qty</TableHead>
+                  <TableHead className="text-right hidden sm:table-cell">Unit price</TableHead>
                   <TableHead className="text-right">Amount</TableHead>
                 </TableRow>
               </TableHeader>
@@ -1237,9 +1239,12 @@ export default function InvoiceDetailPage() {
                   // signup day. Makes the *why* one hover away without
                   // bloating the line description.
                   const prorationMatch = /prorated (\d+)\/(\d+) days/.exec(item.description)
+                  const qty = formatLineQuantity(item.quantity)
+                  const rate = invoiceLineRate(item, invoice.currency, formatRate(item.unit_amount_decimal, invoice.currency))
                   return (
                     <TableRow key={item.id} className={cn(invoice.status === 'voided' && 'opacity-50')}>
-                      <TableCell>
+                      {/* A long description wraps rather than push Amount off a phone. */}
+                      <TableCell className="whitespace-normal">
                         <div className="flex items-center gap-2 flex-wrap">
                           {prorationMatch ? (
                             <Tooltip>
@@ -1267,6 +1272,7 @@ export default function InvoiceDetailPage() {
                             segment-aware billing under plan changes) — the
                             explicit dates convey what the line covers without
                             us guessing the cause. */}
+                        <div className="sm:hidden text-xs text-muted-foreground font-mono tabular-nums mt-0.5">{qty} × {rate}</div>
                         {item.billing_period_start && item.billing_period_end && (
                           item.billing_period_start !== invoice.billing_period_start ||
                           item.billing_period_end !== invoice.billing_period_end
@@ -1296,10 +1302,10 @@ export default function InvoiceDetailPage() {
                           </Link>
                         )}
                       </TableCell>
-                      <TableCell className="text-right font-mono tabular-nums text-sm">
-                        {formatLineQuantity(item.quantity)}
+                      <TableCell className="text-right font-mono tabular-nums text-sm hidden sm:table-cell">
+                        {qty}
                       </TableCell>
-                      <TableCell className="text-right font-mono tabular-nums text-sm">{invoiceLineRate(item, invoice.currency, formatRate(item.unit_amount_decimal, invoice.currency))}</TableCell>
+                      <TableCell className="text-right font-mono tabular-nums text-sm hidden sm:table-cell">{rate}</TableCell>
                       <TableCell className="text-right font-mono tabular-nums text-sm font-medium">{formatCents(item.amount_cents, invoice.currency)}</TableCell>
                     </TableRow>
                   )

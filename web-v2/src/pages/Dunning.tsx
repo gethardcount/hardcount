@@ -335,13 +335,15 @@ function RunsTab() {
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-8"></TableHead>
+                    {/* On a phone the Customer cell stacks the row (PHONE);
+                        the other columns show from 640px up. */}
                     <TableHead>Customer</TableHead>
-                    <TableHead>Invoice</TableHead>
-                    <TableHead className="text-right">Amount</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Progress</TableHead>
-                    <TableHead>Next step</TableHead>
-                    <TableHead>Started</TableHead>
+                    <TableHead className="hidden sm:table-cell">Invoice</TableHead>
+                    <TableHead className="text-right hidden sm:table-cell">Amount</TableHead>
+                    <TableHead className="hidden sm:table-cell">Status</TableHead>
+                    <TableHead className="hidden sm:table-cell">Progress</TableHead>
+                    <TableHead className="hidden sm:table-cell">Next step</TableHead>
+                    <TableHead className="hidden sm:table-cell">Started</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -350,6 +352,22 @@ function RunsTab() {
                     const cust = customerMap[run.customer_id]
                     const isExpanded = expandedRun === run.id
                     const isFinished = run.state !== 'active'
+                    const invoiceLabel = run.invoice_number || inv?.invoice_number || run.invoice_id.slice(0, 8) + '...'
+                    const amount = dunningRunAmount(run, inv) ?? '\u2014'
+                    const nextStep = run.next_action_at
+                      ? <span className="text-xs text-muted-foreground" title={formatDateTime(run.next_action_at)}>{dunningFinalStepNext(run) ? 'Final step ' : ''}{futureRelativeTime(run.next_action_at, effectiveNow(run.effective_now))}</span>
+                      : <span className="text-xs text-muted-foreground">{'\u2014'}</span>
+                    // Closing a run is done on its invoice: Record offline
+                    // payment, Void or Write off each close the run, with the
+                    // invoice page's safeguards (a reference note, the typed
+                    // word). A second, weaker copy here recorded a payment
+                    // with no reference (R-01).
+                    const openInvoice = !isFinished && (
+                      <Link to={`/invoices/${run.invoice_id}`} onClick={e => e.stopPropagation()}
+                        className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-6 text-xs')}>
+                        Open invoice
+                      </Link>
+                    )
 
                     return (
                       <Fragment key={run.id}>
@@ -364,7 +382,27 @@ function RunsTab() {
                             </button>
                           </TableCell>
                           <TableCell>
-                            <div className="flex items-center gap-2.5">
+                            {/* PHONE: customer and invoice, then the amount;
+                                status and the action, then the next step
+                                (plan 1.14, L-04). */}
+                            <div className="sm:hidden space-y-1.5">
+                              <div className="flex items-baseline justify-between gap-3">
+                                <div className="min-w-0 truncate text-sm">
+                                  <span className="font-medium text-foreground">{cust?.display_name || run.customer_id.slice(0, 8) + '...'}</span>
+                                  <span className="text-muted-foreground font-mono"> · {invoiceLabel}</span>
+                                </div>
+                                <span className="shrink-0 tabular-nums font-mono text-sm">{amount}</span>
+                              </div>
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <StatusBadge status={dunningRunStatus(run.state)} />
+                                  {run.test_clock_id && <TestClockBadge testClockId={run.test_clock_id} />}
+                                  {openInvoice}
+                                </div>
+                                {nextStep}
+                              </div>
+                            </div>
+                            <div className="hidden sm:flex items-center gap-2.5">
                               <InitialsAvatar name={cust?.display_name || 'Unknown'} size="xs" />
                               <div>
                                 <Link to={`/customers/${run.customer_id}`} onClick={e => e.stopPropagation()}
@@ -375,54 +413,41 @@ function RunsTab() {
                               </div>
                             </div>
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="hidden sm:table-cell">
                             <div className="flex items-center gap-1.5">
                               <Link to={`/invoices/${run.invoice_id}`} onClick={e => e.stopPropagation()}
                                 className="text-sm font-mono text-primary hover:underline">
-                                {run.invoice_number || inv?.invoice_number || run.invoice_id.slice(0, 8) + '...'}
+                                {invoiceLabel}
                               </Link>
                               {run.test_clock_id && (
                                 <TestClockBadge testClockId={run.test_clock_id} />
                               )}
                             </div>
                           </TableCell>
-                          <TableCell className="text-right tabular-nums font-mono text-sm">
+                          <TableCell className="text-right tabular-nums font-mono text-sm hidden sm:table-cell">
                             {/* The invoice's amount, a void's included; the
                                 server-side join is the fallback when the
                                 invoice did not load. */}
-                            {dunningRunAmount(run, inv) ?? '\u2014'}
+                            {amount}
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="hidden sm:table-cell">
                             <div className="flex items-center gap-2">
                               <StatusBadge status={dunningRunStatus(run.state)} />
                               {run.resolution && run.resolution !== run.state && (
                                 <Badge variant={run.resolution === 'payment_recovered' ? 'success' : run.resolution === 'invoice_voided' ? 'info' : run.resolution === 'invoice_not_collectible' ? 'warning' : 'outline'}>{RESOLUTION_LABELS[run.resolution] ?? run.resolution}</Badge>
                               )}
-                              {/* Closing a run is done on its invoice: Record offline
-                                  payment, Void or Write off each close the run, with
-                                  the invoice page's safeguards (a reference note,
-                                  the typed word). A second, weaker copy here
-                                  recorded a payment with no reference (R-01). */}
-                              {!isFinished && (
-                                <Link to={`/invoices/${run.invoice_id}`} onClick={e => e.stopPropagation()}
-                                  className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-6 text-xs ml-1')}>
-                                  Open invoice
-                                </Link>
-                              )}
+                              <span className="ml-1">{openInvoice}</span>
                             </div>
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="hidden sm:table-cell">
                             <span className="text-xs text-muted-foreground tabular-nums">
                               {run.attempt_count === 0 ? 'No retries yet' : `${run.attempt_count} ${run.attempt_count === 1 ? 'retry' : 'retries'}`}
                             </span>
                           </TableCell>
-                          <TableCell>
-                            {run.next_action_at
-                              ? <span className="text-xs text-muted-foreground" title={formatDateTime(run.next_action_at)}>{dunningFinalStepNext(run) ? 'Final step ' : ''}{futureRelativeTime(run.next_action_at, effectiveNow(run.effective_now))}</span>
-                              : <span className="text-xs text-muted-foreground">{'\u2014'}</span>
-                            }
+                          <TableCell className="hidden sm:table-cell">
+                            {nextStep}
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="hidden sm:table-cell">
                             <span className="text-xs text-muted-foreground" title={formatDateTime(run.created_at)}>{relativeTime(run.created_at, effectiveNow(run.effective_now))}</span>
                           </TableCell>
                         </TableRow>
@@ -431,7 +456,7 @@ function RunsTab() {
                         {isExpanded && (
                           <TableRow>
                             <TableCell colSpan={8} className="bg-accent px-0 py-0">
-                              <div className="px-12 py-4 border-t border-border">
+                              <div className="px-4 sm:px-12 py-4 border-t border-border">
                                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Recovery timeline</p>
                                 <RunTimeline events={runEvents[run.id]} run={run} />
                                 {/* run.reason is why recovery started (a failed
