@@ -41,7 +41,17 @@
  * When the invoice also has `payment_anomaly`, that reason stays and
  * its message asks the operator to check Stripe before any refund.
  * The disputes themselves are at `GET /v1/invoices/{id}/disputes`
- * (2026-10-19). `amount_below_minimum` reports an invoice Stripe
+ * (2026-10-19). `refunded_in_stripe` reports a refund of the invoice's
+ * payment made in Stripe outside Hardcount that Hardcount did not record
+ * as a credit note: the invoice was not paid yet, the currency
+ * differs, the invoice bought prepaid credit, Hardcount first saw the
+ * refund more than a day after it was made, or the refund is more than
+ * the invoice had left to refund or credit. `code` is
+ * `payment.refunded_in_stripe.` and that review reason. The operator
+ * records it with a credit note that names the refund
+ * (`stripe_refund_id` on `POST /v1/credit-notes`) or dismisses it
+ * (`POST /v1/invoices/{id}/stripe-refunds/{stripe_refund_id}/dismiss`).
+ * Surfaced on paid invoices (2026-10-30). `amount_below_minimum` reports an invoice Stripe
  * refused to charge, or refused a payment page for, because the amount
  * is below Stripe's minimum charge. The minimum depends on the
  * currency the Stripe account settles in; Stripe's reply, in
@@ -72,5 +82,6 @@ export const AttentionReason = {
   collection_paused: 'collection_paused',
   commit_exposure: 'commit_exposure',
   dispute_lost: 'dispute_lost',
+  refunded_in_stripe: 'refunded_in_stripe',
   amount_below_minimum: 'amount_below_minimum',
 } as const;

@@ -93,6 +93,7 @@ var notListRoutes = map[string]string{
 var listRoutesNotSeeded = map[string]string{
 	"/v1/customers/{customer_id}/payment-methods": "a payment method comes from Stripe",
 	"/v1/invoices/{id}/disputes":                  "a dispute comes from Stripe",
+	"/v1/invoices/{id}/stripe-refunds":            "a refund made in Stripe comes from Stripe",
 	"/v1/customers/{id}/sent-emails":              "an email row is written by the email worker's flow, not by these requests",
 }
 
@@ -263,6 +264,7 @@ func TestListRoutes_OnePagingStyle(t *testing.T) {
 		"/v1/dunning/runs":                                "/v1/dunning/runs",
 		"/v1/invoices":                                    "/v1/invoices",
 		"/v1/invoices/{id}/disputes":                      "/v1/invoices/" + finalInvoice + "/disputes",
+		"/v1/invoices/{id}/stripe-refunds":                "/v1/invoices/" + finalInvoice + "/stripe-refunds",
 		"/v1/meters":                                      "/v1/meters",
 		"/v1/plans":                                       "/v1/plans",
 		"/v1/plans/{id}/prices":                           "/v1/plans/" + planB + "/prices",

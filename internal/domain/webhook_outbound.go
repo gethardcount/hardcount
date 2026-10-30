@@ -160,7 +160,14 @@ const (
 	// status it did not have: won, lost, warning_closed (an inquiry that never
 	// became a chargeback) or prevented. A lost dispute that Stripe later
 	// marks won fires it again. Queued in the transaction that records it.
-	EventPaymentDisputeClosed               = "payment.dispute_closed"
+	EventPaymentDisputeClosed = "payment.dispute_closed"
+	// EventPaymentRefundedInStripe fires once per refund made in Stripe
+	// outside Hardcount on one of the invoice's payments (ADR-134), when
+	// Hardcount first sees it: recorded as a credit note, or flagged. Queued in
+	// the transaction that records it. A later change to the refund (it
+	// fails, say) sends nothing more; a recorded note's refund status follows
+	// it as for any refund.
+	EventPaymentRefundedInStripe            = "payment.refunded_in_stripe"
 	EventSubscriptionCreated                = "subscription.created"
 	EventSubscriptionActivated              = "subscription.activated"
 	EventSubscriptionCanceled               = "subscription.canceled"
@@ -246,6 +253,7 @@ var KnownWebhookEventTypes = map[string]bool{
 	EventPaymentReceivedOnVoidedInvoice:     true,
 	EventPaymentDisputeOpened:               true,
 	EventPaymentDisputeClosed:               true,
+	EventPaymentRefundedInStripe:            true,
 	EventPaymentMethodAttached:              true,
 	EventPaymentMethodUpdated:               true,
 	EventSubscriptionCreated:                true,

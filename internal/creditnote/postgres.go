@@ -45,7 +45,7 @@ const cnReadCols = `id, tenant_id, invoice_id, customer_id, credit_note_number,
 	status, reason, subtotal_cents, tax_amount_cents, total_cents,
 	refund_amount_cents, credit_amount_cents, out_of_band_amount_cents,
 	currency, issued_at, voided_at, refund_status, COALESCE(stripe_refund_id,''),
-	COALESCE(refund_unknown_key,''),
+	COALESCE(refund_unknown_key,''), recorded_from_stripe,
 	COALESCE(tax_transaction_id,''), is_simulated, issue_pending,
 	tax_reversal_pending, commit_retired_cents,
 	metadata, created_at, updated_at, recorded_at,
@@ -59,7 +59,7 @@ func (s *PostgresStore) cnScanDest(cn *domain.CreditNote, metaJSON *[]byte) []an
 		&cn.Status, &cn.Reason, &cn.SubtotalCents, &cn.TaxAmountCents, &cn.TotalCents,
 		&cn.RefundAmountCents, &cn.CreditAmountCents, &cn.OutOfBandAmountCents,
 		&cn.Currency, &cn.IssuedAt, &cn.VoidedAt, &cn.RefundStatus, &cn.StripeRefundID,
-		&cn.RefundUnknownKey,
+		&cn.RefundUnknownKey, &cn.RecordedFromStripe,
 		&cn.TaxTransactionID, &cn.IsSimulated, &cn.IssuePending,
 		&cn.TaxReversalPending, &cn.CommitRetiredCents,
 		metaJSON, &cn.CreatedAt, &cn.UpdatedAt, &cn.RecordedAt,
@@ -426,13 +426,15 @@ func (s *PostgresStore) insertCreditNoteTx(ctx context.Context, tx *sql.Tx, tena
 		INSERT INTO credit_notes (id, tenant_id, invoice_id, customer_id, credit_note_number,
 			status, reason, subtotal_cents, tax_amount_cents, total_cents,
 			refund_amount_cents, credit_amount_cents, out_of_band_amount_cents,
-			currency, refund_status, is_simulated, issue_pending, commit_retired_cents, metadata, created_at, updated_at, recorded_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$20,now())
+			currency, refund_status, is_simulated, issue_pending, commit_retired_cents, metadata, created_at, updated_at, recorded_at,
+			stripe_refund_id, recorded_from_stripe)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$20,now(),NULLIF($21,''),$22)
 		RETURNING `+cnReadCols,
 		id, tenantID, cn.InvoiceID, cn.CustomerID, cn.CreditNoteNumber,
 		cn.Status, cn.Reason, cn.SubtotalCents, cn.TaxAmountCents, cn.TotalCents,
 		cn.RefundAmountCents, cn.CreditAmountCents, cn.OutOfBandAmountCents,
 		cn.Currency, cn.RefundStatus, cn.IsSimulated, cn.IssuePending, cn.CommitRetiredCents, metaJSON, now,
+		cn.StripeRefundID, cn.RecordedFromStripe,
 	).Scan(s.cnScanDest(&cn, &metaJSON)...)
 	if err != nil {
 		return domain.CreditNote{}, err
@@ -1088,33 +1090,15 @@ func (s *PostgresStore) ApplyRefundWebhookStatusAudited(ctx context.Context, ten
 	// (RetryRefund creates only past a failed one). An event for that id is
 	// old news about the dead refund, and writing it would put back the
 	// false "failed" the unknown status replaced. RetryRefund settles it.
-	var cn domain.CreditNote
-	flipped := true
-	err = tx.QueryRowContext(ctx, `
-		UPDATE credit_notes SET refund_status=$1, updated_at=$2
-		WHERE stripe_refund_id=$3
-		  AND refund_status IS DISTINCT FROM $1
-		  AND refund_status NOT IN ('failed', 'unknown')
-		  AND ($1 = 'failed' OR refund_status <> 'succeeded')
-		RETURNING id, credit_note_number, customer_id, invoice_id`,
-		status, clock.Now(ctx), stripeRefundID).Scan(&cn.ID, &cn.CreditNoteNumber, &cn.CustomerID, &cn.InvoiceID)
-	if errors.Is(err, sql.ErrNoRows) {
-		flipped = false
-		// Zero rows = either no CN carries this refund id (foreign/dashboard
-		// refund, or not-yet-committed), OR the monotonic guard correctly
-		// skipped a stale pending over a terminal. Distinguish: a genuinely
-		// missing refund id is ErrNotFound (caller acks/retries); a skipped
-		// stale write is a success.
-		var exists bool
-		if err := tx.QueryRowContext(ctx,
-			`SELECT EXISTS(SELECT 1 FROM credit_notes WHERE stripe_refund_id=$1)`, stripeRefundID).Scan(&exists); err != nil {
-			return err
-		}
-		if !exists {
-			return errs.ErrNotFound
-		}
-	} else if err != nil {
+	cn, flipped, found, err := s.ApplyRefundWebhookStatusTx(ctx, tx, stripeRefundID, status)
+	if err != nil {
 		return err
+	}
+	if !found {
+		// No credit note carries this refund id: a refund made outside
+		// Hardcount, or one whose note has not committed yet. A skipped stale
+		// or same-value write is found and returns nil below.
+		return errs.ErrNotFound
 	}
 	if flipped && emit != nil {
 		if err := emit(tx, cn); err != nil {

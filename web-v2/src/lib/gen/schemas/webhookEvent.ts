@@ -24,7 +24,8 @@ export interface WebhookEvent {
      * API returns it, and the few keys the event adds beside it.
      * docs/webhooks.md lists what each event carries;
      * `payment.dispute_opened` and `payment.dispute_closed` carry a
-     * `DisputeWebhookEventData`.
+     * `DisputeWebhookEventData`; `payment.refunded_in_stripe` carries a
+     * `StripeRefundWebhookEventData`.
      */
   payload: WebhookEventPayload;
   created_at: string;

@@ -219,6 +219,12 @@ type Service struct {
 	audit    AuditEmitter
 	resolver clock.Resolver
 	dunning  DunningResolver
+	// Refunds made in Stripe outside Hardcount (ADR-134): see
+	// SetStripeRefundRecording and SetRefundReader.
+	refunds      StripeRefundStore
+	piInvoices   PaymentIntentInvoiceFinder
+	outbox       OutboxEnqueuer
+	refundReader RefundReader
 }
 
 // AuditEmitter is the narrow in-tx audit seam (ADR-090). Issue() emits the
@@ -324,6 +330,15 @@ type CreateInput struct {
 	// method). Set only by CreateAdjustmentDraftTx; operator HTTP creates leave
 	// it false. NOT a JSON/API field — callers set it in Go.
 	IssuePending bool `json:"-"`
+	// StripeRefundID links a refund made in Stripe outside Hardcount as this
+	// note's card refund (ADR-134): refund_amount_cents must be the refund's
+	// amount, the refund must be of this invoice's payment and not made by
+	// Hardcount. The note's refund is then done, and Hardcount calls nothing
+	// at Stripe for it.
+	StripeRefundID string `json:"stripe_refund_id,omitempty"`
+	// linked is the refund StripeRefundID names, as Stripe reported it; set by
+	// Create after reading it.
+	linked *linkedStripeRefund
 }
 
 type CreditLineInput struct {
@@ -367,6 +382,16 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		case !errors.Is(err, errs.ErrNotFound):
 			return domain.CreditNote{}, fmt.Errorf("read invoice for the in-flight payment check: %w", err)
 		}
+	}
+	input.linked = nil
+	if strings.TrimSpace(input.StripeRefundID) != "" && input.InvoiceID != "" {
+		input.StripeRefundID = strings.TrimSpace(input.StripeRefundID)
+		link, err := s.checkLinkedStripeRefund(ctx, tenantID, input)
+		if err != nil {
+			return domain.CreditNote{}, err
+		}
+		input.linked = link
+		return s.createAndIssueLinked(ctx, tenantID, input)
 	}
 	return s.create(ctx, tenantID, input, nil)
 }
@@ -512,7 +537,23 @@ func (s *Service) create(ctx context.Context, tenantID string, input CreateInput
 	// invoice serialize on the lock: the second sees the first's note in
 	// `existingCNs` and is capped correctly, closing the TOCTOU where both
 	// read the same pre-state and both inserted past the invoice total.
+	if input.StripeRefundID != "" && input.linked == nil {
+		// Only Create checks a linked refund against Stripe; no other caller
+		// may name one.
+		return domain.CreditNote{}, errs.Invalid("stripe_refund_id", "a refund made in Stripe is linked only through POST /v1/credit-notes")
+	}
+	// linkRow is the refund's row the note records, set by buildFn when the
+	// note links a refund made in Stripe that Hardcount flagged.
+	var linkRow *domain.InvoiceStripeRefund
 	buildFn := func(lockTx *sql.Tx, existingCNs []domain.CreditNote) (domain.CreditNote, error) {
+		// A linked refund made in Stripe (ADR-134) that a note already
+		// records is refused as such, before the caps that note now fills.
+		if input.linked != nil {
+			var err error
+			if linkRow, err = s.linkUnderLockTx(ctx, lockTx, input.InvoiceID, input.linked, existingCNs); err != nil {
+				return domain.CreditNote{}, err
+			}
+		}
 		// Validate: total credit notes cannot exceed invoice total.
 		// For unpaid invoices, also cap at current amount_due.
 		var existingTotal, existingTaxReversed int64
@@ -547,7 +588,16 @@ func (s *Service) create(ctx context.Context, tenantID string, input CreateInput
 				float64(subtotal)/100, float64(inv.AmountDueCents)/100, float64(inv.CreditsAppliedCents)/100))
 		}
 
-		return s.buildCreditNote(ctx, lockTx, tenantID, input, inv, subtotal, existingTotal, existingTaxReversed, existingCNs)
+		cn, err := s.buildCreditNote(ctx, lockTx, tenantID, input, inv, subtotal, existingTotal, existingTaxReversed, existingCNs)
+		if err != nil || input.linked == nil {
+			return cn, err
+		}
+		// The note records a refund made in Stripe (ADR-134): its card refund
+		// is that refund, already done.
+		cn.StripeRefundID = input.linked.facts.ID
+		cn.RefundStatus = input.linked.facts.Status.CreditNoteRefundStatus()
+		cn.RecordedFromStripe = true
+		return cn, nil
 	}
 
 	// ADR-090 in-tx emission. The `create` row rides the SAME transaction as the
@@ -573,14 +623,31 @@ func (s *Service) create(ctx context.Context, tenantID string, input CreateInput
 				ResourceType:  "credit_note",
 				ResourceID:    created.ID,
 				ResourceLabel: created.CreditNoteNumber,
-				Metadata: map[string]any{
-					"invoice_id":  created.InvoiceID,
-					"customer_id": created.CustomerID,
-					"total_cents": created.TotalCents,
-					"reason":      created.Reason,
-					"currency":    created.Currency,
-				},
+				Metadata: withoutEmpty(map[string]any{
+					"invoice_id":       created.InvoiceID,
+					"customer_id":      created.CustomerID,
+					"total_cents":      created.TotalCents,
+					"reason":           created.Reason,
+					"currency":         created.Currency,
+					"stripe_refund_id": created.StripeRefundID,
+				}),
 			})
+		}
+	}
+	if input.linked != nil {
+		// The flagged row the note records is marked recorded on the
+		// transaction that inserts the note.
+		audited := emit
+		emit = func(tx *sql.Tx, created domain.CreditNote) error {
+			if linkRow != nil {
+				if _, err := s.refunds.LinkStripeRefundTx(ctx, tx, linkRow.ID, created.ID); err != nil {
+					return err
+				}
+			}
+			if audited != nil {
+				return audited(tx, created)
+			}
+			return nil
 		}
 	}
 
@@ -2241,6 +2308,12 @@ func (s *Service) RetryRefund(ctx context.Context, tenantID, id string) (domain.
 	inv, err := s.invoices.Get(ctx, tenantID, cn.InvoiceID)
 	if err != nil {
 		return domain.CreditNote{}, fmt.Errorf("get invoice: %w", err)
+	}
+	// No path may refund a customer twice: a refund made in Stripe on this
+	// invoice that is not settled yet may already be what this retry would
+	// send (ADR-134).
+	if err := s.refundBlockedByStripeRefund(ctx, tenantID, cn.InvoiceID); err != nil {
+		return domain.CreditNote{}, err
 	}
 	// The operator-facing dead end this closes: a refund leg written against an
 	// offline-paid invoice can NEVER succeed, because no Stripe payment backs

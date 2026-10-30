@@ -86,6 +86,7 @@ Each item waits until someone using Hardcount needs it:
 
 After v0.9.0 (in [Unreleased](../CHANGELOG.md#unreleased)):
 
+- **A refund made in the Stripe dashboard is recorded.** It becomes a credit note when it plainly fits the invoice, so the documents and Stripe Tax match the card; otherwise the invoice shows a notice ([ADR-134](adr/134-refunds-made-in-stripe-are-recorded.md)).
 - **A usage-only API key for LiteLLM and other gateways.** It can send usage events and nothing else ([key types](api-keys.md#key-types)). The platform key type and `/v1/tenants`, which nothing could use, are removed ([ADR-133](adr/133-api-key-types-secret-and-ingest.md)).
 
 October 2026, v0.9.0 ([everything it changes](../CHANGELOG.md)):

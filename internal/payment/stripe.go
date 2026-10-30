@@ -128,6 +128,7 @@ type Stripe struct {
 	customerResolver   CustomerByStripeIDResolver // optional; resolves SetupIntent.customer → hardcount id
 	refundUpdater      RefundStatusUpdater        // optional; applies async refund-webhook status to a CN
 	disputes           DisputeRecorder            // optional; records charge.dispute.* against the invoice (#979)
+	externalRefunds    ExternalRefundRecorder     // optional; records refunds made in Stripe outside Hardcount (ADR-134)
 	resolver           clock.Resolver             // optional; binds effective-now from invoice
 	anomalies          PaymentAnomalyRecorder     // optional; durable marker for the attention banner (ADR-068)
 	checkoutSessions   *CheckoutSessionStore      // optional; claim-ledger truth-sync + settle-time expire (ADR-068)
@@ -500,6 +501,25 @@ type DisputeRecorder interface {
 // nil logs and acknowledges dispute events (test default).
 func (s *Stripe) SetDisputeRecorder(r DisputeRecorder) {
 	s.disputes = r
+}
+
+// ExternalRefundRecorder records a refund made in Stripe outside Hardcount
+// on a Hardcount payment (ADR-134): as an issued credit note whose refund is
+// already done, or flagged for the operator, with payment.refunded_in_stripe
+// queued in the same transaction. It also moves the refund status of a
+// credit note that already holds the refund id. Returns errs.ErrNotFound when
+// no Hardcount invoice holds the refund's PaymentIntent (a charge the tenant
+// made outside Hardcount); any other error is transient. payment imports
+// nothing from creditnote; creditnote.Service satisfies it.
+type ExternalRefundRecorder interface {
+	RecordStripeRefund(ctx context.Context, tenantID string, snap domain.StripeRefundSnapshot) (domain.StripeRefundRecordResult, error)
+}
+
+// SetExternalRefundRecorder wires the recorder for refunds that carry no
+// hardcount_cn_id. Without it such a refund only reaches a credit note that
+// holds its id, as before ADR-134 (narrow tests).
+func (s *Stripe) SetExternalRefundRecorder(r ExternalRefundRecorder) {
+	s.externalRefunds = r
 }
 
 // IsUnknownPaymentFailure classifies an error returned from ChargeInvoice
@@ -1630,8 +1650,8 @@ func (s *Stripe) processEvent(ctx context.Context, tenantID string, event domain
 			"stripe_event_id", event.StripeEventID,
 			"failure_message", event.FailureMessage)
 		return nil
-	case "charge.refund.updated", "refund.updated", "refund.failed":
-		// One status-driven handler for all three: each carries a Refund object;
+	case "refund.created", "charge.refund.updated", "refund.updated", "refund.failed":
+		// One status-driven handler for all four: each carries a Refund object;
 		// the source event is irrelevant once we read Refund.status.
 		return s.handleRefundUpdated(ctx, tenantID, event)
 	case "charge.dispute.created", "charge.dispute.updated", "charge.dispute.closed":
@@ -1789,13 +1809,33 @@ const refundWebhookRaceWindow = 15 * time.Minute
 // outside Hardcount does not loop for days.
 const disputeWebhookRaceWindow = refundWebhookRaceWindow
 
-// handleRefundUpdated reconciles the ASYNC outcome of a refund. A refund can
-// return pending at create then later flip to succeeded or FAILED (bank reject /
-// insufficient platform balance → money back to the platform, customer
-// un-refunded), so the create-call status is not final — this webhook is the
-// source of truth. Re-parses the raw payload (data.object is a Refund, NOT the
-// PI-shaped struct HandleWebhook pre-parses), maps the status, and applies it
-// monotonically to the matching credit note.
+// handleRefundUpdated reconciles a refund from its webhook: refund.created,
+// refund.updated, refund.failed and charge.refund.updated each carry the
+// whole Refund object (https://docs.stripe.com/api/refunds/object), so the
+// event type does not matter once Refund.status is read. Re-parses the raw
+// payload (data.object is a Refund, NOT the PI-shaped struct HandleWebhook
+// pre-parses).
+//
+// Which refund it is decides the path (ADR-134):
+//
+//   - metadata hardcount_cn_id is set: Hardcount made it (every refund since
+//     the ADR-063 amendment, 2026-08-04, carries it). Its status moves on the
+//     credit note holding its id, monotonically. No note holds it yet (the
+//     refund call runs after the note's issue commits, so its webhook can
+//     arrive first): a young refund asks Stripe to deliver it again, an old
+//     one is acknowledged, and Retry refund adopts the refund by its
+//     metadata. It is never recorded as a refund made outside Hardcount;
+//   - no metadata, with a PaymentIntent: ExternalRefundRecorder records it.
+//     That also moves the status of a note that already holds the id (a
+//     Hardcount refund from before the metadata, or one this recorded). No
+//     invoice holds the PaymentIntent: young asks for redelivery, old is
+//     acknowledged (a charge made outside Hardcount on the same account);
+//   - no metadata and no PaymentIntent, or no recorder wired: as the first
+//     case, by refund id only. Hardcount charges only through PaymentIntents
+//     (ADR-001), so such a refund is not of a Hardcount payment.
+//
+// Wall clock against Stripe's clock decides young (refundWebhookRaceWindow):
+// the refund's age is real time. An unknown age counts as young.
 func (s *Stripe) handleRefundUpdated(ctx context.Context, tenantID string, event domain.StripeWebhookEvent) error {
 	if s.refundUpdater == nil {
 		slog.Debug("refund webhook: no RefundStatusUpdater wired, skipping", "type", event.EventType)
@@ -1808,15 +1848,22 @@ func (s *Stripe) handleRefundUpdated(ctx context.Context, tenantID string, event
 	var parsed struct {
 		Data struct {
 			Object struct {
-				ID      string `json:"id"`
-				Status  string `json:"status"`
-				Created int64  `json:"created"`
+				ID            string          `json:"id"`
+				Object        string          `json:"object"`
+				Status        string          `json:"status"`
+				Created       int64           `json:"created"`
+				Amount        int64           `json:"amount"`
+				Currency      string          `json:"currency"`
+				Charge        json.RawMessage `json:"charge"`
+				PaymentIntent json.RawMessage `json:"payment_intent"`
+				Reason        *string         `json:"reason"`
 				// FailureReason is Stripe's enum for why a refund failed
 				// (lost_or_stolen_card, expired_or_canceled_card, …).
 				// Persisted into the audit row — before this it existed
 				// only in process logs, so "why did last quarter's
 				// refunds fail" was unanswerable retroactively.
-				FailureReason string `json:"failure_reason"`
+				FailureReason string            `json:"failure_reason"`
+				Metadata      map[string]string `json:"metadata"`
 			} `json:"object"`
 		} `json:"data"`
 	}
@@ -1827,23 +1874,33 @@ func (s *Stripe) handleRefundUpdated(ctx context.Context, tenantID string, event
 	if rf.ID == "" {
 		return fmt.Errorf("%s: refund payload missing id", event.EventType)
 	}
-	status := mapStripeRefundStatus(rf.Status)
+	young := rf.Created == 0 || time.Now().Unix()-rf.Created < int64(refundWebhookRaceWindow.Seconds())
+	ownCN := rf.Metadata["hardcount_cn_id"]
+	pi := stripeObjectID(rf.PaymentIntent)
 
+	if ownCN == "" && pi != "" && s.externalRefunds != nil {
+		return s.recordExternalRefund(ctx, tenantID, event, rf.ID, rf.Status, rf.Created, rf.Amount, rf.Currency,
+			stripeObjectID(rf.Charge), pi, rf.Reason, rf.FailureReason, young)
+	}
+
+	status := mapStripeRefundStatus(rf.Status)
 	err := s.refundUpdater.ApplyRefundWebhook(ctx, tenantID, rf.ID, status, rf.FailureReason)
 	if errors.Is(err, errs.ErrNotFound) {
-		// No Hardcount credit note carries this refund id. Either a refund created
-		// OUTSIDE Hardcount (dashboard / direct API) — ack and ignore, never fabricate
-		// a credit note — OR our own refund whose CN row hasn't committed yet
-		// (rare; the create→persist is synchronous). Disambiguate by age: a very
-		// recent refund gets a bounded redelivery so the row can land; an older
-		// one is foreign and is ack'd permanently.
-		// Fail toward redelivery when the age is recent OR unknown (Created==0,
-		// a malformed/partial payload) — better a bounded retry than silently
-		// dropping a reconciliation for our own not-yet-committed refund.
-		if rf.Created == 0 || time.Now().Unix()-rf.Created < int64(refundWebhookRaceWindow.Seconds()) {
+		// No credit note carries this refund id. For Hardcount's own refund
+		// (hardcount_cn_id) the note's id has not been saved yet: a young
+		// refund gets a bounded redelivery so it can land, and an old one is
+		// acknowledged, because Retry refund adopts it by its metadata. Fail
+		// toward redelivery when the age is unknown (Created==0, a
+		// malformed or partial payload).
+		if young {
 			return fmt.Errorf("refund %s: no matching credit note yet (recent — retry)", rf.ID)
 		}
-		slog.Info("refund webhook acknowledged, no matching credit note (external/dashboard refund)",
+		if ownCN != "" {
+			slog.WarnContext(ctx, "refund webhook for a Hardcount refund whose credit note never saved its id — acknowledged; Retry refund on the credit note adopts it",
+				"refund_id", rf.ID, "credit_note_id", ownCN, "stripe_status", rf.Status, "type", event.EventType)
+			return nil
+		}
+		slog.Info("refund webhook acknowledged, no matching credit note (not a refund of a Hardcount payment)",
 			"refund_id", rf.ID, "stripe_status", rf.Status, "type", event.EventType)
 		return nil
 	}
@@ -1852,6 +1909,92 @@ func (s *Stripe) handleRefundUpdated(ctx context.Context, tenantID string, event
 	}
 	slog.Info("refund status reconciled from webhook",
 		"refund_id", rf.ID, "stripe_status", rf.Status, "hardcount_status", status, "type", event.EventType)
+	return nil
+}
+
+// unmatchedRefund decides what an old refund whose PaymentIntent no invoice
+// holds does. A payment Hardcount made carries hardcount_invoice_id on its
+// PaymentIntent, and its record can still be on its way (a hosted-page
+// payment whose settle has not landed): the delivery fails, so Stripe sends
+// it again for up to three days, instead of the refund being dropped for
+// good. A PaymentIntent with no Hardcount metadata is a charge the tenant made
+// outside Hardcount on the same Stripe account: acknowledged. When Stripe
+// cannot be asked, the delivery fails too. Logged at Warn either way.
+func (s *Stripe) unmatchedRefund(ctx context.Context, event domain.StripeWebhookEvent, refundID, pi, status string) error {
+	if s.client == nil {
+		slog.WarnContext(ctx, "refund webhook names a payment no Hardcount invoice holds, and Stripe cannot be asked whose it is — acknowledged",
+			"stripe_event_id", event.StripeEventID, "stripe_refund_id", refundID, "stripe_payment_intent_id", pi, "status", status)
+		return nil
+	}
+	got, err := s.client.GetPaymentIntent(ctx, pi)
+	if err != nil {
+		slog.WarnContext(ctx, "refund webhook names a payment no Hardcount invoice holds, and reading the payment from Stripe failed — Stripe will send it again",
+			"stripe_event_id", event.StripeEventID, "stripe_refund_id", refundID, "stripe_payment_intent_id", pi, "error", err)
+		return fmt.Errorf("%s: refund %s: read payment %s: %w", event.EventType, refundID, pi, err)
+	}
+	if got.InvoiceID != "" {
+		slog.WarnContext(ctx, "refund webhook names a Hardcount payment no invoice holds yet — Stripe will send it again; if it keeps failing, find invoice hardcount_invoice_id and its payment",
+			"stripe_event_id", event.StripeEventID, "stripe_refund_id", refundID, "stripe_payment_intent_id", pi,
+			"hardcount_invoice_id", got.InvoiceID, "status", status)
+		return fmt.Errorf("%s: refund %s: payment %s carries hardcount_invoice_id %s but no invoice holds it yet (retry)",
+			event.EventType, refundID, pi, got.InvoiceID)
+	}
+	slog.WarnContext(ctx, "refund webhook names a payment no Hardcount invoice holds — acknowledged",
+		"stripe_event_id", event.StripeEventID, "stripe_refund_id", refundID, "stripe_payment_intent_id", pi, "status", status)
+	return nil
+}
+
+// recordExternalRefund hands a refund with no hardcount_cn_id to the
+// ExternalRefundRecorder (ADR-134). A status Hardcount does not know (Stripe
+// added one) fails the delivery so Stripe sends it again, which shows on
+// Stripe's webhook page, instead of the refund being dropped; the domain and
+// the column's CHECK are extended together.
+func (s *Stripe) recordExternalRefund(ctx context.Context, tenantID string, event domain.StripeWebhookEvent,
+	refundID, status string, created, amount int64, currency, chargeID, pi string, reason *string, failureReason string, young bool) error {
+	st := domain.StripeRefundStatus(status)
+	if !st.Valid() {
+		slog.ErrorContext(ctx, "refund webhook carries a status Hardcount does not know — failing the delivery so Stripe redelivers it; add the status to domain.StripeRefundStatus and the invoice_stripe_refunds CHECK",
+			"stripe_event_id", event.StripeEventID, "stripe_refund_id", refundID, "status", status)
+		return fmt.Errorf("%s: refund %s has unknown status %q", event.EventType, refundID, status)
+	}
+	if amount <= 0 || currency == "" {
+		return fmt.Errorf("%s: refund %s has no amount or no currency", event.EventType, refundID)
+	}
+	snap := domain.StripeRefundSnapshot{
+		StripeEventID:         event.StripeEventID,
+		EventAt:               event.OccurredAt,
+		StripeRefundID:        refundID,
+		StripePaymentIntentID: pi,
+		StripeChargeID:        chargeID,
+		AmountCents:           amount,
+		Currency:              currency,
+		Status:                st,
+		FailureReason:         failureReason,
+		Young:                 young,
+	}
+	if reason != nil {
+		snap.Reason = *reason
+	}
+	if created > 0 {
+		snap.CreatedAt = time.Unix(created, 0).UTC()
+	}
+	res, err := s.externalRefunds.RecordStripeRefund(ctx, tenantID, snap)
+	if errors.Is(err, errs.ErrNotFound) {
+		if young {
+			return fmt.Errorf("%s: refund %s: no invoice holds payment %s yet (recent refund — retry)", event.EventType, refundID, pi)
+		}
+		return s.unmatchedRefund(ctx, event, refundID, pi, status)
+	}
+	if err != nil {
+		return fmt.Errorf("%s: record refund %s: %w", event.EventType, refundID, err)
+	}
+	attrs := []any{"stripe_event_id", event.StripeEventID, "stripe_refund_id", refundID, "status", status,
+		"recorded", res.Recorded, "applied", res.Applied, "credit_note_id", res.CreditNoteID}
+	if res.Refund != nil {
+		attrs = append(attrs, "invoice_id", res.Refund.InvoiceID, "outcome", string(res.Refund.Outcome),
+			"review_reason", string(res.Refund.ReviewReason))
+	}
+	slog.InfoContext(ctx, "refund made in Stripe recorded from webhook", attrs...)
 	return nil
 }
 

@@ -77,6 +77,7 @@ A step that inserts a row also sets `app.livemode`, and says so.
 | An invoice notice reads "Below Stripe's minimum charge", or a customer's hosted page has no Pay button for a small amount | [An invoice is below Stripe's minimum charge](below-stripe-minimum.md) |
 | "stale charge check: can't confirm an earlier charge with Stripe" in the logs, or `hardcount_stale_charge_hold_resolutions_total{result="cannot_ask"}` rising | [A charge's result is unclear: interrupted](unclear-charge.md#interrupted-hardcount-cannot-ask-stripe) |
 | An invoice says "after a lost dispute", a `payment.dispute_opened` or `payment.dispute_closed` webhook, or Stripe emails about a dispute | [Card disputes](card-disputes.md) |
+| An invoice says "A refund of … was made in Stripe and not recorded here", a `payment.refunded_in_stripe` webhook, or a refund made in the Stripe dashboard | [A refund made in Stripe](refund-made-in-stripe.md) |
 | `hardcount_creditnote_pending_issue_drafts` growing over days | [A charge's result is unclear: clawback drafts](unclear-charge.md#clawback-drafts-waiting) |
 | `hardcount_audit_write_errors_total` rising | [Audit log gaps](audit-log-gaps.md#audit-write-errors) |
 | `hardcount_audit_uncovered_mutation_total` rising | [Audit log gaps](audit-log-gaps.md#a-change-with-no-audit-row) |

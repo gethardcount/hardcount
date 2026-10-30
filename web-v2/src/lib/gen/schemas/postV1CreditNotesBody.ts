@@ -28,6 +28,19 @@ export type PostV1CreditNotesBody = {
   refund_type?: PostV1CreditNotesBodyRefundType;
   auto_issue?: boolean;
   /**
+     * Links a refund made in Stripe outside Hardcount as this
+     * note's card refund, Stripe's `refunds[]` shape: Hardcount
+     * reads the refund from Stripe and calls nothing else
+     * there for it. The refund must be of the payment that paid
+     * this invoice, not made by Hardcount, and succeeded; `refund_amount_cents` must be its amount,
+     * `credit_amount_cents` 0, and `auto_issue` true (the
+     * note is issued at once). The caps on the invoice still
+     * apply. A refund Hardcount flagged on the invoice
+     * (`refunded_in_stripe`) is then marked recorded. Not with
+     * commit_relief.
+     */
+  stripe_refund_id?: string;
+  /**
      * Mutually exclusive with lines and credit_amount_cents. The
      * relief's split goes in here, not at the top level: a top-level
      * `refund_amount_cents`, `out_of_band_amount_cents` or

@@ -461,6 +461,16 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// Record card disputes (charge.dispute.*) against the disputed invoice,
 	// with payment.dispute_opened / .closed queued in the same tx (#979).
 	stripeAdapter.SetDisputeRecorder(invoiceStore)
+	// Record refunds made in Stripe outside Hardcount (ADR-134): an issued
+	// credit note whose refund is already done, or a flagged row, with
+	// payment.refunded_in_stripe queued in the same tx. The credit-note
+	// domain owns them; it finds the invoice by PaymentIntent through the
+	// invoice store's dispute lookup.
+	creditNoteSvc.SetStripeRefundRecording(creditNoteStore, invoiceStore, outboxStore)
+	if stripeRefunder != nil {
+		creditNoteSvc.SetRefundReader(stripeRefunder)
+	}
+	stripeAdapter.SetExternalRefundRecorder(creditNoteSvc)
 	// Resolve an active dunning run promptly when a card payment settles (the
 	// background-settle paths already resolve via the engine; this closes the
 	// card-success symmetry — #317 follow-up). dunningSvc implements ResolveByInvoice.
@@ -511,6 +521,10 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// Finalize issues relief held on a draft before the invoice can be charged
 	// (release plan row 13).
 	invoiceSvc.SetHeldReliefIssuer(heldReliefIssuerAdapter{svc: creditNoteSvc})
+	// The refunded_in_stripe notice, the timeline's refund rows and the
+	// invoice's stripe-refunds routes read the credit-note domain's records
+	// of refunds made in Stripe (ADR-134).
+	invoiceSvc.SetStripeRefunds(creditNoteSvc)
 	// Mark-uncollectible adapter (ADR-036 amendment) — Stripe-standard
 	// dunning terminal action. Wires here because it depends on the
 	// invoice service which is defined just above; other dunning

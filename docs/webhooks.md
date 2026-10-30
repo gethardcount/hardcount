@@ -332,6 +332,7 @@ the charge's Stripe PaymentIntent (`stripe_payment_intent_id`), its error
 | `payment.received_on_voided_invoice` | Money arrived for a voided invoice. Refund it. | `incoming_payment_intent_id`, `captured_cents` |
 | `payment.dispute_opened` | A customer disputed a card payment with their bank (a chargeback), and Hardcount recorded it against the invoice. Sent once per dispute. *(always sent)* | `dispute` |
 | `payment.dispute_closed` | A recorded dispute closed. Sent again if Stripe turns a loss into a win. *(always sent)* | `dispute` |
+| `payment.refunded_in_stripe` | A payment on the invoice was refunded in Stripe, outside Hardcount (the Stripe dashboard, or Stripe's API called directly), and Hardcount recorded it. Sent once per refund, when Hardcount first sees it. *(always sent)* | `refund` |
 
 For the four anomaly events, `incoming_payment_intent_id` is the charge that
 raised the event and `captured_cents` is what it took. Match the charge by
@@ -357,6 +358,32 @@ or `prevented`. When the first Stripe event Hardcount receives is already the
 close, both events are sent with the closed status, in either order. What a
 dispute does and how to turn on Stripe's dispute events:
 [Card disputes](ops/runbook/card-disputes.md).
+
+`refund` is the refund as `GET /v1/invoices/{id}/stripe-refunds` lists it,
+with `stripe_refund_id`, `stripe_payment_intent_id`, `amount_cents`,
+`currency`, Stripe's `status` and `outcome`, what Hardcount did with it:
+
+- `credit_note`: Hardcount recorded it as the issued credit note
+  `credit_note_id`, whose card refund is this refund. Hardcount made no refund
+  call for it, and the note reverses its share of the tax.
+- `other_payment`: a refund of a payment that did not pay the invoice (a
+  second charge, or money on a voided invoice). No credit note.
+- `needs_review`: a refund of the invoice's own payment that Hardcount did
+  not record; `review_reason` says why. The invoice shows a notice until the
+  operator records it with a credit note or dismisses it.
+- `not_refunded`: it failed or was canceled before it succeeded. No money
+  moved.
+
+The event is sent when the outcome is decided: at once for most refunds, and
+for a refund first seen pending, when Stripe says it succeeded, failed or was
+canceled.
+
+The invoice is as it was: a refund never changes its status or amounts. A
+later change to the refund, such as a failure, sends nothing more; a
+recorded note's `refund_status` follows it. Refunds Hardcount makes itself
+send no event. Hardcount hears of a refund made in Stripe only with
+`refund.created` on the Stripe webhook endpoint:
+[A refund made in Stripe](ops/runbook/refund-made-in-stripe.md).
 
 ### Payment methods: `data.payment_method`
 

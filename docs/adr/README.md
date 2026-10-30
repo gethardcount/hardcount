@@ -173,6 +173,7 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [131](131-webhook-events-carry-their-resource.md) | 2026-10-24 | Accepted | Integrations | A webhook event's data is the resource it is about, as the API returns it, plus the few facts the resource lacks; one resource per family |
 | [132](132-returned-credit-goes-back-to-its-grants.md) | 2026-10-30 | Accepted | Credits | Credit a void or credit note hands back goes back to the grants it was drawn from, with their expiry and kind; past expiry, it expires at once |
 | [133](133-api-key-types-secret-and-ingest.md) | 2026-10-30 | Accepted | Platform & ops | API keys are secret or ingest (usage only); platform keys and /v1/tenants are removed |
+| [134](134-refunds-made-in-stripe-are-recorded.md) | 2026-10-30 | Accepted | Payments | A refund made in Stripe outside Hardcount is recorded as an issued credit note when it plainly fits the invoice, and flagged otherwise; `payment.refunded_in_stripe` |
 
 > ℹ️ **ADR-084 was never used.** No file has ever carried that number (verified
 > across every ref). It is a skipped number, not a lost decision.

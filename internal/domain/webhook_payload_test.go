@@ -165,6 +165,16 @@ func goldenDispute() InvoiceDispute {
 	}
 }
 
+func goldenStripeRefund() InvoiceStripeRefund {
+	return InvoiceStripeRefund{
+		ID: "hc_srf_golden", InvoiceID: "hc_inv_golden", StripeRefundID: "re_golden",
+		StripePaymentIntentID: "pi_golden", StripeChargeID: "ch_golden", AmountCents: 4000, Currency: "USD",
+		Status: StripeRefundSucceeded, Reason: "requested_by_customer", Outcome: StripeRefundRecordedAsCreditNote,
+		CreditNoteID: "hc_cn_golden", RefundCreatedAt: goldenAt, LastEventAt: goldenAt, LastStripeEventID: "evt_golden",
+		Livemode: false, CreatedAt: goldenAt, UpdatedAt: goldenAt,
+	}
+}
+
 // goldenWebhookData renders one event type's data from the fixed resources,
 // with the extras its emitter sets filled with fixed values.
 func goldenWebhookData(t *testing.T, eventType string) map[string]any {
@@ -183,6 +193,8 @@ func goldenWebhookData(t *testing.T, eventType string) map[string]any {
 		return InvoiceWebhookData(goldenInvoice(), anomaly)
 	case EventPaymentDisputeOpened, EventPaymentDisputeClosed:
 		return InvoiceWebhookData(goldenInvoice(), map[string]any{"dispute": goldenDispute()})
+	case EventPaymentRefundedInStripe:
+		return InvoiceWebhookData(goldenInvoice(), map[string]any{"refund": goldenStripeRefund()})
 	case EventPaymentMethodAttached:
 		return PaymentMethodWebhookData(goldenPaymentMethod(), map[string]any{"stripe_payment_method_id": "pm_golden"})
 	case EventPaymentMethodUpdated:

@@ -96,6 +96,7 @@ func (h *Handler) Routes() chi.Router {
 	r.Post("/{id}/issue", h.issue)
 	r.Post("/{id}/void", h.void)
 	r.Post("/{id}/retry-refund", h.retryRefund)
+	r.Post("/{id}/attach-stripe-refund", h.attachStripeRefund)
 	r.Post("/{id}/send", h.sendEmail)
 	return r
 }
@@ -120,6 +121,10 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	if req.CommitRelief != nil {
 		if len(req.Lines) > 0 {
 			respond.Validation(w, r, "commit_relief and lines are mutually exclusive — the relief derives its single line from the commit's remaining credits")
+			return
+		}
+		if req.StripeRefundID != "" {
+			respond.ValidationField(w, r, "stripe_refund_id", "stripe_refund_id cannot be used with commit_relief: a refund made in Stripe on an invoice that bought prepaid credit is retired with commit relief allocated out_of_band, then dismissed on the invoice")
 			return
 		}
 		if req.CreditAmountCents > 0 {
@@ -165,14 +170,20 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Auto-issue if requested (create + issue in one call)
-	if input.AutoIssue {
+	// Auto-issue if requested (create + issue in one call). A note linked to
+	// a refund made in Stripe comes back already issued: Create issues it on
+	// the transaction that creates it.
+	if input.AutoIssue && cn.Status == domain.CreditNoteDraft {
 		issued, err := h.svc.Issue(r.Context(), tenantID, cn.ID)
 		if err != nil {
 			// CN was created but issue failed — void the draft to avoid orphans.
 			// The void is itself a CAS-gated audited flip (svc.Void), so the
-			// created-then-voided pair leaves a truthful two-row trail.
-			_, _ = h.svc.Void(r.Context(), tenantID, cn.ID)
+			// created-then-voided pair leaves a truthful two-row trail. A void
+			// that fails leaves a draft behind: say so loudly, never silently.
+			if _, verr := h.svc.Void(r.Context(), tenantID, cn.ID); verr != nil {
+				slog.ErrorContext(r.Context(), "credit note created but its issue failed, and voiding the draft failed too; the draft stays: issue or void it by hand",
+					"credit_note_id", cn.ID, "invoice_id", cn.InvoiceID, "issue_error", err, "void_error", verr)
+			}
 			respond.FromError(w, r, err, "credit_note")
 			return
 		}
@@ -184,6 +195,34 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respond.JSON(w, r, http.StatusCreated, cn)
+}
+
+// AttachStripeRefundRequest is the body of
+// POST /v1/credit-notes/{id}/attach-stripe-refund.
+type AttachStripeRefundRequest struct {
+	StripeRefundID string `json:"stripe_refund_id"`
+}
+
+// attachStripeRefund makes a refund made in Stripe the card refund of an
+// issued credit note whose own refund failed (ADR-134). The audit row is
+// written in the attach's transaction.
+func (h *Handler) attachStripeRefund(w http.ResponseWriter, r *http.Request) {
+	tenantID := auth.TenantID(r.Context())
+	id := chi.URLParam(r, "id")
+	var body AttachStripeRefundRequest
+	if !respond.DecodeStrict(w, r, &body) {
+		return
+	}
+	cn, err := h.svc.AttachStripeRefund(r.Context(), tenantID, id, body.StripeRefundID)
+	if errors.Is(err, errs.ErrNotFound) {
+		respond.NotFound(w, r, "credit note")
+		return
+	}
+	if err != nil {
+		respond.FromError(w, r, err, "credit_note")
+		return
+	}
+	respond.JSON(w, r, http.StatusOK, cn)
 }
 
 func (h *Handler) stats(w http.ResponseWriter, r *http.Request) {

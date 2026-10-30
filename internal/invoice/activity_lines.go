@@ -220,6 +220,11 @@ func creditNoteLine(cn domain.CreditNote, actor *activity.Actor, refundFailure s
 		Amount: activity.Amount(cn.TotalCents, cn.Currency), Actor: actor,
 		Detail: []activity.Segment{{activity.L(activity.LinkCreditNote, cn.ID, cn.CreditNoteNumber)}},
 	}
+	if cn.RecordedFromStripe {
+		// The note records a refund made in Stripe outside Hardcount
+		// (ADR-134): the refund is the event, the note its record.
+		l.Title = "Refunded in Stripe"
+	}
 	if r := strings.TrimSpace(cn.Reason); r != "" {
 		l.Detail = append(l.Detail, activity.Text(activity.CreditNoteReason(r)))
 	}
@@ -470,6 +475,68 @@ func humanizeCode(code string) string {
 		return ""
 	}
 	return strings.ToUpper(s[:1]) + strings.ToLower(s[1:])
+}
+
+// stripeRefundLine is the row for a refund made in Stripe outside Hardcount
+// that no credit note records (ADR-134). A refund recorded as a credit note
+// has no row of its own: the note's row, titled "Refunded in Stripe", tells
+// it. The operator who refunded in Stripe is not an actor a line can name,
+// so the row carries none.
+func stripeRefundLine(r domain.InvoiceStripeRefund) activity.Line {
+	id := activity.Text("Stripe refund " + r.StripeRefundID)
+	l := activity.Line{
+		Kind: "stripe_refund." + string(r.Outcome), Title: "Refunded in Stripe",
+		Amount: activity.Amount(r.AmountCents, r.Currency), Detail: []activity.Segment{id},
+	}
+	if reason := humanizeCode(r.Reason); reason != "" {
+		l.Detail = append(l.Detail, activity.Text("Reason: "+reason))
+	}
+	switch r.Outcome {
+	case domain.StripeRefundOtherPayment:
+		l.Title, l.Tone = "Extra payment refunded in Stripe", activity.ToneNeutral
+		l.Detail = append(l.Detail, activity.Text("A payment that did not pay this invoice"))
+	case domain.StripeRefundNotRefunded:
+		// No money moved, so the row asks for no amount.
+		l.Title, l.Tone, l.Amount = "Refund in Stripe did not go through", activity.ToneNeutral, nil
+		l.Detail = append(l.Detail, activity.Segment{activity.M(r.AmountCents, r.Currency), activity.T(" not refunded")})
+		if f := humanizeCode(r.FailureReason); f != "" {
+			l.Detail = append(l.Detail, activity.Text(f))
+		}
+	case domain.StripeRefundDismissed:
+		l.Tone = activity.ToneNeutral
+		l.Detail = append(l.Detail, activity.Text("Handled outside Hardcount: "+r.DismissedNote))
+	case domain.StripeRefundAwaiting:
+		// Not yet known to have gone through: no amount moved yet.
+		l.Title, l.Tone, l.Amount = "Refund in Stripe in progress", activity.ToneNeutral, nil
+		l.Detail = append(l.Detail, activity.Segment{activity.M(r.AmountCents, r.Currency), activity.T(" waiting for Stripe")})
+	default: // needs_review
+		l.Tone = activity.ToneWarning
+		l.Problem = "Not recorded here: " + stripeRefundReviewWords(r.ReviewReason) + "."
+	}
+	return l
+}
+
+// stripeRefundReviewWords is why a refund made in Stripe was flagged, in the
+// timeline's words.
+func stripeRefundReviewWords(r domain.StripeRefundReviewReason) string {
+	switch r {
+	case domain.StripeRefundReviewInvoiceNotPaid:
+		return "the invoice was not paid when Stripe reported it"
+	case domain.StripeRefundReviewCurrencyMismatch:
+		return "it is in another currency"
+	case domain.StripeRefundReviewPrepaidCommit:
+		return "the invoice bought prepaid credit"
+	case domain.StripeRefundReviewSeenLate:
+		return "Hardcount heard of it more than a day late"
+	case domain.StripeRefundReviewCreditNoteRefundFailed:
+		return "a credit note's card refund on this invoice failed, and this may replace it"
+	case domain.StripeRefundReviewExceedsCardRefundable:
+		return "it is more than the payment had left to refund"
+	case domain.StripeRefundReviewExceedsCreditable:
+		return "it is more than the invoice had left to credit"
+	default:
+		return "it needs review"
+	}
 }
 
 // disputeLines are the dispute rows (#979): "Payment disputed" when Stripe

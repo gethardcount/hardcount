@@ -1105,6 +1105,19 @@ export interface paths {
                         refund_type?: "refund" | "credit";
                         auto_issue?: boolean;
                         /**
+                         * @description Links a refund made in Stripe outside Hardcount as this
+                         *     note's card refund, Stripe's `refunds[]` shape: Hardcount
+                         *     reads the refund from Stripe and calls nothing else
+                         *     there for it. The refund must be of the payment that paid
+                         *     this invoice, not made by Hardcount, and succeeded; `refund_amount_cents` must be its amount,
+                         *     `credit_amount_cents` 0, and `auto_issue` true (the
+                         *     note is issued at once). The caps on the invoice still
+                         *     apply. A refund Hardcount flagged on the invoice
+                         *     (`refunded_in_stripe`) is then marked recorded. Not with
+                         *     commit_relief.
+                         */
+                        stripe_refund_id?: string;
+                        /**
                          * @description Mutually exclusive with lines and credit_amount_cents. The
                          *     relief's split goes in here, not at the top level: a top-level
                          *     `refund_amount_cents`, `out_of_band_amount_cents` or
@@ -3879,7 +3892,11 @@ export interface paths {
          *     `charge_attempt.succeeded|failed|unknown|below_minimum`), dunning retries, credit
          *     notes, customer emails, and card disputes (source `dispute`, a
          *     `payment.dispute_opened` row and, once Stripe closes the dispute, a
-         *     `payment.dispute_closed` row; both at Stripe's own time).
+         *     `payment.dispute_closed` row; both at Stripe's own time), and refunds
+         *     made in Stripe outside Hardcount that no credit note records (source
+         *     `stripe_refund`, event_type `payment.refunded_in_stripe`, at Stripe's
+         *     own time). A refund recorded as a credit note shows as that note's
+         *     row, titled "Refunded in Stripe".
          *     A draft invoice returns an empty list.
          *
          *     Each row carries `line`, the row in the activity line standard's
@@ -3918,6 +3935,55 @@ export interface paths {
         get: operations["listInvoiceDisputes"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/invoices/{id}/stripe-refunds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the refunds made in Stripe on an invoice
+         * @description Returns the refunds made in Stripe outside Hardcount on the
+         *     invoice's payments, oldest first, whatever Hardcount did with each:
+         *     recorded as a credit note, flagged for review, or neither. An
+         *     invoice without any returns an empty list. Hardcount records them
+         *     from Stripe's refund webhook events, of which `refund.created` must
+         *     be turned on for the Stripe webhook endpoint.
+         */
+        get: operations["listInvoiceStripeRefunds"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/invoices/{id}/stripe-refunds/{stripe_refund_id}/dismiss": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dismiss a refund made in Stripe
+         * @description Records that a refund made in Stripe, which Hardcount flagged on the
+         *     invoice (`outcome` `needs_review`), was handled outside Hardcount.
+         *     The `refunded_in_stripe` notice clears. Nothing else changes: no
+         *     credit note, no money, no email. The note is kept on the refund and
+         *     in the audit log.
+         */
+        post: operations["dismissInvoiceStripeRefund"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4089,6 +4155,35 @@ export interface paths {
          *       instead and returned with `status` `voided`.
          */
         post: operations["issueCreditNote"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/credit-notes/{id}/attach-stripe-refund": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Attach a refund made in Stripe to a credit note whose refund failed
+         * @description Makes a refund made in Stripe outside Hardcount the card refund of an
+         *     `issued` credit note whose own refund `failed`: use it when you
+         *     refunded in the Stripe dashboard what the note's refund was for.
+         *     Hardcount reads the refund from Stripe first. It must be of the
+         *     payment that paid the invoice, not made by Hardcount, succeeded, and
+         *     of exactly the note's `refund_amount_cents`. The note then holds the
+         *     refund (`stripe_refund_id`, `refund_status`, `recorded_from_stripe`),
+         *     and a flagged row for it is marked recorded. No new credit note, no
+         *     second tax reversal and no Stripe refund call. Hardcount never matches
+         *     a refund to a note by amount on its own.
+         */
+        post: operations["attachStripeRefundToCreditNote"];
         delete?: never;
         options?: never;
         head?: never;
@@ -7519,7 +7614,17 @@ export interface components {
          *     When the invoice also has `payment_anomaly`, that reason stays and
          *     its message asks the operator to check Stripe before any refund.
          *     The disputes themselves are at `GET /v1/invoices/{id}/disputes`
-         *     (2026-10-19). `amount_below_minimum` reports an invoice Stripe
+         *     (2026-10-19). `refunded_in_stripe` reports a refund of the invoice's
+         *     payment made in Stripe outside Hardcount that Hardcount did not record
+         *     as a credit note: the invoice was not paid yet, the currency
+         *     differs, the invoice bought prepaid credit, Hardcount first saw the
+         *     refund more than a day after it was made, or the refund is more than
+         *     the invoice had left to refund or credit. `code` is
+         *     `payment.refunded_in_stripe.` and that review reason. The operator
+         *     records it with a credit note that names the refund
+         *     (`stripe_refund_id` on `POST /v1/credit-notes`) or dismisses it
+         *     (`POST /v1/invoices/{id}/stripe-refunds/{stripe_refund_id}/dismiss`).
+         *     Surfaced on paid invoices (2026-10-30). `amount_below_minimum` reports an invoice Stripe
          *     refused to charge, or refused a payment page for, because the amount
          *     is below Stripe's minimum charge. The minimum depends on the
          *     currency the Stripe account settles in; Stripe's reply, in
@@ -7534,7 +7639,7 @@ export interface components {
          *     this reason (2026-10-23).
          * @enum {string}
          */
-        AttentionReason: "tax_calculation_failed" | "tax_location_required" | "payment_failed" | "payment_unconfirmed" | "payment_anomaly" | "payment_processing" | "payment_scheduled" | "awaiting_payment" | "no_payment_method" | "dunning_exhausted" | "collection_paused" | "commit_exposure" | "dispute_lost" | "amount_below_minimum";
+        AttentionReason: "tax_calculation_failed" | "tax_location_required" | "payment_failed" | "payment_unconfirmed" | "payment_anomaly" | "payment_processing" | "payment_scheduled" | "awaiting_payment" | "no_payment_method" | "dunning_exhausted" | "collection_paused" | "commit_exposure" | "dispute_lost" | "refunded_in_stripe" | "amount_below_minimum";
         /**
          * @description What an operator must know BEFORE recording an OFFLINE payment on a
          *     written-off invoice (`status = uncollectible`) — a consequence that
@@ -9059,6 +9164,13 @@ export interface components {
              */
             refund_status: "none" | "pending" | "succeeded" | "failed" | "unknown";
             stripe_refund_id?: string;
+            /**
+             * @description True when the card refund is a refund made in Stripe outside
+             *     Hardcount: recorded from Stripe's refund webhook, or linked with
+             *     `stripe_refund_id` at create. Hardcount made no refund call for
+             *     it; `stripe_refund_id` names the refund.
+             */
+            recorded_from_stripe: boolean;
             bill_to_snapshot?: components["schemas"]["DocumentBillTo"];
             supplier_snapshot?: components["schemas"]["DocumentSupplier"];
             /** @description Tax provider's reversal transaction, set when the note is issued. */
@@ -9168,7 +9280,7 @@ export interface components {
             /** Format: date-time */
             timestamp: string;
             /** @enum {string} */
-            source: "lifecycle" | "payment" | "dunning" | "email" | "credit_note" | "dispute";
+            source: "lifecycle" | "payment" | "dunning" | "email" | "credit_note" | "dispute" | "stripe_refund";
             /** @example invoice.finalized */
             event_type: string;
             /**
@@ -9256,6 +9368,97 @@ export interface components {
             total: components["schemas"]["ListTotal"];
         };
         /**
+         * @description A refund made in Stripe outside Hardcount (the Stripe dashboard, or
+         *     Stripe's API called directly) on one of the invoice's payments,
+         *     recorded from Stripe's `refund.created`, `refund.updated`,
+         *     `refund.failed` and `charge.refund.updated` webhook events. It holds
+         *     the refund as the newest of those events showed it. Hardcount's own
+         *     refunds are never listed here. `outcome` is what Hardcount did when
+         *     it first saw the refund, and only the operator changes it after
+         *     that.
+         */
+        InvoiceStripeRefund: {
+            /** @example hc_srf_6f1c0a7e9b2d4c8e1a3b5d7f */
+            id: string;
+            invoice_id: string;
+            /** @example re_3MtJUT2eZvKYlo2C1Fq6Lk8M */
+            stripe_refund_id: string;
+            /** @description The refunded payment. */
+            stripe_payment_intent_id: string;
+            stripe_charge_id?: string;
+            /** Format: int64 */
+            amount_cents: number;
+            /** @example USD */
+            currency: string;
+            /**
+             * @description Stripe's refund status, as Stripe sends it.
+             * @enum {string}
+             */
+            status: "pending" | "requires_action" | "succeeded" | "failed" | "canceled";
+            /** @description Stripe's refund reason, for example `requested_by_customer`. Absent when none was given. */
+            reason?: string;
+            /** @description Why Stripe could not make the refund, once it failed. */
+            failure_reason?: string;
+            /**
+             * @description `awaiting`: first seen pending or requiring action. Nothing is
+             *     recorded or sent until a later event shows how it ended: once it
+             *     succeeded it is decided as below (the 24-hour rule counts from
+             *     Hardcount's first sighting); failed or canceled, it becomes
+             *     `not_refunded`. `credit_note`: recorded as an issued credit note whose card
+             *     refund is this refund (`credit_note_id`); Hardcount called
+             *     nothing at Stripe for it. `other_payment`: a refund of a payment
+             *     that did not pay the invoice (a second charge, or money on a
+             *     voided invoice), so no credit note. `needs_review`: a refund of
+             *     the invoice's own payment that Hardcount did not record
+             *     (`review_reason` says why); the invoice shows the
+             *     `refunded_in_stripe` notice until the operator records it with a
+             *     credit note or dismisses it. `not_refunded`: first seen already
+             *     failed or canceled, so no money moved. `dismissed`: the operator
+             *     handled it outside Hardcount.
+             * @enum {string}
+             */
+            outcome: "awaiting" | "credit_note" | "other_payment" | "needs_review" | "not_refunded" | "dismissed";
+            /**
+             * @description Why a refund of the invoice's own payment was flagged instead of
+             *     recorded. Set for `needs_review` and `dismissed`, and kept when
+             *     the operator records one with a credit note.
+             * @enum {string}
+             */
+            review_reason?: "invoice_not_paid" | "currency_mismatch" | "prepaid_commit" | "seen_late" | "credit_note_refund_failed" | "exceeds_card_refundable" | "exceeds_creditable";
+            /** @description The credit note that records the refund, when `outcome` is `credit_note`. */
+            credit_note_id?: string;
+            dismissed_note?: string;
+            /** Format: date-time */
+            dismissed_at?: string;
+            /**
+             * Format: date-time
+             * @description When Stripe made the refund.
+             */
+            refund_created_at: string;
+            livemode: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        InvoiceStripeRefundList: {
+            data: components["schemas"]["InvoiceStripeRefund"][];
+            total: components["schemas"]["ListTotal"];
+        };
+        /**
+         * @description The `data` of the outbound webhook event `payment.refunded_in_stripe`
+         *     (docs/webhooks.md): the invoice the refunded payment belongs to, as
+         *     it stood (a refund never changes it), and the refund as the API
+         *     returns it. Sent once per refund, when its outcome is decided: when
+         *     Hardcount first sees it, or, for a refund first seen in flight, when
+         *     it succeeds, fails or is canceled. Saved in the same transaction that
+         *     records it. A later change to the refund sends nothing more.
+         */
+        StripeRefundWebhookEventData: {
+            invoice: components["schemas"]["Invoice"];
+            refund: components["schemas"]["InvoiceStripeRefund"];
+        };
+        /**
          * @description The `data` of the outbound webhook events `payment.dispute_opened`
          *     and `payment.dispute_closed` (docs/webhooks.md): the invoice the
          *     disputed payment paid and the dispute, each as the API returns it.
@@ -9276,7 +9479,7 @@ export interface components {
         InvoicePaymentTimeline: {
             events: components["schemas"]["InvoiceTimelineEvent"][];
             /** @description Sources that could not be read, so their rows are missing. */
-            degraded: ("audit" | "credit_notes" | "emails" | "dunning" | "charge_attempts" | "disputes")[];
+            degraded: ("audit" | "credit_notes" | "emails" | "dunning" | "charge_attempts" | "disputes" | "stripe_refunds")[];
             /** @description True when the credit-note source hit its limit of 100 rows. */
             truncated: boolean;
         };
@@ -10475,7 +10678,8 @@ export interface components {
              *     API returns it, and the few keys the event adds beside it.
              *     docs/webhooks.md lists what each event carries;
              *     `payment.dispute_opened` and `payment.dispute_closed` carry a
-             *     `DisputeWebhookEventData`.
+             *     `DisputeWebhookEventData`; `payment.refunded_in_stripe` carries a
+             *     `StripeRefundWebhookEventData`.
              */
             payload: {
                 [key: string]: unknown;
@@ -14593,6 +14797,116 @@ export interface operations {
             422: components["responses"]["InvalidPage"];
         };
     };
+    listInvoiceStripeRefunds: {
+        parameters: {
+            query?: {
+                /**
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                 *     that is not a whole number, is a 422 with `param: limit`.
+                 */
+                limit?: components["parameters"]["Limit"];
+                /**
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                 *     not a whole number, is a 422 with `param: offset`.
+                 */
+                offset?: components["parameters"]["Offset"];
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The invoice's refunds made in Stripe. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceStripeRefundList"];
+                };
+            };
+            /** @description Invoice not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["InvalidPage"];
+        };
+    };
+    dismissInvoiceStripeRefund: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+                stripe_refund_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description How the refund was handled. 1 to 1000 characters. */
+                    note: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The dismissed refund. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceStripeRefund"];
+                };
+            };
+            /** @description Invoice or refund not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The refund does not need review (it is recorded, dismissed or not a refund of the invoice's payment). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or too long `note`, or an unknown field. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     getCreditNoteStats: {
         parameters: {
             query?: never;
@@ -14694,6 +15008,71 @@ export interface operations {
             };
         };
     };
+    attachStripeRefundToCreditNote: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    stripe_refund_id: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The credit note, now holding the refund. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditNote"];
+                };
+            };
+            /** @description Credit note not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The note is not issued or its refund did not fail, another note already holds the refund, its row was decided another way, Stripe is not connected, or the note changed since it was read. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The refund is not of this invoice's payment, was made by Hardcount, has not succeeded, is in another currency or of another amount, or an unknown field. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     retryCreditNoteRefund: {
         parameters: {
             query?: never;
@@ -14738,7 +15117,12 @@ export interface operations {
              *     the refund already succeeded or is still processing at Stripe,
              *     Stripe is not connected, or the invoice was paid outside Stripe
              *     (void the note and issue a new one with
-             *     `out_of_band_amount_cents`).
+             *     `out_of_band_amount_cents`). Code `stripe_refund_unresolved`: the
+             *     invoice has a refund made in Stripe that is not recorded yet
+             *     (flagged for review, or still in flight). Record it, attach it to
+             *     this note with `POST /v1/credit-notes/{id}/attach-stripe-refund`
+             *     if it replaces this refund, or dismiss it, then retry: a retry
+             *     now could refund the customer twice.
              */
             409: {
                 headers: {

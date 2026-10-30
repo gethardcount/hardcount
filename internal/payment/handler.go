@@ -274,13 +274,15 @@ func endpointAuthoritativeEvent(eventType string) bool {
 	switch eventType {
 	case "setup_intent.succeeded", "setup_intent.setup_failed":
 		return true
-	case "charge.refund.updated", "refund.updated", "refund.failed":
-		// Refund objects carry no hardcount_* metadata (we create them with only an
-		// idempotency key), so without admitting them here they'd be silently
-		// skipped and the async-refund-status reconciliation would never run. The
-		// endpoint tenant is authoritative (per-tenant secret + HMAC); the handler
-		// still matches the refund to a Hardcount credit note by stripe_refund_id and
-		// acks anything foreign.
+	case "refund.created", "charge.refund.updated", "refund.updated", "refund.failed":
+		// A Refund carries its own metadata, not the PaymentIntent's, so it
+		// never has hardcount_tenant_id: Hardcount's own refunds carry only
+		// hardcount_cn_id (since the ADR-063 amendment), and a refund made in
+		// the Stripe dashboard carries none. Without admitting them here they
+		// would be skipped. The endpoint tenant is authoritative (per-tenant
+		// secret + HMAC); the handler matches the refund to a credit note by
+		// its id, or to the invoice its PaymentIntent paid (ADR-134), and
+		// acknowledges a refund of a payment no Hardcount invoice holds.
 		return true
 	case "charge.dispute.created", "charge.dispute.updated", "charge.dispute.closed":
 		// A Dispute carries its own metadata, not the PaymentIntent's, so a

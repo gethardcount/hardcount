@@ -387,6 +387,8 @@ func (h *Handler) Routes() chi.Router {
 	r.Post("/{id}/mark-uncollectible", h.markUncollectible)
 	r.Get("/{id}/payment-timeline", h.paymentTimeline)
 	r.Get("/{id}/disputes", h.listDisputes)
+	r.Get("/{id}/stripe-refunds", h.listStripeRefunds)
+	r.Post("/{id}/stripe-refunds/{stripe_refund_id}/dismiss", h.dismissStripeRefund)
 	return r
 }
 
@@ -1344,6 +1346,8 @@ const (
 	rankEscalated         = 50
 	rankLifecycleTerminal = 60 // paid / voided / uncollectible
 	rankCreditNote        = 70
+	// A refund made in Stripe follows the payment it refunds (ADR-134).
+	rankStripeRefund = 72
 	// A dispute opens after the payment it disputes, and closes after it
 	// opened.
 	rankDisputeOpened   = 74
@@ -1442,7 +1446,7 @@ type TimelineEvent struct {
 	// invoice id + kind. Composite timestamp keys collided the moment
 	// rows shared a frozen-clock instant (ADR-104).
 	ID              string `json:"id"`
-	Source          string `json:"source"` // "stripe" / "dunning" / "lifecycle" / "email" / "credit_note"
+	Source          string `json:"source"` // "stripe" / "dunning" / "lifecycle" / "email" / "credit_note" / "dispute" / "stripe_refund"
 	EventType       string `json:"event_type"`
 	Status          string `json:"status"`
 	Description     string `json:"description"`
@@ -1888,6 +1892,12 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 		degrade("disputes", derr)
 	}
 
+	// Refunds made in Stripe outside Hardcount (ADR-134).
+	stripeRefunds, srerr := h.svc.ListStripeRefunds(ctx, tenantID, inv.ID)
+	if srerr != nil {
+		degrade("stripe_refunds", srerr)
+	}
+
 	// Charge attempts: the one owner of payment rows (ADR-103).
 	attempts, aerr := h.svc.ListChargeAttempts(ctx, tenantID, inv.ID)
 	if aerr != nil {
@@ -2117,6 +2127,12 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 		events = append(events, disputeTimelineEvents(disputes)...)
 	}
 
+	// Refunds made in Stripe that no credit note records: one row at
+	// Stripe's own time. A recorded one shows as its credit note's row.
+	if srerr == nil {
+		events = append(events, stripeRefundTimelineEvents(stripeRefunds)...)
+	}
+
 	// Payments render from ONE owner: the charge-attempt facts (ADR-103).
 	// A dunning row that already carries the attempt's PaymentIntent
 	// absorbs it (the campaign row is the richer telling of the same
@@ -2190,6 +2206,81 @@ func disputeTimelineEvents(disputes []domain.InvoiceDispute) []TimelineEvent {
 		})
 	}
 	return out
+}
+
+// stripeRefundTimelineEvents renders each refund made in Stripe that no
+// credit note records as one row at the refund's creation time, a
+// real-world Stripe instant.
+func stripeRefundTimelineEvents(refunds []domain.InvoiceStripeRefund) []TimelineEvent {
+	var out []TimelineEvent
+	for _, r := range refunds {
+		if r.Outcome == domain.StripeRefundRecordedAsCreditNote {
+			continue
+		}
+		out = append(out, TimelineEvent{
+			ID:              "stripe_refund:" + r.ID,
+			Timestamp:       r.RefundCreatedAt.Format(time.RFC3339),
+			sortAt:          r.RefundCreatedAt,
+			tieRank:         rankStripeRefund,
+			Source:          "stripe_refund",
+			EventType:       domain.EventPaymentRefundedInStripe,
+			PaymentIntentID: r.StripePaymentIntentID,
+			Line:            stripeRefundLine(r),
+		})
+	}
+	return out
+}
+
+// listStripeRefunds returns the refunds made in Stripe outside Hardcount on
+// the invoice's payments (ADR-134), oldest first: recorded as a credit note,
+// flagged, or neither. An invoice without any returns an empty list.
+func (h *Handler) listStripeRefunds(w http.ResponseWriter, r *http.Request) {
+	tenantID := auth.TenantID(r.Context())
+	id := chi.URLParam(r, "id")
+	page, ok := respond.ParsePage(w, r)
+	if !ok {
+		return
+	}
+	refunds, err := h.svc.ListInvoiceStripeRefunds(r.Context(), tenantID, id)
+	if errors.Is(err, errs.ErrNotFound) {
+		respond.NotFound(w, r, "invoice")
+		return
+	}
+	if err != nil {
+		slog.ErrorContext(r.Context(), "list invoice refunds made in Stripe", "invoice_id", id, "error", err)
+		respond.InternalError(w, r)
+		return
+	}
+	respond.List(w, r, respond.Window(refunds, page), len(refunds))
+}
+
+// DismissStripeRefundRequest is the body of
+// POST /v1/invoices/{id}/stripe-refunds/{stripe_refund_id}/dismiss.
+type DismissStripeRefundRequest struct {
+	Note string `json:"note"`
+}
+
+// dismissStripeRefund records that the operator handled a flagged refund
+// made in Stripe outside Hardcount, with their note (ADR-134). The audit row
+// is written in the dismissal's transaction.
+func (h *Handler) dismissStripeRefund(w http.ResponseWriter, r *http.Request) {
+	tenantID := auth.TenantID(r.Context())
+	id := chi.URLParam(r, "id")
+	refundID := chi.URLParam(r, "stripe_refund_id")
+	var body DismissStripeRefundRequest
+	if !respond.DecodeStrict(w, r, &body) {
+		return
+	}
+	row, err := h.svc.DismissStripeRefund(r.Context(), tenantID, id, refundID, body.Note)
+	if errors.Is(err, errs.ErrNotFound) {
+		respond.NotFound(w, r, "stripe_refund")
+		return
+	}
+	if err != nil {
+		respond.FromError(w, r, err, "stripe_refund")
+		return
+	}
+	respond.JSON(w, r, http.StatusOK, row)
 }
 
 // listDisputes returns the card disputes Stripe reported against the

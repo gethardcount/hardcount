@@ -74,6 +74,7 @@ var responseTypes = map[string][]any{
 	"HostedInvoice":                {hostedinvoice.HostedInvoicePayload{}},
 	"Invoice":                      {domain.Invoice{}},
 	"InvoiceDispute":               {domain.InvoiceDispute{}},
+	"InvoiceStripeRefund":          {domain.InvoiceStripeRefund{}},
 	"InvoiceLineItem":              {domain.InvoiceLineItem{}},
 	"InvoicePreview":               {billing.PreviewResult{}},
 	"InvoiceTimelineEvent":         {invoice.TimelineEvent{}},

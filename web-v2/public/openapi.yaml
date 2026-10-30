@@ -939,6 +939,7 @@ components:
         - collection_paused
         - commit_exposure
         - dispute_lost
+        - refunded_in_stripe
         - amount_below_minimum
       description: |
         Closed, typed code naming why an invoice needs operator
@@ -973,7 +974,17 @@ components:
         When the invoice also has `payment_anomaly`, that reason stays and
         its message asks the operator to check Stripe before any refund.
         The disputes themselves are at `GET /v1/invoices/{id}/disputes`
-        (2026-10-19). `amount_below_minimum` reports an invoice Stripe
+        (2026-10-19). `refunded_in_stripe` reports a refund of the invoice's
+        payment made in Stripe outside Hardcount that Hardcount did not record
+        as a credit note: the invoice was not paid yet, the currency
+        differs, the invoice bought prepaid credit, Hardcount first saw the
+        refund more than a day after it was made, or the refund is more than
+        the invoice had left to refund or credit. `code` is
+        `payment.refunded_in_stripe.` and that review reason. The operator
+        records it with a credit note that names the refund
+        (`stripe_refund_id` on `POST /v1/credit-notes`) or dismisses it
+        (`POST /v1/invoices/{id}/stripe-refunds/{stripe_refund_id}/dismiss`).
+        Surfaced on paid invoices (2026-10-30). `amount_below_minimum` reports an invoice Stripe
         refused to charge, or refused a payment page for, because the amount
         is below Stripe's minimum charge. The minimum depends on the
         currency the Stripe account settles in; Stripe's reply, in
@@ -3155,6 +3166,7 @@ components:
         - is_simulated
         - issue_pending
         - tax_reversal_pending
+        - recorded_from_stripe
         - created_at
         - updated_at
       properties:
@@ -3216,6 +3228,13 @@ components:
             the same idempotency key.
         stripe_refund_id:
           type: string
+        recorded_from_stripe:
+          type: boolean
+          description: |
+            True when the card refund is a refund made in Stripe outside
+            Hardcount: recorded from Stripe's refund webhook, or linked with
+            `stripe_refund_id` at create. Hardcount made no refund call for
+            it; `stripe_refund_id` names the refund.
         bill_to_snapshot:
           $ref: "#/components/schemas/DocumentBillTo"
         supplier_snapshot:
@@ -3371,7 +3390,7 @@ components:
           format: date-time
         source:
           type: string
-          enum: [lifecycle, payment, dunning, email, credit_note, dispute]
+          enum: [lifecycle, payment, dunning, email, credit_note, dispute, stripe_refund]
         event_type:
           type: string
           example: invoice.finalized
@@ -3500,6 +3519,135 @@ components:
         total:
           $ref: "#/components/schemas/ListTotal"
 
+    InvoiceStripeRefund:
+      type: object
+      description: |
+        A refund made in Stripe outside Hardcount (the Stripe dashboard, or
+        Stripe's API called directly) on one of the invoice's payments,
+        recorded from Stripe's `refund.created`, `refund.updated`,
+        `refund.failed` and `charge.refund.updated` webhook events. It holds
+        the refund as the newest of those events showed it. Hardcount's own
+        refunds are never listed here. `outcome` is what Hardcount did when
+        it first saw the refund, and only the operator changes it after
+        that.
+      required:
+        - id
+        - invoice_id
+        - stripe_refund_id
+        - stripe_payment_intent_id
+        - amount_cents
+        - currency
+        - status
+        - outcome
+        - refund_created_at
+        - livemode
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          example: hc_srf_6f1c0a7e9b2d4c8e1a3b5d7f
+        invoice_id:
+          type: string
+        stripe_refund_id:
+          type: string
+          example: re_3MtJUT2eZvKYlo2C1Fq6Lk8M
+        stripe_payment_intent_id:
+          type: string
+          description: The refunded payment.
+        stripe_charge_id:
+          type: string
+        amount_cents:
+          type: integer
+          format: int64
+        currency:
+          type: string
+          example: USD
+        status:
+          type: string
+          enum: [pending, requires_action, succeeded, failed, canceled]
+          description: Stripe's refund status, as Stripe sends it.
+        reason:
+          type: string
+          description: Stripe's refund reason, for example `requested_by_customer`. Absent when none was given.
+        failure_reason:
+          type: string
+          description: Why Stripe could not make the refund, once it failed.
+        outcome:
+          type: string
+          enum: [awaiting, credit_note, other_payment, needs_review, not_refunded, dismissed]
+          description: |
+            `awaiting`: first seen pending or requiring action. Nothing is
+            recorded or sent until a later event shows how it ended: once it
+            succeeded it is decided as below (the 24-hour rule counts from
+            Hardcount's first sighting); failed or canceled, it becomes
+            `not_refunded`. `credit_note`: recorded as an issued credit note whose card
+            refund is this refund (`credit_note_id`); Hardcount called
+            nothing at Stripe for it. `other_payment`: a refund of a payment
+            that did not pay the invoice (a second charge, or money on a
+            voided invoice), so no credit note. `needs_review`: a refund of
+            the invoice's own payment that Hardcount did not record
+            (`review_reason` says why); the invoice shows the
+            `refunded_in_stripe` notice until the operator records it with a
+            credit note or dismisses it. `not_refunded`: first seen already
+            failed or canceled, so no money moved. `dismissed`: the operator
+            handled it outside Hardcount.
+        review_reason:
+          type: string
+          enum: [invoice_not_paid, currency_mismatch, prepaid_commit, seen_late, credit_note_refund_failed, exceeds_card_refundable, exceeds_creditable]
+          description: |
+            Why a refund of the invoice's own payment was flagged instead of
+            recorded. Set for `needs_review` and `dismissed`, and kept when
+            the operator records one with a credit note.
+        credit_note_id:
+          type: string
+          description: The credit note that records the refund, when `outcome` is `credit_note`.
+        dismissed_note:
+          type: string
+        dismissed_at:
+          type: string
+          format: date-time
+        refund_created_at:
+          type: string
+          format: date-time
+          description: When Stripe made the refund.
+        livemode:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    InvoiceStripeRefundList:
+      type: object
+      required: [data, total]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/InvoiceStripeRefund"
+        total:
+          $ref: "#/components/schemas/ListTotal"
+
+    StripeRefundWebhookEventData:
+      type: object
+      description: |
+        The `data` of the outbound webhook event `payment.refunded_in_stripe`
+        (docs/webhooks.md): the invoice the refunded payment belongs to, as
+        it stood (a refund never changes it), and the refund as the API
+        returns it. Sent once per refund, when its outcome is decided: when
+        Hardcount first sees it, or, for a refund first seen in flight, when
+        it succeeds, fails or is canceled. Saved in the same transaction that
+        records it. A later change to the refund sends nothing more.
+      required: [invoice, refund]
+      properties:
+        invoice:
+          $ref: "#/components/schemas/Invoice"
+        refund:
+          $ref: "#/components/schemas/InvoiceStripeRefund"
+
     DisputeWebhookEventData:
       type: object
       description: |
@@ -3535,7 +3683,7 @@ components:
           description: Sources that could not be read, so their rows are missing.
           items:
             type: string
-            enum: [audit, credit_notes, emails, dunning, charge_attempts, disputes]
+            enum: [audit, credit_notes, emails, dunning, charge_attempts, disputes, stripe_refunds]
         truncated:
           type: boolean
           description: True when the credit-note source hit its limit of 100 rows.
@@ -5200,7 +5348,8 @@ components:
             API returns it, and the few keys the event adds beside it.
             docs/webhooks.md lists what each event carries;
             `payment.dispute_opened` and `payment.dispute_closed` carry a
-            `DisputeWebhookEventData`.
+            `DisputeWebhookEventData`; `payment.refunded_in_stripe` carries a
+            `StripeRefundWebhookEventData`.
         created_at:
           type: string
           format: date-time
@@ -6796,6 +6945,19 @@ paths:
                     puts the whole note in that channel. Not with commit_relief.
                 auto_issue:
                   type: boolean
+                stripe_refund_id:
+                  type: string
+                  description: |
+                    Links a refund made in Stripe outside Hardcount as this
+                    note's card refund, Stripe's `refunds[]` shape: Hardcount
+                    reads the refund from Stripe and calls nothing else
+                    there for it. The refund must be of the payment that paid
+                    this invoice, not made by Hardcount, and succeeded; `refund_amount_cents` must be its amount,
+                    `credit_amount_cents` 0, and `auto_issue` true (the
+                    note is issued at once). The caps on the invoice still
+                    apply. A refund Hardcount flagged on the invoice
+                    (`refunded_in_stripe`) is then marked recorded. Not with
+                    commit_relief.
                 commit_relief:
                   type: object
                   description: |
@@ -10656,7 +10818,11 @@ paths:
         `charge_attempt.succeeded|failed|unknown|below_minimum`), dunning retries, credit
         notes, customer emails, and card disputes (source `dispute`, a
         `payment.dispute_opened` row and, once Stripe closes the dispute, a
-        `payment.dispute_closed` row; both at Stripe's own time).
+        `payment.dispute_closed` row; both at Stripe's own time), and refunds
+        made in Stripe outside Hardcount that no credit note records (source
+        `stripe_refund`, event_type `payment.refunded_in_stripe`, at Stripe's
+        own time). A refund recorded as a credit note shows as that note's
+        row, titled "Refunded in Stripe".
         A draft invoice returns an empty list.
 
         Each row carries `line`, the row in the activity line standard's
@@ -10721,6 +10887,102 @@ paths:
                 $ref: "#/components/schemas/Error"
         "422":
           $ref: "#/components/responses/InvalidPage"
+
+  /v1/invoices/{id}/stripe-refunds:
+    get:
+      tags: [Invoices]
+      summary: List the refunds made in Stripe on an invoice
+      operationId: listInvoiceStripeRefunds
+      description: |
+        Returns the refunds made in Stripe outside Hardcount on the
+        invoice's payments, oldest first, whatever Hardcount did with each:
+        recorded as a credit note, flagged for review, or neither. An
+        invoice without any returns an empty list. Hardcount records them
+        from Stripe's refund webhook events, of which `refund.created` must
+        be turned on for the Stripe webhook endpoint.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: The invoice's refunds made in Stripe.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvoiceStripeRefundList"
+        "404":
+          description: Invoice not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/InvalidPage"
+
+  /v1/invoices/{id}/stripe-refunds/{stripe_refund_id}/dismiss:
+    post:
+      tags: [Invoices]
+      summary: Dismiss a refund made in Stripe
+      operationId: dismissInvoiceStripeRefund
+      description: |
+        Records that a refund made in Stripe, which Hardcount flagged on the
+        invoice (`outcome` `needs_review`), was handled outside Hardcount.
+        The `refunded_in_stripe` notice clears. Nothing else changes: no
+        credit note, no money, no email. The note is kept on the refund and
+        in the audit log.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: stripe_refund_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [note]
+              properties:
+                note:
+                  type: string
+                  description: How the refund was handled. 1 to 1000 characters.
+      responses:
+        "200":
+          description: The dismissed refund.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvoiceStripeRefund"
+        "404":
+          description: Invoice or refund not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: The refund does not need review (it is recorded, dismissed or not a refund of the invoice's payment).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Missing or too long `note`, or an unknown field.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /v1/credit-notes/stats:
     get:
@@ -10874,6 +11136,65 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /v1/credit-notes/{id}/attach-stripe-refund:
+    post:
+      tags: [CreditNotes]
+      summary: Attach a refund made in Stripe to a credit note whose refund failed
+      operationId: attachStripeRefundToCreditNote
+      description: |
+        Makes a refund made in Stripe outside Hardcount the card refund of an
+        `issued` credit note whose own refund `failed`: use it when you
+        refunded in the Stripe dashboard what the note's refund was for.
+        Hardcount reads the refund from Stripe first. It must be of the
+        payment that paid the invoice, not made by Hardcount, succeeded, and
+        of exactly the note's `refund_amount_cents`. The note then holds the
+        refund (`stripe_refund_id`, `refund_status`, `recorded_from_stripe`),
+        and a flagged row for it is marked recorded. No new credit note, no
+        second tax reversal and no Stripe refund call. Hardcount never matches
+        a refund to a note by amount on its own.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [stripe_refund_id]
+              properties:
+                stripe_refund_id:
+                  type: string
+      responses:
+        "200":
+          description: The credit note, now holding the refund.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditNote"
+        "404":
+          description: Credit note not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: The note is not issued or its refund did not fail, another note already holds the refund, its row was decided another way, Stripe is not connected, or the note changed since it was read.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: The refund is not of this invoice's payment, was made by Hardcount, has not succeeded, is in another currency or of another amount, or an unknown field.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /v1/credit-notes/{id}/retry-refund:
     post:
       tags: [CreditNotes]
@@ -10914,7 +11235,12 @@ paths:
             the refund already succeeded or is still processing at Stripe,
             Stripe is not connected, or the invoice was paid outside Stripe
             (void the note and issue a new one with
-            `out_of_band_amount_cents`).
+            `out_of_band_amount_cents`). Code `stripe_refund_unresolved`: the
+            invoice has a refund made in Stripe that is not recorded yet
+            (flagged for review, or still in flight). Record it, attach it to
+            this note with `POST /v1/credit-notes/{id}/attach-stripe-refund`
+            if it replaces this refund, or dismiss it, then retry: a retry
+            now could refund the customer twice.
           content:
             application/json:
               schema:
