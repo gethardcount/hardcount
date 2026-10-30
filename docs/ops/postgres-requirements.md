@@ -65,6 +65,8 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO hardcount_ap
 
 `ALTER DEFAULT PRIVILEGES` covers the tables the admin user creates later, so run the upgrades as that same admin user.
 
+In every `APP_ENV`, Hardcount also refuses to start when the limited user can't read and write a table it needs. The log line `refusing to start: the app database role is missing grants the app needs` lists the `GRANT` statements to run as the admin user. This happens when the database was created without the `ALTER DEFAULT PRIVILEGES` lines above (for example on managed Postgres): requests that wrote those tables used to fail with a 500 after the server started.
+
 **You see:** `CREATE ROLE`, `GRANT` and `ALTER DEFAULT PRIVILEGES` lines from psql. When Hardcount starts, it checks the user and starts listening.
 
 ### Settings Hardcount sets on each transaction
