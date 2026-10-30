@@ -1065,6 +1065,37 @@ test('a new API key shows once, with a try-it line, and closes only from "I\'ve 
   await expect(shown).toHaveCount(0)
 })
 
+test('each Home attention line counts the rows of the list it opens', async ({ page }) => {
+  // Each count is its list's total (other workers add invoices meanwhile, so
+  // the answers are fixed here). The overview, which leaves out test-clock
+  // invoices, says none are open: the line still shows, without an amount.
+  const totals: Record<string, number> = {
+    '/v1/invoices status=finalized payment_status=failed': 3,
+    '/v1/dunning/runs state=active': 2,
+    '/v1/invoices status=finalized': 5,
+  }
+  await page.route(url => url.searchParams.get('limit') === '1' && (url.pathname === '/v1/invoices' || url.pathname === '/v1/dunning/runs'), route => {
+    const url = new URL(route.request().url())
+    const filters = [...url.searchParams].filter(([k]) => k !== 'limit').map(([k, v]) => `${k}=${v}`).join(' ')
+    const n = totals[`${url.pathname} ${filters}`]
+    return n === undefined ? route.fallback() : route.fulfill({ json: { data: [], total: n } })
+  })
+  await page.route(url => url.pathname === '/v1/analytics/overview', async route => {
+    const answer = await route.fetch()
+    await route.fulfill({ response: answer, json: { ...(await answer.json()), open_invoices: 0, outstanding_by_currency: [] } })
+  })
+  await page.goto('/')
+  const lines = page.getByRole('region', { name: 'Attention required' }).getByRole('link')
+  await expect(lines.filter({ hasText: '3 open invoices with a failed payment' })).toHaveAttribute('href', '/invoices?status=finalized&payment_status=failed')
+  await expect(lines.filter({ hasText: '2 invoices in payment retry' })).toHaveAttribute('href', '/dunning?state=active')
+  await expect(lines.filter({ hasText: /^5 open invoices(?! with)/ })).toHaveAttribute('href', '/invoices?status=finalized')
+  await expect(lines.filter({ hasText: 'outstanding' })).toHaveCount(0)
+
+  // The retry line opens Dunning already filtered to the runs it counted.
+  await lines.filter({ hasText: 'in payment retry' }).click()
+  await expect(page).toHaveURL(/\/dunning\?state=active$/)
+})
+
 test('Home defines MRR on its card', async ({ page }) => {
   await page.goto('/')
   await expect(page.getByText('Monthly recurring revenue: the base fees of active subscriptions, per month.', { exact: false })).toBeVisible()
