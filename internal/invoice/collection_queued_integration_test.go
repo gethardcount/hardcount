@@ -100,7 +100,7 @@ func TestFinalizeWritesQueueCollection(t *testing.T) {
 			t.Fatalf("create draft: %v", err)
 		}
 		now := time.Now().UTC()
-		if _, err := store.FinalizeWithDates(ctx, tenantID, draft.ID, now, now.AddDate(0, 0, 30)); err != nil {
+		if _, err := store.FinalizeWithDates(ctx, tenantID, draft.ID, now, now.AddDate(0, 0, 30), []string{}); err != nil {
 			t.Fatalf("finalize: %v", err)
 		}
 		if !queued(t, draft.ID) {

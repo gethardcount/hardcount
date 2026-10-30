@@ -1513,6 +1513,20 @@ func (s *Service) finalize(ctx context.Context, tenantID, id string, checkTaxExp
 	// synchronously; 'stripe' → a calculation that the tax_status block
 	// below may park as pending until the retry worker commits it. Skipped
 	// when no retrier is wired (isolated unit-test fixtures).
+	//
+	// The lines are read first: finalize refuses if any line is added from
+	// here on, since the tax below covers only these (#1298).
+	var taxedLineIDs []string
+	if isOperatorComposed(inv) {
+		lines, lerr := s.store.ListLineItems(ctx, tenantID, id)
+		if lerr != nil {
+			return domain.Invoice{}, fmt.Errorf("read lines at finalize: %w", lerr)
+		}
+		taxedLineIDs = make([]string, 0, len(lines))
+		for _, l := range lines {
+			taxedLineIDs = append(taxedLineIDs, l.ID)
+		}
+	}
 	if s.taxRetrier != nil && isOperatorComposed(inv) {
 		taxed, terr := s.taxRetrier.ComputeTaxForInvoice(ctx, tenantID, id)
 		if terr != nil {
@@ -1581,7 +1595,7 @@ func (s *Service) finalize(ctx context.Context, tenantID, id string, checkTaxExp
 	if isOperatorComposed(inv) {
 		issuedAt := s.clock.Now(ctx)
 		dueAt := domain.AddDaysIn(issuedAt, inv.NetPaymentTermDays, s.invoiceDisplayLoc(ctx, inv))
-		finalized, err = s.store.FinalizeWithDates(ctx, tenantID, id, issuedAt, dueAt)
+		finalized, err = s.store.FinalizeWithDates(ctx, tenantID, id, issuedAt, dueAt, taxedLineIDs)
 	} else {
 		finalized, err = s.store.UpdateStatus(ctx, tenantID, id, domain.InvoiceFinalized)
 	}

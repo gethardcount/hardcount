@@ -51,7 +51,9 @@ type Store interface {
 	// invoices so the issue/due dates anchor to issuance, not draft-create
 	// (Stripe finalized_at semantics). Cycle invoices keep their build-time
 	// dates via UpdateStatus.
-	FinalizeWithDates(ctx context.Context, tenantID, id string, issuedAt, dueAt time.Time) (domain.Invoice, error)
+	// taxedLineIDs are the lines Finalize read before computing tax; it
+	// refuses when the invoice's lines differ (#1298).
+	FinalizeWithDates(ctx context.Context, tenantID, id string, issuedAt, dueAt time.Time, taxedLineIDs []string) (domain.Invoice, error)
 	// StampChargeOutcome records a charge attempt's outcome (processing /
 	// unknown, or a failure with no PaymentIntent) only if no outcome was
 	// recorded since the attempt read attemptSeq — the charge_attempt_seq its
