@@ -163,6 +163,13 @@ const DunningRetryReasonNeedsConfirmation = "needs_confirmation"
 // (ErrBelowMinimumCharge). Nothing was charged and the run ends on it.
 const DunningRetryReasonBelowMinimum = BelowMinimumCode
 
+// DunningRetryReasonPaymentProcessing is the reason on a retry_attempted
+// event for a retry whose payment Stripe is still processing (#1289). The
+// attempt counts and the run stays active: the payment's outcome decides
+// what happens next. A later failure gets a retry_attempted row of its own,
+// carrying the PaymentIntent; this row carries none.
+const DunningRetryReasonPaymentProcessing = "payment_processing"
+
 // Valid reports whether the cause is a known enum value — StartDunning
 // refuses anything else (no-silent-fallbacks: an unlabeled run would
 // re-introduce the hardcoded-reason lie this type exists to end).

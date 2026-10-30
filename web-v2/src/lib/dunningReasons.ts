@@ -23,6 +23,8 @@ const LABELS: Record<string, string> = {
   // A retry that charged nothing: the bank wants the customer to confirm the
   // payment, which a retry made without them can't do.
   needs_confirmation: 'Not charged: the customer must confirm the payment',
+  // A retry whose payment Stripe is still processing: recovery waits for it.
+  payment_processing: 'Payment processing',
   // Final actions at exhaustion (DunningEscalationOutcome.Reason, joined by "+")
   subscription_paused: 'Subscription paused',
   subscription_canceled: 'Subscription canceled',

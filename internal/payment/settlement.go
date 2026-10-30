@@ -407,8 +407,18 @@ func (s *Stripe) settleFailed(ctx context.Context, tenantID string, inv domain.I
 	// Recipient resolved before the tx, the notice enqueued inside it, gated
 	// on the first notice by the store — the same shape as the paid twin.
 	var failedTx func(tx *sql.Tx, fresh domain.Invoice) error
-	if !report.External && !failureEmailSuppressed(f.Purpose) {
+	switch {
+	case !report.External && !failureEmailSuppressed(f.Purpose):
 		failedTx = s.buildPaymentFailedHook(ctx, tenantID, inv, customerFailureReason(f), domain.DeclineAskOf(f.DeclineCode))
+	case f.Purpose == piPurposeDunningRetry && s.dunningRetryFail != nil:
+		// A dunning retry gets dunning's email, not this one. When its payment
+		// came back processing, that email is sent here, from the run waiting
+		// on this PaymentIntent, in the same transaction as the failed stamp
+		// (#1289). The hook is built for every retry; its compare-and-set,
+		// under this settle's invoice lock, finds no run waiting on a
+		// synchronous decline (processRun records that one itself) and then
+		// does nothing.
+		failedTx = s.dunningRetryFail.RetryPaymentFailed(ctx, tenantID, inv, f.PaymentIntentID, f.DeclineCode, f.CardMessage)
 	}
 	fresh, res, err := s.invoices.MarkPaymentFailedReportingTransition(ctx, tenantID, inv.ID, report, failedTx)
 	if err != nil {

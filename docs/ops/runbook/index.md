@@ -62,6 +62,7 @@ A step that inserts a row also sets `app.livemode`, and says so.
 | One customer's webhook endpoint keeps failing (`hardcount_webhook_deliveries_total{status="failed"}`) | [A webhook endpoint keeps failing](webhook-endpoint-failing.md) |
 | `hardcount_stripe_breaker_state == 2`, or dunning retries skipped | [Stripe circuit breaker open](stripe-circuit-breaker-open.md) |
 | Invoices stuck with an unconfirmed payment for hours | [A charge's result is unclear](unclear-charge.md#unconfirmed-with-a-paymentintent) |
+| A payment `processing` for days, or a dunning retry that "is processing" | [A charge's result is unclear: processing](unclear-charge.md#processing-for-days) |
 | A test clock stuck on the Advancing badge | [Test-clock advance hung](test-clock-advance-hung.md) |
 | A tenant sees another tenant's data | [Data leak between tenants suspected](rls-leak-suspected.md) |
 | LiteLLM spend 503s, or Hardcount spend short of LiteLLM's | [LiteLLM spend gap after an outage](litellm-spend-gap.md) |

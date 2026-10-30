@@ -26,6 +26,12 @@ type memStore struct {
 	// PostgresStore's in-tx outbox row).
 	started  []map[string]any
 	startErr error // when set, StartRun fails and writes nothing (all-or-none)
+	// awaiting is each run's awaiting_payment_intent_id (#1289).
+	awaiting map[string]string
+	// paymentMoved marks an invoice whose payment left flight before the
+	// in-flight write: RecordRetryInFlight then writes nothing, as the real
+	// store does when the invoice no longer waits on the PaymentIntent.
+	paymentMoved map[string]bool
 }
 
 func newMemStore() *memStore {
@@ -37,10 +43,71 @@ func newMemStore() *memStore {
 		FinalInvoiceAction:      domain.InvActionNone,
 	}
 	return &memStore{
-		policies:  map[string]domain.DunningPolicy{"dpol_1": policy},
-		defaultID: "dpol_1",
-		runs:      make(map[string]domain.InvoiceDunningRun),
+		policies:     map[string]domain.DunningPolicy{"dpol_1": policy},
+		defaultID:    "dpol_1",
+		runs:         make(map[string]domain.InvoiceDunningRun),
+		awaiting:     make(map[string]string),
+		paymentMoved: make(map[string]bool),
 	}
+}
+
+// RecordRetryInFlight mirrors the real store: nothing when the payment left
+// flight, else UpdateRunIfActive's guard, then the run, its awaited
+// PaymentIntent and its event together.
+func (m *memStore) RecordRetryInFlight(_ context.Context, _ string, run domain.InvoiceDunningRun, expectedAttempts int, paymentIntentID string, event domain.InvoiceDunningEvent) (RetryInFlightResult, error) {
+	if paymentIntentID == "" {
+		return RetryInFlightRunMoved, fmt.Errorf("no PaymentIntent id")
+	}
+	if err := refuseStrandingWrite(run); err != nil {
+		return RetryInFlightRunMoved, err
+	}
+	if m.paymentMoved[run.InvoiceID] {
+		return RetryInFlightPaymentMoved, nil
+	}
+	existing, ok := m.runs[run.ID]
+	if ok && (existing.State != domain.DunningActive || existing.AttemptCount != expectedAttempts) {
+		return RetryInFlightRunMoved, nil
+	}
+	m.runs[run.ID] = run
+	m.awaiting[run.ID] = paymentIntentID
+	_, _ = m.CreateEvent(context.Background(), "", event)
+	return RetryInFlightRecorded, nil
+}
+
+func (m *memStore) TakeAwaitedRetryTx(_ context.Context, _ *sql.Tx, invoiceID, paymentIntentID string) (domain.InvoiceDunningRun, domain.DunningPolicy, bool, error) {
+	if paymentIntentID == "" {
+		return domain.InvoiceDunningRun{}, domain.DunningPolicy{}, false, nil
+	}
+	for id, r := range m.runs {
+		if r.InvoiceID == invoiceID && r.State == domain.DunningActive && m.awaiting[id] == paymentIntentID {
+			delete(m.awaiting, id)
+			p, ok := m.policies[r.PolicyID]
+			if !ok {
+				return domain.InvoiceDunningRun{}, domain.DunningPolicy{}, false, errs.ErrNotFound
+			}
+			return r, p, true, nil
+		}
+	}
+	return domain.InvoiceDunningRun{}, domain.DunningPolicy{}, false, nil
+}
+
+func (m *memStore) RecordRetryFailureTx(_ context.Context, _ *sql.Tx, run domain.InvoiceDunningRun, event domain.InvoiceDunningEvent, then func(tx *sql.Tx) error) error {
+	if run.NextActionAt == nil {
+		return fmt.Errorf("no next_action_at")
+	}
+	existing, ok := m.runs[run.ID]
+	if !ok || existing.State != domain.DunningActive || existing.AttemptCount != run.AttemptCount {
+		return fmt.Errorf("run changed under its lock")
+	}
+	existing.NextActionAt = run.NextActionAt
+	m.runs[run.ID] = existing
+	_, _ = m.CreateEvent(context.Background(), "", event)
+	if then != nil {
+		if err := then(nil); err != nil {
+			m.hookErrs = append(m.hookErrs, err)
+		}
+	}
+	return nil
 }
 
 func (m *memStore) GetPolicyByID(_ context.Context, _ string, id string) (domain.DunningPolicy, error) {
@@ -214,6 +281,7 @@ func (m *memStore) ResolveRun(_ context.Context, _ string, run domain.InvoiceDun
 		return false, nil
 	}
 	m.runs[run.ID] = run
+	delete(m.awaiting, run.ID)
 	return true, nil
 }
 
@@ -234,6 +302,7 @@ func (m *memStore) UpdateRunIfActive(_ context.Context, _ string, run domain.Inv
 		return false, nil
 	}
 	m.runs[run.ID] = run
+	delete(m.awaiting, run.ID) // every write but the in-flight one clears it
 	// Mirror the real store: the hook runs only when the write applied, and
 	// its error never vetoes (recorded for tests).
 	if then != nil {

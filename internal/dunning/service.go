@@ -33,6 +33,19 @@ type RetryError struct {
 	// warning email, which asks for a different card, or for the
 	// confirmation, instead of promising a retry.
 	Ask domain.DeclineAsk
+	// NoReason marks a failure whose words are not known to be safe to show
+	// the customer, so the warning email carries no reason line. Set for a
+	// failure recorded by its webhook before the retry could record it
+	// (#1289): the attempt row keeps Stripe's decline code, which gives the
+	// Ask, but not its card message.
+	NoReason bool
+	// Hold is the charge hold the retry's charge took, set when its payment
+	// came back in flight (ErrPaymentInFlight): the charge keeps it then. A
+	// payment that settled before the in-flight write could be recorded is
+	// over, so retrySettledFirst releases this hold by its own token
+	// (ChargeHoldClaimer.ReleaseChargeHold); otherwise the next retry and the
+	// final action waited for the stale-hold sweep.
+	Hold domain.ChargeHold
 }
 
 func (e *RetryError) Error() string { return e.Err.Error() }
@@ -47,6 +60,13 @@ func (e *RetryError) Unwrap() error { return e.Err }
 // error before or after the charge. The adapter maps payment's errors to
 // this dunning-visible sentinel so peer domains don't import each other.
 var ErrTransientSkip = errors.New("dunning retry skipped: upstream transient")
+
+// ErrPaymentInFlight means the retry's payment is still being processed: Stripe
+// was asked and a PaymentIntent exists, but it has not succeeded or failed
+// yet (#1289). The attempt counts, the run waits for the payment's outcome,
+// and no warning email goes out: the payment has not failed. The retrier
+// returns it wrapped in a *RetryError that names the PaymentIntent.
+var ErrPaymentInFlight = errors.New("the retry's payment is still being processed; the run waits for its outcome")
 
 // PaymentRetrier retries a payment for an invoice.
 type PaymentRetrier interface {
@@ -107,6 +127,16 @@ type InvoiceGetter interface {
 type ChargeHoldClaimer interface {
 	ClaimChargeHoldForFinalAction(ctx context.Context, tenantID, invoiceID string) (domain.ChargeHold, error)
 	ReleaseChargeHold(ctx context.Context, tenantID, invoiceID string, hold domain.ChargeHold) error
+}
+
+// RetryHoldReleaser frees the charge hold a dunning retry kept while its
+// payment was processing (#1289), on the failure settle's transaction, which
+// holds the invoice's row lock. The in-flight charge keeps its hold (an
+// unclear outcome never releases, ADR-127), and the due-run pickers skip a
+// held run, so without this the next retry waited for the stale-hold sweep.
+// Implemented by *invoice.PostgresStore.
+type RetryHoldReleaser interface {
+	ReleaseRetryChargeHoldTx(ctx context.Context, tx *sql.Tx, invoiceID, paymentIntentID string) (bool, error)
 }
 
 // SubscriptionTerminalState reports whether a subscription can still be
@@ -198,6 +228,7 @@ type Service struct {
 	invoiceUncollect InvoiceUncollectibleMarker
 	invoiceGet       InvoiceGetter
 	chargeHolds      ChargeHoldClaimer
+	retryHolds       RetryHoldReleaser
 	events           domain.EventDispatcher
 	emailNotifier    EmailNotifier
 	customerEmail    CustomerEmailFetcher
@@ -303,6 +334,13 @@ func (s *Service) SetSubscriptionStateReader(r SubscriptionStateReader) {
 // without the hold, as before ADR-127.
 func (s *Service) SetChargeHoldClaimer(c ChargeHoldClaimer) {
 	s.chargeHolds = c
+}
+
+// SetRetryHoldReleaser wires the release of a processing retry's charge hold
+// when its payment fails (RetryPaymentFailed). The producer always wires it;
+// unwired (narrow tests) the hold waits for the stale-hold sweep.
+func (s *Service) SetRetryHoldReleaser(r RetryHoldReleaser) {
+	s.retryHolds = r
 }
 
 // SetInvoiceUncollectibleMarker configures the write-off terminal action.
@@ -574,11 +612,41 @@ func anchorInstant(now time.Time, scheduled *time.Time, simulated bool) time.Tim
 // would show the escalation before the edit that caused it).
 // One residue: a re-drive interrupted AFTER its claim re-leases from its own
 // attempt instant, so a second re-drive records that instant instead.
-func exhaustStampAt(run domain.InvoiceDunningRun, listedNext *time.Time, attemptAt time.Time) time.Time {
+//
+// failedAt is when the final retry's failure was recorded, zero when unknown.
+// A final retry whose payment came back processing is held until the payment
+// fails, which can be days later (#1289). The escalation records the later of
+// the retry's instant and that failure, so it is never dated before the
+// failure that caused it (ADR-112 amendment 2026-10-30).
+func exhaustStampAt(run domain.InvoiceDunningRun, listedNext *time.Time, attemptAt, failedAt time.Time) time.Time {
 	if run.LastAttemptAt == nil || listedNext == nil || !listedNext.Equal(leaseFrom(*run.LastAttemptAt)) {
 		return attemptAt
 	}
+	if failedAt.After(*run.LastAttemptAt) {
+		return failedAt
+	}
 	return *run.LastAttemptAt
+}
+
+// finalRetryFailedAt is when the run's last counted attempt was recorded as
+// failed: the newest retry_attempted event at that attempt. For a retry whose
+// payment came back processing, that is the failure RetryPaymentFailed
+// recorded later. Zero when there is none or the events cannot be read (then
+// the escalation keeps the retry's instant, as before; logged).
+func (s *Service) finalRetryFailedAt(ctx context.Context, tenantID string, run domain.InvoiceDunningRun) time.Time {
+	events, err := s.store.ListEvents(ctx, tenantID, run.ID)
+	if err != nil {
+		slog.WarnContext(ctx, "dunning exhaust: could not read the run's events; the escalation is dated at the final retry",
+			"run_id", run.ID, "invoice_id", run.InvoiceID, "error", err)
+		return time.Time{}
+	}
+	var at time.Time
+	for _, e := range events {
+		if e.EventType == domain.DunningEventRetryAttempted && e.AttemptCount == run.AttemptCount && e.CreatedAt.After(at) {
+			at = e.CreatedAt
+		}
+	}
+	return at
 }
 
 func (s *Service) ProcessDueRunsForClock(ctx context.Context, tenantID, clockID string, frozenTime time.Time, limit int) (int, []error) {
@@ -759,7 +827,7 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 				"run_id", run.ID, "invoice_id", run.InvoiceID)
 			return nil
 		}
-		stampAt := exhaustStampAt(run, run.NextActionAt, attemptAt)
+		stampAt := exhaustStampAt(run, run.NextActionAt, attemptAt, s.finalRetryFailedAt(ctx, tenantID, run))
 		run.NextActionAt = &lease
 		return s.exhaustRun(ctx, tenantID, run, policy, stampAt, attemptAt)
 	}
@@ -886,107 +954,106 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 		return rerr
 	}
 
+	// The retry's payment is still processing (#1289): Stripe was asked and a
+	// PaymentIntent exists, but it has neither succeeded nor failed. Before,
+	// this came back as nil and closed the run as recovered over an unpaid
+	// invoice. A dunning retry closes the run as recovered only if the
+	// invoice it leaves behind is paid.
+	if errors.Is(retryErr, ErrPaymentInFlight) {
+		return s.retryInFlight(ctx, tenantID, run, policy, retryErr, now)
+	}
+
 	if retryErr != nil {
-		run.State = domain.DunningActive // Will retry again later
-		slog.Warn("dunning retry failed",
-			"run_id", run.ID,
-			"invoice_id", run.InvoiceID,
-			"attempt", run.AttemptCount,
-			"error", retryErr,
-		)
-
-		// Record failed retry event at this retry's simulated instant
-		// (= run.NextActionAt at fire time, captured into `now` above)
-		// so each retry row on the invoice timeline carries its own
-		// scheduled timestamp instead of all sharing frozen_time.
-		// Attribution key for the invoice timeline: the failed charge's
-		// PI id, when the adapter surfaced it (RetryError). Legacy rows
-		// without it fall back to index pairing in the timeline merge.
-		var evtMeta map[string]any
-		var rerr *RetryError
-		if errors.As(retryErr, &rerr) && rerr.PaymentIntentID != "" {
-			evtMeta = map[string]any{"payment_intent_id": rerr.PaymentIntentID}
-		}
-		// A card-less "attempt" records the same no_payment_method cause
-		// vocabulary the start event uses — the timeline renders it as a
-		// reminder tick, not a charge failure. A retry that skipped a card
-		// the bank refused for good charged nothing either, and says so
-		// (#966), as does one that skipped a card whose payment the bank
-		// wants the customer to confirm. Real declines keep their provider
-		// reason text.
-		evtReason := retryErr.Error()
-		switch {
-		case errors.Is(retryErr, domain.ErrNoPaymentMethodOnRetry):
-			evtReason = string(domain.DunningCauseNoPaymentMethod)
-		case errors.Is(retryErr, domain.ErrCardNeedsReplacing):
-			evtReason = domain.DunningRetryReasonCardRefused
-		case errors.Is(retryErr, domain.ErrCardNeedsConfirmation):
-			evtReason = domain.DunningRetryReasonNeedsConfirmation
-		}
-		_, _ = s.store.CreateEvent(ctx, tenantID, domain.InvoiceDunningEvent{
-			RunID:        run.ID,
-			InvoiceID:    run.InvoiceID,
-			EventType:    domain.DunningEventRetryAttempted,
-			State:        domain.DunningActive,
-			AttemptCount: run.AttemptCount,
-			Reason:       evtReason,
-			Metadata:     evtMeta,
-			CreatedAt:    now,
-		})
-
-		// The dunning warning email is enqueued further down, AFTER the
-		// next-retry reschedule — see the comment there. Enqueuing it
-		// here rendered "We'll try again on <date>" from a NextActionAt
-		// still holding the JUST-FAILED attempt's scheduled instant.
-	} else {
-		slog.Info("dunning resolved — payment succeeded",
-			"run_id", run.ID,
-			"invoice_id", run.InvoiceID,
-			"attempt", run.AttemptCount,
-		)
-		// The SUCCESSFUL retry gets its own timeline row too — pre-fix
-		// only failures wrote retry_attempted, so a run resolved "after
-		// 3 retry attempts" showed 2 retry rows and the recovering
-		// attempt's instant appeared nowhere on the invoice timeline.
-		_, _ = s.store.CreateEvent(ctx, tenantID, domain.InvoiceDunningEvent{
-			RunID:        run.ID,
-			InvoiceID:    run.InvoiceID,
-			EventType:    domain.DunningEventRetryAttempted,
-			State:        domain.DunningResolved,
-			AttemptCount: run.AttemptCount,
-			Reason:       "succeeded",
-			CreatedAt:    now,
-		})
-		// Resolve AT the retry's contracted instant (`now` = the anchored
-		// run.NextActionAt) — resolveRunNow's own clock read is the
-		// advance-end frozen_time under catchup, which stamped a Mar 7
-		// recovery "resolved Apr 1" when the operator advanced a month in
-		// one click (the contracted-instant class, 4th sighting).
-		_, rerr := s.resolveListedRun(ctx, tenantID, run, domain.ResolutionPaymentRecovered, "payment_recovered", &now)
-		return rerr
+		return s.retryFailed(ctx, tenantID, run, policy, retryErr, now)
 	}
+	return s.retrySucceeded(ctx, tenantID, run, now)
+}
 
-	// Schedule the next retry: retry_days[k] is the wait after retry k
-	// (retry_days[0], the wait before retry 1, was StartDunning's).
-	// The list's length is the retry count, so a retry still to come always
-	// has its entry; there is no count that can disagree with the list.
-	if run.AttemptCount < retries {
-		wait, ok := policy.WaitBeforeRetry(run.AttemptCount + 1)
-		if !ok { // unreachable: AttemptCount+1 <= retries
-			return fmt.Errorf("dunning policy %s has no retry %d", policy.ID, run.AttemptCount+1)
+// nextActionAfterRetry is the run's next_action_at after retry attempt
+// (counted), at the retry's instant now: the wait before the next retry, or
+// the exhaustion lease after the last. retry_days[k] is the wait after retry
+// k (retry_days[0], the wait before retry 1, was StartDunning's). The list's
+// length is the retry count, so a retry still to come always has its entry;
+// there is no count that can disagree with the list.
+func nextActionAfterRetry(policy domain.DunningPolicy, attempt int, now time.Time) (time.Time, error) {
+	if attempt < policy.Retries() {
+		wait, ok := policy.WaitBeforeRetry(attempt + 1)
+		if !ok { // unreachable: attempt+1 <= retries
+			return time.Time{}, fmt.Errorf("dunning policy %s has no retry %d", policy.ID, attempt+1)
 		}
-		t := now.Add(wait)
-		run.NextActionAt = &t
-	} else {
-		// Never NULL: NULL removes an active run from both due-run pickers for
-		// good, so an exhaustion interrupted after this commit (deploy SIGTERM,
-		// lease loss, a DB error on the escalation write) stranded the run
-		// forever (SB-1). Not now either: that would make the run due while
-		// exhaustRun is still running inline (SB-2). The lease (same value the
-		// pre-charge persist wrote) re-arms it if exhaustion never finishes.
-		l := leaseFrom(now)
-		run.NextActionAt = &l
+		return now.Add(wait), nil
 	}
+	// Never NULL: NULL removes an active run from both due-run pickers for
+	// good, so an exhaustion interrupted after this commit (deploy SIGTERM,
+	// lease loss, a DB error on the escalation write) stranded the run
+	// forever (SB-1). Not now either: that would make the run due while
+	// exhaustRun is still running inline (SB-2). The lease (same value the
+	// pre-charge persist wrote) re-arms it if exhaustion never finishes.
+	return leaseFrom(now), nil
+}
+
+// retryFailed is a counted retry that did not collect the invoice: a decline,
+// no card, a card the retry skipped. It records the attempt's event,
+// reschedules the run with the customer's warning email in the same
+// transaction, and on the last attempt runs the final actions inline.
+func (s *Service) retryFailed(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, policy domain.DunningPolicy, retryErr error, now time.Time) error {
+	retries := policy.Retries()
+	run.State = domain.DunningActive // Will retry again later
+	slog.Warn("dunning retry failed",
+		"run_id", run.ID,
+		"invoice_id", run.InvoiceID,
+		"attempt", run.AttemptCount,
+		"error", retryErr,
+	)
+
+	// Record failed retry event at this retry's simulated instant
+	// (= run.NextActionAt at fire time, captured into `now` above)
+	// so each retry row on the invoice timeline carries its own
+	// scheduled timestamp instead of all sharing frozen_time.
+	// Attribution key for the invoice timeline: the failed charge's
+	// PI id, when the adapter surfaced it (RetryError). Legacy rows
+	// without it fall back to index pairing in the timeline merge.
+	var evtMeta map[string]any
+	var rerr *RetryError
+	if errors.As(retryErr, &rerr) && rerr.PaymentIntentID != "" {
+		evtMeta = map[string]any{"payment_intent_id": rerr.PaymentIntentID}
+	}
+	// A card-less "attempt" records the same no_payment_method cause
+	// vocabulary the start event uses — the timeline renders it as a
+	// reminder tick, not a charge failure. A retry that skipped a card
+	// the bank refused for good charged nothing either, and says so
+	// (#966), as does one that skipped a card whose payment the bank
+	// wants the customer to confirm. Real declines keep their provider
+	// reason text.
+	evtReason := retryErr.Error()
+	switch {
+	case errors.Is(retryErr, domain.ErrNoPaymentMethodOnRetry):
+		evtReason = string(domain.DunningCauseNoPaymentMethod)
+	case errors.Is(retryErr, domain.ErrCardNeedsReplacing):
+		evtReason = domain.DunningRetryReasonCardRefused
+	case errors.Is(retryErr, domain.ErrCardNeedsConfirmation):
+		evtReason = domain.DunningRetryReasonNeedsConfirmation
+	}
+	_, _ = s.store.CreateEvent(ctx, tenantID, domain.InvoiceDunningEvent{
+		RunID:        run.ID,
+		InvoiceID:    run.InvoiceID,
+		EventType:    domain.DunningEventRetryAttempted,
+		State:        domain.DunningActive,
+		AttemptCount: run.AttemptCount,
+		Reason:       evtReason,
+		Metadata:     evtMeta,
+		CreatedAt:    now,
+	})
+
+	// The dunning warning email is enqueued further down, AFTER the
+	// next-retry reschedule — see the comment there. Enqueuing it
+	// here rendered "We'll try again on <date>" from a NextActionAt
+	// still holding the JUST-FAILED attempt's scheduled instant.
+	next, err := nextActionAfterRetry(policy, run.AttemptCount, now)
+	if err != nil {
+		return err
+	}
+	run.NextActionAt = &next
 
 	// Warning email rides the reschedule transaction (ADR-040): built here —
 	// resolution and invoice context are plain reads — and enqueued by the
@@ -1012,7 +1079,7 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 	if run.AttemptCount < retries && s.emailNotifier != nil && s.customerEmail != nil {
 		ask := retryAsk(retryErr)
 		reason := activity.StripWrapper(retryErr.Error())
-		if ask != domain.DeclineAskNone {
+		if ask != domain.DeclineAskNone || (errors.As(retryErr, &rerr) && rerr.NoReason) {
 			reason = ""
 		}
 		warnTx = s.buildDunningWarningTx(ctx, tenantID, run, policy, reason, ask)
@@ -1049,8 +1116,163 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 	if run.AttemptCount >= retries {
 		return s.exhaustRun(ctx, tenantID, run, policy, now, now)
 	}
-
 	return nil
+}
+
+// retrySucceeded is a retry that left the invoice paid: the run resolves as
+// recovered at the retry's instant.
+func (s *Service) retrySucceeded(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, now time.Time) error {
+	slog.Info("dunning resolved — payment succeeded",
+		"run_id", run.ID,
+		"invoice_id", run.InvoiceID,
+		"attempt", run.AttemptCount,
+	)
+	// The SUCCESSFUL retry gets its own timeline row too — pre-fix
+	// only failures wrote retry_attempted, so a run resolved "after
+	// 3 retry attempts" showed 2 retry rows and the recovering
+	// attempt's instant appeared nowhere on the invoice timeline.
+	_, _ = s.store.CreateEvent(ctx, tenantID, domain.InvoiceDunningEvent{
+		RunID:        run.ID,
+		InvoiceID:    run.InvoiceID,
+		EventType:    domain.DunningEventRetryAttempted,
+		State:        domain.DunningResolved,
+		AttemptCount: run.AttemptCount,
+		Reason:       "succeeded",
+		CreatedAt:    now,
+	})
+	// Resolve AT the retry's contracted instant (`now` = the anchored
+	// run.NextActionAt) — resolveRunNow's own clock read is the
+	// advance-end frozen_time under catchup, which stamped a Mar 7
+	// recovery "resolved Apr 1" when the operator advanced a month in
+	// one click (the contracted-instant class, 4th sighting).
+	_, rerr := s.resolveListedRun(ctx, tenantID, run, domain.ResolutionPaymentRecovered, "payment_recovered", &now)
+	return rerr
+}
+
+// retryInFlight is a retry whose payment Stripe is still processing (#1289).
+// The attempt stays counted (Stripe was asked). The run is rescheduled exactly
+// as a failure reschedules it — the next retry per schedule, or the
+// exhaustion lease after the last — and records the PaymentIntent it waits
+// on, with a retry_attempted row reading payment_processing, in one
+// transaction. No warning email: the payment has not failed, and "we'll try
+// again on <date>" would be false while it may still succeed.
+//
+// What happens next is the payment's to decide:
+//   - it succeeds: SettleSucceeded resolves the run as recovered
+//     (ResolveByInvoice) and dunning.resolved fires then, once;
+//   - it fails: the failure settle calls RetryPaymentFailed, which records
+//     the failed attempt, sends its warning email and moves the next retry
+//     so it is not back-to-back with the failure;
+//   - while it is processing, the due-run pickers skip the run.
+//
+// On the last attempt the final actions are not attempted here, inline, as a
+// failed last retry's are: the run keeps its exhaustion lease, and
+// exhaust-on-entry runs them once the payment has failed. Inline, a failure
+// that settled between this write and exhaustRun's invoice read escalated at
+// the retry's instant, before the failure row the settle had just written;
+// exhaust-on-entry only lists the run once the payment is no longer in
+// flight, so that row is there, and the escalation is dated at it.
+//
+// A settle that landed between the charge and this write (RetryInFlightPaymentMoved)
+// has already decided the attempt; retrySettledFirst reads which way.
+func (s *Service) retryInFlight(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, policy domain.DunningPolicy, retryErr error, now time.Time) error {
+	var pi string
+	var hold domain.ChargeHold
+	var re *RetryError
+	if errors.As(retryErr, &re) {
+		pi, hold = re.PaymentIntentID, re.Hold
+	}
+	next, err := nextActionAfterRetry(policy, run.AttemptCount, now)
+	if err != nil {
+		return err
+	}
+	run.State = domain.DunningActive
+	run.NextActionAt = &next
+	// No PaymentIntent id on this row: the later failed or paid attempt
+	// keeps its own row on the timeline, matched by its PaymentIntent.
+	res, err := s.store.RecordRetryInFlight(ctx, tenantID, run, run.AttemptCount, pi, domain.InvoiceDunningEvent{
+		RunID:        run.ID,
+		InvoiceID:    run.InvoiceID,
+		EventType:    domain.DunningEventRetryAttempted,
+		State:        domain.DunningActive,
+		AttemptCount: run.AttemptCount,
+		Reason:       domain.DunningRetryReasonPaymentProcessing,
+		CreatedAt:    now,
+	})
+	if err != nil {
+		return fmt.Errorf("record dunning retry %d of run %s as processing: %w", run.AttemptCount, run.ID, err)
+	}
+	switch res {
+	case RetryInFlightRunMoved:
+		slog.Info("dunning retry in flight not recorded — run resolved, escalated or retried by another processor",
+			"run_id", run.ID, "invoice_id", run.InvoiceID, "payment_intent_id", pi)
+		return nil
+	case RetryInFlightPaymentMoved:
+		return s.retrySettledFirst(ctx, tenantID, run, policy, pi, hold, now)
+	}
+	slog.Info("dunning retry is processing — the run waits for the payment's outcome",
+		"run_id", run.ID, "invoice_id", run.InvoiceID, "attempt", run.AttemptCount, "payment_intent_id", pi)
+	return nil
+}
+
+// RetryFailureExplainer is an optional PaymentRetrier capability: the failure
+// of the PaymentIntent pi on the invoice, as RetryPayment would return it for
+// a decline (a *RetryError with the attempt's decline code as its Ask). The
+// production retrier implements it from the attempt row.
+type RetryFailureExplainer interface {
+	ExplainRetryFailure(ctx context.Context, tenantID, invoiceID, paymentIntentID string) error
+}
+
+// errRetryPaymentFailed is the failure retrySettledFirst records when the
+// retrier cannot explain it.
+var errRetryPaymentFailed = errors.New("payment failed")
+
+// retrySettledFirst is a retry whose payment left flight between the charge
+// and the run write: its webhook (or the reconciler) settled it first, and
+// found no run waiting on it. The invoice says which way it went. Paid closes
+// the run as a recovered retry. Failed on this PaymentIntent is a counted
+// failure, with its warning email, as if the charge had answered the decline.
+// Either way the payment is over, so the hold its charge kept is released by
+// its own token: the failure settle's hook found no run waiting and released
+// nothing. Anything else is loud: the attempt stays counted as the pre-charge
+// persist wrote it, the hold stays, and the next due tick reads the invoice
+// again.
+func (s *Service) retrySettledFirst(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, policy domain.DunningPolicy, pi string, hold domain.ChargeHold, now time.Time) error {
+	if s.invoiceGet == nil {
+		return fmt.Errorf("dunning retry %d of run %s: its payment settled before the run write, and no invoice reader is wired to say how", run.AttemptCount, run.ID)
+	}
+	inv, err := s.invoiceGet.Get(ctx, tenantID, run.InvoiceID)
+	if err != nil {
+		return fmt.Errorf("dunning retry %d of run %s: read the invoice its payment settled: %w", run.AttemptCount, run.ID, err)
+	}
+	switch {
+	case inv.Status == domain.InvoicePaid || inv.PaymentStatus == domain.PaymentSucceeded:
+		s.releaseRetryHold(ctx, tenantID, run, hold)
+		return s.retrySucceeded(ctx, tenantID, run, now)
+	case inv.PaymentStatus == domain.PaymentFailed && inv.StripePaymentIntentID == pi:
+		s.releaseRetryHold(ctx, tenantID, run, hold)
+		failure := error(&RetryError{PaymentIntentID: pi, Err: errRetryPaymentFailed, NoReason: true})
+		if ex, ok := s.retrier.(RetryFailureExplainer); ok {
+			if ferr := ex.ExplainRetryFailure(ctx, tenantID, run.InvoiceID, pi); ferr != nil {
+				failure = ferr
+			}
+		}
+		return s.retryFailed(ctx, tenantID, run, policy, failure, now)
+	}
+	return fmt.Errorf("dunning retry %d of run %s: its payment %s left flight before the run write, and the invoice reads %s/%s; the next due tick looks again",
+		run.AttemptCount, run.ID, pi, inv.Status, inv.PaymentStatus)
+}
+
+// releaseRetryHold releases the hold a retry's charge kept, by its own token.
+// A failed release leaves it for the stale-hold sweep (logged).
+func (s *Service) releaseRetryHold(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, hold domain.ChargeHold) {
+	if s.chargeHolds == nil || !hold.Held() {
+		return
+	}
+	if err := s.chargeHolds.ReleaseChargeHold(ctx, tenantID, run.InvoiceID, hold); err != nil {
+		slog.WarnContext(ctx, "dunning retry: releasing the charge hold of a payment that settled first failed — the stale-hold sweep clears it",
+			"run_id", run.ID, "invoice_id", run.InvoiceID, "error", err)
+	}
 }
 
 // exhaustRun finalizes a dunning run after its last retry failed (or
@@ -1771,6 +1993,139 @@ func (s *Service) ResolveByInvoice(ctx context.Context, tenantID, invoiceID stri
 	return rerr
 }
 
+// warningRecipient is the customer a dunning warning email goes to.
+type warningRecipient struct {
+	email, name string
+	cc          []string
+}
+
+// RetryPaymentFailed is the failure settle's hook for a dunning retry's
+// payment (#1289): payment.SettleFailed calls it, before its transaction
+// opens, for every failure of a PaymentIntent tagged as a dunning retry, and
+// runs the hook it returns inside that transaction, after the failed stamp.
+// paymentIntentID is the payment that failed; declineCode and cardMessage are
+// Stripe's decline code and its customer-safe card message (empty when the
+// report had none).
+//
+// The hook acts only for a run that waits on this payment: a retry whose
+// payment came back processing (retryInFlight). It is returned for every
+// non-empty PaymentIntent and finds out under the settle's lock whether a run
+// waits; for a synchronous decline none does, and processRun's own failure
+// path records it.
+//
+// The read here (the customer's email) is a plain read before the settle
+// locks the invoice. The hook itself, under that lock:
+//   - clears the awaited PaymentIntent with a compare-and-set
+//     (TakeAwaitedRetryTx). The webhook, a redelivery and the reconciler can
+//     each report the failure; one wins, so the attempt gets one failed row
+//     and one email;
+//   - releases the charge hold the retry kept while the payment was
+//     processing, so the next retry is not left waiting for the stale-hold
+//     sweep;
+//   - records the failed attempt, at the failure's instant, with its
+//     PaymentIntent, so the timeline matches it to its charge attempt;
+//   - on any attempt but the last, moves the next retry to the failure plus
+//     the next wait when that is later than the date the in-flight write
+//     scheduled (no retry right after a late failure), and sends the warning
+//     email in the same transaction (ADR-040). Its Ask comes from the decline
+//     code and its reason from the card message, never the invoice's
+//     last_payment_error;
+//   - on the last attempt sends nothing: the run keeps its exhaustion lease,
+//     and exhaust-on-entry runs the final actions and the escalation email,
+//     dated at this failure (exhaustStampAt).
+//
+// An error from the hook rolls back to the settle's savepoint and is logged
+// there: the failure stays recorded on the invoice, the run keeps waiting on
+// the payment, and its next retry date still comes (the in-flight write set
+// it), when the next attempt clears the wait.
+func (s *Service) RetryPaymentFailed(ctx context.Context, tenantID string, inv domain.Invoice, paymentIntentID, declineCode, cardMessage string) func(tx *sql.Tx, fresh domain.Invoice) error {
+	if paymentIntentID == "" {
+		return nil
+	}
+	// No read here decides whether a run waits on the payment: the hook is
+	// built before the settle locks the invoice, and the in-flight write can
+	// commit in between (it waits for no lock this read takes). A hook left
+	// out because no run waited yet lost the failure for good: no failed
+	// row, no warning, the hold kept and the run waiting on a payment that
+	// had failed, since later reports are not the first notice. The
+	// compare-and-set under the lock decides; for a synchronous decline it
+	// simply misses, because the next attempt's write cleared the column.
+	var to *warningRecipient
+	if s.emailNotifier != nil && s.customerEmail != nil {
+		email, name, cc, err := s.customerEmail.GetCustomerEmail(ctx, tenantID, inv.CustomerID)
+		if err != nil || email == "" {
+			slog.WarnContext(ctx, "skip dunning warning email — cannot resolve customer email",
+				"invoice_id", inv.ID, "customer_id", inv.CustomerID, "error", err)
+		} else {
+			to = &warningRecipient{email: email, name: name, cc: cc}
+		}
+	}
+	return func(tx *sql.Tx, fresh domain.Invoice) error {
+		return s.retryPaymentFailedTx(ctx, tx, tenantID, fresh, paymentIntentID, declineCode, cardMessage, to)
+	}
+}
+
+func (s *Service) retryPaymentFailedTx(ctx context.Context, tx *sql.Tx, tenantID string, inv domain.Invoice, pi, declineCode, cardMessage string, to *warningRecipient) error {
+	run, policy, won, err := s.store.TakeAwaitedRetryTx(ctx, tx, inv.ID, pi)
+	if err != nil {
+		return err
+	}
+	if !won {
+		return nil
+	}
+	if s.retryHolds != nil {
+		if _, err := s.retryHolds.ReleaseRetryChargeHoldTx(ctx, tx, inv.ID, pi); err != nil {
+			return fmt.Errorf("release the retry's charge hold: %w", err)
+		}
+	}
+	// The failure's instant: the settle's ctx is bound to the invoice's
+	// clock, so on a test clock this is the simulated time it was learned.
+	failedAt := s.clock.Now(ctx)
+	ask := domain.DeclineAskOf(declineCode)
+	reason := errRetryPaymentFailed.Error()
+	if cardMessage != "" {
+		reason += ": " + cardMessage
+	}
+	event := domain.InvoiceDunningEvent{
+		RunID:        run.ID,
+		InvoiceID:    run.InvoiceID,
+		EventType:    domain.DunningEventRetryAttempted,
+		State:        domain.DunningActive,
+		AttemptCount: run.AttemptCount,
+		Reason:       reason,
+		Metadata:     map[string]any{"payment_intent_id": pi},
+		CreatedAt:    failedAt,
+	}
+	var warnTx func(tx *sql.Tx) error
+	if run.AttemptCount < policy.Retries() {
+		next, err := nextActionAfterRetry(policy, run.AttemptCount, failedAt)
+		if err != nil {
+			return err
+		}
+		if run.NextActionAt == nil || next.After(*run.NextActionAt) {
+			run.NextActionAt = &next
+		}
+		// As the generic failure email: no warning for an invoice that is no
+		// longer finalized (voided or written off while the payment was
+		// processing). The failed row is still recorded, and the paid
+		// pre-check closes the run on its next tick.
+		if to != nil && inv.Status == domain.InvoiceFinalized {
+			emailReason := cardMessage
+			if ask != domain.DeclineAskNone {
+				emailReason = ""
+			}
+			warnTx = s.warningTx(ctx, tenantID, *to, inv.InvoiceNumber, inv.PublicToken, inv.BillingTimezone, run, policy, emailReason, ask)
+		}
+	}
+	if err := s.store.RecordRetryFailureTx(ctx, tx, run, event, warnTx); err != nil {
+		return err
+	}
+	slog.InfoContext(ctx, "dunning retry's payment failed after processing — the failure is recorded on the run",
+		"run_id", run.ID, "invoice_id", run.InvoiceID, "attempt", run.AttemptCount, "payment_intent_id", pi,
+		"next_action_at", run.NextActionAt)
+	return nil
+}
+
 // GetDefaultPolicy returns the tenant's default dunning policy.
 // Operators / handlers needing "the current policy" use this; runtime
 // dunning state machine instead resolves per-customer via
@@ -1944,6 +2299,13 @@ func (s *Service) buildDunningWarningTx(ctx context.Context, tenantID string, ru
 			billTZ = inv.BillingTimezone
 		}
 	}
+	return s.warningTx(ctx, tenantID, warningRecipient{email: email, name: name, cc: cc}, invoiceNumber, publicToken, billTZ, run, policy, retryErrMsg, ask)
+}
+
+// warningTx is the hook that enqueues the dunning warning email on the
+// caller's state transaction, from values already read: it makes no read of
+// its own, so it can run under the failure settle's invoice row lock.
+func (s *Service) warningTx(ctx context.Context, tenantID string, to warningRecipient, invoiceNumber, publicToken, billTZ string, run domain.InvoiceDunningRun, policy domain.DunningPolicy, retryErrMsg string, ask domain.DeclineAsk) func(tx *sql.Tx) error {
 	nextRetry := "TBD"
 	if run.NextActionAt != nil {
 		// Render the retry date in the invoice's billing timezone (ADR-077),
@@ -1953,7 +2315,7 @@ func (s *Service) buildDunningWarningTx(ctx context.Context, tenantID string, ru
 		nextRetry = run.NextActionAt.In(domain.LoadLocationOrUTC(billTZ)).Format("January 2, 2006")
 	}
 	return func(tx *sql.Tx) error {
-		return s.emailNotifier.SendDunningWarningTx(ctx, tx, tenantID, email, cc, name, invoiceNumber, run.AttemptCount, policy.Retries(), nextRetry, retryErrMsg, publicToken, ask)
+		return s.emailNotifier.SendDunningWarningTx(ctx, tx, tenantID, to.email, to.cc, to.name, invoiceNumber, run.AttemptCount, policy.Retries(), nextRetry, retryErrMsg, publicToken, ask)
 	}
 }
 

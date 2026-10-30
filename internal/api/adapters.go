@@ -310,6 +310,7 @@ type retryInvoiceStore interface {
 	MarkPaid(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time) (domain.Invoice, error)
 	SettleZeroDue(ctx context.Context, tenantID, id string, paidAt time.Time) (domain.Invoice, bool, error)
 	RetryBlockingDecline(ctx context.Context, tenantID, invoiceID, stripePaymentMethodID string) (string, error)
+	ListChargeAttemptsByInvoice(ctx context.Context, tenantID, invoiceID string) ([]domain.InvoiceChargeAttempt, error)
 }
 
 // paymentRetrierAdapter bridges Stripe + invoice/customer stores → dunning.PaymentRetrier.
@@ -342,7 +343,9 @@ func (a *paymentRetrierAdapter) RetryPayment(ctx context.Context, tenantID, invo
 // because the class was fixed one call site at a time three times (#940,
 // #978, #1302).
 func classifyDunningRetryResult(ctx context.Context, invoiceID string, err error) error {
-	if err == nil || errors.Is(err, dunning.ErrTransientSkip) ||
+	// ErrPaymentInFlight passes: Stripe was asked and a PaymentIntent exists,
+	// so the attempt counts and the run waits for its outcome (#1289).
+	if err == nil || errors.Is(err, dunning.ErrTransientSkip) || errors.Is(err, dunning.ErrPaymentInFlight) ||
 		errors.Is(err, domain.ErrNoPaymentMethodOnRetry) || errors.Is(err, domain.ErrCardNeedsReplacing) ||
 		errors.Is(err, domain.ErrCardNeedsConfirmation) ||
 		errors.Is(err, domain.ErrBelowMinimumCharge) {
@@ -504,7 +507,7 @@ func (a *paymentRetrierAdapter) retryPayment(ctx context.Context, tenantID, invo
 	// receives two emails per failed retry: "Payment failed for invoice
 	// X" plus dunning's "Action required — payment retry for invoice X
 	// (Attempt N of M)".
-	_, err = a.charger.ChargeInvoiceForDunningRetry(chargeCtx, tenantID, inv, hold, ps.StripeCustomerID, ps.StripePaymentMethodID)
+	charged, err := a.charger.ChargeInvoiceForDunningRetry(chargeCtx, tenantID, inv, hold, ps.StripeCustomerID, ps.StripePaymentMethodID)
 	// A definite decline carries its PI id across the boundary (typed dunning
 	// wrapper, no payment import in dunning) so the failed retry's timeline
 	// row can be matched to its exact payment_intent.payment_failed webhook
@@ -520,7 +523,85 @@ func (a *paymentRetrierAdapter) retryPayment(ctx context.Context, tenantID, invo
 			Ask:             domain.DeclineAskOf(pe.DeclineCode),
 		}
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	return a.chargedOutcome(ctx, tenantID, charged, hold, release)
+}
+
+// chargedOutcome is what a charge that returned no error did, read from the
+// invoice it left behind (#1289). No error is not "paid": the charge also
+// returns the invoice when its PaymentIntent is still processing, and when its
+// stamp was refused because another outcome was recorded during the call
+// (P13). Dunning closes the run as recovered only on a paid invoice.
+//
+//   - paid: nil, the retry recovered the invoice;
+//   - payment in flight: dunning.ErrPaymentInFlight, naming the
+//     PaymentIntent the run now waits on and carrying the hold the charge
+//     kept, which dunning releases if the payment settles before it records
+//     the wait;
+//   - failed: the payment_intent.payment_failed webhook recorded the failure
+//     first. A definite decline, built from that attempt's own row (its
+//     decline code gives the Ask), so dunning counts it and warns as for any
+//     decline. The invoice's last_payment_error is never the reason. The
+//     round-trip is over, so the hold is released (release, by its token),
+//     as for a decline the charge itself answered; kept, the next retry and
+//     the final action waited for the stale-hold sweep;
+//   - anything else (pending, void, written off): a loud error, which
+//     RetryPayment turns into an uncounted skip; the next tick reads the
+//     invoice again.
+func (a *paymentRetrierAdapter) chargedOutcome(ctx context.Context, tenantID string, inv domain.Invoice, hold domain.ChargeHold, release func()) error {
+	switch {
+	case inv.Status == domain.InvoicePaid || inv.PaymentStatus == domain.PaymentSucceeded:
+		return nil
+	case inv.PaymentInFlight():
+		if inv.StripePaymentIntentID == "" {
+			slog.ErrorContext(ctx, "dunning retry: the charge left the invoice in flight with no PaymentIntent; skipping this attempt uncounted",
+				"invoice_id", inv.ID, "payment_status", inv.PaymentStatus)
+			return fmt.Errorf("dunning retry: invoice %s is %s with no PaymentIntent after the charge", inv.ID, inv.PaymentStatus)
+		}
+		return &dunning.RetryError{PaymentIntentID: inv.StripePaymentIntentID, Err: dunning.ErrPaymentInFlight, Hold: hold}
+	case inv.PaymentStatus == domain.PaymentFailed && inv.StripePaymentIntentID != "":
+		release()
+		return a.retryFailure(ctx, tenantID, inv.ID, inv.StripePaymentIntentID)
+	}
+	slog.ErrorContext(ctx, "dunning retry: the charge returned no error but left the invoice neither paid, in flight nor failed; skipping this attempt uncounted",
+		"invoice_id", inv.ID, "status", inv.Status, "payment_status", inv.PaymentStatus)
+	return fmt.Errorf("dunning retry: invoice %s is %s/%s after the charge", inv.ID, inv.Status, inv.PaymentStatus)
+}
+
+// retryFailure is the failure of PaymentIntent pi as a counted decline: a
+// *dunning.RetryError wrapping a definite *payment.PaymentError, with the
+// attempt row's decline code as its Ask. The attempt row holds Stripe's
+// decline code but not its card message, so the warning carries no reason
+// line; it never falls back to the invoice's last_payment_error. A failed
+// read leaves the Ask unset (logged): the attempt still counts.
+func (a *paymentRetrierAdapter) retryFailure(ctx context.Context, tenantID, invoiceID, pi string) error {
+	var code string
+	attempts, err := a.invoiceStore.ListChargeAttemptsByInvoice(ctx, tenantID, invoiceID)
+	if err != nil {
+		slog.WarnContext(ctx, "dunning retry: could not read the failed attempt's decline code; the warning asks nothing specific",
+			"invoice_id", invoiceID, "payment_intent_id", pi, "error", err)
+	}
+	for _, at := range attempts {
+		if at.StripePaymentIntentID == pi {
+			code = at.DeclineCode
+			break
+		}
+	}
+	return &dunning.RetryError{
+		PaymentIntentID: pi,
+		Err:             &payment.PaymentError{Message: "payment failed", DeclineCode: code, PaymentIntentID: pi},
+		Ask:             domain.DeclineAskOf(code),
+		NoReason:        true,
+	}
+}
+
+// ExplainRetryFailure implements dunning.RetryFailureExplainer: a retry whose
+// payment failed before its in-flight write is recorded as the decline
+// retryFailure builds.
+func (a *paymentRetrierAdapter) ExplainRetryFailure(ctx context.Context, tenantID, invoiceID, paymentIntentID string) error {
+	return a.retryFailure(ctx, tenantID, invoiceID, paymentIntentID)
 }
 
 // dunningRunStarter is the minimal slice of dunning.Service the adapter
