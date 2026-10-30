@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
+import { StaleNotice } from '@/components/StaleNotice'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -605,7 +606,9 @@ export default function InvoiceDetailPage() {
     )
   }
 
-  if (error) {
+  // A failed refresh after a load keeps the page (StaleNotice below);
+  // only a page that never loaded becomes the error screen.
+  if (error && !invoiceData) {
     return (
       <Layout>
         <LoadError what="this invoice" error={loadError} onRetry={() => refetch()} className="py-16" />
@@ -641,6 +644,7 @@ export default function InvoiceDetailPage() {
   return (
     <Layout>
       <DetailBreadcrumb to="/invoices" parentLabel="Invoices" currentLabel={invoice.invoice_number} />
+      {loadError && <StaleNotice what="this invoice" onRetry={() => refetch()} />}
 
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3 mb-6">

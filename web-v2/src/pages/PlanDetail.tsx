@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react'
+import { StaleNotice } from '@/components/StaleNotice'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -136,7 +137,9 @@ export default function PlanDetailPage() {
     )
   }
 
-  if (loadError) {
+  // A failed refresh after a load keeps the page (StaleNotice below);
+  // only a page that never loaded becomes the error screen.
+  if (loadError && !plan) {
     return (
       <Layout>
         <LoadError what="this plan" error={loadError} onRetry={() => refetch()} className="py-16" />
@@ -155,6 +158,7 @@ export default function PlanDetailPage() {
   return (
     <Layout>
       <DetailBreadcrumb to="/pricing" parentLabel="Plans" currentLabel={plan.name} />
+      {loadError && <StaleNotice what="this plan" onRetry={() => refetch()} />}
 
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3 mb-6">
@@ -229,7 +233,8 @@ export default function PlanDetailPage() {
       <Card className="mt-6">
         <CardHeader>
           <div className="flex items-center justify-between">
-            <CardTitle className="text-sm">Subscriptions ({subsTotal})</CardTitle>
+            {/* No count until the list arrives: "(0)" read as "none" (W-17). */}
+            <CardTitle className="text-sm">Subscriptions{subsPage ? ` (${subsTotal})` : ''}</CardTitle>
             {subscriptions.length > 0 && (
               <Link to="/subscriptions" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
                 View all
@@ -291,8 +296,10 @@ export default function PlanDetailPage() {
                 ))}
               </TableBody>
             </Table>
-          ) : (
+          ) : subsPage ? (
             <p className="text-sm text-muted-foreground text-center py-8">No subscriptions are using this plan yet</p>
+          ) : (
+            <p className="text-sm text-muted-foreground text-center py-8">Loading…</p>
           )}
           {subsTotal > subscriptions.length && (
             <p className="px-6 py-2 text-xs text-muted-foreground border-t border-border">Showing the first {subscriptions.length} of {subsTotal}.</p>

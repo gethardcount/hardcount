@@ -189,6 +189,9 @@ export default function CreditNotesPage() {
     ;(customersData?.data ?? []).forEach(c => { cMap[c.id] = c })
     return cMap
   }, [customersData])
+  // While the names load a row reads "…", not "Unknown": a customer is
+  // unknown only once the names arrived without it (W-17).
+  const unknownCustomer = customersData ? 'Unknown customer' : '…'
 
   const issueMutation = useMutation({
     mutationFn: (id: string) => api.issueCreditNote(id),
@@ -449,7 +452,7 @@ export default function CreditNotesPage() {
                         </TableCell>
                         <TableCell className="text-sm">
                           <Link to={`/customers/${note.customer_id}`} className="text-primary hover:underline">
-                            {customerMap[note.customer_id]?.display_name || 'Unknown'}
+                            {customerMap[note.customer_id]?.display_name || unknownCustomer}
                           </Link>
                         </TableCell>
                         <TableCell className="text-sm">

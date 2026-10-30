@@ -191,6 +191,9 @@ export default function InvoicesPage() {
     ;(customersData?.data ?? []).forEach(c => { cMap[c.id] = c })
     return cMap
   }, [customersData])
+  // While the names load a row reads "…", not "Unknown": a customer is
+  // unknown only once the names arrived without it (W-17).
+  const unknownCustomer = customersData ? 'Unknown customer' : '…'
 
   // Search + date range are server-side (search=, from=, to= query
   // params) — the rows arriving here are already filtered across the
@@ -431,14 +434,14 @@ export default function InvoicesPage() {
                       </TableCell>
                       <TableCell className="text-sm">
                         <div className="flex items-center gap-2.5">
-                          <InitialsAvatar name={customerMap[inv.customer_id]?.display_name || 'Unknown'} size="xs" />
+                          <InitialsAvatar name={customerMap[inv.customer_id]?.display_name || unknownCustomer} size="xs" />
                           <Link
                             to={`/customers/${inv.customer_id}`}
                             onClick={e => e.stopPropagation()}
                             className="text-sm font-medium text-foreground hover:text-primary truncate block max-w-[160px]"
-                            title={customerMap[inv.customer_id]?.display_name || 'Unknown'}
+                            title={customerMap[inv.customer_id]?.display_name || unknownCustomer}
                           >
-                            {customerMap[inv.customer_id]?.display_name || 'Unknown'}
+                            {customerMap[inv.customer_id]?.display_name || unknownCustomer}
                           </Link>
                         </div>
                       </TableCell>

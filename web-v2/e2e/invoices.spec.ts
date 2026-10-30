@@ -605,3 +605,29 @@ test('Collect payment asks first, naming the amount and the card, and is not off
   await expect(page.getByText("The customer's bank refused this card for good.")).toBeVisible()
   await expect(page.getByRole('button', { name: 'Collect payment' })).toHaveCount(0)
 })
+
+// A refresh that fails after the page loaded keeps the page, and an open
+// dialog with what was typed in it, and says so in one line with Retry
+// (B-06). It used to swap the whole page for an error screen. An open
+// invoice polls every 10 seconds, so the failed poll arrives on its own.
+test('a failed refresh keeps the invoice page and an open dialog, and Retry recovers', async ({ page }) => {
+  const { invoice } = await billedCustomer()
+  await page.goto(`/invoices/${invoice.id}`)
+  await expect(page.getByRole('heading', { level: 1, name: invoice.invoice_number, exact: true })).toBeVisible()
+  await (await invoiceActions(page)).getByRole('menuitem', { name: 'Email invoice' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Email invoice' })
+  await dialog.getByLabel('Recipient email').fill('typed-before-outage@example.com')
+
+  const route = (url: URL) => url.pathname === `/v1/invoices/${invoice.id}`
+  await page.route(route, r => r.fulfill({ status: 503, json: { error: { type: 'api_error', message: 'unavailable' } } }))
+  // includeHidden: the open dialog hides the page behind it from role queries.
+  const notice = page.getByRole('status', { includeHidden: true }).filter({ hasText: "Couldn't refresh this invoice." })
+  await expect(notice).toBeAttached({ timeout: 20_000 })
+  await expect(dialog.getByLabel('Recipient email')).toHaveValue('typed-before-outage@example.com')
+  await expect(page.getByRole('heading', { level: 1, name: invoice.invoice_number, exact: true, includeHidden: true })).toBeAttached()
+
+  await dialog.getByRole('button', { name: 'Cancel' }).click()
+  await page.unroute(route)
+  await notice.getByRole('button', { name: 'Retry', exact: true }).click()
+  await expect(notice).toHaveCount(0)
+})
