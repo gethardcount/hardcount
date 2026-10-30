@@ -259,6 +259,7 @@ secrets.
 
 | CI job | What it checks | Local command |
 |---|---|---|
+| `upgrade` | Installs the previous release from its tag and bills a month with its demo, then starts HEAD on the same database. Every invoice from before must read the same through the API, HEAD must bill a new month, and hardcount-doctor must find nothing | `scripts/ci/upgrade-from-previous-tag.sh` (needs Docker) |
 | `doc-links` | Every internal Markdown link and `#anchor` resolves. It turns red on a broken link; fix it before merging | `lychee --offline --include-fragments '**/*.md'` |
 | `doc-style` | Vale prose lint on the lines your PR adds. It comments only and never fails | `vale <changed .md files>` |
 

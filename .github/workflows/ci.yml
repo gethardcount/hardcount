@@ -270,6 +270,40 @@ jobs:
           path: ${{ runner.temp }}/migrations-out
           retention-days: 7
 
+  # An upgrade from the previous release (ADR-125, amendment 2026-10-30).
+  # The newest v* tag, built from its own source, installs on an empty
+  # database and bills a month with its demo. Then HEAD starts on that
+  # database and runs its migrations. Every invoice from before must read the
+  # same through the API, HEAD must bill a new month there, and
+  # hardcount-doctor must find nothing. The script starts its own Postgres,
+  # so the job has no service. Not a required check yet.
+  upgrade:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The tags and their history: the script picks the previous
+          # release from them and checks it out in a git worktree.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Upgrade from the previous release
+        run: scripts/ci/upgrade-from-previous-tag.sh
+        env:
+          KEEP_OUT: ${{ runner.temp }}/upgrade-out
+
+      - name: Upload outputs on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: upgrade-out
+          path: ${{ runner.temp }}/upgrade-out
+          retention-days: 7
+
   # Golden path: the first-invoice tutorial's own commands, then the README
   # quickstart + scripts/demo.sh, executed for real.
   # This is the whole wedge chain in one run — recipe → test-clock customer →
@@ -700,7 +734,8 @@ jobs:
     timeout-minutes: 30
     # Every check an image must pass before it is published. Each one is
     # also a required check on main (with e2e), so keep this list and the
-    # branch protection's required checks the same.
+    # branch protection's required checks the same. The upgrade job is
+    # neither yet: it joins both lists when it becomes a required check.
     needs: [test, unit, test-pgbouncer, pricing-shapes, migrations, golden-path, codegen-drift, frontend, lint]
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04

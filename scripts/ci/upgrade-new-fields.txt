@@ -1,0 +1,17 @@
+# Fields HEAD may add to an invoice that existed before an upgrade.
+# Read by scripts/ci/upgrade-from-previous-tag.sh (the upgrade CI job).
+#
+# The job compares each invoice, as GET /v1/invoices/{id} returns it, before
+# and after the upgrade. A field the previous release did not return and
+# HEAD does fails the job, unless it is listed here. So a new field is a
+# reviewed decision, not a silent one.
+#
+# One entry per line: "invoice <field>" or "line_item <field>". The comment
+# line above each entry says what the field is and why its value does not
+# change what the invoice bills. A listed field that the previous release
+# also returned is still compared.
+#
+# Never list a field to make a changed amount, line, status, number or tax
+# pass: that is a money finding, and the upgrade is what needs fixing.
+#
+# No entries on 2026-10-30, upgrading from v0.9.1.

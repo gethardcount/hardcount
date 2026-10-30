@@ -148,6 +148,19 @@ The golden-path demo (`scripts/demo.sh`) and the `hardcount-doctor` sweep also
 run in CI on every PR. The doctor checks the money invariants over the rows
 the golden path left behind.
 
+The `upgrade` job checks an upgrade from the previous release on every PR,
+from source. It installs the newest `v*` tag, bills a month with that tag's
+`scripts/demo.sh`, then starts HEAD on the same database, which runs HEAD's
+migrations. Every invoice from before must read the same through the API,
+timestamps included. Two fields are left out, `attention` and
+`recovery_warning`, because the API works them out on each read. A field
+HEAD adds passes only when `scripts/ci/upgrade-new-fields.txt` lists it,
+with why. HEAD must then render the old invoices' PDFs and bill a new month
+there, and `hardcount-doctor` must find nothing. To run it yourself:
+`scripts/ci/upgrade-from-previous-tag.sh` (needs Docker, Go and `jq`). It is
+not a required check yet. Why it exists:
+[ADR-125, amendment 2026-10-30](adr/125-goose-migrations-from-one-v081-baseline.md#amendment-2026-10-30-an-upgrade-job-checks-that-invoices-survive-an-upgrade).
+
 The [first-invoice tutorial](first-invoice.md) runs in the same CI job.
 `cmd/hardcount-docs-run` runs each code block the page marks
 `<!-- docs-run: command -->` in one shell, in order, and checks the block
