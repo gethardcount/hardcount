@@ -44,15 +44,30 @@ Hardcount is pre-1.0. Only the latest release gets security fixes.
 
 ## Hardening status
 
-Hardcount is **pre-launch** and pre-audit. Encryption-at-rest, RLS on most API requests (the exceptions are listed in [Architecture](docs/architecture.md#design-rules)), audit log immutability, HMAC webhook signing, bcrypt (cost 12) passwords, SHA-256 session/API-key/token hashing, security headers, GCRA rate limiting (a leaky-bucket-style algorithm), and TLS-only intent (secure cookies + HSTS; TLS termination itself is left to the operator's proxy) are all implemented. (A SOC 2 control mapping waits until a design partner requires it: see [Later](docs/roadmap.md#later) in the roadmap.)
+Hardcount has had no external security audit or penetration test yet.
 
-Known gaps, documented openly:
+In place:
 
-- No built-in mechanism to rotate `HARDCOUNT_ENCRYPTION_KEY` or `HARDCOUNT_EMAIL_BIDX_KEY` (a rebuild on envelope encryption — data keys wrapped under a rotatable master key — is planned)
-- No MFA on dashboard login (no MFA in v1; SSO direction is embedded OIDC/SAML per ADR-014 — Hardcount will not depend on a SaaS auth vendor)
-- No SAST (static application security testing) in CI (Semgrep / CodeQL planned)
-- No threat model document (STRIDE / LINDDUN, two threat-modeling frameworks, planned)
-- No external penetration test on record yet
+- **Account isolation:** row-level security on most API requests; the exceptions are listed in [Architecture](docs/architecture.md#design-rules). Hardcount refuses to start if its request-time database user can bypass it.
+- **Secrets at rest:** AES-256-GCM encryption for Stripe keys, webhook signing secrets and customer personal data, required in production; an HMAC blind index (a keyed hash) to find a customer by email without storing the address in plain text.
+- **Credentials:** passwords as bcrypt (cost 12); sessions, API keys and one-time tokens stored only as SHA-256 hashes.
+- **Sign-in** ([who can sign in](docs/production-one-vm.md#who-can-sign-in-to-the-dashboard)):
+  - about 30,000 common leaked passwords are refused when a password is set;
+  - repeated wrong passwords slow down instead of locking the account;
+  - the sign-in cookie travels only over HTTPS in production.
+- **Requests:** CSRF checks on the dashboard, security headers and HSTS, rate limiting. TLS itself is ended by the operator's proxy.
+- **Webhooks:** outbound events signed with HMAC-SHA256; inbound Stripe events verified.
+- **Audit log:** append-only; a database trigger refuses any update or delete.
+- **Supply chain:** CI runs `govulncheck` and scans the images with Trivy; release images carry an SBOM and are signed.
+
+Known gaps:
+
+- **No two-factor sign-in.** It is built when an operator asks for it or a customer's security review requires it ([ADR-095](docs/adr/095-login-security-roadmap-and-mfa.md)). Until then, a team can put the dashboard's sign-in behind its own SSO or VPN.
+- **No built-in rotation** of `HARDCOUNT_ENCRYPTION_KEY` or `HARDCOUNT_EMAIL_BIDX_KEY`.
+- **No static analysis** (SAST, such as CodeQL or Semgrep) in CI.
+- **No threat model document.**
+- **No external penetration test** on record.
+- **No SOC 2 control mapping** until a customer requires one ([Later](docs/roadmap.md#later) in the roadmap).
 
 If you can help close any of these, contributions are welcome via the normal PR process.
 
