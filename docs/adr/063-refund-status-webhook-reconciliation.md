@@ -1,11 +1,11 @@
 # ADR-063: Refund status is reconciled from Stripe webhooks (async truth)
 
 **Date:** 2026-06-28
-**Status:** Accepted (amended 2026-08-04)
+**Status:** Accepted (amended 2026-08-04, 2026-10-30)
 
 ## Summary
 
-Stripe webhooks decide a refund's final status, because Stripe refunds settle later and a `pending` refund can still fail. Hardcount records the status Stripe returns at creation, and the refund webhooks then move it to `succeeded` or `failed`; Stripe's `canceled` counts as `failed`. A late `pending` never overwrites a final status, and the dashboard flags a refund that failed or has been pending over 72 hours. Amended 2026-08-04: because Stripe idempotency keys expire after about 24 hours, a retry first looks the refund up at Stripe and creates a new one only when none is live. Status: active, amended 2026-08-04; refunds are retried only by the operator.
+Stripe webhooks decide a refund's final status, because Stripe refunds settle later and a `pending` refund can still fail. Hardcount records the status Stripe returns at creation, and the refund webhooks then move it to `succeeded` or `failed`; Stripe's `canceled` counts as `failed`. A late `pending` never overwrites a final status, and the dashboard flags a refund that failed or has been pending over 72 hours. Amended 2026-08-04: because Stripe idempotency keys expire after about 24 hours, a retry first looks the refund up at Stripe and creates a new one only when none is live. Status: active, amended 2026-08-04; refunds are retried only by the operator. Amended 2026-10-30 ([ADR-134](134-refunds-made-in-stripe-are-recorded.md)): a refund made in Stripe outside Hardcount, told apart by its missing `hardcount_cn_id` metadata, is recorded as an issued credit note when it plainly fits the invoice, and flagged otherwise; `refund.created` joins the refund events.
 
 ## Context
 
@@ -74,8 +74,8 @@ was *rare* (only "no refunder/no PI at issue").
   aged-pending alert is its stand-in. Trigger: an observed missed webhook.
 - **Dedicated `RefundCanceled` enum + CHECK-widening migration (0124)** — trigger:
   a partner actually hits canceled refunds.
-- **Ingesting external (dashboard) refunds** into the credit ledger — larger
-  separate decision; trigger: a tenant relies on dashboard refunds.
+- **Ingesting external (dashboard) refunds.** *Built 2026-10-30, see the
+  amendment below and [ADR-134](134-refunds-made-in-stripe-are-recorded.md).*
 
 ## Related
 - #319 (the refund "needs attention" alert this co-refines).
@@ -165,3 +165,13 @@ rejected a freestanding refunds table); the deferred attempt-history table
 (`invoice_refund_attempts`, mirroring ADR-102's charge attempts) keeps its
 trigger: a DP asking for refund observability, a second PSP, or dispute
 ingestion.
+
+## Amendment 2026-10-30: refunds made in Stripe are recorded, not ignored
+
+Decision 2 acknowledged a refund with no matching credit note and never created one. [ADR-134](134-refunds-made-in-stripe-are-recorded.md) replaces that half for refunds made outside Hardcount:
+
+- **`refund.created` joins the handled events**, with `refund.updated`, `refund.failed` and `charge.refund.updated`. One handler reads the Refund each carries.
+- **Hardcount's own refund is recognized by its metadata, not the database.** A refund with `hardcount_cn_id` keeps this ADR's path: its status goes to the credit note holding its id, and when none holds it yet, a young refund asks Stripe to deliver it again (the 15-minute window) and an old one is acknowledged for Retry refund to adopt. It is never recorded as a refund made in Stripe.
+- **A refund without that metadata goes to `creditnote.Service.RecordStripeRefund`.** That records it as an issued credit note whose refund is already done, when it plainly fits the invoice, or flags it on the invoice (`invoice_stripe_refunds`, migration 00222). It also moves the status of a note that already holds the refund id, with this ADR's monotonic rule, on its own transaction under the invoice lock.
+- **The refund stays a leg of its credit note.** The new table is an inbound log of facts from Stripe, like `invoice_disputes`; the freestanding refunds model this ADR rejected stays rejected.
+

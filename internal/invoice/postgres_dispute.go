@@ -178,7 +178,25 @@ func disputedInvoiceTx(ctx context.Context, tx *sql.Tx, stripeDisputeID, payment
 	if !errors.Is(err, sql.ErrNoRows) {
 		return "", fmt.Errorf("read dispute %s: %w", stripeDisputeID, err)
 	}
-	err = tx.QueryRowContext(ctx,
+	return invoiceForPaymentIntentTx(ctx, tx, paymentIntentID)
+}
+
+// InvoiceForPaymentIntentTx finds, on the caller's tx, the invoice a Stripe
+// PaymentIntent paid or was charged for: the invoice's charge attempts first,
+// then its own payment and anomaly columns, as for a dispute. errs.ErrNotFound
+// when no invoice holds it. The credit-note domain records a refund made in
+// Stripe against this invoice (ADR-134).
+func (s *PostgresStore) InvoiceForPaymentIntentTx(ctx context.Context, tx *sql.Tx, paymentIntentID string) (string, error) {
+	return invoiceForPaymentIntentTx(ctx, tx, paymentIntentID)
+}
+
+// invoiceForPaymentIntentTx matches an invoice by PaymentIntent: every
+// payment a settle path saw has a charge attempt row (the success upserts it
+// in the settle transaction), and the invoice columns cover rows from before
+// attempts were recorded and payments flagged as anomalies.
+func invoiceForPaymentIntentTx(ctx context.Context, tx *sql.Tx, paymentIntentID string) (string, error) {
+	var id string
+	err := tx.QueryRowContext(ctx,
 		`SELECT invoice_id FROM invoice_charge_attempts WHERE stripe_payment_intent_id = $1`, paymentIntentID,
 	).Scan(&id)
 	if err == nil {

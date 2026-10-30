@@ -50,6 +50,13 @@ export interface CreditNote {
      */
   refund_status: CreditNoteRefundStatus;
   stripe_refund_id?: string;
+  /**
+     * True when the card refund is a refund made in Stripe outside
+     * Hardcount: recorded from Stripe's refund webhook, or linked with
+     * `stripe_refund_id` at create. Hardcount made no refund call for
+     * it; `stripe_refund_id` names the refund.
+     */
+  recorded_from_stripe: boolean;
   bill_to_snapshot?: DocumentBillTo;
   supplier_snapshot?: DocumentSupplier;
   /** Tax provider's reversal transaction, set when the note is issued. */

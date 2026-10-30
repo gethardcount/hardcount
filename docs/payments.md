@@ -77,6 +77,7 @@ payment failures, and the gaps still open.
 | Retries used up, and a payment may still go through when dunning's final action is due (`processing`, `unknown`, a charge running, or a lost result) | No cancel, pause or write-off while that payment may still go through; dunning checks again later. The final action holds the charge claim itself, so no charge starts while it cancels. A payment that succeeds closes dunning; one that fails gets the final action. A parked invoice waits for the reconciler: with no payment 24 hours after the attempt, it goes back to `failed` or `pending` and dunning goes on. | Nothing. If you write off a parked invoice whose dunning used every retry, apply the policy's cancel or pause by hand ([runbook](ops/runbook/unclear-charge.md#parked-no-paymentintent)). |
 | Stripe failing | Circuit breaker, one for the whole process: after 5 unclear failures in a row within a minute (the count resets every 60 s), no charges for 30 s, and no reconciler reads by PaymentIntent. Those reads count toward the 5 too. The interrupted-charge check skips the breaker on purpose, so its failures never stop charges. A skipped dunning retry is not counted. | Usually nothing: [runbook](ops/runbook/stripe-circuit-breaker-open.md). |
 | Database error during a dunning retry | The retry is skipped and does not use up an attempt; a `WARN` line names the invoice and the error. The next pass usually retries it within the hour. If the charge claim was saved but its answer lost, the retry waits until the reconciler clears the claim: up to about 2 hours. If credits covered the invoice and only marking it paid failed, the next pass marks it paid. | Nothing. |
+| A refund made in the Stripe dashboard (or Stripe's API) on a Hardcount payment | A refund of the payment that paid a paid invoice, that fits what is left to refund and credit and that Hardcount hears of within a day, becomes an issued credit note whose card refund is that refund: no Stripe call, the tax reversed, the invoice still paid. Anything else is recorded on the invoice, never as a document: a refund of another payment or one that failed shows on its Activity list, and a refund of its own payment that did not fit shows a notice. `payment.refunded_in_stripe` is sent once. Needs `refund.created` on the Stripe webhook endpoint ([ADR-134](adr/134-refunds-made-in-stripe-are-recorded.md)). | For a notice: record it with a credit note that names the refund, or dismiss it ([runbook](ops/runbook/refund-made-in-stripe.md)). |
 | Refund pending or failed at the bank | Status follows Stripe's refund webhooks; failed never moves back to succeeded. Failed, or pending over 72 hours, shows on the home page. | **Retry refund** on the credit note. It looks the refund up in Stripe first and reuses it. |
 | Refund timeout, Stripe 5xx, 409 or 429 (no clear answer) | Refund `unknown`: the customer may already be refunded. It shows on the home page at once. Webhooks do not change it. | Don't refund in the Stripe dashboard. Retry the refund: Hardcount looks for the refund in Stripe, then resends the same request with the same idempotency key. While Stripe keeps the key (at least 24 hours), it returns the first result instead of making a second refund. |
 
@@ -125,12 +126,15 @@ payment failures, and the gaps still open.
   that follows only that list records no disputes; add them by hand
   ([runbook](ops/runbook/card-disputes.md)). Read disputes with
   `GET /v1/invoices/{id}/disputes`.
-- **A dispute that Stripe's dispute prevention settles (status
-  `prevented`) shows no notice.** Prevention settles a dispute by
-  refunding the payment in Stripe, and Hardcount does not record a refund made
-  in Stripe. The dispute is in the invoice's Activity list; record the
-  refund with a credit note
-  ([ADR-049](adr/049-payment-settlement-primitive.md), "Deferred").
+- **A refund made in Stripe whose events never reach Hardcount is not
+  recorded.** Hardcount does not poll Stripe for refunds. Stripe retries a
+  failed delivery for about three days; an endpoint without
+  `refund.created` sees most refunds only through a later `refund.updated`,
+  more than a day late, so they are flagged rather than recorded
+  ([runbook](ops/runbook/refund-made-in-stripe.md)).
+- **The dashboard has no button yet to record or dismiss a flagged refund
+  made in Stripe.** Use `POST /v1/credit-notes` with `stripe_refund_id`, or
+  `POST /v1/invoices/{id}/stripe-refunds/{stripe_refund_id}/dismiss`.
 
 **Next:** react to these events in your app with
 [webhooks](webhooks.md#event-catalog). Operators:

@@ -175,6 +175,12 @@ Words used in the Hardcount docs and dashboard. For the big picture, read
   customer's balance, and money returned outside Hardcount (out of band). Its
   status is draft, issued or voided.
   [More](adr/038-credit-note-three-channel-allocation.md)
+- **recorded from Stripe**: A credit note whose card refund is a refund made
+  in Stripe outside Hardcount, for example in the Stripe dashboard
+  (`recorded_from_stripe`). Hardcount writes it from the refund's webhook when
+  the refund plainly fits the invoice, or the operator links the refund at
+  create; either way Hardcount calls nothing at Stripe for it.
+  [More](adr/134-refunds-made-in-stripe-are-recorded.md)
 - **clawback**: Has two meanings. In subscriptions: a paid period billed in
   advance is cut short (a cancel, a downgrade, a removed item or a plan
   swap). Hardcount then issues a credit note that adds the unused amount, tax

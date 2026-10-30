@@ -63,6 +63,7 @@ import type {
   DeleteV1WebhookEndpointsEndpointsId200,
   DiscardHeldUsage200,
   DiscardHeldUsageBody,
+  DismissInvoiceStripeRefundBody,
   DunningPolicy,
   DunningPolicyInput,
   DunningRun,
@@ -129,6 +130,8 @@ import type {
   InvoiceLineItemInput,
   InvoicePaymentTimeline,
   InvoicePreview,
+  InvoiceStripeRefund,
+  InvoiceStripeRefundList,
   InvoiceWithLineItems,
   ListApiKeys200,
   ListApiKeysParams,
@@ -150,6 +153,7 @@ import type {
   ListDunningRunsParams,
   ListHeldUsage200,
   ListInvoiceDisputesParams,
+  ListInvoiceStripeRefundsParams,
   ListMembers200,
   ListPlanPrices200,
   ListPlanPricesParams,
@@ -9336,7 +9340,11 @@ export const getGetInvoicePaymentTimelineUrl = (id: string,) => {
  * `charge_attempt.succeeded|failed|unknown|below_minimum`), dunning retries, credit
  * notes, customer emails, and card disputes (source `dispute`, a
  * `payment.dispute_opened` row and, once Stripe closes the dispute, a
- * `payment.dispute_closed` row; both at Stripe's own time).
+ * `payment.dispute_closed` row; both at Stripe's own time), and refunds
+ * made in Stripe outside Hardcount that no credit note records (source
+ * `stripe_refund`, event_type `payment.refunded_in_stripe`, at Stripe's
+ * own time). A refund recorded as a credit note shows as that note's
+ * row, titled "Refunded in Stripe".
  * A draft invoice returns an empty list.
  *
  * Each row carries `line`, the row in the activity line standard's
@@ -9559,6 +9567,207 @@ export function useListInvoiceDisputes<TData = Awaited<ReturnType<typeof listInv
 
 
 
+
+export const getListInvoiceStripeRefundsUrl = (id: string,
+    params?: ListInvoiceStripeRefundsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/v1/invoices/${id}/stripe-refunds?${stringifiedParams}` : `/v1/invoices/${id}/stripe-refunds`
+}
+
+/**
+ * Returns the refunds made in Stripe outside Hardcount on the
+ * invoice's payments, oldest first, whatever Hardcount did with each:
+ * recorded as a credit note, flagged for review, or neither. An
+ * invoice without any returns an empty list. Hardcount records them
+ * from Stripe's refund webhook events, of which `refund.created` must
+ * be turned on for the Stripe webhook endpoint.
+ * @summary List the refunds made in Stripe on an invoice
+ */
+export const listInvoiceStripeRefunds = async (id: string,
+    params?: ListInvoiceStripeRefundsParams, options?: RequestInit): Promise<InvoiceStripeRefundList> => {
+
+  return orvalClient<InvoiceStripeRefundList>(getListInvoiceStripeRefundsUrl(id,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListInvoiceStripeRefundsQueryKey = (id: string,
+    params?: ListInvoiceStripeRefundsParams,) => {
+    return [
+    `/v1/invoices/${id}/stripe-refunds`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListInvoiceStripeRefundsQueryOptions = <TData = Awaited<ReturnType<typeof listInvoiceStripeRefunds>>, TError = Error | InvalidPageResponse>(id: string,
+    params?: ListInvoiceStripeRefundsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoiceStripeRefunds>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListInvoiceStripeRefundsQueryKey(id,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listInvoiceStripeRefunds>>> = () => listInvoiceStripeRefunds(id,params, requestOptions);
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listInvoiceStripeRefunds>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListInvoiceStripeRefundsQueryResult = NonNullable<Awaited<ReturnType<typeof listInvoiceStripeRefunds>>>
+export type ListInvoiceStripeRefundsQueryError = Error | InvalidPageResponse
+
+
+export function useListInvoiceStripeRefunds<TData = Awaited<ReturnType<typeof listInvoiceStripeRefunds>>, TError = Error | InvalidPageResponse>(
+ id: string,
+    params: undefined |  ListInvoiceStripeRefundsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoiceStripeRefunds>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listInvoiceStripeRefunds>>,
+          TError,
+          Awaited<ReturnType<typeof listInvoiceStripeRefunds>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListInvoiceStripeRefunds<TData = Awaited<ReturnType<typeof listInvoiceStripeRefunds>>, TError = Error | InvalidPageResponse>(
+ id: string,
+    params?: ListInvoiceStripeRefundsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoiceStripeRefunds>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listInvoiceStripeRefunds>>,
+          TError,
+          Awaited<ReturnType<typeof listInvoiceStripeRefunds>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListInvoiceStripeRefunds<TData = Awaited<ReturnType<typeof listInvoiceStripeRefunds>>, TError = Error | InvalidPageResponse>(
+ id: string,
+    params?: ListInvoiceStripeRefundsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoiceStripeRefunds>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List the refunds made in Stripe on an invoice
+ */
+
+export function useListInvoiceStripeRefunds<TData = Awaited<ReturnType<typeof listInvoiceStripeRefunds>>, TError = Error | InvalidPageResponse>(
+ id: string,
+    params?: ListInvoiceStripeRefundsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoiceStripeRefunds>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListInvoiceStripeRefundsQueryOptions(id,params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getDismissInvoiceStripeRefundUrl = (id: string,
+    stripeRefundId: string,) => {
+
+
+
+
+  return `/v1/invoices/${id}/stripe-refunds/${stripeRefundId}/dismiss`
+}
+
+/**
+ * Records that a refund made in Stripe, which Hardcount flagged on the
+ * invoice (`outcome` `needs_review`), was handled outside Hardcount.
+ * The `refunded_in_stripe` notice clears. Nothing else changes: no
+ * credit note, no money, no email. The note is kept on the refund and
+ * in the audit log.
+ * @summary Dismiss a refund made in Stripe
+ */
+export const dismissInvoiceStripeRefund = async (id: string,
+    stripeRefundId: string,
+    dismissInvoiceStripeRefundBody: DismissInvoiceStripeRefundBody, options?: RequestInit): Promise<InvoiceStripeRefund> => {
+
+  return orvalClient<InvoiceStripeRefund>(getDismissInvoiceStripeRefundUrl(id,stripeRefundId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(dismissInvoiceStripeRefundBody)
+  }
+);}
+
+
+
+
+
+export const getDismissInvoiceStripeRefundMutationOptions = <TError = Error,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof dismissInvoiceStripeRefund>>, TError,{id: string;stripeRefundId: string;data: DismissInvoiceStripeRefundBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof dismissInvoiceStripeRefund>>, TError,{id: string;stripeRefundId: string;data: DismissInvoiceStripeRefundBody}, TContext> => {
+
+const mutationKey = ['dismissInvoiceStripeRefund'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof dismissInvoiceStripeRefund>>, {id: string;stripeRefundId: string;data: DismissInvoiceStripeRefundBody}> = (props) => {
+          const {id,stripeRefundId,data} = props ?? {};
+
+          return  dismissInvoiceStripeRefund(id,stripeRefundId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DismissInvoiceStripeRefundMutationResult = NonNullable<Awaited<ReturnType<typeof dismissInvoiceStripeRefund>>>
+    export type DismissInvoiceStripeRefundMutationBody = DismissInvoiceStripeRefundBody
+    export type DismissInvoiceStripeRefundMutationError = Error
+
+    /**
+ * @summary Dismiss a refund made in Stripe
+ */
+export const useDismissInvoiceStripeRefund = <TError = Error,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof dismissInvoiceStripeRefund>>, TError,{id: string;stripeRefundId: string;data: DismissInvoiceStripeRefundBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof dismissInvoiceStripeRefund>>,
+        TError,
+        {id: string;stripeRefundId: string;data: DismissInvoiceStripeRefundBody},
+        TContext
+      > => {
+      return useMutation(getDismissInvoiceStripeRefundMutationOptions(options), queryClient);
+    }
 
 export const getGetCreditNoteStatsUrl = () => {
 

@@ -46,6 +46,7 @@ const (
 //	payment_method_required     — no PM on file
 //	dunning_exhausted           — shipped 2026-07-22 (payment-surfacing audit)
 //	dispute_lost                — shipped 2026-10-19 (#979)
+//	refunded_in_stripe          — shipped 2026-10-30 (ADR-134)
 type AttentionReason string
 
 const (
@@ -181,6 +182,18 @@ const (
 	// own books). Critical, and surfaced on paid invoices, which is where
 	// every dispute lands. Lago parity.
 	AttentionReasonDisputeLost AttentionReason = "dispute_lost"
+
+	// AttentionReasonRefundedInStripe: a refund of this invoice's payment was
+	// made in Stripe outside Hardcount, and Hardcount did not record it as a
+	// credit note (ADR-134): the invoice was not paid yet, the currency
+	// differs, it bought prepaid credit, Hardcount first saw the refund more
+	// than a day late, or the refund is more than the invoice has left to
+	// refund or credit. The invoice, its PDF and the hosted page still say
+	// nothing was refunded until the operator records it with a credit note
+	// linked to the refund, or dismisses it as handled outside Hardcount.
+	// Warning, and surfaced on paid invoices, which is where refunds land. A
+	// refund Hardcount did record raises nothing: the books are right.
+	AttentionReasonRefundedInStripe AttentionReason = "refunded_in_stripe"
 
 	// AttentionReasonAmountBelowMinimum: Stripe refused to charge the invoice
 	// because its amount is below Stripe's minimum charge
@@ -539,6 +552,14 @@ type AttentionContext struct {
 	// and in GET /v1/invoices/{id}/disputes.
 	LostDispute *InvoiceDispute
 
+	// StripeRefundReview is the newest refund made in Stripe outside
+	// Hardcount on one of this invoice's payments that Hardcount flagged
+	// instead of recording (outcome needs_review, ADR-134); nil when none
+	// waits. The invoice service reads it for every non-draft invoice. A read
+	// error leaves it nil: the notice is display-only, and the refund stays
+	// on the invoice's timeline and in GET /v1/invoices/{id}/stripe-refunds.
+	StripeRefundReview *InvoiceStripeRefund
+
 	// LastFailedChargeAt is the simulated instant of the invoice's latest
 	// failed charge, for a clock-pinned invoice only (nil otherwise). The
 	// payment-failure banner dates "since" from it: attentionSince's issue
@@ -634,6 +655,11 @@ func classifyAttentionCause(inv Invoice, atc AttentionContext) *Attention {
 	// early return would hide every one of them.
 	if atc.LostDispute != nil {
 		return classifyDisputeLost(inv, *atc.LostDispute, atc)
+	}
+	// A refund made in Stripe that Hardcount did not record pierces it as
+	// well: refunds land on paid invoices.
+	if atc.StripeRefundReview != nil {
+		return classifyRefundedInStripe(inv, *atc.StripeRefundReview)
 	}
 	// A BAD-DEBT RECOVERY charge in flight pierces the early-return, for the
 	// same reason the anomaly does: the state lives only on a row the return
@@ -1747,6 +1773,56 @@ func classifyDisputeLost(inv Invoice, d InvoiceDispute, atc AttentionContext) *A
 		Message:  message,
 		Detail:   detail,
 		DocURL:   docURL("dispute-lost"),
+		Since:    &since,
+	}
+}
+
+// classifyRefundedInStripe reports a refund of the invoice's payment made in
+// Stripe outside Hardcount that Hardcount flagged instead of recording
+// (ADR-134). Warning: the money already moved, the invoice is not wrong in a
+// way that loses more, but its documents and Stripe Tax say nothing was
+// refunded until the operator acts. No action button yet: recording it is a
+// credit note linked to the refund (POST /v1/credit-notes with
+// stripe_refund_id), and dismissing it is POST
+// /v1/invoices/{id}/stripe-refunds/{stripe_refund_id}/dismiss; Detail names
+// both.
+func classifyRefundedInStripe(inv Invoice, r InvoiceStripeRefund) *Attention {
+	since := r.RefundCreatedAt
+	amount := FormatMoneyMinor(r.AmountCents, r.Currency)
+	why := ""
+	record := "Record it with a credit note linked to the refund, or dismiss it if you handled it outside Hardcount."
+	switch r.ReviewReason {
+	case StripeRefundReviewInvoiceNotPaid:
+		why = "the invoice was not paid in Hardcount when Stripe reported the refund"
+		record = "Check the invoice's payments in Stripe, then record the refund with a credit note once the invoice is paid, or dismiss it if you handled it outside Hardcount."
+	case StripeRefundReviewCurrencyMismatch:
+		why = "the refund is in " + r.Currency + " and the invoice in " + inv.Currency
+		record = "Record it in your own books and dismiss it here."
+	case StripeRefundReviewPrepaidCommit:
+		why = "the invoice bought prepaid credit, which the customer can still spend"
+		record = "Retire that credit with commit relief, recorded as money returned outside Hardcount (the refund already returned it), then dismiss the refund here."
+	case StripeRefundReviewSeenLate:
+		why = "Hardcount first heard of it more than a day after it was made, so it may already be recorded"
+		record = "If no credit note records it yet, record it with a credit note linked to the refund; otherwise dismiss it."
+	case StripeRefundReviewExceedsCardRefundable:
+		why = "it is more than the card payment had left to refund after the invoice's credit notes"
+		record = "Check the payment in Stripe and record the difference in your own books, then dismiss it here."
+	case StripeRefundReviewExceedsCreditable:
+		why = "the customer got back more than the invoice had left to credit, after a credit note that already gave part of it back another way"
+		record = "If that credit note's credit was not meant as well, take it back from the customer's balance; then dismiss the refund here."
+	default:
+		why = "Hardcount could not match it to the invoice"
+	}
+	detail := "Stripe refund " + r.StripeRefundID + " on payment " + r.StripePaymentIntentID + ". " +
+		"To record it: POST /v1/credit-notes with stripe_refund_id and refund_amount_cents set to the refund's amount; Hardcount calls nothing at Stripe for it. " +
+		"To dismiss it: POST /v1/invoices/" + inv.ID + "/stripe-refunds/" + r.StripeRefundID + "/dismiss with a note."
+	return &Attention{
+		Severity: AttentionSeverityWarning,
+		Reason:   AttentionReasonRefundedInStripe,
+		Code:     "payment.refunded_in_stripe." + string(r.ReviewReason),
+		Message:  "A refund of " + amount + " was made in Stripe and not recorded here: " + why + ". " + record,
+		Detail:   detail,
+		DocURL:   docURL("refunded-in-stripe"),
 		Since:    &since,
 	}
 }

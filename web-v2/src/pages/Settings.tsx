@@ -1073,6 +1073,10 @@ const STRIPE_WEBHOOK_EVENTS: { name: string; purpose: string }[] = [
   // and it only breaks in prod (stripe listen forwards ALL events, so dev
   // never reproduces it).
   { name: 'charge.refund.updated', purpose: 'tracks async refund status' },
+  // A refund made in the Stripe dashboard (ADR-134): recorded as a credit
+  // note, or flagged on the invoice. Without it such a refund is seen only
+  // through a later refund.updated, and then flagged rather than recorded.
+  { name: 'refund.created', purpose: 'records refunds made in Stripe' },
   { name: 'refund.updated', purpose: 'tracks async refund status' },
   { name: 'refund.failed', purpose: 'flags refunds that failed at Stripe' },
   // Card disputes (#979): recorded against the paid invoice, with the

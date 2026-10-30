@@ -375,6 +375,7 @@ const EVENT_GROUPS: { label: string; events: { type: string; description: string
       { type: 'payment.received_on_voided_invoice', description: 'A payment landed on a voided invoice — the customer is owed a refund' },
       { type: 'payment.dispute_opened', description: 'A customer disputed a card payment with their bank' },
       { type: 'payment.dispute_closed', description: 'A recorded dispute closed' },
+      { type: 'payment.refunded_in_stripe', description: 'A payment was refunded in Stripe, outside Hardcount' },
     ],
   },
   {

@@ -296,6 +296,10 @@ type stripeStub struct {
 	mu    sync.Mutex
 	calls []string              // "POST /v1/customers"
 	forms map[string]url.Values // last form sent to each "METHOD path"
+	// extra, when set, answers a call before the built-in answers do: ok
+	// false falls through to them. It runs outside the stub's lock, so it
+	// may call the server under test (a concurrent-resolver fake).
+	extra func(call string, form url.Values) (status int, body string, ok bool)
 }
 
 func installStripeStub(t *testing.T) *stripeStub {
@@ -328,6 +332,16 @@ func (s *stripeStub) answer(req *http.Request) *http.Response {
 	s.forms[call] = form
 	s.mu.Unlock()
 
+	if s.extra != nil {
+		if status, body, ok := s.extra(call, form); ok {
+			return &http.Response{
+				StatusCode: status,
+				Header:     http.Header{"Content-Type": {"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(body)),
+				Request:    req,
+			}
+		}
+	}
 	status, body := 200, ""
 	switch {
 	case call == "POST /v1/customers":

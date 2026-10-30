@@ -54,6 +54,11 @@ type CreditNote struct {
 	VoidedAt           *time.Time   `json:"voided_at,omitempty"`
 	RefundStatus       RefundStatus `json:"refund_status"`
 	StripeRefundID     string       `json:"stripe_refund_id,omitempty"`
+	// RecordedFromStripe marks a credit note whose card refund is a refund
+	// made in Stripe outside Hardcount (ADR-134): recorded from the refund
+	// webhook, or linked by the operator at create. Hardcount made no refund
+	// call for it; StripeRefundID names the refund.
+	RecordedFromStripe bool `json:"recorded_from_stripe"`
 	// RefundUnknownKey is the idempotency key of the refund request whose
 	// result is unknown. It is set exactly while RefundStatus is
 	// RefundUnknown, and Retry refund resends that request with it. Internal:

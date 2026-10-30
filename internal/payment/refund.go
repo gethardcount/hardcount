@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/stripe/stripe-go/v82"
 )
 
@@ -214,6 +215,44 @@ func (r *StripeRefunder) GetRefund(ctx context.Context, refundID string) (domain
 		return "", "", fmt.Errorf("stripe get refund: %s", stripeErrorMessage(err))
 	}
 	return mapStripeRefundStatus(string(ref.Status)), string(ref.FailureReason), nil
+}
+
+// ReadRefund reads one refund's current state at Stripe: its PaymentIntent,
+// amount, currency, status and hardcount_cn_id metadata. The credit-note
+// service reads it before an operator links a refund made in Stripe to a
+// credit note (ADR-134), so a link can only name a refund that exists, on
+// the invoice's payment, that Hardcount did not make. A status Stripe adds
+// later is refused: the link would store a status Hardcount cannot read.
+func (r *StripeRefunder) ReadRefund(ctx context.Context, refundID string) (domain.StripeRefundFacts, error) {
+	sc, err := r.clients.ResolveCtx(ctx)
+	if err != nil {
+		return domain.StripeRefundFacts{}, fmt.Errorf("stripe get refund: read Stripe credentials: %w", err)
+	}
+	if sc == nil {
+		return domain.StripeRefundFacts{}, ErrStripeNotConfigured
+	}
+	ref, err := sc.V1Refunds.Retrieve(ctx, refundID, nil)
+	if err != nil {
+		var se *stripe.Error
+		if errors.As(err, &se) && se.HTTPStatusCode == http.StatusNotFound {
+			return domain.StripeRefundFacts{}, errs.Invalid("stripe_refund_id", "Stripe has no refund "+refundID+" in this mode")
+		}
+		return domain.StripeRefundFacts{}, fmt.Errorf("stripe get refund: %s", stripeErrorMessage(err))
+	}
+	facts := domain.StripeRefundFacts{
+		ID:                    ref.ID,
+		AmountCents:           ref.Amount,
+		Currency:              string(ref.Currency),
+		Status:                domain.StripeRefundStatus(ref.Status),
+		HardcountCreditNoteID: ref.Metadata["hardcount_cn_id"],
+	}
+	if ref.PaymentIntent != nil {
+		facts.PaymentIntentID = ref.PaymentIntent.ID
+	}
+	if !facts.Status.Valid() {
+		return domain.StripeRefundFacts{}, fmt.Errorf("stripe refund %s has a status Hardcount does not know: %q", refundID, ref.Status)
+	}
+	return facts, nil
 }
 
 // FindRefundForCreditNote searches the PaymentIntent's refunds for a LIVE

@@ -18,4 +18,5 @@ export const InvoicePaymentTimelineDegradedItem = {
   dunning: 'dunning',
   charge_attempts: 'charge_attempts',
   disputes: 'disputes',
+  stripe_refunds: 'stripe_refunds',
 } as const;

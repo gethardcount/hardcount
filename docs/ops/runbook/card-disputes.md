@@ -102,9 +102,11 @@ The status tells you where the dispute is:
    both payments in Stripe before you refund anything: a refund of the other
    payment can give the customer the same money back twice.
 4. **If it is `prevented`, check the payment in Stripe.** Stripe's dispute
-   prevention settles a dispute by refunding the payment, and Hardcount does
-   not record a refund made in Stripe. Record that refund with a credit
-   note, as in step 3. No notice appears for this.
+   prevention settles a dispute by refunding the payment. Hardcount records
+   that refund as it records any refund made in Stripe: as a credit note when
+   it fits the invoice, or with a notice on the invoice when it does not
+   ([A refund made in Stripe](refund-made-in-stripe.md)). An inquiry closed
+   by a full refund is recorded the same way.
 5. **If a lost dispute later turns into a win** (Stripe calls it a late
    win), Stripe returns the money to your balance, the disputes list shows
    `won` and the notice goes away. If you already acted on the loss, undo

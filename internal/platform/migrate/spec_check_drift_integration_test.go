@@ -68,6 +68,9 @@ func TestSpecEnumsMatchColumnChecks(t *testing.T) {
 		{"plan_price_versions_mode_check", "PlanPrice", "mode"},
 		{"customer_price_overrides_mode_check", "CustomerPriceOverride", "mode"},
 		{"api_keys_key_type_check", "APIKey", "key_type"},
+		{"invoice_stripe_refunds_status_check", "InvoiceStripeRefund", "status"},
+		{"invoice_stripe_refunds_outcome_check", "InvoiceStripeRefund", "outcome"},
+		{"invoice_stripe_refunds_review_reason_check", "InvoiceStripeRefund", "review_reason"},
 	} {
 		var def string
 		if err := db.QueryRow(`SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = $1`, c.constraint).Scan(&def); err != nil {
@@ -76,6 +79,11 @@ func TestSpecEnumsMatchColumnChecks(t *testing.T) {
 		}
 		var check []string
 		for _, m := range literal.FindAllStringSubmatch(def, -1) {
+			// '' is "not set", which the spec says by leaving the field out
+			// (invoice_stripe_refunds.review_reason).
+			if m[1] == "" {
+				continue
+			}
 			check = append(check, m[1])
 		}
 		enum := append([]string{}, specEnum(c.schema, c.prop)...)

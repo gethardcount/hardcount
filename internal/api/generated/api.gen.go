@@ -220,6 +220,7 @@ const (
 	AttentionReasonPaymentProcessing    AttentionReason = "payment_processing"
 	AttentionReasonPaymentScheduled     AttentionReason = "payment_scheduled"
 	AttentionReasonPaymentUnconfirmed   AttentionReason = "payment_unconfirmed"
+	AttentionReasonRefundedInStripe     AttentionReason = "refunded_in_stripe"
 	AttentionReasonTaxCalculationFailed AttentionReason = "tax_calculation_failed"
 	AttentionReasonTaxLocationRequired  AttentionReason = "tax_location_required"
 )
@@ -250,6 +251,8 @@ func (e AttentionReason) Valid() bool {
 	case AttentionReasonPaymentScheduled:
 		return true
 	case AttentionReasonPaymentUnconfirmed:
+		return true
+	case AttentionReasonRefundedInStripe:
 		return true
 	case AttentionReasonTaxCalculationFailed:
 		return true
@@ -1000,6 +1003,7 @@ const (
 	InvoicePaymentTimelineDegradedDisputes       InvoicePaymentTimelineDegraded = "disputes"
 	InvoicePaymentTimelineDegradedDunning        InvoicePaymentTimelineDegraded = "dunning"
 	InvoicePaymentTimelineDegradedEmails         InvoicePaymentTimelineDegraded = "emails"
+	InvoicePaymentTimelineDegradedStripeRefunds  InvoicePaymentTimelineDegraded = "stripe_refunds"
 )
 
 // Valid indicates whether the value is a known member of the InvoicePaymentTimelineDegraded enum.
@@ -1016,6 +1020,8 @@ func (e InvoicePaymentTimelineDegraded) Valid() bool {
 	case InvoicePaymentTimelineDegradedDunning:
 		return true
 	case InvoicePaymentTimelineDegradedEmails:
+		return true
+	case InvoicePaymentTimelineDegradedStripeRefunds:
 		return true
 	default:
 		return false
@@ -1088,6 +1094,90 @@ func (e InvoiceStatus) Valid() bool {
 	}
 }
 
+// Defines values for InvoiceStripeRefundOutcome.
+const (
+	InvoiceStripeRefundOutcomeCreditNote   InvoiceStripeRefundOutcome = "credit_note"
+	InvoiceStripeRefundOutcomeDismissed    InvoiceStripeRefundOutcome = "dismissed"
+	InvoiceStripeRefundOutcomeNeedsReview  InvoiceStripeRefundOutcome = "needs_review"
+	InvoiceStripeRefundOutcomeNotRefunded  InvoiceStripeRefundOutcome = "not_refunded"
+	InvoiceStripeRefundOutcomeOtherPayment InvoiceStripeRefundOutcome = "other_payment"
+)
+
+// Valid indicates whether the value is a known member of the InvoiceStripeRefundOutcome enum.
+func (e InvoiceStripeRefundOutcome) Valid() bool {
+	switch e {
+	case InvoiceStripeRefundOutcomeCreditNote:
+		return true
+	case InvoiceStripeRefundOutcomeDismissed:
+		return true
+	case InvoiceStripeRefundOutcomeNeedsReview:
+		return true
+	case InvoiceStripeRefundOutcomeNotRefunded:
+		return true
+	case InvoiceStripeRefundOutcomeOtherPayment:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for InvoiceStripeRefundReviewReason.
+const (
+	CurrencyMismatch      InvoiceStripeRefundReviewReason = "currency_mismatch"
+	ExceedsCardRefundable InvoiceStripeRefundReviewReason = "exceeds_card_refundable"
+	ExceedsCreditable     InvoiceStripeRefundReviewReason = "exceeds_creditable"
+	InvoiceNotPaid        InvoiceStripeRefundReviewReason = "invoice_not_paid"
+	PrepaidCommit         InvoiceStripeRefundReviewReason = "prepaid_commit"
+	SeenLate              InvoiceStripeRefundReviewReason = "seen_late"
+)
+
+// Valid indicates whether the value is a known member of the InvoiceStripeRefundReviewReason enum.
+func (e InvoiceStripeRefundReviewReason) Valid() bool {
+	switch e {
+	case CurrencyMismatch:
+		return true
+	case ExceedsCardRefundable:
+		return true
+	case ExceedsCreditable:
+		return true
+	case InvoiceNotPaid:
+		return true
+	case PrepaidCommit:
+		return true
+	case SeenLate:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for InvoiceStripeRefundStatus.
+const (
+	InvoiceStripeRefundStatusCanceled       InvoiceStripeRefundStatus = "canceled"
+	InvoiceStripeRefundStatusFailed         InvoiceStripeRefundStatus = "failed"
+	InvoiceStripeRefundStatusPending        InvoiceStripeRefundStatus = "pending"
+	InvoiceStripeRefundStatusRequiresAction InvoiceStripeRefundStatus = "requires_action"
+	InvoiceStripeRefundStatusSucceeded      InvoiceStripeRefundStatus = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the InvoiceStripeRefundStatus enum.
+func (e InvoiceStripeRefundStatus) Valid() bool {
+	switch e {
+	case InvoiceStripeRefundStatusCanceled:
+		return true
+	case InvoiceStripeRefundStatusFailed:
+		return true
+	case InvoiceStripeRefundStatusPending:
+		return true
+	case InvoiceStripeRefundStatusRequiresAction:
+		return true
+	case InvoiceStripeRefundStatusSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for InvoiceTaxStatus.
 const (
 	InvoiceTaxStatusOk      InvoiceTaxStatus = "ok"
@@ -1108,12 +1198,13 @@ func (e InvoiceTaxStatus) Valid() bool {
 
 // Defines values for InvoiceTimelineEventSource.
 const (
-	InvoiceTimelineEventSourceCreditNote InvoiceTimelineEventSource = "credit_note"
-	InvoiceTimelineEventSourceDispute    InvoiceTimelineEventSource = "dispute"
-	InvoiceTimelineEventSourceDunning    InvoiceTimelineEventSource = "dunning"
-	InvoiceTimelineEventSourceEmail      InvoiceTimelineEventSource = "email"
-	InvoiceTimelineEventSourceLifecycle  InvoiceTimelineEventSource = "lifecycle"
-	InvoiceTimelineEventSourcePayment    InvoiceTimelineEventSource = "payment"
+	InvoiceTimelineEventSourceCreditNote   InvoiceTimelineEventSource = "credit_note"
+	InvoiceTimelineEventSourceDispute      InvoiceTimelineEventSource = "dispute"
+	InvoiceTimelineEventSourceDunning      InvoiceTimelineEventSource = "dunning"
+	InvoiceTimelineEventSourceEmail        InvoiceTimelineEventSource = "email"
+	InvoiceTimelineEventSourceLifecycle    InvoiceTimelineEventSource = "lifecycle"
+	InvoiceTimelineEventSourcePayment      InvoiceTimelineEventSource = "payment"
+	InvoiceTimelineEventSourceStripeRefund InvoiceTimelineEventSource = "stripe_refund"
 )
 
 // Valid indicates whether the value is a known member of the InvoiceTimelineEventSource enum.
@@ -1130,6 +1221,8 @@ func (e InvoiceTimelineEventSource) Valid() bool {
 	case InvoiceTimelineEventSourceLifecycle:
 		return true
 	case InvoiceTimelineEventSourcePayment:
+		return true
+	case InvoiceTimelineEventSourceStripeRefund:
 		return true
 	default:
 		return false
@@ -2056,19 +2149,19 @@ func (e WebhookEndpointDeliveryStatus) Valid() bool {
 
 // Defines values for WebhookEventDeliveryAttemptStatus.
 const (
-	Failed    WebhookEventDeliveryAttemptStatus = "failed"
-	Pending   WebhookEventDeliveryAttemptStatus = "pending"
-	Succeeded WebhookEventDeliveryAttemptStatus = "succeeded"
+	WebhookEventDeliveryAttemptStatusFailed    WebhookEventDeliveryAttemptStatus = "failed"
+	WebhookEventDeliveryAttemptStatusPending   WebhookEventDeliveryAttemptStatus = "pending"
+	WebhookEventDeliveryAttemptStatusSucceeded WebhookEventDeliveryAttemptStatus = "succeeded"
 )
 
 // Valid indicates whether the value is a known member of the WebhookEventDeliveryAttemptStatus enum.
 func (e WebhookEventDeliveryAttemptStatus) Valid() bool {
 	switch e {
-	case Failed:
+	case WebhookEventDeliveryAttemptStatusFailed:
 		return true
-	case Pending:
+	case WebhookEventDeliveryAttemptStatusPending:
 		return true
-	case Succeeded:
+	case WebhookEventDeliveryAttemptStatusSucceeded:
 		return true
 	default:
 		return false
@@ -2245,16 +2338,16 @@ func (e ListCreditNotesParamsDir) Valid() bool {
 
 // Defines values for PostV1CreditNotesJSONBodyRefundType.
 const (
-	Credit PostV1CreditNotesJSONBodyRefundType = "credit"
-	Refund PostV1CreditNotesJSONBodyRefundType = "refund"
+	PostV1CreditNotesJSONBodyRefundTypeCredit PostV1CreditNotesJSONBodyRefundType = "credit"
+	PostV1CreditNotesJSONBodyRefundTypeRefund PostV1CreditNotesJSONBodyRefundType = "refund"
 )
 
 // Valid indicates whether the value is a known member of the PostV1CreditNotesJSONBodyRefundType enum.
 func (e PostV1CreditNotesJSONBodyRefundType) Valid() bool {
 	switch e {
-	case Credit:
+	case PostV1CreditNotesJSONBodyRefundTypeCredit:
 		return true
-	case Refund:
+	case PostV1CreditNotesJSONBodyRefundTypeRefund:
 		return true
 	default:
 		return false
@@ -3376,7 +3469,17 @@ type Attention struct {
 	// When the invoice also has `payment_anomaly`, that reason stays and
 	// its message asks the operator to check Stripe before any refund.
 	// The disputes themselves are at `GET /v1/invoices/{id}/disputes`
-	// (2026-10-19). `amount_below_minimum` reports an invoice Stripe
+	// (2026-10-19). `refunded_in_stripe` reports a refund of the invoice's
+	// payment made in Stripe outside Hardcount that Hardcount did not record
+	// as a credit note: the invoice was not paid yet, the currency
+	// differs, the invoice bought prepaid credit, Hardcount first saw the
+	// refund more than a day after it was made, or the refund is more than
+	// the invoice had left to refund or credit. `code` is
+	// `payment.refunded_in_stripe.` and that review reason. The operator
+	// records it with a credit note that names the refund
+	// (`stripe_refund_id` on `POST /v1/credit-notes`) or dismisses it
+	// (`POST /v1/invoices/{id}/stripe-refunds/{stripe_refund_id}/dismiss`).
+	// Surfaced on paid invoices (2026-10-30). `amount_below_minimum` reports an invoice Stripe
 	// refused to charge, or refused a payment page for, because the amount
 	// is below Stripe's minimum charge. The minimum depends on the
 	// currency the Stripe account settles in; Stripe's reply, in
@@ -3479,7 +3582,17 @@ type AttentionActionItem struct {
 // When the invoice also has `payment_anomaly`, that reason stays and
 // its message asks the operator to check Stripe before any refund.
 // The disputes themselves are at `GET /v1/invoices/{id}/disputes`
-// (2026-10-19). `amount_below_minimum` reports an invoice Stripe
+// (2026-10-19). `refunded_in_stripe` reports a refund of the invoice's
+// payment made in Stripe outside Hardcount that Hardcount did not record
+// as a credit note: the invoice was not paid yet, the currency
+// differs, the invoice bought prepaid credit, Hardcount first saw the
+// refund more than a day after it was made, or the refund is more than
+// the invoice had left to refund or credit. `code` is
+// `payment.refunded_in_stripe.` and that review reason. The operator
+// records it with a credit note that names the refund
+// (`stripe_refund_id` on `POST /v1/credit-notes`) or dismisses it
+// (`POST /v1/invoices/{id}/stripe-refunds/{stripe_refund_id}/dismiss`).
+// Surfaced on paid invoices (2026-10-30). `amount_below_minimum` reports an invoice Stripe
 // refused to charge, or refused a payment page for, because the amount
 // is below Stripe's minimum charge. The minimum depends on the
 // currency the Stripe account settles in; Stripe's reply, in
@@ -3807,8 +3920,14 @@ type CreditNote struct {
 	Reason               string                 `json:"reason"`
 
 	// RecordedAt Real-world time the row was written, when `created_at` is test-clock time.
-	RecordedAt        time.Time `json:"recorded_at,omitempty"`
-	RefundAmountCents int64     `json:"refund_amount_cents"`
+	RecordedAt time.Time `json:"recorded_at,omitempty"`
+
+	// RecordedFromStripe True when the card refund is a refund made in Stripe outside
+	// Hardcount: recorded from Stripe's refund webhook, or linked with
+	// `stripe_refund_id` at create. Hardcount made no refund call for
+	// it; `stripe_refund_id` names the refund.
+	RecordedFromStripe bool  `json:"recorded_from_stripe"`
+	RefundAmountCents  int64 `json:"refund_amount_cents"`
 
 	// RefundStatus The refund part's state at Stripe. `unknown`: Stripe gave no
 	// clear answer (a timeout, a network error, a Stripe 5xx, a 409 or
@@ -5216,6 +5335,95 @@ type InvoicePreviewTotal struct {
 // nothing).
 type InvoiceStatus string
 
+// InvoiceStripeRefund A refund made in Stripe outside Hardcount (the Stripe dashboard, or
+// Stripe's API called directly) on one of the invoice's payments,
+// recorded from Stripe's `refund.created`, `refund.updated`,
+// `refund.failed` and `charge.refund.updated` webhook events. It holds
+// the refund as the newest of those events showed it. Hardcount's own
+// refunds are never listed here. `outcome` is what Hardcount did when
+// it first saw the refund, and only the operator changes it after
+// that.
+type InvoiceStripeRefund struct {
+	AmountCents int64     `json:"amount_cents"`
+	CreatedAt   time.Time `json:"created_at"`
+
+	// CreditNoteId The credit note that records the refund, when `outcome` is `credit_note`.
+	CreditNoteId  string    `json:"credit_note_id,omitempty"`
+	Currency      string    `json:"currency"`
+	DismissedAt   time.Time `json:"dismissed_at,omitempty"`
+	DismissedNote string    `json:"dismissed_note,omitempty"`
+
+	// FailureReason Why Stripe could not make the refund, once it failed.
+	FailureReason string `json:"failure_reason,omitempty"`
+	Id            string `json:"id"`
+	InvoiceId     string `json:"invoice_id"`
+	Livemode      bool   `json:"livemode"`
+
+	// Outcome `credit_note`: recorded as an issued credit note whose card
+	// refund is this refund (`credit_note_id`); Hardcount called
+	// nothing at Stripe for it. `other_payment`: a refund of a payment
+	// that did not pay the invoice (a second charge, or money on a
+	// voided invoice), so no credit note. `needs_review`: a refund of
+	// the invoice's own payment that Hardcount did not record
+	// (`review_reason` says why); the invoice shows the
+	// `refunded_in_stripe` notice until the operator records it with a
+	// credit note or dismisses it. `not_refunded`: first seen already
+	// failed or canceled, so no money moved. `dismissed`: the operator
+	// handled it outside Hardcount.
+	Outcome InvoiceStripeRefundOutcome `json:"outcome"`
+
+	// Reason Stripe's refund reason, for example `requested_by_customer`. Absent when none was given.
+	Reason string `json:"reason,omitempty"`
+
+	// RefundCreatedAt When Stripe made the refund.
+	RefundCreatedAt time.Time `json:"refund_created_at"`
+
+	// ReviewReason Why a refund of the invoice's own payment was flagged instead of
+	// recorded. Set for `needs_review` and `dismissed`, and kept when
+	// the operator records one with a credit note.
+	ReviewReason InvoiceStripeRefundReviewReason `json:"review_reason,omitempty"`
+
+	// Status Stripe's refund status, as Stripe sends it.
+	Status         InvoiceStripeRefundStatus `json:"status"`
+	StripeChargeId string                    `json:"stripe_charge_id,omitempty"`
+
+	// StripePaymentIntentId The refunded payment.
+	StripePaymentIntentId string    `json:"stripe_payment_intent_id"`
+	StripeRefundId        string    `json:"stripe_refund_id"`
+	UpdatedAt             time.Time `json:"updated_at"`
+}
+
+// InvoiceStripeRefundOutcome `credit_note`: recorded as an issued credit note whose card
+// refund is this refund (`credit_note_id`); Hardcount called
+// nothing at Stripe for it. `other_payment`: a refund of a payment
+// that did not pay the invoice (a second charge, or money on a
+// voided invoice), so no credit note. `needs_review`: a refund of
+// the invoice's own payment that Hardcount did not record
+// (`review_reason` says why); the invoice shows the
+// `refunded_in_stripe` notice until the operator records it with a
+// credit note or dismisses it. `not_refunded`: first seen already
+// failed or canceled, so no money moved. `dismissed`: the operator
+// handled it outside Hardcount.
+type InvoiceStripeRefundOutcome string
+
+// InvoiceStripeRefundReviewReason Why a refund of the invoice's own payment was flagged instead of
+// recorded. Set for `needs_review` and `dismissed`, and kept when
+// the operator records one with a credit note.
+type InvoiceStripeRefundReviewReason string
+
+// InvoiceStripeRefundStatus Stripe's refund status, as Stripe sends it.
+type InvoiceStripeRefundStatus string
+
+// InvoiceStripeRefundList defines model for InvoiceStripeRefundList.
+type InvoiceStripeRefundList struct {
+	Data []InvoiceStripeRefund `json:"data"`
+
+	// Total How many rows match the request's filters, on every page, not only
+	// this one. The audit log and the customer list's search and name or
+	// email sort say where they stop counting.
+	Total ListTotal `json:"total"`
+}
+
 // InvoiceTaxStatus Whether tax has been calculated. `ok`: it has. `pending`: the
 // calculation failed, and `tax_error_code` says why and whether
 // Hardcount retries it. A pending invoice cannot be finalized, so a wrong
@@ -6109,6 +6317,28 @@ type StripeConnection struct {
 // check passed, and on keys that failed before this field existed.
 type StripeConnectionLastVerifiedErrorKind string
 
+// StripeRefundWebhookEventData The `data` of the outbound webhook event `payment.refunded_in_stripe`
+// (docs/webhooks.md): the invoice the refunded payment belongs to, as
+// it stood (a refund never changes it), and the refund as the API
+// returns it. Sent once per refund, when Hardcount first sees it,
+// saved in the same transaction that records it. A later change to
+// the refund sends nothing more.
+type StripeRefundWebhookEventData struct {
+	// Invoice A Hardcount invoice. Returned from create, finalize, void, list, get,
+	// rotate-public-token, and collect-payment endpoints.
+	Invoice Invoice `json:"invoice"`
+
+	// Refund A refund made in Stripe outside Hardcount (the Stripe dashboard, or
+	// Stripe's API called directly) on one of the invoice's payments,
+	// recorded from Stripe's `refund.created`, `refund.updated`,
+	// `refund.failed` and `charge.refund.updated` webhook events. It holds
+	// the refund as the newest of those events showed it. Hardcount's own
+	// refunds are never listed here. `outcome` is what Hardcount did when
+	// it first saw the refund, and only the operator changes it after
+	// that.
+	Refund InvoiceStripeRefund `json:"refund"`
+}
+
 // Subscription defines model for Subscription.
 type Subscription struct {
 	ActivatedAt time.Time `json:"activated_at,omitempty"`
@@ -6982,7 +7212,8 @@ type WebhookEvent struct {
 	// API returns it, and the few keys the event adds beside it.
 	// docs/webhooks.md lists what each event carries;
 	// `payment.dispute_opened` and `payment.dispute_closed` carry a
-	// `DisputeWebhookEventData`.
+	// `DisputeWebhookEventData`; `payment.refunded_in_stripe` carries a
+	// `StripeRefundWebhookEventData`.
 	Payload map[string]interface{} `json:"payload"`
 
 	// ReplayOfEventId Set on a replay. The event the replay was made from.
@@ -7355,6 +7586,19 @@ type PostV1CreditNotesJSONBody struct {
 	// `*_amount_cents` fields are all 0, `refund` or `credit`
 	// puts the whole note in that channel. Not with commit_relief.
 	RefundType PostV1CreditNotesJSONBodyRefundType `json:"refund_type,omitempty"`
+
+	// StripeRefundId Links a refund made in Stripe outside Hardcount as this
+	// note's card refund, Stripe's `refunds[]` shape: Hardcount
+	// reads the refund from Stripe and calls nothing else
+	// there for it. The refund must be of the payment that paid
+	// this invoice, not made by Hardcount, and not failed or
+	// canceled; `refund_amount_cents` must be its amount,
+	// `credit_amount_cents` 0, and `auto_issue` true (the
+	// note is issued at once). The caps on the invoice still
+	// apply. A refund Hardcount flagged on the invoice
+	// (`refunded_in_stripe`) is then marked recorded. Not with
+	// commit_relief.
+	StripeRefundId string `json:"stripe_refund_id,omitempty"`
 }
 
 // PostV1CreditNotesParams defines parameters for PostV1CreditNotes.
@@ -8119,6 +8363,34 @@ type PostV1InvoicesIdSendParams struct {
 
 // PostV1InvoicesIdSend200JSONResponseBodyStatus defines parameters for PostV1InvoicesIdSend.
 type PostV1InvoicesIdSend200JSONResponseBodyStatus string
+
+// ListInvoiceStripeRefundsParams defines parameters for ListInvoiceStripeRefunds.
+type ListInvoiceStripeRefundsParams struct {
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
+	// that is not a whole number, is a 422 with `param: limit`.
+	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
+	// not a whole number, is a 422 with `param: offset`.
+	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
+// DismissInvoiceStripeRefundJSONBody defines parameters for DismissInvoiceStripeRefund.
+type DismissInvoiceStripeRefundJSONBody struct {
+	// Note How the refund was handled. 1 to 1000 characters.
+	Note string `json:"note"`
+}
+
+// DismissInvoiceStripeRefundParams defines parameters for DismissInvoiceStripeRefund.
+type DismissInvoiceStripeRefundParams struct {
+	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
+	// the same value on every retry. For 24 hours, a repeat with the same
+	// key, method, path and body gets the first response again, with an
+	// `Idempotent-Replayed: true` header, instead of running again. The
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
 
 // VoidInvoiceParams defines parameters for VoidInvoice.
 type VoidInvoiceParams struct {
@@ -9332,6 +9604,9 @@ type RefundInvoiceJSONRequestBody RefundInvoiceJSONBody
 // PostV1InvoicesIdSendJSONRequestBody defines body for PostV1InvoicesIdSend for application/json ContentType.
 type PostV1InvoicesIdSendJSONRequestBody PostV1InvoicesIdSendJSONBody
 
+// DismissInvoiceStripeRefundJSONRequestBody defines body for DismissInvoiceStripeRefund for application/json ContentType.
+type DismissInvoiceStripeRefundJSONRequestBody DismissInvoiceStripeRefundJSONBody
+
 // InviteMemberJSONRequestBody defines body for InviteMember for application/json ContentType.
 type InviteMemberJSONRequestBody InviteMemberJSONBody
 
@@ -9968,6 +10243,12 @@ type ServerInterface interface {
 	// Email the invoice (PDF attached) to a recipient
 	// (POST /v1/invoices/{id}/send)
 	PostV1InvoicesIdSend(w http.ResponseWriter, r *http.Request, id string, params PostV1InvoicesIdSendParams)
+	// List the refunds made in Stripe on an invoice
+	// (GET /v1/invoices/{id}/stripe-refunds)
+	ListInvoiceStripeRefunds(w http.ResponseWriter, r *http.Request, id string, params ListInvoiceStripeRefundsParams)
+	// Dismiss a refund made in Stripe
+	// (POST /v1/invoices/{id}/stripe-refunds/{stripe_refund_id}/dismiss)
+	DismissInvoiceStripeRefund(w http.ResponseWriter, r *http.Request, id string, stripeRefundId string, params DismissInvoiceStripeRefundParams)
 	// Void an invoice
 	// (POST /v1/invoices/{id}/void)
 	VoidInvoice(w http.ResponseWriter, r *http.Request, id string, params VoidInvoiceParams)
@@ -10778,6 +11059,18 @@ func (_ Unimplemented) RotateInvoicePublicToken(w http.ResponseWriter, r *http.R
 // Email the invoice (PDF attached) to a recipient
 // (POST /v1/invoices/{id}/send)
 func (_ Unimplemented) PostV1InvoicesIdSend(w http.ResponseWriter, r *http.Request, id string, params PostV1InvoicesIdSendParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// List the refunds made in Stripe on an invoice
+// (GET /v1/invoices/{id}/stripe-refunds)
+func (_ Unimplemented) ListInvoiceStripeRefunds(w http.ResponseWriter, r *http.Request, id string, params ListInvoiceStripeRefundsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Dismiss a refund made in Stripe
+// (POST /v1/invoices/{id}/stripe-refunds/{stripe_refund_id}/dismiss)
+func (_ Unimplemented) DismissInvoiceStripeRefund(w http.ResponseWriter, r *http.Request, id string, stripeRefundId string, params DismissInvoiceStripeRefundParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -15780,6 +16073,132 @@ func (siw *ServerInterfaceWrapper) PostV1InvoicesIdSend(w http.ResponseWriter, r
 	handler.ServeHTTP(w, r)
 }
 
+// ListInvoiceStripeRefunds operation middleware
+func (siw *ServerInterfaceWrapper) ListInvoiceStripeRefunds(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListInvoiceStripeRefundsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListInvoiceStripeRefunds(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DismissInvoiceStripeRefund operation middleware
+func (siw *ServerInterfaceWrapper) DismissInvoiceStripeRefund(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "stripe_refund_id" -------------
+	var stripeRefundId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "stripe_refund_id", chi.URLParam(r, "stripe_refund_id"), &stripeRefundId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "stripe_refund_id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DismissInvoiceStripeRefundParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DismissInvoiceStripeRefund(w, r, id, stripeRefundId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // VoidInvoice operation middleware
 func (siw *ServerInterfaceWrapper) VoidInvoice(w http.ResponseWriter, r *http.Request) {
 
@@ -20380,6 +20799,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/invoices/{id}/send", wrapper.PostV1InvoicesIdSend)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/invoices/{id}/stripe-refunds", wrapper.ListInvoiceStripeRefunds)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/invoices/{id}/stripe-refunds/{stripe_refund_id}/dismiss", wrapper.DismissInvoiceStripeRefund)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/invoices/{id}/void", wrapper.VoidInvoice)

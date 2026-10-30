@@ -185,6 +185,7 @@ type Service struct {
 	paymentPages   PaymentPageReader
 	cardRefusals   CardRefusalReader
 	disputes       DisputeReader
+	stripeRefunds  StripeRefunds
 	creditApplier  CreditApplier
 	settings       TenantSettingsReader
 	currencyFacts  CustomerCurrencyFacts
@@ -619,6 +620,55 @@ func (s *Service) ListDisputes(ctx context.Context, tenantID, invoiceID string) 
 		return []domain.InvoiceDispute{}, nil
 	}
 	return s.disputes.ListDisputesByInvoice(ctx, tenantID, invoiceID)
+}
+
+// StripeRefunds reads and dismisses the refunds made in Stripe outside
+// Hardcount on invoices' payments (ADR-134). The credit-note domain owns them
+// (a refund is a leg of a credit note); creditnote.Service satisfies it,
+// wired by the composition root.
+type StripeRefunds interface {
+	ListStripeRefunds(ctx context.Context, tenantID, invoiceID string) ([]domain.InvoiceStripeRefund, error)
+	StripeRefundsNeedingReview(ctx context.Context, tenantID string, invoiceIDs []string) (map[string]domain.InvoiceStripeRefund, error)
+	DismissStripeRefund(ctx context.Context, tenantID, invoiceID, stripeRefundID, note string) (domain.InvoiceStripeRefund, error)
+}
+
+// SetStripeRefunds wires the refunds behind the refunded_in_stripe notice,
+// the timeline's refund rows and the invoice's stripe-refunds routes.
+// Optional: when nil no refund made in Stripe is reported.
+func (s *Service) SetStripeRefunds(r StripeRefunds) {
+	s.stripeRefunds = r
+}
+
+// ListStripeRefunds returns the refunds made in Stripe outside Hardcount on
+// the invoice's payments, oldest first. Empty when none is wired.
+func (s *Service) ListStripeRefunds(ctx context.Context, tenantID, invoiceID string) ([]domain.InvoiceStripeRefund, error) {
+	if s.stripeRefunds == nil {
+		return []domain.InvoiceStripeRefund{}, nil
+	}
+	return s.stripeRefunds.ListStripeRefunds(ctx, tenantID, invoiceID)
+}
+
+// ListInvoiceStripeRefunds is ListStripeRefunds for one invoice the caller
+// names: errs.ErrNotFound when the invoice does not exist in this tenant and
+// mode.
+func (s *Service) ListInvoiceStripeRefunds(ctx context.Context, tenantID, invoiceID string) ([]domain.InvoiceStripeRefund, error) {
+	if _, err := s.store.Get(ctx, tenantID, invoiceID); err != nil {
+		return nil, err
+	}
+	return s.ListStripeRefunds(ctx, tenantID, invoiceID)
+}
+
+// DismissStripeRefund records that the operator handled a refund made in
+// Stripe, flagged on this invoice, outside Hardcount. errs.ErrNotFound when
+// the invoice or the refund does not exist on it.
+func (s *Service) DismissStripeRefund(ctx context.Context, tenantID, invoiceID, stripeRefundID, note string) (domain.InvoiceStripeRefund, error) {
+	if s.stripeRefunds == nil {
+		return domain.InvoiceStripeRefund{}, errs.ErrNotFound
+	}
+	if _, err := s.store.Get(ctx, tenantID, invoiceID); err != nil {
+		return domain.InvoiceStripeRefund{}, err
+	}
+	return s.stripeRefunds.DismissStripeRefund(ctx, tenantID, invoiceID, stripeRefundID, note)
 }
 
 // ListInvoiceDisputes is ListDisputes for one invoice the caller names:
@@ -1111,14 +1161,15 @@ func (s *Service) attachAttention(ctx context.Context, inv domain.Invoice) domai
 // pays for a read exactly when it did before.
 type attentionFacts struct {
 	stripeConnected bool
-	paymentReady    map[string]bool                  // customer id → ready payment method
-	hasEmail        map[string]bool                  // customer id → email on file
-	escalated       map[string]bool                  // invoice id → dunning run escalated
-	paused          map[string]bool                  // subscription id → pause_collection in force
-	pageLive        map[string]bool                  // invoice id → hosted payment page live
-	refusedCard     map[string]string                // invoice id → decline code that stops retries charging the default card
-	retrying        map[string]bool                  // invoice id → a charge retry is still to come (RetryScheduled)
-	lostDispute     map[string]domain.InvoiceDispute // invoice id → newest dispute closed as lost
+	paymentReady    map[string]bool                       // customer id → ready payment method
+	hasEmail        map[string]bool                       // customer id → email on file
+	escalated       map[string]bool                       // invoice id → dunning run escalated
+	paused          map[string]bool                       // subscription id → pause_collection in force
+	pageLive        map[string]bool                       // invoice id → hosted payment page live
+	refusedCard     map[string]string                     // invoice id → decline code that stops retries charging the default card
+	retrying        map[string]bool                       // invoice id → a charge retry is still to come (RetryScheduled)
+	lostDispute     map[string]domain.InvoiceDispute      // invoice id → newest dispute closed as lost
+	refundReview    map[string]domain.InvoiceStripeRefund // invoice id → newest refund made in Stripe that needs review
 }
 
 // attachAttentionAll decorates every invoice with its Attention, reading the
@@ -1348,6 +1399,27 @@ func (s *Service) readAttentionFacts(ctx context.Context, tenantID string, page 
 		}
 	}
 
+	// A refund made in Stripe that Hardcount flagged (ADR-134) sits on a paid
+	// invoice, so every non-draft row joins the read: one indexed query for
+	// the page. A read error leaves the notice off (logged); the refund stays
+	// on the invoice's timeline and in its stripe-refunds list.
+	if s.stripeRefunds != nil {
+		ids := distinct(page, func(inv domain.Invoice) string {
+			if inv.Status != domain.InvoiceDraft {
+				return inv.ID
+			}
+			return ""
+		})
+		if len(ids) > 0 {
+			review, err := s.stripeRefunds.StripeRefundsNeedingReview(ctx, tenantID, ids)
+			if err != nil {
+				slog.Error("invoice: attention could not read refunds made in Stripe", "error", err,
+					"tenant_id", tenantID, "invoices", len(ids))
+			}
+			f.refundReview = review
+		}
+	}
+
 	return f
 }
 
@@ -1390,6 +1462,9 @@ func (s *Service) decorateInvoice(ctx context.Context, inv domain.Invoice, f att
 	atc.DunningRetrying = f.retrying[inv.ID]
 	if d, ok := f.lostDispute[inv.ID]; ok {
 		atc.LostDispute = &d
+	}
+	if r, ok := f.refundReview[inv.ID]; ok {
+		atc.StripeRefundReview = &r
 	}
 	// A clock-pinned invoice's failure banner dates "since" from its latest
 	// failed charge's simulated instant. Simulated failed invoices only, so a

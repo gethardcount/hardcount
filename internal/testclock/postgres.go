@@ -149,6 +149,10 @@ var clockTeardownStatements = []string{
 	`DELETE FROM invoice_dunning_events WHERE invoice_id IN (SELECT id FROM invoices WHERE customer_id IN (SELECT id FROM customers WHERE test_clock_id = $1))`,
 	`DELETE FROM invoice_dunning_runs   WHERE invoice_id IN (SELECT id FROM invoices WHERE customer_id IN (SELECT id FROM customers WHERE test_clock_id = $1))`,
 	`DELETE FROM tax_calculations       WHERE invoice_id IN (SELECT id FROM invoices WHERE customer_id IN (SELECT id FROM customers WHERE test_clock_id = $1))`,
+	// Refunds made in Stripe (ADR-134) go before the credit notes: a recorded
+	// one names its note (credit_note_id, ON DELETE RESTRICT). They would
+	// cascade with their invoice, but the notes are deleted first.
+	`DELETE FROM invoice_stripe_refunds WHERE invoice_id IN (SELECT id FROM invoices WHERE customer_id IN (SELECT id FROM customers WHERE test_clock_id = $1))`,
 	`DELETE FROM credit_note_line_items WHERE credit_note_id IN (SELECT id FROM credit_notes WHERE customer_id IN (SELECT id FROM customers WHERE test_clock_id = $1))`,
 	`DELETE FROM credit_notes           WHERE customer_id IN (SELECT id FROM customers WHERE test_clock_id = $1)`,
 	`DELETE FROM invoice_line_items     WHERE invoice_id IN (SELECT id FROM invoices WHERE customer_id IN (SELECT id FROM customers WHERE test_clock_id = $1))`,

@@ -122,6 +122,10 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 			respond.Validation(w, r, "commit_relief and lines are mutually exclusive — the relief derives its single line from the commit's remaining credits")
 			return
 		}
+		if req.StripeRefundID != "" {
+			respond.ValidationField(w, r, "stripe_refund_id", "stripe_refund_id cannot be used with commit_relief: a refund made in Stripe on an invoice that bought prepaid credit is retired with commit relief allocated out_of_band, then dismissed on the invoice")
+			return
+		}
 		if req.CreditAmountCents > 0 {
 			respond.Validation(w, r, "credit_amount_cents cannot be used with commit_relief — paying relief from the customer's balance would refund the very credits being retired")
 			return

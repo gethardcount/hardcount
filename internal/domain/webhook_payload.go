@@ -84,6 +84,7 @@ var WebhookEventExtras = map[string][]string{
 	EventPaymentReceivedOnVoidedInvoice: {"incoming_payment_intent_id", "captured_cents"},
 	EventPaymentDisputeOpened:           {"dispute"},
 	EventPaymentDisputeClosed:           {"dispute"},
+	EventPaymentRefundedInStripe:        {"refund"},
 
 	EventPaymentMethodAttached: {"stripe_payment_method_id"},
 	EventPaymentMethodUpdated:  {"stripe_customer_id"},
