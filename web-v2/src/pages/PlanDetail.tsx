@@ -17,7 +17,6 @@ import { collectionPausedFlag, genericStatus, subscriptionStatus } from '@/lib/s
 import { StatusBadge } from '@/components/StatusBadge'
 
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -165,6 +164,7 @@ export default function PlanDetailPage() {
             <span className="text-xs text-muted-foreground font-mono bg-muted px-2 py-0.5 rounded">{plan.id}</span>
             <CopyButton text={plan.id} />
             <span className="text-xs text-muted-foreground font-mono bg-muted px-2 py-0.5 rounded">{plan.code}</span>
+            <span className="text-xs text-muted-foreground">Created {formatDateTime(plan.created_at)}</span>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -193,69 +193,31 @@ export default function PlanDetailPage() {
         </NoticeRow>
       )}
 
-      {/* Key metrics */}
+      {/* Key metrics. The plan's settings once each: the Properties card
+          below them repeated interval, currency, status, code and ID, and
+          pushed the prices down (L-08). When the base fee is billed is part
+          of the price, so it sits under it. */}
       <Card>
         <CardContent className="p-0">
-          <div className="flex divide-x divide-border">
-            <div className="flex-1 px-6 py-4">
-              <p className="text-sm text-muted-foreground">Base Price</p>
+          <div className="grid grid-cols-2 divide-border md:flex md:divide-x">
+            <div className="min-w-0 px-6 py-4 md:flex-1">
+              <p className="text-sm text-muted-foreground">Base price</p>
               <p className="text-lg font-semibold text-foreground mt-1">{formatCents(plan.base_amount_cents, plan.currency)}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {plan.base_bill_timing === 'in_advance' ? 'Billed at the start of each period' : 'Billed at the end of each period'}
+              </p>
             </div>
-            <div className="flex-1 px-6 py-4">
+            <div className="min-w-0 px-6 py-4 md:flex-1">
               <p className="text-sm text-muted-foreground">Interval</p>
               <p className="text-lg font-semibold text-foreground mt-1">{plan.billing_interval === 'yearly' ? 'Yearly' : 'Monthly'}</p>
             </div>
-            <div className="flex-1 px-6 py-4">
+            <div className="min-w-0 px-6 py-4 md:flex-1">
               <p className="text-sm text-muted-foreground">Currency</p>
               <p className="text-lg font-semibold text-foreground mt-1">{plan.currency.toUpperCase()}</p>
             </div>
-            <div className="flex-1 px-6 py-4">
-              <p className="text-sm text-muted-foreground">Active Subscriptions</p>
+            <div className="min-w-0 px-6 py-4 md:flex-1">
+              <p className="text-sm text-muted-foreground">Active subscriptions</p>
               <p className="text-lg font-semibold text-foreground mt-1">{activeSubscriptions.length}</p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Properties */}
-      <Card className="mt-6">
-        <CardHeader>
-          <CardTitle className="text-sm">Properties</CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          <div className="divide-y divide-border">
-            <div className="flex items-center justify-between px-6 py-3">
-              <span className="text-sm text-muted-foreground">Code</span>
-              <span className="text-sm text-foreground font-mono">{plan.code}</span>
-            </div>
-            <div className="flex items-center justify-between px-6 py-3">
-              <span className="text-sm text-muted-foreground">Billing Interval</span>
-              <Badge variant="info">{plan.billing_interval === 'yearly' ? 'Yearly' : 'Monthly'}</Badge>
-            </div>
-            <div className="flex items-center justify-between px-6 py-3">
-              <span className="text-sm text-muted-foreground">Base fee billed</span>
-              <span className="text-sm text-foreground font-medium">
-                {plan.base_bill_timing === 'in_advance' ? 'At start of period' : 'At end of period'}
-              </span>
-            </div>
-            <div className="flex items-center justify-between px-6 py-3">
-              <span className="text-sm text-muted-foreground">Currency</span>
-              <span className="text-sm text-foreground font-medium">{plan.currency.toUpperCase()}</span>
-            </div>
-            <div className="flex items-center justify-between px-6 py-3">
-              <span className="text-sm text-muted-foreground">Status</span>
-              <StatusBadge status={genericStatus(plan.status)} />
-            </div>
-            <div className="flex items-center justify-between px-6 py-3">
-              <span className="text-sm text-muted-foreground">Created</span>
-              <span className="text-sm text-foreground">{formatDateTime(plan.created_at)}</span>
-            </div>
-            <div className="flex items-center justify-between px-6 py-3">
-              <span className="text-sm text-muted-foreground">ID</span>
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-foreground font-mono">{plan.id}</span>
-                <CopyButton text={plan.id} />
-              </div>
             </div>
           </div>
         </CardContent>
