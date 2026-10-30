@@ -65,6 +65,8 @@ func TestManualFinalize_CollectsThroughTheEngine_E2E(t *testing.T) {
 	engine.SetTaxProviderResolver(tax.NewResolver(nil))
 	engine.SetNoPaymentMethodNotifier(&testNoPMNotifier{})
 	engine.SetDunningStarter(testDunningStarter{})
+	engine.SetStripeReadiness(testStripeConnected{})
+	engine.SetInvoiceEmailer(&testInvoiceEmailer{})
 	engine.SetDunningResolver(&testDunningResolver{})
 
 	h := invoice.NewHandler(svc, customers, settings)

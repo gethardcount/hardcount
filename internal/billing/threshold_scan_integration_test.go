@@ -92,6 +92,8 @@ func newThresholdFixture(t *testing.T, name string) *thresholdFixture {
 	engine.SetTaxProviderResolver(tax.NewResolver(nil))
 	engine.SetNoPaymentMethodNotifier(&testNoPMNotifier{})
 	engine.SetDunningStarter(testDunningStarter{})
+	engine.SetStripeReadiness(testStripeConnected{})
+	engine.SetInvoiceEmailer(&testInvoiceEmailer{})
 
 	ctx := postgres.WithLivemode(context.Background(), false)
 

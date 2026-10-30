@@ -143,6 +143,8 @@ func newPrebillVoidRig(t *testing.T, name string, policy domain.DunningPolicy) *
 	e.SetTaxProviderResolver(tax.NewResolver(nil))
 	e.SetNoPaymentMethodNotifier(&testNoPMNotifier{})
 	e.SetDunningStarter(testDunningStarter{})
+	e.SetStripeReadiness(testStripeConnected{})
+	e.SetInvoiceEmailer(&testInvoiceEmailer{})
 	e.SetDunningResolver(&testDunningResolver{})
 	e.SetInvoiceVoider(invSvc)
 	e.SetCreditNoteAdjuster(cnSvc)

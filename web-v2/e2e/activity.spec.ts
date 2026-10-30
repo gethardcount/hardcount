@@ -338,7 +338,10 @@ test.describe('activity text parity', () => {
       await asPerson(page, 'POST', `/invoices/${draft.id}/finalize`)
       // Each email is waited for before the next step. An email row is dated
       // when the mail server took it, so two emails queued together would
-      // land in whichever order the worker sent them, on either clock.
+      // land in whichever order the worker sent them, on either clock. With
+      // no Stripe connected (CI connects none), finalizing emails the
+      // customer the invoice itself, so that email is waited for too.
+      await waitForEmailsSent(customer.id)
       await asPerson(page, 'POST', `/invoices/${draft.id}/send`, { email: customer.email })
       await waitForEmailsSent(customer.id)
       const note = await asPerson<{ id: string }>(page, 'POST', '/credit-notes', {

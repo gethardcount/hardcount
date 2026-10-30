@@ -170,6 +170,8 @@ func newFailoverEngine(db *postgres.DB, now time.Time) *billing.Engine {
 	e.SetTaxProviderResolver(tax.NewResolver(nil))
 	e.SetNoPaymentMethodNotifier(&testNoPMNotifier{})
 	e.SetDunningStarter(testDunningStarter{})
+	e.SetStripeReadiness(testStripeConnected{})
+	e.SetInvoiceEmailer(&testInvoiceEmailer{})
 	e.SetDunningResolver(&testDunningResolver{})
 	return e
 }

@@ -79,6 +79,8 @@ func wireLive(t *testing.T, f *thresholdFixture, ctx context.Context) *liveFixtu
 	engine.SetTaxProviderResolver(tax.NewResolver(nil))
 	engine.SetNoPaymentMethodNotifier(&testNoPMNotifier{})
 	engine.SetDunningStarter(testDunningStarter{})
+	engine.SetStripeReadiness(testStripeConnected{})
+	engine.SetInvoiceEmailer(&testInvoiceEmailer{})
 	engine.SetDunningResolver(&testDunningResolver{})
 	engine.SetLiveBalanceReaders(creditSvc, f.subStore)
 	f.engine = engine

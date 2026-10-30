@@ -295,7 +295,7 @@ func TestRetryPendingChargesForClock_PagesThroughTheQueue(t *testing.T) {
 
 	done := make(chan []error, 1)
 	go func() {
-		_, errs := e.RetryPendingChargesForClock(context.Background(), "t1", "clk_1", 1)
+		_, errs := e.RetryPendingChargesForClock(postgres.WithLivemode(context.Background(), false), "t1", "clk_1", 1)
 		done <- errs
 	}()
 	select {

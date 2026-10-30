@@ -22,7 +22,9 @@ import (
 // one Recorded time; nothing else may differ.
 //
 // The story: a one-off invoice is finalized, emailed, reduced by a credit
-// note and paid offline; a second one is finalized and voided. Each step is
+// note and paid offline; a second one is finalized and voided. No Stripe is
+// connected, so each finalize also emails the customer the invoice itself
+// (ADR-060 amendment 2026-10-30). Each step is
 // the operator's own act, so on the test clock every row is dated at the
 // clock's frozen instant and ordered by its real time.
 func TestActivityParity_InvoiceOperatorScenarios(t *testing.T) {
@@ -130,6 +132,8 @@ func TestActivityParity_InvoiceOperatorScenarios(t *testing.T) {
 		{"paid invoice", realPaid, []string{
 			"Invoice created | by API key",
 			"Invoice finalized · 4900 | by API key",
+			// The finalize's own invoice email (no Stripe), then the operator's.
+			"Invoice email queued | To billing@parity.test",
 			"Invoice email queued | To billing@parity.test",
 			"Credit note issued · 1000 | <number> · Billing error · by API key",
 			"Offline payment received · 3900 | Wire 1042 · by API key",
@@ -137,6 +141,7 @@ func TestActivityParity_InvoiceOperatorScenarios(t *testing.T) {
 		{"voided invoice", realVoid, []string{
 			"Invoice created | by API key",
 			"Invoice finalized · 4900 | by API key",
+			"Invoice email queued | To billing@parity.test",
 			"Invoice voided · 4900 | by API key",
 		}},
 	} {

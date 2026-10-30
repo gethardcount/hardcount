@@ -106,6 +106,7 @@ func TestNoPaymentMethodCopy_EveryBranch(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			att := ClassifyInvoiceAttention(noPMInvoice(tc.simulated), AttentionContext{
+				StripeConnected:  true,
 				CustomerHasEmail: tc.hasEmail, SetupLinkEmailOff: tc.emailOff, CollectionPaused: tc.pause,
 			})
 			if att == nil || att.Reason != AttentionReasonNoPaymentMethod {
@@ -162,6 +163,7 @@ func TestRecoveryEndedCopy_EveryBranch(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			att := ClassifyInvoiceAttention(noPMInvoice(tc.simulated), AttentionContext{
+				StripeConnected:  true,
 				DunningEscalated: true, CollectionPaused: tc.pause,
 				CustomerHasEmail: tc.hasEmail, SetupLinkEmailOff: tc.emailOff,
 			})
@@ -410,6 +412,7 @@ func TestCommitExposureCopy_ThreeLinesOnNoPaymentMethod(t *testing.T) {
 	inv.Currency = "USD"
 	atc := liveGrant(10000000, 0)
 	atc.CustomerHasEmail = true
+	atc.StripeConnected = true
 
 	att := ClassifyInvoiceAttention(inv, atc)
 	if att == nil || att.Reason != AttentionReasonNoPaymentMethod {
@@ -482,7 +485,7 @@ func TestPausedCollectionCopy_OpenRunKeepsRetrying(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			att := ClassifyInvoiceAttention(noPMInvoice(false), AttentionContext{
 				HasPaymentMethod: tc.hasCard, CollectionPaused: true, DunningRetrying: tc.retrying,
-				CustomerHasEmail: true,
+				CustomerHasEmail: true, StripeConnected: true,
 			})
 			if att == nil || att.Reason != tc.reason {
 				t.Fatalf("got %+v, want %s", att, tc.reason)

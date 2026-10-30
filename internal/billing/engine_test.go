@@ -320,6 +320,14 @@ func wireBaseTax(e *Engine) *Engine {
 	if e.noPMNotifier == nil {
 		e.noPMNotifier = &fakeNoPMNotifier{}
 	}
+	// Stripe connected by default, so a card-less invoice takes the
+	// setup-link arm; the no-Stripe tests wire their own.
+	if e.stripeReady == nil {
+		e.stripeReady = fakeStripeReadiness{connected: true}
+	}
+	if e.invoiceEmailer == nil {
+		e.invoiceEmailer = &fakeInvoiceEmailer{}
+	}
 	// The collector starts no-payment dunning for a card-less invoice, so
 	// any fixture that reaches the no-PM arm needs a starter.
 	if e.dunningStarter == nil {
@@ -1090,6 +1098,16 @@ func (m *mockInvoices) SetNoPMNotifiedAt(_ context.Context, _, id string, at tim
 	for i, inv := range m.invoices {
 		if inv.ID == id {
 			m.invoices[i].NoPMNotifiedAt = &at
+			return nil
+		}
+	}
+	return fmt.Errorf("not found")
+}
+
+func (m *mockInvoices) SetInvoiceEmailedAt(_ context.Context, _, id string, at time.Time) error {
+	for i, inv := range m.invoices {
+		if inv.ID == id {
+			m.invoices[i].InvoiceEmailedAt = &at
 			return nil
 		}
 	}

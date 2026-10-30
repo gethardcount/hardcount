@@ -11,11 +11,13 @@ import (
 )
 
 // TestE2E_PaymentUpdateLink walks the customer's update-payment link over
-// the real router and database. An invoice finalizes with no card on file,
-// so the customer is emailed a single-use link. The page reads the invoice
-// through GET /v1/public/payment-updates/{token}, and its button opens a
-// Stripe Checkout session through POST .../{token}/checkout. Neither public
-// endpoint had a handler test; only the token store was tested.
+// the real router and database. With Stripe connected, an invoice finalizes
+// with no card on file, so the customer is emailed a single-use link (without
+// Stripe the customer is emailed the invoice instead, ADR-060 amendment
+// 2026-10-30). The page reads the invoice through GET
+// /v1/public/payment-updates/{token}, and its button opens a Stripe Checkout
+// session through POST .../{token}/checkout. Neither public endpoint had a
+// handler test; only the token store was tested.
 func TestE2E_PaymentUpdateLink(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	const returnURL = "https://billing.update-flow.test/payment-method-added"
@@ -26,6 +28,16 @@ func TestE2E_PaymentUpdateLink(t *testing.T) {
 
 	tenantID := testutil.CreateTestTenant(t, db, "Update Link Flow Co")
 	key := createAPIKeyWithMode(t, db, tenantID, false)
+	connectStripe := func() {
+		t.Helper()
+		if _, err := tenantstripe.NewStore(db).Upsert(context.Background(), tenantstripe.UpsertInput{
+			TenantID: tenantID, Livemode: false, SecretKey: "sk_test_update_flow", PublishableKey: "pk_test_update_flow",
+		}); err != nil {
+			t.Fatalf("connect stripe: %v", err)
+		}
+	}
+	connectStripe()
+	stripe := installStripeStub(t)
 
 	const customerName, customerEmail = "Update Link Customer", "ap@update-flow.test"
 	customerID := flowStr(flowDo(t, ts, "POST", "/v1/customers", flowReq{bearer: key, body: map[string]any{
@@ -69,22 +81,19 @@ func TestE2E_PaymentUpdateLink(t *testing.T) {
 		t.Errorf("made-up link error code %q, want invalid_token", res.errCode())
 	}
 
-	// Before Stripe is connected the button is refused with a code the page
-	// can explain (409, not a 502: Stripe was never called), and the link
-	// still works.
-	if res := checkout().want(t, 409, "checkout before Stripe is connected"); res.errCode() != "online_payment_unavailable" {
+	// If the seller disconnects Stripe after the link was sent, the button is
+	// refused with a code the page can explain (409, not a 502: Stripe was
+	// never called), and the link still works.
+	flowDo(t, ts, "DELETE", "/v1/settings/stripe/test", flowReq{bearer: key}).want(t, 204, "disconnect Stripe")
+	if res := checkout().want(t, 409, "checkout while Stripe is disconnected"); res.errCode() != "online_payment_unavailable" {
 		t.Errorf("checkout without Stripe: code %q, want online_payment_unavailable", res.errCode())
 	}
 	page().want(t, 200, "open the link after the failed checkout")
 
-	// With Stripe connected, the button opens a Checkout session in setup
-	// mode for this customer, returning to the payment-method-added page.
-	if _, err := tenantstripe.NewStore(db).Upsert(context.Background(), tenantstripe.UpsertInput{
-		TenantID: tenantID, Livemode: false, SecretKey: "sk_test_update_flow", PublishableKey: "pk_test_update_flow",
-	}); err != nil {
-		t.Fatalf("connect stripe: %v", err)
-	}
-	stripe := installStripeStub(t)
+	// With Stripe connected again, the button opens a Checkout session in
+	// setup mode for this customer, returning to the payment-method-added
+	// page.
+	connectStripe()
 	opened := checkout().want(t, 201, "checkout")
 	if got := flowStr(opened.body, "url"); got != "https://checkout.stripe.test/c/cs_flow" {
 		t.Errorf("checkout url %q, want the session's url", got)
@@ -119,17 +128,18 @@ func TestE2E_PaymentUpdateLink(t *testing.T) {
 		t.Errorf("unexpected Stripe calls: %v", u)
 	}
 
-	// The seller then disconnects Stripe. The customer now has a Stripe
-	// customer, so EnsureStripeCustomer returns it without reading the keys.
-	// The next invoice's link must still answer 409, not 502: Stripe is not
-	// connected, and Stripe is never called.
-	flowDo(t, ts, "DELETE", "/v1/settings/stripe/test", flowReq{bearer: key}).want(t, 204, "disconnect Stripe")
+	// The next invoice, still card-less, gets its own link. The seller then
+	// disconnects Stripe. The customer now has a Stripe customer, so
+	// EnsureStripeCustomer returns it without reading the keys. The link must
+	// still answer 409, not 502: Stripe is not connected, and Stripe is never
+	// called.
 	invoice2 := flowStr(flowDo(t, ts, "POST", "/v1/invoices", flowReq{bearer: key, body: map[string]any{
 		"customer_id": customerID,
 		"line_items":  []map[string]any{{"description": "Seats", "quantity": 1, "unit_amount_cents": 4400}},
 	}}).want(t, 201, "create second invoice").body, "id")
 	flowDo(t, ts, "POST", "/v1/invoices/"+invoice2+"/finalize", flowReq{bearer: key}).want(t, 200, "finalize second invoice")
 	token = flowEmailLinkToken(t, db, "payment_setup_request", "update_url")
+	flowDo(t, ts, "DELETE", "/v1/settings/stripe/test", flowReq{bearer: key}).want(t, 204, "disconnect Stripe")
 	if res := checkout().want(t, 409, "checkout after Stripe is disconnected"); res.errCode() != "online_payment_unavailable" {
 		t.Errorf("checkout after disconnect: code %q, want online_payment_unavailable", res.errCode())
 	}

@@ -508,6 +508,9 @@ func (s *Sender) SendDunningWarning(ctx context.Context, tenantID, to string, cc
 	case domain.DeclineAskAddCard:
 		subject, contentHTML, ctaURL, ctaLabel = renderNoCardWarningHTML(customerName, invoiceNumber, hostedURL)
 		textBody = noCardWarningTextBody(customerName, invoiceNumber, hostedURL)
+	case domain.DeclineAskPayInvoice:
+		subject, contentHTML, ctaURL, ctaLabel = renderPayInvoiceReminderHTML(customerName, invoiceNumber, hostedURL)
+		textBody = payInvoiceReminderTextBody(customerName, invoiceNumber, hostedURL)
 	}
 	htmlBody, err := renderLayout(layoutInputs{
 		Subject: subject, CompanyName: brand.CompanyName, LogoURL: brand.LogoURL,
@@ -782,6 +785,18 @@ func noCardWarningTextBody(customerName, invoiceNumber, hostedURL string) string
 	fmt.Fprintf(&b, "%s\n%s\n\n", noCardSentence(invoiceNumber), payOrContactAsk(hostedURL != ""))
 	if hostedURL != "" {
 		fmt.Fprintf(&b, "Pay invoice: %s\n", hostedURL)
+	}
+	return b.String()
+}
+
+// payInvoiceReminderTextBody is the plain-text part of the pay-the-invoice
+// reminder (renderPayInvoiceReminderHTML).
+func payInvoiceReminderTextBody(customerName, invoiceNumber, hostedURL string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Hi %s,\n\n", customerName)
+	fmt.Fprintf(&b, "%s\n%s\n\n", unpaidSentence(invoiceNumber), payInvoiceAsk(hostedURL != ""))
+	if hostedURL != "" {
+		fmt.Fprintf(&b, "View invoice: %s\n", hostedURL)
 	}
 	return b.String()
 }

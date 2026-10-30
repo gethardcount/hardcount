@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 // spyCustomerReader returns a fixed customer (or an error) and counts lookups,
@@ -72,12 +73,15 @@ func finalizedUnpaidNoPM() domain.Invoice {
 // finalized-unpaid-no-PM invoices that reach the branch, so list reads don't
 // pay a customer lookup per row.
 func TestAttachAttention_NoPaymentMethod_EmailVariant(t *testing.T) {
-	ctx := context.Background()
+	// The setup-link notice is the Stripe-connected one (ADR-060 amendment
+	// 2026-10-30), so these services read Stripe as connected, in test mode.
+	ctx := postgres.WithLivemode(context.Background(), false)
 
 	t.Run("customer has email -> emailed-a-link variant, one lookup", func(t *testing.T) {
 		spy := &spyCustomerReader{cust: domain.Customer{Email: "ops@acme.test"}}
 		svc := NewService(newMemStore(), nil, newMemNumberer())
 		svc.SetCustomerReader(spy)
+		svc.SetStripeChecker(&countingStripe{})
 
 		inv := svc.attachAttention(ctx, finalizedUnpaidNoPM())
 		if inv.Attention == nil || inv.Attention.Reason != domain.AttentionReasonNoPaymentMethod {
@@ -107,6 +111,7 @@ func TestAttachAttention_NoPaymentMethod_EmailVariant(t *testing.T) {
 		spy := &spyCustomerReader{cust: domain.Customer{Email: ""}}
 		svc := NewService(newMemStore(), nil, newMemNumberer())
 		svc.SetCustomerReader(spy)
+		svc.SetStripeChecker(&countingStripe{})
 
 		inv := svc.attachAttention(ctx, finalizedUnpaidNoPM())
 		if inv.Attention == nil {
@@ -124,6 +129,7 @@ func TestAttachAttention_NoPaymentMethod_EmailVariant(t *testing.T) {
 		spy := &spyCustomerReader{cust: domain.Customer{Email: "ops@acme.test"}, err: errors.New("db blip")}
 		svc := NewService(newMemStore(), nil, newMemNumberer())
 		svc.SetCustomerReader(spy)
+		svc.SetStripeChecker(&countingStripe{})
 
 		inv := svc.attachAttention(ctx, finalizedUnpaidNoPM())
 		if spy.calls != 1 {
@@ -138,6 +144,7 @@ func TestAttachAttention_NoPaymentMethod_EmailVariant(t *testing.T) {
 		spy := &spyCustomerReader{cust: domain.Customer{Email: "ops@acme.test"}}
 		svc := NewService(newMemStore(), nil, newMemNumberer())
 		svc.SetCustomerReader(spy)
+		svc.SetStripeChecker(&countingStripe{})
 		svc.SetSetupLinkEmailConfigured(false)
 
 		att := svc.attachAttention(ctx, finalizedUnpaidNoPM()).Attention
@@ -162,6 +169,7 @@ func TestAttachAttention_NoPaymentMethod_EmailVariant(t *testing.T) {
 		spy := &spyCustomerReader{cust: domain.Customer{Email: "ops@acme.test"}}
 		svc := NewService(newMemStore(), nil, newMemNumberer())
 		svc.SetCustomerReader(spy)
+		svc.SetStripeChecker(&countingStripe{})
 
 		inv := finalizedUnpaidNoPM()
 		inv.Status = domain.InvoicePaid // terminal: never reaches no_payment_method
@@ -175,6 +183,7 @@ func TestAttachAttention_NoPaymentMethod_EmailVariant(t *testing.T) {
 		spy := &spyCustomerReader{cust: domain.Customer{Email: "ops@acme.test"}}
 		svc := NewService(newMemStore(), nil, newMemNumberer())
 		svc.SetCustomerReader(spy)
+		svc.SetStripeChecker(&countingStripe{})
 
 		inv := finalizedUnpaidNoPM()
 		inv.PaymentStatus = domain.PaymentProcessing // in-flight, not the no-PM branch
@@ -188,6 +197,7 @@ func TestAttachAttention_NoPaymentMethod_EmailVariant(t *testing.T) {
 		spy := &spyCustomerReader{cust: domain.Customer{Email: "ops@acme.test"}}
 		svc := NewService(newMemStore(), nil, newMemNumberer())
 		svc.SetCustomerReader(spy)
+		svc.SetStripeChecker(&countingStripe{})
 		svc.SetPaymentMethodReader(readyPMReader{}) // customer has a ready PM
 
 		_ = svc.attachAttention(ctx, finalizedUnpaidNoPM())
@@ -225,7 +235,7 @@ func assertNoEmailVariant(t *testing.T, att *domain.Attention) {
 // subscription promised "charged automatically once the customer adds a card"
 // although the sweep that charges on attach skips paused subscriptions.
 func TestAttachAttention_NoPaymentMethod_ReadsPauseForCardlessInvoices(t *testing.T) {
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), false)
 	inv := finalizedUnpaidNoPM()
 	inv.SubscriptionID = "sub_1"
 	inv.AutoChargePending = false // not queued: the old guard skipped the read
@@ -235,6 +245,7 @@ func TestAttachAttention_NoPaymentMethod_ReadsPauseForCardlessInvoices(t *testin
 		svc := NewService(newMemStore(), nil, newMemNumberer())
 		svc.SetCustomerReader(&spyCustomerReader{cust: domain.Customer{Email: "ops@acme.test"}})
 		svc.SetSubscriptionPauseReader(pauses)
+		svc.SetStripeChecker(&countingStripe{})
 
 		att := svc.attachAttention(ctx, inv).Attention
 		if att == nil || att.Reason != domain.AttentionReasonNoPaymentMethod {

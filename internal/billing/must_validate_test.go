@@ -67,7 +67,9 @@ func TestMustValidate_CoversEveryCollaborator(t *testing.T) {
 		// the two reads behind LiveCreditBalance.
 		// Back to 26 at #970 PR-A: the dead CreditGranter is gone (the
 		// cancel relief credits through CreditNoteAdjuster).
-		const collaborators = 26
+		// 28 at the ADR-060 amendment (2026-10-30): StripeReadiness and
+		// InvoiceEmailer, the collector's no-Stripe arm.
+		const collaborators = 28
 		if nilCount != collaborators {
 			t.Errorf("zero engine names %d nil collaborators, expected %d — Engine's dep set changed; update router wiring + this count deliberately", nilCount, collaborators)
 		}

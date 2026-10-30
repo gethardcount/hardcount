@@ -313,12 +313,22 @@ type retryInvoiceStore interface {
 	ListChargeAttemptsByInvoice(ctx context.Context, tenantID, invoiceID string) ([]domain.InvoiceChargeAttempt, error)
 }
 
+// stripeReadiness reports whether a tenant has Stripe connected for a mode.
+// *payment.StripeClients implements it (HasFor); a read error is an error,
+// never "not connected".
+type stripeReadiness interface {
+	HasFor(ctx context.Context, tenantID string, livemode bool) (bool, error)
+}
+
 // paymentRetrierAdapter bridges Stripe + invoice/customer stores → dunning.PaymentRetrier.
 type paymentRetrierAdapter struct {
 	charger       *payment.Stripe
 	invoiceStore  retryInvoiceStore
 	paymentSetups payment.PaymentSetupStore
 	credits       *credit.Service
+	// stripeReady: without Stripe for the invoice's mode a retry charges
+	// nothing and is a reminder only (ADR-060 amendment 2026-10-30).
+	stripeReady stripeReadiness
 }
 
 // RetryPayment counts a retry only when it got a definite answer; see
@@ -445,6 +455,26 @@ func (a *paymentRetrierAdapter) retryPayment(ctx context.Context, tenantID, invo
 			}
 			return nil
 		}
+	}
+
+	// Stripe not connected for the invoice's mode: no charge is attempted,
+	// whatever card is on file, and none can succeed until Stripe is
+	// connected. The attempt counts (ErrNoOnlinePaymentOnRetry is a kind of
+	// ErrNoPaymentMethodOnRetry), so the run still reaches its final action,
+	// and its reminder asks the customer to pay the invoice (ADR-060
+	// amendment 2026-10-30). A failed read is not "not connected": skip this
+	// tick, uncounted, as for the payment-setup read below. Provably
+	// pre-Stripe either way, so the hold is released.
+	connected, err := a.stripeConnected(ctx, tenantID)
+	if err != nil {
+		release()
+		slog.WarnContext(ctx, "dunning retry: Stripe connection read failed; skipping this attempt",
+			"invoice_id", invoiceID, "error", err)
+		return dunning.ErrTransientSkip
+	}
+	if !connected {
+		release()
+		return domain.ErrNoOnlinePaymentOnRetry
 	}
 
 	ps, err := a.paymentSetups.GetPaymentSetup(ctx, tenantID, customerID)
@@ -602,6 +632,19 @@ func (a *paymentRetrierAdapter) retryFailure(ctx context.Context, tenantID, invo
 // retryFailure builds.
 func (a *paymentRetrierAdapter) ExplainRetryFailure(ctx context.Context, tenantID, invoiceID, paymentIntentID string) error {
 	return a.retryFailure(ctx, tenantID, invoiceID, paymentIntentID)
+}
+
+// stripeConnected reports whether the tenant has Stripe connected for the
+// mode the retry runs in (ctx's livemode, which the dunning sweeps carry).
+func (a *paymentRetrierAdapter) stripeConnected(ctx context.Context, tenantID string) (bool, error) {
+	if a.stripeReady == nil {
+		return false, errors.New("dunning retry: no Stripe connection check wired")
+	}
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return false, err
+	}
+	return a.stripeReady.HasFor(ctx, tenantID, live)
 }
 
 // dunningRunStarter is the minimal slice of dunning.Service the adapter

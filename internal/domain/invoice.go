@@ -347,6 +347,13 @@ type Invoice struct {
 	// collect or the auto-charge retry sweep), checked by the sweep so a no-PM
 	// invoice is emailed exactly once, not per tick (ADR-087 follow-up).
 	NoPMNotifiedAt *time.Time `json:"no_pm_notified_at,omitempty"`
+	// InvoiceEmailedAt is the send-once marker for the invoice email the
+	// auto-charge collector sends when Stripe is not connected for the
+	// invoice's mode (ADR-060 amendment 2026-10-30): stamped after the email
+	// is queued, checked so the next visit sends nothing more. An operator's
+	// "Email invoice" does not stamp it. Not in the API: the invoice's
+	// activity shows the email.
+	InvoiceEmailedAt *time.Time `json:"-"`
 	// BelowMinimumAt is when Stripe last refused to charge this invoice
 	// because its amount is below Stripe's minimum charge (ErrBelowMinimumCharge).
 	// The charge path stamps it with payment_status 'pending' and the

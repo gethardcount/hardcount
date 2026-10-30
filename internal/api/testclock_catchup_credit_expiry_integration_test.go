@@ -117,7 +117,7 @@ func TestCatchup_CreditExpiryRunsAfterDunningRetries_RealStore(t *testing.T) {
 			}
 
 			credits := credit.NewService(credit.NewPostgresStore(r.db))
-			retrier := &paymentRetrierAdapter{charger: r.charger, invoiceStore: r.invoices, paymentSetups: r.retrier.paymentSetups, credits: credits}
+			retrier := &paymentRetrierAdapter{charger: r.charger, invoiceStore: r.invoices, paymentSetups: r.retrier.paymentSetups, credits: credits, stripeReady: stripeConnectedForTest{connected: true}}
 			dunningSvc := dunning.NewService(dstore, retrier, nil)
 
 			// Before the advance the clock reads t0: dunning starts there. The

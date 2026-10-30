@@ -73,7 +73,7 @@ func (f *anchorCreditApplier) ApplyToInvoiceAt(_ context.Context, _, _, _ string
 // collector on one invoice, so every arm below is the sweep's behavior, and a
 // failure leaves the invoice queued for the sweep rather than lost.
 func TestCollectInvoice(t *testing.T) {
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), false) // the collector reads the mode for the Stripe connection
 
 	t.Run("PM ready → charged once, flag cleared, no email", func(t *testing.T) {
 		e, invoices, notifier, inv := collectFixture()
@@ -324,7 +324,7 @@ func (c *ctxProbeCharger) ChargeInvoice(ctx context.Context, _ string, inv domai
 // resolve ERROR sends nothing (unknown ≠ missing), and a skipped-no-email
 // outcome stays unstamped so it self-heals when the customer gains an address.
 func TestSweepNoPM_SetupEmailSentExactlyOnce(t *testing.T) {
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), false) // the collector reads the mode for the Stripe connection
 
 	t.Run("no PM, never emailed → one email, stamped; second tick silent", func(t *testing.T) {
 		e, invoices, notifier, inv := collectFixture()

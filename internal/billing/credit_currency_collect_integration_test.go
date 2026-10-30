@@ -97,6 +97,8 @@ func TestCollect_CreditInAnotherCurrencyIsNotApplied(t *testing.T) {
 	e.SetTaxProviderResolver(tax.NewResolver(nil))
 	e.SetNoPaymentMethodNotifier(&testNoPMNotifier{})
 	e.SetDunningStarter(testDunningStarter{})
+	e.SetStripeReadiness(testStripeConnected{})
+	e.SetInvoiceEmailer(&testInvoiceEmailer{})
 	e.SetDunningResolver(&testDunningResolver{})
 
 	inv, err := e.BillOnCreate(ctx, sub)

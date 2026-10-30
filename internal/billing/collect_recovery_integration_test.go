@@ -95,6 +95,8 @@ func newCollectHarness(t *testing.T) collectHarness {
 		e.SetTaxProviderResolver(tax.NewResolver(nil))
 		e.SetNoPaymentMethodNotifier(&testNoPMNotifier{})
 		e.SetDunningStarter(testDunningStarter{})
+		e.SetStripeReadiness(testStripeConnected{})
+		e.SetInvoiceEmailer(&testInvoiceEmailer{})
 		e.SetDunningResolver(&testDunningResolver{})
 		if ds != nil {
 			e.SetDunningStarter(ds)

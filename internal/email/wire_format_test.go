@@ -78,6 +78,9 @@ func TestWireFormat_EverySendPath(t *testing.T) {
 		{"dunning-warning-no-card", func() error {
 			return s.SendDunningWarning(ctx, "t1", "ap@acme.test", nil, cust, "INV-000123", 1, 4, "2026-10-20", "", "tok_abc", domain.DeclineAskAddCard)
 		}, []string{cust, noCardSentence("INV-000123")}},
+		{"dunning-warning-no-stripe", func() error {
+			return s.SendDunningWarning(ctx, "t1", "ap@acme.test", nil, cust, "INV-000123", 1, 4, "2026-10-20", "", "tok_abc", domain.DeclineAskPayInvoice)
+		}, []string{cust, unpaidSentence("INV-000123"), "View invoice: https://pay.example.com/invoice/tok_abc"}},
 		{"dunning-escalation", func() error {
 			return s.SendDunningEscalation(ctx, "t1", "ap@acme.test", nil, cust, "INV-000123", domain.DunningEscalationOutcome{}, "tok_abc")
 		}, []string{cust}},

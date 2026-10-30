@@ -562,14 +562,16 @@ func (h *Handler) finalize(w http.ResponseWriter, r *http.Request) {
 	// endpoint AND the tax-retry auto-finalize. Pre-fix the webhook fired
 	// from here only, so the tax-retry path silently skipped it.
 
-	// No automatic "here's your invoice" email on finalize. Hardcount
-	// auto-charges the saved card (Stripe charge_automatically model), so
-	// the customer's touchpoint is the payment receipt on success (fired
-	// from the Stripe webhook) or the "set up payment method" email below
-	// when there's no card on file — matching cycle invoices and Stripe's
-	// auto-charge behavior, where finalizing an auto-charged invoice does
-	// NOT email the invoice. Operators can still send it explicitly via
-	// POST /{id}/send.
+	// No automatic "here's your invoice" email on finalize while Stripe is
+	// connected. Hardcount auto-charges the saved card (Stripe
+	// charge_automatically model), so the customer's touchpoint is the
+	// payment receipt on success (fired from the Stripe webhook) or the "set
+	// up payment method" email below when there's no card on file — matching
+	// cycle invoices and Stripe's auto-charge behavior, where finalizing an
+	// auto-charged invoice does NOT email the invoice. Without Stripe for the
+	// invoice's mode the collector below emails the invoice itself instead,
+	// once (ADR-060 amendment 2026-10-30), as for a send-invoice tenant.
+	// Operators can still send it explicitly via POST /{id}/send.
 
 	// Collect now through the billing engine's one collector (credits, then
 	// the card, or the setup-link email). The finalize write already queued
@@ -893,83 +895,21 @@ func (h *Handler) sendEmail(w http.ResponseWriter, r *http.Request) {
 		respond.NotFound(w, r, "invoice")
 		return
 	}
-
-	// This email carries a "View & pay invoice" button. Sending it for an
-	// invoice whose payment is unresolved asks the customer to pay something we
-	// may already have taken from them — and for a parked invoice (ADR-107) the
-	// hosted page will not even offer a Pay button when they arrive.
-	if b := domain.PaymentBlocksAction(inv, domain.ActionEmailInvoice); b.Blocked {
-		respond.ConflictCoded(w, r, "", b.Code, b.Message)
-		return
-	}
 	if err != nil {
 		respond.InternalError(w, r)
 		return
 	}
-	// The email says "Your invoice is ready" over the amount due and a pay
-	// button. A draft is not issued yet and its lines can still change; a
-	// voided invoice is cancelled. Either way the customer would be asked for
-	// money they do not owe.
-	switch inv.Status {
-	case domain.InvoiceDraft:
-		respond.ConflictCoded(w, r, "", "invoice_not_sendable",
-			"a draft invoice can't be emailed because it isn't issued yet. Finalize it first, then email it")
-		return
-	case domain.InvoiceVoided:
-		respond.ConflictCoded(w, r, "", "invoice_not_sendable",
-			"a voided invoice can't be emailed because it is cancelled and nothing is owed. To bill the customer, create a new invoice")
-		return
-	}
-	if !h.emailConfigured {
-		respond.FromError(w, r, errs.EmailNotConfigured(), "invoice_email")
-		return
-	}
-	// Operator entry point on a clock-pinned entity (ADR-030): bind once
-	// here so the enqueued email carries the invoice's billing anchor and
-	// lands on the invoice's own calendar (ADR-104). Without this the row
-	// enqueues unanchored and sorts by real send time — the exact gap the
-	// 2026-07-29 walk caught after the anchor shipped.
-	ctx := h.svc.bindForInvoice(r.Context(), tenantID, inv.ID)
-
-	cc, err := resolveSendCC(ctx, h.customers, tenantID, inv.CustomerID, to, body.AdditionalEmails)
-	if err != nil {
-		respond.FromError(w, r, err, "invoice_email")
-		return
-	}
-
-	// One shared context builder across emailed/downloaded/hosted PDFs —
-	// this path previously hand-rolled a THINNER context (no buyer
-	// address/tax id, no credit notes), so the emailed document diverged
-	// from the downloaded one.
-	bt, ci, cnInfos := BuildPDFContext(ctx, h.customers, h.settings, h.pdfCreditNotes, tenantID, &inv)
-
-	pdfBytes, err := RenderPDF(ctx, inv, items, bt, cnInfos, ci)
-	if err != nil {
-		respond.InternalError(w, r)
-		return
-	}
-
-	// AmountDueCents, not Total: the email template labels this figure
-	// "Amount due", and credits/partial payments make the two differ —
-	// telling a customer they owe the pre-credit total is wrong.
-	if err := h.emailSender.SendInvoice(ctx, tenantID, to, cc, bt.Name, inv.InvoiceNumber, inv.AmountDueCents, inv.Currency, pdfBytes, inv.PublicToken, inv.Status == domain.InvoiceUncollectible); err != nil {
+	// The body is shared with the collector's automatic invoice email
+	// (emailInvoice): the refusals answer 409, a PDF render failure 500.
+	if err := h.emailInvoice(r.Context(), tenantID, inv, items, to, body.AdditionalEmails, ""); err != nil {
+		if errors.Is(err, errInvoicePDF) {
+			respond.InternalError(w, r)
+			return
+		}
 		// Sanitize at the boundary — SMTP errors / outbox-store errors
 		// would otherwise leak to the operator toast. ADR-026.
 		respond.FromError(w, r, err, "invoice_email")
 		return
-	}
-
-	// Explicit audit row so an operator-initiated send is recorded as
-	// "Emailed INV-NNN". (It used to also displace the catch-all middleware's
-	// generic "create" row; that middleware is deleted — ADR-090 — so this row is
-	// now the only record.)
-	// No recipient address in the append-only row (GDPR erasure) — the email
-	// outbox is the delivery record; the row links the invoice + customer.
-	if h.auditLogger != nil {
-		_ = h.auditLogger.Log(h.svc.AuditCtx(r.Context(), inv), tenantID, domain.AuditActionSend, "invoice", inv.ID, inv.InvoiceNumber, map[string]any{
-			"invoice_number": inv.InvoiceNumber,
-			"customer_id":    inv.CustomerID,
-		})
 	}
 
 	respond.JSON(w, r, http.StatusOK, map[string]string{"status": "sent"})

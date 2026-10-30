@@ -80,6 +80,8 @@ type Engine struct {
 	testClocks      TestClockReader
 	events          domain.EventDispatcher
 	noPMNotifier    NoPaymentMethodNotifier
+	stripeReady     StripeReadiness
+	invoiceEmailer  InvoiceEmailer
 	dunningStarter  DunningStarter
 	dunningResolver DunningResolver
 	cancelExecutor  ScheduledCancelExecutor
@@ -306,6 +308,33 @@ var _ clock.Resolver = (*Engine)(nil)
 // integration tests). Wire in router.go via SetNoPaymentMethodNotifier.
 type NoPaymentMethodNotifier interface {
 	NotifyNoPaymentMethod(ctx context.Context, tenantID string, inv domain.Invoice, trigger string) (domain.NotifyOutcome, error)
+}
+
+// StripeReadiness reports whether a tenant has Stripe connected for a mode:
+// the same check the hosted invoice page makes before it offers Pay.
+// Implemented by *payment.StripeClients (HasFor). A read error is an error,
+// never "not connected" (no silent fallbacks).
+//
+// The collector reads it for an invoice that is owed with no card on file
+// (ADR-060 amendment 2026-10-30). Connected: the customer is emailed a
+// card-setup link. Not connected: no card can be added online, so the
+// customer is emailed the invoice itself instead (InvoiceEmailer). Either
+// way the no-payment dunning run starts. REQUIRED; wire via
+// SetStripeReadiness.
+type StripeReadiness interface {
+	HasFor(ctx context.Context, tenantID string, livemode bool) (bool, error)
+}
+
+// InvoiceEmailer emails the customer the invoice itself: the PDF and the
+// hosted invoice page link, the same email as the operator's "Email
+// invoice", to the customer's email address and stored CC list. The
+// collector sends it once when Stripe is not connected for the invoice's
+// mode, and stamps invoice_emailed_at on NotifySent. NotifySkippedNoEmail:
+// the customer has no email address, nothing was sent. An error (no SMTP on
+// this server, an invoice that cannot be emailed, a failed read) sent
+// nothing; the next visit tries again. REQUIRED; wire via SetInvoiceEmailer.
+type InvoiceEmailer interface {
+	EmailInvoice(ctx context.Context, tenantID, invoiceID string) (domain.NotifyOutcome, error)
 }
 
 // DunningStarter enrolls a stuck invoice into a dunning campaign.
@@ -657,6 +686,10 @@ type InvoiceWriter interface {
 	// auto-charge sweep checks it so a card-less invoice is emailed exactly
 	// once, not once per tick.
 	SetNoPMNotifiedAt(ctx context.Context, tenantID, invoiceID string, at time.Time) error
+	// SetInvoiceEmailedAt stamps the send-once marker for the invoice email
+	// the collector sends when Stripe is not connected for the invoice's mode
+	// (ADR-060 amendment 2026-10-30).
+	SetInvoiceEmailedAt(ctx context.Context, tenantID, invoiceID string, at time.Time) error
 	// ClaimAutoCharge takes the per-invoice charge hold (HA hazard #1,
 	// ADR-127): a claim re-asserting the full eligibility predicate and
 	// refusing any set hold. The zero ChargeHold = another owner holds the
@@ -966,6 +999,18 @@ func (e *Engine) SetEventDispatcher(d domain.EventDispatcher) {
 // the NoPaymentMethodNotifier doc-comment for the full rationale.
 func (e *Engine) SetNoPaymentMethodNotifier(n NoPaymentMethodNotifier) {
 	e.noPMNotifier = n
+}
+
+// SetStripeReadiness wires the Stripe-connected check the collector makes
+// for an owed invoice with no card. See the StripeReadiness doc-comment.
+func (e *Engine) SetStripeReadiness(r StripeReadiness) {
+	e.stripeReady = r
+}
+
+// SetInvoiceEmailer wires the invoice email the collector sends when Stripe
+// is not connected. See the InvoiceEmailer doc-comment.
+func (e *Engine) SetInvoiceEmailer(m InvoiceEmailer) {
+	e.invoiceEmailer = m
 }
 
 // SetDunningStarter wires the no-payment-method dunning enroller — the
@@ -4916,6 +4961,42 @@ func (e *Engine) enrollStalledForDunning(ctx context.Context, pending []domain.I
 	return swept, errs
 }
 
+// stripeConnected reports whether the tenant has Stripe connected for the
+// mode the collector runs in (ctx's livemode, which the sweeps and the
+// finalize nudge always carry). A ctx with no mode is an error, never a
+// guess.
+func (e *Engine) stripeConnected(ctx context.Context, tenantID string) (bool, error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return false, err
+	}
+	return e.stripeReady.HasFor(ctx, tenantID, live)
+}
+
+// emailInvoiceOnce emails the customer the invoice (PDF and hosted page
+// link) for an owed invoice with no card while Stripe is not connected, and
+// stamps invoice_emailed_at so the next visit sends nothing more. It runs
+// under the invoice's charge hold, so rival sweep leaders cannot both send.
+// A customer with no email address, or a send that fails or is refused (no
+// SMTP on this server), is left unstamped: the next visit tries again, as
+// for the setup-link email. A crash between the send and the stamp sends
+// the email once more on the next visit.
+func (e *Engine) emailInvoiceOnce(ctx context.Context, inv domain.Invoice) {
+	outcome, err := e.invoiceEmailer.EmailInvoice(ctx, inv.TenantID, inv.ID)
+	switch {
+	case err != nil:
+		slog.Warn("auto-charge: Stripe is not connected and the invoice email was not sent; the next visit tries again",
+			"invoice_id", inv.ID, "error", err)
+	case outcome == domain.NotifySkippedNoEmail:
+		slog.Info("auto-charge: Stripe is not connected; invoice email skipped: customer has no email on file", "invoice_id", inv.ID)
+	default:
+		if serr := e.invoices.SetInvoiceEmailedAt(ctx, inv.TenantID, inv.ID, e.clock.Now(ctx)); serr != nil {
+			slog.Warn("auto-charge: failed to stamp the invoice-emailed marker; the next visit may email it again", "invoice_id", inv.ID, "error", serr)
+		}
+		slog.Info("auto-charge: Stripe is not connected; invoice email queued", "invoice_id", inv.ID)
+	}
+}
+
 // processAutoCharge is the one collector for finalized invoices. The two
 // sweeps (RetryPendingCharges, RetryPendingChargesForClock) and the post-commit
 // CollectInvoice nudge all run it, so collection has a single implementation.
@@ -5046,8 +5127,29 @@ func (e *Engine) processAutoCharge(ctx context.Context, pending []domain.Invoice
 			errs = append(errs, fmt.Errorf("resolve payment method for invoice %s: %w", inv.ID, err))
 		}
 		if err != nil || stripePMID == "" || stripeCusID == "" {
-			// Genuinely no PM (not a resolve error) and never emailed: send
-			// the setup-link email ONCE (ADR-087 follow-up). This closes the
+			// Genuinely no card: what the customer is asked to do depends on
+			// whether Stripe is connected for the invoice's mode (ADR-060
+			// amendment 2026-10-30). Without it no card can be added online,
+			// so the tenant collects like a send-invoice tenant: the customer
+			// is emailed the invoice, never a setup link. A failed read of the
+			// connection is not "not connected": nothing is sent, no dunning
+			// starts, and the sweep counts the error; the invoice stays
+			// queued, so the next visit reads it again.
+			connected := false
+			if err == nil {
+				var rerr error
+				if connected, rerr = e.stripeConnected(ctx, inv.TenantID); rerr != nil {
+					errs = append(errs, fmt.Errorf("read the Stripe connection for invoice %s: %w", inv.ID, rerr))
+					release()
+					continue
+				}
+			}
+			if err == nil && !connected && inv.InvoiceEmailedAt == nil {
+				e.emailInvoiceOnce(ctx, inv)
+			}
+			// Genuinely no PM (not a resolve error), Stripe connected, and
+			// never emailed: send the setup-link email ONCE (ADR-087
+			// follow-up). This closes the
 			// sweep-mediated silence: a proration invoice is enrolled here
 			// without any finalize-time email, and a finalize-time resolver
 			// error deliberately queues without emailing — pre-fix both aged
@@ -5056,8 +5158,11 @@ func (e *Engine) processAutoCharge(ctx context.Context, pending []domain.Invoice
 			// too), so the per-tick revisit never duplicates; a
 			// skipped-no-email outcome is left unstamped so it self-heals if
 			// the customer gains an address. Runs inside the charge lease, so
-			// rival HA sweep leaders can't double-send within a tick.
-			if err == nil && inv.NoPMNotifiedAt == nil {
+			// rival HA sweep leaders can't double-send within a tick. When
+			// Stripe is connected after the invoice email went out, the next
+			// visit arrives here with no_pm_notified_at unset and sends the
+			// link then.
+			if err == nil && connected && inv.NoPMNotifiedAt == nil {
 				outcome, nerr := e.noPMNotifier.NotifyNoPaymentMethod(ctx, inv.TenantID, inv, trigger)
 				switch {
 				case nerr != nil:
@@ -5081,7 +5186,10 @@ func (e *Engine) processAutoCharge(ctx context.Context, pending []domain.Invoice
 			// that only read the queue could dun an invoice whose credits
 			// were about to cover it, or whose credit apply had just failed.)
 			// A resolve ERROR is not "no card", so it starts nothing.
-			// StartDunning is idempotent: one run per invoice, ever.
+			// StartDunning is idempotent: one run per invoice, ever. The run
+			// starts with or without Stripe: without it, its reminders ask
+			// the customer to pay the invoice and its retries charge nothing,
+			// and it still ends in the policy's final action.
 			if err == nil {
 				// Anchored on settleAt, the instant this collection runs in the
 				// invoice's time domain: a cycle invoice's close when collected

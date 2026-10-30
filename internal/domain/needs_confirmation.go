@@ -56,6 +56,12 @@ const (
 	// succeed until a card is added, so the email asks the customer to pay
 	// the invoice and promises no retry.
 	DeclineAskAddCard DeclineAsk = "add_card"
+	// DeclineAskPayInvoice: Stripe is not connected for the invoice's mode,
+	// so the retry charged nothing and no card can be added online
+	// (ErrNoOnlinePaymentOnRetry). The reminder asks the customer to pay the
+	// invoice and links the hosted invoice page; it mentions no card and
+	// promises no retry (ADR-060 amendment 2026-10-30).
+	DeclineAskPayInvoice DeclineAsk = "pay_invoice"
 )
 
 // DeclineAskOf is the ask for a Stripe decline code.

@@ -180,6 +180,8 @@ func newZeroDueFinalActionRig(t *testing.T, name string) *zeroDueFinalActionRig 
 	e.SetTaxProviderResolver(tax.NewResolver(nil))
 	e.SetNoPaymentMethodNotifier(&testNoPMNotifier{})
 	e.SetDunningStarter(testDunningStarter{})
+	e.SetStripeReadiness(testStripeConnected{})
+	e.SetInvoiceEmailer(&testInvoiceEmailer{})
 	e.SetDunningResolver(&testDunningResolver{})
 	e.SetInvoiceVoider(invoice.NewService(r.invStore, clock.Real(), settings))
 	e.SetCreditNoteAdjuster(r.cnSvc)

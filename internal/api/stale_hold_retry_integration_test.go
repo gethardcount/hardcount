@@ -79,7 +79,7 @@ func TestDunningRetry_CreditCovered_SettledAndHoldReleased_RealStore(t *testing.
 	if _, err := credits.Grant(r.ctx, r.tenantID, credit.GrantInput{Currency: "USD", CustomerID: custID, AmountCents: 5000, Description: "goodwill"}); err != nil {
 		t.Fatalf("grant credit: %v", err)
 	}
-	retrier := &paymentRetrierAdapter{charger: r.charger, invoiceStore: r.invoices, paymentSetups: r.retrier.paymentSetups, credits: credits}
+	retrier := &paymentRetrierAdapter{charger: r.charger, invoiceStore: r.invoices, paymentSetups: r.retrier.paymentSetups, credits: credits, stripeReady: stripeConnectedForTest{connected: true}}
 
 	if err := retrier.RetryPayment(r.ctx, r.tenantID, inv.ID, custID); err != nil {
 		t.Fatalf("retry: %v", err)
