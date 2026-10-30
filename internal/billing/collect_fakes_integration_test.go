@@ -40,6 +40,8 @@ func newRealEngine(db *postgres.DB, clk clock.Clock) *billing.Engine {
 	e.SetTaxProviderResolver(tax.NewResolver(nil))
 	e.SetNoPaymentMethodNotifier(&testNoPMNotifier{})
 	e.SetDunningStarter(testDunningStarter{})
+	e.SetStripeReadiness(testStripeConnected{})
+	e.SetInvoiceEmailer(&testInvoiceEmailer{})
 	return e
 }
 
@@ -78,6 +80,21 @@ type testNoPMNotifier struct{ got []domain.Invoice }
 
 func (n *testNoPMNotifier) NotifyNoPaymentMethod(_ context.Context, _ string, inv domain.Invoice, trigger string) (domain.NotifyOutcome, error) {
 	n.got = append(n.got, inv)
+	return domain.NotifySent, nil
+}
+
+// testStripeConnected reports Stripe connected, so a card-less invoice takes
+// the setup-link arm as it did before ADR-060's 2026-10-30 amendment.
+type testStripeConnected struct{}
+
+func (testStripeConnected) HasFor(context.Context, string, bool) (bool, error) { return true, nil }
+
+// testInvoiceEmailer records the invoice emails the collector sends when
+// Stripe is not connected.
+type testInvoiceEmailer struct{ got []string }
+
+func (m *testInvoiceEmailer) EmailInvoice(_ context.Context, _, invoiceID string) (domain.NotifyOutcome, error) {
+	m.got = append(m.got, invoiceID)
 	return domain.NotifySent, nil
 }
 

@@ -186,6 +186,8 @@ func TestManualRunVsSchedulerRace_ExactlyOneInvoice(t *testing.T) {
 	engine.SetTaxProviderResolver(tax.NewResolver(nil))
 	engine.SetNoPaymentMethodNotifier(&testNoPMNotifier{})
 	engine.SetDunningStarter(testDunningStarter{})
+	engine.SetStripeReadiness(testStripeConnected{})
+	engine.SetInvoiceEmailer(&testInvoiceEmailer{})
 
 	var (
 		wg       sync.WaitGroup

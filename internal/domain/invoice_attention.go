@@ -408,6 +408,13 @@ type AttentionContext struct {
 	// stale tax_error_code hasn't been replaced yet because the
 	// scheduler hasn't ticked. Banner now reads "calculation queued"
 	// + "Retry now" so the operator gets agency without waiting.
+	//
+	// The no-payment-method notices read it too (ADR-060 amendment
+	// 2026-10-30): without Stripe no card can be added online, so they say
+	// the invoice is emailed instead of a setup link. Unlike the other
+	// fields, its zero value (false) is not the old behaviour: it selects
+	// the no-Stripe copy. The invoice service reads it for every page; a
+	// read error leaves it false (logged), display only.
 	StripeConnected bool
 
 	// DunningEscalated is true when the invoice's dunning run has reached
@@ -444,6 +451,14 @@ type AttentionContext struct {
 	// and offers the customer page instead. Zero value (false) means sending
 	// works — what every production boot wires explicitly.
 	SetupLinkEmailOff bool
+
+	// InvoiceEmailOff is true when this server cannot send email at all (SMTP
+	// is not set up). Read only by the no-payment-method notices while Stripe
+	// is not connected (StripeConnected false): the collector then emails the
+	// customer the invoice instead of a setup link (ADR-060 amendment
+	// 2026-10-30), and refuses without SMTP. Zero value (false) means sending
+	// works.
+	InvoiceEmailOff bool
 
 	// CommitGrantDrawableCents and CommitGrantConsumedCents describe the
 	// prepaid-commit grant this invoice funded (ADR-078). Drawable is what the
@@ -1455,6 +1470,9 @@ const pausedRetriesDetail = "Pausing collection keeps new invoices as drafts. Pa
 // invoice" collection mode look alarming.
 func classifyNoPaymentMethod(inv Invoice, atc AttentionContext) *Attention {
 	since := attentionSince(inv)
+	if !atc.StripeConnected {
+		return classifyNoPaymentMethodNoStripe(inv, atc, since)
+	}
 	// Resend can only send to an address, from a server that can send.
 	canEmail := atc.CustomerHasEmail && !atc.SetupLinkEmailOff
 
@@ -1559,6 +1577,65 @@ func classifyNoPaymentMethod(inv Invoice, atc AttentionContext) *Attention {
 		Code:     "payment.no_payment_method",
 		Message:  charge + "\n" + emailLine,
 		Detail:   noCardDetail,
+		DocURL:   docURL("no-payment-method"),
+		Actions:  actions,
+		Since:    &since,
+		DueBy:    inv.DueAt,
+	}
+}
+
+// classifyNoPaymentMethodNoStripe is the no-payment-method notice while
+// Stripe is not connected for the invoice's mode (ADR-060 amendment
+// 2026-10-30). No card can be added online, so the collector emails the
+// customer the invoice once instead of a setup link, and payment recovery
+// reminds them to pay it. There is no setup link to resend; the customer
+// page stays the operator's lever. Line 2 says what happened to the invoice
+// email, from the same two facts as the setup-link copy: whether the customer
+// has an email address, and whether this server can send email.
+//
+// StripeConnected is false also when its read failed (logged); the notice
+// then says Stripe isn't connected, which is display only: the collector
+// itself reads the connection again and refuses to act on an error.
+func classifyNoPaymentMethodNoStripe(inv Invoice, atc AttentionContext, since time.Time) *Attention {
+	const noStripe = "Stripe isn't connected in this mode, so no card can be added online."
+	var emailLine string
+	switch {
+	case !atc.CustomerHasEmail:
+		emailLine = "The invoice is emailed only to customers with an email address; add one on the customer page."
+	case atc.InvoiceEmailOff:
+		emailLine = "This server can't send email, so the invoice was not emailed to the customer."
+	default:
+		emailLine = "The invoice is emailed to the customer once."
+	}
+	const detail = "Payment recovery reminds the customer to pay the invoice. To collect by card, connect Stripe under Settings. " +
+		"When the customer pays another way, record the payment on this invoice. The invoice's activity shows whether the email was sent."
+	actions := []AttentionActionItem{{Code: AttentionActionAddPaymentMethod, Label: "Open customer page"}}
+
+	if atc.DunningEscalated {
+		msg := "Retries stopped; " + noStripe
+		if atc.CollectionPaused {
+			msg = "Retries stopped and collection is paused; " + noStripe
+		}
+		const ended = "Automatic payment recovery ended without collecting, and the recovery policy's final step ran. " +
+			"Check the subscription to see what that step did."
+		return &Attention{
+			Severity: AttentionSeverityWarning,
+			Reason:   AttentionReasonDunningExhausted,
+			Code:     "payment.dunning_exhausted",
+			Message:  msg + "\n" + emailLine,
+			Detail:   joinDetail(ended, detail),
+			DocURL:   docURL("dunning-exhausted"),
+			Actions:  actions,
+			Since:    &since,
+			DueBy:    inv.DueAt,
+		}
+	}
+	return &Attention{
+		Severity: AttentionSeverityWarning,
+		Reason:   AttentionReasonNoPaymentMethod,
+		Code:     "payment.no_payment_method",
+		Message:  noStripe + "\n" + emailLine,
+		Detail:   detail,
 		DocURL:   docURL("no-payment-method"),
 		Actions:  actions,
 		Since:    &since,

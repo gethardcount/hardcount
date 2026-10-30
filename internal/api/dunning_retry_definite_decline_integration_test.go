@@ -160,6 +160,7 @@ func newDunningRetryRig(t *testing.T, name string) *dunningRetryRig {
 func (d *dunningRetryRig) useCharger(charger *payment.Stripe) {
 	svc := dunning.NewService(d.runs, &paymentRetrierAdapter{
 		charger: charger, invoiceStore: d.faults, paymentSetups: d.retrier.paymentSetups, credits: d.credits,
+		stripeReady: stripeConnectedForTest{connected: true},
 	}, nil)
 	svc.SetSubscriptionPauser(nil, d.invoices)
 	svc.SetInvoiceUncollectibleMarker(&invoiceUncollectibleAdapter{svc: d.invSvc})

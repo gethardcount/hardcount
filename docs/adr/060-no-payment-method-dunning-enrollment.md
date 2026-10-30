@@ -2,11 +2,11 @@
 
 ## Status
 
-Accepted — 2026-06-23 (amended 2026-10-08).
+Accepted — 2026-06-23 (amended 2026-10-08 and 2026-10-30).
 
 ## Summary
 
-An unpaid invoice whose customer has no usable card enters dunning (the retry-and-escalate process), like a declined charge. Without this, the subscription stayed active and kept billing with no path to a final decision. The retries count as failed attempts, so the run ends in the policy's final actions, and adding a card mid-run lets the collector charge the invoice. Amended 2026-10-08: the auto-charge collector starts the run itself when money is still owed and no card exists ([ADR-116](116-collection-intent-at-finalize-one-collector.md)), and the separate enrollment sweeps were deleted. Status: active, amended; tenants with dunning disabled are skipped.
+An unpaid invoice whose customer has no usable card enters dunning (the retry-and-escalate process), like a declined charge. Without this, the subscription stayed active and kept billing with no path to a final decision. The retries count as failed attempts, so the run ends in the policy's final actions, and adding a card mid-run lets the collector charge the invoice. Amended 2026-10-08: the auto-charge collector starts the run itself when money is still owed and no card exists ([ADR-116](116-collection-intent-at-finalize-one-collector.md)), and the separate enrollment sweeps were deleted. Amended 2026-10-30: without Stripe for the invoice's mode no card can be added, so the customer is emailed the invoice itself once, not a card-setup link. The run's retries then charge nothing and remind the customer to pay the invoice, and the run still ends in the policy's final actions. Status: active, amended; tenants with dunning disabled are skipped.
 
 ## Context
 
@@ -120,3 +120,71 @@ and the dunning state machine.
   (Stripe's revoke-but-recoverable step).
 - Usage spend-cap hard-stop / prepaid-balance (the AI-native exposure
   limiter for unbounded unpaid usage).
+
+## Amendment (2026-10-30): without Stripe, the invoice email instead of a setup link
+
+**Problem.** The no-card arm assumed a card could be added. When the tenant
+has no Stripe account connected for the invoice's mode (livemode), it cannot:
+
+- the setup-link email led to a form that could not save a card;
+- every dunning reminder asked for a card the customer could not add;
+- the invoice itself was never emailed: only an operator's **Email invoice**
+  sends it.
+
+**Decision.** Without Stripe for the invoice's mode, the tenant collects like
+a send-invoice tenant (Stripe Billing's `collection_method=send_invoice`;
+Lago and Orb send the invoice too):
+
+- **First contact is the invoice email.** The collector emails the customer
+  the invoice once: the PDF and the hosted invoice page link, the same email
+  as **Email invoice**, to the customer's address and stored CC list. The
+  send-once marker is a new column, `invoices.invoice_emailed_at` (migration
+  220); `no_pm_notified_at` keeps meaning "a setup link was emailed". No setup
+  link is sent. The hosted page says online payment isn't set up and to
+  contact the seller.
+- **The run still starts** (cause `no_payment_method`), so the invoice still
+  reaches the policy's final actions. The liveness reason above holds: without
+  the run, an unpaid invoice with no card would again have no off-ramp.
+- **Retries charge nothing and are reminders.** The retrier checks the
+  connection before it reads the card: without Stripe it charges nothing,
+  even with a card on file from before, and reports
+  `ErrNoOnlinePaymentOnRetry`. That is a kind of `ErrNoPaymentMethodOnRetry`,
+  so the attempt counts and the timeline shows a retry that charged nothing.
+  The reminder (`decline_ask` `pay_invoice`) asks the customer to pay the
+  invoice, links the hosted page as **View invoice**, and says nothing about
+  a card or a retry date.
+- **Connecting Stripe later** puts the invoice back on the path above: the
+  next visit sends the setup link once, and the next retry reads the card.
+- **A failed read of the connection is not "not connected".** The collector
+  counts an error and sends and starts nothing; the retrier skips the tick
+  uncounted. The invoice stays queued, and the next visit reads it again.
+- **The invoice email follows the operator's rules.** It is refused for a
+  draft, a void or a payment in flight, and without SMTP (`SMTP_HOST` unset):
+  nothing is stamped, a `WARN` is logged, and the next visit tries again. A
+  customer with no email address is skipped the same way, as for the setup
+  link.
+- **The invoice's notice** says Stripe isn't connected in this mode, so no
+  card can be added online, and says what happened to the invoice email. It
+  offers no **Resend setup link**.
+
+"Connected" is the hosted page's own check (`payment.StripeClients.HasFor`
+for the invoice's mode), given to the billing engine and the dunning retrier
+as narrow interfaces. The email is the invoice handler's **Email invoice**
+body, shared by both senders.
+
+**A run started while Stripe was connected**, then Stripe disconnected, is
+left to carry on: its next retry finds no Stripe, charges nothing, and sends
+the pay-the-invoice reminder. The operator sees the run on the Dunning page.
+
+**A card saved before Stripe was disconnected** is not charged either. The
+collector reads the connection before it charges, so such an invoice takes
+the same no-Stripe path: the invoice email once and the dunning run. Before,
+each visit tried the charge, got "Stripe not configured", and skipped it, with
+no email and no run.
+
+**Save & send** reads `invoice_emailed_at` on the finalize response (the API
+returns it). When finalizing already emailed the invoice, the dashboard does
+not send it again, so the customer gets it once.
+
+**Not settled here.** The final notice (dunning escalation) keeps its **Pay
+invoice** button, which opens the hosted page that says to contact the seller.

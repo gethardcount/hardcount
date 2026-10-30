@@ -1,6 +1,9 @@
 package domain
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 // NotifyOutcome is the typed disposition of a customer-notification effect.
 // Effect interfaces return it INSTEAD of a bare nil so a policy skip (e.g.
@@ -34,3 +37,13 @@ const (
 // customer copy instead of leaking the internal system-perspective
 // string ("no payment method for customer") into a customer inbox.
 var ErrNoPaymentMethodOnRetry = errors.New("no payment method for customer")
+
+// ErrNoOnlinePaymentOnRetry is what a dunning retry returns when Stripe is
+// not connected for the invoice's mode (ADR-060 amendment 2026-10-30): no
+// charge was attempted, whatever card is on file, and none can be until
+// Stripe is connected. It wraps ErrNoPaymentMethodOnRetry, so errors.Is
+// matches both: the attempt counts (the run still reaches its final action)
+// and the timeline shows it as a retry that charged nothing. Only the
+// customer's reminder differs: it asks them to pay the invoice, never to add
+// a card (DeclineAskPayInvoice).
+var ErrNoOnlinePaymentOnRetry = fmt.Errorf("stripe is not connected for this mode: %w", ErrNoPaymentMethodOnRetry)

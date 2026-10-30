@@ -439,7 +439,7 @@ func TestClassifyInvoiceAttention_NoPaymentMethod(t *testing.T) {
 
 	// Customer HAS an email → the engine emailed a setup link, so the banner
 	// claims it and offers both a resend and the customer-page path.
-	att := ClassifyInvoiceAttention(inv, AttentionContext{HasPaymentMethod: false, CustomerHasEmail: true})
+	att := ClassifyInvoiceAttention(inv, AttentionContext{HasPaymentMethod: false, CustomerHasEmail: true, StripeConnected: true})
 	if att == nil {
 		t.Fatalf("expected attention")
 	}
@@ -491,7 +491,7 @@ func TestClassifyInvoiceAttention_NoPaymentMethod_NoEmail(t *testing.T) {
 	inv.PaymentStatus = PaymentPending
 	inv.UpdatedAt = time.Now()
 
-	att := ClassifyInvoiceAttention(inv, AttentionContext{HasPaymentMethod: false, CustomerHasEmail: false})
+	att := ClassifyInvoiceAttention(inv, AttentionContext{HasPaymentMethod: false, CustomerHasEmail: false, StripeConnected: true})
 	if att == nil {
 		t.Fatalf("expected attention")
 	}
@@ -691,7 +691,7 @@ func TestClassifyInvoiceAttention_NoPaymentMethod_Simulated(t *testing.T) {
 	inv.IsSimulated = true
 	inv.UpdatedAt = time.Now()
 
-	att := ClassifyInvoiceAttention(inv, AttentionContext{HasPaymentMethod: false, CustomerHasEmail: true})
+	att := ClassifyInvoiceAttention(inv, AttentionContext{HasPaymentMethod: false, CustomerHasEmail: true, StripeConnected: true})
 	if att == nil || att.Reason != AttentionReasonNoPaymentMethod {
 		t.Fatalf("expected no_payment_method, got %+v", att)
 	}
@@ -716,7 +716,7 @@ func TestClassifyInvoiceAttention_DunningExhausted(t *testing.T) {
 	inv.UpdatedAt = time.Now()
 
 	att := ClassifyInvoiceAttention(inv, AttentionContext{
-		HasPaymentMethod: false, CustomerHasEmail: true, DunningEscalated: true,
+		HasPaymentMethod: false, CustomerHasEmail: true, DunningEscalated: true, StripeConnected: true,
 	})
 	if att == nil {
 		t.Fatal("expected attention")

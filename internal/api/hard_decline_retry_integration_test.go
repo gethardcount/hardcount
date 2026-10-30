@@ -100,7 +100,7 @@ func newHardDeclineRig(t *testing.T, name string) *hardDeclineRig {
 	r.charger.SetCardFetcher(r.cards)
 	r.charger.SetPaymentMethodAttacher(r.pmSvc)
 	r.charger.SetCustomerResolver(&stripeCustomerResolverAdapter{customers: r.customers})
-	r.retrier = &paymentRetrierAdapter{charger: r.charger, invoiceStore: r.invoices, paymentSetups: setups}
+	r.retrier = &paymentRetrierAdapter{charger: r.charger, invoiceStore: r.invoices, paymentSetups: setups, stripeReady: stripeConnectedForTest{connected: true}}
 	r.invSvc = invoice.NewService(r.invoices, nil, nil)
 	r.invSvc.SetPaymentMethodReader(setups)
 	r.invSvc.SetCardRefusalReader(r.invoices)

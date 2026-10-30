@@ -263,6 +263,39 @@ func payOrContactAsk(hasLink bool) string {
 	return "Please contact us to pay the invoice."
 }
 
+// renderPayInvoiceReminderHTML is the dunning reminder when Stripe is not
+// connected for the invoice's mode (domain.DeclineAskPayInvoice, ADR-060
+// amendment 2026-10-30). Nothing was charged and no card can be added online,
+// so it asks the customer to pay the invoice and mentions no card, no retry
+// count and no retry date. The hosted page it links shows the invoice and
+// says to contact the seller to pay, so the button reads "View invoice".
+func renderPayInvoiceReminderHTML(customerName, invoiceNumber, hostedURL string) (subject, contentHTML, ctaURL, ctaLabel string) {
+	subject = "Reminder — invoice " + invoiceNumber + " is unpaid"
+	var b strings.Builder
+	b.WriteString(`<h1 style="margin:0 0 12px;font-size:20px;color:#111827;">Your invoice is unpaid</h1>`)
+	b.WriteString(`<p style="margin:0 0 8px;color:#4b5563;">Hi ` + escape(customerName) + `,</p>`)
+	b.WriteString(`<p style="margin:0 0 12px;color:#4b5563;">` + escape(unpaidSentence(invoiceNumber)) + `</p>`)
+	b.WriteString(`<p style="margin:0 0 16px;color:#4b5563;">` + escape(payInvoiceAsk(hostedURL != "")) + `</p>`)
+	if hostedURL != "" {
+		ctaURL = hostedURL
+		ctaLabel = "View invoice"
+	}
+	return subject, b.String(), ctaURL, ctaLabel
+}
+
+// unpaidSentence and payInvoiceAsk are the pay-the-invoice reminder's copy,
+// shared by its HTML and plain-text parts so the two cannot drift.
+func unpaidSentence(invoiceNumber string) string {
+	return "Invoice " + invoiceNumber + " is still unpaid."
+}
+
+func payInvoiceAsk(hasLink bool) string {
+	if hasLink {
+		return "Please pay the invoice. You can view it using the link below."
+	}
+	return "Please contact us to pay the invoice."
+}
+
 // renderCardRefusedWarningHTML is the dunning warning for a card the bank
 // refused for good (#966): lost, stolen, revoked and the rest of
 // domain.IsHardDecline. Dunning retries skip that card, so unlike

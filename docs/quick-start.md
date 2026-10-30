@@ -144,7 +144,9 @@ says what went wrong. So a finished run means each step below worked. The IDs (t
 8. **Show the invoice ACME Corp receives.** The demo checks that the
    invoice is finalized (issued and no longer a draft), has a line for each
    model and token type, and that its PDF renders. Nothing is charged: no
-   Stripe account is connected in the quick start.
+   Stripe account is connected in the quick start. Without Stripe, Hardcount
+   emails the customer the invoice itself, once, instead of a link to add a
+   card. The quick start sets up no email server, so nothing is sent.
 
    **You see:**
 

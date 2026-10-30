@@ -486,6 +486,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		invoiceStore:  invoiceStore,
 		paymentSetups: paymentSetupStore,
 		credits:       creditSvc,
+		stripeReady:   stripeClients,
 	})
 	// Pre-invoiceSvc dunning wires (pauser + canceler only depend on
 	// subscription.Service + invoice store, both defined above).
@@ -710,6 +711,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// refuses without PAYMENT_UPDATE_URL even when SMTP works.
 	setupLinksEmailable := canEmailSetupLinks(emailSender.IsConfigured(), paymentUpdateURL)
 	invoiceSvc.SetSetupLinkEmailConfigured(setupLinksEmailable)
+	// Without Stripe the customer is emailed the invoice instead, which needs
+	// SMTP only (ADR-060 amendment 2026-10-30).
+	invoiceSvc.SetInvoiceEmailConfigured(emailSender.IsConfigured())
 	stripeAdapter.SetEmailPaymentFailed(paymentFailedEmail, customerEmailAdapter)
 
 	// Audit logging for financial operations
@@ -1069,6 +1073,12 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// route card-less auto_charge_pending invoices into dunning so they
 	// escalate to a terminal instead of only being re-visited by the sweep.
 	engine.SetDunningStarter(&dunningStarterAdapter{dunning: dunningSvc})
+	// Owed with no card and no Stripe for the invoice's mode: the customer is
+	// emailed the invoice itself, once, instead of a card-setup link (ADR-060
+	// amendment 2026-10-30). The readiness check is the hosted page's; the
+	// email is the operator's "Email invoice", through the same handler body.
+	engine.SetStripeReadiness(stripeClients)
+	engine.SetInvoiceEmailer(invoiceH.Emailer())
 	// ADR-097: a cancel_at strictly inside a billing period fires through
 	// the subscription service's one-tx composition (flip + final invoice +
 	// relief drafts). The engine detects due-ness via the scans' cancel

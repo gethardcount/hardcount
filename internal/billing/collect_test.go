@@ -73,7 +73,7 @@ func (f *anchorCreditApplier) ApplyToInvoiceAt(_ context.Context, _, _, _ string
 // collector on one invoice, so every arm below is the sweep's behavior, and a
 // failure leaves the invoice queued for the sweep rather than lost.
 func TestCollectInvoice(t *testing.T) {
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), false) // the collector reads the mode for the Stripe connection
 
 	t.Run("PM ready → charged once, flag cleared, no email", func(t *testing.T) {
 		e, invoices, notifier, inv := collectFixture()
@@ -192,7 +192,7 @@ func TestCollectInvoice(t *testing.T) {
 		charger := &ctxProbeCharger{}
 		e.charger = charger
 
-		callerCtx, cancel := context.WithCancel(context.Background())
+		callerCtx, cancel := context.WithCancel(postgres.WithLivemode(context.Background(), false))
 		cancel() // the HTTP client is already gone
 
 		e.CollectInvoice(callerCtx, "t1", inv.ID, nil)
@@ -221,7 +221,7 @@ func TestCollectInvoice(t *testing.T) {
 // before any card charge, a fully covered invoice settles paid with no charge,
 // and an apply FAILURE never charges the pre-credit amount (trap R1).
 func TestCollect_Credits(t *testing.T) {
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), false)
 
 	t.Run("partial credit → card charged exactly the remainder", func(t *testing.T) {
 		e, invoices, _, inv := collectFixture()
@@ -286,7 +286,7 @@ func TestCollect_Credits(t *testing.T) {
 // charge. Pre-fix every collection path required amount_due > 0, so these sat
 // finalized and "awaiting payment" forever.
 func TestCollect_ZeroDueSettles(t *testing.T) {
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), false)
 	e, invoices, notifier, inv := collectFixture()
 	invoices.invoices[0].AmountDueCents = 0 // e.g. a credit note covered it
 	e.SetDunningResolver(&recordingDunningResolver{})
@@ -324,7 +324,7 @@ func (c *ctxProbeCharger) ChargeInvoice(ctx context.Context, _ string, inv domai
 // resolve ERROR sends nothing (unknown ≠ missing), and a skipped-no-email
 // outcome stays unstamped so it self-heals when the customer gains an address.
 func TestSweepNoPM_SetupEmailSentExactlyOnce(t *testing.T) {
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), false) // the collector reads the mode for the Stripe connection
 
 	t.Run("no PM, never emailed → one email, stamped; second tick silent", func(t *testing.T) {
 		e, invoices, notifier, inv := collectFixture()
@@ -437,7 +437,7 @@ func TestCollect_DefiniteFailureWithoutDeclineCode_ClearsFlag(t *testing.T) {
 	e.paymentSetups = &fakePaymentSetups{ready: true, stripeCustomerID: "cus_stripe"}
 	e.charger = refusingCharger{store: invoices}
 
-	_, errs := e.processAutoCharge(context.Background(), []domain.Invoice{inv}, nil, noPMTriggerSweep)
+	_, errs := e.processAutoCharge(postgres.WithLivemode(context.Background(), false), []domain.Invoice{inv}, nil, noPMTriggerSweep)
 	if len(errs) != 1 {
 		t.Errorf("an unusual refusal is surfaced to the caller, got errs=%v", errs)
 	}
@@ -490,7 +490,7 @@ func TestProcessAutoCharge_BelowMinimumIsNotAnError(t *testing.T) {
 	charger := &belowMinimumCharger{}
 	e.charger = charger
 
-	if _, errs := e.processAutoCharge(context.Background(), []domain.Invoice{inv}, nil, noPMTriggerSweep); len(errs) != 0 {
+	if _, errs := e.processAutoCharge(postgres.WithLivemode(context.Background(), false), []domain.Invoice{inv}, nil, noPMTriggerSweep); len(errs) != 0 {
 		t.Fatalf("errs = %v, want none", errs)
 	}
 	if charger.calls != 1 || len(notifier.got) != 0 {

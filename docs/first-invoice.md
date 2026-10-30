@@ -308,7 +308,9 @@ variable into the JSON for you.
    The lines are 1,000,000 input tokens at $3.00 per million, and 200,000
    output tokens at $15.00 per million. "Finalized" means issued and no
    longer a draft. Nothing is charged: no Stripe account is connected, and
-   ACME Corp has no card.
+   ACME Corp has no card. Without Stripe, Hardcount emails ACME Corp the
+   invoice itself, with a link to view it, once. The quick start sets up no
+   email server, so here nothing is sent.
 
 8. **Open the invoice in the dashboard.** Sign in first.
 
@@ -326,9 +328,11 @@ variable into the JSON for you.
 
    Open it, and you see the invoice for ACME Corp, with the two token lines
    and $6.00 due. The dashboard marks an invoice that is finalized and not
-   paid as **Open**. A yellow **No payment method** notice says the invoice
-   is charged once the customer adds a card. To see the PDF, open the **⋯**
-   menu next to **Audit log** and choose **Preview PDF**.
+   paid as **Open**. A yellow **No payment method** notice says Stripe isn't
+   connected in this mode, so no card can be added online. Its second line
+   says the server can't send email, so the invoice was not emailed. To see
+   the PDF, open the **⋯** menu next to **Audit log** and choose **Preview
+   PDF**.
 
 Home leaves out customers on a test clock, so its totals still read $0.
 That is expected: open the customer from **Customers** instead.

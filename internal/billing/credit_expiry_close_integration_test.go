@@ -121,6 +121,8 @@ func newExpiryEnv(t *testing.T, name string, taxProvider tax.Provider) *expiryEn
 	e.SetTaxProviderResolver(resolver)
 	e.SetNoPaymentMethodNotifier(&testNoPMNotifier{})
 	e.SetDunningStarter(testDunningStarter{})
+	e.SetStripeReadiness(testStripeConnected{})
+	e.SetInvoiceEmailer(&testInvoiceEmailer{})
 	e.SetDunningResolver(&testDunningResolver{})
 	x.eng = e
 	return x

@@ -12,9 +12,9 @@
             }
           ],
           "code": "payment.no_payment_method",
-          "detail": "To let Hardcount email setup links, set up email sending (SMTP) and the payment-update page address (PAYMENT_UPDATE_URL).",
+          "detail": "Payment recovery reminds the customer to pay the invoice. To collect by card, connect Stripe under Settings. When the customer pays another way, record the payment on this invoice. The invoice's activity shows whether the email was sent.",
           "due_by": "2026-05-10T14:30:00Z",
-          "message": "This invoice is charged automatically once the customer adds a card.\nThis server can't email setup links, so none was sent; copy one from the customer page instead.",
+          "message": "Stripe isn't connected in this mode, so no card can be added online.\nThis server can't send email, so the invoice was not emailed to the customer.",
           "reason": "no_payment_method",
           "severity": "warning",
           "since": "2026-04-10T14:30:00Z"

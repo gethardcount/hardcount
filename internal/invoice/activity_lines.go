@@ -378,7 +378,11 @@ func dunningLine(evt domain.InvoiceDunningEvent, dc dunningContext) activity.Lin
 		l.Kind, l.Title = "payment_recovery.started", "Payment recovery started"
 		if evt.Reason == string(domain.DunningCauseNoPaymentMethod) {
 			l.Tone = activity.ToneWarning
-			l.Problem = "No payment method on file. Reminders go out until the customer adds one."
+			// True with Stripe connected or not: both reminders ask the
+			// customer to pay the invoice. "Until the customer adds one" was
+			// false without Stripe, where no card can be added (ADR-060
+			// amendment 2026-10-30).
+			l.Problem = "No payment method on file. Reminders ask the customer to pay the invoice."
 		}
 		// After a decline, the Payment failed row above it says why.
 	case domain.DunningEventRetryAttempted:

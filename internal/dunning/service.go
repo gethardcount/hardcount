@@ -2320,13 +2320,19 @@ func (s *Service) warningTx(ctx context.Context, tenantID string, to warningReci
 }
 
 // retryAsk is what a failed retry asks of the customer: to pay the invoice
-// when no card is on file (domain.ErrNoPaymentMethodOnRetry), a different card
+// when Stripe is not connected (domain.ErrNoOnlinePaymentOnRetry) or no card
+// is on file (domain.ErrNoPaymentMethodOnRetry), a different card
 // (#966) when the retry skipped a card the bank had refused for good
 // (domain.ErrCardNeedsReplacing), the confirmation the bank wants when it
 // skipped a card for that (domain.ErrCardNeedsConfirmation), or what its
 // charge drew (RetryError.Ask).
 func retryAsk(retryErr error) domain.DeclineAsk {
 	switch {
+	// Before the no-card case it wraps: without Stripe the reminder asks the
+	// customer to pay the invoice, never to add a card (ADR-060 amendment
+	// 2026-10-30).
+	case errors.Is(retryErr, domain.ErrNoOnlinePaymentOnRetry):
+		return domain.DeclineAskPayInvoice
 	case errors.Is(retryErr, domain.ErrNoPaymentMethodOnRetry):
 		return domain.DeclineAskAddCard
 	case errors.Is(retryErr, domain.ErrCardNeedsReplacing):

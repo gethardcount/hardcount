@@ -227,6 +227,7 @@ func TestGet_AttentionMatchesListRow(t *testing.T) {
 	svc.SetCustomerReader(&countingCustomers{email: map[string]string{"cus_1": "a@acme.test"}})
 	svc.SetDunningRunReader(&countingDunning{escalated: map[string]bool{"inv_1": true}})
 	svc.SetSubscriptionPauseReader(&countingPauses{paused: map[string]bool{"sub_1": true}})
+	svc.SetStripeChecker(&countingStripe{})
 
 	one, err := svc.Get(ctx, "t1", "inv_1")
 	if err != nil {

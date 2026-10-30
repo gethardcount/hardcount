@@ -1440,6 +1440,14 @@ components:
           description: |
             When the customer was emailed a link to add a payment method for
             this invoice. The email is sent once.
+        invoice_emailed_at:
+          type: string
+          format: date-time
+          description: |
+            When Hardcount itself emailed the customer this invoice, because
+            Stripe is not connected for the invoice's mode and the customer
+            has no card. The email is sent once. An invoice you email with
+            `POST /v1/invoices/{id}/send` does not set it.
         provider_payment_status:
           type: string
           description: |

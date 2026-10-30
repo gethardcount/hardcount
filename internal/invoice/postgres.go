@@ -236,7 +236,7 @@ const invCols = `id, tenant_id, customer_id, COALESCE(subscription_id,''), invoi
 	COALESCE(payment_anomaly_kind,''), COALESCE(payment_anomaly_payment_intent_id,''), COALESCE(payment_anomaly_captured_cents,0),
 	COALESCE(billing_timezone,''), no_pm_notified_at, charge_attempt_seq,
 	COALESCE(provider_payment_status,''), provider_synced_at,
-	bill_to_snapshot, supplier_snapshot, below_minimum_at, paid_out_of_band`
+	bill_to_snapshot, supplier_snapshot, below_minimum_at, paid_out_of_band, invoice_emailed_at`
 
 // invClockCol reads the test clock an invoice's dates follow from its
 // customer (domain.Invoice.TestClockID). It follows invCols on the list and
@@ -4050,7 +4050,7 @@ func (s *PostgresStore) scanInvDest(inv *domain.Invoice) []any {
 		&inv.ProviderPaymentStatus, &inv.ProviderSyncedAt,
 		domain.SnapshotScanner[domain.DocumentBillTo]{Dst: &inv.BillToSnapshot, Open: s.openBillTo},
 		domain.SnapshotScanner[domain.DocumentSupplier]{Dst: &inv.SupplierSnapshot},
-		&inv.BelowMinimumAt, &inv.PaidOutOfBand,
+		&inv.BelowMinimumAt, &inv.PaidOutOfBand, &inv.InvoiceEmailedAt,
 	}
 }
 
@@ -4067,6 +4067,29 @@ func (s *PostgresStore) SetNoPMNotifiedAt(ctx context.Context, tenantID, invoice
 	defer postgres.Rollback(tx)
 	res, err := tx.ExecContext(ctx, `
 		UPDATE invoices SET no_pm_notified_at = $1 WHERE id = $2
+	`, at, invoiceID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return errs.ErrNotFound
+	}
+	return tx.Commit()
+}
+
+// SetInvoiceEmailedAt stamps the send-once marker for the invoice email the
+// auto-charge collector sends when Stripe is not connected for the invoice's
+// mode (ADR-060 amendment 2026-10-30). The collector stamps it after the email
+// is queued and checks it, under the invoice's charge hold, so the invoice is
+// emailed once, not once per visit.
+func (s *PostgresStore) SetInvoiceEmailedAt(ctx context.Context, tenantID, invoiceID string, at time.Time) error {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return err
+	}
+	defer postgres.Rollback(tx)
+	res, err := tx.ExecContext(ctx, `
+		UPDATE invoices SET invoice_emailed_at = $1 WHERE id = $2
 	`, at, invoiceID)
 	if err != nil {
 		return err

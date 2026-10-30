@@ -7584,7 +7584,7 @@
       "id": "dunning/started/no_payment_method",
       "kind": "payment_recovery.started",
       "title": "Payment recovery started",
-      "problem": "No payment method on file. Reminders go out until the customer adds one.",
+      "problem": "No payment method on file. Reminders ask the customer to pay the invoice.",
       "detail": [],
       "actor": {
         "kind": "automatic"
@@ -7594,7 +7594,7 @@
     },
     "text": [
       "Payment recovery started",
-      "problem: No payment method on file. Reminders go out until the customer adds one.",
+      "problem: No payment method on file. Reminders ask the customer to pay the invoice.",
       "meta: Automatic",
       "tone: warning"
     ]

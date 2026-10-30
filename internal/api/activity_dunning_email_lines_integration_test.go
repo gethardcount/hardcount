@@ -13,6 +13,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/email"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/leader"
+	"github.com/gethardcount/hardcount/internal/tenantstripe"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -108,7 +109,7 @@ func TestActivityLines_DunningRunAndSentEmails(t *testing.T) {
 		t.Errorf("Dunning page lines\n got: %q\nwant: %q", got, want)
 	}
 	if len(realDunning) == 2 {
-		if p := realDunning[0]["problem"]; p != "No payment method on file. Reminders go out until the customer adds one." {
+		if p := realDunning[0]["problem"]; p != "No payment method on file. Reminders ask the customer to pay the invoice." {
 			t.Errorf("payment recovery started: problem %q", p)
 		}
 		if realDunning[0]["tone"] != "warning" || realDunning[1]["tone"] != "success" {
@@ -118,7 +119,10 @@ func TestActivityLines_DunningRunAndSentEmails(t *testing.T) {
 
 	// The Sent emails card names the invoice, linked, and who it went to.
 	realEmails := linesOf(t, real.emails)
+	// No Stripe is connected, so finalizing emailed the customer the invoice
+	// itself (ADR-060 amendment 2026-10-30); the second is the operator's.
 	if got, want := summaries(normalizeLines(realEmails)), []string{
+		"Invoice email queued | <number> · To billing@activity-lines.test",
 		"Invoice email queued | <number> · To billing@activity-lines.test",
 	}; !reflect.DeepEqual(got, want) {
 		t.Errorf("Sent emails lines\n got: %q\nwant: %q", got, want)
@@ -215,6 +219,13 @@ func TestActivityLines_SkippedEmailSaysWhy(t *testing.T) {
 
 	tenantID := testutil.CreateTestTenant(t, db, "Skipped Email Co")
 	key := createAPIKeyWithMode(t, db, tenantID, false)
+	// The setup-link email goes out only with Stripe connected (ADR-060
+	// amendment 2026-10-30); without it the customer gets the invoice.
+	if _, err := tenantstripe.NewStore(db).Upsert(context.Background(), tenantstripe.UpsertInput{
+		TenantID: tenantID, Livemode: false, SecretKey: "sk_test_skipped_email", PublishableKey: "pk_test_skipped_email",
+	}); err != nil {
+		t.Fatalf("connect stripe: %v", err)
+	}
 	call := func(method, path string, req flowReq) flowResp {
 		t.Helper()
 		req.bearer = key

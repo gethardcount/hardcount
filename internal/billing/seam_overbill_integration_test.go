@@ -126,6 +126,8 @@ func newSeamFixture(t *testing.T, zone string, billingTime domain.SubscriptionBi
 		e.SetTaxProviderResolver(tax.NewResolver(nil))
 		e.SetNoPaymentMethodNotifier(&testNoPMNotifier{})
 		e.SetDunningStarter(testDunningStarter{})
+		e.SetStripeReadiness(testStripeConnected{})
+		e.SetInvoiceEmailer(&testInvoiceEmailer{})
 		e.SetDunningResolver(&testDunningResolver{})
 		return e
 	}

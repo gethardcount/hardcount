@@ -260,7 +260,7 @@ func TestProcessAutoCharge_StopsAtTheNextInvoiceWhenCtxEnds(t *testing.T) {
 	second.ID = "inv_c2"
 	invoices.invoices = append(invoices.invoices, second)
 	e.paymentSetups = &fakePaymentSetups{ready: true, stripeCustomerID: "cus_stripe"}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(postgres.WithLivemode(context.Background(), false))
 	defer cancel()
 	charger := &cancelingCharger{recordingCharger: recordingCharger{store: invoices}, cancel: cancel}
 	e.charger = charger
@@ -295,7 +295,7 @@ func TestRetryPendingChargesForClock_PagesThroughTheQueue(t *testing.T) {
 
 	done := make(chan []error, 1)
 	go func() {
-		_, errs := e.RetryPendingChargesForClock(context.Background(), "t1", "clk_1", 1)
+		_, errs := e.RetryPendingChargesForClock(postgres.WithLivemode(context.Background(), false), "t1", "clk_1", 1)
 		done <- errs
 	}()
 	select {

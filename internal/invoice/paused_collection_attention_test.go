@@ -56,6 +56,7 @@ func TestAttention_PausedCollectionReadsTheOpenRun(t *testing.T) {
 			svc.SetCustomerReader(&countingCustomers{email: map[string]string{"cus_1": "a@acme.test"}})
 			svc.SetSubscriptionPauseReader(&countingPauses{paused: map[string]bool{"sub_1": true}})
 			svc.SetDunningRunReader(runs)
+			svc.SetStripeChecker(&countingStripe{})
 
 			inv, err := svc.Get(ctx, "t1", "inv_1")
 			if err != nil {

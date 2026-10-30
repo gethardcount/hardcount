@@ -4783,6 +4783,12 @@ type Invoice struct {
 	Footer string `json:"footer,omitempty"`
 	Id     string `json:"id"`
 
+	// InvoiceEmailedAt When Hardcount itself emailed the customer this invoice, because
+	// Stripe is not connected for the invoice's mode and the customer
+	// has no card. The email is sent once. An invoice you email with
+	// `POST /v1/invoices/{id}/send` does not set it.
+	InvoiceEmailedAt time.Time `json:"invoice_emailed_at,omitempty"`
+
 	// InvoiceNumber Set when the invoice is created, including drafts.
 	InvoiceNumber string `json:"invoice_number"`
 

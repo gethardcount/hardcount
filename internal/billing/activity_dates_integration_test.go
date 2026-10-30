@@ -88,6 +88,8 @@ func TestTrialExpiry_TestClock_ChargeNotBeforeIssue(t *testing.T) {
 	engine.SetTaxProviderResolver(tax.NewResolver(nil))
 	engine.SetNoPaymentMethodNotifier(&testNoPMNotifier{})
 	engine.SetDunningStarter(testDunningStarter{})
+	engine.SetStripeReadiness(testStripeConnected{})
+	engine.SetInvoiceEmailer(&testInvoiceEmailer{})
 	engine.SetDunningResolver(&testDunningResolver{})
 	engine.SetTestClockReader(clocks)
 	engine.SetAuditLogger(audit.NewLogger(f.db))

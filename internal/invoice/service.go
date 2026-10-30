@@ -197,6 +197,11 @@ type Service struct {
 	// setup link is emailed when nothing can be sent. Zero value: sending
 	// works, which is what every production boot wires explicitly.
 	setupLinkEmailOff bool
+	// invoiceEmailOff is true when this server cannot send email at all
+	// (SMTP_HOST unset), so the collector's invoice email for an invoice
+	// with no card and no Stripe is refused. Read only by the no-payment-
+	// method notice's no-Stripe copy. Zero value: sending works.
+	invoiceEmailOff bool
 }
 
 // SetSetupLinkEmailConfigured records whether this server can email a setup
@@ -204,6 +209,12 @@ type Service struct {
 // when one can be. Wired at boot from both things the sender needs: SMTP and
 // PAYMENT_UPDATE_URL.
 func (s *Service) SetSetupLinkEmailConfigured(configured bool) { s.setupLinkEmailOff = !configured }
+
+// SetInvoiceEmailConfigured records whether this server can send email
+// (SMTP), so the no-payment-method notice says "the invoice is emailed to the
+// customer once" without Stripe only when it can be (ADR-060 amendment
+// 2026-10-30).
+func (s *Service) SetInvoiceEmailConfigured(configured bool) { s.invoiceEmailOff = !configured }
 
 // SetCollectionStopper wires the Stripe leg every committed void runs
 // (AfterVoid): expire the invoice's live Checkout sessions, then cancel its
@@ -1425,6 +1436,7 @@ func (s *Service) decorateInvoice(ctx context.Context, inv domain.Invoice, f att
 	}
 	atc.StripeConnected = f.stripeConnected
 	atc.SetupLinkEmailOff = s.setupLinkEmailOff
+	atc.InvoiceEmailOff = s.invoiceEmailOff
 	inv.Attention = domain.ClassifyInvoiceAttention(inv, atc)
 
 	// What an operator must know BEFORE recording a wire against a
