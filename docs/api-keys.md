@@ -17,8 +17,10 @@ To make a new key in the dashboard:
    expiry choice.
 2. Give the key a name, such as `Production server`, and click **Create
    key**.
-   **You see:** the full key, with "Save this key now. It won't be shown
-   again." Copy it into your secret store.
+   **You see:** the full key, with "Copy it now. Hardcount shows it only
+   this once.", and a `curl` line that tries it. Copy the key into your
+   secret store, then click **I've copied it**: the dialog closes no other
+   way.
 
 The new key gets the mode the dashboard is in. In test mode you get a
 `hc_secret_test_…` key; switch to live mode first to get a
@@ -30,6 +32,7 @@ key, and it is shown only this once.
 
 ## Send it
 
+The **Quick start** box at the top of **API keys** shows the address to call.
 Put the key in the `Authorization` header as a Bearer token:
 
 ```bash
@@ -75,7 +78,8 @@ may have leaked, or on a schedule.
    **You see:** a dialog that asks when the current key should stop
    working: **Now**, **In 1 hour**, **In 24 hours** or **In 7 days**.
 2. Pick a time and confirm.
-   **You see:** the new key, shown once. Copy it.
+   **You see:** the new key, shown once, in a dialog titled **Key rotated**.
+   Copy it, then click **I've copied it**.
 3. Put the new key in your servers' settings and redeploy before the time
    you picked.
    **You see:** your calls keep working. After that time, the old key gets

@@ -262,7 +262,7 @@ other failure: register the URL that answers with the `2xx` itself.
 
 **If your endpoint was down for longer:** failed deliveries stay visible in
 the dashboard, with each endpoint's success rate and each event's delivery
-history. Send any event again from there, or with
+history. Send any event again from there with **Resend**, or with
 `POST /v1/webhook_events/{id}/replay`. `GET /v1/webhook-endpoints/events`
 lists events, newest first, 50 to a page by default (`limit` up to 100,
 `offset`, and the `total`); it has no filters.

@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { genericStatus } from '@/lib/statusLabels'
+import { genericStatus, webhookStatus } from '@/lib/statusLabels'
 import { StatusBadge } from '@/components/StatusBadge'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useNavigate, useParams } from 'react-router-dom'
@@ -144,7 +144,7 @@ export default function WebhookEndpointDetailPage() {
       queryClient.invalidateQueries({ queryKey: ['webhook-endpoint-deliveries', id] })
       queryClient.invalidateQueries({ queryKey: ['webhook-endpoint-stats'] })
     } catch (err) {
-      showApiError(err, 'Failed to replay delivery')
+      showApiError(err, "Couldn't resend delivery")
     } finally {
       replayInFlight.current = false
       setReplayingId(null)
@@ -307,11 +307,6 @@ function rateColor(rate: number) {
   return rate >= 95 ? 'text-success-foreground' : rate >= 70 ? 'text-warning-foreground' : 'text-danger-foreground'
 }
 
-function statusBadge(status: EndpointDelivery['status']) {
-  if (status === 'succeeded') return <Badge variant="success">succeeded</Badge>
-  if (status === 'failed') return <Badge variant="destructive">failed</Badge>
-  return <Badge variant="secondary">pending</Badge>
-}
 
 function DeliveryRows({
   delivery: d,
@@ -337,11 +332,11 @@ function DeliveryRows({
         <TableCell>
           <div className="flex items-center gap-2">
             <Badge variant="outline">{d.event_type}</Badge>
-            {d.is_replay && <Badge variant="secondary">replay</Badge>}
+            {d.is_replay && <Badge variant="secondary">Resent</Badge>}
           </div>
           <div className="font-mono text-xs text-muted-foreground mt-0.5">{d.event_id}</div>
         </TableCell>
-        <TableCell>{statusBadge(d.status)}</TableCell>
+        <TableCell><StatusBadge status={webhookStatus(d.status, d.attempt_count > 0)} /></TableCell>
         <TableCell className="font-mono text-sm">
           {d.status_code > 0 ? d.status_code : '—'}
         </TableCell>
@@ -369,7 +364,7 @@ function DeliveryRows({
             onClick={onReplay}
           >
             <RefreshCw size={12} className={replaying ? 'mr-1 animate-spin' : 'mr-1'} />
-            {replaying ? 'Replaying…' : 'Replay'}
+            {replaying ? 'Resending…' : 'Resend'}
           </Button>
         </TableCell>
       </TableRow>
@@ -397,7 +392,7 @@ function DeliveryRows({
                 Created {timeAgo(d.created_at, wallClockNow())}
                 {d.completed_at && <> {'·'} completed {timeAgo(d.completed_at, wallClockNow())}</>}
                 {d.is_replay && d.replay_of_event_id && (
-                  <> {'·'} replay of <span className="font-mono">{d.replay_of_event_id}</span></>
+                  <> {'·'} resend of <span className="font-mono">{d.replay_of_event_id}</span></>
                 )}
               </div>
             </div>

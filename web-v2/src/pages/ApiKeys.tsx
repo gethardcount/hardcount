@@ -58,6 +58,8 @@ import {
 
 import { Plus, Key, Shield, ChevronDown, Loader2, RotateCw, MoreHorizontal } from 'lucide-react'
 import { EmptyState } from '@/components/EmptyState'
+import { CopyButton, ShowOnceSecretDialog } from '@/components/ShowOnceSecretDialog'
+import { API_ORIGIN, DOCS_BASE } from '@/lib/apiOrigin'
 
 // The list standard (UI plan 1.4): 12 px muted headers on a row shorter than
 // the data rows, and rows tall enough to tap on a phone (1.14).
@@ -115,7 +117,7 @@ function inactiveLabel(expired: number, revoked: number): string {
 export default function ApiKeysPage() {
   usePageTitle('API keys')
   const [showCreate, setShowCreate] = useState(false)
-  const [createdKey, setCreatedKey] = useState<string | null>(null)
+  const [createdKey, setCreatedKey] = useState<{ key: string; rotated: boolean } | null>(null)
   const [revokeTarget, setRevokeTarget] = useState<ApiKeyInfo | null>(null)
   const [revoking, setRevoking] = useState(false)
   const [rotateTarget, setRotateTarget] = useState<ApiKeyInfo | null>(null)
@@ -170,6 +172,8 @@ export default function ApiKeysPage() {
           Create API key
         </Button>
       </div>
+
+      <QuickStart />
 
       {/* Said once for every key, not on each row. */}
       {keys.length > 0 && (
@@ -292,7 +296,7 @@ export default function ApiKeysPage() {
           onClose={() => setShowCreate(false)}
           onCreated={(rawKey) => {
             setShowCreate(false)
-            setCreatedKey(rawKey)
+            setCreatedKey({ key: rawKey, rotated: false })
             queryClient.invalidateQueries({ queryKey: ['api-keys'] })
             toast.success('API key created')
           }}
@@ -306,49 +310,30 @@ export default function ApiKeysPage() {
           onClose={() => setRotateTarget(null)}
           onRotated={(rawKey) => {
             setRotateTarget(null)
-            setCreatedKey(rawKey)
+            setCreatedKey({ key: rawKey, rotated: true })
             queryClient.invalidateQueries({ queryKey: ['api-keys'] })
             toast.success('API key rotated')
           }}
         />
       )}
 
-      {/* Show created key */}
+      {/* The new key, shown once. */}
       {createdKey && (
-        <Dialog open onOpenChange={() => setCreatedKey(null)}>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle>API key created</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4">
-              <div className="bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 rounded-xl p-4">
-                <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-amber-100 dark:bg-amber-500/20 flex items-center justify-center shrink-0">
-                    <Key size={16} className="text-amber-600" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold text-amber-800 dark:text-amber-400">Save this key now. It won&apos;t be shown again.</p>
-                    <div className="flex items-start gap-2 mt-2">
-                      <code className="font-mono text-sm text-amber-900 dark:text-amber-300 break-all select-all flex-1 bg-amber-100/50 dark:bg-amber-500/10 rounded px-2 py-1">
-                        {createdKey}
-                      </code>
-                      <Button variant="outline" size="sm" className="shrink-0"
-                        onClick={() => {
-                          navigator.clipboard.writeText(createdKey)
-                          toast.success('Copied to clipboard')
-                        }}>
-                        Copy
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <DialogFooter>
-                <Button onClick={() => setCreatedKey(null)}>I've saved this key</Button>
-              </DialogFooter>
+        <ShowOnceSecretDialog
+          title={createdKey.rotated ? 'Key rotated' : 'API key created'}
+          label={createdKey.rotated ? 'New key' : 'Key'}
+          secret={createdKey.key}
+          onDone={() => setCreatedKey(null)}
+        >
+          <div>
+            <p className="text-xs font-medium text-muted-foreground">Try it</p>
+            <div className="mt-1.5 flex items-start gap-2">
+              <code className="flex-1 break-all rounded bg-muted px-2 py-1 font-mono text-xs text-foreground">{tryItCurl(createdKey.key)}</code>
+              <CopyButton text={tryItCurl(createdKey.key)} />
             </div>
-          </DialogContent>
-        </Dialog>
+            <p className="mt-1.5 text-xs text-muted-foreground">It answers with the account and mode the key belongs to.</p>
+          </div>
+        </ShowOnceSecretDialog>
       )}
 
       {/* Revoke confirmation: friction follows risk (revokeNeedsTypedWord). */}
@@ -396,6 +381,42 @@ type ExpiryPreset = 'never' | '30d' | '90d' | '1y' | 'custom'
 // Date-grade helpers (endOfDayInTZ, addDaysInTZ, formatExpiryHintInTZ)
 // live in @/lib/dates so Credits / future pickers can reuse
 // the same TZ-grounded arithmetic. See ADR-010.
+
+// The first call to make with a key: whoami names its account and mode.
+function tryItCurl(key: string): string {
+  return `curl ${API_ORIGIN}/v1/whoami -H "Authorization: Bearer ${key}"`
+}
+
+// Where the API is and how to call it, before any key exists (C-28).
+function QuickStart() {
+  const guides = [
+    { href: `${DOCS_BASE}/api-keys.md`, label: 'API keys' },
+    { href: `${DOCS_BASE}/first-invoice.md`, label: 'Your first invoice' },
+    { href: `${DOCS_BASE}/webhooks.md`, label: 'Webhooks' },
+  ]
+  return (
+    <Card className="mt-4">
+      <CardContent className="p-4 space-y-3">
+        <div>
+          <p className="text-sm font-medium text-foreground">Quick start</p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Call the API at this address and send a key as <code className="font-mono">Authorization: Bearer &lt;key&gt;</code>.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <code className="min-w-0 flex-1 truncate rounded bg-muted px-2 py-1.5 font-mono text-sm text-foreground" title={API_ORIGIN}>{API_ORIGIN}</code>
+          <CopyButton text={API_ORIGIN} />
+        </div>
+        <p className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+          <span className="text-muted-foreground">Guides:</span>
+          {guides.map(g => (
+            <a key={g.href} href={g.href} target="_blank" rel="noreferrer" className="text-primary underline-offset-2 hover:underline">{g.label}</a>
+          ))}
+        </p>
+      </CardContent>
+    </Card>
+  )
+}
 
 function CreateKeyDialog({ onClose, onCreated }: { onClose: () => void; onCreated: (rawKey: string) => void }) {
   const [expiryPreset, setExpiryPreset] = useState<ExpiryPreset>('never')
