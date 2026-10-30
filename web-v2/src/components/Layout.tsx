@@ -29,6 +29,7 @@ import { HardcountLogo } from '@/components/HardcountLogo'
 import { OnboardingLauncher, SetupChecklistPanel } from '@/components/OnboardingLauncher'
 import { useOnboardingSteps } from '@/hooks/useOnboardingSteps'
 import { ScrollPane } from '@/components/ui/scroll-pane'
+import { DiscardChangesDialog, hasUnsavedChanges } from '@/components/UnsavedChangesGuard'
 
 type NavItem = { to: string; icon: LucideIcon; label: string }
 
@@ -202,6 +203,12 @@ export function Layout({ children }: { children: ReactNode }) {
   const { dark, toggle: toggleDark } = useDarkMode()
   const { user, logout, setMode } = useAuth()
   const [modeBusy, setModeBusy] = useState(false)
+  // Switching mode remounts the page, so unsaved changes on it ask first.
+  const [confirmModeSwitch, setConfirmModeSwitch] = useState(false)
+  const requestToggleMode = () => {
+    if (hasUnsavedChanges()) setConfirmModeSwitch(true)
+    else void handleToggleMode()
+  }
   const handleToggleMode = async () => {
     if (!user || modeBusy) return
     const next = !user.livemode
@@ -333,7 +340,7 @@ export function Layout({ children }: { children: ReactNode }) {
           <ModeToggle
             livemode={user.livemode}
             busy={modeBusy}
-            onToggle={handleToggleMode}
+            onToggle={requestToggleMode}
           />
         </div>
       )}
@@ -579,6 +586,15 @@ export function Layout({ children }: { children: ReactNode }) {
 
       {/* Command Palette */}
       <CommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} />
+      {/* Outside sidebarContent, which renders twice (desktop and phone). */}
+      {user && (
+        <DiscardChangesDialog
+          open={confirmModeSwitch}
+          why={`Switching to ${user.livemode ? 'test' : 'live'} mode reloads it, so they are lost.`}
+          onKeep={() => setConfirmModeSwitch(false)}
+          onDiscard={() => { setConfirmModeSwitch(false); void handleToggleMode() }}
+        />
+      )}
     </div>
   )
 }

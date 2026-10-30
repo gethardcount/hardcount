@@ -941,6 +941,41 @@ test('a tax ID the server refuses shows its reason under the field', async ({ pa
   await expect(taxId).toBeFocused()
 })
 
+test('leaving Settings with unsaved changes asks first', async ({ page }) => {
+  const saves: string[] = []
+  page.on('request', r => { if (r.method() === 'PATCH' || r.method() === 'PUT') saves.push(r.url()) })
+  await page.goto('/settings')
+  const name = page.locator('input[name="company_name"]')
+  const before = await name.inputValue()
+  const discard = page.getByRole('alertdialog', { name: 'Discard changes?' })
+  const customers = page.getByRole('navigation').getByRole('link', { name: 'Customers', exact: true })
+
+  await name.fill(`${before} (edited)`)
+  // Another tab is the same page: no question.
+  await page.getByRole('tab', { name: 'Invoicing' }).click()
+  await expect(discard).toHaveCount(0)
+  await page.getByRole('tab', { name: 'General' }).click()
+
+  await customers.click()
+  await expect(discard).toBeVisible()
+  await discard.getByRole('button', { name: 'Keep editing' }).click()
+  await expect(page).toHaveURL(/\/settings/)
+  await expect(name).toHaveValue(`${before} (edited)`)
+
+  // The Test/Live switch reloads the page, so it asks too. The e2e session is
+  // shared, so the test keeps editing rather than switching.
+  await page.getByRole('radio', { name: 'Live mode' }).click()
+  await expect(discard).toContainText('Switching to live mode reloads it')
+  await discard.getByRole('button', { name: 'Keep editing' }).click()
+  await expect(page.getByRole('radio', { name: 'Test mode' })).toHaveAttribute('aria-checked', 'true')
+  await expect(name).toHaveValue(`${before} (edited)`)
+
+  await customers.click()
+  await discard.getByRole('button', { name: 'Discard changes' }).click()
+  await expect(page.getByRole('heading', { level: 1, name: 'Customers', exact: true })).toBeVisible()
+  expect(saves).toEqual([])
+})
+
 test('a new account: Home welcomes the operator and the setup checklist opens once', async ({ page }) => {
   // The e2e account already has subscriptions. Answer "none yet" to the one
   // question that makes an account new, so Home shows its first-run state.
