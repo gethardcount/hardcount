@@ -48,6 +48,8 @@ func TestUpdateTaxAtomic_InitialAttemptDoesNotCountAsRetry(t *testing.T) {
 	update := domain.InvoiceTaxRetryUpdate{
 		SubtotalCents:    10000,
 		TotalAmountCents: 11000,
+		// The header the computation read (#1298); the draft has no lines.
+		BasisSubtotalCents: 10000,
 	}
 	update.TaxAmountCents = 1000
 	update.TaxStatus = domain.InvoiceTaxOK
