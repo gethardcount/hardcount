@@ -21,3 +21,7 @@ updates:
     ignore:
       # The Go builder image moves together with go.mod, by hand.
       - dependency-name: golang
+      # Node's major version moves with CI's node-version (ci.yml), by hand:
+      # the dashboard image must build on the Node CI tests on.
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
