@@ -171,6 +171,7 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [129](129-credit-carries-its-own-currency.md) | 2026-10-23 | Accepted | Credits | Each credit ledger row stores its currency; credit pays only invoices in it, never converted; a manual invoice uses the customer's currency |
 | [130](130-usage-prices-belong-to-the-plan.md) | 2026-10-23 | Accepted (lock order, one rater, one aggregation per meter, price shapes, plan prices, catalog-only recipes and ingest's unbilled statuses shipped; PR-7 cut, PR-8 not built yet) | Pricing & usage | Usage prices are rows on the plan; the most specific price wins; an edit on a used plan applies from each subscriber's next period |
 | [131](131-webhook-events-carry-their-resource.md) | 2026-10-24 | Accepted | Integrations | A webhook event's data is the resource it is about, as the API returns it, plus the few facts the resource lacks; one resource per family |
+| [133](133-api-key-types-secret-and-ingest.md) | 2026-10-30 | Accepted | Platform & ops | API keys are secret or ingest (usage only); platform keys and /v1/tenants are removed |
 
 > ℹ️ **ADR-084 was never used.** No file has ever carried that number (verified
 > across every ref). It is a skipped number, not a lost decision.

@@ -17,8 +17,8 @@ their SDKs aligned with their HTTP surface.
    generated TS types narrow on status and callers get the right body type
    per status code. A `POST`, `PUT` or `PATCH` under `/v1` also lists
    `$ref: "#/components/parameters/IdempotencyKey"` in its `parameters`.
-   The exceptions are `/v1/auth/*`, `/v1/public/*`, the inbound webhooks,
-   `/v1/tenants` and `/v1/bootstrap`: the server ignores the header there.
+   The exceptions are `/v1/auth/*`, `/v1/public/*`, the inbound webhooks
+   and `/v1/bootstrap`: the server ignores the header there.
 2. **Run `make gen` from the repo root.** It runs both Go and TS codegen,
    refreshes `web-v2/public/openapi.yaml`, and rewrites the generated files
    in place.

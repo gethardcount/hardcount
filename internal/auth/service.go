@@ -95,23 +95,11 @@ func (s *Service) CreateKey(ctx context.Context, tenantID string, input CreateKe
 	if keyType == "" {
 		keyType = KeyTypeSecret
 	}
-	if keyType != KeyTypePlatform && keyType != KeyTypeSecret {
-		return CreateKeyResult{}, errs.Invalid("key_type", "must be one of: platform, secret")
-	}
-
-	// Platform keys are a privileged credential: they carry tenant-management
-	// permissions (PermTenantRead/Write) that reach ACROSS tenants, and the
-	// `tenants` surface they unlock is not RLS-protected. `key_type` arrives
-	// from the request body, and the /v1/api-keys route is reachable by any
-	// secret key or dashboard session (both hold PermAPIKeyWrite, both scoped
-	// to a single tenant). Without this gate a single-tenant principal could
-	// self-mint a platform key and escalate to read/create every tenant.
-	// Treat key_type as privileged: a platform key may only be issued by an
-	// existing platform principal. (The first platform key, if a deployment
-	// ever needs one, is provisioned out-of-band, not over this route.)
-	if keyType == KeyTypePlatform && GetKeyType(ctx) != KeyTypePlatform {
-		return CreateKeyResult{}, errs.Forbidden(
-			"platform keys can only be issued by an existing platform key")
+	// Only the stored types can be issued (ADR-133). Each holds no more
+	// than the secret key or session that mints it (PermAPIKeyWrite), so
+	// key_type from the request body cannot raise the caller's access.
+	if keyType != KeyTypeSecret && keyType != KeyTypeIngest {
+		return CreateKeyResult{}, errs.Invalid("key_type", "must be one of: secret, ingest")
 	}
 
 	// Reject past expires_at — a key that's already expired at creation
@@ -201,7 +189,7 @@ func (s *Service) ValidateKey(ctx context.Context, rawKey string) (domain.APIKey
 		keyType    KeyType
 		fullPrefix string
 	)
-	for _, kt := range []KeyType{KeyTypePlatform, KeyTypeSecret} {
+	for _, kt := range StoredKeyTypes {
 		typeP := kt.TypePrefix()
 		if !strings.HasPrefix(rawKey, typeP) {
 			continue
@@ -327,8 +315,7 @@ func (s *Service) RotateKey(ctx context.Context, tenantID, id string, input Rota
 	// The new key must land on the same livemode as the old — postgres.Livemode(ctx)
 	// depends on the request ctx, which the caller controls. We force the
 	// ctx to match the old key's mode so a live key rotated from a test-mode
-	// session (unlikely but possible through platform keys) still produces a
-	// live replacement.
+	// caller still produces a live replacement.
 	created, err := s.CreateKey(postgres.WithLivemode(ctx, old.Livemode), tenantID, createInput)
 	if err != nil {
 		return RotateKeyResult{}, fmt.Errorf("mint replacement key: %w", err)

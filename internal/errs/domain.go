@@ -138,7 +138,7 @@ func InvalidState(message string) *DomainError {
 // layer when an authz rule must hold regardless of which handler/route the
 // call arrived through, so the rule cannot be bypassed by a future caller.
 //
-//	return errs.Forbidden("platform keys can only be issued by an existing platform key")
+//	return errs.Forbidden("this key cannot do that")
 func Forbidden(message string) *DomainError {
 	return &DomainError{
 		Kind:    ErrForbidden,

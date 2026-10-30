@@ -53,7 +53,7 @@ tags:
   - name: Public
     description: Pages a customer opens with a token, without an API key.
   - name: System
-    description: Health, settings, tenants, the audit log and setup.
+    description: Health, settings, the audit log and setup.
 
 components:
   securitySchemes:
@@ -62,15 +62,17 @@ components:
       scheme: bearer
       description: |
         API key authentication. Use `Authorization: Bearer hc_secret_...`
-        Key types: hc_platform_ (tenant mgmt), hc_secret_ (full access)
+        Key types: hc_secret_ (full access to one account), hc_ingest_
+        (sends usage events only: `POST /v1/usage-events`, its `/batch`,
+        and `POST /v1/integrations/litellm/spend`, plus `GET /v1/whoami`;
+        every other route answers it 403)
     SessionCookie:
       type: apiKey
       in: cookie
       name: hardcount_session
       description: |
         Dashboard session cookie, set by `POST /v1/auth/login`. Routes
-        under `/v1` (except `/v1/tenants`) accept it in place of a Bearer
-        key. Operations that list only this scheme (members, mode
+        under `/v1` accept it in place of a Bearer key. Operations that list only this scheme (members, mode
         switch, logout) do not accept an API key.
     MetricsToken:
       type: http
@@ -4260,7 +4262,11 @@ components:
           example: hc_secret_test_1a2b3c4d
         key_type:
           type: string
-          enum: [platform, secret]
+          enum: [secret, ingest]
+          description: |
+            `secret` can read and change everything in the account.
+            `ingest` can only send usage events, for LiteLLM or another
+            gateway (ADR-133).
         livemode:
           type: boolean
         name:
@@ -9242,6 +9248,9 @@ paths:
     post:
       tags: [Usage]
       summary: Ingest usage event
+      description: |
+        Needs the `usage:ingest` permission: an ingest key or a secret
+        key.
       requestBody:
         required: true
         content:
@@ -9397,7 +9406,8 @@ paths:
         and are not errors. A `deduplicated` count above zero on a batch
         you never sent before means some keys were already used, by an
         earlier event or by another event in the batch. Those events
-        were not stored.
+        were not stored. Needs the `usage:ingest` permission: an ingest
+        key or a secret key.
       requestBody:
         required: true
         content:
@@ -9496,7 +9506,7 @@ paths:
         Shares idempotency keys with live ingest: a repeated
         `idempotency_key` returns 200 with the original event and an
         `Idempotent-Replayed: true` header, and writes nothing.
-        Requires usage write permission.
+        Requires usage write permission, so an ingest key cannot backfill.
       operationId: backfillUsageEvent
       requestBody:
         required: true
@@ -11637,7 +11647,7 @@ paths:
                     type: string
                   key_type:
                     type: string
-                    enum: [platform, secret]
+                    enum: [secret, ingest]
         "401":
           description: Missing, revoked, or expired credential
           content:
@@ -13458,7 +13468,9 @@ paths:
         record with no `user` or no `id`, or an invalid event, is listed in
         `errors` and the rest of the batch still goes in, with status 200.
         If the usage store cannot be reached, the whole request fails with
-        503 so LiteLLM retries it. Requires usage write permission.
+        503 so LiteLLM retries it. Needs the `usage:ingest` permission:
+        give the proxy an ingest key (`hc_ingest_…`), which can do nothing
+        else. A secret key works too.
       operationId: ingestLitellmSpend
       requestBody:
         required: true
@@ -13509,12 +13521,10 @@ paths:
         Creates a key in the caller's mode: a test-mode caller gets a test
         key, a live-mode caller gets a live key. The full key (`raw_key`)
         is returned once and is never shown again. Hardcount stores only a
-        salted hash. `key_type` defaults to `secret`.
-
-        A `platform` key can only be issued by an existing platform key.
-        Platform keys do not hold the `apikey:write` permission this route
-        needs, so in practice this route never issues one (403).
-        Writes an audit row (never the key value).
+        salted hash. `key_type` defaults to `secret`. An `ingest` key
+        (`hc_ingest_…`) can only send usage events: give it to LiteLLM or
+        another gateway, so the key in its config cannot refund, void or
+        read your data. Writes an audit row (never the key value).
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -13530,7 +13540,7 @@ paths:
                   description: Label shown in the key list. Must not be blank.
                 key_type:
                   type: string
-                  enum: [secret, platform]
+                  enum: [secret, ingest]
                   default: secret
                 expires_at:
                   type: string
@@ -13550,7 +13560,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
-          description: Caller lacks the `apikey:write` permission, or asked for a platform key
+          description: Caller lacks the `apikey:write` permission
           content:
             application/json:
               schema:
@@ -13682,7 +13692,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
-          description: The key is a platform key and the caller is not a platform key
+          description: Caller lacks the `apikey:write` permission
           content:
             application/json:
               schema:
@@ -14031,143 +14041,6 @@ paths:
                 $ref: "#/components/schemas/Error"
         "404":
           description: Stripe is not connected for this mode
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-
-  /v1/tenants:
-    post:
-      tags: [System]
-      summary: Create a tenant
-      operationId: createTenant
-      description: |
-        Platform keys only (`hc_platform_`), sent as
-        `Authorization: Bearer`. Dashboard sessions are not accepted.
-        Creates an active tenant. It has no users and no API keys yet.
-        Writes an audit row.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [name]
-              properties:
-                name:
-                  type: string
-                  description: Must not be blank.
-      responses:
-        "201":
-          description: Tenant created
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Tenant"
-        "400":
-          description: Body is not valid JSON
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "401":
-          description: Missing or invalid API key
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "403":
-          description: The key is not a platform key
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "422":
-          description: "`name` is missing"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-    get:
-      tags: [System]
-      summary: List tenants
-      operationId: listTenants
-      description: |
-        Platform keys only. Returns the newest 50 tenants across the whole
-        installation, newest first. There are no paging parameters and no
-        `total`.
-      parameters:
-        - name: status
-          in: query
-          schema:
-            type: string
-            enum: [active, suspended, deleted]
-        - $ref: "#/components/parameters/Limit"
-        - $ref: "#/components/parameters/Offset"
-      responses:
-        "200":
-          description: Tenant list
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [data, total]
-                properties:
-                  data:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/Tenant"
-                  total:
-                    $ref: "#/components/schemas/ListTotal"
-        "401":
-          description: Missing or invalid API key
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "403":
-          description: The key is not a platform key
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "422":
-          $ref: "#/components/responses/InvalidPage"
-
-  /v1/tenants/{id}:
-    get:
-      tags: [System]
-      summary: Get a tenant
-      operationId: getTenant
-      description: Platform keys only. Reads any tenant in the installation.
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-          example: hc_ten_1a2b3c4d5e6f7890
-      responses:
-        "200":
-          description: The tenant
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Tenant"
-        "401":
-          description: Missing or invalid API key
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "403":
-          description: The key is not a platform key
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "404":
-          description: No such tenant
           content:
             application/json:
               schema:

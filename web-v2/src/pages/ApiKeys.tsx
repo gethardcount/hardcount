@@ -56,7 +56,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 
-import { Plus, Key, Shield, ChevronDown, Loader2, RotateCw, MoreHorizontal } from 'lucide-react'
+import { Plus, Key, Shield, Activity, ChevronDown, Loader2, RotateCw, MoreHorizontal } from 'lucide-react'
 import { EmptyState } from '@/components/EmptyState'
 import { CopyButton, ShowOnceSecretDialog } from '@/components/ShowOnceSecretDialog'
 import { API_ORIGIN, DOCS_BASE } from '@/lib/apiOrigin'
@@ -81,15 +81,33 @@ function relativeTime(dateStr: string, now: EffectiveNow): string {
   return formatDate(dateStr)
 }
 
-// Human label for a key type — the raw enum ("secret") is a backend
-// identifier, not operator copy.
+// Human label for a key type — the raw enum ("secret", "ingest") is a
+// backend identifier, not operator copy. An ingest key can only send usage
+// events (ADR-133).
 function keyTypeLabel(type: string): string {
   switch (type) {
     case 'secret': return 'Secret'
-    case 'platform': return 'Platform'
+    case 'ingest': return 'Usage only'
     default: return type
   }
 }
+
+// The same type as a noun for running text: "a new usage-only key".
+function keyTypeNoun(type: string): string {
+  switch (type) {
+    case 'secret': return 'secret key'
+    case 'ingest': return 'usage-only key'
+    default: return `${type} key`
+  }
+}
+
+type KeyTypeChoice = 'secret' | 'ingest'
+
+// The two key types the create dialog offers, in plain words.
+const KEY_TYPES: { value: KeyTypeChoice; label: string; hint: string; icon: typeof Shield }[] = [
+  { value: 'secret', label: 'Secret', hint: 'Full access. Keep it on your server.', icon: Shield },
+  { value: 'ingest', label: 'Usage only', hint: 'Can only send usage events. Use it in LiteLLM or another gateway.', icon: Activity },
+]
 
 function isExpired(key: ApiKeyInfo): boolean {
   return !!key.expires_at && untilMs(key.expires_at, wallClockNow()) < 0
@@ -419,6 +437,7 @@ function QuickStart() {
 }
 
 function CreateKeyDialog({ onClose, onCreated }: { onClose: () => void; onCreated: (rawKey: string) => void }) {
+  const [keyType, setKeyType] = useState<KeyTypeChoice>('secret')
   const [expiryPreset, setExpiryPreset] = useState<ExpiryPreset>('never')
   const [customDate, setCustomDate] = useState('')
   const [customDateError, setCustomDateError] = useState('')
@@ -458,7 +477,7 @@ function CreateKeyDialog({ onClose, onCreated }: { onClose: () => void; onCreate
     try {
       const res = await api.createApiKey({
         name: data.name,
-        key_type: 'secret',
+        key_type: keyType,
         expires_at: getExpiresAt(),
       })
       onCreated(res.raw_key)
@@ -513,13 +532,31 @@ function CreateKeyDialog({ onClose, onCreated }: { onClose: () => void; onCreate
             />
 
             <div>
-              <Label className="mb-2 block">Key type</Label>
-              <div className="flex items-start gap-3 p-3 rounded-xl border border-border">
-                <Shield size={18} className="mt-0.5 text-primary" />
-                <div>
-                  <p className="text-sm font-medium text-foreground">Secret</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">Full access. Keep it on your server.</p>
-                </div>
+              <Label id="create-key-type" className="mb-2 block">Key type</Label>
+              <div role="radiogroup" aria-labelledby="create-key-type" className="grid gap-2">
+                {KEY_TYPES.map(kt => {
+                  const Icon = kt.icon
+                  const selected = keyType === kt.value
+                  return (
+                    <button
+                      key={kt.value}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      onClick={() => setKeyType(kt.value)}
+                      className={cn(
+                        'flex items-start gap-3 p-3 rounded-xl border text-left transition-colors',
+                        selected ? 'border-primary bg-primary/5' : 'border-border hover:border-foreground/30'
+                      )}
+                    >
+                      <Icon size={18} className={cn('mt-0.5 shrink-0', selected ? 'text-primary' : 'text-muted-foreground')} />
+                      <span>
+                        <span className="block text-sm font-medium text-foreground">{kt.label}</span>
+                        <span className="block text-xs text-muted-foreground mt-0.5">{kt.hint}</span>
+                      </span>
+                    </button>
+                  )
+                })}
               </div>
             </div>
 
@@ -627,7 +664,7 @@ function RotateKeyDialog({
         <DialogHeader>
           <DialogTitle>Rotate API key</DialogTitle>
           <DialogDescription>
-            A new {keyTypeLabel(target.key_type).toLowerCase()} key will be issued for "{target.name}". The current key
+            A new {keyTypeNoun(target.key_type)} will be issued for "{target.name}". The current key
             stops working when the grace period ends — immediately if you pick "Now" — so anything
             still using it must switch to the new key within that window.
           </DialogDescription>

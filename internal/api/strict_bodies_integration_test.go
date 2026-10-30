@@ -1,10 +1,6 @@
 package api
 
 import (
-	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -23,8 +19,8 @@ import (
 const probeKey = "b9_unknown_field"
 
 // strictRig is a bootstrapped account on a real router and database, with
-// the three credentials the routes take: the owner's dashboard session, a
-// test-mode secret key and a platform key.
+// the credentials the routes take: the owner's dashboard session and a
+// test-mode secret key.
 type strictRig struct {
 	t        *testing.T
 	ts       *httptest.Server
@@ -32,7 +28,6 @@ type strictRig struct {
 	tenantID string
 	cookie   *http.Cookie
 	secret   string
-	platform string
 }
 
 func newStrictRig(t *testing.T) *strictRig {
@@ -49,15 +44,14 @@ func newStrictRig(t *testing.T) *strictRig {
 	tenantID := flowStr(boot, "tenant", "id")
 	return &strictRig{
 		t: t, ts: ts, db: db, tenantID: tenantID,
-		cookie:   login(t, ts, email, password),
-		secret:   flowStr(boot, "secret_key_test"),
-		platform: createPlatformKey(t, db, tenantID),
+		cookie: login(t, ts, email, password),
+		secret: flowStr(boot, "secret_key_test"),
 	}
 }
 
 // call sends the request with the credential the route takes: none for the
-// public sign-in routes and bootstrap, the platform key for /v1/tenants, the
-// dashboard session for everything else (the dashboard is the main client,
+// public sign-in routes and bootstrap, the dashboard session for everything
+// else (the dashboard is the main client,
 // and /v1/members and /v1/auth/mode take nothing else).
 func (r *strictRig) call(method, path string, body any) flowResp {
 	r.t.Helper()
@@ -65,42 +59,10 @@ func (r *strictRig) call(method, path string, body any) flowResp {
 	switch {
 	case strings.HasPrefix(path, "/v1/bootstrap"),
 		strings.HasPrefix(path, "/v1/auth/") && path != "/v1/auth/mode":
-	case strings.HasPrefix(path, "/v1/tenants"):
-		req.bearer = r.platform
 	default:
 		req.cookie = r.cookie
 	}
 	return flowDo(r.t, r.ts, method, path, req)
-}
-
-// createPlatformKey inserts a platform key for the tenant, the way
-// createAPIKeyWithMode inserts a secret key. Only a platform key may call
-// /v1/tenants.
-func createPlatformKey(t *testing.T, db *postgres.DB, tenantID string) string {
-	t.Helper()
-	secret := make([]byte, 32)
-	_, _ = rand.Read(secret)
-	secretHex := hex.EncodeToString(secret)
-	rawKey := "hc_platform_live_" + secretHex
-	hash := sha256.Sum256([]byte(rawKey))
-	tx, err := db.BeginTx(context.Background(), postgres.TxBypass, "")
-	if err != nil {
-		t.Fatalf("begin tx: %v", err)
-	}
-	defer postgres.Rollback(tx)
-	if _, err := tx.ExecContext(context.Background(), `SELECT set_config('app.livemode', 'on', true)`); err != nil {
-		t.Fatalf("set app.livemode: %v", err)
-	}
-	if _, err := tx.ExecContext(context.Background(),
-		`INSERT INTO api_keys (id, key_prefix, key_hash, key_type, name, tenant_id)
-		 VALUES ($1, $2, $3, 'platform', 'Strict bodies platform key', $4)`,
-		"hc_key_strict_"+secretHex[:8], "hc_platform_live_"+secretHex[:12], hex.EncodeToString(hash[:]), tenantID); err != nil {
-		t.Fatalf("insert platform key: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit: %v", err)
-	}
-	return rawKey
 }
 
 // probePath fills a chi pattern's parameters. A handler reads its body

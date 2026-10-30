@@ -1,52 +1,55 @@
 package auth
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
-func TestHasPermission_SecretHasAll(t *testing.T) {
-	allPerms := []Permission{
-		PermCustomerRead, PermCustomerWrite, PermPricingRead, PermPricingWrite,
-		PermSubscriptionRead, PermSubscriptionWrite, PermUsageRead, PermUsageWrite,
-		PermInvoiceRead, PermInvoiceWrite, PermDunningRead, PermDunningWrite,
-		PermAPIKeyRead, PermAPIKeyWrite,
-		PermTestClockWrite,
-	}
-	for _, p := range allPerms {
-		if !HasPermission(KeyTypeSecret, p) {
-			t.Errorf("secret should have %s", p)
+// everyPermission is every permission a route can require.
+var everyPermission = []Permission{
+	PermCustomerRead, PermCustomerWrite, PermPricingRead, PermPricingWrite,
+	PermSubscriptionRead, PermSubscriptionWrite, PermUsageRead, PermUsageWrite,
+	PermUsageIngest,
+	PermInvoiceRead, PermInvoiceWrite, PermDunningRead, PermDunningWrite,
+	PermAPIKeyRead, PermAPIKeyWrite,
+	PermTestClockWrite,
+}
+
+// A secret key and a dashboard session hold every permission, the usage
+// ingest one included, so both still send usage.
+func TestHasPermission_SecretAndSessionHoldAll(t *testing.T) {
+	for _, kt := range []KeyType{KeyTypeSecret, KeyTypeSession} {
+		for _, p := range everyPermission {
+			if !HasPermission(kt, p) {
+				t.Errorf("%s should have %s", kt, p)
+			}
 		}
-	}
-	// Secret should NOT have tenant management
-	if HasPermission(KeyTypeSecret, PermTenantWrite) {
-		t.Error("secret should NOT have tenant:write")
+		if got := len(AllPermissions(kt)); got != len(everyPermission) {
+			t.Errorf("%s has %d permissions, want %d", kt, got, len(everyPermission))
+		}
 	}
 }
 
-func TestHasPermission_PlatformOnlyTenants(t *testing.T) {
-	if !HasPermission(KeyTypePlatform, PermTenantRead) {
-		t.Error("platform should have tenant:read")
+// An ingest key holds exactly one permission: sending usage (ADR-133).
+// Mutation: give it any other permission, such as usage:write (which
+// gates backfill and the held-usage release), and this fails.
+func TestHasPermission_IngestHoldsOnlyUsageIngest(t *testing.T) {
+	if got := AllPermissions(KeyTypeIngest); !slices.Equal(got, []Permission{PermUsageIngest}) {
+		t.Fatalf("ingest key permissions = %v, want only %s", got, PermUsageIngest)
 	}
-	if !HasPermission(KeyTypePlatform, PermTenantWrite) {
-		t.Error("platform should have tenant:write")
-	}
-	if HasPermission(KeyTypePlatform, PermCustomerRead) {
-		t.Error("platform should NOT have customer:read")
+	for _, p := range everyPermission {
+		if got, want := HasPermission(KeyTypeIngest, p), p == PermUsageIngest; got != want {
+			t.Errorf("ingest key %s = %v, want %v", p, got, want)
+		}
 	}
 }
 
 func TestHasPermission_UnknownType(t *testing.T) {
-	if HasPermission("nonexistent", PermCustomerRead) {
-		t.Error("unknown type should have no permissions")
-	}
-}
-
-func TestAllPermissions(t *testing.T) {
-	secretPerms := AllPermissions(KeyTypeSecret)
-	if len(secretPerms) != 15 {
-		t.Errorf("secret should have 15 permissions, got %d", len(secretPerms))
-	}
-
-	platformPerms := AllPermissions(KeyTypePlatform)
-	if len(platformPerms) != 2 {
-		t.Errorf("platform should have 2 permissions, got %d", len(platformPerms))
+	for _, kt := range []KeyType{"nonexistent", "platform", "publishable", ""} {
+		for _, p := range everyPermission {
+			if HasPermission(kt, p) {
+				t.Errorf("key type %q should have no permissions, has %s", kt, p)
+			}
+		}
 	}
 }

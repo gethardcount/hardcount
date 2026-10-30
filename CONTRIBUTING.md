@@ -115,9 +115,9 @@ make bootstrap HARDCOUNT_BOOTSTRAP_EMAIL=tenant-b@hardcount.local \
 ```
 
 The tool runs from source, so it needs Go and this repository. It is not in
-the Docker image. There is no button for this in the dashboard, and a
-secret key cannot do it: only a platform key can manage accounts, and a
-standard Hardcount server issues none.
+the Docker image. There is no button for this in the dashboard and no API
+route: no key can create an account or read another one
+([ADR-133](docs/adr/133-api-key-types-secret-and-ingest.md)).
 
 ### Several worktrees
 

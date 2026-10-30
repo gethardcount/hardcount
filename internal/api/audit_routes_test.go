@@ -13,7 +13,7 @@ import (
 // walkMutatingRoutes enumerates every mutating route in the LIVE router, keyed
 // canonically. chi.Walk descends into nested r.Route / r.Mount / r.With
 // subrouters and yields fully-qualified patterns, so this is the whole surface —
-// including the blocks the deleted catch-all never saw (/v1/auth, /v1/tenants,
+// including the blocks the deleted catch-all never saw (/v1/auth,
 // /v1/public/*, /v1/webhooks, /v1/bootstrap).
 //
 // The router builds with a zero-value *postgres.DB (no database): NewServer only

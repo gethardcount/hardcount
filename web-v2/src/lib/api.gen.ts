@@ -2864,7 +2864,11 @@ export interface paths {
             };
         };
         put?: never;
-        /** Ingest usage event */
+        /**
+         * Ingest usage event
+         * @description Needs the `usage:ingest` permission: an ingest key or a secret
+         *     key.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -2994,7 +2998,8 @@ export interface paths {
          *     and are not errors. A `deduplicated` count above zero on a batch
          *     you never sent before means some keys were already used, by an
          *     earlier event or by another event in the batch. Those events
-         *     were not stored.
+         *     were not stored. Needs the `usage:ingest` permission: an ingest
+         *     key or a secret key.
          */
         post: {
             parameters: {
@@ -3122,7 +3127,7 @@ export interface paths {
          *     Shares idempotency keys with live ingest: a repeated
          *     `idempotency_key` returns 200 with the original event and an
          *     `Idempotent-Replayed: true` header, and writes nothing.
-         *     Requires usage write permission.
+         *     Requires usage write permission, so an ingest key cannot backfill.
          */
         post: operations["backfillUsageEvent"];
         delete?: never;
@@ -4934,7 +4939,7 @@ export interface paths {
                             email?: string;
                             key_id?: string;
                             /** @enum {string} */
-                            key_type?: "platform" | "secret";
+                            key_type?: "secret" | "ingest";
                         };
                     };
                 };
@@ -6547,7 +6552,9 @@ export interface paths {
          *     record with no `user` or no `id`, or an invalid event, is listed in
          *     `errors` and the rest of the batch still goes in, with status 200.
          *     If the usage store cannot be reached, the whole request fails with
-         *     503 so LiteLLM retries it. Requires usage write permission.
+         *     503 so LiteLLM retries it. Needs the `usage:ingest` permission:
+         *     give the proxy an ingest key (`hc_ingest_…`), which can do nothing
+         *     else. A secret key works too.
          */
         post: operations["ingestLitellmSpend"];
         delete?: never;
@@ -6577,12 +6584,10 @@ export interface paths {
          * @description Creates a key in the caller's mode: a test-mode caller gets a test
          *     key, a live-mode caller gets a live key. The full key (`raw_key`)
          *     is returned once and is never shown again. Hardcount stores only a
-         *     salted hash. `key_type` defaults to `secret`.
-         *
-         *     A `platform` key can only be issued by an existing platform key.
-         *     Platform keys do not hold the `apikey:write` permission this route
-         *     needs, so in practice this route never issues one (403).
-         *     Writes an audit row (never the key value).
+         *     salted hash. `key_type` defaults to `secret`. An `ingest` key
+         *     (`hc_ingest_…`) can only send usage events: give it to LiteLLM or
+         *     another gateway, so the key in its config cannot refund, void or
+         *     read your data. Writes an audit row (never the key value).
          */
         post: operations["createApiKey"];
         delete?: never;
@@ -6808,55 +6813,6 @@ export interface paths {
          *     Stripe in that mode until you connect again. Writes an audit row.
          */
         delete: operations["disconnectStripe"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/tenants": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List tenants
-         * @description Platform keys only. Returns the newest 50 tenants across the whole
-         *     installation, newest first. There are no paging parameters and no
-         *     `total`.
-         */
-        get: operations["listTenants"];
-        put?: never;
-        /**
-         * Create a tenant
-         * @description Platform keys only (`hc_platform_`), sent as
-         *     `Authorization: Bearer`. Dashboard sessions are not accepted.
-         *     Creates an active tenant. It has no users and no API keys yet.
-         *     Writes an audit row.
-         */
-        post: operations["createTenant"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/tenants/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get a tenant
-         * @description Platform keys only. Reads any tenant in the installation.
-         */
-        get: operations["getTenant"];
-        put?: never;
-        post?: never;
-        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -9874,8 +9830,13 @@ export interface components {
              * @example hc_secret_test_1a2b3c4d
              */
             key_prefix: string;
-            /** @enum {string} */
-            key_type: "platform" | "secret";
+            /**
+             * @description `secret` can read and change everything in the account.
+             *     `ingest` can only send usage events, for LiteLLM or another
+             *     gateway (ADR-133).
+             * @enum {string}
+             */
+            key_type: "secret" | "ingest";
             livemode: boolean;
             name: string;
             tenant_id: string;
@@ -16456,7 +16417,7 @@ export interface operations {
                      * @default secret
                      * @enum {string}
                      */
-                    key_type?: "secret" | "platform";
+                    key_type?: "secret" | "ingest";
                     /**
                      * Format: date-time
                      * @description Optional. Must be in the future. Omit for a key that does not expire.
@@ -16484,7 +16445,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Caller lacks the `apikey:write` permission, or asked for a platform key */
+            /** @description Caller lacks the `apikey:write` permission */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -16586,7 +16547,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The key is a platform key and the caller is not a platform key */
+            /** @description Caller lacks the `apikey:write` permission */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -16980,173 +16941,6 @@ export interface operations {
                 };
             };
             /** @description Stripe is not connected for this mode */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
-    listTenants: {
-        parameters: {
-            query?: {
-                status?: "active" | "suspended" | "deleted";
-                /**
-                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                 *     that is not a whole number, is a 422 with `param: limit`.
-                 */
-                limit?: components["parameters"]["Limit"];
-                /**
-                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                 *     not a whole number, is a 422 with `param: offset`.
-                 */
-                offset?: components["parameters"]["Offset"];
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Tenant list */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        data: components["schemas"]["Tenant"][];
-                        total: components["schemas"]["ListTotal"];
-                    };
-                };
-            };
-            /** @description Missing or invalid API key */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description The key is not a platform key */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            422: components["responses"]["InvalidPage"];
-        };
-    };
-    createTenant: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /** @description Must not be blank. */
-                    name: string;
-                };
-            };
-        };
-        responses: {
-            /** @description Tenant created */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Tenant"];
-                };
-            };
-            /** @description Body is not valid JSON */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Missing or invalid API key */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description The key is not a platform key */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description `name` is missing */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
-    getTenant: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @example hc_ten_1a2b3c4d5e6f7890 */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The tenant */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Tenant"];
-                };
-            };
-            /** @description Missing or invalid API key */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description The key is not a platform key */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description No such tenant */
             404: {
                 headers: {
                     [name: string]: unknown;

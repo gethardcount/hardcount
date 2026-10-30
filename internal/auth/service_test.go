@@ -171,53 +171,75 @@ func TestValidateKey_OldPublishablePrefixIsInvalid(t *testing.T) {
 	}
 }
 
-func TestCreateKey_Platform(t *testing.T) {
+// An ingest key (ADR-133) is issued like a secret key, in the caller's
+// mode, with its own prefix, and validates back to its type.
+func TestCreateKey_Ingest(t *testing.T) {
 	svc := NewService(newMemStore())
 
-	// Platform keys may only be minted by an existing platform principal, so
-	// the caller ctx must carry KeyTypePlatform.
-	ctx := WithKeyType(postgres.WithLivemode(context.Background(), true), KeyTypePlatform)
-	result, err := svc.CreateKey(ctx, "tenant1", CreateKeyInput{
-		Name:    "Platform Key",
-		KeyType: KeyTypePlatform,
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.HasPrefix(result.RawKey, "hc_platform_live_") {
-		t.Errorf("raw key should start with hc_platform_live_")
-	}
-	if result.Key.KeyType != "platform" {
-		t.Errorf("key_type: got %q, want platform", result.Key.KeyType)
+	for _, live := range []bool{true, false} {
+		ctx := WithKeyType(postgres.WithLivemode(context.Background(), live), KeyTypeSession)
+		result, err := svc.CreateKey(ctx, "tenant1", CreateKeyInput{Name: "LiteLLM proxy", KeyType: KeyTypeIngest})
+		if err != nil {
+			t.Fatalf("create an ingest key (live=%v): %v", live, err)
+		}
+		want := "hc_ingest_test_"
+		if live {
+			want = "hc_ingest_live_"
+		}
+		if !strings.HasPrefix(result.RawKey, want) || !strings.HasPrefix(result.Key.KeyPrefix, want) {
+			t.Errorf("live=%v: raw key %q, prefix %q, want both to start with %s", live, result.RawKey[:len(want)], result.Key.KeyPrefix, want)
+		}
+		if result.Key.KeyType != "ingest" || result.Key.Livemode != live {
+			t.Errorf("live=%v: stored key_type %q livemode %v, want ingest in the caller's mode", live, result.Key.KeyType, result.Key.Livemode)
+		}
+		got, err := svc.ValidateKey(ctx, result.RawKey)
+		if err != nil {
+			t.Fatalf("validate the ingest key: %v", err)
+		}
+		if got.KeyType != "ingest" || got.ID != result.Key.ID {
+			t.Errorf("validated %+v, want the ingest key %s", got, result.Key.ID)
+		}
 	}
 }
 
-// Regression for the audit critical (velox-ops #1): a non-platform principal
-// (secret key, dashboard session, or no key-type in ctx) must NOT be able to
-// mint a platform key by passing key_type=platform in the request body. Before
-// the fix, any single-tenant secret/session could self-escalate to a platform
-// key and read/create every tenant.
-func TestCreateKey_Platform_RejectedForNonPlatformCaller(t *testing.T) {
-	svc := NewService(newMemStore())
+// Platform keys and /v1/tenants are gone (ADR-133): the type is refused on
+// create from every caller, and a raw key with the old hc_platform_ prefix
+// is an unknown key, even when a row with that prefix and a matching hash
+// is in the store. Mutation: put "platform" back in the type check or in
+// StoredKeyTypes, and this fails.
+func TestPlatformKeyType_RefusedAtCreateAndParse(t *testing.T) {
+	store := newMemStore()
+	svc := NewService(store)
 
-	callers := map[string]context.Context{
-		"no key-type (raw ctx)": context.Background(),
-		"secret key":            WithKeyType(context.Background(), KeyTypeSecret),
-		"dashboard session":     WithKeyType(context.Background(), KeyTypeSession),
+	for name, ctx := range map[string]context.Context{
+		"no key type":            postgres.WithLivemode(context.Background(), true),
+		"secret key":             WithKeyType(postgres.WithLivemode(context.Background(), true), KeyTypeSecret),
+		"session":                WithKeyType(postgres.WithLivemode(context.Background(), true), KeyTypeSession),
+		"old platform principal": WithKeyType(postgres.WithLivemode(context.Background(), true), KeyType("platform")),
+	} {
+		_, err := svc.CreateKey(ctx, "tenant1", CreateKeyInput{Name: "Platform", KeyType: KeyType("platform")})
+		if !errors.Is(err, errs.ErrValidation) {
+			t.Errorf("%s: create with key_type platform: got %v, want a validation error", name, err)
+		}
 	}
-	for name, ctx := range callers {
-		t.Run(name, func(t *testing.T) {
-			_, err := svc.CreateKey(ctx, "tenant1", CreateKeyInput{
-				Name:    "Escalation attempt",
-				KeyType: KeyTypePlatform,
-			})
-			if err == nil {
-				t.Fatal("expected platform-key creation to be rejected, got nil error")
-			}
-			if !errors.Is(err, errs.ErrForbidden) {
-				t.Errorf("want ErrForbidden (HTTP 403), got %T: %v", err, err)
-			}
-		})
+	if len(store.keys) != 0 {
+		t.Fatalf("a refused create stored %d keys", len(store.keys))
+	}
+
+	// A platform-shaped row, hashed the way CreateKey hashes, is never
+	// looked up: the parser does not know the prefix.
+	raw := "hc_platform_live_" + strings.Repeat("ab", 32)
+	salt := []byte("0123456789abcdef")
+	hash := sha256.Sum256(append(salt, []byte(raw)...))
+	store.keys["hc_key_plat"] = domain.APIKey{
+		ID: "hc_key_plat", KeyPrefix: raw[:len("hc_platform_live_")+keyPrefixLen], KeyHash: hex.EncodeToString(hash[:]),
+		KeySalt: hex.EncodeToString(salt), KeyType: "platform", Livemode: true, TenantID: "tenant1",
+	}
+	if _, err := svc.ValidateKey(context.Background(), raw); !errors.Is(err, ErrInvalidKey) {
+		t.Errorf("ValidateKey(hc_platform_live_…): got %v, want ErrInvalidKey", err)
+	}
+	if p := KeyType("platform").TypePrefix(); p != "" {
+		t.Errorf("platform TypePrefix = %q, want none", p)
 	}
 }
 
@@ -305,14 +327,9 @@ func TestValidateKey_AllTypes(t *testing.T) {
 	svc := NewService(newMemStore())
 	ctx := postgres.WithLivemode(context.Background(), true)
 
-	// A platform principal may mint any key type; use it so the platform
-	// iteration passes the privileged-mint guard (secret is unrestricted
-	// either way).
-	mintCtx := WithKeyType(ctx, KeyTypePlatform)
-	types := []KeyType{KeyTypeSecret, KeyTypePlatform}
-	for _, kt := range types {
+	for _, kt := range StoredKeyTypes {
 		t.Run(string(kt), func(t *testing.T) {
-			result, _ := svc.CreateKey(mintCtx, "tenant1", CreateKeyInput{
+			result, _ := svc.CreateKey(ctx, "tenant1", CreateKeyInput{
 				Name:    "Test " + string(kt),
 				KeyType: kt,
 			})

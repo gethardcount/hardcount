@@ -35,7 +35,7 @@ func TestIngestLookup_RealStoreContract(t *testing.T) {
 			strings.NewReader(`{"external_customer_id":"cus_never_created","event_name":"api_call","quantity":1,"idempotency_key":"evt_lookup"}`))
 		req = req.WithContext(auth.WithTenantID(ctx, tenantID))
 		rec := httptest.NewRecorder()
-		h.Routes().ServeHTTP(rec, req)
+		h.Routes(ungated, ungated, ungated).ServeHTTP(rec, req)
 		return rec.Code, rec.Body.String()
 	}
 
@@ -55,3 +55,8 @@ func TestIngestLookup_RealStoreContract(t *testing.T) {
 		t.Fatalf("cancelled lookup: body leaks or misclassifies: %s", body)
 	}
 }
+
+// ungated is a permission gate that lets every request through. These tests
+// call the handler without the router's auth middleware, so they pass it for
+// each gate Routes takes.
+func ungated(next http.Handler) http.Handler { return next }

@@ -14,7 +14,8 @@ Every call needs three things:
   [quick start](quick-start.md) it is `http://localhost:8080`. All routes
   start with `/v1/`.
 - **An API key** in the header `Authorization: Bearer <key>`. Use a secret
-  key from your server. See [API keys](api-keys.md).
+  key from your server. A gateway that only sends usage, such as LiteLLM,
+  gets a usage-only key. See [API keys](api-keys.md#key-types).
 - **`Content-Type: application/json`** on calls that send a body.
 
 Create a test customer:
@@ -177,8 +178,7 @@ the call returns `409` with code `unbilled_period`.
 `INVOICE_GRACE_PERIOD` has passed. It skips subscriptions on a test clock
 (advancing the clock bills those), ones waiting after a failed attempt, and
 ones set aside after too many failed attempts (`retry-billing` brings them
-back). It answers 206 when some subscriptions could not be billed, and 403
-to a platform key.
+back). It answers 206 when some subscriptions could not be billed.
 
 ### Credits and refunds
 
@@ -414,7 +414,7 @@ specific status for a body that is too large.
   - `conflict_idempotency` (409): another request with this key is still running, or did not finish. Retry later.
   - `conflict_idempotency_unresolved` (409): an earlier request with this key started more than 5 minutes ago and never recorded an outcome. Check whether the resource exists before you retry with a new key.
   - `invalid_request` (400): the body could not be read. This includes any body over 1 MB.
-- **A replayed key** (POST, PUT or PATCH under `/v1` with the same key, method, path and body) returns the first response's status and body, plus `Idempotent-Replayed: true`. The body's `request_id` is the first request's; the `Hardcount-Request-Id` header is the new request's. The response's other headers are not sent again. A first response of 409 or 422 is not stored: the key is freed, and a retry with the same key runs the request again. The usage routes (`/v1/usage-events…`, `/v1/integrations/litellm/spend`) ignore the header. So do the routes outside the main `/v1` group: `/v1/auth…`, `/v1/bootstrap`, `/v1/tenants…`, `/v1/public/…`, `/v1/webhooks…` and `/v1/exports…`. If a database error stops the server from freeing the key or storing the first response, the key stays reserved: a retry gets `conflict_idempotency`, then `conflict_idempotency_unresolved` once 5 minutes have passed. The request does not run twice.
+- **A replayed key** (POST, PUT or PATCH under `/v1` with the same key, method, path and body) returns the first response's status and body, plus `Idempotent-Replayed: true`. The body's `request_id` is the first request's; the `Hardcount-Request-Id` header is the new request's. The response's other headers are not sent again. A first response of 409 or 422 is not stored: the key is freed, and a retry with the same key runs the request again. The usage routes (`/v1/usage-events…`, `/v1/integrations/litellm/spend`) ignore the header. So do the routes outside the main `/v1` group: `/v1/auth…`, `/v1/bootstrap`, `/v1/public/…`, `/v1/webhooks…` and `/v1/exports…`. If a database error stops the server from freeing the key or storing the first response, the key stays reserved: a retry gets `conflict_idempotency`, then `conflict_idempotency_unresolved` once 5 minutes have passed. The request does not run twice.
 - **A plain-text error** comes from two places:
   - The HTTP server itself, before Hardcount sees the request. A request too malformed to parse, such as bad syntax or headers that are too large, gets 400 or 431 with no `Hardcount-Request-Id` header.
   - `/metrics`, the Prometheus scrape route. If it cannot read the metrics, it answers a plain-text 500.

@@ -41,7 +41,6 @@ var notListRoutes = map[string]string{
 	"/v1/settings":                           "one object: the tenant's settings",
 	"/v1/settings/email":                     "one object: email delivery status",
 	"/v1/settings/stripe":                    "settings: one row per mode, so at most two",
-	"/v1/tenants/{id}":                       "one resource",
 	"/v1/customers/{id}":                     "one resource",
 	"/v1/customers/{id}/billing-profile":     "one object of the customer",
 	"/v1/customers/{id}/margin":              "one object of the customer",
@@ -144,14 +143,9 @@ func TestListRoutes_OnePagingStyle(t *testing.T) {
 	testutil.CreateTestTenant(t, db, "One Paging Style Second Co")
 	key := createAPIKeyWithMode(t, db, tenantID, false)
 	createAPIKeyWithMode(t, db, tenantID, false)
-	platform := createPlatformKey(t, db, tenantID)
 	call := func(method, path string, body any) flowResp {
 		t.Helper()
-		req := flowReq{bearer: key, body: body}
-		if strings.HasPrefix(path, "/v1/tenants") {
-			req.bearer = platform
-		}
-		return flowDo(t, ts, method, path, req)
+		return flowDo(t, ts, method, path, flowReq{bearer: key, body: body})
 	}
 	id := func(r flowResp) string { return flowStr(r.body, "id") }
 
@@ -277,7 +271,6 @@ func TestListRoutes_OnePagingStyle(t *testing.T) {
 		"/v1/recipes":                                     "/v1/recipes",
 		"/v1/recipes/instances":                           "/v1/recipes/instances",
 		"/v1/subscriptions":                               "/v1/subscriptions",
-		"/v1/tenants":                                     "/v1/tenants",
 		"/v1/test-clocks":                                 "/v1/test-clocks",
 		"/v1/test-clocks/{id}/customers":                  "/v1/test-clocks/" + clk + "/customers",
 		"/v1/test-clocks/{id}/subscriptions":              "/v1/test-clocks/" + clk + "/subscriptions",

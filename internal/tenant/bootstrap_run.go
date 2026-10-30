@@ -234,7 +234,7 @@ func RunBootstrap(ctx context.Context, db *postgres.DB, deps BootstrapDeps, opts
 		// The tx runs under TxBypass (no tenant exists yet at BEGIN), so stamp
 		// the GUCs the audit INSERT reads: tenant_id comes from app.tenant_id
 		// and livemode is trigger-stamped from app.livemode. Account-plane
-		// facts are recorded LIVE, matching POST /v1/tenants.
+		// facts are recorded LIVE.
 		if _, err := tx.ExecContext(ctx, `SELECT set_config('app.tenant_id', $1, true)`, tenantID); err != nil {
 			return BootstrapResult{}, fmt.Errorf("stamp tenant for audit: %w", err)
 		}

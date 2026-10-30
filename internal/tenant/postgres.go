@@ -3,7 +3,6 @@ package tenant
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/domain"
@@ -17,52 +16,6 @@ type PostgresStore struct {
 
 func NewPostgresStore(db *postgres.DB) *PostgresStore {
 	return &PostgresStore{db: db}
-}
-
-func (s *PostgresStore) Create(ctx context.Context, t domain.Tenant) (domain.Tenant, error) {
-	return s.CreateAudited(ctx, t, nil)
-}
-
-// CreateAudited creates the tenant and runs the caller-supplied audit
-// emission in ONE transaction (ADR-090 shared fate). The tenant's id is
-// generated up front so the tx can be opened AS the new tenant: audit_log
-// is FORCE-RLS'd, and a platform-plane action lands in the NEW tenant's own
-// log (design-panel Q6 — no separate platform log), which requires the
-// app.tenant_id GUC to be the new id before the audit INSERT runs. The
-// tenants table itself carries no RLS, so the INSERT is unaffected by the
-// tenant-scoped GUC.
-func (s *PostgresStore) CreateAudited(ctx context.Context, t domain.Tenant, emit func(tx *sql.Tx, out domain.Tenant) error) (domain.Tenant, error) {
-	ctx, cancel := context.WithTimeout(ctx, s.db.QueryTimeout)
-	defer cancel()
-
-	id := postgres.NewID("hc_ten")
-	now := time.Now().UTC()
-
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, id)
-	if err != nil {
-		return domain.Tenant{}, err
-	}
-	defer postgres.Rollback(tx)
-
-	err = tx.QueryRowContext(ctx, `
-		INSERT INTO tenants (id, name, status, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $4)
-		RETURNING id, name, status, created_at, updated_at
-	`, id, t.Name, domain.TenantStatusActive, now).Scan(
-		&t.ID, &t.Name, &t.Status, &t.CreatedAt, &t.UpdatedAt,
-	)
-	if err != nil {
-		return domain.Tenant{}, err
-	}
-	if emit != nil {
-		if err := emit(tx, t); err != nil {
-			return domain.Tenant{}, fmt.Errorf("provision in tx: %w", err)
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return domain.Tenant{}, err
-	}
-	return t, nil
 }
 
 func (s *PostgresStore) Get(ctx context.Context, id string) (domain.Tenant, error) {
@@ -81,49 +34,6 @@ func (s *PostgresStore) Get(ctx context.Context, id string) (domain.Tenant, erro
 		return domain.Tenant{}, err
 	}
 	return t, nil
-}
-
-// List returns one page of the tenants, newest first, and how many match.
-func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.Tenant, int, error) {
-	ctx, cancel := context.WithTimeout(ctx, s.db.QueryTimeout)
-	defer cancel()
-
-	// The handler sends a limit of 1 to 100 (respond.ParsePage).
-	limit := filter.Limit
-	if limit <= 0 {
-		limit = 50
-	}
-
-	where := ""
-	args := []any{}
-	if filter.Status != "" {
-		where = ` WHERE status = $1`
-		args = append(args, filter.Status)
-	}
-	var total int
-	if err := s.db.Pool.QueryRowContext(ctx, `SELECT COUNT(*) FROM tenants`+where, args...).Scan(&total); err != nil {
-		return nil, 0, err
-	}
-
-	args = append(args, limit, filter.Offset)
-	query := `SELECT id, name, status, created_at, updated_at FROM tenants` + where +
-		fmt.Sprintf(` ORDER BY created_at DESC, id DESC LIMIT $%d OFFSET $%d`, len(args)-1, len(args))
-
-	rows, err := s.db.Pool.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer func() { _ = rows.Close() }()
-
-	var tenants []domain.Tenant
-	for rows.Next() {
-		var t domain.Tenant
-		if err := rows.Scan(&t.ID, &t.Name, &t.Status, &t.CreatedAt, &t.UpdatedAt); err != nil {
-			return nil, 0, err
-		}
-		tenants = append(tenants, t)
-	}
-	return tenants, total, rows.Err()
 }
 
 func (s *PostgresStore) UpdateStatus(ctx context.Context, id string, status domain.TenantStatus) (domain.Tenant, error) {

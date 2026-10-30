@@ -26,6 +26,7 @@ original text.
 
 ### Changed
 
+- **A usage-only API key for LiteLLM and other gateways.** Create one under **API keys** ("Usage only") or with `key_type: ingest`; it sends usage, and every other call but `/v1/whoami` gets 403. Breaking: the unusable platform key type and `/v1/tenants` are removed, and an install holding a platform key stops at migration 00221. ([#1497](https://github.com/gethardcount/hardcount/pull/1497))
 - **A pull request merges only when the upgrade, pricing and browser checks pass on a branch up to date with `main`.** The `migrations`, `pricing-shapes` and `e2e` jobs are now required, so two pull requests can no longer both merge the same migration number. ([#1495](https://github.com/gethardcount/hardcount/pull/1495))
 - **Dashboard and front-proxy images move from nginx 1.30 to 1.31.** Compose users: pull `nginx:1.31-alpine` on your next upgrade; no config change is needed. The dashboard image stays on Node 22, the version CI builds and tests it on. ([#1494](https://github.com/gethardcount/hardcount/pull/1494))
 - **Find a customer's invoices from the Invoices list.** Search matches the customer's name or email as well as the invoice number, and a customer picker filters the list to one customer. `GET /v1/invoices?search=` matches the same way. ([#1483](https://github.com/gethardcount/hardcount/pull/1483))

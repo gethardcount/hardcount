@@ -39,8 +39,8 @@ var auditUncoveredMutations = promauto.NewCounterVec(
 // and resource from the URL and sniffing the response body for a label. That
 // invented false permanent records in an append-only compliance log (a pricing
 // rule deleted from a meter was recorded as "deleted meter X"), and it covered
-// only the /v1 block, so /v1/auth, /v1/tenants, /v1/public/*, /v1/webhooks and
-// /v1/bootstrap got nothing at all (ADR-090, RC1 + RC2). Coverage is now
+// only the /v1 block, so /v1/auth, /v1/tenants (since removed), /v1/public/*,
+// /v1/webhooks and /v1/bootstrap got nothing at all (ADR-090, RC1 + RC2). Coverage is now
 // DECLARED (the route-audit registry) and EMITTED in the business transaction
 // (audit.Logger.LogInTx). This middleware only reports when reality diverges.
 //

@@ -17,7 +17,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
-// seedAccount runs the seed writer the way tenant.Service.Create does: on a
+// seedAccount runs the seed writer on a
 // live-mode tenant tx, so the per-mode GUC switching is exercised against
 // real RLS and the 0021 livemode trigger.
 func seedAccount(t *testing.T, db *postgres.DB, svc *dunning.Service, tenantID string) {

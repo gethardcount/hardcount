@@ -47,7 +47,6 @@ import type {
   CreateHostedInvoiceCheckout200,
   CreatePriceOverrideBody,
   CreatePublicPaymentUpdateCheckout201,
-  CreateTenantBody,
   CreditGrants,
   CreditLedgerEntry,
   CreditLiveBalance,
@@ -161,8 +160,6 @@ import type {
   ListRecipes200,
   ListRecipesParams,
   ListStripeConnections200,
-  ListTenants200,
-  ListTenantsParams,
   ListTestClockCustomers200,
   ListTestClockCustomersParams,
   ListWebhookEndpointDeliveries200,
@@ -241,7 +238,6 @@ import type {
   Subscription,
   SubscriptionItem,
   SubscriptionItemChangeResult,
-  Tenant,
   TenantSettings,
   TenantSettingsInput,
   TestClock,
@@ -7359,6 +7355,8 @@ export const getPostV1UsageEventsUrl = () => {
 }
 
 /**
+ * Needs the `usage:ingest` permission: an ingest key or a secret
+ * key.
  * @summary Ingest usage event
  */
 export const postV1UsageEvents = async (postV1UsageEventsBody: PostV1UsageEventsBody, options?: RequestInit): Promise<UsageEvent> => {
@@ -7547,7 +7545,8 @@ export const getPostV1UsageEventsBatchUrl = () => {
  * and are not errors. A `deduplicated` count above zero on a batch
  * you never sent before means some keys were already used, by an
  * earlier event or by another event in the batch. Those events
- * were not stored.
+ * were not stored. Needs the `usage:ingest` permission: an ingest
+ * key or a secret key.
  * @summary Batch ingest usage events (max 1000, all-or-nothing)
  */
 export const postV1UsageEventsBatch = async (postV1UsageEventsBatchBodyItem: PostV1UsageEventsBatchBodyItem[], options?: RequestInit): Promise<UsageEventBatchResult> => {
@@ -7638,7 +7637,7 @@ export const getBackfillUsageEventUrl = () => {
  * Shares idempotency keys with live ingest: a repeated
  * `idempotency_key` returns 200 with the original event and an
  * `Idempotent-Replayed: true` header, and writes nothing.
- * Requires usage write permission.
+ * Requires usage write permission, so an ingest key cannot backfill.
  * @summary Backfill a past usage event
  */
 export const backfillUsageEvent = async (backfillUsageEventBody: BackfillUsageEventBody, options?: RequestInit): Promise<UsageEvent> => {
@@ -15743,7 +15742,9 @@ export const getIngestLitellmSpendUrl = () => {
  * record with no `user` or no `id`, or an invalid event, is listed in
  * `errors` and the rest of the batch still goes in, with status 200.
  * If the usage store cannot be reached, the whole request fails with
- * 503 so LiteLLM retries it. Requires usage write permission.
+ * 503 so LiteLLM retries it. Needs the `usage:ingest` permission:
+ * give the proxy an ingest key (`hc_ingest_…`), which can do nothing
+ * else. A secret key works too.
  * @summary Ingest LiteLLM spend logs
  */
 export const ingestLitellmSpend = async (ingestLitellmSpendBody: IngestLitellmSpendBody, options?: RequestInit): Promise<LitellmSpendResult> => {
@@ -15818,12 +15819,10 @@ export const getCreateApiKeyUrl = () => {
  * Creates a key in the caller's mode: a test-mode caller gets a test
  * key, a live-mode caller gets a live key. The full key (`raw_key`)
  * is returned once and is never shown again. Hardcount stores only a
- * salted hash. `key_type` defaults to `secret`.
- *
- * A `platform` key can only be issued by an existing platform key.
- * Platform keys do not hold the `apikey:write` permission this route
- * needs, so in practice this route never issues one (403).
- * Writes an audit row (never the key value).
+ * salted hash. `key_type` defaults to `secret`. An `ingest` key
+ * (`hc_ingest_…`) can only send usage events: give it to LiteLLM or
+ * another gateway, so the key in its config cannot refund, void or
+ * read your data. Writes an audit row (never the key value).
  * @summary Create an API key
  */
 export const createApiKey = async (createApiKeyBody: CreateApiKeyBody, options?: RequestInit): Promise<APIKeyCreated> => {
@@ -16863,294 +16862,6 @@ export const useDisconnectStripe = <TError = Error,
       > => {
       return useMutation(getDisconnectStripeMutationOptions(options), queryClient);
     }
-
-export const getCreateTenantUrl = () => {
-
-
-
-
-  return `/v1/tenants`
-}
-
-/**
- * Platform keys only (`hc_platform_`), sent as
- * `Authorization: Bearer`. Dashboard sessions are not accepted.
- * Creates an active tenant. It has no users and no API keys yet.
- * Writes an audit row.
- * @summary Create a tenant
- */
-export const createTenant = async (createTenantBody: CreateTenantBody, options?: RequestInit): Promise<Tenant> => {
-
-  return orvalClient<Tenant>(getCreateTenantUrl(),
-  {
-    ...options,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-    body: JSON.stringify(createTenantBody)
-  }
-);}
-
-
-
-
-
-export const getCreateTenantMutationOptions = <TError = Error,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createTenant>>, TError,{data: CreateTenantBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
-): UseMutationOptions<Awaited<ReturnType<typeof createTenant>>, TError,{data: CreateTenantBody}, TContext> => {
-
-const mutationKey = ['createTenant'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createTenant>>, {data: CreateTenantBody}> = (props) => {
-          const {data} = props ?? {};
-
-          return  createTenant(data,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type CreateTenantMutationResult = NonNullable<Awaited<ReturnType<typeof createTenant>>>
-    export type CreateTenantMutationBody = CreateTenantBody
-    export type CreateTenantMutationError = Error
-
-    /**
- * @summary Create a tenant
- */
-export const useCreateTenant = <TError = Error,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createTenant>>, TError,{data: CreateTenantBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient): UseMutationResult<
-        Awaited<ReturnType<typeof createTenant>>,
-        TError,
-        {data: CreateTenantBody},
-        TContext
-      > => {
-      return useMutation(getCreateTenantMutationOptions(options), queryClient);
-    }
-
-export const getListTenantsUrl = (params?: ListTenantsParams,) => {
-  const normalizedParams = new URLSearchParams();
-
-  Object.entries(params || {}).forEach(([key, value]) => {
-
-    if (value !== undefined) {
-      normalizedParams.append(key, value === null ? 'null' : String(value))
-    }
-  });
-
-  const stringifiedParams = normalizedParams.toString();
-
-  return stringifiedParams.length > 0 ? `/v1/tenants?${stringifiedParams}` : `/v1/tenants`
-}
-
-/**
- * Platform keys only. Returns the newest 50 tenants across the whole
- * installation, newest first. There are no paging parameters and no
- * `total`.
- * @summary List tenants
- */
-export const listTenants = async (params?: ListTenantsParams, options?: RequestInit): Promise<ListTenants200> => {
-
-  return orvalClient<ListTenants200>(getListTenantsUrl(params),
-  {
-    ...options,
-    method: 'GET'
-
-
-  }
-);}
-
-
-
-
-
-export const getListTenantsQueryKey = (params?: ListTenantsParams,) => {
-    return [
-    `/v1/tenants`, ...(params ? [params] : [])
-    ] as const;
-    }
-
-
-export const getListTenantsQueryOptions = <TData = Awaited<ReturnType<typeof listTenants>>, TError = Error | InvalidPageResponse>(params?: ListTenantsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTenants>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
-) => {
-
-const {query: queryOptions, request: requestOptions} = options ?? {};
-
-  const queryKey =  queryOptions?.queryKey ?? getListTenantsQueryKey(params);
-
-
-
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listTenants>>> = () => listTenants(params, requestOptions);
-
-
-
-
-
-   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listTenants>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
-}
-
-export type ListTenantsQueryResult = NonNullable<Awaited<ReturnType<typeof listTenants>>>
-export type ListTenantsQueryError = Error | InvalidPageResponse
-
-
-export function useListTenants<TData = Awaited<ReturnType<typeof listTenants>>, TError = Error | InvalidPageResponse>(
- params: undefined |  ListTenantsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTenants>>, TError, TData>> & Pick<
-        DefinedInitialDataOptions<
-          Awaited<ReturnType<typeof listTenants>>,
-          TError,
-          Awaited<ReturnType<typeof listTenants>>
-        > , 'initialData'
-      >, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient
-  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListTenants<TData = Awaited<ReturnType<typeof listTenants>>, TError = Error | InvalidPageResponse>(
- params?: ListTenantsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTenants>>, TError, TData>> & Pick<
-        UndefinedInitialDataOptions<
-          Awaited<ReturnType<typeof listTenants>>,
-          TError,
-          Awaited<ReturnType<typeof listTenants>>
-        > , 'initialData'
-      >, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient
-  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListTenants<TData = Awaited<ReturnType<typeof listTenants>>, TError = Error | InvalidPageResponse>(
- params?: ListTenantsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTenants>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient
-  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary List tenants
- */
-
-export function useListTenants<TData = Awaited<ReturnType<typeof listTenants>>, TError = Error | InvalidPageResponse>(
- params?: ListTenantsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTenants>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient
- ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
-
-  const queryOptions = getListTenantsQueryOptions(params,options)
-
-  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-  return withQueryKey(query, queryOptions.queryKey);
-}
-
-
-
-
-
-
-
-export const getGetTenantUrl = (id: string,) => {
-
-
-
-
-  return `/v1/tenants/${id}`
-}
-
-/**
- * Platform keys only. Reads any tenant in the installation.
- * @summary Get a tenant
- */
-export const getTenant = async (id: string, options?: RequestInit): Promise<Tenant> => {
-
-  return orvalClient<Tenant>(getGetTenantUrl(id),
-  {
-    ...options,
-    method: 'GET'
-
-
-  }
-);}
-
-
-
-
-
-export const getGetTenantQueryKey = (id: string,) => {
-    return [
-    `/v1/tenants/${id}`
-    ] as const;
-    }
-
-
-export const getGetTenantQueryOptions = <TData = Awaited<ReturnType<typeof getTenant>>, TError = Error>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getTenant>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
-) => {
-
-const {query: queryOptions, request: requestOptions} = options ?? {};
-
-  const queryKey =  queryOptions?.queryKey ?? getGetTenantQueryKey(id);
-
-
-
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getTenant>>> = () => getTenant(id, requestOptions);
-
-
-
-
-
-   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getTenant>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
-}
-
-export type GetTenantQueryResult = NonNullable<Awaited<ReturnType<typeof getTenant>>>
-export type GetTenantQueryError = Error
-
-
-export function useGetTenant<TData = Awaited<ReturnType<typeof getTenant>>, TError = Error>(
- id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getTenant>>, TError, TData>> & Pick<
-        DefinedInitialDataOptions<
-          Awaited<ReturnType<typeof getTenant>>,
-          TError,
-          Awaited<ReturnType<typeof getTenant>>
-        > , 'initialData'
-      >, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient
-  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetTenant<TData = Awaited<ReturnType<typeof getTenant>>, TError = Error>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getTenant>>, TError, TData>> & Pick<
-        UndefinedInitialDataOptions<
-          Awaited<ReturnType<typeof getTenant>>,
-          TError,
-          Awaited<ReturnType<typeof getTenant>>
-        > , 'initialData'
-      >, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient
-  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetTenant<TData = Awaited<ReturnType<typeof getTenant>>, TError = Error>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getTenant>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient
-  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary Get a tenant
- */
-
-export function useGetTenant<TData = Awaited<ReturnType<typeof getTenant>>, TError = Error>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getTenant>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient
- ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
-
-  const queryOptions = getGetTenantQueryOptions(id,options)
-
-  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-  return withQueryKey(query, queryOptions.queryKey);
-}
-
-
-
-
-
-
 
 export const getBootstrapUrl = () => {
 

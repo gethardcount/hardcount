@@ -45,10 +45,11 @@ func (h *Handler) triggerCycle(w http.ResponseWriter, r *http.Request) {
 	}
 	tenantID := auth.TenantID(r.Context())
 	if tenantID == "" {
-		// Platform keys carry no tenant scope. Fail closed — NEVER fall through
-		// to the unscoped, cross-tenant RunCycle (the pre-fix leak). RunCycle
-		// stays scheduler-only.
-		respond.Forbidden(w, r, "billing run requires a tenant-scoped secret key, not a platform key")
+		// Every key and session carries a tenant (platform keys are gone,
+		// ADR-133), but a request without one must still fail closed — NEVER
+		// fall through to the unscoped, cross-tenant RunCycle (the pre-fix
+		// leak). RunCycle stays scheduler-only.
+		respond.Forbidden(w, r, "billing run requires a key scoped to one account")
 		return
 	}
 

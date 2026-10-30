@@ -94,7 +94,7 @@ func TestRunCycleForTenant_FailingSubDoesNotLoopForever(t *testing.T) {
 }
 
 // TestTriggerCycle_ForbidsUnscopedKey is the fail-closed lock: a request with no
-// tenant scope (a platform key) must be rejected 403 — never fall through to the
+// tenant scope must be rejected 403 — never fall through to the
 // unscoped, cross-tenant RunCycle (the pre-fix leak). RunCycle stays
 // scheduler-only.
 func TestTriggerCycle_ForbidsUnscopedKey(t *testing.T) {

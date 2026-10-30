@@ -57,23 +57,27 @@ func NewHandler(svc *Service, customers CustomerResolver, meters MeterResolver) 
 	return &Handler{svc: svc, customers: customers, meters: meters}
 }
 
-func (h *Handler) Routes() chi.Router {
+// Routes serves /v1/usage-events. The router passes one permission gate
+// for each kind of route: ingest gates sending events (single and batch),
+// the only routes here an ingest key may call (ADR-133); read gates the
+// list, the aggregate and the held list; write gates the held-usage
+// release and discard.
+func (h *Handler) Routes(ingest, read, write func(http.Handler) http.Handler) chi.Router {
 	r := chi.NewRouter()
-	r.Post("/", h.ingest)
-	r.Post("/batch", h.batchIngest)
-	r.Get("/", h.list)
+	r.With(ingest).Post("/", h.ingest)
+	r.With(ingest).Post("/batch", h.batchIngest)
+	r.With(read).Get("/", h.list)
 	// Server-side aggregate that powers the /usage page's stat cards +
 	// "Usage by Meter" breakdown. Mounted as a sibling of GET / so chi
 	// picks the more-specific pattern; reuses parseListFilter so filter
 	// semantics match the list query exactly. See internal/usage/store.go
 	// (Aggregate type) for the response shape.
-	r.Get("/aggregate", h.aggregate)
+	r.With(read).Get("/aggregate", h.aggregate)
 	// Held usage (#1044, ADR-122): rows the LiteLLM callback could not
-	// ingest because their customer or meter did not exist. GET needs
-	// usage read, the POSTs usage write (RequireMethod in router.go).
-	r.Get("/held", h.listHeld)
-	r.Post("/held/release", h.releaseHeld)
-	r.Post("/held/discard", h.discardHeld)
+	// ingest because their customer or meter did not exist.
+	r.With(read).Get("/held", h.listHeld)
+	r.With(write).Post("/held/release", h.releaseHeld)
+	r.With(write).Post("/held/discard", h.discardHeld)
 	return r
 }
 

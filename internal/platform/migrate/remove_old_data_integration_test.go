@@ -15,11 +15,13 @@ const oldDataVersion = 217
 // that stay still go in, the coupon tables and invoices.stripe_invoice_id
 // are gone, and every narrowed CHECK is validated. The Down puts the old
 // schema back, each old value goes in again, and Up runs again. Mutation:
-// an Up that keeps any of these turns this red.
+// an Up that keeps any of these turns this red. The test stops before
+// 00221, which removes the platform key type this test still inserts
+// (TestAPIKeyTypeIngest_*).
 func TestRemoveOldData_UpNarrowsAndDownRestores(t *testing.T) {
 	dsn, db := scratchDB(t, "hardcount_test_d06b_migrate_old_data")
 	ctx := context.Background()
-	if err := up(ctx, dsn, migrationFiles()); err != nil {
+	if err := up(ctx, dsn, filesBefore(t, apiKeyTypeIngestVersion)); err != nil {
 		t.Fatalf("Up: %v", err)
 	}
 	if err := deadContractExec(ctx, db, deadContractSeedNow); err != nil {
@@ -78,7 +80,7 @@ func TestRemoveOldData_UpNarrowsAndDownRestores(t *testing.T) {
 		}
 	}
 
-	if _, err := down(ctx, dsn, migrationFiles(), oldDataVersion-1); err != nil {
+	if _, err := down(ctx, dsn, filesBefore(t, apiKeyTypeIngestVersion), oldDataVersion-1); err != nil {
 		t.Fatalf("Down to before %d: %v", oldDataVersion, err)
 	}
 	for _, table := range []string{"coupons", "coupon_redemptions", "customer_discounts"} {
@@ -117,7 +119,7 @@ func TestRemoveOldData_UpNarrowsAndDownRestores(t *testing.T) {
 		_ = tx.Rollback()
 	}
 
-	if err := up(ctx, dsn, migrationFiles()); err != nil {
+	if err := up(ctx, dsn, filesBefore(t, apiKeyTypeIngestVersion)); err != nil {
 		t.Fatalf("Up again: %v", err)
 	}
 	if tableExists(t, db, "public.coupons") || columnExists(t, db, "invoices", "stripe_invoice_id") {

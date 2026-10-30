@@ -24,6 +24,8 @@ predates the subscription
    export HARDCOUNT_KEY=hc_secret_test_…   # your test secret key
    ```
 
+   The proxy gets a different key, a usage-only one (step 2).
+
 2. **A `tokens` meter with prices.** Step 1 below creates it.
 3. **Each customer created in Hardcount, and on a plan.** The customer's
    external ID (your own ID for it) must be the `user` you pass to LiteLLM.
@@ -58,7 +60,22 @@ curl -s -X POST "$HARDCOUNT/v1/meters" \
 
 ## 2. Add Hardcount to the proxy config
 
-Add this to your `litellm_config.yaml`. It uses LiteLLM's `generic_api`
+First create a usage-only key for the proxy. It can send usage and nothing
+else, so the key in the proxy's config cannot refund, void or read your
+data ([key types](../api-keys.md#key-types)). In the dashboard, open **API
+keys**, click **Create API key** and pick **Usage only**. Or:
+
+```bash
+curl -s -X POST "$HARDCOUNT/v1/api-keys" \
+  -H "Authorization: Bearer $HARDCOUNT_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"LiteLLM proxy","key_type":"ingest"}' | jq -r '.raw_key'
+```
+
+**You see:** the key, such as `hc_ingest_test_…`. It is shown only this
+once.
+
+Then add this to your `litellm_config.yaml`. It uses LiteLLM's `generic_api`
 callback, which sends a record of each finished call to a web address.
 Tested with LiteLLM 1.83.9.
 
@@ -71,7 +88,7 @@ callback_settings:
     callback_type: generic_api
     endpoint: "https://<your-hardcount-host>/v1/integrations/litellm/spend"
     headers:
-      Authorization: Bearer hc_secret_test_…
+      Authorization: Bearer hc_ingest_test_…   # the usage-only key
     max_retries: 4
     retry_delay: 5
     timeout: 10
@@ -83,7 +100,8 @@ callback_settings:
   `http://host.docker.internal:8080` instead. On Linux, start the container
   with `--add-host=host.docker.internal:host-gateway` for that name to
   work.
-- **`Authorization`:** a secret key, as in "Before you start".
+- **`Authorization`:** the usage-only key you just created. A secret key
+  also works, but it can do everything in the account.
 - **`max_retries` and `retry_delay`:** keep these. LiteLLM's default is no
   retries, so one failed send loses the batch. Hardcount answers 503 when its
   database is briefly out of reach, such as during a restart. Four retries
@@ -341,7 +359,7 @@ at all?
 |---|---|---|
 | 400 | The body is not valid JSON, or it is over 1 MB. The batch was not saved. | Fix the request. A batch over 1 MB gets this answer every time, so have LiteLLM send fewer records at once. |
 | 401 | The API key is missing, wrong, revoked or expired. The batch was not saved. | Fix the `Authorization` header. |
-| 403 | The key cannot send usage: it is a publishable or platform key. The batch was not saved. | Use a secret key. |
+| 403 | The key cannot send usage. Every Hardcount key type can, so this does not happen with a key Hardcount made. The batch was not saved. | Use a usage-only or secret key. |
 | `429 rate_limited` | Too many requests. The batch was not saved. | Send the whole batch again after `Retry-After` seconds. |
 | `503 authentication_unavailable` | Hardcount could not check the API key. The batch was not saved. | Send the whole batch again. |
 | `503 ingest_unavailable` | Hardcount could not reach or write its usage store. The batch was not saved. | Send the whole batch again. |

@@ -67,6 +67,7 @@ func TestSpecEnumsMatchColumnChecks(t *testing.T) {
 		{"invoice_dunning_events_state_check", "DunningRunEvent", "state"},
 		{"plan_price_versions_mode_check", "PlanPrice", "mode"},
 		{"customer_price_overrides_mode_check", "CustomerPriceOverride", "mode"},
+		{"api_keys_key_type_check", "APIKey", "key_type"},
 	} {
 		var def string
 		if err := db.QueryRow(`SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = $1`, c.constraint).Scan(&def); err != nil {
