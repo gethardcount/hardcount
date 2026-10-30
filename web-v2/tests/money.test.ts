@@ -6,7 +6,6 @@
 import { test, beforeEach } from 'vitest'
 import assert from 'node:assert/strict'
 import {
-  amountInputToCents,
   amountsByCurrencyText,
   atRiskText,
   formatCents,
@@ -62,15 +61,6 @@ test('sums per currency never add one currency into another', () => {
 
 test('an unknown currency code is shown as the code, never as the default symbol', () => {
   assert.equal(formatCents(500, 'XYZ'), 'XYZ 5.00')
-})
-
-test('amountInputToCents is what both the form and its confirm use', () => {
-  assert.equal(amountInputToCents('50'), 5000)
-  assert.equal(amountInputToCents('19.99'), 1999)
-  assert.equal(amountInputToCents(''), 0)
-  assert.equal(amountInputToCents('abc'), 0)
-  // The confirm shows these cents, so it can't disagree with what is sent.
-  assert.equal(formatCents(amountInputToCents('0.1'), 'USD'), '$0.10')
 })
 
 test('the Dunning list shows the invoice amount of a run, a void included', () => {

@@ -16,6 +16,7 @@ import { Layout } from '@/components/Layout'
 import { LoadError } from '@/components/LoadError'
 import { METER_AGGREGATIONS, meterAggregationHelp, meterAggregationLabel } from '@/lib/meterLabels'
 import { showApiError } from '@/lib/formErrors'
+import { amountInputError, dollarsToWholeCents } from '@/lib/priceInput'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -390,19 +391,29 @@ function CreatePlanDialog({ onClose, onCreated }: { onClose: () => void; onCreat
   const [basePrice, setBasePrice] = useState('')
   const [billTiming, setBillTiming] = useState<'in_arrears' | 'in_advance'>('in_arrears')
   const [saving, setSaving] = useState(false)
+  const [errors, setErrors] = useState<{ name?: string; code?: string; basePrice?: string }>({})
 
   // The plan's prices take its currency. The Base Price label reads the same
   // value, so it names the currency the plan is created in.
   const planCurrency = getActiveCurrency()
-  const baseCents = Math.round(parseFloat(basePrice || '0') * 100)
+  // null while the box does not hold an amount; nothing is rounded or
+  // filled in. A plan with no base fee is a typed 0.
+  const baseCents = dollarsToWholeCents(basePrice)
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
+    const errs: typeof errors = {}
+    if (!name.trim()) errs.name = 'Enter a plan name.'
+    if (!code.trim()) errs.code = 'Enter a code.'
+    else if (!/^[A-Za-z0-9_-]+$/.test(code.trim())) errs.code = 'Letters, numbers, hyphens and underscores only.'
+    if (baseCents === null) errs.basePrice = amountInputError(basePrice, '49.00', true)
+    setErrors(errs)
+    if (Object.keys(errs).length > 0 || baseCents === null) return
     setSaving(true)
     try {
       const created = await api.createPlan({
-        name,
-        code,
+        name: name.trim(),
+        code: code.trim(),
         currency: planCurrency,
         billing_interval: interval,
         base_amount_cents: baseCents,
@@ -427,14 +438,19 @@ function CreatePlanDialog({ onClose, onCreated }: { onClose: () => void; onCreat
         <form onSubmit={submit} noValidate className="space-y-4">
           <div>
             <Label>Plan Name</Label>
-            <Input value={name} onChange={e => setName(e.target.value)}
+            <Input value={name} onChange={e => { setName(e.target.value); setErrors(x => ({ ...x, name: undefined })) }}
+              aria-invalid={errors.name ? true : undefined}
               placeholder="Pro Plan" maxLength={255} className="mt-1" />
+            {errors.name && <p className="text-xs text-destructive mt-1">{errors.name}</p>}
           </div>
           <div>
             <Label htmlFor="plan-code">Code</Label>
-            <Input id="plan-code" value={code} onChange={e => setCode(e.target.value)}
+            <Input id="plan-code" value={code} onChange={e => { setCode(e.target.value); setErrors(x => ({ ...x, code: undefined })) }}
+              aria-invalid={errors.code ? true : undefined}
               placeholder="pro" maxLength={100} className="mt-1 font-mono" />
-            <p className="text-xs text-muted-foreground mt-1">Unique identifier used in API calls</p>
+            {errors.code
+              ? <p className="text-xs text-destructive mt-1">{errors.code}</p>
+              : <p className="text-xs text-muted-foreground mt-1">Unique identifier used in API calls</p>}
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -453,11 +469,14 @@ function CreatePlanDialog({ onClose, onCreated }: { onClose: () => void; onCreat
           </div>
           <div>
             <Label>Base Price ({getCurrencySymbol(planCurrency)})</Label>
-            <Input type="number" step="0.01" min={0} max={999999.99} value={basePrice}
-              onChange={e => setBasePrice(e.target.value)} placeholder="49.00" className="mt-1" />
-            <p className="text-xs text-muted-foreground mt-1">Fixed {interval} charge before usage fees</p>
+            <Input type="text" inputMode="decimal" value={basePrice}
+              aria-invalid={errors.basePrice ? true : undefined}
+              onChange={e => { setBasePrice(e.target.value); setErrors(x => ({ ...x, basePrice: undefined })) }} placeholder="49.00" className="mt-1" />
+            {errors.basePrice
+              ? <p className="text-xs text-destructive mt-1">{errors.basePrice}</p>
+              : <p className="text-xs text-muted-foreground mt-1">Fixed {interval} charge before usage fees. 0 for no base fee.</p>}
           </div>
-          {baseCents > 0 && (
+          {baseCents !== null && baseCents > 0 && (
             <div>
               <Label>Base fee billed</Label>
               <Select items={BILL_TIMING_OPTIONS} value={billTiming} onValueChange={(v) => setBillTiming((v ?? 'in_arrears') as 'in_arrears' | 'in_advance')}>

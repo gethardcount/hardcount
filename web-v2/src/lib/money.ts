@@ -61,15 +61,6 @@ export function formatCompactCents(cents: number, currency: string): string {
   return `${sign}${symbol}${Math.round(abs / 100)}`
 }
 
-// amountInputToCents turns what an operator typed in an amount field into the
-// cents a form submits. A confirm step that restates the amount must use this
-// same conversion, so it never shows a figure different from the one sent.
-export function amountInputToCents(input: string): number {
-  const n = parseFloat(input || '0')
-  if (!Number.isFinite(n)) return 0
-  return Math.round(n * 100)
-}
-
 export interface CurrencyAmount { currency: string; amount_cents: number }
 
 // sumByCurrency adds amounts per currency, never across: one entry per

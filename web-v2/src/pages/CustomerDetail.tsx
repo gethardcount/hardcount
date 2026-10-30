@@ -8,7 +8,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { authApi } from '@/lib/auth'
 import { useAuth } from '@/contexts/AuthContext'
 import { finalizeConfirmLines } from '@/lib/invoiceNotice'
-import { dollarsToWholeCents } from '@/lib/priceInput'
+import { dollarsToWholeCents, wholeUnits } from '@/lib/priceInput'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -1801,10 +1801,10 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
 
   const subtotalCents = useMemo(() => {
     return lines.reduce((acc, l) => {
-      const q = Number(l.quantity)
+      const q = wholeUnits(l.quantity)
       const u = dollarsToWholeCents(l.unitAmount)
-      if (!Number.isFinite(q) || q <= 0 || u === null) return acc
-      return acc + Math.round(q) * u
+      if (q === null || u === null) return acc
+      return acc + q * u
     }, 0)
   }, [lines])
 
@@ -1837,8 +1837,9 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
       const errs: { description?: string; quantity?: string; unitAmount?: string; commit?: string } = {}
       const desc = l.description.trim()
       if (!desc) errs.description = 'Description is required'
-      const qty = Number(l.quantity)
-      if (!Number.isFinite(qty) || !Number.isInteger(qty) || qty <= 0) {
+      // Digits only: Number("1e3") is a whole number too.
+      const qty = wholeUnits(l.quantity)
+      if (qty === null) {
         errs.quantity = 'Whole number greater than 0'
       }
       const unit = dollarsToWholeCents(l.unitAmount)
@@ -1873,14 +1874,14 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
           }
         }
       }
-      if (Object.keys(errs).length > 0) {
+      if (Object.keys(errs).length > 0 || qty === null || unit === null) {
         lineErrors[i] = errs
       } else {
         cleaned.push({
           description: desc,
           line_type: l.line_type || 'add_on',
           quantity: qty,
-          unit_amount_cents: unit ?? 0,
+          unit_amount_cents: unit,
           ...(commitGranted !== undefined ? { commit_granted_cents: commitGranted } : {}),
           ...(commitExpires !== undefined ? { commit_expires_at: commitExpires } : {}),
         })
@@ -2084,11 +2085,9 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
               <div className="divide-y divide-border">
                 {lines.map((line, idx) => {
                   const lineErrs = errors.lines?.[idx] || {}
-                  const qty = Number(line.quantity)
+                  const qty = wholeUnits(line.quantity)
                   const unit = dollarsToWholeCents(line.unitAmount)
-                  const totalCents = Number.isFinite(qty) && qty > 0 && unit !== null
-                    ? Math.round(qty) * unit
-                    : 0
+                  const totalCents = qty !== null && unit !== null ? qty * unit : 0
                   return (
                     <div key={idx}>
                     <div className="grid grid-cols-2 sm:grid-cols-[minmax(0,1fr)_150px_140px_160px_44px] items-start gap-0">

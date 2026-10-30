@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { api, formatCents, getCurrencySymbol, type CreditNote } from '@/lib/api'
 import { creditNoteCeilings, hasCardPayment } from '@/lib/creditNoteCeilings'
+import { amountInputError, dollarsToWholeCents } from '@/lib/priceInput'
 import { useSingleFlight } from '@/hooks/useSingleFlight'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -48,15 +49,24 @@ export function IssueCreditDialog({ invoice, existingCreditNotes, onClose, onCre
   const [submitError, setSubmitError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
-  const parseDollarsToCents = (s: string): number => {
-    const n = parseFloat(s || '0')
-    if (!isFinite(n)) return 0
-    return Math.round(n * 100)
-  }
-  const amountCents = parseDollarsToCents(amount)
-  const refundCents = parseDollarsToCents(refund)
-  const creditCents = parseDollarsToCents(credit)
-  const outOfBandCents = parseDollarsToCents(outOfBand)
+  // Each box is read exactly (dollarsToWholeCents) or refused under it:
+  // parseFloat read "9,50" as 9 and rounded "10.005" to 10.01. A blank
+  // channel box is 0, since the three channels must add up to the total
+  // and the sum is shown as they are typed.
+  const channelCents = (s: string): number | null => s.trim() === '' ? 0 : dollarsToWholeCents(s)
+  const amountParsed = dollarsToWholeCents(amount)
+  const refundParsed = channelCents(refund)
+  const creditParsed = channelCents(credit)
+  const outOfBandParsed = channelCents(outOfBand)
+  const amountInputErr = amount.trim() !== '' && amountParsed === null ? amountInputError(amount, '25.00', true) : null
+  const channelErr = (s: string, parsed: number | null) => parsed === null ? amountInputError(s, '25.00', true) : null
+  const refundErr = channelErr(refund, refundParsed)
+  const creditErr = channelErr(credit, creditParsed)
+  const outOfBandErr = channelErr(outOfBand, outOfBandParsed)
+  const amountCents = amountParsed ?? 0
+  const refundCents = refundParsed ?? 0
+  const creditCents = creditParsed ?? 0
+  const outOfBandCents = outOfBandParsed ?? 0
   const allocatedCents = refundCents + creditCents + outOfBandCents
 
   // Every ceiling the dialog advertises, derived in one tested place
@@ -96,7 +106,7 @@ export function IssueCreditDialog({ invoice, existingCreditNotes, onClose, onCre
     setRefund(v)
     if (!isPaid) return
     if (!manualCredit && !manualOOB) {
-      const remainder = amountCents - parseDollarsToCents(v) - outOfBandCents
+      const remainder = amountCents - (channelCents(v) ?? 0) - outOfBandCents
       setCredit(remainder >= 0 ? (remainder / 100).toFixed(2) : '0.00')
     }
   }
@@ -108,7 +118,7 @@ export function IssueCreditDialog({ invoice, existingCreditNotes, onClose, onCre
     setOutOfBand(v)
     setManualOOB(true)
     if (!manualCredit) {
-      const remainder = amountCents - refundCents - parseDollarsToCents(v)
+      const remainder = amountCents - refundCents - (channelCents(v) ?? 0)
       setCredit(remainder >= 0 ? (remainder / 100).toFixed(2) : '0.00')
     }
   }
@@ -117,10 +127,11 @@ export function IssueCreditDialog({ invoice, existingCreditNotes, onClose, onCre
   const allocationMatches = isPaid ? allocatedCents === amountCents : true
   const refundOverCap = refundCents > cardRefundableCents
   const reasonOk = reason.trim().length > 0
-  const amountOk = amountCents > 0
+  const amountOk = amountParsed !== null && amountParsed > 0
+  const channelsOk = !isPaid || (!refundErr && !creditErr && !outOfBandErr)
   const amountOverCreditable = amountCents > creditableRemainingCents
   const canSubmit =
-    reasonOk && amountOk && allocationMatches && !refundOverCap && !amountOverCreditable && !submitting
+    reasonOk && amountOk && channelsOk && allocationMatches && !refundOverCap && !amountOverCreditable && !submitting
 
   // One Idempotency-Key per dialog open, sent with every submit from it. A
   // retry after a lost answer (a timeout while Stripe is slow) then gets the
@@ -192,13 +203,13 @@ export function IssueCreditDialog({ invoice, existingCreditNotes, onClose, onCre
             </Label>
             <Input
               id="cn-amount"
-              type="number"
-              step="0.01"
-              min={0.01}
-              max={creditableRemainingCents / 100}
+              type="text"
+              inputMode="decimal"
               value={amount}
+              aria-invalid={amountInputErr ? true : undefined}
               onChange={(e) => handleAmountChange(e.target.value)}
             />
+            {amountInputErr && <p className="text-xs text-destructive">{amountInputErr}</p>}
             {amountOverCreditable && (
               <p className="text-xs text-destructive">
                 Credit note cannot exceed {fmt(creditableRemainingCents)} still creditable
@@ -229,14 +240,14 @@ export function IssueCreditDialog({ invoice, existingCreditNotes, onClose, onCre
                 </Label>
                 <Input
                   id="cn-refund"
-                  type="number"
-                  step="0.01"
-                  min={0}
-                  max={refundCeilingCents / 100}
+                  type="text"
+                  inputMode="decimal"
                   value={refund}
+                  aria-invalid={refundErr ? true : undefined}
                   onChange={(e) => handleRefundChange(e.target.value)}
                   disabled={!hasCard}
                 />
+                {refundErr && <p className="text-xs text-destructive">{refundErr}</p>}
                 {!hasCard && (
                   <p className="text-xs text-muted-foreground">
                     This invoice was paid outside Stripe, so there is no card to refund. Use
@@ -276,23 +287,25 @@ export function IssueCreditDialog({ invoice, existingCreditNotes, onClose, onCre
                 <Label htmlFor="cn-credit">Credit balance</Label>
                 <Input
                   id="cn-credit"
-                  type="number"
-                  step="0.01"
-                  min={0}
+                  type="text"
+                  inputMode="decimal"
                   value={credit}
+                  aria-invalid={creditErr ? true : undefined}
                   onChange={(e) => handleCreditChange(e.target.value)}
                 />
+                {creditErr && <p className="text-xs text-destructive">{creditErr}</p>}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="cn-oob">Outside Stripe (cash, ACH, manual)</Label>
                 <Input
                   id="cn-oob"
-                  type="number"
-                  step="0.01"
-                  min={0}
+                  type="text"
+                  inputMode="decimal"
                   value={outOfBand}
+                  aria-invalid={outOfBandErr ? true : undefined}
                   onChange={(e) => handleOOBChange(e.target.value)}
                 />
+                {outOfBandErr && <p className="text-xs text-destructive">{outOfBandErr}</p>}
               </div>
               <div className="flex items-center justify-between pt-2 border-t text-sm">
                 <span className="text-muted-foreground">Allocated</span>

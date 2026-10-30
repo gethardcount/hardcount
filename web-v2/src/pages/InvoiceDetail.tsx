@@ -14,7 +14,7 @@ import { formatCivilPeriod, formatInvoiceDate, formatYMDInTZ, usageFilterEndYMD 
 import { canIssueCreditNote } from '@/lib/creditNoteCeilings'
 import { IssueCreditDialog } from '@/components/IssueCreditDialog'
 import { pollIntervalForInvoice } from '@/lib/invoicePolling'
-import { amountInputToCents } from '@/lib/money'
+import { amountInputError, dollarsToWholeCents, wholeUnits } from '@/lib/priceInput'
 import { collectOutcome, writeOffOutcome } from '@/lib/actionOutcomes'
 import { showOutcome } from '@/lib/outcomeToast'
 import { InvoiceAttention } from '@/components/InvoiceAttention'
@@ -1982,21 +1982,31 @@ function AddLineItemDialog({ invoiceId, currency, onClose, onAdded }: {
   const [unitAmount, setUnitAmount] = useState('')
   const [saving, setSaving] = useState(false)
   const [descriptionError, setDescriptionError] = useState('')
+  const [quantityError, setQuantityError] = useState('')
   const [amountError, setAmountError] = useState('')
+  // Read exactly or refused under the box: parseInt cut "2.7" to 2 and read
+  // a blank quantity as 1, and the price was rounded to cents.
+  const qty = wholeUnits(quantity)
+  const unitCents = dollarsToWholeCents(unitAmount)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setDescriptionError('')
-    setAmountError('')
-    if (!description.trim()) { setDescriptionError('Description is required'); return }
-    if (!unitAmount || parseFloat(unitAmount) <= 0) { setAmountError('Unit amount must be greater than 0'); return }
+    const descErr = description.trim() ? '' : 'Description is required'
+    const qtyErr = qty === null ? 'Enter a whole number, 1 or more.' : ''
+    const amtErr = unitCents === null
+      ? amountInputError(unitAmount, '10.00', true)
+      : unitCents === 0 ? 'Unit amount must be greater than 0' : ''
+    setDescriptionError(descErr)
+    setQuantityError(qtyErr)
+    setAmountError(amtErr)
+    if (descErr || qtyErr || amtErr || qty === null || unitCents === null) return
     setSaving(true)
     try {
       await api.addInvoiceLineItem(invoiceId, {
         description: description.trim(),
         line_type: lineType,
-        quantity: parseInt(quantity) || 1,
-        unit_amount_cents: amountInputToCents(unitAmount),
+        quantity: qty,
+        unit_amount_cents: unitCents,
       })
       onAdded()
     } catch (err) {
@@ -2037,19 +2047,24 @@ function AddLineItemDialog({ invoiceId, currency, onClose, onAdded }: {
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
               <Label htmlFor="quantity">Quantity</Label>
-              <Input id="quantity" type="number" min={1} value={quantity} onChange={e => setQuantity(e.target.value)} />
+              <Input id="quantity" type="number" min={1} step={1} value={quantity}
+                aria-invalid={quantityError ? true : undefined}
+                onChange={e => { setQuantity(e.target.value); setQuantityError('') }} />
+              {quantityError && <p className="text-xs text-destructive">{quantityError}</p>}
             </div>
             <div className="space-y-2">
               <Label htmlFor="unitAmount">Unit price ({getCurrencySymbol(currency)})</Label>
-              <Input id="unitAmount" type="number" step="0.01" min={0.01} value={unitAmount} onChange={e => { setUnitAmount(e.target.value); setAmountError('') }} placeholder="10.00" />
+              <Input id="unitAmount" type="text" inputMode="decimal" value={unitAmount}
+                aria-invalid={amountError ? true : undefined}
+                onChange={e => { setUnitAmount(e.target.value); setAmountError('') }} placeholder="10.00" />
               {amountError && <p className="text-xs text-destructive">{amountError}</p>}
             </div>
           </div>
-          {unitAmount && quantity && (
+          {qty !== null && unitCents !== null && (
             <p className="text-sm text-muted-foreground">
               {/* The same integer cents the submit sends, so the preview never
                   drifts from the line the invoice gets. */}
-              Total: {formatCents((parseInt(quantity) || 1) * amountInputToCents(unitAmount), currency)}
+              Total: {formatCents(qty * unitCents, currency)}
             </p>
           )}
           <DialogFooter>

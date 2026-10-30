@@ -167,7 +167,7 @@ test('create a meter and a plan, then price the meter on the plan; the change ap
   await field(planDialog, 'Plan Name').getByRole('textbox').fill(planName)
   await planDialog.getByLabel('Code', { exact: true }).fill(planCode)
   await expect(planDialog.getByText('Base fee billed', { exact: true })).toBeHidden()
-  await field(planDialog, /^Base Price/).getByRole('spinbutton').fill('29.00')
+  await field(planDialog, /^Base Price/).getByRole('textbox').fill('29.00')
   await expect(planDialog.getByText('Base fee billed', { exact: true })).toBeVisible()
   const creatingPlan = apiCall(page, 'POST', /\/plans$/)
   await planDialog.getByRole('button', { name: 'Create plan' }).click()
@@ -260,7 +260,7 @@ test('a used plan billed in advance keeps a base fee above 0, and the Edit plan 
   await expect(timing).toHaveText(/^At start of period/)
   await expect(timing).toBeDisabled()
   await expect(dialog.getByText('Monthly recurring charge, above 0.', { exact: true })).toBeVisible()
-  await field(dialog, /^Base Price/).getByRole('spinbutton').fill('0')
+  await field(dialog, /^Base Price/).getByRole('textbox').fill('0')
   await expect(dialog.getByText('This plan bills its base fee at the start of each period, so the fee must be above 0. To charge no base fee, create a new plan.', { exact: true })).toBeVisible()
   await expect(timing).toHaveText(/^At start of period/)
   await expect(dialog.getByRole('button', { name: 'Save' })).toBeDisabled()
@@ -312,6 +312,77 @@ test('the price form saves a graduated price with an open last tier, and a packa
   expect([pkg.dimension_match, pkg.mode, pkg.package_size, pkg.package_amount_cents]).toEqual([{ tier: 'b' }, 'package', 1000, '0.2'])
   await expect(card(page, 'Usage prices (2)').getByTestId('plan-price-row').filter({ hasText: 'tier=b' })).toHaveText(
     `${meter.name}${meter.event_name}tier=b$0.002 per 1,000 unit`)
+})
+
+// The forms used to change what was typed and save it with a success toast:
+// a package of 0 units saved as 1, a negative base fee went to the server,
+// and a number box read "9,50" its own way. Two labels with one name saved as
+// one. Each is now refused under its box, and nothing is sent.
+test('the price and plan forms refuse an amount they cannot read, under its box, and send nothing', async ({ page }) => {
+  const id = uniq()
+  const meter = await api<Meter>('POST', '/meters', { event_name: `e2e_strict_${id}`, name: `E2E Strict ${id}`, unit: 'unit', aggregation: 'sum' })
+  const plan = await api<PlanDetail>('POST', '/plans', { code: `e2e-strict-${id}`, name: `E2E Strict plan ${id}`, currency: 'USD', billing_interval: 'monthly', base_amount_cents: 1000, base_bill_timing: 'in_arrears' })
+  const writes: string[] = []
+  page.on('request', r => {
+    if (['POST', 'PATCH'].includes(r.method()) && /\/v1\/plans(\/|$)/.test(new URL(r.url()).pathname)) writes.push(`${r.method()} ${new URL(r.url()).pathname}`)
+  })
+
+  await page.goto(`/plans/${plan.id}`)
+  const prices = page.getByRole('main').locator('[data-slot="card"]').filter({ has: page.getByText(/^Usage prices \(\d+\)$/) })
+  await prices.getByRole('button', { name: 'Add price' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Add price' })
+  await dialog.getByRole('button', { name: 'Select a meter…' }).click()
+  await pick(page, meter.name, new RegExp(`^${escapeRegExp(meter.name)} \\(`))
+
+  // "9,50" is not read as 9.50, 950 or nothing: the box says why.
+  await dialog.getByLabel(/^Price per unit/).fill('9,50')
+  // Two labels with one name: the second is refused, not merged into one.
+  for (const [i, v] of ['gpt-4o', 'gpt-4o-mini'].entries()) {
+    await dialog.getByRole('button', { name: 'Add label' }).click()
+    await dialog.getByLabel(`Label ${i + 1} key`).fill('model')
+    await dialog.getByLabel(`Label ${i + 1} value`).fill(v)
+  }
+  await dialog.getByRole('button', { name: 'Add price' }).click()
+  await expect(dialog.getByText('Use a point for decimals, not a comma: for example 0.01.', { exact: true })).toBeVisible()
+  await expect(dialog.getByLabel(/^Price per unit/)).toHaveAttribute('aria-invalid', 'true')
+  await expect(dialog.getByText('"model" is already label 1. A price matches each label name once.', { exact: true })).toBeVisible()
+  await expect(dialog.getByLabel('Label 2 key')).toHaveAttribute('aria-invalid', 'true')
+  await dialog.getByRole('button', { name: 'Remove label 2' }).click()
+
+  // A package of 0 units is refused, not saved as 1.
+  await dialog.getByRole('combobox', { name: 'Pricing model' }).click()
+  await page.getByRole('option', { name: 'Per package' }).click()
+  await dialog.getByLabel('Units per package').fill('0')
+  await dialog.getByLabel(/^Price per package/).fill('10.00')
+  await dialog.getByRole('button', { name: 'Add price' }).click()
+  await expect(dialog.getByText('Enter a whole number greater than 0, for example 100.', { exact: true })).toBeVisible()
+  await expect(dialog.getByLabel('Units per package')).toHaveAttribute('aria-invalid', 'true')
+  await dialog.getByRole('button', { name: 'Cancel' }).click()
+  await expect(dialog).toBeHidden()
+
+  // A negative base fee is refused under the box, and Save waits for a fix.
+  await page.getByRole('button', { name: 'Edit', exact: true }).click()
+  const edit = page.getByRole('dialog', { name: 'Edit plan' })
+  await field(edit, /^Base Price/).getByRole('textbox').fill('-5')
+  await expect(edit.getByText("Enter 0 or more. An amount can't be negative.", { exact: true })).toBeVisible()
+  await expect(edit.getByRole('button', { name: 'Save' })).toBeDisabled()
+  await edit.getByRole('button', { name: 'Cancel' }).click()
+
+  // A new plan with no name and "9,50" as its fee: both refused on their boxes.
+  await page.goto('/pricing')
+  await page.getByRole('button', { name: 'Add Plan' }).click()
+  const create = page.getByRole('dialog', { name: 'Create plan' })
+  await create.getByLabel('Code', { exact: true }).fill(`e2e-strict-new-${id}`)
+  await field(create, /^Base Price/).getByRole('textbox').fill('9,50')
+  await create.getByRole('button', { name: 'Create plan' }).click()
+  await expect(create.getByText('Enter a plan name.', { exact: true })).toBeVisible()
+  await expect(create.getByText('Use a point for decimals, not a comma: for example 49.00.', { exact: true })).toBeVisible()
+  await create.getByRole('button', { name: 'Cancel' }).click()
+
+  // Nothing reached the server, and the plan is as it was.
+  expect(writes).toEqual([])
+  const stored = await api<PlanDetail>('GET', `/plans/${plan.id}`)
+  expect([stored.base_amount_cents, stored.prices]).toEqual([1000, []])
 })
 
 // A meter's aggregation is fixed once the meter has usage events (ADR-130

@@ -8,6 +8,7 @@ import { Loader2, Plus, Trash2 } from 'lucide-react'
 import { api, type Customer, type Plan, type Subscription } from '@/lib/api'
 import { applyApiError } from '@/lib/formErrors'
 import { hasUsableCard } from '@/lib/paymentReadiness'
+import { wholeNumberIn, wholeUnits } from '@/lib/priceInput'
 import { toast } from 'sonner'
 
 import { CustomerCombobox } from '@/components/CustomerCombobox'
@@ -38,20 +39,26 @@ import {
 // has been folded in. Industry convention (Stripe / Chargebee) is one
 // create-subscription form across entry points, with the parent ID
 // pre-filled.
+// The longest trial the server takes (subscription.maxTrialDays).
+const MAX_TRIAL_DAYS = 730
+
 const schema = z.object({
   code: z.string().min(1, 'Code is required').regex(/^[a-zA-Z0-9_-]+$/, 'Only letters, numbers, hyphens, and underscores'),
   display_name: z.string().min(1, 'Display name is required'),
   customer_id: z.string().min(1, 'Customer is required'),
   items: z.array(z.object({
     plan_id: z.string().min(1, 'Plan is required'),
-    quantity: z.string().refine(v => v === '' || (Number.isInteger(Number(v)) && Number(v) >= 1), 'Quantity must be a positive integer'),
+    // Digits only: Number("1e3") is a whole number, and parseInt then sent 1.
+    quantity: z.string().refine(v => wholeUnits(v) !== null, 'Quantity must be a whole number, 1 or more'),
   })).min(1, 'At least one item is required').refine(
     (items) => new Set(items.map(i => i.plan_id)).size === items.length,
     { message: 'Each plan can only appear once per subscription' },
   ),
   draft: z.boolean(),
   billing_time: z.string(),
-  trial_days: z.string(),
+  // Blank is no trial. parseInt cut "2.7" to 2 and sent "-5" as -5.
+  trial_days: z.string().refine(v => v.trim() === '' || wholeNumberIn(v, 0, MAX_TRIAL_DAYS) !== null,
+    `Trial days must be a whole number from 0 to ${MAX_TRIAL_DAYS}`),
 })
 
 type FormData = z.infer<typeof schema>
@@ -111,12 +118,12 @@ export function CreateSubscriptionDialog({
       customer_id: data.customer_id,
       items: data.items.map(it => ({
         plan_id: it.plan_id,
-        ...(it.quantity ? { quantity: parseInt(it.quantity) } : {}),
+        quantity: wholeUnits(it.quantity)!,
       })),
       // A subscription starts now unless it is created as a draft.
       ...(data.draft ? { status: 'draft' as const } : {}),
       billing_time: data.billing_time,
-      ...(data.trial_days ? { trial_days: parseInt(data.trial_days) } : {}),
+      ...(data.trial_days.trim() ? { trial_days: wholeNumberIn(data.trial_days, 0, MAX_TRIAL_DAYS)! } : {}),
     }),
     onSuccess: (created, vars) => {
       onCreated(created)
@@ -360,7 +367,7 @@ export function CreateSubscriptionDialog({
                   <FormItem>
                     <FormLabel>Trial period</FormLabel>
                     <FormControl>
-                      <Input type="number" min={0} max={730} placeholder="0 days" disabled={watchedDraft} {...field} />
+                      <Input type="number" min={0} max={MAX_TRIAL_DAYS} step={1} placeholder="0 days" disabled={watchedDraft} {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>

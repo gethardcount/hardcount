@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { Trash2 } from 'lucide-react'
 import { getCurrencySymbol, type PriceShape } from '@/lib/api'
-import { dollarsToRateCents, wholeUnits } from '@/lib/priceInput'
 import { PRICING_MODES, pricingModeLabel, shiftDecimal } from '@/lib/priceDisplay'
+import type { PriceShapeInput, ShapeError, ShapeField } from '@/lib/priceShapeForm'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -11,8 +11,9 @@ import {
 
 // The price-shape form, shared by a plan's prices and a customer's price
 // overrides: a mode and the fields that mode uses. Rates are typed in
-// currency units and sent as decimal cents (dollarsToRateCents), so sub-cent
-// rates stay exact.
+// currency units and sent as decimal cents (lib/priceShapeForm), so sub-cent
+// rates stay exact. Rate boxes are text boxes, not number boxes: a number
+// box hands the page "" for "9,50", so the form could not say what was wrong.
 
 const MODE_OPTIONS = PRICING_MODES.map(value => ({ value, label: pricingModeLabel(value) }))
 
@@ -24,17 +25,16 @@ const MODE_HELP: Record<string, string> = {
 
 interface TierRow { upTo: string; price: string }
 
-export interface PriceShapeState {
-  mode: string
+export interface PriceShapeState extends PriceShapeInput {
   setMode: (m: string) => void
-  unitAmount: string
   setUnitAmount: (v: string) => void
-  tiers: TierRow[]
   setTiers: React.Dispatch<React.SetStateAction<TierRow[]>>
-  packageSize: string
   setPackageSize: (v: string) => void
-  packageAmount: string
   setPackageAmount: (v: string) => void
+  // The refusal buildPriceShape gave on the last save, shown under its box
+  // until the form changes.
+  error: ShapeError | null
+  setError: (e: ShapeError | null) => void
 }
 
 // usePriceShape holds the form's state, seeded from an existing shape when
@@ -42,51 +42,37 @@ export interface PriceShapeState {
 // blank: an example in a box is saved as a price if nobody changes it, so
 // examples go in placeholders only.
 export function usePriceShape(prefill?: PriceShape): PriceShapeState {
-  const [mode, setMode] = useState(prefill?.mode ?? 'per_unit')
-  const [unitAmount, setUnitAmount] = useState(prefill?.unit_amount_cents ? shiftDecimal(prefill.unit_amount_cents, -2) : '')
-  const [tiers, setTiers] = useState<TierRow[]>(
+  const [mode, setModeRaw] = useState(prefill?.mode ?? 'per_unit')
+  const [unitAmount, setUnitAmountRaw] = useState(prefill?.unit_amount_cents ? shiftDecimal(prefill.unit_amount_cents, -2) : '')
+  const [tiers, setTiersRaw] = useState<TierRow[]>(
     prefill?.tiers?.length
       ? prefill.tiers.map(t => ({ upTo: t.up_to != null ? String(t.up_to) : '', price: shiftDecimal(t.unit_amount_cents || '0', -2) }))
       : [{ upTo: '', price: '' }, { upTo: '', price: '' }],
   )
-  const [packageSize, setPackageSize] = useState(prefill?.package_size ? String(prefill.package_size) : '')
-  const [packageAmount, setPackageAmount] = useState(prefill?.package_amount_cents ? shiftDecimal(prefill.package_amount_cents, -2) : '')
-  return { mode, setMode, unitAmount, setUnitAmount, tiers, setTiers, packageSize, setPackageSize, packageAmount, setPackageAmount }
+  const [packageSize, setPackageSizeRaw] = useState(prefill?.package_size ? String(prefill.package_size) : '')
+  const [packageAmount, setPackageAmountRaw] = useState(prefill?.package_amount_cents ? shiftDecimal(prefill.package_amount_cents, -2) : '')
+  const [error, setError] = useState<ShapeError | null>(null)
+  // Any edit clears the last refusal.
+  const edit = <T,>(set: (v: T) => void) => (v: T) => { setError(null); set(v) }
+  return {
+    mode, setMode: edit(setModeRaw),
+    unitAmount, setUnitAmount: edit(setUnitAmountRaw),
+    tiers, setTiers: edit(setTiersRaw),
+    packageSize, setPackageSize: edit(setPackageSizeRaw),
+    packageAmount, setPackageAmount: edit(setPackageAmountRaw),
+    error, setError,
+  }
 }
 
-// buildPriceShape turns the form into the request's shape, or an error to
-// show. A blank or unreadable rate is refused here: the server accepts 0 as a
-// deliberate free rate, so it cannot catch a rate left empty.
-export function buildPriceShape(f: PriceShapeState): { shape: PriceShape } | { error: string } {
-  if (f.mode === 'per_unit') {
-    const cents = dollarsToRateCents(f.unitAmount)
-    if (cents === null) return { error: 'Price per unit: enter a price as a plain number, for example 0.01. Use 0 for free.' }
-    return { shape: { mode: 'per_unit', unit_amount_cents: cents } }
-  }
-  if (f.mode === 'graduated') {
-    const { tiers } = f
-    const out: { up_to: number | null; unit_amount_cents: string }[] = []
-    let prev = 0
-    for (let i = 0; i < tiers.length; i++) {
-      // The last tier has no upper bound: up_to null.
-      let upTo: number | null = null
-      if (i < tiers.length - 1) {
-        upTo = wholeUnits(tiers[i].upTo)
-        if (upTo === null) return { error: `Tier ${i + 1}: enter how many units the tier goes up to, a whole number greater than 0` }
-        if (upTo <= prev) return { error: `Tier ${i + 1}: "Up to" must be greater than ${prev}` }
-        prev = upTo
-      }
-      const cents = dollarsToRateCents(tiers[i].price)
-      if (cents === null) return { error: `Tier ${i + 1}: enter a price as a plain number, for example 0.01. Use 0 for free.` }
-      out.push({ up_to: upTo, unit_amount_cents: cents })
-    }
-    return { shape: { mode: 'graduated', tiers: out } }
-  }
-  const size = wholeUnits(f.packageSize)
-  if (size === null) return { error: 'Units per package: enter a whole number greater than 0, for example 100.' }
-  const cents = dollarsToRateCents(f.packageAmount)
-  if (cents === null) return { error: 'Price per package: enter a price as a plain number, for example 10.00. Use 0 for free.' }
-  return { shape: { mode: 'package', package_size: size, package_amount_cents: cents } }
+// FieldError is the refusal line under one box, when the refusal is for it.
+function FieldError({ f, field, tier }: { f: PriceShapeState; field: ShapeField; tier?: number }) {
+  const e = f.error
+  if (!e || e.field !== field || e.tier !== tier) return null
+  return <p className="text-xs text-destructive mt-1">{e.message}</p>
+}
+
+function invalid(f: PriceShapeState, field: ShapeField, tier?: number): true | undefined {
+  return f.error?.field === field && f.error.tier === tier ? true : undefined
 }
 
 // PriceShapeFields renders the mode select and the mode's fields. `currency`
@@ -114,8 +100,10 @@ export function PriceShapeFields({ f, currency, hint, idPrefix = 'price' }: { f:
       {f.mode === 'per_unit' && (
         <div>
           <Label htmlFor={`${idPrefix}-unit-price`}>Price per unit ({sym})</Label>
-          <Input id={`${idPrefix}-unit-price`} type="number" step="any" min={0} value={f.unitAmount}
+          <Input id={`${idPrefix}-unit-price`} type="text" inputMode="decimal" value={f.unitAmount}
+            aria-invalid={invalid(f, 'unitAmount')}
             onChange={e => f.setUnitAmount(e.target.value)} placeholder="0.01" className="mt-1" />
+          <FieldError f={f} field="unitAmount" />
           <p className="text-xs text-muted-foreground mt-1">{hint ?? `e.g. ${sym}0.01 per API call. Sub-cent rates allowed.`}</p>
         </div>
       )}
@@ -130,22 +118,26 @@ export function PriceShapeFields({ f, currency, hint, idPrefix = 'price' }: { f:
               <span />
             </div>
             {f.tiers.map((tier, idx) => (
-              <div key={idx} className="grid grid-cols-[1fr_1fr_36px] gap-0 px-3 py-2 border-b border-border last:border-b-0 items-center">
+              <div key={idx} className="grid grid-cols-[1fr_1fr_36px] gap-0 px-3 py-2 border-b border-border last:border-b-0 items-start">
                 <div className="pr-2">
                   {/* The last tier has no upper limit, so its box takes no number. */}
-                  <Input type="number" min={0} value={idx === f.tiers.length - 1 ? '' : tier.upTo}
+                  <Input type="number" min={1} step={1} value={idx === f.tiers.length - 1 ? '' : tier.upTo}
                     aria-label={`Tier ${idx + 1} up to`}
+                    aria-invalid={invalid(f, 'tierUpTo', idx)}
                     disabled={idx === f.tiers.length - 1}
                     onChange={e => f.setTiers(t => t.map((r, i) => i === idx ? { ...r, upTo: e.target.value } : r))}
                     placeholder={idx === f.tiers.length - 1 ? 'No limit' : '1000'} />
+                  <FieldError f={f} field="tierUpTo" tier={idx} />
                 </div>
                 <div className="pr-2">
-                  <Input type="number" step="any" min={0} value={tier.price}
+                  <Input type="text" inputMode="decimal" value={tier.price}
                     aria-label={`Tier ${idx + 1} price`}
+                    aria-invalid={invalid(f, 'tierPrice', idx)}
                     onChange={e => f.setTiers(t => t.map((r, i) => i === idx ? { ...r, price: e.target.value } : r))}
                     placeholder={idx === 0 ? '0.10' : '0.05'} />
+                  <FieldError f={f} field="tierPrice" tier={idx} />
                 </div>
-                <div className="flex justify-center">
+                <div className="flex justify-center pt-2.5">
                   {f.tiers.length > 1 && (
                     <button type="button" onClick={() => f.setTiers(t => t.filter((_, i) => i !== idx))}
                       aria-label={`Remove tier ${idx + 1}`}
@@ -169,13 +161,17 @@ export function PriceShapeFields({ f, currency, hint, idPrefix = 'price' }: { f:
         <div className="grid grid-cols-2 gap-3">
           <div>
             <Label htmlFor={`${idPrefix}-pkg-size`}>Units per package</Label>
-            <Input id={`${idPrefix}-pkg-size`} type="number" min={1} value={f.packageSize}
+            <Input id={`${idPrefix}-pkg-size`} type="number" min={1} step={1} value={f.packageSize}
+              aria-invalid={invalid(f, 'packageSize')}
               onChange={e => f.setPackageSize(e.target.value)} placeholder="100" className="mt-1" />
+            <FieldError f={f} field="packageSize" />
           </div>
           <div>
             <Label htmlFor={`${idPrefix}-pkg-price`}>Price per package ({sym})</Label>
-            <Input id={`${idPrefix}-pkg-price`} type="number" step="any" min={0} value={f.packageAmount}
+            <Input id={`${idPrefix}-pkg-price`} type="text" inputMode="decimal" value={f.packageAmount}
+              aria-invalid={invalid(f, 'packageAmount')}
               onChange={e => f.setPackageAmount(e.target.value)} placeholder="10.00" className="mt-1" />
+            <FieldError f={f} field="packageAmount" />
           </div>
         </div>
       )}

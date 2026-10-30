@@ -9,6 +9,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, api, setActiveCurrency, setTenantTimezone, formatTaxRate, type StripeProviderCredentials } from '@/lib/api'
 import { applyApiError, showApiError } from '@/lib/formErrors'
 import { taxExampleAmounts } from '@/lib/taxExample'
+import { dollarsToWholeCents, percentRate } from '@/lib/priceInput'
 import { SETTINGS_FIELDS, firstInvalidSettingsField, invalidSettingsToast } from '@/lib/settingsFields'
 import { Layout } from '@/components/Layout'
 import { LoadError } from '@/components/LoadError'
@@ -89,9 +90,12 @@ const settingsSchema = z.object({
     .min(0, 'Enter a number of days from 0 to 365')
     .max(365, 'Enter a number of days from 0 to 365'),
   tax_provider: z.enum(['none', 'manual', 'stripe_tax']),
-  tax_rate: z.number({ error: 'Enter a rate from 0 to 100' })
-    .min(0, 'Enter a rate from 0 to 100')
-    .max(100, 'Enter a rate from 0 to 100'),
+  // The box's text is read by percentRate; a text it cannot read arrives
+  // here as NaN, which z.number() refuses. parseFloat read a blank box as 0
+  // (tax off) and "8,5" as 8.
+  tax_rate: z.number({ error: 'Enter a rate from 0 to 100, up to 4 decimal places' })
+    .min(0, 'Enter a rate from 0 to 100, up to 4 decimal places')
+    .max(100, 'Enter a rate from 0 to 100, up to 4 decimal places'),
   tax_name: z.string().max(50, 'Must be at most 50 characters'),
   tax_inclusive: z.boolean(),
   default_product_tax_code: z.string()
@@ -101,7 +105,7 @@ const settingsSchema = z.object({
   // Dollar amount (string-bound input); '' = low-balance alerts off.
   credit_balance_low_threshold: z.string()
     .regex(/^\d*(\.\d{1,2})?$/, 'Dollar amount like 50 or 50.00')
-    .refine(v => parseFloat(v) > 0, 'Enter an amount above 0, or leave it blank to turn alerts off')
+    .refine(v => (dollarsToWholeCents(v) ?? 0) > 0, 'Enter an amount above 0, or leave it blank to turn alerts off')
     .or(z.literal('')),
 })
 
@@ -188,6 +192,9 @@ export default function SettingsPage() {
 
   const form = watch()
   const hasChanges = isDirty
+  // What is typed in the tax rate box, while it is being edited; null shows
+  // the form's rate. The form holds the rate the text reads as, or NaN.
+  const [taxRateText, setTaxRateText] = useState<string | null>(null)
 
   const loadSettings = () => {
     setLoading(true); setError(null)
@@ -215,6 +222,7 @@ export default function SettingsPage() {
           : '',
       }
       reset(f)
+      setTaxRateText(null)
       setNextInvoiceSeq(s.next_invoice_sequence)
       setLoading(false)
     }).catch(err => { setError(err ?? new Error('Failed to load settings')); setLoading(false) })
@@ -254,9 +262,11 @@ export default function SettingsPage() {
       const { credit_balance_low_threshold, ...rest } = data
       const updated = await api.updateSettings({
         ...rest,
+        // The schema took only an amount with at most two decimals, so
+        // this reads it exactly (string math, no float rounding).
         credit_balance_low_threshold_cents: credit_balance_low_threshold === ''
           ? null
-          : Math.round(parseFloat(credit_balance_low_threshold) * 100),
+          : dollarsToWholeCents(credit_balance_low_threshold),
       })
       const f = {
         company_name: updated.company_name || '', company_email: updated.company_email || '',
@@ -281,6 +291,7 @@ export default function SettingsPage() {
           : '',
       }
       reset(f)
+      setTaxRateText(null)
       setNextInvoiceSeq(updated.next_invoice_sequence)
       if (updated.default_currency) setActiveCurrency(updated.default_currency)
       // Synchronously reseed the module-scoped tenant TZ so the very
@@ -797,12 +808,16 @@ export default function SettingsPage() {
                         )}
                       </div>
                       <div>
-                        <Label>Tax rate</Label>
+                        <Label htmlFor="settings-tax-rate">Tax rate</Label>
                         <div className="relative mt-1">
-                          <Input type="number" step="0.0001" min={0} max={100}
-                            value={form.tax_rate}
+                          <Input id="settings-tax-rate" type="text" inputMode="decimal"
+                            value={taxRateText ?? String(form.tax_rate)}
+                            aria-invalid={formErrors.tax_rate ? true : undefined}
                             // shouldValidate: say "0 to 100" while typing, not only after Save.
-                            onChange={e => setValue('tax_rate', parseFloat(e.target.value || '0'), { shouldDirty: true, shouldValidate: true })}
+                            onChange={e => {
+                              setTaxRateText(e.target.value)
+                              setValue('tax_rate', percentRate(e.target.value) ?? NaN, { shouldDirty: true, shouldValidate: true })
+                            }}
                             className={cn('pr-8', formErrors.tax_rate && 'border-destructive')} placeholder="0" />
                           <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none">%</span>
                         </div>
@@ -814,7 +829,7 @@ export default function SettingsPage() {
                             <button
                               type="button"
                               className="underline underline-offset-2 hover:text-foreground"
-                              onClick={() => setValue('tax_rate', typicalRate, { shouldDirty: true })}
+                              onClick={() => { setTaxRateText(null); setValue('tax_rate', typicalRate, { shouldDirty: true, shouldValidate: true }) }}
                             >
                               use {typicalRate}%
                             </button>
