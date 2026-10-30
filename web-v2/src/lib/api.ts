@@ -996,6 +996,11 @@ export interface Invoice {
   due_at?: string
   voided_at?: string
   paid_at?: string
+  // invoice_emailed_at: Hardcount emailed the customer this invoice itself,
+  // because Stripe isn't connected in its mode and the customer has no card
+  // (ADR-060 amendment 2026-10-30). Set by the finalize, so the finalize
+  // response carries it. The operator's Email invoice does not set it.
+  invoice_emailed_at?: string
   // public_token is populated at finalize. Drafts and pre-addendum
   // finalized invoices (migrated-in but never rotated) carry empty.
   public_token?: string

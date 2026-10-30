@@ -351,9 +351,10 @@ type Invoice struct {
 	// auto-charge collector sends when Stripe is not connected for the
 	// invoice's mode (ADR-060 amendment 2026-10-30): stamped after the email
 	// is queued, checked so the next visit sends nothing more. An operator's
-	// "Email invoice" does not stamp it. Not in the API: the invoice's
-	// activity shows the email.
-	InvoiceEmailedAt *time.Time `json:"-"`
+	// "Email invoice" does not stamp it.
+	// The finalize response carries it, so "Save & send" can skip its own
+	// send when the collector already emailed the invoice.
+	InvoiceEmailedAt *time.Time `json:"invoice_emailed_at,omitempty"`
 	// BelowMinimumAt is when Stripe last refused to charge this invoice
 	// because its amount is below Stripe's minimum charge (ErrBelowMinimumCharge).
 	// The charge path stamps it with payment_status 'pending' and the

@@ -176,6 +176,13 @@ export interface Invoice {
      */
   no_pm_notified_at?: string;
   /**
+     * When Hardcount itself emailed the customer this invoice, because
+     * Stripe is not connected for the invoice's mode and the customer
+     * has no card. The email is sent once. An invoice you email with
+     * `POST /v1/invoices/{id}/send` does not set it.
+     */
+  invoice_emailed_at?: string;
+  /**
      * Stripe's PaymentIntent status the last time Hardcount checked it,
      * word for word. For information only: `payment_status` is the
      * invoice's payment state. Absent until Hardcount has checked. An

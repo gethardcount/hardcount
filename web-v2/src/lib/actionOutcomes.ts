@@ -79,6 +79,19 @@ export type NewInvoiceResult =
   | { kind: 'no_email' }
   | { kind: 'email_not_configured' }
 
+// emailStepAfterFinalize: what Save & send still has to do once the invoice
+// is finalized. Without Stripe, finalizing a card-less customer's invoice
+// already emails them the invoice (invoice_emailed_at, ADR-060 amendment
+// 2026-10-30), and sending it again would email it twice. Otherwise it is
+// sent to the customer's address, or there is none to send to.
+export function emailStepAfterFinalize(
+  finalized: { invoice_emailed_at?: string },
+  recipient: string | undefined,
+): 'already_emailed' | 'send' | 'no_email' {
+  if (finalized.invoice_emailed_at) return 'already_emailed'
+  return recipient ? 'send' : 'no_email'
+}
+
 export function newInvoiceOutcome(invoiceNumber: string, result: NewInvoiceResult): Outcome {
   switch (result.kind) {
     case 'sent':

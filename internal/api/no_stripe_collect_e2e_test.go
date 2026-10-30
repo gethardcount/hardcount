@@ -27,6 +27,8 @@ type noStripeRig struct {
 	key      string
 	clockID  string
 	frozen   time.Time
+	// lastFinalize is the body of the last finalize response.
+	lastFinalize map[string]any
 }
 
 func newNoStripeRig(t *testing.T, name string) *noStripeRig {
@@ -77,7 +79,7 @@ func (r *noStripeRig) finalizedInvoice(name string) string {
 		"customer_id": customerID,
 		"line_items":  []map[string]any{{"description": "Seats " + name, "quantity": 1, "unit_amount_cents": 4900}},
 	}}).want(r.t, 201, name+": create invoice").body, "id")
-	r.call("POST", "/v1/invoices/"+id+"/finalize", flowReq{}).want(r.t, 200, name+": finalize")
+	r.lastFinalize = r.call("POST", "/v1/invoices/"+id+"/finalize", flowReq{}).want(r.t, 200, name+": finalize").body
 	return id
 }
 
@@ -178,10 +180,16 @@ func TestE2E_NoStripe_EmailsTheInvoiceAndRemindsToPay(t *testing.T) {
 
 	invoiceEmail := queuedEmail{kind: "invoice"}
 	if got := r.emailsOf(inv); !sameEmails(got, invoiceEmail) {
-		t.Fatalf("emails after finalize: %+v, want only the invoice email", got)
+		t.Errorf("emails after finalize: %+v, want only the invoice email", got)
 	}
 	if emailed, linked := r.markers(inv); !emailed || linked {
-		t.Fatalf("invoice_emailed_at set %v, no_pm_notified_at set %v; want the invoice email stamped and no setup link", emailed, linked)
+		t.Errorf("invoice_emailed_at set %v, no_pm_notified_at set %v; want the invoice email stamped and no setup link", emailed, linked)
+	}
+	// The finalize response is read after the collect it runs, so it carries
+	// the stamp: Save & send reads it to skip a second send.
+	if flowStr(r.lastFinalize, "invoice_emailed_at") == "" || flowStr(r.lastFinalize, "no_pm_notified_at") != "" {
+		t.Errorf("finalize response invoice_emailed_at %q, no_pm_notified_at %q; want the first set and the second empty",
+			flowStr(r.lastFinalize, "invoice_emailed_at"), flowStr(r.lastFinalize, "no_pm_notified_at"))
 	}
 	runs := r.runs(inv)
 	if len(runs) != 1 || flowStr(runs[0], "reason") != "no_payment_method" || flowStr(runs[0], "state") != "active" {

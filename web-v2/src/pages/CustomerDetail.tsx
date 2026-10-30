@@ -15,7 +15,7 @@ import { z } from 'zod'
 import { toast } from 'sonner'
 import { api, ApiError, amountsByCurrencyText, formatCents, formatDate, formatDateTime, getCurrencySymbol, type Customer, type BillingProfile, type Invoice, type DunningPolicyWithCount, type Subscription, type CustomerPaymentMethod } from '@/lib/api'
 import { applyApiError, showApiError } from '@/lib/formErrors'
-import { isEmailNotConfigured, newInvoiceOutcome, type NewInvoiceResult } from '@/lib/actionOutcomes'
+import { emailStepAfterFinalize, isEmailNotConfigured, newInvoiceOutcome, type NewInvoiceResult } from '@/lib/actionOutcomes'
 import { showOutcome } from '@/lib/outcomeToast'
 import { billingProfileCard, profileOrAbsent } from '@/lib/billingProfileLoad'
 import { isBeforeCivilToday, startOfDayInTZ, startOfNextDayInTZ } from '@/lib/dates'
@@ -1960,7 +1960,12 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
       if (action === 'send') {
         invoice = await api.finalizeInvoice(invoice.id)
         const recipient = customer.email
-        if (recipient) {
+        // Without Stripe the finalize already emailed the customer the
+        // invoice; sending again would email it twice.
+        const step = emailStepAfterFinalize(invoice, recipient)
+        if (step === 'already_emailed') {
+          result = { kind: 'sent' }
+        } else if (step === 'send' && recipient) {
           try {
             await api.sendInvoiceEmail(invoice.id, recipient)
             result = { kind: 'sent' }

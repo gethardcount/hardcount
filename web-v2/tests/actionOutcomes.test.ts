@@ -7,6 +7,7 @@ import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import {
   collectOutcome,
+  emailStepAfterFinalize,
   isEmailNotConfigured,
   marginCardView,
   newInvoiceOutcome,
@@ -134,4 +135,14 @@ test('margin card: a custom range missing a date asks for it instead of spinning
 test('margin card: loading only while a request can still answer', () => {
   assert.equal(marginCardView({ hasWindow: true, isError: false, hasData: false }), 'loading')
   assert.equal(marginCardView({ hasWindow: true, isError: false, hasData: true }), 'ready')
+})
+
+// Without Stripe, finalizing already emails a card-less customer the invoice
+// (invoice_emailed_at on the finalize response), so Save & send must not send
+// it again: the customer would get it twice.
+test('Save & send: an invoice the finalize already emailed is not sent again', () => {
+  assert.equal(emailStepAfterFinalize({ invoice_emailed_at: '2026-10-30T10:00:00Z' }, 'ap@acme.test'), 'already_emailed')
+  assert.equal(emailStepAfterFinalize({}, 'ap@acme.test'), 'send')
+  assert.equal(emailStepAfterFinalize({}, undefined), 'no_email')
+  assert.equal(emailStepAfterFinalize({}, ''), 'no_email')
 })

@@ -1,5 +1,5 @@
 import { test, expect, type Locator, type Page } from '@playwright/test'
-import { api, usd, usdBalance, uniq } from './fixtures/api'
+import { api, apiListAll, usd, usdBalance, uniq } from './fixtures/api'
 import { billedCustomer, createCustomer, invoicesFor, type Invoice } from './fixtures/seed'
 
 // Invoices through the screen: issue one, settle it, correct it, close it.
@@ -252,6 +252,14 @@ test('a one-off invoice: save a draft from the customer page, add a line, finali
   const sent = (await invoicesFor(customer.id)).find(i => i.id !== draft.invoice.id)
   expect(sent?.status).toBe('finalized')
   expect(outcomeText).toContain(`Invoice ${sent!.invoice_number} `)
+  // Without Stripe (CI connects none) the finalize itself emails this
+  // card-less customer the invoice, so Save & send does not send it again:
+  // the customer gets it once.
+  if (email.smtp_configured && !stripeConnected) {
+    const invoiceEmails = (await apiListAll<{ email_type: string; invoice_number?: string }>(`/customers/${customer.id}/sent-emails`))
+      .filter(e => e.email_type === 'invoice' && e.invoice_number === sent!.invoice_number)
+    expect(invoiceEmails, 'Save & send emails the invoice once').toHaveLength(1)
+  }
   await expect(recentInvoice(page, sent!.invoice_number)).toContainText('Open')
 })
 
