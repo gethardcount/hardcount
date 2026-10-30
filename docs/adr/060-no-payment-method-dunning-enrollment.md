@@ -176,7 +176,15 @@ body, shared by both senders.
 left to carry on: its next retry finds no Stripe, charges nothing, and sends
 the pay-the-invoice reminder. The operator sees the run on the Dunning page.
 
-**Not settled here.** Finalizing with **Save & send** without Stripe emails
-the invoice twice: the collector's email at finalize, then the operator's.
-The final notice (dunning escalation) keeps its **Pay invoice** button,
-which opens the hosted page that says to contact the seller.
+**A card saved before Stripe was disconnected** is not charged either. The
+collector reads the connection before it charges, so such an invoice takes
+the same no-Stripe path: the invoice email once and the dunning run. Before,
+each visit tried the charge, got "Stripe not configured", and skipped it, with
+no email and no run.
+
+**Save & send** reads `invoice_emailed_at` on the finalize response (the API
+returns it). When finalizing already emailed the invoice, the dashboard does
+not send it again, so the customer gets it once.
+
+**Not settled here.** The final notice (dunning escalation) keeps its **Pay
+invoice** button, which opens the hosted page that says to contact the seller.

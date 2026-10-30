@@ -260,7 +260,7 @@ func TestProcessAutoCharge_StopsAtTheNextInvoiceWhenCtxEnds(t *testing.T) {
 	second.ID = "inv_c2"
 	invoices.invoices = append(invoices.invoices, second)
 	e.paymentSetups = &fakePaymentSetups{ready: true, stripeCustomerID: "cus_stripe"}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(postgres.WithLivemode(context.Background(), false))
 	defer cancel()
 	charger := &cancelingCharger{recordingCharger: recordingCharger{store: invoices}, cancel: cancel}
 	e.charger = charger

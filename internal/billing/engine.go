@@ -5126,24 +5126,28 @@ func (e *Engine) processAutoCharge(ctx context.Context, pending []domain.Invoice
 			// frees the hold and the invoice stays queued.
 			errs = append(errs, fmt.Errorf("resolve payment method for invoice %s: %w", inv.ID, err))
 		}
-		if err != nil || stripePMID == "" || stripeCusID == "" {
-			// Genuinely no card: what the customer is asked to do depends on
-			// whether Stripe is connected for the invoice's mode (ADR-060
-			// amendment 2026-10-30). Without it no card can be added online,
-			// so the tenant collects like a send-invoice tenant: the customer
-			// is emailed the invoice, never a setup link. A failed read of the
-			// connection is not "not connected": nothing is sent, no dunning
-			// starts, and the sweep counts the error; the invoice stays
-			// queued, so the next visit reads it again.
-			connected := false
-			if err == nil {
-				var rerr error
-				if connected, rerr = e.stripeConnected(ctx, inv.TenantID); rerr != nil {
-					errs = append(errs, fmt.Errorf("read the Stripe connection for invoice %s: %w", inv.ID, rerr))
-					release()
-					continue
-				}
+		// Whether Stripe is connected for the invoice's mode (ADR-060
+		// amendment 2026-10-30), read before anything is sent or charged. A
+		// failed read is not "not connected": nothing is sent or charged, no
+		// dunning starts, and the sweep counts the error; the invoice stays
+		// queued, so the next visit reads it again.
+		connected := false
+		if err == nil {
+			var rerr error
+			if connected, rerr = e.stripeConnected(ctx, inv.TenantID); rerr != nil {
+				errs = append(errs, fmt.Errorf("read the Stripe connection for invoice %s: %w", inv.ID, rerr))
+				release()
+				continue
 			}
+		}
+		if err != nil || stripePMID == "" || stripeCusID == "" || !connected {
+			// No card, or no Stripe to charge one with. Without Stripe no card
+			// can be added or charged online, so the tenant collects like a
+			// send-invoice tenant: the customer is emailed the invoice, never a
+			// setup link, and dunning starts. That includes a card saved before
+			// Stripe was disconnected: charging it fails as "Stripe not
+			// configured", a skip the sweep would repeat on every visit with
+			// no email and no dunning run.
 			if err == nil && !connected && inv.InvoiceEmailedAt == nil {
 				e.emailInvoiceOnce(ctx, inv)
 			}

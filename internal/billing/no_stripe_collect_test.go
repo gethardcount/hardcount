@@ -229,3 +229,43 @@ func TestCollector_StripeConnected_SetupLinkNoInvoiceEmail(t *testing.T) {
 		t.Fatal("no dunning start, want the no-payment run")
 	}
 }
+
+// A card saved before Stripe was disconnected cannot be charged: the charge
+// would come back "Stripe not configured", a skip the sweep repeated on every
+// visit with no email and no dunning run. Without Stripe the collector takes
+// the no-Stripe path whatever is on file: no charge, the invoice email once,
+// and the dunning run. Mutation: check readiness only for the no-card case
+// (the card is charged and nothing else happens).
+func TestCollector_NoStripe_CardOnFileIsNotCharged(t *testing.T) {
+	h := newNoStripeHarness(t)
+	charger := &recordingCharger{}
+	h.engine.charger = charger
+	h.engine.paymentSetups = &fakePaymentSetups{ready: true, stripeCustomerID: "cus_stripe"}
+
+	for i := 0; i < 2; i++ {
+		if errs := h.sweep(t); len(errs) != 0 {
+			t.Fatalf("sweep %d: errors %v", i+1, errs)
+		}
+	}
+	if len(charger.got) != 0 {
+		t.Fatalf("charges %d, want none without Stripe", len(charger.got))
+	}
+	if len(h.emailer.sent) != 1 || len(h.links.triggers) != 0 {
+		t.Fatalf("invoice emails %v, setup links %v; want one invoice email and no link", h.emailer.sent, h.links.triggers)
+	}
+	if len(h.starter.started) == 0 || h.starter.causes[0] != domain.DunningCauseNoPaymentMethod {
+		t.Fatalf("dunning starts %v, want the no-payment run", h.starter.started)
+	}
+	if !h.invoices.invoices[0].AutoChargePending || h.invoices.holdSet("inv_1") {
+		t.Fatal("want the invoice still queued with its hold released")
+	}
+
+	// Stripe connected again: the card is charged.
+	h.ready.connected = true
+	if errs := h.sweep(t); len(errs) != 0 {
+		t.Fatalf("sweep with Stripe: %v", errs)
+	}
+	if len(charger.got) != 1 {
+		t.Fatalf("charges %d once Stripe is connected, want 1", len(charger.got))
+	}
+}
