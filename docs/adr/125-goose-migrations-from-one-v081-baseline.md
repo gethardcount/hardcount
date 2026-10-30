@@ -1,7 +1,7 @@
 # ADR-125: Run migrations with goose from one v0.8.1 baseline
 
 **Date:** 2026-10-18
-**Status:** Accepted (2026-10-18). The cut-over is built; it ships in v0.9.0. Amended 2026-10-22 ([#1354](https://github.com/gethardcount/hardcount/pull/1354)) and 2026-10-28 ([#1409](https://github.com/gethardcount/hardcount/pull/1409)): the takeover of a v0.8.x database and the upgrade from a build of `main` are dropped. v0.9.0 installs fresh only and refuses an older database. The text below about taking over a v0.8.x database is history.
+**Status:** Accepted (2026-10-18). The cut-over is built; it ships in v0.9.0. Amended 2026-10-22 ([#1354](https://github.com/gethardcount/hardcount/pull/1354)) and 2026-10-28 ([#1409](https://github.com/gethardcount/hardcount/pull/1409)): the takeover of a v0.8.x database and the upgrade from a build of `main` are dropped. v0.9.0 installs fresh only and refuses an older database. The text below about taking over a v0.8.x database is history. Amended 2026-10-30 ([#1499](https://github.com/gethardcount/hardcount/pull/1499)): the trigger for replacing `hardcount-migrate-safety` fired, and an `upgrade` CI job now checks that invoices read the same after an upgrade from the previous release ([amendment](#amendment-2026-10-30-an-upgrade-job-checks-that-invoices-survive-an-upgrade)).
 **Supersedes:** [ADR-124](124-plain-golang-migrate-each-file-sets-its-lock-limit.md), which was never built
 **Amends:** [ADR-073](073-selfhost-boot-and-bootstrap-contract.md) (decision 3, the migration runner, is replaced) and [ADR-107](107-unknown-is-terminal-until-a-human.md) (migration 0009's rollback stops shipping)
 
@@ -15,7 +15,9 @@ baseline. A database from v0.8.0 or v0.8.1 is taken over with no table
 change. A failed migration leaves nothing to repair, so the dirty state
 and `hardcount migrate force` go away, and several copies may migrate as they
 start. We switch now because Hardcount has no customer installs yet: the
-first partners start on goose and never need an adopt step.
+first partners start on goose and never need an adopt step. Since
+2026-10-30 a second CI job upgrades from the previous release and checks
+that every existing invoice reads the same afterwards.
 
 ## Context
 
@@ -340,7 +342,8 @@ An INVALID index is one Postgres keeps but never uses.
     file after 180 that touches `usage_events`, `invoices`,
     `subscriptions`, `customer_credit_ledger` or `audit_log`.
   - A replacement for `hardcount-migrate-safety`. Trigger: the first file
-    after 180 that moves data.
+    after 180 that moves data. *(Fired; built 2026-10-30 as the `upgrade`
+    CI job. See the amendment at the end.)*
   - At the next baseline: delete migration 180's adopt branch, the table
     comment check and the three refusals, and drop the frozen
     `schema_migrations`.
@@ -374,3 +377,59 @@ An INVALID index is one Postgres keeps but never uses.
 - `feedback_prefer_battle_tested_libs`,
   `feedback_design_principles_simple_correct_standard`,
   `feedback_no_overengineering`
+
+## Amendment 2026-10-30: an upgrade job checks that invoices survive an upgrade
+
+**The trigger fired.** The replacement for `hardcount-migrate-safety`
+waited for the first file after 180 that moves data. Migration 00183 was
+the first: it rewrites `credit_notes.refund_status`. Others followed, such
+as 00186, which rewrites invoice rows. And since v0.9.0, which installs
+fresh only, each release has a previous Hardcount release to upgrade from.
+
+**Decision.** A new CI job, `upgrade`, runs
+`scripts/ci/upgrade-from-previous-tag.sh` on every pull request, on `main`
+and on tags:
+
+1. It builds the previous release from its own source, in a git worktree.
+   The previous release is the newest `v*` tag that HEAD contains, other
+   than a tag on HEAD itself. No image is pulled, so the job does not
+   depend on GHCR.
+2. It installs that release on an empty Postgres 16, with that release's
+   Compose role setup. The server starts with `RUN_MIGRATIONS_ON_BOOT=true`.
+   That release's `hardcount-bootstrap` makes a tenant, and its
+   `scripts/demo.sh` bills a month for a test-clock customer, through the
+   API, to a finalized invoice.
+3. It reads every invoice and its lines with `GET /v1/invoices/{id}`, in
+   test and live mode.
+4. It stops that release with SIGTERM and starts HEAD on the same
+   database, which runs HEAD's migrations. It reads the invoices again. Any
+   difference fails the job and prints the diff.
+5. On the upgraded database, HEAD renders each old invoice's PDF and bills
+   a new month with its own `scripts/demo.sh`. The old invoices must still
+   read the same afterwards. Then `hardcount-doctor` must find no broken
+   money invariant.
+
+**What is compared.** Every field the API returns, timestamps included. An
+upgrade must not touch an invoice row, so even `updated_at` must not move.
+Two fields are left out: `attention` and `recovery_warning`. The API works
+them out on each read, from the moment and the server's settings, and
+webhooks leave them out for the same reason. A field HEAD adds passes only
+when `scripts/ci/upgrade-new-fields.txt` lists it, with a comment that says
+why. The list starts empty.
+
+**Not covered.**
+
+- The job does not time migrations on populated tables or watch their
+  locks, as `hardcount-migrate-safety` did. That is the separate deferred
+  tool under Risks / open items. Its trigger, a file after 180 that touches
+  `invoices`, has fired too (00186). It is not part of this change.
+- The billing state is the demo's: one subscription invoice on a test
+  clock, with no tax, credit, credit note or payment. A later file that
+  moves those rows is checked only once the job makes such rows with the
+  previous release.
+- The PDF's text is not compared. HEAD must render it; the release
+  checklist's upgrade drill compares it by hand.
+- It upgrades from the previous release only.
+
+**Status.** The job is not a required check, and the `docker` job does not
+wait for it. Making it required is a repository setting (#1232).

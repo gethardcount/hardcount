@@ -21,6 +21,7 @@ original text.
 
 ### Added
 
+- **Every pull request now upgrades from the previous release and checks that existing invoices are unchanged.** The new `upgrade` CI job bills a month on the latest tag, starts the pull request's code on that database, and compares every invoice and line through the API. It is not yet required to merge. ([#1499](https://github.com/gethardcount/hardcount/pull/1499))
 - **One page for upgrading: [Upgrade Hardcount](docs/upgrades.md).** Before you upgrade, the upgrade on one VM or on several copies, what to do if it stops, and how to go back. Going back on one VM now has the exact commands to empty the database and restore the backup, tested on Docker from v0.9.1 back to v0.9.0. The one-VM guide, self-host, high-availability and Compose pages link to it, and `hardcount migrate rollback`'s refusal names it.
 - **One page lists every setting.** [`docs/settings.md`](docs/settings.md) names each environment variable Hardcount and its commands read, what it does, and what happens when it is unset, including the Compose-only ones. A test fails when the code reads a setting the page does not list.
 
