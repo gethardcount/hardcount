@@ -4634,6 +4634,22 @@ type HostedInvoice struct {
 		LogoUrl             string `json:"logo_url,omitempty"`
 		SupportUrl          string `json:"support_url,omitempty"`
 	} `json:"branding"`
+
+	// CreditNotes The invoice's issued credit notes, as its PDF prints them, so
+	// the total minus credit notes minus what was paid is the amount
+	// due. One issued before payment lowered what is owed
+	// (`before_payment`). One issued after payment is listed once a
+	// part of it has settled, with what came back: a card refund once
+	// Stripe confirmed it, credit added to the customer's balance, or
+	// an amount settled another way. Empty when there are none.
+	CreditNotes []struct {
+		AmountCents         int64  `json:"amount_cents"`
+		BeforePayment       bool   `json:"before_payment"`
+		CreditedCents       int64  `json:"credited_cents,omitempty"`
+		Number              string `json:"number"`
+		RefundedCents       int64  `json:"refunded_cents,omitempty"`
+		SettledOutsideCents int64  `json:"settled_outside_cents,omitempty"`
+	} `json:"credit_notes"`
 	Invoice struct {
 		AmountDueCents  int64 `json:"amount_due_cents"`
 		AmountPaidCents int64 `json:"amount_paid_cents"`

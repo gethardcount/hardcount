@@ -6,7 +6,7 @@ import { useParams, useSearchParams } from 'react-router-dom'
 import { formatCents, formatRate, formatLineQuantity, formatDate, formatTaxRate } from '@/lib/api'
 import { invoiceLineRate } from '@/lib/priceDisplay'
 import { invoiceAmountLine, invoiceDueCents, invoiceHeadline, invoicePaymentInFlight, invoicePaymentSucceeded } from '@/lib/invoiceTerminal'
-import { hostedTotalRows, loadErrorCopy, payErrorCopy, payUnavailableCopy } from '@/lib/hostedInvoice'
+import { creditNoteBackText, hostedTotalRows, loadErrorCopy, payErrorCopy, payUnavailableCopy, type HostedCreditNote } from '@/lib/hostedInvoice'
 import { sellerContact } from '@/lib/sellerContact'
 import { SellerContactLink } from '@/components/SellerContactLink'
 import { Button } from '@/components/ui/button'
@@ -53,6 +53,7 @@ interface HostedInvoicePayload {
     memo?: string
     footer?: string
   }
+  credit_notes: HostedCreditNote[]
   line_items: {
     description: string
     // The exact quantity as a decimal string ("3", "1.5").
@@ -253,7 +254,10 @@ export default function HostedInvoicePage() {
   }
 
   const { invoice, line_items, bill_to, branding } = data
-  const totalRows = hostedTotalRows(invoice)
+  const creditNotes = data.credit_notes ?? []
+  const totalRows = hostedTotalRows(invoice, creditNotes)
+  const notesBefore = creditNotes.filter(cn => cn.before_payment)
+  const notesAfter = creditNotes.filter(cn => !cn.before_payment)
   const companyAddress = formatAddress([
     branding.company_address_line1,
     branding.company_address_line2,
@@ -589,6 +593,16 @@ export default function HostedInvoicePage() {
                     </dd>
                   </div>
                 )}
+                {/* Credit notes issued before payment lower what is owed, so
+                    total − these − credits − paid = the amount due (M-04). */}
+                {notesBefore.map(cn => (
+                  <div key={cn.number} className="flex justify-between">
+                    <dt className="text-muted-foreground">Credit note {cn.number}</dt>
+                    <dd className="text-foreground tabular-nums">
+                      −{formatCents(cn.amount_cents, invoice.currency)}
+                    </dd>
+                  </div>
+                ))}
                 {totalRows.includes('credits') && (
                   <div className="flex justify-between">
                     <dt className="text-muted-foreground">Credits applied</dt>
@@ -619,6 +633,22 @@ export default function HostedInvoicePage() {
                 </div>
               </dl>
             </section>
+
+            {/* Credit notes issued after payment: what came back, and how.
+                Only settled parts are sent, as on the PDF. */}
+            {notesAfter.length > 0 && (
+              <section aria-labelledby="refunds-heading" className="text-sm">
+                <h3 id="refunds-heading" className="text-xs text-muted-foreground uppercase tracking-wider mb-2">Refunds and credits</h3>
+                <ul className="space-y-1.5">
+                  {notesAfter.map(cn => (
+                    <li key={cn.number} className="flex flex-wrap justify-between gap-x-4">
+                      <span className="text-foreground">Credit note {cn.number}</span>
+                      <span className="text-muted-foreground">{creditNoteBackText(cn, c => formatCents(c, invoice.currency))}</span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
 
             {invoice.memo && (
               <section aria-labelledby="memo-heading" className="text-sm">

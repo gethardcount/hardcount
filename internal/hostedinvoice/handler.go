@@ -165,6 +165,10 @@ type HostedInvoicePayload struct {
 	LineItems []viewLineItem `json:"line_items"`
 	BillTo    viewBillTo     `json:"bill_to"`
 	Branding  viewBranding   `json:"branding"`
+	// CreditNotes are the invoice's issued credit notes, as the PDF prints
+	// them, so total minus credit notes minus what was paid adds up to the
+	// amount due (M-04). Empty, never absent.
+	CreditNotes []viewCreditNote `json:"credit_notes"`
 	// PayEnabled is a convenience flag for the SPA. Equivalent to
 	// "invoice.status == finalized && amount_due > 0", but computed
 	// server-side so the rule lives in one place.
@@ -208,6 +212,44 @@ type viewInvoice struct {
 	BillingTimezone string `json:"billing_timezone,omitempty"`
 	Memo            string `json:"memo,omitempty"`
 	Footer          string `json:"footer,omitempty"`
+}
+
+// viewCreditNote is an issued credit note as the customer sees it. One
+// issued before payment lowered what is owed (BeforePayment). One issued
+// after payment shows what came back and how, and is listed only once at
+// least one part has settled: a credit to the balance and an amount settled
+// outside Hardcount settle at once, a card refund when Stripe confirms it
+// (the PDF's rule, invoice.RenderPDF).
+type viewCreditNote struct {
+	Number        string `json:"number"`
+	AmountCents   int64  `json:"amount_cents"`
+	BeforePayment bool   `json:"before_payment"`
+	// After payment: the card refund once it succeeded, the credit added to
+	// the customer's balance, and an amount settled another way.
+	RefundedCents       int64 `json:"refunded_cents,omitempty"`
+	CreditedCents       int64 `json:"credited_cents,omitempty"`
+	SettledOutsideCents int64 `json:"settled_outside_cents,omitempty"`
+}
+
+func toViewCreditNotes(notes []domain.CreditNote) []viewCreditNote {
+	out := make([]viewCreditNote, 0, len(notes))
+	for _, cn := range notes {
+		v := viewCreditNote{Number: cn.CreditNoteNumber, AmountCents: cn.TotalCents}
+		if cn.RefundAmountCents == 0 && cn.CreditAmountCents == 0 && cn.OutOfBandAmountCents == 0 {
+			v.BeforePayment = true
+			out = append(out, v)
+			continue
+		}
+		if cn.RefundStatus == domain.RefundSucceeded {
+			v.RefundedCents = cn.RefundAmountCents
+		}
+		v.CreditedCents = cn.CreditAmountCents
+		v.SettledOutsideCents = cn.OutOfBandAmountCents
+		if v.RefundedCents+v.CreditedCents+v.SettledOutsideCents > 0 {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 type viewLineItem struct {
@@ -348,6 +390,21 @@ func (h *Handler) viewInvoice(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// A page without its credit notes shows totals that don't add up, so a
+	// failed read is an error, not an empty list.
+	if h.creditNotes == nil {
+		slog.ErrorContext(r.Context(), "hostedinvoice: no credit note lister wired")
+		respond.InternalError(w, r)
+		return
+	}
+	notes, err := h.creditNotes.ListIssued(r.Context(), inv.TenantID, inv.ID)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "hostedinvoice: list credit notes",
+			"invoice_id", inv.ID, "error", err)
+		respond.InternalError(w, r)
+		return
+	}
+
 	owed := payEnabled(inv)
 	live, err := postgres.Livemode(r.Context())
 	if err != nil {
@@ -370,6 +427,7 @@ func (h *Handler) viewInvoice(w http.ResponseWriter, r *http.Request) {
 		LineItems:            toViewLineItems(items),
 		BillTo:               billTo,
 		Branding:             branding,
+		CreditNotes:          toViewCreditNotes(notes),
 		PayEnabled:           owed && online && !belowMinimum,
 		PayUnavailableReason: payUnavailableReason(owed, online, belowMinimum),
 		// resolveToken pinned the row's livemode onto the request ctx.

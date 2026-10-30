@@ -347,6 +347,10 @@ test('an open invoice: a credit note lowers what is owed, an offline payment set
   await expect(figure(page, 'Amount paid')).toContainText(usd(paid.amount_paid_cents))
   await expect(page.getByRole('button', { name: /^Pay/ })).toHaveCount(0)
   await expect(page.getByText(/Online payment isn.t set up/)).toHaveCount(0)
+  // The credit note issued before payment is a row of its own, so the rows
+  // add up to what was paid (M-04).
+  const noteRow = page.getByRole('term').filter({ hasText: `Credit note ${unpaidNote.credit_note_number}` }).locator('..')
+  await expect(noteRow).toContainText(`−${usd(unpaidNote.total_cents)}`)
 
   // A credit note on the paid invoice: it was paid outside Stripe, so there
   // is no card to refund, and the whole note goes to the credit balance.
@@ -365,6 +369,11 @@ test('an open invoice: a credit note lowers what is owed, an offline payment set
   const balance = await creditBalance(customer.id)
   expect(balance).toBe(balanceBefore + paidNote!.credit_amount_cents)
   await expect(page.getByText(`${usd(paidNote!.credit_amount_cents)} → credit`)).toBeVisible()
+  // The customer's page lists it under Refunds and credits.
+  await page.goto(`/invoice/${paid.public_token}`)
+  const back = page.getByRole('region', { name: 'Refunds and credits' })
+  await expect(back.getByRole('listitem').filter({ hasText: `Credit note ${paidNote!.credit_note_number}` }))
+    .toContainText(`${usd(paidNote!.credit_amount_cents)} added to your account credit`)
   await page.goto(`/customers/${customer.id}`)
   const credits = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Credits', exact: true }) })
   await expect(figure(credits, 'Balance')).toContainText(usd(balance))

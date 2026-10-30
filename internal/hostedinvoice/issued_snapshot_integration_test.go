@@ -83,7 +83,7 @@ func TestHostedView_IssuedInvoiceKeepsIssueTimeParties(t *testing.T) {
 	setParties("After AG", "Neue Strasse 9", "AT", "Seller After Inc", "2 New Avenue", "#222222")
 
 	// Production wires the invoice service here (router.go).
-	h := New(Deps{Invoices: invoice.NewService(invoices, nil, settings), Customers: customers, Settings: settings})
+	h := New(Deps{Invoices: invoice.NewService(invoices, nil, settings), Customers: customers, Settings: settings, CreditNotes: fakeCreditNotes{}})
 	w := httptest.NewRecorder()
 	mountRouter(h).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/"+inv.PublicToken, nil))
 	if w.Code != http.StatusOK {
