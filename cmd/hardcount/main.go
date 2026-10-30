@@ -600,6 +600,18 @@ func openAppPool(cfg config.Config, adminPool *sql.DB) (*sql.DB, func()) {
 		slog.Warn("app database role can bypass RLS — acceptable in local dev only", "role", role)
 	}
 
+	// The role must also be able to read and write the tables the app uses:
+	// without the default privileges the schema setup grants, requests failed
+	// later with 500s (#1317). Refused in every environment, naming the grants.
+	if _, missing, err := missingAppGrants(appPool); err != nil {
+		slog.Error("refusing to start: could not read the app role's table privileges", "role", role, "error", err)
+		os.Exit(1)
+	} else if len(missing) > 0 {
+		slog.Error("refusing to start: the app database role is missing grants the app needs. Run these as the admin role, then set the default privileges for new tables — see docs/ops/postgres-requirements.md#the-two-database-users.",
+			"role", role, "grants", strings.Join(missing, "; "))
+		os.Exit(1)
+	}
+
 	slog.Info("using app database connection (RLS enforced)", "role", role)
 	return appPool, func() { _ = appPool.Close() }
 }
