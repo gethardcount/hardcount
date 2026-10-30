@@ -1083,3 +1083,27 @@ test('resuming a paused endpoint on its page shows it active', async ({ page }) 
   const endpoint = await api<{ active: boolean }>('GET', `/webhook-endpoints/endpoints/${id}`)
   expect(endpoint.active).toBe(true)
 })
+
+// The customer page puts what matters first (L-02). On a wide screen the
+// account sits in a right-hand column, the payment method at its top, beside
+// the subscriptions and invoices; on a phone the payment method comes first.
+// The page was 14 cards in one column, the payment method ninth.
+test('the customer page shows the payment method first, beside subscriptions and invoices', async ({ page }) => {
+  const { customer } = await subscribedCustomer()
+  const titles = page.getByRole('main').locator('[data-slot="card-title"]')
+  const cardTitled = (name: string) => titles.filter({ hasText: new RegExp(`^${name}`) }).first()
+
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto(`/customers/${customer.id}`)
+  await expect(page.getByRole('heading', { level: 1, name: customer.display_name, exact: true })).toBeVisible()
+  await expect(cardTitled('Payment methods')).toBeVisible()
+  const pay = (await cardTitled('Payment methods').boundingBox())!
+  const subs = (await cardTitled('Subscriptions').boundingBox())!
+  const details = (await cardTitled('Details').boundingBox())!
+  expect(pay.x, 'payment methods sit in the right-hand column').toBeGreaterThan(subs.x + 300)
+  expect(Math.abs(pay.y - subs.y), 'level with the subscriptions').toBeLessThan(40)
+  expect(details.y, 'the account details below the payment method').toBeGreaterThan(pay.y)
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(titles.first()).toHaveText('Payment methods')
+})
