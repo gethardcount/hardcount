@@ -109,7 +109,7 @@ func TestActivityLines_DunningRunAndSentEmails(t *testing.T) {
 		t.Errorf("Dunning page lines\n got: %q\nwant: %q", got, want)
 	}
 	if len(realDunning) == 2 {
-		if p := realDunning[0]["problem"]; p != "No payment method on file. Reminders go out until the customer adds one." {
+		if p := realDunning[0]["problem"]; p != "No payment method on file. Reminders ask the customer to pay the invoice." {
 			t.Errorf("payment recovery started: problem %q", p)
 		}
 		if realDunning[0]["tone"] != "warning" || realDunning[1]["tone"] != "success" {

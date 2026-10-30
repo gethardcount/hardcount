@@ -288,7 +288,7 @@ func TestActivityLines_InvoiceWire(t *testing.T) {
 	t.Run("payment recovery started", func(t *testing.T) {
 		for _, tc := range []struct{ cause, tone, problem string }{
 			{string(domain.DunningCausePaymentFailed), "neutral", ""},
-			{string(domain.DunningCauseNoPaymentMethod), "warning", "No payment method on file. Reminders go out until the customer adds one."},
+			{string(domain.DunningCauseNoPaymentMethod), "warning", "No payment method on file. Reminders ask the customer to pay the invoice."},
 		} {
 			events := fetchWire(t, wireCase{
 				inv:    finalized,
