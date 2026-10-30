@@ -121,9 +121,11 @@ func serve() {
 	defer func() { _ = pool.Close() }()
 
 	if cfg.Migrate {
-		if cfg.Env == "production" {
-			slog.Warn("RUN_MIGRATIONS_ON_BOOT=true in production — prefer a dedicated migration Job before rollout")
-		}
+		// Not a warning: the one-VM guide upgrades this way, and with several
+		// copies the migration lock makes it safe (docs/upgrades.md). A
+		// warning operators are told to ignore teaches them to ignore
+		// warnings (#1245).
+		slog.Info("running migrations on start (RUN_MIGRATIONS_ON_BOOT=true)")
 		if err := migrate.Up(cfg.DB.URL); err != nil {
 			slog.Error("run migrations", "error", err)
 			os.Exit(1)
@@ -418,11 +420,25 @@ func loadDSN() string {
 }
 
 func runMigrate() {
-	if err := migrate.Up(loadDSN()); err != nil {
+	sum, err := migrate.UpReport(loadDSN())
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "migration failed: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Println("migrations applied successfully")
+	fmt.Println(migrateSummaryLine(sum))
+}
+
+// migrateSummaryLine says what `hardcount migrate` did. It printed
+// "migrations applied successfully" when nothing ran (#1245).
+func migrateSummaryLine(sum migrate.UpSummary) string {
+	switch sum.Applied {
+	case 0:
+		return fmt.Sprintf("already up to date: the database is at version %d", sum.Version)
+	case 1:
+		return fmt.Sprintf("applied 1 migration: the database is at version %d", sum.Version)
+	default:
+		return fmt.Sprintf("applied %d migrations: the database is at version %d", sum.Applied, sum.Version)
+	}
 }
 
 // runMigrateStatus prints the upgrade plan: the database's version, this

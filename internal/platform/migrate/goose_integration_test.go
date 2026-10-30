@@ -764,3 +764,26 @@ func TestUpIgnoresOldRecordWhenGooseHas180(t *testing.T) {
 		})
 	}
 }
+
+// UpReport says what it did, for `hardcount migrate` to print: both files on
+// an empty database, then nothing at the same version (#1245: the command
+// said "migrations applied successfully" either way).
+func TestUpReportCountsWhatRan(t *testing.T) {
+	dsn, _ := scratchDB(t, "hardcount_migrate_report")
+	widgets, version := pastShipped(t, "widgets.sql")
+	fsys := files(map[string]string{widgets: widgetsFile})
+	sum, err := upReport(context.Background(), dsn, fsys)
+	if err != nil {
+		t.Fatalf("first Up: %v", err)
+	}
+	if sum.Applied != 2 || sum.Version != version {
+		t.Fatalf("first Up = %+v, want 2 applied at version %d (the baseline and %s)", sum, version, widgets)
+	}
+	sum, err = upReport(context.Background(), dsn, fsys)
+	if err != nil {
+		t.Fatalf("second Up: %v", err)
+	}
+	if sum.Applied != 0 || sum.Version != version {
+		t.Fatalf("second Up = %+v, want nothing applied at version %d", sum, version)
+	}
+}

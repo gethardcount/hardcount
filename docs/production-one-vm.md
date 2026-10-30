@@ -188,7 +188,6 @@ docker compose logs hardcount-api | grep '"level":"WARN"'
 | `POSTMARK_WEBHOOK_USER/POSTMARK_WEBHOOK_PASS not set` | Hardcount turns away Postmark's reports of late bounces. | Only if you send email through Postmark. See [Email setup](ops/email-setup.md#when-postmark-reports-a-bounce-later). |
 | `METRICS_TOKEN not set` | `/metrics` answers 401 to everyone. | Only if you collect metrics with Prometheus. See [What to watch](self-host.md#what-to-watch). |
 | `HARDCOUNT_API_BASE_URL NOT SET` | The link you copy to share a customer's cost dashboard (a page of their usage and charges) is a path, not a full address. | Only if you share cost dashboards. Set it in `.env` to your HTTPS address. |
-| `RUN_MIGRATIONS_ON_BOOT=true in production` | Hardcount updates its database as it starts. | No. On one VM this is how upgrades apply. The warning is for setups with several copies of Hardcount. |
 | `DASHBOARD_BASE_URL is an http:// address`, or the same for another address setting | That setting starts with `http://`, so Hardcount is served without HTTPS there. Sign-in needs HTTPS, and links to that address are not encrypted. | Yes. Change it to your `https://` address, as in [step 4](#4-set-the-web-addresses). |
 
 To set `HARDCOUNT_EMAIL_BIDX_KEY`, add a random key and restart. Set it before you add customers: Hardcount indexes a customer's email only when the customer is created or edited.

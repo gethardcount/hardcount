@@ -46,7 +46,9 @@ func CheckSchemaReady(db *sql.DB) error {
 		for _, a := range p.Ahead {
 			ahead = append(ahead, a.Version)
 		}
-		slog.Warn("schema ahead of binary — likely a rollback in progress",
+		// Not a normal path: to go back a release, the guide restores the
+		// backup taken before the upgrade (#1245).
+		slog.Warn("this release is older than the database: it may not read data the newer release wrote. To go back a release, restore the backup taken before the upgrade — see docs/upgrades.md#going-back",
 			"database_version", p.Database,
 			"binary_version", p.Latest,
 			"versions_not_shipped", ahead,
