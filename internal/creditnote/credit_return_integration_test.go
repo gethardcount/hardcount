@@ -187,10 +187,13 @@ func TestIssue_PaidInvoiceCreditNeverLessThanTheNote(t *testing.T) {
 // totals agree with the grant list.
 //
 // It is a collision test for the two real paths (no deadlock, no lost or made
-// credit in either order). It does not isolate the return's own early lock:
-// the ledger insert takes the same lock, so the issue queues either way.
-// TestCreditReturn_ConcurrentWritersWaitForTheReturn (internal/credit)
-// isolates it.
+// credit in either order).
+//
+// Mutation-verify (CI, PR #1498): drop the return's early advisory lock and
+// FOR UPDATE → the return writes a block before it takes the lock at its
+// ledger insert, against the draw holding that lock and waiting on the block:
+// "deadlock detected (SQLSTATE 40P01)", red. The lock order is what keeps
+// these two writers apart.
 func TestIssue_CreditReturnRacesADraw(t *testing.T) {
 	r := newCNReturnRig(t, "CN Return Race")
 	admin := testutil.AdminPool(t)
