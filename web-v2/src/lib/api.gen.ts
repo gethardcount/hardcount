@@ -3254,7 +3254,7 @@ export interface paths {
                     subscription_id?: string;
                     status?: string;
                     payment_status?: string;
-                    /** @description Case-insensitive substring match on invoice number. */
+                    /** @description Case-insensitive substring match on the invoice number or the customer's name or email. */
                     search?: string;
                     /**
                      * @description Lower bound on created_at, inclusive. RFC3339 instant or

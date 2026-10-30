@@ -9771,7 +9771,7 @@ paths:
             type: string
         - name: search
           in: query
-          description: Case-insensitive substring match on invoice number.
+          description: Case-insensitive substring match on the invoice number or the customer's name or email.
           schema:
             type: string
         - name: from

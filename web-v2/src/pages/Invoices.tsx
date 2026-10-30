@@ -50,6 +50,7 @@ import { TableSkeleton } from '@/components/ui/TableSkeleton'
 
 import { Search, Download, ArrowUpDown, ArrowUp, ArrowDown, Receipt } from 'lucide-react'
 import { EmptyState } from '@/components/EmptyState'
+import { CustomerCombobox } from '@/components/CustomerCombobox'
 
 const PAGE_SIZE = 25
 
@@ -305,17 +306,25 @@ export default function InvoicesPage() {
       {/* Search + date filters — server-side across the full dataset.
           The row stays visible while a search/date filter is active so
           a zero-result query never hides its own input. */}
-      {(total > 0 || search || dateFrom || dateTo) && (
+      {(total > 0 || search || customerFilter || dateFrom || dateTo) && (
         <div className="flex flex-wrap items-center gap-3 mt-6">
           <div className="relative w-full sm:w-auto sm:flex-1">
             <Search size={16} className="absolute left-3 top-2.5 text-muted-foreground" />
             <Input
               value={search}
               onChange={e => setUrlState({ search: e.target.value, page: '1' })}
-              placeholder="Search by invoice number..."
+              placeholder="Search by number, customer or email"
+              aria-label="Search invoices by number, customer name or email"
               className="pl-9"
             />
           </div>
+          <CustomerCombobox
+            value={customerFilter}
+            onChange={(id) => setUrlState({ customer: id, page: '1' })}
+            placeholder="All customers"
+            clearable
+            className="min-w-0 w-full sm:w-56"
+          />
           <DatePicker
             value={dateFrom}
             onChange={(v) => setUrlState({ dateFrom: v, page: '1' })}

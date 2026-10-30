@@ -269,9 +269,9 @@ type ListFilter struct {
 	SubscriptionID string
 	Status         string
 	PaymentStatus  string
-	// Search filters by invoice number, case-insensitive substring
-	// (ILIKE, metacharacters escaped). Empty = no filter. Backs the
-	// dashboard list search box and the command palette.
+	// Search matches the invoice number or the customer's name or email,
+	// case-insensitive substring (ILIKE, metacharacters escaped). Empty =
+	// no filter. Backs the dashboard list search box and the command palette.
 	Search string
 	// CreatedFrom / CreatedTo bound created_at — inclusive on both
 	// ends, matching the shared api/timefilter contract (?from / ?to).

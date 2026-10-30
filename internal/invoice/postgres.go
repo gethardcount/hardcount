@@ -4410,7 +4410,12 @@ func buildInvWhere(f ListFilter) (string, []any) {
 		idx++
 	}
 	if f.Search != "" {
-		clauses = append(clauses, fmt.Sprintf("invoice_number ILIKE $%d", idx))
+		// The invoice number, or the customer's name or email: an operator
+		// looking for a customer's invoices types the customer, not a number
+		// (C-15). The customer row is read under the same tenant tx.
+		clauses = append(clauses, fmt.Sprintf(`(invoice_number ILIKE $%[1]d OR EXISTS (
+			SELECT 1 FROM customers c WHERE c.id = invoices.customer_id
+			  AND (c.display_name ILIKE $%[1]d OR c.email ILIKE $%[1]d)))`, idx))
 		args = append(args, "%"+postgres.EscapeLike(f.Search)+"%")
 		idx++
 	}
