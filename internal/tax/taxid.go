@@ -1,7 +1,7 @@
 package tax
 
 import (
-	"fmt"
+	"errors"
 	"regexp"
 	"strings"
 )
@@ -77,15 +77,15 @@ func ValidateTaxID(kind, value string) error {
 	switch strings.ToLower(strings.TrimSpace(kind)) {
 	case TaxIDKindINGST, "gstin", "in_gstin":
 		if !gstinPattern.MatchString(value) {
-			return fmt.Errorf("invalid GSTIN format: expected 15-char code like 27AAEPM1234C1Z5")
+			return errors.New("must be a 15-character GSTIN, like 27AAEPM1234C1Z5")
 		}
 	case TaxIDKindEUVAT, "vat":
 		if !euVATPattern.MatchString(value) {
-			return fmt.Errorf("invalid EU VAT format: expected 2-letter country prefix + alphanumerics")
+			return errors.New("must be a 2-letter country code, then 2 to 12 letters or digits, like DE123456789")
 		}
 	case TaxIDKindAUABN, "abn":
 		if !australianABNPattern.MatchString(value) {
-			return fmt.Errorf("invalid ABN format: expected 11 digits")
+			return errors.New("must be 11 digits, like 51824753556")
 		}
 	}
 	return nil

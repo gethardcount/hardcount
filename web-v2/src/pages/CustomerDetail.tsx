@@ -1327,6 +1327,8 @@ function EditCustomerDialog({ customer, onClose, onSaved }: {
 
 /* ─── Edit billing profile ───────────────────────────────────── */
 
+const TAX_STATUS_LABELS = { standard: 'Standard', exempt: 'Exempt', reverse_charge: 'Reverse charge' }
+
 function EditBillingProfileDialog({ customerId, customer, profile, onClose, onSaved }: {
   customerId: string
   customer: Customer
@@ -1356,6 +1358,10 @@ function EditBillingProfileDialog({ customerId, customer, profile, onClose, onSa
   })
   const { register, handleSubmit, watch, setValue, control, formState: { errors: formErrors, isSubmitting, isDirty } } = formMethods
   const form = watch()
+  // The server checks what the form can't (a tax ID's format for its type)
+  // and names the field; applyApiError puts its message here.
+  const fieldError = (name: keyof BillingProfileData) =>
+    formErrors[name] ? <p className="text-xs text-destructive">{formErrors[name]?.message}</p> : null
 
   const onSubmit = handleSubmit(async (data) => {
     if (!isDirty) return
@@ -1429,12 +1435,13 @@ function EditBillingProfileDialog({ customerId, customer, profile, onClose, onSa
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Contact</p>
             <div className="space-y-2">
               <Label>Legal name</Label>
-              <Input maxLength={255} placeholder="Acme Corporation Inc." {...register('legal_name')} />
+              <Input maxLength={255} placeholder="Acme Corporation Inc." aria-invalid={!!formErrors.legal_name} {...register('legal_name')} />
+              {fieldError('legal_name')}
             </div>
             <div className="space-y-2">
               <Label>Phone</Label>
-              <Input type="tel" placeholder="+1 (555) 123-4567" maxLength={20} {...register('phone')} />
-              {formErrors.phone && <p className="text-xs text-destructive">{formErrors.phone.message}</p>}
+              <Input type="tel" placeholder="+1 (555) 123-4567" maxLength={20} aria-invalid={!!formErrors.phone} {...register('phone')} />
+              {fieldError('phone')}
             </div>
           </div>
 
@@ -1455,19 +1462,23 @@ function EditBillingProfileDialog({ customerId, customer, profile, onClose, onSa
                 placeholder="Select country..."
                 clearable
               />
+              {fieldError('country')}
             </div>
             <div className="space-y-2">
               <Label>Street address</Label>
-              <Input maxLength={200} placeholder="123 Main Street" {...register('address_line1')} />
+              <Input maxLength={200} placeholder="123 Main Street" aria-invalid={!!formErrors.address_line1} {...register('address_line1')} />
+              {fieldError('address_line1')}
             </div>
             <div className="space-y-2">
               <Label>Apt / Suite / Floor <span className="text-muted-foreground font-normal">(optional)</span></Label>
-              <Input maxLength={200} placeholder="Suite 100" {...register('address_line2')} />
+              <Input maxLength={200} placeholder="Suite 100" aria-invalid={!!formErrors.address_line2} {...register('address_line2')} />
+              {fieldError('address_line2')}
             </div>
             <div className="grid grid-cols-3 gap-4">
               <div className="space-y-2">
                 <Label>City</Label>
-                <Input maxLength={100} placeholder="San Francisco" {...register('city')} />
+                <Input maxLength={100} placeholder="San Francisco" aria-invalid={!!formErrors.city} {...register('city')} />
+                {fieldError('city')}
               </div>
               <div className="space-y-2">
                 <Label>{stateLabel}</Label>
@@ -1480,12 +1491,14 @@ function EditBillingProfileDialog({ customerId, customer, profile, onClose, onSa
                     clearable
                   />
                 ) : (
-                  <Input placeholder={stateLabel} maxLength={100} {...register('state')} />
+                  <Input placeholder={stateLabel} maxLength={100} aria-invalid={!!formErrors.state} {...register('state')} />
                 )}
+                {fieldError('state')}
               </div>
               <div className="space-y-2">
                 <Label>Postal code</Label>
-                <Input placeholder={postalPlaceholder} maxLength={20} {...register('postal_code')} />
+                <Input placeholder={postalPlaceholder} maxLength={20} aria-invalid={!!formErrors.postal_code} {...register('postal_code')} />
+                {fieldError('postal_code')}
               </div>
             </div>
           </div>
@@ -1502,7 +1515,9 @@ function EditBillingProfileDialog({ customerId, customer, profile, onClose, onSa
                 name="tax_status"
                 control={control}
                 render={({ field }) => (
-                  <Select value={field.value} onValueChange={field.onChange}>
+                  // items gives <SelectValue> the words; without it the
+                  // trigger showed the stored code ("reverse_charge").
+                  <Select items={TAX_STATUS_LABELS} value={field.value} onValueChange={field.onChange}>
                     <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="standard">Standard — tax applied per provider rules</SelectItem>
@@ -1512,13 +1527,13 @@ function EditBillingProfileDialog({ customerId, customer, profile, onClose, onSa
                   </Select>
                 )}
               />
-              <p className="text-xs text-muted-foreground">
+              {fieldError('tax_status') ?? <p className="text-xs text-muted-foreground">
                 {form.tax_status === 'exempt'
                   ? 'Forces zero tax with the exempt reason printed on the PDF audit trail. Use for a certificate or non-profit the tax provider can\'t see.'
                   : form.tax_status === 'reverse_charge'
                     ? 'No tax on the invoice, which notes that the business customer pays the VAT/GST themselves. For most business customers, pick Standard and add their tax ID instead: reverse charge then applies automatically, only where it\'s allowed. It never applies to a customer in your own country.'
                     : 'Tax is calculated by your provider. For a B2B customer, add their Tax ID below — reverse charge is then applied automatically where it applies (cross-border).'}
-              </p>
+              </p>}
             </div>
 
             {form.tax_status === 'exempt' && (
@@ -1527,11 +1542,11 @@ function EditBillingProfileDialog({ customerId, customer, profile, onClose, onSa
                 <Input
                   maxLength={500}
                   placeholder="e.g. 501(c)(3) non-profit — certificate on file"
+                  aria-invalid={!!formErrors.tax_exempt_reason}
                   {...register('tax_exempt_reason')}
                 />
-                {formErrors.tax_exempt_reason
-                  ? <p className="text-xs text-destructive">{formErrors.tax_exempt_reason.message}</p>
-                  : <p className="text-xs text-muted-foreground">Printed on every invoice for this customer as audit trail.</p>}
+                {fieldError('tax_exempt_reason')
+                  ?? <p className="text-xs text-muted-foreground">Printed on every invoice for this customer as audit trail.</p>}
               </div>
             )}
 
@@ -1555,16 +1570,19 @@ function EditBillingProfileDialog({ customerId, customer, profile, onClose, onSa
                     placeholder="Select type..."
                     clearable
                   />
+                  {fieldError('tax_id_type')}
                 </div>
                 <div className="space-y-2">
                   <Label>Tax ID</Label>
-                  <Input maxLength={50} className="font-mono" placeholder="Identifier" {...register('tax_id')} />
-                  {form.tax_id_type && TAX_ID_HINTS[form.tax_id_type] && (
-                    <p className="text-xs text-muted-foreground">{TAX_ID_HINTS[form.tax_id_type]}</p>
-                  )}
-                  {form.tax_status === 'reverse_charge' && (
-                    <p className="text-xs text-muted-foreground">Required — reverse charge is only valid when the buyer has a registered tax ID.</p>
-                  )}
+                  <Input maxLength={50} className="font-mono" placeholder="Identifier" aria-invalid={!!formErrors.tax_id} {...register('tax_id')} />
+                  {fieldError('tax_id') ?? <>
+                    {form.tax_id_type && TAX_ID_HINTS[form.tax_id_type] && (
+                      <p className="text-xs text-muted-foreground">{TAX_ID_HINTS[form.tax_id_type]}</p>
+                    )}
+                    {form.tax_status === 'reverse_charge' && (
+                      <p className="text-xs text-muted-foreground">Required — reverse charge is only valid when the buyer has a registered tax ID.</p>
+                    )}
+                  </>}
                 </div>
               </div>
             )}
@@ -1583,7 +1601,7 @@ function EditBillingProfileDialog({ customerId, customer, profile, onClose, onSa
                 options={currencyOptions}
                 placeholder="Select currency..."
               />
-              <p className="text-xs text-muted-foreground">Overrides the account default for invoices on this customer.</p>
+              {fieldError('currency') ?? <p className="text-xs text-muted-foreground">Overrides the account default for invoices on this customer.</p>}
             </div>
           </div>
 
