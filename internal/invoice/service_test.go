@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -287,10 +288,21 @@ func (m *memStore) UpdateStatusWithReversal(ctx context.Context, tenantID, id st
 	return inv, nil
 }
 
-func (m *memStore) FinalizeWithDates(_ context.Context, tenantID, id string, issuedAt, dueAt time.Time) (domain.Invoice, error) {
+func (m *memStore) FinalizeWithDates(_ context.Context, tenantID, id string, issuedAt, dueAt time.Time, taxedLineIDs []string) (domain.Invoice, error) {
 	inv, ok := m.invoices[id]
 	if !ok || inv.TenantID != tenantID {
 		return domain.Invoice{}, errs.ErrNotFound
+	}
+	// As Postgres: the lines must be the ones read before tax (#1298).
+	if inv.Status == domain.InvoiceDraft {
+		have := m.lineItems[id]
+		same := len(have) == len(taxedLineIDs)
+		for i := 0; same && i < len(have); i++ {
+			same = slices.Contains(taxedLineIDs, have[i].ID)
+		}
+		if !same {
+			return domain.Invoice{}, errLinesChanged()
+		}
 	}
 	inv.Status = domain.InvoiceFinalized
 	inv.AutoChargePending = inv.PaymentStatus == domain.PaymentPending

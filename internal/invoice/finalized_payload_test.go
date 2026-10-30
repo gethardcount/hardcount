@@ -72,9 +72,9 @@ type getFailsAfterFinalize struct {
 	finalized bool
 }
 
-func (s *getFailsAfterFinalize) FinalizeWithDates(ctx context.Context, tenantID, id string, issuedAt, dueAt time.Time) (domain.Invoice, error) {
+func (s *getFailsAfterFinalize) FinalizeWithDates(ctx context.Context, tenantID, id string, issuedAt, dueAt time.Time, taxedLineIDs []string) (domain.Invoice, error) {
 	s.finalized = true
-	return s.memStore.FinalizeWithDates(ctx, tenantID, id, issuedAt, dueAt)
+	return s.memStore.FinalizeWithDates(ctx, tenantID, id, issuedAt, dueAt, taxedLineIDs)
 }
 
 func (s *getFailsAfterFinalize) Get(ctx context.Context, tenantID, id string) (domain.Invoice, error) {

@@ -504,6 +504,13 @@ type InvoiceTaxRetryUpdate struct {
 	// computation" — the operator Retry-tax button and the ADR-017
 	// reconciler still count every attempt they make.
 	InitialAttempt bool
+	// BasisSubtotalCents / BasisDiscountCents are the invoice header the
+	// computation started from. UpdateTaxAtomic refuses the write when, under
+	// its lock, the header no longer holds them or the invoice's lines are not
+	// the ones taxed: a line added during the computation would otherwise be
+	// left out of the total it overwrites (#1298).
+	BasisSubtotalCents int64
+	BasisDiscountCents int64
 }
 
 type InvoiceLineItem struct {

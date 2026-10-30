@@ -65,8 +65,11 @@ func TestUpdateTaxAtomic_ConcurrentSerializes(t *testing.T) {
 	const (
 		goroutines = 8
 		taxCents   = int64(100)
-		subtotal   = int64(500)
-		total      = subtotal + taxCents
+		// The seeded draft's subtotal: every writer's basis must match the
+		// header it locks (#1298), so the subtotal stays put and only the tax
+		// and the retry counter move.
+		subtotal = int64(0)
+		total    = subtotal + taxCents
 	)
 
 	var wg sync.WaitGroup
@@ -79,9 +82,10 @@ func TestUpdateTaxAtomic_ConcurrentSerializes(t *testing.T) {
 					TaxAmountCents: taxCents, TaxRate: 20,
 					TaxStatus: domain.InvoiceTaxOK,
 				},
-				SubtotalCents:    subtotal,
-				DiscountCents:    0,
-				TotalAmountCents: total,
+				SubtotalCents:      subtotal,
+				DiscountCents:      0,
+				TotalAmountCents:   total,
+				BasisSubtotalCents: subtotal,
 			}, nil)
 			if err != nil {
 				errCh <- err

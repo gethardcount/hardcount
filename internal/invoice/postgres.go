@@ -768,12 +768,35 @@ func (s *PostgresStore) updateStatusInTx(ctx context.Context, tx *sql.Tx, id str
 // rejected by its own draft re-check). A funder error fails finalize by
 // design: operator-synchronous, loud, retryable — never weaken to
 // post-commit.
-func (s *PostgresStore) FinalizeWithDates(ctx context.Context, tenantID, id string, issuedAt, dueAt time.Time) (domain.Invoice, error) {
+func (s *PostgresStore) FinalizeWithDates(ctx context.Context, tenantID, id string, issuedAt, dueAt time.Time, taxedLineIDs []string) (domain.Invoice, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return domain.Invoice{}, err
 	}
 	defer postgres.Rollback(tx)
+
+	// The lines must be the ones Finalize read before computing tax. A line
+	// added after the tax write would otherwise be finalized with no tax, and
+	// a commit line's credit granted below without its charge being taxed
+	// (#1298). AddLineItemAtomic takes this row lock too, so a line either
+	// lands first and is seen here, or finds the invoice finalized.
+	var locked string
+	err = tx.QueryRowContext(ctx, `SELECT status FROM invoices WHERE id = $1 FOR UPDATE`, id).Scan(&locked)
+	if err == sql.ErrNoRows {
+		return domain.Invoice{}, errs.ErrNotFound
+	}
+	if err != nil {
+		return domain.Invoice{}, err
+	}
+	if locked == string(domain.InvoiceDraft) {
+		same, lerr := lineIDsMatchTx(ctx, tx, id, taxedLineIDs)
+		if lerr != nil {
+			return domain.Invoice{}, lerr
+		}
+		if !same {
+			return domain.Invoice{}, errLinesChanged()
+		}
+	}
 
 	now := clock.Now(ctx)
 	var inv domain.Invoice
@@ -2135,6 +2158,45 @@ func (s *PostgresStore) AddLineItemAtomicAudited(
 	return item, inv, nil
 }
 
+// lineIDsMatchTx reports whether the invoice's lines, read in tx under the
+// invoice row lock, are exactly want. A draft's lines are only ever added
+// (nothing deletes or re-prices one), so the ids name the line set.
+func lineIDsMatchTx(ctx context.Context, tx *sql.Tx, invoiceID string, want []string) (bool, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM invoice_line_items WHERE invoice_id = $1`, invoiceID)
+	if err != nil {
+		return false, fmt.Errorf("read invoice lines: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	have := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return false, err
+		}
+		have[id] = true
+	}
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	if len(have) != len(want) {
+		return false, nil
+	}
+	for _, id := range want {
+		if !have[id] {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// errLinesChanged: a line was added between reading an invoice and writing
+// its tax or finalizing it. Nothing was written; doing it again reads the
+// new line.
+func errLinesChanged() error {
+	return errs.InvalidState("a line was added to this invoice while its total was being calculated; try again").
+		WithCode("invoice_lines_changed")
+}
+
 func (s *PostgresStore) UpdateTaxAtomic(
 	ctx context.Context, tenantID, invoiceID string,
 	update domain.InvoiceTaxRetryUpdate, lineItems []domain.InvoiceLineItem,
@@ -2148,11 +2210,13 @@ func (s *PostgresStore) UpdateTaxAtomic(
 	var (
 		status    domain.InvoiceStatus
 		taxStatus string
+		subtotal  int64
+		discount  int64
 	)
 	err = tx.QueryRowContext(ctx,
-		`SELECT status, tax_status FROM invoices WHERE id = $1 FOR UPDATE`,
+		`SELECT status, tax_status, subtotal_cents, discount_cents FROM invoices WHERE id = $1 FOR UPDATE`,
 		invoiceID,
-	).Scan(&status, &taxStatus)
+	).Scan(&status, &taxStatus, &subtotal, &discount)
 	if err == sql.ErrNoRows {
 		return domain.Invoice{}, errs.ErrNotFound
 	}
@@ -2172,6 +2236,25 @@ func (s *PostgresStore) UpdateTaxAtomic(
 			"invoice tax is only mutable on draft invoices (current: %s)", status))
 	}
 	_ = taxStatus // selected for the FOR UPDATE lock; no longer gated here
+
+	// The computation read the header and the lines before calling the tax
+	// provider. A line added since then changed both, and this write would
+	// put back the older subtotal, leaving the line outside the total
+	// (#1298). Refuse; the caller computes again.
+	if subtotal != update.BasisSubtotalCents || discount != update.BasisDiscountCents {
+		return domain.Invoice{}, errLinesChanged()
+	}
+	taxed := make([]string, 0, len(lineItems))
+	for _, li := range lineItems {
+		taxed = append(taxed, li.ID)
+	}
+	same, err := lineIDsMatchTx(ctx, tx, invoiceID, taxed)
+	if err != nil {
+		return domain.Invoice{}, err
+	}
+	if !same {
+		return domain.Invoice{}, errLinesChanged()
+	}
 
 	now := clock.Now(ctx)
 

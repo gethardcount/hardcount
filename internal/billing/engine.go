@@ -5329,6 +5329,10 @@ func (e *Engine) computeAndPersistInvoiceTax(ctx context.Context, tenantID, invo
 		// through here at build time, so the counter now uniformly means
 		// "attempts after the initial computation" for both invoice types.
 		InitialAttempt: inv.TaxStatus != domain.InvoiceTaxPending,
+		// The header this computation read; the write is refused if a line
+		// changed it meanwhile (#1298).
+		BasisSubtotalCents: inv.SubtotalCents,
+		BasisDiscountCents: inv.DiscountCents,
 	}
 
 	return e.invoices.UpdateTaxAtomic(ctx, tenantID, invoiceID, update, items)
