@@ -626,32 +626,41 @@ func TestLoad_RateLimits(t *testing.T) {
 	t.Setenv("APP_ENV", "local")
 	t.Setenv("HARDCOUNT_ENCRYPTION_KEY", "")
 	t.Setenv("TRUST_PROXY", "")
-	const general, ingest = "HARDCOUNT_RATE_LIMIT_GENERAL_PER_MIN", "HARDCOUNT_RATE_LIMIT_INGEST_PER_SEC"
+	const (
+		general = "HARDCOUNT_RATE_LIMIT_GENERAL_PER_MIN"
+		authKey = "HARDCOUNT_RATE_LIMIT_AUTH_PER_MIN"
+		ingest  = "HARDCOUNT_RATE_LIMIT_INGEST_PER_SEC"
+	)
 
 	t.Setenv(general, "")
+	t.Setenv(authKey, "")
 	t.Setenv(ingest, "")
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("unset: %v", err)
 	}
-	if want := (RateLimits{GeneralPerMinute: 100, IngestPerSecond: 1000}); cfg.RateLimits != want || DefaultRateLimits() != want {
+	// The general limit is sized for the dashboard (about 10 requests a
+	// page); sign-in and bootstrap keep 100 a minute per address.
+	if want := (RateLimits{GeneralPerMinute: 1000, AuthPerMinute: 100, IngestPerSecond: 1000}); cfg.RateLimits != want || DefaultRateLimits() != want {
 		t.Fatalf("unset: got %+v, defaults %+v, want %+v", cfg.RateLimits, DefaultRateLimits(), want)
 	}
 
 	t.Setenv(general, " 250 ")
+	t.Setenv(authKey, "30")
 	t.Setenv(ingest, "5000")
 	cfg, err = Load()
 	if err != nil {
 		t.Fatalf("set: %v", err)
 	}
-	if want := (RateLimits{GeneralPerMinute: 250, IngestPerSecond: 5000}); cfg.RateLimits != want {
+	if want := (RateLimits{GeneralPerMinute: 250, AuthPerMinute: 30, IngestPerSecond: 5000}); cfg.RateLimits != want {
 		t.Fatalf("set: got %+v, want %+v", cfg.RateLimits, want)
 	}
 
-	for _, key := range []string{general, ingest} {
+	for _, key := range []string{general, authKey, ingest} {
 		for _, bad := range []string{"abc", "0", "-5", "1.5", "100/min"} {
 			t.Run(key+"="+bad, func(t *testing.T) {
 				t.Setenv(general, "")
+				t.Setenv(authKey, "")
 				t.Setenv(ingest, "")
 				t.Setenv(key, bad)
 				_, err := Load()

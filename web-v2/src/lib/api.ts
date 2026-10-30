@@ -1,6 +1,7 @@
 import { setLastRequestId } from './lastRequestId'
 import { reportUnauthorized } from './sessionEnd'
 import { getCurrencySymbol } from './money'
+import { parseRetryAfter } from './rateLimitRetry'
 import type { EmailSettingsStatus } from './emailSettings'
 // Recipe wire types are GENERATED from api/openapi.yaml (single source of
 // truth) — the hand-written versions drifted from the server (`key` vs
@@ -30,7 +31,10 @@ export class ApiError extends Error {
   // method is set only when no response arrived (status 0): a POST that got
   // no answer may still have taken effect, a GET did nothing.
   method?: string
-  constructor(message: string, status: number, opts?: { field?: string; code?: string; requestId?: string; method?: string }) {
+  // retryAfterMs is the response's Retry-After, in milliseconds, when it
+  // sent a readable one (a 429 does). lib/rateLimitRetry waits that long.
+  retryAfterMs?: number
+  constructor(message: string, status: number, opts?: { field?: string; code?: string; requestId?: string; method?: string; retryAfterMs?: number }) {
     super(message)
     this.name = 'ApiError'
     this.status = status
@@ -38,6 +42,7 @@ export class ApiError extends Error {
     this.code = opts?.code
     this.requestId = opts?.requestId
     this.method = opts?.method
+    this.retryAfterMs = opts?.retryAfterMs
   }
 }
 
@@ -143,6 +148,7 @@ export async function apiRequest<T>(method: string, path: string, body?: unknown
       // Hardcount-Request-Id header so errors that bypass the JSON writer (502s,
       // plain-text proxy errors) still carry a traceable ID to the toast.
       requestId,
+      retryAfterMs: parseRetryAfter(res.headers.get('Retry-After')),
     })
   }
 

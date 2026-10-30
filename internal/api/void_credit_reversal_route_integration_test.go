@@ -31,7 +31,7 @@ func newVoidRig(t *testing.T) *voidRig {
 	t.Helper()
 	db := testutil.SetupTestDB(t)
 	ts := httptest.NewServer(NewServer(db, clock.Real(), nil,
-		WithRateLimits(config.RateLimits{GeneralPerMinute: 10_000, IngestPerSecond: 1000})))
+		WithRateLimits(config.RateLimits{GeneralPerMinute: 10_000, AuthPerMinute: 100, IngestPerSecond: 1000})))
 	t.Cleanup(ts.Close)
 	tenantID := testutil.CreateTestTenant(t, db, "Void Reversal Co")
 	key := createAPIKeyWithMode(t, db, tenantID, false)

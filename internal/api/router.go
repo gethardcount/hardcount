@@ -1424,6 +1424,14 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// Postgres, never a lockout (ADR-094). The old users.locked_until
 	// auto-lockout (fragmenting across Redis↔in-memory and weaponizable — any
 	// known operator email → a 15-min lockout on demand) stays removed.
+	//
+	// The general limit is sized for the dashboard plus an integration, not
+	// for sign-in: one dashboard page sends about 10 requests, and every
+	// operator of an account shares the account's per-mode bucket, so the
+	// old 100 a minute stopped one operator after about 10 pages. Default
+	// 1,000 a minute (about 16 a second) per API key or per account and
+	// mode; Stripe's lowest documented global limit is 25 a second, in a
+	// sandbox (ADR-095 amendment 2026-10-31).
 	rateLimiter := mw.NewRateLimiter(rdb, "general", o.rateLimits.GeneralPerMinute, time.Minute)
 	// In production, refuse requests when Redis is unreachable rather than
 	// silently disabling rate limiting (DDoS vector). The general/IP limiter
@@ -1433,8 +1441,23 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	if prod {
 		rateLimiter.SetFailClosed(true)
 	}
+	// Before sign-in, /v1/bootstrap and /v1/auth count per client address
+	// on their own limit, HARDCOUNT_RATE_LIMIT_AUTH_PER_MIN (default 100 a
+	// minute, the general limit until 2026-10-31), so a larger general
+	// limit never loosens password guessing. Both use the "auth" Redis
+	// namespace with the same rate, so one address shares one bucket across
+	// sign-in and bootstrap, as it did when both rode "general". They could
+	// not stay in "general": that namespace now holds a different rate, and
+	// two rates on one GCRA key corrupt each other's state.
+	//
+	// The bootstrap instance fails closed in production like the general
+	// one; the /v1/auth instance below never does.
+	bootstrapLimiter := mw.NewRateLimiter(rdb, "auth", o.rateLimits.AuthPerMinute, time.Minute)
+	if prod {
+		bootstrapLimiter.SetFailClosed(true)
+	}
 	// /v1/auth gets its OWN limiter instance — same Redis namespace and
-	// limits as the general one (shared buckets), but NEVER fail-closed:
+	// limit as the bootstrap one (shared buckets), but NEVER fail-closed:
 	// locking operators out of login during a Redis blip re-introduces
 	// the DoS the #21 design avoids. Login keeps a brute-force floor even
 	// then: the sign-in throttle lives in Postgres. The HA-readiness audit (docs/dev/
@@ -1447,12 +1470,12 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// counts in this process with the same limit (ADR-095 amendment
 	// 2026-10-18). That count is per replica, so N replicas allow one
 	// address up to N times the limit until Redis is back.
-	authLimiter := mw.NewRateLimiter(rdb, "general", o.rateLimits.GeneralPerMinute, time.Minute)
+	authLimiter := mw.NewRateLimiter(rdb, "auth", o.rateLimits.AuthPerMinute, time.Minute)
 	authLimiter.SetLocalFallback()
 
 	// Dedicated, much larger bucket for the ingest surface (/v1/usage-events*
-	// + the LiteLLM adapter). The general 100/min bucket was sized for
-	// operator CRUD; LiteLLM POSTs ONE callback per LLM call (ADR-033), so
+	// + the LiteLLM adapter). The general bucket (100/min until 2026-10-31)
+	// was sized for operator CRUD; LiteLLM POSTs ONE callback per LLM call (ADR-033), so
 	// any real AI-infra traffic above ~1.7 calls/s exhausted it inside the
 	// first hour of wiring the proxy — and LiteLLM at stock config retries
 	// NOTHING (max_retries=0; the queue is cleared on any send error —
@@ -1575,7 +1598,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	audit.MustWired(&bootstrapDeps)
 	bootstrapH := tenant.NewBootstrapHandler(db, bootstrapDeps)
 	r.Group(func(r chi.Router) {
-		r.Use(rateLimiter.Middleware())
+		r.Use(bootstrapLimiter.Middleware())
 		r.Use(mw.Timeout(30 * time.Second))
 		r.Mount("/v1/bootstrap", bootstrapH.Routes())
 	})

@@ -50,7 +50,8 @@ Every whole-number setting above stops start-up when its value is not a whole nu
 | `HARDCOUNT_COOKIE_DOMAIN` | The `Domain` of the sign-in cookie, such as `.example.com` when the API and dashboard are on sibling subdomains. | Unset: the cookie is for the API's host only. |
 | `HARDCOUNT_API_BASE_URL` | The public address of the API, so a copied cost-dashboard link is a full address. | Unset: the link is a path, and start-up logs a warning. |
 | `REDIS_URL` | Redis, used for rate limiting only. | Production: required, and an unreachable Redis stops start-up. Elsewhere: unset logs nothing, and unreachable logs a warning. Either way rate limits are then off, except sign-in's, which each copy counts on its own. |
-| `HARDCOUNT_RATE_LIMIT_GENERAL_PER_MIN` | Requests a minute for each API key, for each account's dashboard users together, or for each client address before sign-in. Sign-in attempts from one address use the same limit. | `100`. A value that is not a whole number of 1 or more stops start-up. |
+| `HARDCOUNT_RATE_LIMIT_GENERAL_PER_MIN` | API and dashboard requests a minute for each API key, or for each account's dashboard users together in each mode (test or live). One dashboard page sends about 10 requests. | `1000`. A value that is not a whole number of 1 or more stops start-up. |
+| `HARDCOUNT_RATE_LIMIT_AUTH_PER_MIN` | Requests a minute from each client address to sign-in, password reset, invites (`/v1/auth`) and `POST /v1/bootstrap`. It slows password guessing. | `100`. A value that is not a whole number of 1 or more stops start-up. |
 | `HARDCOUNT_RATE_LIMIT_INGEST_PER_SEC` | Usage events and LiteLLM callbacks a second, for each API key. | `1000`. A value that is not a whole number of 1 or more stops start-up. |
 | `SHUTDOWN_DRAIN_DELAY` | On shutdown, how long a copy keeps serving after `/health/ready` turns to 503, so a load balancer stops sending it traffic first. A Go duration. See [High availability](ops/high-availability.md). | Outside local: `5s`. Local: `0`. A value that does not parse, or is negative, stops start-up. |
 
@@ -134,7 +135,7 @@ These are read by Docker Compose from [`deploy/compose/.env`](../deploy/compose/
 
 How Compose differs from running the binary:
 
-- **Compose passes only the names `docker-compose.yml` lists.** `HARDCOUNT_RATE_LIMIT_GENERAL_PER_MIN`, `HARDCOUNT_RATE_LIMIT_INGEST_PER_SEC`, `SHUTDOWN_DRAIN_DELAY`, `DB_SSLMODE` and the `DB_HOST` set are not listed, so setting them in `.env` does nothing. Add them to the `hardcount-api` service's `environment` to use them.
+- **Compose passes only the names `docker-compose.yml` lists.** `HARDCOUNT_RATE_LIMIT_GENERAL_PER_MIN`, `HARDCOUNT_RATE_LIMIT_AUTH_PER_MIN`, `HARDCOUNT_RATE_LIMIT_INGEST_PER_SEC`, `SHUTDOWN_DRAIN_DELAY`, `DB_SSLMODE` and the `DB_HOST` set are not listed, so setting them in `.env` does nothing. Add them to the `hardcount-api` service's `environment` to use them.
 - **Some values are fixed.** `PORT` is `8080`, `RUN_MIGRATIONS_ON_BOOT` is `true`, and `DATABASE_URL` and `APP_DATABASE_URL` point at the in-stack Postgres. A `DATABASE_URL` in `.env` is ignored.
 - **Some defaults differ.** `APP_ENV` is `production`, `REDIS_URL` is `redis://redis:6379`, `TRUST_PROXY` is `172.16.0.0/12,192.168.0.0/16`, and `SMTP_FROM` is `billing@example.com`. `quickstart.sh` sets `APP_ENV=local`.
 

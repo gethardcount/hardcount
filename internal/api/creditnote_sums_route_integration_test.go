@@ -22,7 +22,7 @@ import (
 func TestCreditNoteSums_Routes_CountEveryNote(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ts := httptest.NewServer(NewServer(db, clock.Real(), nil,
-		WithRateLimits(config.RateLimits{GeneralPerMinute: 10_000, IngestPerSecond: 1000})))
+		WithRateLimits(config.RateLimits{GeneralPerMinute: 10_000, AuthPerMinute: 100, IngestPerSecond: 1000})))
 	defer ts.Close()
 
 	tenantID := testutil.CreateTestTenant(t, db, "Credit Note Sums Co")

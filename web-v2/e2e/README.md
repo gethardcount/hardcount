@@ -72,6 +72,9 @@ the screen, and that the main things an operator does work end to end.
   zone header and day headers follow the account's zone. The files go to `activity-shots/`,
   which CI uploads as the `activity-shots` artifact on every run (see
   [Activity screenshots](#activity-screenshots)).
+- `rate-limit.spec.ts` stubs a 429 (Too many requests) with `Retry-After`
+  on a customer page's first load. The page must show "Too many requests.
+  Trying again in a moment." at once, then load the customer by itself.
 - `global.setup.ts` runs first. It seeds data through the API (code in
   `fixtures/`) and signs in once through the login page. The other tests reuse
   that session.

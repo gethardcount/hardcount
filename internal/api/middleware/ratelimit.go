@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"strconv"
 	"time"
@@ -128,7 +129,7 @@ func (rl *RateLimiter) Middleware() func(http.Handler) http.Handler {
 				respond.FromError(w, r, err, "rate_limit")
 				return
 			}
-			remaining, resetAt, allowed := rl.allow(r.Context(), key)
+			remaining, resetAt, retryIn, allowed := rl.allow(r.Context(), key)
 
 			// Set rate limit headers (Stripe convention)
 			w.Header().Set("X-RateLimit-Limit", strconv.Itoa(rl.limit.Rate))
@@ -136,7 +137,13 @@ func (rl *RateLimiter) Middleware() func(http.Handler) http.Handler {
 			w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(resetAt.Unix(), 10))
 
 			if !allowed {
-				retryAfter := int(time.Until(resetAt).Seconds()) + 1
+				// Retry-After is when the NEXT request may pass, rounded
+				// up to a whole second. It used to be the reset time,
+				// when the whole bucket is full again: a full period
+				// (61s at any per-minute limit) although one request's
+				// token refills in period/rate. A client that honors
+				// the header waited a minute for nothing.
+				retryAfter := int(math.Ceil(retryIn.Seconds()))
 				if retryAfter < 1 {
 					retryAfter = 1
 				}
@@ -157,13 +164,16 @@ func (rl *RateLimiter) Middleware() func(http.Handler) http.Handler {
 // Returns (remaining, resetAt, allowed); same fail-open / fail-closed /
 // local-fallback semantics as the middleware path.
 func (rl *RateLimiter) AllowKey(ctx context.Context, key string) (int, time.Time, bool) {
-	return rl.allow(ctx, key)
+	remaining, resetAt, _, allowed := rl.allow(ctx, key)
+	return remaining, resetAt, allowed
 }
 
 // allow checks the rate limit for the given key.
-// Returns (remaining, resetAt, allowed). On Redis absence or error, behavior
-// depends on SetLocalFallback and SetFailClosed.
-func (rl *RateLimiter) allow(ctx context.Context, key string) (int, time.Time, bool) {
+// Returns (remaining, resetAt, retryIn, allowed): resetAt is when the bucket
+// is full again, retryIn how long until the next request may pass (0 when
+// allowed). On Redis absence or error, behavior depends on SetLocalFallback
+// and SetFailClosed.
+func (rl *RateLimiter) allow(ctx context.Context, key string) (int, time.Time, time.Duration, bool) {
 	now := time.Now().UTC()
 
 	if rl.limiter == nil {
@@ -172,9 +182,9 @@ func (rl *RateLimiter) allow(ctx context.Context, key string) (int, time.Time, b
 			return rl.local.allow(key, now)
 		case rl.failClosed:
 			slog.Error("rate_limiter: no redis configured, failing closed", "key", key)
-			return 0, now.Add(rl.limit.Period), false
+			return 0, now.Add(rl.limit.Period), rl.limit.Period, false
 		}
-		return rl.limit.Rate - 1, now.Add(rl.limit.Period), true
+		return rl.limit.Rate - 1, now.Add(rl.limit.Period), 0, true
 	}
 
 	res, err := rl.limiter.Allow(ctx, rl.bucketKey(key), rl.limit)
@@ -191,17 +201,21 @@ func (rl *RateLimiter) allow(ctx context.Context, key string) (int, time.Time, b
 				"error", err,
 				"key", key,
 			)
-			return 0, now.Add(rl.limit.Period), false
+			return 0, now.Add(rl.limit.Period), rl.limit.Period, false
 		}
 		slog.Warn("rate_limiter: redis error, failing open",
 			"error", err,
 			"key", key,
 		)
-		return rl.limit.Rate - 1, now.Add(rl.limit.Period), true
+		return rl.limit.Rate - 1, now.Add(rl.limit.Period), 0, true
 	}
 
 	resetAt := now.Add(res.ResetAfter)
-	return res.Remaining, resetAt, res.Allowed > 0
+	if res.Allowed > 0 {
+		return res.Remaining, resetAt, 0, true
+	}
+	// redis_rate's RetryAfter is the time until the next request passes.
+	return res.Remaining, resetAt, res.RetryAfter, false
 }
 
 // bucketKey is the Redis key for a logical bucket: the per-limiter namespace

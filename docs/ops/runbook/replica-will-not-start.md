@@ -40,7 +40,7 @@ This is a different situation:
 - Usage ingest keeps working with no limit (it fails open).
 - Sign-in, `/v1/auth`, keeps working and stays limited. Each replica
   counts sign-in requests on its own. The limit is 100 a minute per address
-  by default, so with three replicas one address can make up to 300 a
-  minute. The log shows `rate_limiter: redis error, counting in this
+  by default (`HARDCOUNT_RATE_LIMIT_AUTH_PER_MIN`), so with three replicas
+  one address can make up to 300 a minute. The log shows `rate_limiter: redis error, counting in this
   process`.
 - Restore Redis. No restart is needed.

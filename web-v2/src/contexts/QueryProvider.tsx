@@ -1,6 +1,7 @@
 import { useMemo, type ReactNode } from 'react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useAuth } from '@/contexts/AuthContext'
+import { retryQuery, scheduleRateLimitRefetch } from '@/lib/rateLimitRetry'
 
 // Refetch posture (2026-06-02): operator billing data changes on the order of
 // minutes and is refreshed explicitly via invalidateQueries after mutations,
@@ -10,14 +11,33 @@ import { useAuth } from '@/contexts/AuthContext'
 // stops a full re-fetch on every alt-tab. Real-time surfaces (test-clock
 // advancing, invoice payment status) opt into polling via per-query
 // refetchInterval, which is independent of these defaults.
+//
+// retry: one retry for a failed load, except a 429 (Too many requests). A
+// query that is retrying stays pending, so the page showed its skeleton
+// until the retries ran out. A 429 now shows the error state at once, and
+// the query loads again after the API's Retry-After (lib/rateLimitRetry).
 const queryDefaults = {
   queries: {
     staleTime: 30_000,
-    retry: 1,
+    retry: retryQuery,
     refetchOnWindowFocus: false,
     refetchOnMount: true,
   },
 } as const
+
+function newQueryClient(): QueryClient {
+  const client: QueryClient = new QueryClient({
+    queryCache: new QueryCache({
+      onError: (err, query) => {
+        scheduleRateLimitRefetch(err, query, () => {
+          void client.refetchQueries({ queryKey: query.queryKey, exact: true, type: 'active' })
+        })
+      },
+    }),
+    defaultOptions: queryDefaults,
+  })
+  return client
+}
 
 // Mode-scoped data (customers, invoices, subscriptions, API keys, audit
 // log entries, etc.) lives in fully separate caches per mode. Toggling
@@ -46,8 +66,8 @@ export function ModeAwareQueryProvider({ children }: { children: ReactNode }) {
 
   const { testClient, liveClient } = useMemo(
     () => ({
-      testClient: new QueryClient({ defaultOptions: queryDefaults }),
-      liveClient: new QueryClient({ defaultOptions: queryDefaults }),
+      testClient: newQueryClient(),
+      liveClient: newQueryClient(),
     }),
     [userKey],
   )

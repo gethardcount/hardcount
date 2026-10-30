@@ -21,6 +21,7 @@ var configOwnedSettings = map[string]bool{
 	"APP_ENV":                              true,
 	"RUN_MIGRATIONS_ON_BOOT":               true,
 	"HARDCOUNT_RATE_LIMIT_GENERAL_PER_MIN": true,
+	"HARDCOUNT_RATE_LIMIT_AUTH_PER_MIN":    true,
 	"HARDCOUNT_RATE_LIMIT_INGEST_PER_SEC":  true,
 	"INVOICE_GRACE_PERIOD":                 true,
 	"SHUTDOWN_DRAIN_DELAY":                 true,
