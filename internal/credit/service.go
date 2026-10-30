@@ -424,20 +424,26 @@ type CreditNoteReturnInput struct {
 	Description string
 	InvoiceID   string
 	// InvoicePaid: the note is on a paid invoice and the amount is its credit
-	// channel. Only the part the invoice drew from credit blocks goes back to
-	// them; the rest, which the customer paid in cash, is new credit with no
+	// channel. The balance rises by exactly the amount: the note's drawn
+	// share (pro rata to how the invoice was paid) goes back to the blocks it
+	// came from where it stays spendable, the rest is new credit with no
 	// expiry. Unset: the note is on an unpaid invoice and the amount is the
 	// applied credit it relieves, every cent drawn credit.
 	InvoicePaid bool
+	// InvoiceTotalCents is the invoice's total, the base of the pro-rata
+	// split. Required when InvoicePaid is set.
+	InvoiceTotalCents int64
 }
 
 // GrantForCreditNoteTx is the credit-note grant, on the caller's coordinator
 // tx, so the ledger entry commits atomically with the credit note's
 // draft→issued CAS (ADR-061, creditnote.Issue). It is a credit return
-// (ADR-132): the credit the invoice drew from blocks goes back to those
-// blocks with their expiry and kind, last drawn first. Stripe does not
-// reinstate credit grants on a credit note; Hardcount does, so a note never
-// turns expiring or promotional credit into credit that never expires.
+// (ADR-132). On an unpaid invoice the credit the note relieves goes back to
+// the blocks it was drawn from, with their expiry and kind, last drawn
+// first. On a paid invoice the balance rises by exactly the note's credit
+// amount: its drawn share goes back to its blocks only where it stays
+// spendable, and the rest is new credit. Stripe reinstates no credit grant on
+// a credit note.
 //
 // The 0093 (tenant, CN) dedup index still backs uniqueness, but the issue CAS
 // makes a duplicate UNREACHABLE — exactly one Issue() reaches the grant per
@@ -475,6 +481,10 @@ func (s *Service) GrantForCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID
 	if len(desc) > 500 {
 		return domain.CreditReturn{}, errs.Invalid("description", "must be at most 500 characters")
 	}
+	if input.InvoicePaid && input.InvoiceTotalCents <= 0 {
+		// A caller bug, not bad input: the paid branch always has the invoice.
+		return domain.CreditReturn{}, fmt.Errorf("credit note %s on paid invoice %s: invoice total %d is not positive", creditNoteID, input.InvoiceID, input.InvoiceTotalCents)
+	}
 	out, res, err := s.store.ReturnCreditTx(ctx, tx, tenantID, ReturnEntry{
 		CustomerID:         input.CustomerID,
 		InvoiceID:          input.InvoiceID,
@@ -483,6 +493,7 @@ func (s *Service) GrantForCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID
 		Description:        desc,
 		SourceCreditNoteID: creditNoteID,
 		PaidInvoice:        input.InvoicePaid,
+		InvoiceTotalCents:  input.InvoiceTotalCents,
 		At:                 clock.Now(ctx),
 	})
 	if err != nil {

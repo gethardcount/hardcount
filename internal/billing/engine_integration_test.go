@@ -651,7 +651,7 @@ func TestBillTiming_InAdvance_E2E(t *testing.T) {
 type reliefLedgerGranter struct{ svc *credit.Service }
 
 func (g reliefLedgerGranter) in(i creditnote.CreditGrantInput) credit.CreditNoteReturnInput {
-	return credit.CreditNoteReturnInput{Currency: i.Currency, CustomerID: i.CustomerID, AmountCents: i.AmountCents, Description: i.Description, InvoiceID: i.InvoiceID, InvoicePaid: i.InvoicePaid}
+	return credit.CreditNoteReturnInput{Currency: i.Currency, CustomerID: i.CustomerID, AmountCents: i.AmountCents, Description: i.Description, InvoiceID: i.InvoiceID, InvoicePaid: i.InvoicePaid, InvoiceTotalCents: i.InvoiceTotalCents}
 }
 func (g reliefLedgerGranter) GrantForCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, cnID string, i creditnote.CreditGrantInput) error {
 	_, err := g.svc.GrantForCreditNoteTx(ctx, tx, tenantID, cnID, g.in(i))

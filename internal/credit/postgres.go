@@ -1293,6 +1293,18 @@ const balanceWriteOffColumns = `COALESCE(SUM(CASE WHEN entry_type = 'expiry' THE
 			                   AND COALESCE(metadata->>'reason', '') NOT IN ('commit_void_retire', 'commit_refund_retire')
 			              THEN ABS(amount_cents) ELSE 0 END), 0)`
 
+// restoredCentsSQL is what a return row (ADR-132) restored to the blocks the
+// invoice drew from: metadata restored_cents, 0 on every other row.
+const restoredCentsSQL = `CASE WHEN entry_type = 'grant' THEN COALESCE((metadata->>'restored_cents')::bigint, 0) ELSE 0 END`
+
+// balanceGrantedUsedColumns are total_granted and total_used. A return row's
+// restored part is not new credit and the draw it undoes is not use, so it
+// comes off both (ADR-132): the totals then match ListGrantSummaries, and
+// total_granted = total_used + total_expired + total_retired +
+// total_deducted + balance still holds.
+const balanceGrantedUsedColumns = `COALESCE(SUM(CASE WHEN amount_cents > 0 THEN amount_cents - ` + restoredCentsSQL + ` ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN entry_type = 'usage' THEN ABS(amount_cents) ELSE 0 END), 0) - COALESCE(SUM(` + restoredCentsSQL + `), 0)`
+
 // GetBalance returns the customer's balances, one per currency the ledger
 // holds (ADR-129), ordered by currency. An empty ledger returns none.
 func (s *PostgresStore) GetBalance(ctx context.Context, tenantID, customerID string) ([]domain.CreditBalance, error) {
@@ -1314,8 +1326,7 @@ func balancesTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, currency 
 		SELECT
 			currency,
 			COALESCE(SUM(amount_cents), 0),
-			COALESCE(SUM(CASE WHEN amount_cents > 0 THEN amount_cents ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN entry_type = 'usage' THEN ABS(amount_cents) ELSE 0 END), 0),
+			`+balanceGrantedUsedColumns+`,
 			`+balanceWriteOffColumns+`
 		FROM customer_credit_ledger WHERE tenant_id = $1 AND customer_id = $2
 			AND ($3 = '' OR currency = $3)
@@ -1419,8 +1430,7 @@ func (s *PostgresStore) ListBalances(ctx context.Context, tenantID string, limit
 			customer_id,
 			currency,
 			COALESCE(SUM(amount_cents), 0) AS balance_cents,
-			COALESCE(SUM(CASE WHEN amount_cents > 0 THEN amount_cents ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN entry_type = 'usage' THEN ABS(amount_cents) ELSE 0 END), 0),
+			`+balanceGrantedUsedColumns+`,
 			`+balanceWriteOffColumns+`
 		FROM customer_credit_ledger
 		WHERE tenant_id = $1
@@ -1595,7 +1605,7 @@ func (s *PostgresStore) ListEntries(ctx context.Context, filter ListFilter) ([]d
 				ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
 			) AS running_balance,
 			description, invoice_id, expires_at, metadata, created_at,
-			consumed_cents, grant_kind, source_invoice_id
+			consumed_cents - ` + restoredCentsSQL + ` AS consumed_cents, grant_kind, source_invoice_id
 		FROM customer_credit_ledger
 		WHERE tenant_id = $1 AND customer_id = $2
 	)

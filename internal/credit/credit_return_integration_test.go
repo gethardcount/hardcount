@@ -92,15 +92,23 @@ func (r *returnRig) void(ctx context.Context, cust, inv string) domain.CreditRet
 	return res
 }
 
-func (r *returnRig) creditNote(cust, inv, cnID string, cents int64, paid bool) (domain.CreditReturn, error) {
+// creditNote runs the credit-note grant on its own transaction. A paid note
+// needs invoiceTotal, the base of its pro-rata split; pass 0 for an unpaid one.
+func (r *returnRig) creditNote(cust, inv, cnID string, cents int64, paid bool, invoiceTotal int64) (domain.CreditReturn, error) {
 	r.t.Helper()
-	tx, err := r.db.BeginTx(r.ctx, postgres.TxTenant, r.tenantID)
+	return r.creditNoteAt(r.ctx, cust, inv, cnID, cents, paid, invoiceTotal)
+}
+
+func (r *returnRig) creditNoteAt(ctx context.Context, cust, inv, cnID string, cents int64, paid bool, invoiceTotal int64) (domain.CreditReturn, error) {
+	r.t.Helper()
+	tx, err := r.db.BeginTx(ctx, postgres.TxTenant, r.tenantID)
 	if err != nil {
 		r.t.Fatalf("begin: %v", err)
 	}
 	defer postgres.Rollback(tx)
-	res, err := r.svc.GrantForCreditNoteTx(r.ctx, tx, r.tenantID, cnID, credit.CreditNoteReturnInput{
-		CustomerID: cust, Currency: "USD", AmountCents: cents, Description: "Credit note " + cnID, InvoiceID: inv, InvoicePaid: paid,
+	res, err := r.svc.GrantForCreditNoteTx(ctx, tx, r.tenantID, cnID, credit.CreditNoteReturnInput{
+		CustomerID: cust, Currency: "USD", AmountCents: cents, Description: "Credit note " + cnID, InvoiceID: inv,
+		InvoicePaid: paid, InvoiceTotalCents: invoiceTotal,
 	})
 	if err != nil {
 		return domain.CreditReturn{}, err
@@ -221,6 +229,41 @@ func (r *returnRig) checkLedger(cust string) {
 	if reopened != 0 {
 		r.t.Errorf("%d expired grants have headroom again", reopened)
 	}
+	postgres.Rollback(tx)
+	r.checkTotals(cust)
+}
+
+// checkTotals asserts that the balance totals (GET /v1/credits/balance, the
+// credit.* webhooks) add up and agree with the grant list: a return's
+// restored part is neither granted again nor used (ADR-132).
+func (r *returnRig) checkTotals(cust string) {
+	r.t.Helper()
+	bs, err := r.svc.GetBalance(r.ctx, r.tenantID, cust)
+	if err != nil {
+		r.t.Fatalf("balance: %v", err)
+	}
+	resp := r.summaries(cust, true)
+	for _, b := range bs {
+		if got := b.TotalUsed + b.TotalExpired + b.TotalRetired + b.TotalDeducted + b.BalanceCents; got != b.TotalGranted {
+			r.t.Errorf("%s: used+expired+retired+deducted+balance = %d, granted %d (%+v)", b.Currency, got, b.TotalGranted, b)
+		}
+		var amount, used, expired, retired, deducted int64
+		for _, g := range resp.Grants {
+			if g.Currency != b.Currency {
+				continue
+			}
+			amount += g.AmountCents
+			used += g.ConsumedCents - g.ExpiredCents - g.RetiredCents - g.DeductedCents
+			expired += g.ExpiredCents
+			retired += g.RetiredCents
+			deducted += g.DeductedCents
+		}
+		if amount != b.TotalGranted || used != b.TotalUsed || expired != b.TotalExpired || retired != b.TotalRetired || deducted != b.TotalDeducted {
+			r.t.Errorf("%s: totals granted %d used %d expired %d retired %d deducted %d; grant list %d %d %d %d %d",
+				b.Currency, b.TotalGranted, b.TotalUsed, b.TotalExpired, b.TotalRetired, b.TotalDeducted,
+				amount, used, expired, retired, deducted)
+		}
+	}
 }
 
 func (r *returnRig) summaries(cust string, history bool) credit.GrantsResponse {
@@ -293,6 +336,15 @@ func TestCreditReturn_VoidRestoresTheExpiringGrant(t *testing.T) {
 		t.Errorf("balance %d, want 10000", got)
 	}
 	r.checkLedger(cust)
+	// The ledger list says how much of the reversal row was used or expired:
+	// none. Its restored part is on the grants.
+	entries, err := r.svc.ListEntries(r.ctx, credit.ListFilter{TenantID: r.tenantID, CustomerID: cust, InvoiceID: inv, EntryType: string(domain.CreditGrant)})
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("ledger list: %d rows, %v; want the reversal row", len(entries), err)
+	}
+	if entries[0].AmountCents != 6000 || entries[0].ConsumedCents != 0 {
+		t.Errorf("reversal row in the ledger list: amount %d consumed %d, want 6000 0", entries[0].AmountCents, entries[0].ConsumedCents)
+	}
 
 	// The grant summary shows both grants whole again, and the reversal row
 	// is not a block: everything it returned is on the grants.
@@ -489,7 +541,7 @@ func TestCreditReturn_PartialCreditNoteRestoresLastDrawnFirst(t *testing.T) {
 	inv := r.invoice(cust, 5000)
 	r.apply(cust, inv, 5000) // first 3000, second 2000
 
-	res, err := r.creditNote(cust, inv, "hc_cn_partial", 2500, false)
+	res, err := r.creditNote(cust, inv, "hc_cn_partial", 2500, false, 0)
 	if err != nil {
 		t.Fatalf("credit note: %v", err)
 	}
@@ -514,56 +566,84 @@ func TestCreditReturn_PartialCreditNoteRestoresLastDrawnFirst(t *testing.T) {
 	r.checkLedger(cust)
 }
 
-// A credit note on a paid invoice restores only the part the invoice drew
-// from grants; the cash-paid part is new credit with no expiry, as before.
-func TestCreditReturn_PaidInvoiceRestoresOnlyTheDrawnPart(t *testing.T) {
+// A credit note on a paid invoice never gives the customer less than it says
+// (ADR-132): the balance rises by exactly the note's credit amount. The note
+// is split pro rata to how the invoice was paid; the drawn share goes back to
+// the grant it came from while that grant is spendable, and everything else
+// is new credit with no expiry.
+//
+// Mutation-verify (CI, PR #1498): treat every block as spendable → "expired
+// grant" puts 2400 of live credit back on the expired grant (return red);
+// place the whole note drawn first → "spendable grant" restores 3000 (red).
+func TestCreditReturn_PaidInvoiceNeverGivesLessThanTheNote(t *testing.T) {
 	r := newReturnRig(t, "Return Paid CN")
-	cust := r.customer("ret_paid")
-	nextWeek := time.Now().UTC().Add(7 * 24 * time.Hour)
-	promo := r.grant(cust, 3000, &nextWeek, domain.GrantKindPromotional)
-	inv := r.invoice(cust, 10000)
-	r.apply(cust, inv, 3000) // credit covers 3000; the card paid the other 7000
 
-	res, err := r.creditNote(cust, inv, "hc_cn_paid_1", 5000, true)
-	if err != nil {
-		t.Fatalf("credit note: %v", err)
-	}
-	if res != (domain.CreditReturn{ReturnedCents: 5000, RestoredCents: 3000, UnattributedCents: 2000}) {
-		t.Errorf("return = %+v, want 3000 back to the grant and 2000 new credit", res)
-	}
-	if b := r.block(promo); b.Consumed != 0 || b.Kind != string(domain.GrantKindPromotional) || b.ExpiresAt == nil {
-		t.Errorf("promotional grant = %+v, want whole again with its kind and expiry", b)
-	}
-	amount, consumed, _ := r.returnRow("source_credit_note_id", "hc_cn_paid_1")
-	if amount != 5000 || consumed != 3000 {
-		t.Errorf("credit note row: amount %d consumed %d, want 5000 3000", amount, consumed)
-	}
-	resp := r.summaries(cust, false)
-	if got := resp.RemainingByCurrency[0]; got.PromotionalRemainingCents != 3000 || got.OtherRemainingCents != 2000 {
-		t.Errorf("remaining = %+v, want promotional 3000, other 2000", got)
-	}
-	if len(resp.Grants) != 2 {
-		t.Errorf("%d grant rows, want the promotional grant and the note's 2000", len(resp.Grants))
-	}
-	for _, g := range resp.Grants {
-		if g.ID != promo && (g.AmountCents != 2000 || g.ConsumedCents != 0 || g.RemainingCents != 2000) {
-			t.Errorf("note row summary = %+v, want amount 2000, consumed 0, remaining 2000", g)
+	t.Run("spendable grant: the drawn share goes back to it", func(t *testing.T) {
+		r.t = t
+		cust := r.customer("ret_paid_live")
+		nextWeek := time.Now().UTC().Add(7 * 24 * time.Hour)
+		promo := r.grant(cust, 3000, &nextWeek, domain.GrantKindPromotional)
+		inv := r.invoice(cust, 10000)
+		r.apply(cust, inv, 3000) // credit pays 3000; the card paid the other 7000
+
+		res, err := r.creditNote(cust, inv, "hc_cn_paid_1", 5000, true, 10000)
+		if err != nil {
+			t.Fatalf("credit note: %v", err)
 		}
-	}
-	r.checkLedger(cust)
+		// 5000 × 3000/10000 = 1500 drawn share, back on the promotional grant.
+		if res != (domain.CreditReturn{ReturnedCents: 5000, RestoredCents: 1500, UnattributedCents: 3500}) {
+			t.Errorf("return = %+v, want 1500 back to the grant and 3500 new credit", res)
+		}
+		if b := r.block(promo); b.Consumed != 1500 || b.Kind != string(domain.GrantKindPromotional) {
+			t.Errorf("promotional grant = %+v, want consumed 1500 with its kind", b)
+		}
+		if got := r.balance(cust); got != 5000 {
+			t.Errorf("balance %d, want 5000: exactly the note's credit", got)
+		}
+		resp := r.summaries(cust, false)
+		if got := resp.RemainingByCurrency[0]; got.PromotionalRemainingCents != 1500 || got.OtherRemainingCents != 3500 {
+			t.Errorf("remaining = %+v, want promotional 1500, other 3500", got)
+		}
+		r.checkLedger(cust)
 
-	// Nothing drawn is left on the invoice: a second note is all new credit.
-	res, err = r.creditNote(cust, inv, "hc_cn_paid_2", 4000, true)
-	if err != nil {
-		t.Fatalf("second credit note: %v", err)
-	}
-	if res != (domain.CreditReturn{ReturnedCents: 4000, UnattributedCents: 4000}) {
-		t.Errorf("second return = %+v, want all 4000 new credit", res)
-	}
-	if got := r.balance(cust); got != 9000 {
-		t.Errorf("balance %d, want 9000 (3000 granted, 3000 drawn, 5000 + 4000 back)", got)
-	}
-	r.checkLedger(cust)
+		// The second note continues the first: (5000+4000) × 0.3 − 1500 = 1200.
+		res, err = r.creditNote(cust, inv, "hc_cn_paid_2", 4000, true, 10000)
+		if err != nil {
+			t.Fatalf("second credit note: %v", err)
+		}
+		if res != (domain.CreditReturn{ReturnedCents: 4000, RestoredCents: 1200, UnattributedCents: 2800}) {
+			t.Errorf("second return = %+v, want 1200 restored and 2800 new credit", res)
+		}
+		if got := r.balance(cust); got != 9000 {
+			t.Errorf("balance %d, want 9000", got)
+		}
+		r.checkLedger(cust)
+	})
+
+	t.Run("expired grant: the whole note is new credit", func(t *testing.T) {
+		r.t = t
+		cust := r.customer("ret_paid_expired")
+		later := time.Now().UTC().Add(time.Hour)
+		promo := r.grant(cust, 4000, &later, domain.GrantKindPromotional)
+		inv := r.invoice(cust, 10000)
+		r.apply(cust, inv, 4000)
+		r.backdate(promo, time.Now().UTC().Add(-24*time.Hour)) // expired yesterday
+
+		res, err := r.creditNote(cust, inv, "hc_cn_paid_exp", 6000, true, 10000)
+		if err != nil {
+			t.Fatalf("credit note: %v", err)
+		}
+		if res != (domain.CreditReturn{ReturnedCents: 6000, UnattributedCents: 6000}) {
+			t.Errorf("return = %+v, want all 6000 new credit", res)
+		}
+		if got := r.balance(cust); got != 6000 {
+			t.Errorf("balance %d, want 6000: the note says 6000 added", got)
+		}
+		if ex := r.expiries(cust, promo); len(ex) != 0 {
+			t.Errorf("expiry entries = %+v, want none", ex)
+		}
+		r.checkLedger(cust)
+	})
 }
 
 // A usage row written before drains recorded their blocks (2026-07-05) has no
@@ -635,7 +715,7 @@ func TestCreditReturn_LegacyRowsTakeTheLegacyPath(t *testing.T) {
 		r.apply(cust, inv, 3000)
 		before := r.balance(cust)
 
-		if _, err := r.creditNote(cust, inv, "hc_cn_too_much", 4000, false); err == nil {
+		if _, err := r.creditNote(cust, inv, "hc_cn_too_much", 4000, false, 0); err == nil {
 			t.Fatal("a credit note returning 4000 of 3000 drawn: accepted, want a refusal")
 		}
 		if got := r.balance(cust); got != before {
@@ -819,4 +899,154 @@ func TestCreditReturn_RestoreIsACAS(t *testing.T) {
 	if b := r.block(g); b.Consumed != 6000 {
 		t.Errorf("grant consumed %d, want 6000 (rolled back)", b.Consumed)
 	}
+}
+
+// The owed-draw hold leaves out the invoice the credit is returned for. An
+// unpaid period invoice stays queued for collection while a credit note
+// relieves it, and it is the draw being undone, not a draw the credit is
+// still owed to: a share of its expired grant expires at once.
+//
+// Mutation-verify (CI, PR #1498): count the invoice itself in the hold → the
+// share stays live on the expired grant (red).
+func TestCreditReturn_HoldLeavesOutTheInvoiceBeingCredited(t *testing.T) {
+	r := newReturnRig(t, "Return Hold Self")
+	cust := r.customer("ret_hold_self")
+	later := time.Now().UTC().Add(time.Hour)
+	g := r.grant(cust, 3000, &later, "") // all of it drawn: a draw takes min(due, balance)
+	issued := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Microsecond)
+	// A finalized period invoice, queued for collection (auto_charge_pending),
+	// issued before the grant expires: it draws the grant as of its issue.
+	inv := seedPeriodInvoice(t, r.ctx, r.invoices, r.tenantID, cust, "", domain.BillingReasonSubscriptionCycle,
+		domain.InvoiceFinalized, domain.InvoiceTaxOK, issued)
+	r.apply(cust, inv.ID, 3000)
+	r.backdate(g, time.Now().UTC().Add(-time.Hour)) // after the issue, before now
+
+	res, err := r.creditNote(cust, inv.ID, "hc_cn_hold_self", 3000, false, 0)
+	if err != nil {
+		t.Fatalf("credit note: %v", err)
+	}
+	if res.ExpiredOnReturnCents != 3000 {
+		t.Errorf("return = %+v, want the 3000 expired at once: the invoice being credited does not hold its own grant", res)
+	}
+	if got := r.balance(cust); got != 0 {
+		t.Errorf("balance %d, want 0", got)
+	}
+	r.checkLedger(cust)
+}
+
+// Concurrent-resolver: the expiry sweep runs on the same grant while the
+// return holds the customer's ledger locks, between reading the blocks and
+// the first write. It must wait; then it finds nothing left to expire, so the
+// grant has exactly one write-off of its remainder.
+//
+// Mutation-verify (CI, PR #1498): drop the return's advisory lock and its
+// FOR UPDATE → the sweep expires the remainder inside the window
+// ("finished while the return held its locks", red).
+func TestCreditReturn_ExpirySweepWaitsForTheReturn(t *testing.T) {
+	r := newReturnRig(t, "Return Sweep Race")
+	admin := testutil.AdminPool(t)
+	cust := r.customer("ret_sweep_race")
+	later := time.Now().UTC().Add(time.Hour)
+	g := r.grant(cust, 5000, &later, "")
+	inv := r.invoice(cust, 3000)
+	r.apply(cust, inv, 3000)
+	r.backdate(g, time.Now().UTC().Add(-time.Hour))
+
+	type sweep struct {
+		n   int64
+		err error
+	}
+	var finished atomic.Bool
+	done := make(chan sweep, 1)
+	var finishedEarly bool
+	credit.SetBeforeRestoreHook(r.store, func(ctx context.Context, tx *sql.Tx) {
+		go func() {
+			n, err := r.store.ExpireGrantAtomic(r.ctx, r.tenantID, cust, g)
+			finished.Store(true)
+			done <- sweep{n, err}
+		}()
+		deadline := time.Now().Add(15 * time.Second)
+		for {
+			if finished.Load() {
+				finishedEarly = true
+				return
+			}
+			var waiting int
+			if err := admin.QueryRowContext(ctx, `SELECT count(*) FROM pg_stat_activity
+				WHERE datname = current_database() AND wait_event_type = 'Lock' AND query ILIKE '%pg_advisory_xact_lock%'`).Scan(&waiting); err != nil {
+				t.Errorf("read pg_stat_activity: %v", err)
+				return
+			}
+			if waiting >= 1 {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Error("the sweep never reached the customer lock")
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	})
+
+	tx, err := r.db.BeginTx(r.ctx, postgres.TxTenant, r.tenantID)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	_, err = r.svc.ReverseForInvoiceTx(r.ctx, tx, r.tenantID, cust, inv, "")
+	if err == nil {
+		err = tx.Commit()
+	}
+	postgres.Rollback(tx)
+	credit.SetBeforeRestoreHook(r.store, nil)
+	if finishedEarly {
+		t.Error("the sweep finished while the return held its locks")
+	}
+	if err != nil {
+		t.Fatalf("void reversal: %v", err)
+	}
+	select {
+	case s := <-done:
+		if s.err != nil || s.n != 0 {
+			t.Errorf("sweep after the return = %d, %v; want 0, nil: the return already wrote the grant off", s.n, s.err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("the sweep did not finish after the return committed")
+	}
+	if ex := r.expiries(cust, g); len(ex) != 2 || ex[0].Amount != -2000 || ex[1].Amount != -3000 {
+		t.Errorf("expiry entries = %+v, want -2000 (the remainder) then -3000 (the returned share), once each", ex)
+	}
+	if got := r.balance(cust); got != 0 {
+		t.Errorf("balance %d, want 0", got)
+	}
+	r.checkLedger(cust)
+}
+
+// The credit-note path on a test clock: a note on an unpaid invoice judges
+// its grant's expiry at the customer's clock and stamps there.
+func TestCreditReturn_CreditNoteOnATestClock(t *testing.T) {
+	r := newReturnRig(t, "Return CN Test Clock")
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	frozen := now.Add(60 * 24 * time.Hour)
+	clockID := postgres.NewID("hc_tclk")
+	bypassExec(t, r.db, r.ctx, `INSERT INTO test_clocks (id, tenant_id, name, frozen_time, status, livemode)
+		VALUES ($1, $2, 'return-cn', $3, 'ready', false)`, clockID, r.tenantID, frozen)
+	cust := r.customer("ret_cn_clock")
+	bypassExec(t, r.db, r.ctx, `UPDATE customers SET test_clock_id = $1 WHERE id = $2`, clockID, cust)
+	expires := now.Add(30 * 24 * time.Hour)
+	g := r.grant(cust, 5000, &expires, "")
+	inv := r.invoice(cust, 5000)
+	r.apply(cust, inv, 5000)
+
+	simCtx := clock.WithSim(r.ctx, clock.Sim{At: frozen, TestClockID: clockID})
+	res, err := r.creditNoteAt(simCtx, cust, inv, "hc_cn_clock", 2000, false, 0)
+	if err != nil {
+		t.Fatalf("credit note: %v", err)
+	}
+	if res.ExpiredOnReturnCents != 2000 {
+		t.Errorf("return = %+v, want the 2000 expired at once on the customer's clock", res)
+	}
+	if ex := r.expiries(cust, g); len(ex) != 1 || ex[0].Amount != -2000 || !ex[0].CreatedAt.Equal(frozen) {
+		t.Errorf("expiry entries = %+v, want one -2000 stamped at the clock's %v", ex, frozen)
+	}
+	r.checkLedger(cust)
 }

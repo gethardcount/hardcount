@@ -30,7 +30,7 @@ func (a *cnGrantAdapter) GrantForCreditNoteTx(ctx context.Context, tx *sql.Tx, t
 	_, err := a.svc.GrantForCreditNoteTx(ctx, tx, tenantID, creditNoteID, credit.CreditNoteReturnInput{
 		Currency:   in.Currency,
 		CustomerID: in.CustomerID, AmountCents: in.AmountCents, Description: in.Description, InvoiceID: in.InvoiceID,
-		InvoicePaid: in.InvoicePaid,
+		InvoicePaid: in.InvoicePaid, InvoiceTotalCents: in.InvoiceTotalCents,
 	})
 	return err
 }

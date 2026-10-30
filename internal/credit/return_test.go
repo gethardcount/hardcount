@@ -130,6 +130,75 @@ func TestPlanRestore_RefusesCorruptAttribution(t *testing.T) {
 	}
 }
 
+// paidDrawnShare splits a paid-invoice note pro rata to how the invoice was
+// paid, cumulatively, so rounding never gives back more drawn credit than the
+// notes' share of it.
+//
+// Mutation-verify: compute each note's share on its own (amount×drawn/total)
+// → "three one-cent notes" red (3 instead of 2).
+func TestPaidDrawnShare(t *testing.T) {
+	cases := []struct {
+		name                          string
+		earlier, amount, drawn, total int64
+		want                          int64
+	}{
+		{"scenario A: 6000 of 10000, 4000 drawn", 0, 6000, 4000, 10000, 2400},
+		{"nothing drawn", 0, 5000, 0, 10000, 0},
+		{"all drawn", 0, 5000, 10000, 10000, 5000},
+		{"second note continues the first", 6000, 4000, 4000, 10000, 1600},
+		{"drawn above the total is capped at the note", 0, 100, 500, 200, 100},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := paidDrawnShare(tc.earlier, tc.amount, tc.drawn, tc.total)
+			if err != nil || got != tc.want {
+				t.Errorf("paidDrawnShare = %d, %v; want %d", got, err, tc.want)
+			}
+		})
+	}
+	t.Run("three one-cent notes telescope", func(t *testing.T) {
+		var sum, earlier int64
+		for i := 0; i < 3; i++ {
+			got, err := paidDrawnShare(earlier, 1, 2, 3)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sum += got
+			earlier++
+		}
+		if sum != 2 {
+			t.Errorf("three one-cent notes on 2 drawn of 3: shares sum to %d, want 2 (floor(3×2/3))", sum)
+		}
+	})
+	if _, err := paidDrawnShare(0, 100, 50, 0); err == nil {
+		t.Error("total 0: no error")
+	}
+}
+
+// spendableAt is the paid branch's test: a share goes back to its block only
+// while the block is not past expiry (the boundary is live) and is not a
+// commit whose funding invoice is voided.
+func TestSpendableAt(t *testing.T) {
+	at := time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
+	past, future := at.Add(-time.Second), at.Add(time.Second)
+	for _, tc := range []struct {
+		name string
+		b    blockState
+		want bool
+	}{
+		{"no expiry", blockState{}, true},
+		{"not yet expired", blockState{ExpiresAt: &future}, true},
+		{"at the boundary", blockState{ExpiresAt: &at}, true},
+		{"past expiry", blockState{ExpiresAt: &past}, false},
+		{"past expiry but held: still not spendable now", blockState{ExpiresAt: &past, Held: true}, false},
+		{"commit with a voided funding invoice", blockState{FundingVoided: true}, false},
+	} {
+		if got := spendableAt(tc.b, at); got != tc.want {
+			t.Errorf("%s: spendableAt = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
 // classifyRestore applies the expiry sweep's rule: expired when
 // expires_at < at (the boundary instant is live), not while an owed draw holds
 // the grant, and retirement wins once the sweep wrote the grant off. A voided
@@ -241,7 +310,7 @@ func TestReturns_UseTheCustomersInstant(t *testing.T) {
 // invoice was paid, after GrantTx's own checks.
 func TestGrantForCreditNoteTx_IsAReturnForTheNote(t *testing.T) {
 	ctx := context.Background()
-	valid := CreditNoteReturnInput{CustomerID: "cus_1", Currency: "usd", AmountCents: 500, Description: " Credit note CN-1 ", InvoiceID: "inv_1", InvoicePaid: true}
+	valid := CreditNoteReturnInput{CustomerID: "cus_1", Currency: "usd", AmountCents: 500, Description: " Credit note CN-1 ", InvoiceID: "inv_1", InvoicePaid: true, InvoiceTotalCents: 10000}
 
 	store := newMemStore()
 	svc := NewService(store)
@@ -253,8 +322,16 @@ func TestGrantForCreditNoteTx_IsAReturnForTheNote(t *testing.T) {
 	}
 	got := store.returns[0]
 	if got.SourceCreditNoteID != "cn_1" || got.SourceInvoiceReversalID != "" || !got.PaidInvoice ||
-		got.Currency != "USD" || got.Description != "Credit note CN-1" || got.AmountCents != 500 || got.At.IsZero() {
+		got.Currency != "USD" || got.Description != "Credit note CN-1" || got.AmountCents != 500 || got.At.IsZero() ||
+		got.InvoiceTotalCents != 10000 {
 		t.Errorf("return entry = %+v", got)
+	}
+
+	// A paid note needs the invoice total, the base of its pro-rata split.
+	noTotal := valid
+	noTotal.InvoiceTotalCents = 0
+	if _, err := NewService(newMemStore()).GrantForCreditNoteTx(ctx, nil, "t1", "cn_3", noTotal); err == nil {
+		t.Error("paid note with no invoice total: accepted, want an error")
 	}
 
 	refused := []struct {

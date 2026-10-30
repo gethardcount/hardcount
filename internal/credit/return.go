@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math/big"
 	"strings"
 	"time"
 
@@ -33,13 +34,19 @@ type ReturnEntry struct {
 	// Exactly one source: the voided invoice, or the credit note.
 	SourceInvoiceReversalID string
 	SourceCreditNoteID      string
-	// PaidInvoice is set when the amount is money a paid invoice hands back
-	// (a credit note's credit channel). The part the invoice drew from credit
-	// blocks goes back to them first; the rest is what the customer paid in
-	// cash and stays on the row as new credit with no expiry, as before
-	// ADR-132. When unset (a void, or a credit note on an unpaid invoice)
-	// every cent of the amount is drawn credit.
+	// PaidInvoice is set when the amount is a credit note's credit channel on
+	// a paid invoice. Then the customer's balance rises by exactly the amount:
+	// a credit note never gives less than it says. The note is split pro rata
+	// to how the invoice was paid (paidDrawnShare); the drawn share goes back
+	// to the blocks it came from where it stays spendable, and everything
+	// else, including a share whose block is past expiry or is a commit whose
+	// funding invoice is voided, is new credit with no expiry. When unset (a
+	// void, or a credit note on an unpaid invoice) every cent of the amount
+	// is drawn credit.
 	PaidInvoice bool
+	// InvoiceTotalCents is the paid invoice's total, the base of the pro-rata
+	// split. Required when PaidInvoice is set.
+	InvoiceTotalCents int64
 	// At is the instant of the return on the customer's clock. It stamps the
 	// row and decides which source grants are already past their expiry.
 	// Zero means clock.Now(ctx).
@@ -148,6 +155,37 @@ func planRestore(draws []usageDraw, restored map[string]int64, amount int64) (re
 	return plan, nil
 }
 
+// paidDrawnShare is the part of a credit note on a paid invoice that stands
+// for credit the invoice drew, rather than cash the customer paid: the note
+// split pro rata to how the invoice was paid, drawn / total of it.
+//
+// It is cumulative over the invoice's earlier paid-branch notes (`earlier`
+// is the sum of their amounts): this note's share is
+// floor((earlier+amount)×drawn/total) − floor(earlier×drawn/total). The
+// rounding therefore telescopes, and the notes' shares together never pass
+// the drawn credit's share of what was credited. The result is within
+// [0, amount].
+func paidDrawnShare(earlier, amount, drawn, total int64) (int64, error) {
+	switch {
+	case total <= 0:
+		return 0, fmt.Errorf("invoice total %d is not positive", total)
+	case earlier < 0 || amount <= 0 || drawn < 0:
+		return 0, fmt.Errorf("paid share inputs out of range (earlier %d, amount %d, drawn %d)", earlier, amount, drawn)
+	}
+	f := func(x int64) *big.Int {
+		v := new(big.Int).Mul(big.NewInt(x), big.NewInt(drawn))
+		return v.Quo(v, big.NewInt(total)) // all non-negative: Quo is floor
+	}
+	share := new(big.Int).Sub(f(earlier+amount), f(earlier))
+	if share.Sign() < 0 {
+		return 0, nil
+	}
+	if share.Cmp(big.NewInt(amount)) > 0 {
+		return amount, nil // drawn > total: a corrupt invoice, never more than the note
+	}
+	return share.Int64(), nil
+}
+
 // blockState is a source block as the return reads it under the locks.
 type blockState struct {
 	ID              string
@@ -199,6 +237,18 @@ func classifyRestore(b blockState, at time.Time) restoreAction {
 	return restoreLive
 }
 
+// spendableAt reports whether a share restored to b would be spendable at
+// `at`: not past its expiry (expires_at >= at, the drain's rule) and not a
+// commit whose funding invoice is voided. On a paid invoice only such shares
+// go back to their block (ADR-132): a credit note never gives less than it
+// says, so a share that would expire or be retired is new credit instead.
+func spendableAt(b blockState, at time.Time) bool {
+	if b.FundingVoided {
+		return false
+	}
+	return b.ExpiresAt == nil || !b.ExpiresAt.Before(at)
+}
+
 // ReturnCreditTx writes one credit return on the caller's tx (ADR-132).
 //
 // Locks, in the house order: the caller already holds the invoice row (the
@@ -224,6 +274,8 @@ func (s *PostgresStore) ReturnCreditTx(ctx context.Context, tx *sql.Tx, tenantID
 		return domain.CreditLedgerEntry{}, domain.CreditReturn{}, fmt.Errorf("credit return for invoice %s: amount %d is not positive", in.InvoiceID, in.AmountCents)
 	case (in.SourceInvoiceReversalID == "") == (in.SourceCreditNoteID == ""):
 		return domain.CreditLedgerEntry{}, domain.CreditReturn{}, fmt.Errorf("credit return for invoice %s needs exactly one source", in.InvoiceID)
+	case in.PaidInvoice && (in.SourceCreditNoteID == "" || in.InvoiceTotalCents <= 0):
+		return domain.CreditLedgerEntry{}, domain.CreditReturn{}, fmt.Errorf("credit return on paid invoice %s needs a credit note and the invoice total (%d)", in.InvoiceID, in.InvoiceTotalCents)
 	}
 	at := in.At
 	if at.IsZero() {
@@ -274,47 +326,40 @@ func (s *PostgresStore) ReturnCreditTx(ctx context.Context, tx *sql.Tx, tenantID
 	if err != nil {
 		return domain.CreditLedgerEntry{}, domain.CreditReturn{}, err
 	}
-	plan, err := planRestore(draws, restored, in.AmountCents)
+	// What goes back to blocks: on a void or an unpaid note, all of it; on a
+	// paid invoice, the note's drawn share (paidDrawnShare).
+	toPlace := in.AmountCents
+	var drawnShare int64
+	if in.PaidInvoice {
+		earlier, err := paidReturnedTx(ctx, tx, tenantID, in.CustomerID, in.InvoiceID)
+		if err != nil {
+			return domain.CreditLedgerEntry{}, domain.CreditReturn{}, err
+		}
+		if drawnShare, err = paidDrawnShare(earlier, in.AmountCents, attributedCents(draws), in.InvoiceTotalCents); err != nil {
+			return domain.CreditLedgerEntry{}, domain.CreditReturn{}, fmt.Errorf("credit return for invoice %s: %w", in.InvoiceID, err)
+		}
+		toPlace = drawnShare
+	}
+	plan, err := planRestore(draws, restored, toPlace)
 	if err != nil {
 		return domain.CreditLedgerEntry{}, domain.CreditReturn{}, fmt.Errorf("credit return for invoice %s: %w", in.InvoiceID, err)
 	}
-	unattributed := in.AmountCents - plan.RestoredCents
-	if !in.PaidInvoice && unattributed > plan.LegacyCents {
+	if !in.PaidInvoice && in.AmountCents-plan.RestoredCents > plan.LegacyCents {
 		// Every cent of this return is credit the invoice drew. More of it
 		// than the unattributed rows drew has no block to go back to.
 		return domain.CreditLedgerEntry{}, domain.CreditReturn{}, fmt.Errorf(
 			"credit return for invoice %s: %d to return, %d outstanding on recorded blocks, %d drawn by rows without a record; refusing to mint the difference",
 			in.InvoiceID, in.AmountCents, plan.OutstandingCents, plan.LegacyCents)
 	}
-	if unattributed > 0 && plan.LegacyCents > 0 {
-		// No silent fallback: name the invoice whose credit could not be
-		// traced to its blocks.
-		slog.WarnContext(ctx, "credit return: part of the credit goes back as new credit with no expiry, because the invoice drew it before drains recorded their blocks (2026-07-05)",
-			"invoice_id", in.InvoiceID, "customer_id", in.CustomerID, "currency", currency,
-			"returned_cents", in.AmountCents, "restored_cents", plan.RestoredCents,
-			"unattributed_cents", unattributed, "paid_invoice", in.PaidInvoice)
-	}
 
 	ids := make([]string, len(plan.Legs))
 	for i, l := range plan.Legs {
 		ids[i] = l.BlockID
 	}
-	states, err := blockStatesTx(ctx, tx, tenantID, in.CustomerID, ids)
+	states, err := blockStatesTx(ctx, tx, tenantID, in.CustomerID, in.InvoiceID, ids)
 	if err != nil {
 		return domain.CreditLedgerEntry{}, domain.CreditReturn{}, err
 	}
-	if s.beforeRestore != nil {
-		s.beforeRestore(ctx, tx)
-	}
-
-	result := domain.CreditReturn{ReturnedCents: in.AmountCents, RestoredCents: plan.RestoredCents, UnattributedCents: unattributed}
-	type followUp struct {
-		block    blockState
-		take     int64
-		consumed int64 // the block's consumed_cents after the restore
-		action   restoreAction
-	}
-	followUps := make([]followUp, 0, len(plan.Legs))
 	for _, leg := range plan.Legs {
 		b, ok := states[leg.BlockID]
 		switch {
@@ -325,7 +370,49 @@ func (s *PostgresStore) ReturnCreditTx(ctx context.Context, tx *sql.Tx, tenantID
 		case b.AmountCents <= 0 || b.ConsumedCents < leg.TakeCents:
 			return domain.CreditLedgerEntry{}, domain.CreditReturn{}, fmt.Errorf("credit return for invoice %s: block %s has %d of %d consumed, less than the %d to restore", in.InvoiceID, b.ID, b.ConsumedCents, b.AmountCents, leg.TakeCents)
 		}
+	}
+	// On a paid invoice a share goes back to its block only where it stays
+	// spendable; the rest is new credit, so the balance rises by the note's
+	// whole amount.
+	legs := plan.Legs
+	restoredCents := plan.RestoredCents
+	if in.PaidInvoice {
+		legs = nil
+		for _, leg := range plan.Legs {
+			if spendableAt(states[leg.BlockID], at) {
+				legs = append(legs, leg)
+			} else {
+				restoredCents -= leg.TakeCents
+			}
+		}
+	}
+	unattributed := in.AmountCents - restoredCents
+	if unattributed > 0 && plan.LegacyCents > 0 {
+		// No silent fallback: name the invoice whose credit could not be
+		// traced to its blocks.
+		slog.WarnContext(ctx, "credit return: part of the credit goes back as new credit with no expiry, because the invoice drew it before drains recorded their blocks (2026-07-05)",
+			"invoice_id", in.InvoiceID, "customer_id", in.CustomerID, "currency", currency,
+			"returned_cents", in.AmountCents, "restored_cents", restoredCents,
+			"unattributed_cents", unattributed, "paid_invoice", in.PaidInvoice)
+	}
+	if s.beforeRestore != nil {
+		s.beforeRestore(ctx, tx)
+	}
+
+	result := domain.CreditReturn{ReturnedCents: in.AmountCents, RestoredCents: restoredCents, UnattributedCents: unattributed}
+	type followUp struct {
+		block    blockState
+		take     int64
+		consumed int64 // the block's consumed_cents after the restore
+		action   restoreAction
+	}
+	followUps := make([]followUp, 0, len(legs))
+	for _, leg := range legs {
+		b := states[leg.BlockID]
 		action := classifyRestore(b, at)
+		if in.PaidInvoice {
+			action = restoreLive // spendableAt held above
+		}
 		consumed := b.ConsumedCents
 		if action == restoreThenExpire && b.AmountCents > consumed {
 			// The sweep has not written off this grant's remainder yet. It
@@ -358,9 +445,18 @@ func (s *PostgresStore) ReturnCreditTx(ctx context.Context, tx *sql.Tx, tenantID
 		followUps = append(followUps, followUp{block: b, take: leg.TakeCents, consumed: consumed - leg.TakeCents, action: action})
 	}
 
-	row.ConsumedCents = plan.RestoredCents
-	if len(plan.Legs) > 0 {
-		row.Metadata = map[string]any{"restored_blocks": plan.Legs, "restored_cents": plan.RestoredCents}
+	row.ConsumedCents = restoredCents
+	switch {
+	case in.PaidInvoice:
+		// paid_invoice marks the row for paidReturnedTx: the base of the
+		// next paid note's cumulative share.
+		row.Metadata = map[string]any{"paid_invoice": true, "drawn_share_cents": drawnShare}
+		if len(legs) > 0 {
+			row.Metadata["restored_blocks"] = legs
+			row.Metadata["restored_cents"] = restoredCents
+		}
+	case len(legs) > 0:
+		row.Metadata = map[string]any{"restored_blocks": legs, "restored_cents": restoredCents}
 	}
 	out, _, err := s.insertEntryInTx(ctx, tx, tenantID, row)
 	if err != nil {
@@ -492,6 +588,32 @@ func invoiceDrawsTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, invoi
 	return out, nil
 }
 
+// attributedCents is what the invoice's usage rows with a block record drew.
+// planRestore checked each such row's blocks against its amount.
+func attributedCents(draws []usageDraw) int64 {
+	var sum int64
+	for _, d := range draws {
+		if d.Blocks != nil {
+			sum += d.AmountCents
+		}
+	}
+	return sum
+}
+
+// paidReturnedTx adds up the earlier paid-branch credit-note returns on the
+// invoice (metadata paid_invoice), the base of paidDrawnShare.
+func paidReturnedTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, invoiceID string) (int64, error) {
+	var sum int64
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COALESCE(SUM(amount_cents), 0)::bigint FROM customer_credit_ledger
+		WHERE tenant_id = $1 AND customer_id = $2 AND invoice_id = $3 AND entry_type = $4
+		  AND source_credit_note_id IS NOT NULL AND metadata->>'paid_invoice' = 'true'
+	`, tenantID, customerID, invoiceID, domain.CreditGrant).Scan(&sum); err != nil {
+		return 0, fmt.Errorf("read earlier credit notes on paid invoice %s: %w", invoiceID, err)
+	}
+	return sum, nil
+}
+
 // invoiceRestoredTx adds up, per block, what earlier returns on the invoice
 // restored (their restored_blocks).
 func invoiceRestoredTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, invoiceID string) (map[string]int64, error) {
@@ -528,7 +650,11 @@ func invoiceRestoredTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, in
 // expiry sweep's rule needs: whether an owed draw holds the grant, whether the
 // sweep already retired it, and for a commit whether its funding invoice is
 // voided.
-func blockStatesTx(ctx context.Context, tx *sql.Tx, tenantID, customerID string, ids []string) (map[string]blockState, error) {
+//
+// The hold leaves out invoiceID, the invoice the credit is being returned
+// for: it is the draw being undone (an unpaid one may still be queued for
+// collection), never a draw the returned credit is owed to.
+func blockStatesTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, invoiceID string, ids []string) (map[string]blockState, error) {
 	out := make(map[string]blockState, len(ids))
 	if len(ids) == 0 {
 		return out, nil
@@ -536,7 +662,7 @@ func blockStatesTx(ctx context.Context, tx *sql.Tx, tenantID, customerID string,
 	rows, err := tx.QueryContext(ctx, `
 		SELECT g.id, g.entry_type, g.currency, g.amount_cents, g.consumed_cents, g.cn_retired_cents,
 			g.expires_at, COALESCE(g.grant_kind, ''), COALESCE(g.source_invoice_id, ''),
-			(g.expires_at IS NOT NULL AND `+domain.CreditDrawOwedSQL("g")+`),
+			(g.expires_at IS NOT NULL AND `+domain.CreditDrawOwedExceptSQL("g", "$4")+`),
 			EXISTS (
 				SELECT 1 FROM customer_credit_ledger e
 				WHERE e.tenant_id = g.tenant_id AND e.customer_id = g.customer_id
@@ -546,7 +672,7 @@ func blockStatesTx(ctx context.Context, tx *sql.Tx, tenantID, customerID string,
 				WHERE fi.tenant_id = g.tenant_id AND fi.id = g.source_invoice_id AND fi.status = 'voided'))
 		FROM customer_credit_ledger g
 		WHERE g.tenant_id = $1 AND g.customer_id = $2 AND g.id = ANY($3::text[])
-	`, tenantID, customerID, ids)
+	`, tenantID, customerID, ids, invoiceID)
 	if err != nil {
 		return nil, fmt.Errorf("read the blocks to restore: %w", err)
 	}

@@ -22,7 +22,7 @@ import (
 type ledgerGranter struct{ svc *credit.Service }
 
 func (g ledgerGranter) in(i creditnote.CreditGrantInput) credit.CreditNoteReturnInput {
-	return credit.CreditNoteReturnInput{Currency: i.Currency, CustomerID: i.CustomerID, AmountCents: i.AmountCents, Description: i.Description, InvoiceID: i.InvoiceID, InvoicePaid: i.InvoicePaid}
+	return credit.CreditNoteReturnInput{Currency: i.Currency, CustomerID: i.CustomerID, AmountCents: i.AmountCents, Description: i.Description, InvoiceID: i.InvoiceID, InvoicePaid: i.InvoicePaid, InvoiceTotalCents: i.InvoiceTotalCents}
 }
 func (g ledgerGranter) GrantForCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, cnID string, i creditnote.CreditGrantInput) error {
 	_, err := g.svc.GrantForCreditNoteTx(ctx, tx, tenantID, cnID, g.in(i))
