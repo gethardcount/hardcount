@@ -11,6 +11,10 @@ test('payment_anomaly has a label', () => {
   assert.equal(attentionReasonLabel('payment_anomaly'), 'Payment needs review')
 })
 
+test('a refund made in Stripe that is not recorded has a label', () => {
+  assert.equal(attentionReasonLabel('refunded_in_stripe', 'payment.refunded_in_stripe.seen_late'), 'Refunded in Stripe')
+})
+
 test('a parked invoice is told apart by its code', () => {
   assert.equal(attentionReasonLabel('payment_unconfirmed', 'payment.unidentifiable'), 'Payment status unknown')
   assert.equal(attentionReasonLabel('payment_unconfirmed', 'payment.unconfirmed'), 'Confirming payment')

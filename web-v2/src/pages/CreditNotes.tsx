@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react'
 import { genericStatus, invoiceStatus } from '@/lib/statusLabels'
 import { StatusBadge } from '@/components/StatusBadge'
 import { usePageTitle } from '@/hooks/usePageTitle'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
@@ -10,6 +10,9 @@ import { api, downloadCreditNotePDF, formatCents, formatDate, formatDateTime, ge
 import type { CreditNote, Invoice, Customer } from '@/lib/api'
 import { wallClockNow } from '@/lib/effectiveNow'
 import { showApiError } from '@/lib/formErrors'
+import { errorSentence } from '@/lib/errorCopy'
+import { isStripeRefundUnresolved } from '@/lib/actionOutcomes'
+import { RecordedFromStripeTag } from '@/components/StripeRefundActions'
 import { downloadCSV } from '@/lib/csv'
 import { CREDIT_NOTE_CSV_HEADERS, creditNoteCsvRow } from '@/lib/creditNoteCsv'
 import { creditNoteStatFigures, creditNotesListView } from '@/lib/creditNoteStats'
@@ -211,13 +214,27 @@ export default function CreditNotesPage() {
     onError: (err) => showApiError(err, 'Failed to void'),
   })
 
+  const navigate = useNavigate()
   const retryRefundMutation = useMutation({
-    mutationFn: (id: string) => api.retryCreditNoteRefund(id),
+    mutationFn: (note: CreditNote) => api.retryCreditNoteRefund(note.id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['credit-notes'] })
       toast.success('Refund retried successfully')
     },
-    onError: (err) => showApiError(err, 'Failed to retry refund'),
+    onError: (err, note) => {
+      // Refused while the invoice has a refund made in Stripe that is not
+      // recorded yet (ADR-134): a retry could refund the customer twice. The
+      // server's sentence says so; the invoice is where it is recorded,
+      // attached to this note, or dismissed.
+      if (isStripeRefundUnresolved(err)) {
+        toast.error('Refund not retried', {
+          description: errorSentence(err),
+          action: { label: 'Open invoice', onClick: () => navigate(`/invoices/${note.invoice_id}`) },
+        })
+        return
+      }
+      showApiError(err, 'Failed to retry refund')
+    },
   })
 
   // Header, tabs and stat cards come from the server, which counts every note
@@ -467,6 +484,18 @@ export default function CreditNotesPage() {
                             the two are identical, so nothing is lost either way. */}
                         <TableCell className="text-sm text-muted-foreground max-w-[220px] truncate" title={creditNoteReasonLabel(note.reason)}>
                           {creditNoteReasonLabel(note.reason)}
+                          {/* A note whose card refund is a refund made in Stripe
+                              (ADR-134), under the reason. The wrapper is 0 wide
+                              to the table's sizing (w-0) and then takes the
+                              column's width (min-w-full), so the tag never
+                              widens the table: under a short reason it is cut
+                              with an ellipsis, and its tooltip names it in full
+                              with the refund's id (also shown on the invoice). */}
+                          {note.recorded_from_stripe && (
+                            <div className="mt-0.5 w-0 min-w-full">
+                              <RecordedFromStripeTag note={note} className="max-w-full h-4 px-1.5 py-0 text-[10px]" />
+                            </div>
+                          )}
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-1.5">
@@ -507,7 +536,7 @@ export default function CreditNotesPage() {
                                   <Button
                                     variant="outline"
                                     size="sm"
-                                    onClick={() => retryRefundMutation.mutate(note.id)}
+                                    onClick={() => retryRefundMutation.mutate(note)}
                                     disabled={retryRefundMutation.isPending}
                                     title={note.refund_status === 'failed' ? 'Retry Stripe refund' : 'Process Stripe refund'}
                                   >

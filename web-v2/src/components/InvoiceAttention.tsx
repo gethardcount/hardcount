@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { AlertTriangle, AlertCircle, Info, ExternalLink, Calendar } from 'lucide-react'
@@ -39,6 +39,7 @@ export function InvoiceAttention({
   charging,
   sending,
   now,
+  extraActions,
   className = 'mb-6',
 }: {
   invoice: Invoice
@@ -63,6 +64,12 @@ export function InvoiceAttention({
   // wall-clock sits in 2026. Build the anchor with effectiveNow(...) —
   // the type makes passing it non-optional so this can't regress.
   now: EffectiveNow
+  // Buttons the page draws after the server's own, for facts the notice
+  // carries that its actions do not cover: the refunds made in Stripe that
+  // Hardcount flagged (ADR-134), which come with no server action and can
+  // ride on another reason's notice (a payment anomaly). Rendered only when
+  // the page passes something.
+  extraActions?: ReactNode
   className?: string
 }) {
   const att = invoice.attention
@@ -93,9 +100,9 @@ export function InvoiceAttention({
           )}
         </span>
       }
-      actions={(att.actions?.length ?? 0) > 0 ? (
+      actions={(att.actions?.length ?? 0) > 0 || extraActions ? (
         <>
-          {att.actions!.map((action, idx) => (
+          {(att.actions ?? []).map((action, idx) => (
             <ActionButton
               key={action.code}
               action={action.code}
@@ -112,6 +119,7 @@ export function InvoiceAttention({
               sending={sending}
             />
           ))}
+          {extraActions}
           {/* att.doc_url is not rendered: the pages it points at are not
               published yet, so a "Learn more" button would open a dead
               link. Restore the button when they exist. */}

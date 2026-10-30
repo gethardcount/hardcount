@@ -143,3 +143,41 @@ export function marginCardView(s: { hasWindow: boolean; isError: boolean; hasDat
   if (s.hasData) return 'ready'
   return 'loading'
 }
+
+// recordStripeRefundOutcome reads the credit note that "Record as credit
+// note" returns (ADR-134). Its card refund is the refund already made in
+// Stripe, so the message says no second refund went out.
+export function recordStripeRefundOutcome(cn: { credit_note_number: string; status: string }): Outcome {
+  if (cn.status !== 'issued') {
+    return { tone: 'warning', title: `${cn.credit_note_number} not issued yet`, description: 'Refresh to check it before trying again.' }
+  }
+  return {
+    tone: 'success',
+    title: `Recorded as ${cn.credit_note_number}`,
+    description: 'The refund made in Stripe is on this invoice now. Nothing was refunded again.',
+  }
+}
+
+// attachStripeRefundOutcome reads the credit note that "Attach to …" returns:
+// the note whose own refund failed now has the refund made in Stripe as its
+// card refund.
+export function attachStripeRefundOutcome(cn: { credit_note_number: string; refund_status: string }): Outcome {
+  if (cn.refund_status !== 'succeeded') {
+    return { tone: 'warning', title: `${cn.credit_note_number} not updated yet`, description: 'Refresh to check it before trying again.' }
+  }
+  return {
+    tone: 'success',
+    title: `Refund attached to ${cn.credit_note_number}`,
+    description: 'Its card refund is now the refund made in Stripe. Nothing was refunded again.',
+  }
+}
+
+// Retry refund's refusal while the invoice has a refund made in Stripe that
+// is not recorded yet (409, ADR-134): a retry could refund the customer
+// twice. The server's sentence says what to do; the toast adds a way to the
+// invoice, where the buttons are.
+export const STRIPE_REFUND_UNRESOLVED = 'stripe_refund_unresolved'
+
+export function isStripeRefundUnresolved(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === STRIPE_REFUND_UNRESOLVED
+}

@@ -512,6 +512,10 @@ export const api = {
     out_of_band_amount_cents?: number
     refund_type?: string
     auto_issue?: boolean
+    // A refund made in Stripe outside Hardcount, linked as this note's card
+    // refund (ADR-134): refund_amount_cents must be its amount, nothing goes
+    // to the credit balance, and auto_issue must be true.
+    stripe_refund_id?: string
     lines: { description: string; quantity: number; unit_amount_cents: number }[]
   }, idempotencyKey: string) => apiRequest<CreditNote>('POST', '/credit-notes', data, { idempotencyKey }),
   issueCreditNote: (id: string) => apiRequest<CreditNote>('POST', `/credit-notes/${id}/issue`),
@@ -869,6 +873,9 @@ export type AttentionReason =
   | 'dunning_exhausted'
   | 'collection_paused'
   | 'commit_exposure'
+  | 'dispute_lost'
+  | 'refunded_in_stripe'
+  | 'amount_below_minimum'
 
 export type AttentionAction =
   | 'edit_billing_profile'
@@ -1676,6 +1683,12 @@ export interface CreditNote {
   tax_amount_cents?: number
   tax_transaction_id?: string
   refund_status: string
+  // The card refund at Stripe, once there is one.
+  stripe_refund_id?: string
+  // True when the card refund is a refund made in Stripe outside Hardcount
+  // (ADR-134): recorded from Stripe's webhook, or linked when the note was
+  // created. Hardcount sent no refund of its own for it.
+  recorded_from_stripe?: boolean
   currency: string
   issued_at?: string
   voided_at?: string
