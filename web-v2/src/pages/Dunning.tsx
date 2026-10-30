@@ -391,7 +391,9 @@ function RunsTab() {
                               <div className="flex items-baseline justify-between gap-3">
                                 <div className="min-w-0 truncate text-sm">
                                   <span className="font-medium text-foreground">{cust?.display_name || run.customer_id.slice(0, 8) + '...'}</span>
-                                  <span className="text-muted-foreground font-mono"> · {invoiceLabel}</span>
+                                  <span className="text-muted-foreground"> · </span>
+                                  <Link to={`/invoices/${run.invoice_id}`} onClick={e => e.stopPropagation()}
+                                    className="font-mono text-primary hover:underline">{invoiceLabel}</Link>
                                 </div>
                                 <span className="shrink-0 tabular-nums font-mono text-sm">{amount}</span>
                               </div>

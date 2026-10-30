@@ -444,7 +444,7 @@ export default function InvoicesPage() {
                         {phone && <div className="space-y-1.5">
                           <div className="flex items-baseline justify-between gap-3">
                             <div className="min-w-0 truncate text-sm">
-                              <span className="font-medium text-foreground">{inv.invoice_number}</span>
+                              <Link to={`/invoices/${inv.id}`} className="font-medium text-foreground hover:text-primary">{inv.invoice_number}</Link>
                               <span className="text-muted-foreground"> · {customerName}</span>
                             </div>
                             <span className="shrink-0 tabular-nums font-mono text-sm">{amount}</span>
