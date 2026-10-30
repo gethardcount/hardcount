@@ -153,7 +153,10 @@ Words used in the Hardcount docs and dashboard. For the big picture, read
   grant, usage, expiry and adjustment entries. Each grant is a block that
   invoices draw down when billed: promotional credit first, then the
   soonest to expire, then the oldest. A draw-down updates the grant entry's
-  used amount in place. [More](adr/071-credit-expiry-retires-the-block.md)
+  used amount in place. Credit a void or a credit note hands back goes to
+  the grants it was drawn from, with their expiry and kind. If a grant is
+  already past its expiry, its share expires at once.
+  [More](adr/071-credit-expiry-retires-the-block.md)
 - **prepaid commit**: Usage credit the customer pays for up front, sold as
   a line on a one-off invoice. When that invoice is finalized, Hardcount adds a
   credit block to the customer's balance. The credit can be more than the

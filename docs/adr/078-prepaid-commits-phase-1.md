@@ -124,7 +124,10 @@ Ship the prepaid-commit primitive on the existing credit-block ledger:
   read it).
 - Accepted, documented limitations (phase-2 triggers in the design doc):
   ReverseForInvoice re-grants drawn credits as NULL-kind/never-expiring
-  (pre-existing class, needs per-block attribution); reporting stays
+  (pre-existing class, needs per-block attribution) *(resolved 2026-10-30
+  by [ADR-132](132-returned-credit-goes-back-to-its-grants.md): drawn
+  commit credit goes back to the commit grant, and is retired again when
+  the commit's funding invoice is voided)*; reporting stays
   face-value-aggregate; uncollectible/pause/cancel leave commit blocks
   live; the $1M per-grant cap applies to commits (split larger commits).
 - Deferred: payment gate + paid-hook, auto-recharge, CN-retire leg,

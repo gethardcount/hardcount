@@ -109,4 +109,9 @@ refund at face (over-refund); charging consumption at face under-refunds.
   carry live max-refundable figures).
 - Ratio-integrity invariant (no writer grows `amount_cents` or shrinks
   `consumed_cents` on a commit grant) holds today by construction and is
-  pinned by tests, not a speculative gate.
+  pinned by tests, not a speculative gate. *(Changed 2026-10-30 by
+  [ADR-132](132-returned-credit-goes-back-to-its-grants.md): a void or
+  credit note returning drawn commit credit lowers `consumed_cents` by what
+  an invoice drew. It never goes below `cn_retired_cents`, since relief
+  retires only remaining credit, so relief cash stays at most what was paid.
+  `amount_cents` still never grows.)*

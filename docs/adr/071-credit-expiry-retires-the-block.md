@@ -265,7 +265,10 @@ run, not only read.
   credit with no `ExpiresAt`, permanently laundering expiring credit
   into never-expiring credit. Stripe reinstates into the original grant
   and expires immediately if past expiry. Divergence recorded here so it
-  becomes a decision, not an accident.
+  becomes a decision, not an accident. *(Resolved 2026-10-30 by
+  [ADR-132](132-returned-credit-goes-back-to-its-grants.md): a void returns
+  credit to its grants, and a share past expiry expires at once by this
+  ADR's sweep rule.)*
 - No structured `source_expired_grant_id` column: with the CAS as the
   exactly-once gate, a dedup index would be a redundant second guard
   (no-belt-and-suspenders). The description remains display copy only.

@@ -449,6 +449,9 @@ the event.
 `credit.balance_recovered` follow the settled balance: the credit a customer
 holds after every invoice issued so far. They fire when an invoice, a grant,
 an adjustment or an expiry moves that balance. They do not follow usage.
+Credit a void or credit note hands back moves the balance once: if part of
+it expires at once, because its grant was past its expiry, the events
+follow the net change.
 
 Each currency has its own balance, and each event is about one of them: a
 customer whose EUR credit runs out gets `credit.balance_depleted` with
