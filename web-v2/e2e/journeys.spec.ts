@@ -265,7 +265,7 @@ test('advance a test clock to the renewal and see the invoice', async ({ page })
   const { invoice } = await api<{ invoice: Invoice }>('GET', `/invoices/${invoices[0].id}`)
 
   await page.goto('/invoices')
-  await page.getByPlaceholder('Search by invoice number...').fill(invoice.invoice_number)
+  await page.getByPlaceholder('Search by number, customer or email').fill(invoice.invoice_number)
   // The list names the state as the invoice page does: "Open", not the raw
   // "finalized".
   expect(invoice.status).toBe('finalized')

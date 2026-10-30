@@ -7884,7 +7884,7 @@ type GetV1InvoicesParams struct {
 	Status         string `form:"status,omitempty" json:"status,omitempty"`
 	PaymentStatus  string `form:"payment_status,omitempty" json:"payment_status,omitempty"`
 
-	// Search Case-insensitive substring match on invoice number.
+	// Search Case-insensitive substring match on the invoice number or the customer's name or email.
 	Search string `form:"search,omitempty" json:"search,omitempty"`
 
 	// From Lower bound on created_at, inclusive. RFC3339 instant or

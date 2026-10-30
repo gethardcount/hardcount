@@ -631,3 +631,26 @@ test('a failed refresh keeps the invoice page and an open dialog, and Retry reco
   await notice.getByRole('button', { name: 'Retry', exact: true }).click()
   await expect(notice).toHaveCount(0)
 })
+
+// The list finds a customer's invoices by the customer: search matches the
+// name or email, not only the invoice number, and a picker filters to one
+// customer (C-15).
+test('invoices: search by customer name or email, and filter by customer', async ({ page }) => {
+  const { customer, invoice } = await billedCustomer()
+  await page.goto('/invoices')
+  const rows = page.getByRole('table').locator('tbody tr')
+  const search = page.getByPlaceholder('Search by number, customer or email')
+  for (const term of [customer.display_name, customer.email]) {
+    await search.fill(term)
+    await expect(rows).toHaveCount(1)
+    await expect(rows.first()).toContainText(invoice.invoice_number)
+  }
+  await search.fill('')
+
+  await page.getByRole('button', { name: /All customers/ }).click()
+  await page.getByPlaceholder('Search...').fill(customer.display_name)
+  await page.getByRole('option', { name: new RegExp(customer.display_name) }).click()
+  await expect(page).toHaveURL(new RegExp(`customer=${customer.id}`))
+  await expect(rows).toHaveCount(1)
+  await expect(rows.first()).toContainText(invoice.invoice_number)
+})

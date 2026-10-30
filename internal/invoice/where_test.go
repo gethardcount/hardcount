@@ -12,8 +12,11 @@ import (
 
 func TestBuildInvWhere_Search(t *testing.T) {
 	where, args := buildInvWhere(ListFilter{Search: "INV-2026"})
-	if !strings.Contains(where, "invoice_number ILIKE $1") {
-		t.Fatalf("want invoice_number ILIKE clause, got %q", where)
+	// The number, or the customer's name or email, all on the one pattern.
+	for _, frag := range []string{"invoice_number ILIKE $1", "c.id = invoices.customer_id", "c.display_name ILIKE $1", "c.email ILIKE $1"} {
+		if !strings.Contains(where, frag) {
+			t.Fatalf("search clause missing %q in %q", frag, where)
+		}
 	}
 	if len(args) != 1 || args[0] != "%INV-2026%" {
 		t.Fatalf("want single pattern arg %%INV-2026%%, got %v", args)

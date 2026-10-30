@@ -17,7 +17,7 @@ subscription_id?: string;
 status?: string;
 payment_status?: string;
 /**
- * Case-insensitive substring match on invoice number.
+ * Case-insensitive substring match on the invoice number or the customer's name or email.
  */
 search?: string;
 /**
