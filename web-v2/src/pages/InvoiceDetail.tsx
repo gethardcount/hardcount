@@ -73,6 +73,7 @@ import {
 import { CopyButton } from '@/components/CopyButton'
 import { DetailBreadcrumb } from '@/components/DetailBreadcrumb'
 import { DetailSkeleton } from '@/components/ui/DetailSkeleton'
+import { stripeKeyState } from '@/lib/stripeVerify'
 
 // TaxReversedLine renders the "↳ Tax reversed $X (Stripe Tax)" sub-fact for a
 // credit note, shared by the pre-payment and post-payment settlement blocks so
@@ -392,7 +393,8 @@ export default function InvoiceDetailPage() {
     queryFn: () => api.listStripeCredentials(),
     enabled: invoice?.status === 'draft' && !!user,
   })
-  const stripeConnected = stripeCreds && user ? stripeCreds.data.some(c => c.livemode === user.livemode) : undefined
+  // A key Stripe refused charges nothing, so it isn't connected.
+  const stripeConnected = stripeCreds && user ? stripeKeyState(stripeCreds.data, user.livemode) === 'connected' : undefined
 
   const invalidateAll = () => {
     queryClient.invalidateQueries({ queryKey: ['invoice', id] })

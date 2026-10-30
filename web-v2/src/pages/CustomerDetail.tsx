@@ -77,6 +77,7 @@ import { TAX_ID_HINTS, taxIdTypeOptions } from '@/lib/taxIdTypes'
 import { finalActionSummary } from '@/lib/dunningActions'
 import { retryPlanText } from '@/lib/dunningSchedule'
 import { ScrollPane } from '@/components/ui/scroll-pane'
+import { stripeKeyState } from '@/lib/stripeVerify'
 
 
 const editCustomerSchema = z.object({
@@ -1793,7 +1794,8 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
     queryFn: () => api.listStripeCredentials(),
     enabled: !!user,
   })
-  const stripeConnected = stripeCreds && user ? stripeCreds.data.some(c => c.livemode === user.livemode) : undefined
+  // A key Stripe refused charges nothing, so it isn't connected.
+  const stripeConnected = stripeCreds && user ? stripeKeyState(stripeCreds.data, user.livemode) === 'connected' : undefined
 
   const currencySymbol = getCurrencySymbol(currency)
 

@@ -52,3 +52,21 @@ export function stripeVerifyNotice(kind: string | undefined): StripeVerifyNotice
 
 // The toast's sentence: the notice sits above the key form.
 export const STRIPE_VERIFY_TOAST_BODY = 'See the message above the form.'
+
+// Whether a mode can charge cards. 'refused': Stripe refused the saved key
+// ('rejected', or a failed row from before the kind was recorded). A key
+// Stripe couldn't check ('unavailable') counts as connected: it was not
+// refused, and Settings shows it as unchecked. The setup checklist and the
+// live-mode warning used to count any saved key, so a refused key, or a test
+// key in live mode, ticked "Connect Stripe" and hid the warning.
+export type StripeKeyState = 'none' | 'refused' | 'connected'
+
+export function stripeKeyState(
+  creds: readonly { livemode: boolean; last_verified_error?: string; last_verified_error_kind?: string }[],
+  livemode: boolean,
+): StripeKeyState {
+  const key = creds.find(c => c.livemode === livemode)
+  if (!key) return 'none'
+  if (key.last_verified_error && key.last_verified_error_kind !== 'unavailable') return 'refused'
+  return 'connected'
+}

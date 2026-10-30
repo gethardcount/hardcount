@@ -971,6 +971,42 @@ test('a new account: Home welcomes the operator and the setup checklist opens on
   await expect(checklist).toBeVisible()
 })
 
+test('the setup checklist ticks Connect Stripe only for a working key in this mode, and counts test-clock customers', async ({ page }) => {
+  const key = (livemode: boolean, extra = {}) => ({ id: `e2e_${livemode}`, livemode, secret_key_last4: '0000', publishable_key: 'pk_e2e', has_webhook_secret: true, ...extra })
+  let creds: object[] = []
+  await page.route(url => url.pathname === '/v1/settings/stripe', route => route.request().method() === 'GET'
+    ? route.fulfill({ json: { data: creds } })
+    : route.fallback())
+  // No webhook endpoint yet: a step stays open, so the Setup button stays
+  // shown even once Stripe is connected.
+  await page.route(url => url.pathname === '/v1/webhook-endpoints/endpoints', route => route.fulfill({ json: { data: [], total: 0 } }))
+  // Home's totals leave test-clock customers out; the checklist must not (#1153).
+  await page.route(url => url.pathname === '/v1/analytics/overview', async route => {
+    const answer = await route.fetch()
+    await route.fulfill({ response: answer, json: { ...(await answer.json()), active_customers: 0 } })
+  })
+  const stripeStep = async () => {
+    await page.goto('/')
+    await page.getByRole('button', { name: /^Setup: / }).click()
+    const checklist = page.getByRole('dialog', { name: 'Bill your first customer' })
+    await expect(checklist.getByRole('listitem').filter({ hasText: 'Add your first customer' }).locator('[aria-label="done"]')).toHaveCount(1)
+    return checklist.getByRole('listitem').filter({ hasText: 'Connect Stripe' })
+  }
+
+  // A live key doesn't connect test mode.
+  creds = [key(true)]
+  await expect((await stripeStep()).locator('[aria-label="done"]')).toHaveCount(0)
+  // A key Stripe refused connects nothing, and the step says so.
+  creds = [key(false, { last_verified_error: 'Invalid API Key provided', last_verified_error_kind: 'rejected' })]
+  let step = await stripeStep()
+  await expect(step.locator('[aria-label="done"]')).toHaveCount(0)
+  await expect(step).toContainText('Stripe refused the saved key. Paste the current one from your Stripe dashboard.')
+  // A working test key does.
+  creds = [key(false)]
+  step = await stripeStep()
+  await expect(step.locator('[aria-label="done"]')).toHaveCount(1)
+})
+
 test('Home defines MRR on its card', async ({ page }) => {
   await page.goto('/')
   await expect(page.getByText('Monthly recurring revenue: the base fees of active subscriptions, per month.', { exact: false })).toBeVisible()
