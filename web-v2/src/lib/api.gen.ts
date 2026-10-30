@@ -10320,6 +10320,27 @@ export interface components {
                 support_url?: string;
             };
             /**
+             * @description The invoice's issued credit notes, as its PDF prints them, so
+             *     the total minus credit notes minus what was paid is the amount
+             *     due. One issued before payment lowered what is owed
+             *     (`before_payment`). One issued after payment is listed once a
+             *     part of it has settled, with what came back: a card refund once
+             *     Stripe confirmed it, credit added to the customer's balance, or
+             *     an amount settled another way. Empty when there are none.
+             */
+            credit_notes: {
+                number: string;
+                /** Format: int64 */
+                amount_cents: number;
+                before_payment: boolean;
+                /** Format: int64 */
+                refunded_cents?: number;
+                /** Format: int64 */
+                credited_cents?: number;
+                /** Format: int64 */
+                settled_outside_cents?: number;
+            }[];
+            /**
              * @description True when the customer can pay online now: the invoice is
              *     finalized, something is owed, no payment is in progress, the
              *     seller has Stripe connected for the invoice's mode, and Stripe's

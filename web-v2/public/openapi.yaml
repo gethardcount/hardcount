@@ -4829,7 +4829,7 @@ components:
         What the hosted invoice page shows. It leaves out internal ids and
         Stripe details. `bill_to` and the company details in `branding`
         come from the same place as the invoice PDF's.
-      required: [invoice, line_items, bill_to, branding, pay_enabled, livemode]
+      required: [invoice, line_items, bill_to, branding, credit_notes, pay_enabled, livemode]
       properties:
         invoice:
           type: object
@@ -4947,6 +4947,35 @@ components:
             logo_url: { type: string }
             brand_color: { type: string }
             support_url: { type: string }
+        credit_notes:
+          type: array
+          description: |
+            The invoice's issued credit notes, as its PDF prints them, so
+            the total minus credit notes minus what was paid is the amount
+            due. One issued before payment lowered what is owed
+            (`before_payment`). One issued after payment is listed once a
+            part of it has settled, with what came back: a card refund once
+            Stripe confirmed it, credit added to the customer's balance, or
+            an amount settled another way. Empty when there are none.
+          items:
+            type: object
+            required: [number, amount_cents, before_payment]
+            properties:
+              number: { type: string }
+              amount_cents:
+                type: integer
+                format: int64
+              before_payment:
+                type: boolean
+              refunded_cents:
+                type: integer
+                format: int64
+              credited_cents:
+                type: integer
+                format: int64
+              settled_outside_cents:
+                type: integer
+                format: int64
         pay_enabled:
           type: boolean
           description: |

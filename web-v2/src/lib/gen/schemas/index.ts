@@ -204,6 +204,7 @@ export * from './heldUsageReleaseResult';
 export * from './hostedInvoice';
 export * from './hostedInvoiceBillTo';
 export * from './hostedInvoiceBranding';
+export * from './hostedInvoiceCreditNotesItem';
 export * from './hostedInvoiceInvoice';
 export * from './hostedInvoiceLineItemsItem';
 export * from './hostedInvoicePayUnavailableReason';

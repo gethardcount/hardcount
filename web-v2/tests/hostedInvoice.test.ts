@@ -2,7 +2,7 @@
 // repeated totals, and an honest line when online payment isn't set up.
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { hostedTotalRows, loadErrorCopy, payErrorCopy, payUnavailableCopy } from '../src/lib/hostedInvoice.ts'
+import { creditNoteBackText, hostedTotalRows, loadErrorCopy, payErrorCopy, payUnavailableCopy } from '../src/lib/hostedInvoice.ts'
 
 const base = { status: 'finalized', subtotal_cents: 56600, discount_cents: 0, tax_amount_cents: 0, total_amount_cents: 56600, credits_applied_cents: 0, amount_paid_cents: 0 }
 
@@ -47,4 +47,22 @@ test('below the card minimum: the line in place of Pay says so, and who to conta
 test('a bad link reads as an invalid link, not "invoice not found"', () => {
   assert.equal(loadErrorCopy(404).title, 'This link isn’t valid')
   assert.equal(loadErrorCopy(500).title, 'We couldn’t load this invoice')
+})
+
+// A credit note issued before payment comes off the total, so the total shows
+// and the rows add up to the amount due (M-04).
+test('a credit note before payment brings back the total it comes off', () => {
+  const cn = { number: 'CN-1', amount_cents: 6600, before_payment: true }
+  assert.deepEqual(hostedTotalRows(base, [cn]), ['total'])
+  // One issued after payment is listed below the amount, not in the column.
+  assert.deepEqual(hostedTotalRows(base, [{ ...cn, before_payment: false, credited_cents: 6600 }]), [])
+})
+
+test('an after-payment credit note says where the money went', () => {
+  const money = (c: number) => `$${(c / 100).toFixed(2)}`
+  assert.equal(
+    creditNoteBackText({ number: 'CN-2', amount_cents: 2900, before_payment: false, refunded_cents: 2000, credited_cents: 500, settled_outside_cents: 400 }, money),
+    '$20.00 refunded to your card · $5.00 added to your account credit · $4.00 settled with you directly',
+  )
+  assert.equal(creditNoteBackText({ number: 'CN-3', amount_cents: 500, before_payment: false, credited_cents: 500 }, money), '$5.00 added to your account credit')
 })

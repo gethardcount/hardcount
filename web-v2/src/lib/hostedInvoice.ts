@@ -12,15 +12,28 @@ export interface HostedTotalsInput {
   amount_paid_cents: number
 }
 
+// A credit note as the hosted payload sends it (hostedinvoice.viewCreditNote).
+export interface HostedCreditNote {
+  number: string
+  amount_cents: number
+  before_payment: boolean
+  refunded_cents?: number
+  credited_cents?: number
+  settled_outside_cents?: number
+}
+
 export type HostedTotalRow = 'subtotal' | 'discount' | 'tax' | 'total' | 'credits' | 'paid'
 
 // hostedTotalRows lists the rows above the final amount line. A row only
 // appears when it says something new: an invoice with no discount, tax,
 // credit or payment showed "Subtotal", "Total" and "Amount due" as three
 // identical figures.
-export function hostedTotalRows(inv: HostedTotalsInput): HostedTotalRow[] {
+//
+// A credit note issued before payment comes off the total too, so it brings
+// the total back (its own row is drawn from the credit notes).
+export function hostedTotalRows(inv: HostedTotalsInput, creditNotes: readonly HostedCreditNote[] = []): HostedTotalRow[] {
   const adjusted = inv.discount_cents > 0 || inv.tax_amount_cents > 0
-  const settled = inv.credits_applied_cents > 0 || inv.amount_paid_cents > 0
+  const settled = inv.credits_applied_cents > 0 || inv.amount_paid_cents > 0 || creditNotes.some(cn => cn.before_payment)
   const rows: HostedTotalRow[] = []
   if (adjusted) {
     rows.push('subtotal')
@@ -31,6 +44,17 @@ export function hostedTotalRows(inv: HostedTotalsInput): HostedTotalRow[] {
   if (inv.credits_applied_cents > 0) rows.push('credits')
   if (inv.amount_paid_cents > 0) rows.push('paid')
   return rows
+}
+
+// creditNoteBackText says where an after-payment credit note's money went,
+// in the customer's words: "$20.00 refunded to your card · $5.00 added to
+// your account credit". Only settled parts come from the server.
+export function creditNoteBackText(cn: HostedCreditNote, money: (cents: number) => string): string {
+  const parts: string[] = []
+  if (cn.refunded_cents) parts.push(`${money(cn.refunded_cents)} refunded to your card`)
+  if (cn.credited_cents) parts.push(`${money(cn.credited_cents)} added to your account credit`)
+  if (cn.settled_outside_cents) parts.push(`${money(cn.settled_outside_cents)} settled with you directly`)
+  return parts.join(' · ')
 }
 
 // payErrorCopy maps a failed "Pay" request to what the customer reads.
