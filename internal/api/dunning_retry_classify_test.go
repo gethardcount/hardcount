@@ -40,6 +40,9 @@ func TestClassifyDunningRetryResult(t *testing.T) {
 		// Not a skip: a skip leaves the run due, and the next tick would ask
 		// Stripe again forever. Dunning ends the run on it.
 		{"below Stripe's minimum charge", &payment.BelowMinimumError{Message: "Amount must be at least $0.50 usd"}, true},
+		// Stripe was asked and a PaymentIntent exists: the attempt counts and
+		// the run waits for the payment's outcome (#1289).
+		{"payment still processing", &dunning.RetryError{PaymentIntentID: "pi_slow", Err: dunning.ErrPaymentInFlight}, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

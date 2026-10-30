@@ -702,9 +702,11 @@ func (s *PostgresStore) ResolveRun(ctx context.Context, tenantID string, run dom
 	defer postgres.Rollback(tx)
 
 	now := clock.Now(ctx)
+	// A resolved run waits on no payment (#1289).
 	res, err := tx.ExecContext(ctx, `
 		UPDATE invoice_dunning_runs SET state=$1, reason=$2, attempt_count=$3,
-			last_attempt_at=$4, next_action_at=$5, paused=$6, resolved_at=$7, resolution=$8, updated_at=$9
+			last_attempt_at=$4, next_action_at=$5, paused=$6, resolved_at=$7, resolution=$8, updated_at=$9,
+			awaiting_payment_intent_id = NULL
 		WHERE id=$10 AND state <> 'resolved' AND (NOT $11 OR state = 'active')`,
 		run.State, postgres.NullableString(run.Reason), run.AttemptCount,
 		postgres.NullableTime(run.LastAttemptAt), postgres.NullableTime(run.NextActionAt),
@@ -754,6 +756,11 @@ func (s *PostgresStore) ResolveRun(ctx context.Context, tenantID string, run dom
 // together (ADR-040 — a failover between the two used to lose the email with
 // the state standing), but an email-side failure only rolls back to the
 // savepoint and is logged loud — it never vetoes the money write.
+//
+// Every write here clears the PaymentIntent the run waits on (#1289): the
+// next attempt, a counted failure, the final action and its re-attempt all
+// mean the run no longer waits on that payment. Only RecordRetryInFlight
+// sets it.
 func (s *PostgresStore) UpdateRunIfActive(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, expectedAttempts int, then func(tx *sql.Tx) error) (bool, error) {
 	if err := refuseStrandingWrite(run); err != nil {
 		return false, err
@@ -767,7 +774,8 @@ func (s *PostgresStore) UpdateRunIfActive(ctx context.Context, tenantID string, 
 	now := clock.Now(ctx)
 	res, err := tx.ExecContext(ctx, `
 		UPDATE invoice_dunning_runs SET state=$1, reason=$2, attempt_count=$3,
-			last_attempt_at=$4, next_action_at=$5, paused=$6, resolved_at=$7, resolution=$8, updated_at=$9
+			last_attempt_at=$4, next_action_at=$5, paused=$6, resolved_at=$7, resolution=$8, updated_at=$9,
+			awaiting_payment_intent_id = NULL
 		WHERE id=$10 AND state = 'active' AND attempt_count = $11`,
 		run.State, postgres.NullableString(run.Reason), run.AttemptCount,
 		postgres.NullableTime(run.LastAttemptAt), postgres.NullableTime(run.NextActionAt),
@@ -839,6 +847,183 @@ func (s *PostgresStore) ClaimExhaustion(ctx context.Context, tenantID, runID str
 		return false, err
 	}
 	return n == 1, nil
+}
+
+// runColumns is the run row as the single-run reads return it, in the order
+// scanRun reads.
+const runColumns = `id, tenant_id, invoice_id, COALESCE(customer_id,''), policy_id, state,
+	COALESCE(reason,''), attempt_count, last_attempt_at, next_action_at,
+	paused, resolved_at, COALESCE(resolution,''), created_at, updated_at`
+
+func scanRun(row interface{ Scan(dest ...any) error }) (domain.InvoiceDunningRun, error) {
+	var run domain.InvoiceDunningRun
+	err := row.Scan(&run.ID, &run.TenantID, &run.InvoiceID, &run.CustomerID, &run.PolicyID,
+		&run.State, &run.Reason, &run.AttemptCount, &run.LastAttemptAt, &run.NextActionAt,
+		&run.Paused, &run.ResolvedAt, &run.Resolution, &run.CreatedAt, &run.UpdatedAt)
+	return run, err
+}
+
+// RecordRetryInFlight writes a retry whose payment is still processing
+// (#1289): the run's fields under UpdateRunIfActive's guard (active, at
+// expectedAttempts), the PaymentIntent it now waits on, and its
+// retry_attempted event, all in one transaction. So a run resolved in the
+// meantime leaves no stray event behind.
+//
+// Lock order: the invoice row first (the money-path playbook, §5 pattern 6).
+// The failure settle locks the invoice FOR UPDATE and then writes this run
+// (TakeAwaitedRetryTx), and the event insert below takes a key-share lock on
+// the invoice for its foreign key. Writing the run first would deadlock
+// against that settle. FOR SHARE also waits for the settle to commit, so the
+// check that follows reads its outcome: when the invoice no longer waits on
+// paymentIntentID with its payment in flight, the payment succeeded or failed
+// before this write and decided the attempt, and nothing is written.
+func (s *PostgresStore) RecordRetryInFlight(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, expectedAttempts int, paymentIntentID string, event domain.InvoiceDunningEvent) (RetryInFlightResult, error) {
+	if paymentIntentID == "" {
+		return RetryInFlightRunMoved, fmt.Errorf("dunning run %s: a retry whose payment is in flight needs its PaymentIntent id", run.ID)
+	}
+	if err := refuseStrandingWrite(run); err != nil {
+		return RetryInFlightRunMoved, err
+	}
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return RetryInFlightRunMoved, err
+	}
+	defer postgres.Rollback(tx)
+
+	var inv domain.Invoice
+	var pi sql.NullString
+	err = tx.QueryRowContext(ctx,
+		`SELECT payment_status, stripe_payment_intent_id FROM invoices WHERE id = $1 FOR SHARE`, run.InvoiceID,
+	).Scan(&inv.PaymentStatus, &pi)
+	if errors.Is(err, sql.ErrNoRows) {
+		return RetryInFlightRunMoved, errs.ErrNotFound
+	}
+	if err != nil {
+		return RetryInFlightRunMoved, fmt.Errorf("lock the run's invoice: %w", err)
+	}
+	inv.StripePaymentIntentID = pi.String
+	if !inv.PaymentInFlight() || inv.StripePaymentIntentID != paymentIntentID {
+		return RetryInFlightPaymentMoved, nil
+	}
+
+	res, err := tx.ExecContext(ctx, `
+		UPDATE invoice_dunning_runs SET state=$1, reason=$2, attempt_count=$3,
+			last_attempt_at=$4, next_action_at=$5, paused=$6, resolved_at=$7, resolution=$8, updated_at=$9,
+			awaiting_payment_intent_id = $12
+		WHERE id=$10 AND state = 'active' AND attempt_count = $11`,
+		run.State, postgres.NullableString(run.Reason), run.AttemptCount,
+		postgres.NullableTime(run.LastAttemptAt), postgres.NullableTime(run.NextActionAt),
+		run.Paused, postgres.NullableTime(run.ResolvedAt), postgres.NullableString(string(run.Resolution)),
+		clock.Now(ctx), run.ID, expectedAttempts, paymentIntentID)
+	if err != nil {
+		return RetryInFlightRunMoved, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return RetryInFlightRunMoved, err
+	}
+	if n == 0 {
+		return RetryInFlightRunMoved, nil
+	}
+	if _, err := s.createEventTx(ctx, tx, tenantID, event); err != nil {
+		return RetryInFlightRunMoved, fmt.Errorf("retry in flight event: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return RetryInFlightRunMoved, err
+	}
+	return RetryInFlightRecorded, nil
+}
+
+// GetRunAwaitingPayment returns the active run waiting on paymentIntentID, or
+// errs.ErrNotFound. No production path decides on it (the failure hook's
+// compare-and-set does, under the invoice lock); the integration tests read
+// the wait with it.
+func (s *PostgresStore) GetRunAwaitingPayment(ctx context.Context, tenantID, invoiceID, paymentIntentID string) (domain.InvoiceDunningRun, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return domain.InvoiceDunningRun{}, err
+	}
+	defer postgres.Rollback(tx)
+
+	run, err := scanRun(tx.QueryRowContext(ctx, `SELECT `+runColumns+`
+		FROM invoice_dunning_runs
+		WHERE invoice_id = $1 AND awaiting_payment_intent_id = $2 AND state = 'active'`,
+		invoiceID, paymentIntentID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.InvoiceDunningRun{}, errs.ErrNotFound
+	}
+	return run, err
+}
+
+// TakeAwaitedRetryTx clears the run's awaited PaymentIntent, only while it is
+// paymentIntentID and the run is active, and returns the run and its bound
+// policy when this call did. The UPDATE is the compare-and-set: the webhook,
+// a redelivery and the reconciler can each report the failure, and one wins.
+// The caller's transaction locks the invoice row before this one (the
+// failure settle's FOR UPDATE), so the lock order matches RecordRetryInFlight.
+func (s *PostgresStore) TakeAwaitedRetryTx(ctx context.Context, tx *sql.Tx, invoiceID, paymentIntentID string) (domain.InvoiceDunningRun, domain.DunningPolicy, bool, error) {
+	if paymentIntentID == "" {
+		return domain.InvoiceDunningRun{}, domain.DunningPolicy{}, false, nil
+	}
+	run, err := scanRun(tx.QueryRowContext(ctx, `
+		UPDATE invoice_dunning_runs SET awaiting_payment_intent_id = NULL, updated_at = $3
+		WHERE invoice_id = $1 AND awaiting_payment_intent_id = $2 AND state = 'active'
+		RETURNING `+runColumns,
+		invoiceID, paymentIntentID, clock.Now(ctx)))
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.InvoiceDunningRun{}, domain.DunningPolicy{}, false, nil
+	}
+	if err != nil {
+		return domain.InvoiceDunningRun{}, domain.DunningPolicy{}, false, fmt.Errorf("take the run waiting on the payment: %w", err)
+	}
+	policy, err := scanPolicy(tx.QueryRowContext(ctx, `SELECT `+policyColumns+` FROM dunning_policies WHERE id = $1`, run.PolicyID))
+	if err != nil {
+		return domain.InvoiceDunningRun{}, domain.DunningPolicy{}, false, fmt.Errorf("read bound policy %s for run %s: %w", run.PolicyID, run.ID, err)
+	}
+	return run, policy, true, nil
+}
+
+// RecordRetryFailureTx writes the run's next_action_at, still active at its
+// attempt, and the failed attempt's event on the caller's transaction, then
+// runs then under a SAVEPOINT: an email-side failure is logged and skipped,
+// never the run write.
+func (s *PostgresStore) RecordRetryFailureTx(ctx context.Context, tx *sql.Tx, run domain.InvoiceDunningRun, event domain.InvoiceDunningEvent, then func(tx *sql.Tx) error) error {
+	if run.NextActionAt == nil { // the active run would leave both due-run pickers for good (SB-1)
+		return fmt.Errorf("dunning run %s: refusing to write an active run with no next_action_at", run.ID)
+	}
+	res, err := tx.ExecContext(ctx, `
+		UPDATE invoice_dunning_runs SET next_action_at = $1, updated_at = $2
+		WHERE id = $3 AND state = 'active' AND attempt_count = $4`,
+		*run.NextActionAt, clock.Now(ctx), run.ID, run.AttemptCount)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 { // unreachable: TakeAwaitedRetryTx holds the row's lock in this transaction
+		return fmt.Errorf("dunning run %s changed under its own row lock", run.ID)
+	}
+	if _, err := s.createEventTx(ctx, tx, run.TenantID, event); err != nil {
+		return fmt.Errorf("retry failed event: %w", err)
+	}
+	if then == nil {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx, "SAVEPOINT dunning_retry_email"); err != nil {
+		return err
+	}
+	if herr := then(tx); herr != nil {
+		if _, rerr := tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT dunning_retry_email"); rerr != nil {
+			return rerr
+		}
+		slog.ErrorContext(ctx, "dunning warning email enqueue failed inside the failure settle — the failure is recorded, the email skipped",
+			"run_id", run.ID, "invoice_id", run.InvoiceID, "error", herr)
+		return nil
+	}
+	_, err = tx.ExecContext(ctx, "RELEASE SAVEPOINT dunning_retry_email")
+	return err
 }
 
 // ListDueRuns — CRON path. ADR-029 Phase 5: dunning runs whose owning

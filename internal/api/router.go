@@ -466,6 +466,13 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// background-settle paths already resolve via the engine; this closes the
 	// card-success symmetry — #317 follow-up). dunningSvc implements ResolveByInvoice.
 	stripeAdapter.SetDunningResolver(dunningSvc)
+	// A dunning retry whose payment came back processing keeps its run
+	// waiting on that PaymentIntent; its later failure is recorded on the run,
+	// with the retry's warning email and the release of its charge hold, in
+	// the failure settle's transaction (#1289). dunningSvc implements
+	// RetryPaymentFailed; the hold release is the invoice store's.
+	stripeAdapter.SetDunningRetryFailure(dunningSvc)
+	dunningSvc.SetRetryHoldReleaser(invoiceStore)
 	// A charge Stripe refuses for the key (401/403) shows on the Settings →
 	// Payments card, as a failed Connect check does.
 	stripeAdapter.SetKeyHealth(tenantStripeSvc)

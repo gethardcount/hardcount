@@ -37,6 +37,18 @@ type DunningResolver interface {
 	ResolveByInvoice(ctx context.Context, tenantID, invoiceID string, resolution domain.DunningResolution) error
 }
 
+// DunningRetryFailure is dunning's hook for the failure of a dunning retry's
+// payment (#1289): a retry whose payment came back processing keeps its run
+// active and waiting on that PaymentIntent, and its later failure is
+// recorded, and the customer warned, from here. SettleFailed calls
+// RetryPaymentFailed before its transaction opens (plain reads only) and runs
+// the hook it returns inside that transaction, after the failed stamp, in
+// place of the generic failure email a dunning retry never gets. nil means no
+// run waits on this payment. Satisfied by *dunning.Service.
+type DunningRetryFailure interface {
+	RetryPaymentFailed(ctx context.Context, tenantID string, inv domain.Invoice, paymentIntentID, declineCode, cardMessage string) func(tx *sql.Tx, fresh domain.Invoice) error
+}
+
 // CardDetails holds card info fetched from Stripe for display.
 type CardDetails struct {
 	PaymentMethodID string
@@ -104,6 +116,7 @@ type Stripe struct {
 	webhooks           WebhookStore
 	dunning            DunningStarter
 	dunningResolver    DunningResolver
+	dunningRetryFail   DunningRetryFailure
 	paymentSetups      PaymentSetupStore
 	cardFetcher        CardFetcher
 	events             domain.EventDispatcher
@@ -369,6 +382,14 @@ func (s *Stripe) SetCardFetcher(cf CardFetcher) {
 // card payment settles (SettleSucceeded). See the DunningResolver doc-comment.
 func (s *Stripe) SetDunningResolver(d DunningResolver) {
 	s.dunningResolver = d
+}
+
+// SetDunningRetryFailure wires dunning's hook for a processing retry's later
+// failure (see DunningRetryFailure). The producer always wires it; unwired
+// (narrow tests), such a failure is recorded on the invoice only, and the run
+// goes on at the retry date the in-flight write scheduled.
+func (s *Stripe) SetDunningRetryFailure(d DunningRetryFailure) {
+	s.dunningRetryFail = d
 }
 
 // SetEmailReceipt configures payment receipt email sending.
@@ -1018,7 +1039,22 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 	// Still in flight — record the PI and set processing; the webhook (and the
 	// reconciler backstop) will settle it. If an outcome was recorded during
 	// the call the stamp is refused and that row comes back (P13).
-	current, applied, err := s.invoices.StampChargeOutcome(ctx, tenantID, inv.ID, inv.ChargeAttemptSeq,
+	//
+	// Saved on a context detached from the caller's deadline, as an unclear
+	// outcome is above: Stripe has this PaymentIntent. A reply that came back
+	// just before a 15-second dunning deadline used to fail the stamp, so the
+	// invoice did not show a payment Stripe was processing, the retry was
+	// skipped uncounted as if nothing had reached Stripe, and only the
+	// stale-hold sweep, about a quarter of an hour later at best, found the
+	// payment. A cancelled caller (a shutdown, a lost lease) saves nothing, as
+	// for an unclear outcome: the hold stays, and that sweep finds it.
+	stampCtx := ctx
+	if !errors.Is(ctx.Err(), context.Canceled) {
+		var cancelStamp context.CancelFunc
+		stampCtx, cancelStamp = context.WithTimeout(context.WithoutCancel(ctx), chargeOutcomeSaveTimeout)
+		defer cancelStamp()
+	}
+	current, applied, err := s.invoices.StampChargeOutcome(stampCtx, tenantID, inv.ID, inv.ChargeAttemptSeq,
 		domain.PaymentProcessing, result.ID, "")
 	if err != nil {
 		return domain.Invoice{}, err

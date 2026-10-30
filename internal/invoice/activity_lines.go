@@ -407,13 +407,20 @@ func dunningLine(evt domain.InvoiceDunningEvent, dc dunningContext) activity.Lin
 			// and recovery ends on it.
 			l.Kind, l.Title, l.Tone = kindRetryRefused, fmt.Sprintf("Payment retry %d refused by Stripe", evt.AttemptCount), activity.ToneWarning
 			l.Problem = "The amount is below Stripe's minimum charge. Nothing was charged."
+		case evt.Reason == domain.DunningRetryReasonPaymentProcessing:
+			// Stripe has the payment and has not finished it (#1289). Its
+			// outcome is a row of its own: "Payment retry N failed", matched
+			// to its charge attempt, or "Invoice paid".
+			l.Kind, l.Title = "payment_recovery.retry_processing", fmt.Sprintf("Payment retry %d is processing", evt.AttemptCount)
 		default:
 			// A real decline. The attempt row's decline code, when it is
 			// absorbed, replaces this provider text (renderChargeAttempts).
 			l.Kind, l.Title, l.Tone = "payment_recovery.retry_failed", fmt.Sprintf("Payment retry %d failed", evt.AttemptCount), activity.ToneFailure
 			l.Problem = activity.StripWrapper(evt.Reason)
 		}
-		if dc.email != nil && evt.Reason != "succeeded" {
+		// The attempt's warning email follows its failure, not the processing
+		// row before it.
+		if dc.email != nil && evt.Reason != "succeeded" && evt.Reason != domain.DunningRetryReasonPaymentProcessing {
 			if c := emailClauseOf(*dc.email); c != nil {
 				l.Detail = append(l.Detail, c)
 			}

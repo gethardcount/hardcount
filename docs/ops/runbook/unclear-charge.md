@@ -11,6 +11,7 @@ follow its Check, Fix and Verify. Back to the [runbook index](index.md).
 | What you see | Case |
 |---|---|
 | Invoices show `payment_unconfirmed` for hours, and the invoice has a Stripe PaymentIntent | [Unconfirmed, with a PaymentIntent](#unconfirmed-with-a-paymentintent) |
+| An invoice says "Stripe still hasn't confirmed this payment", its payment is `processing`, or its activity shows "Payment retry N is processing" for days | [Processing for days](#processing-for-days) |
 | `hardcount_parked_invoices{disposition="open"}` above 0 | [Parked: no PaymentIntent](#parked-no-paymentintent) |
 | `stale charge check: can't confirm an earlier charge with Stripe` in the logs, or `hardcount_stale_charge_hold_resolutions_total{result="cannot_ask"}` rising | [Interrupted: Hardcount cannot ask Stripe](#interrupted-hardcount-cannot-ask-stripe) |
 | `hardcount_creditnote_pending_issue_drafts` growing over days | [Clawback drafts waiting](#clawback-drafts-waiting) |
@@ -63,6 +64,54 @@ failed.
 
 **Verify:** the query above no longer returns the invoice, and the invoice
 no longer shows `payment_unconfirmed`.
+
+## Processing for days
+
+**Symptom:** an invoice's `payment_status` is `processing`, and after 6 hours
+its notice reads "Stripe still hasn't confirmed this payment after 6 hours,
+so check it in Stripe." When a dunning retry made the payment, its activity
+shows "Payment retry N is processing", and its dunning run stays under
+Active on the Dunning page with no new retry.
+
+**Why:** Stripe has the payment and has not finished it. Card payments end
+within seconds; a payment method that settles later, such as a bank debit,
+can take days. While the payment is processing, Hardcount does not charge the
+invoice, retry it or run dunning's final action. Void, write-off and offline
+payment are refused. The payment's webhook ends the wait. Without one, the
+reconciler reads the PaymentIntent on each scheduled run once the payment is
+30 minutes old, and records what Stripe said.
+
+**Check:**
+
+```sql
+SET app.bypass_rls = 'on';
+SELECT i.id, i.stripe_payment_intent_id, i.provider_payment_status, i.provider_synced_at,
+       r.id AS run_id, r.state, r.attempt_count, r.next_action_at, r.awaiting_payment_intent_id
+FROM invoices i
+LEFT JOIN invoice_dunning_runs r ON r.invoice_id = i.id
+WHERE i.payment_status = 'processing' AND i.updated_at < now() - interval '1 day'
+LIMIT 20;
+```
+
+`provider_payment_status` is the PaymentIntent's status at Stripe when the
+reconciler last read it (`provider_synced_at`). `awaiting_payment_intent_id`
+is set when the run waits on this payment.
+
+**Fix:**
+
+- Stripe still shows the payment `processing`: wait. Nothing in Hardcount
+  ends it sooner, and nothing charges the invoice twice meanwhile.
+- Stripe shows it `succeeded` or failed, and the invoice still says
+  `processing`: the webhook was lost and the reconciler has not run. Check
+  it runs ([A background job is stuck](background-job-stuck.md)); its log
+  lines start with `reconcile:`. It settles the payment on its next run.
+
+**Verify:** the query no longer returns the invoice. A payment that
+succeeded marks the invoice paid and closes its dunning run as recovered. One
+that failed puts the invoice back to `failed`. Its run stays active with
+`awaiting_payment_intent_id` empty, the customer gets that retry's reminder,
+and the next retry is due at the failure plus the policy's next wait. On the
+last retry the policy's final action follows instead.
 
 ## Parked: no PaymentIntent
 

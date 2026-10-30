@@ -1,6 +1,6 @@
 # ADR-112: Dunning exhaustion settles two questions, not one
 
-**Status:** Accepted (2026-08-05; amended 2026-10-08, 2026-10-19 and 2026-10-22)
+**Status:** Accepted (2026-08-05; amended 2026-10-08, 2026-10-19, 2026-10-22 and 2026-10-30)
 **Amends:** [ADR-036](036-dunning-campaigns-model.md) (dunning campaigns —
 `final_action` and its 2026-05-16 four-value enum)
 **Relates to:** [ADR-110](110-written-off-invoices-close-self-service-payment.md)
@@ -353,7 +353,8 @@ never reaches the final actions. #976 handles that path in its own design.
   record closes this, because it exists for the whole call.
 - **A final retry that itself comes back `processing`** resolves the run as
   recovered at once. If that payment later fails, nothing retries the invoice
-  ([#1289](https://github.com/gethardcount/hardcount/issues/1289)).
+  ([#1289](https://github.com/gethardcount/hardcount/issues/1289)). Closed by
+  the [amendment of 2026-10-30](#amendment-2026-10-30--a-retry-whose-payment-is-processing-keeps-dunning-running).
 
 **Deferred, with a trigger.** After a hold that began inline, the escalation
 records the final retry's instant: `exhaustStampAt` reads the untouched lease
@@ -361,7 +362,9 @@ as an uninterrupted exhaustion. The run's `resolved_at` and the escalated
 timeline row both get that instant, which can be days before the failure that
 ended the hold. So the dunning API shows the run resolved too early, and on
 the invoice timeline the escalation can sit before that failure. Trigger: a
-walk or a tenant who reports the order.
+walk or a tenant who reports the order. Closed by the
+[amendment of 2026-10-30](#amendment-2026-10-30--a-retry-whose-payment-is-processing-keeps-dunning-running):
+the escalation records the later of the retry's instant and the failure.
 
 ## Amendment 2026-10-19 (2) — the final action takes the charge hold
 
@@ -406,3 +409,73 @@ with final invoice action `none` escalated over the voided invoice. See the
 A pause or cancel that would close a period still inside its invoice grace waits: both actions run when the grace ends ([ADR-120 amendment of 2026-10-22](120-invoice-grace-period-for-late-usage.md#decision)). The run stays active and the wait writes only `next_action_at`. A first exhaustion that waits is not marked `action_failed`. A re-attempt of an earlier failed action that waits keeps its `action_failed` resolution until the action runs: the last attempt of that action did fail, and the wait did not attempt it.
 
 The list reads of a run (`GET /v1/dunning/runs`, and the invoice notices) carry the bound policy's `max_retry_attempts`. A run whose `attempt_count` has reached it retries no charge, so its `next_action_at` is labelled the final step, not a retry, and the invoice notices no longer promise a retry for it. Before, they keyed on `action_failed` alone and promised a retry during the grace wait and the exhaustion lease.
+
+## Amendment 2026-10-30 — a retry whose payment is processing keeps dunning running
+
+**Gap ([#1289](https://github.com/gethardcount/hardcount/issues/1289)).** A
+dunning retry whose payment Stripe left `processing` came back to dunning as a
+success. The run was resolved as `payment_recovered`, with `dunning.resolved`,
+over an unpaid invoice. When the payment then failed, `StartDunning` returned
+the closed run, the backfill skipped an invoice with any run, and nothing
+retried it. Since PR A ([#1432](https://github.com/gethardcount/hardcount/pull/1432),
+`error_on_requires_action`) a retry is in flight only for a payment that is
+genuinely processing, such as a bank debit.
+
+**Decision.** A dunning retry closes the run as recovered only if the invoice
+it leaves behind is paid.
+
+- The retry's answer is read from the invoice the charge returns. Paid is
+  recovered. In flight is `dunning.ErrPaymentInFlight`, naming the
+  PaymentIntent. Failed (its webhook recorded the decline during the call) is
+  a counted decline, with the Ask from that attempt's decline code. Anything
+  else is a loud, uncounted skip.
+- In flight, the attempt counts and the run is rescheduled exactly as a
+  failure is: the next retry by the schedule, or the exhaustion lease after
+  the last. The run records the PaymentIntent it waits on
+  (`invoice_dunning_runs.awaiting_payment_intent_id`), with a
+  `payment_processing` retry row, in one transaction that locks the invoice
+  row first. No reminder goes out, because the payment has not failed. On
+  the last attempt the final actions are not attempted inline; exhaust-on-entry
+  runs them once the payment has failed. A settle that landed between the
+  charge and this write is read from the invoice: paid closes the run as
+  recovered, failed is a counted failure with its reminder, and either way
+  the retry releases the charge hold it kept, by its own token. So does a
+  retry whose failure the webhook recorded during the call.
+- The payment's failure is recorded by dunning's hook inside the failure
+  settle's transaction (`dunning.Service.RetryPaymentFailed`, called by
+  `payment.SettleFailed`). The hook is built for every failure of a
+  dunning-retry PaymentIntent, and only the compare-and-set on the awaited
+  PaymentIntent, under the invoice's lock, decides whether a run waits on it:
+  a read before the lock can come before the in-flight write commits. The
+  compare-and-set lets one report win among the webhook, a redelivery and the
+  reconciler. The
+  winner records the failed retry row with its PaymentIntent and releases the
+  charge hold the retry kept. On any attempt but the last, it sends the
+  reminder (its Ask from the decline code, its reason from Stripe's card
+  message, never the invoice's `last_payment_error`) and moves the next retry
+  to the failure plus the next wait when that is later. On the last, it sends
+  nothing: exhaust-on-entry runs the final actions and the escalation email.
+  It sends no reminder for an invoice that is no longer finalized, as the
+  generic failure email does not.
+- The escalation records the later of the final retry's instant and the
+  recorded failure (`exhaustStampAt`), which closes the deferred item above.
+
+**Consequences.**
+
+- A payment that succeeds closes the run then, through `SettleSucceeded`, with
+  one `dunning.resolved`. One that fails continues the schedule, one reminder
+  per attempt, and no retry follows the failure at once.
+- While the payment is processing, the due-run pickers skip the run, and on
+  the last attempt the final actions stay held, as in the amendment of
+  2026-10-19. Neither ends on its own while Stripe keeps the payment
+  processing; the runbook says what to check
+  ([A charge's result is unclear: processing](../ops/runbook/unclear-charge.md#processing-for-days)).
+- The hold release frees only a hold younger than the stale-hold sweep's
+  wait: an older one may be kept by the sweep for a payment the invoice does
+  not follow, and stays for the sweep.
+- The in-flight stamp is saved on a context detached from the caller's
+  deadline, as the unclear-outcome save already was.
+- Pinned by `internal/api/dunning_retry_in_flight_e2e_test.go` (the router,
+  signed webhooks and a test clock), `internal/dunning/retry_in_flight_integration_test.go`
+  and `internal/invoice/retry_hold_release_integration_test.go` on real
+  Postgres, and `internal/dunning/retry_in_flight_test.go`.

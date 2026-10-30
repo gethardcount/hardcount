@@ -57,6 +57,29 @@ type Store interface {
 	// at expectedAttempts with that next_action_at. Exactly one processor wins;
 	// the exhaust-on-entry path fires terminal actions only on a win.
 	ClaimExhaustion(ctx context.Context, tenantID, runID string, expectedAttempts int, expectedNext, lease time.Time) (bool, error)
+
+	// Retries whose payment is still processing (#1289).
+	//
+	// RecordRetryInFlight is the write after a retry whose payment came back
+	// still processing: the run's reschedule (run's fields, guarded like
+	// UpdateRunIfActive), the PaymentIntent it now waits on, and event (the
+	// attempt's retry_attempted row), in one transaction. It locks the
+	// invoice row first and writes nothing unless the invoice still waits on
+	// paymentIntentID with its payment in flight: a settle that landed
+	// between the charge and this write has already decided the attempt.
+	RecordRetryInFlight(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, expectedAttempts int, paymentIntentID string, event domain.InvoiceDunningEvent) (RetryInFlightResult, error)
+	// TakeAwaitedRetryTx is the compare-and-set that lets one report of the
+	// payment's failure, of all the webhook and reconciler send, record it:
+	// it clears the run's awaited PaymentIntent only while it is
+	// paymentIntentID and the run is active, on the caller's transaction,
+	// and returns the run and its policy when it did.
+	TakeAwaitedRetryTx(ctx context.Context, tx *sql.Tx, invoiceID, paymentIntentID string) (domain.InvoiceDunningRun, domain.DunningPolicy, bool, error)
+	// RecordRetryFailureTx writes, on the caller's transaction, what
+	// TakeAwaitedRetryTx's winner decided: the run's next_action_at (still
+	// active at the same attempt), the failed attempt's event, and then (nil
+	// = none) under a SAVEPOINT, whose error is logged and skips only then.
+	RecordRetryFailureTx(ctx context.Context, tx *sql.Tx, run domain.InvoiceDunningRun, event domain.InvoiceDunningEvent, then func(tx *sql.Tx) error) error
+
 	ListDueRuns(ctx context.Context, tenantID string, dueBefore time.Time, limit int) ([]domain.InvoiceDunningRun, error)
 
 	// ListDueRunsForClock is the catchup-path counterpart to ListDueRuns.
@@ -90,6 +113,20 @@ type Store interface {
 	SetDefaultPolicy(ctx context.Context, tenantID, id string) error
 	CountCustomersOnPolicy(ctx context.Context, tenantID, policyID string) (int, error)
 }
+
+// RetryInFlightResult is what RecordRetryInFlight did.
+type RetryInFlightResult int
+
+const (
+	// RetryInFlightRecorded: the run waits on the payment.
+	RetryInFlightRecorded RetryInFlightResult = iota
+	// RetryInFlightRunMoved: nothing written; the run was resolved,
+	// escalated or retried by another processor (UpdateRunIfActive's guard).
+	RetryInFlightRunMoved
+	// RetryInFlightPaymentMoved: nothing written; the invoice no longer
+	// waits on this payment in flight. Its success or failure settled first.
+	RetryInFlightPaymentMoved
+)
 
 // Stats is the dashboard-card payload — aggregate counts of dunning
 // runs by state + total at-risk amount (sum of amount_due_cents on

@@ -7775,6 +7775,25 @@
     ]
   },
   {
+    "case": "dunning/retry/payment_processing",
+    "line": {
+      "id": "dunning/retry/payment_processing",
+      "kind": "payment_recovery.retry_processing",
+      "title": "Payment retry 2 is processing",
+      "detail": [],
+      "actor": {
+        "kind": "automatic"
+      },
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Payment retry 2 is processing",
+      "meta: Automatic",
+      "tone: neutral"
+    ]
+  },
+  {
     "case": "dunning/retry/succeeded/invoice paid (Dunning page)",
     "line": {
       "id": "dunning/retry/succeeded/invoice paid (Dunning page)",

@@ -2752,6 +2752,41 @@ func (s *PostgresStore) ReleaseChargeHold(ctx context.Context, tenantID, id stri
 	return tx.Commit()
 }
 
+// ReleaseRetryChargeHoldTx frees the charge hold a dunning retry kept while
+// its payment was processing, once that payment has failed (#1289). It runs
+// on the failure settle's transaction (MarkPaymentFailedReportingTransition's
+// hook), which holds the invoice's row lock, and only for the PaymentIntent
+// the invoice now records as failed.
+//
+// Why the hold is that retry's: until this transaction the invoice was
+// processing on paymentIntentID, and no claim admits a processing invoice, so
+// no other owner can have taken a hold since the retry's. The one other
+// writer of a hold in that state is the stale-hold sweep, which keeps it while
+// a payment the invoice does not follow is still processing at Stripe
+// (keepForProcessing). The sweep looks only at holds that ended at least
+// domain.StaleChargeHoldWait ago, so this releases only a hold younger than
+// that, which the sweep has not looked at. An older one stays for the sweep,
+// whose next check clears it. Reports whether it released. No updated_at
+// write (see ClaimAutoCharge).
+func (s *PostgresStore) ReleaseRetryChargeHoldTx(ctx context.Context, tx *sql.Tx, invoiceID, paymentIntentID string) (bool, error) {
+	if paymentIntentID == "" {
+		return false, nil
+	}
+	res, err := tx.ExecContext(ctx, `
+		UPDATE invoices SET auto_charge_claimed_until = NULL
+		WHERE id = $1 AND stripe_payment_intent_id = $2 AND payment_status = 'failed'
+		  AND auto_charge_claimed_until > now() - make_interval(secs => $3)`,
+		invoiceID, paymentIntentID, domain.StaleChargeHoldWait.Seconds())
+	if err != nil {
+		return false, fmt.Errorf("release the retry's charge hold: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n == 1, nil
+}
+
 // ChargeHeldTx reports the invoice's hold: none, live, or stale (ADR-127),
 // and the hold value. The caller must hold the invoice's row lock on tx —
 // every claim takes that lock before it writes the hold, so the answer cannot
