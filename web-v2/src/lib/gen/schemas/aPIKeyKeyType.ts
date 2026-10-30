@@ -8,10 +8,15 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * `secret` can read and change everything in the account.
+ * `ingest` can only send usage events, for LiteLLM or another
+ * gateway (ADR-133).
+ */
 export type APIKeyKeyType = typeof APIKeyKeyType[keyof typeof APIKeyKeyType];
 
 
 export const APIKeyKeyType = {
-  platform: 'platform',
   secret: 'secret',
+  ingest: 'ingest',
 } as const;

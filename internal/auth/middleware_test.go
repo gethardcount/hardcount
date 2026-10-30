@@ -3,6 +3,7 @@ package auth
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
@@ -125,31 +126,41 @@ func TestRequire_SecretKeyHasFullAccess(t *testing.T) {
 	}
 }
 
-func TestRequire_PlatformKeyHasNoTenantScopes(t *testing.T) {
+// An ingest key passes Require(usage:ingest) and gets the ordinary
+// missing-permission 403 on everything else, with the same message a
+// secret key would get for a permission it lacked.
+func TestRequire_IngestKeyOnlySendsUsage(t *testing.T) {
 	svc := NewService(newMemStore())
-	ctx := postgres.WithLivemode(t.Context(), true)
-	result, _ := svc.CreateKey(WithKeyType(ctx, KeyTypePlatform), "t1", CreateKeyInput{Name: "Plat", KeyType: KeyTypePlatform})
-
-	// A platform key manages tenants and holds no scope inside one: every
-	// tenant read and write is a 403.
-	denied := []Permission{
-		PermCustomerRead, PermUsageRead, PermSubscriptionRead, PermInvoiceRead,
-		PermCustomerWrite, PermUsageWrite,
-		PermPricingWrite, PermSubscriptionWrite, PermInvoiceWrite, PermDunningRead, PermDunningWrite, PermAPIKeyWrite,
+	ctx := WithKeyType(postgres.WithLivemode(t.Context(), true), KeyTypeSecret)
+	result, err := svc.CreateKey(ctx, "t1", CreateKeyInput{Name: "LiteLLM", KeyType: KeyTypeIngest})
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, perm := range denied {
-		t.Run("denied_"+string(perm), func(t *testing.T) {
-			handler := Middleware(svc)(Require(perm)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				t.Fatal("should not reach handler")
-			})))
 
-			req := httptest.NewRequest("GET", "/", nil)
+	for _, perm := range everyPermission {
+		t.Run(string(perm), func(t *testing.T) {
+			reached := false
+			handler := Middleware(svc)(Require(perm)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				reached = true
+				w.WriteHeader(http.StatusOK)
+			})))
+			req := httptest.NewRequest("POST", "/", nil)
 			req.Header.Set("Authorization", "Bearer "+result.RawKey)
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, req)
 
-			if rec.Code != http.StatusForbidden {
-				t.Errorf("platform key should NOT have %s, got %d (want 403)", perm, rec.Code)
+			if perm == PermUsageIngest {
+				if rec.Code != http.StatusOK || !reached {
+					t.Errorf("ingest key on usage:ingest: %d, want 200", rec.Code)
+				}
+				return
+			}
+			if rec.Code != http.StatusForbidden || reached {
+				t.Errorf("ingest key on %s: %d (reached=%v), want 403", perm, rec.Code, reached)
+			}
+			want := "insufficient permissions: this key type does not have " + string(perm) + " access"
+			if !strings.Contains(rec.Body.String(), want) {
+				t.Errorf("ingest key on %s: body %s, want the missing-permission message %q", perm, rec.Body.String(), want)
 			}
 		})
 	}
@@ -164,7 +175,7 @@ func TestLivemodeFromRawKey(t *testing.T) {
 	}{
 		{"secret_live", "hc_secret_live_" + "ff", true, true},
 		{"secret_test", "hc_secret_test_" + "aa", false, true},
-		{"platform_live", "hc_plat_live_xyz", true, true},
+		{"ingest_live", "hc_ingest_live_xyz", true, true},
 		{"empty", "", false, false},
 		{"no_mode_infix", "hc_cps_customer_portal_token", false, false},
 		{"random", "not-a-key", false, false},
@@ -208,49 +219,15 @@ func TestLivemodeFromRequest(t *testing.T) {
 	}
 }
 
-func TestRequire_PlatformKeyOnlyTenants(t *testing.T) {
-	svc := NewService(newMemStore())
-	// Platform keys can only be minted by an existing platform principal.
-	result, _ := svc.CreateKey(WithKeyType(postgres.WithLivemode(t.Context(), true), KeyTypePlatform), "t1", CreateKeyInput{Name: "Platform", KeyType: KeyTypePlatform})
-
-	// Should have tenant access
-	handler := Middleware(svc)(Require(PermTenantWrite)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})))
-
-	req := httptest.NewRequest("GET", "/", nil)
-	req.Header.Set("Authorization", "Bearer "+result.RawKey)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("platform key should have tenant:write, got %d", rec.Code)
-	}
-
-	// Should NOT have customer access
-	handler2 := Middleware(svc)(Require(PermCustomerRead)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("should not reach handler")
-	})))
-
-	req2 := httptest.NewRequest("GET", "/", nil)
-	req2.Header.Set("Authorization", "Bearer "+result.RawKey)
-	rec2 := httptest.NewRecorder()
-	handler2.ServeHTTP(rec2, req2)
-
-	if rec2.Code != http.StatusForbidden {
-		t.Errorf("platform key should NOT have customer:read, got %d", rec2.Code)
-	}
-}
-
 func TestRequireMethod_GETUsesReadPOSTUsesWrite(t *testing.T) {
 	svc := NewService(newMemStore())
-	// Secret holds customer:read but NOT tenant:write (tenant scopes are
-	// platform-only), so RequireMethod(customer:read, tenant:write) passes read
-	// methods (arg0 held) and 403s write methods (arg1 absent) — isolating
+	// An ingest key holds usage:ingest but NOT customer:write, so
+	// RequireMethod(usage:ingest, customer:write) passes read methods (arg0
+	// held) and 403s write methods (arg1 absent) — isolating
 	// GET/HEAD/OPTIONS→arg0 and POST/PUT/PATCH/DELETE→arg1.
-	sec, _ := svc.CreateKey(postgres.WithLivemode(t.Context(), true), "t1", CreateKeyInput{Name: "Sec", KeyType: KeyTypeSecret})
+	sec, _ := svc.CreateKey(postgres.WithLivemode(t.Context(), true), "t1", CreateKeyInput{Name: "Ingest", KeyType: KeyTypeIngest})
 
-	mw := Middleware(svc)(RequireMethod(PermCustomerRead, PermTenantWrite)(
+	mw := Middleware(svc)(RequireMethod(PermUsageIngest, PermCustomerWrite)(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }),
 	))
 
@@ -259,10 +236,10 @@ func TestRequireMethod_GETUsesReadPOSTUsesWrite(t *testing.T) {
 		want   int
 		why    string
 	}{
-		{"GET", http.StatusOK, "GET → arg0 (customer:read) held"},
+		{"GET", http.StatusOK, "GET → arg0 (usage:ingest) held"},
 		{"HEAD", http.StatusOK, "HEAD → arg0 held"},
 		{"OPTIONS", http.StatusOK, "OPTIONS → arg0 held"},
-		{"POST", http.StatusForbidden, "POST → arg1 (tenant:write) absent"},
+		{"POST", http.StatusForbidden, "POST → arg1 (customer:write) absent"},
 		{"PUT", http.StatusForbidden, "PUT → arg1 absent"},
 		{"PATCH", http.StatusForbidden, "PATCH → arg1 absent"},
 		{"DELETE", http.StatusForbidden, "DELETE → arg1 absent"},

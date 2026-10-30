@@ -143,34 +143,3 @@ func TestBootstrap_SeedsDefaultDunningPolicy(t *testing.T) {
 		}
 	})
 }
-
-// TestTenantCreate_SeedsDefaultDunningPolicy: POST /v1/tenants is the second
-// way an account is created, and it gets the same policies, with an audit
-// row per mode. Mutation check: drop the seed from Service.Create.
-func TestTenantCreate_SeedsDefaultDunningPolicy(t *testing.T) {
-	db := testutil.SetupTestDB(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	dunSvc := dunning.NewService(dunning.NewPostgresStore(db), nil, nil)
-	logger := audit.NewLogger(db)
-
-	svc := tenant.NewService(tenant.NewPostgresStore(db))
-	svc.SetAuditLogger(logger)
-	svc.SetDunningSeeder(dunSvc.SeedDefaultPoliciesTx)
-
-	created, err := svc.Create(ctx, tenant.CreateInput{Name: "Platform Created Co"})
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	assertSeeded(t, dunSvc, created.ID)
-
-	for _, live := range []bool{false, true} {
-		rows, _, err := logger.Query(postgres.WithLivemode(ctx, live), created.ID, audit.QueryFilter{ResourceType: "dunning_policy"})
-		if err != nil {
-			t.Fatalf("query audit (livemode=%v): %v", live, err)
-		}
-		if len(rows) != 1 || rows[0].Metadata["action"] != "tenant_provisioned" {
-			t.Errorf("livemode=%v: dunning_policy audit rows %+v, want one tenant_provisioned row", live, rows)
-		}
-	}
-}

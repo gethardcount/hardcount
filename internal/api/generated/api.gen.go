@@ -25,14 +25,14 @@ const (
 
 // Defines values for APIKeyKeyType.
 const (
-	APIKeyKeyTypePlatform APIKeyKeyType = "platform"
-	APIKeyKeyTypeSecret   APIKeyKeyType = "secret"
+	APIKeyKeyTypeIngest APIKeyKeyType = "ingest"
+	APIKeyKeyTypeSecret APIKeyKeyType = "secret"
 )
 
 // Valid indicates whether the value is a known member of the APIKeyKeyType enum.
 func (e APIKeyKeyType) Valid() bool {
 	switch e {
-	case APIKeyKeyTypePlatform:
+	case APIKeyKeyTypeIngest:
 		return true
 	case APIKeyKeyTypeSecret:
 		return true
@@ -2110,14 +2110,14 @@ func (e GetHealth200JSONResponseBodyStatus) Valid() bool {
 
 // Defines values for CreateApiKeyJSONBodyKeyType.
 const (
-	CreateApiKeyJSONBodyKeyTypePlatform CreateApiKeyJSONBodyKeyType = "platform"
-	CreateApiKeyJSONBodyKeyTypeSecret   CreateApiKeyJSONBodyKeyType = "secret"
+	CreateApiKeyJSONBodyKeyTypeIngest CreateApiKeyJSONBodyKeyType = "ingest"
+	CreateApiKeyJSONBodyKeyTypeSecret CreateApiKeyJSONBodyKeyType = "secret"
 )
 
 // Valid indicates whether the value is a known member of the CreateApiKeyJSONBodyKeyType enum.
 func (e CreateApiKeyJSONBodyKeyType) Valid() bool {
 	switch e {
-	case CreateApiKeyJSONBodyKeyTypePlatform:
+	case CreateApiKeyJSONBodyKeyTypeIngest:
 		return true
 	case CreateApiKeyJSONBodyKeyTypeSecret:
 		return true
@@ -2900,27 +2900,6 @@ func (e PauseSubscriptionCollectionJSONBodyBehavior) Valid() bool {
 	}
 }
 
-// Defines values for ListTenantsParamsStatus.
-const (
-	ListTenantsParamsStatusActive    ListTenantsParamsStatus = "active"
-	ListTenantsParamsStatusDeleted   ListTenantsParamsStatus = "deleted"
-	ListTenantsParamsStatusSuspended ListTenantsParamsStatus = "suspended"
-)
-
-// Valid indicates whether the value is a known member of the ListTenantsParamsStatus enum.
-func (e ListTenantsParamsStatus) Valid() bool {
-	switch e {
-	case ListTenantsParamsStatusActive:
-		return true
-	case ListTenantsParamsStatusDeleted:
-		return true
-	case ListTenantsParamsStatusSuspended:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for DeleteV1TestClocksId200JSONResponseBodyStatus.
 const (
 	DeleteV1TestClocksId200JSONResponseBodyStatusDeleted DeleteV1TestClocksId200JSONResponseBodyStatus = "deleted"
@@ -2938,13 +2917,13 @@ func (e DeleteV1TestClocksId200JSONResponseBodyStatus) Valid() bool {
 
 // Defines values for DeleteV1WebhookEndpointsEndpointsId200JSONResponseBodyStatus.
 const (
-	DeleteV1WebhookEndpointsEndpointsId200JSONResponseBodyStatusDeleted DeleteV1WebhookEndpointsEndpointsId200JSONResponseBodyStatus = "deleted"
+	Deleted DeleteV1WebhookEndpointsEndpointsId200JSONResponseBodyStatus = "deleted"
 )
 
 // Valid indicates whether the value is a known member of the DeleteV1WebhookEndpointsEndpointsId200JSONResponseBodyStatus enum.
 func (e DeleteV1WebhookEndpointsEndpointsId200JSONResponseBodyStatus) Valid() bool {
 	switch e {
-	case DeleteV1WebhookEndpointsEndpointsId200JSONResponseBodyStatusDeleted:
+	case Deleted:
 		return true
 	default:
 		return false
@@ -2992,14 +2971,14 @@ func (e ReceiveStripeWebhook200JSONResponseBodyStatus) Valid() bool {
 
 // Defines values for GetV1Whoami200JSONResponseBodyKeyType.
 const (
-	Platform GetV1Whoami200JSONResponseBodyKeyType = "platform"
-	Secret   GetV1Whoami200JSONResponseBodyKeyType = "secret"
+	Ingest GetV1Whoami200JSONResponseBodyKeyType = "ingest"
+	Secret GetV1Whoami200JSONResponseBodyKeyType = "secret"
 )
 
 // Valid indicates whether the value is a known member of the GetV1Whoami200JSONResponseBodyKeyType enum.
 func (e GetV1Whoami200JSONResponseBodyKeyType) Valid() bool {
 	switch e {
-	case Platform:
+	case Ingest:
 		return true
 	case Secret:
 		return true
@@ -3017,8 +2996,12 @@ type APIKey struct {
 	Id        string    `json:"id"`
 
 	// KeyPrefix The start of the key (type, mode and a few characters), enough to tell keys apart. Never the full key.
-	KeyPrefix string        `json:"key_prefix"`
-	KeyType   APIKeyKeyType `json:"key_type"`
+	KeyPrefix string `json:"key_prefix"`
+
+	// KeyType `secret` can read and change everything in the account.
+	// `ingest` can only send usage events, for LiteLLM or another
+	// gateway (ADR-133).
+	KeyType APIKeyKeyType `json:"key_type"`
 
 	// LastUsedAt Updated at most about once per interval, so it can lag a little.
 	LastUsedAt time.Time `json:"last_used_at,omitempty"`
@@ -3028,7 +3011,9 @@ type APIKey struct {
 	TenantId   string    `json:"tenant_id"`
 }
 
-// APIKeyKeyType defines model for APIKey.KeyType.
+// APIKeyKeyType `secret` can read and change everything in the account.
+// `ingest` can only send usage events, for LiteLLM or another
+// gateway (ADR-133).
 type APIKeyKeyType string
 
 // APIKeyCreated defines model for APIKeyCreated.
@@ -8846,28 +8831,6 @@ type ScheduleSubscriptionCancelParams struct {
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// ListTenantsParams defines parameters for ListTenants.
-type ListTenantsParams struct {
-	Status ListTenantsParamsStatus `form:"status,omitempty" json:"status,omitempty"`
-
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
-	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
-
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
-	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
-}
-
-// ListTenantsParamsStatus defines parameters for ListTenants.
-type ListTenantsParamsStatus string
-
-// CreateTenantJSONBody defines parameters for CreateTenant.
-type CreateTenantJSONBody struct {
-	// Name Must not be blank.
-	Name string `json:"name"`
-}
-
 // GetV1TestClocksParams defines parameters for GetV1TestClocks.
 type GetV1TestClocksParams struct {
 	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
@@ -9431,9 +9394,6 @@ type PauseSubscriptionCollectionJSONRequestBody PauseSubscriptionCollectionJSONB
 
 // ScheduleSubscriptionCancelJSONRequestBody defines body for ScheduleSubscriptionCancel for application/json ContentType.
 type ScheduleSubscriptionCancelJSONRequestBody ScheduleSubscriptionCancelJSONBody
-
-// CreateTenantJSONRequestBody defines body for CreateTenant for application/json ContentType.
-type CreateTenantJSONRequestBody CreateTenantJSONBody
 
 // PostV1TestClocksJSONRequestBody defines body for PostV1TestClocks for application/json ContentType.
 type PostV1TestClocksJSONRequestBody PostV1TestClocksJSONBody
@@ -10191,15 +10151,6 @@ type ServerInterface interface {
 	// Get subscription activity timeline
 	// (GET /v1/subscriptions/{id}/timeline)
 	GetSubscriptionTimeline(w http.ResponseWriter, r *http.Request, id string)
-	// List tenants
-	// (GET /v1/tenants)
-	ListTenants(w http.ResponseWriter, r *http.Request, params ListTenantsParams)
-	// Create a tenant
-	// (POST /v1/tenants)
-	CreateTenant(w http.ResponseWriter, r *http.Request)
-	// Get a tenant
-	// (GET /v1/tenants/{id})
-	GetTenant(w http.ResponseWriter, r *http.Request, id string)
 	// List test clocks for the active tenant
 	// (GET /v1/test-clocks)
 	GetV1TestClocks(w http.ResponseWriter, r *http.Request, params GetV1TestClocksParams)
@@ -11193,24 +11144,6 @@ func (_ Unimplemented) ClearSubscriptionScheduledCancel(w http.ResponseWriter, r
 // Get subscription activity timeline
 // (GET /v1/subscriptions/{id}/timeline)
 func (_ Unimplemented) GetSubscriptionTimeline(w http.ResponseWriter, r *http.Request, id string) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-// List tenants
-// (GET /v1/tenants)
-func (_ Unimplemented) ListTenants(w http.ResponseWriter, r *http.Request, params ListTenantsParams) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-// Create a tenant
-// (POST /v1/tenants)
-func (_ Unimplemented) CreateTenant(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-// Get a tenant
-// (GET /v1/tenants/{id})
-func (_ Unimplemented) GetTenant(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -18626,123 +18559,6 @@ func (siw *ServerInterfaceWrapper) GetSubscriptionTimeline(w http.ResponseWriter
 	handler.ServeHTTP(w, r)
 }
 
-// ListTenants operation middleware
-func (siw *ServerInterfaceWrapper) ListTenants(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params ListTenantsParams
-
-	// ------------- Optional query parameter "status" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", r.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
-		}
-		return
-	}
-
-	// ------------- Optional query parameter "limit" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
-		}
-		return
-	}
-
-	// ------------- Optional query parameter "offset" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
-		}
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListTenants(w, r, params)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// CreateTenant operation middleware
-func (siw *ServerInterfaceWrapper) CreateTenant(w http.ResponseWriter, r *http.Request) {
-
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.CreateTenant(w, r)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// GetTenant operation middleware
-func (siw *ServerInterfaceWrapper) GetTenant(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "id" -------------
-	var id string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
-		return
-	}
-
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetTenant(w, r, id)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
 // GetV1TestClocks operation middleware
 func (siw *ServerInterfaceWrapper) GetV1TestClocks(w http.ResponseWriter, r *http.Request) {
 
@@ -20747,15 +20563,6 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/subscriptions/{id}/timeline", wrapper.GetSubscriptionTimeline)
-	})
-	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/tenants", wrapper.ListTenants)
-	})
-	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/tenants", wrapper.CreateTenant)
-	})
-	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/tenants/{id}", wrapper.GetTenant)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/test-clocks", wrapper.GetV1TestClocks)

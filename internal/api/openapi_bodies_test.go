@@ -120,7 +120,6 @@ var requestBodies = map[string]requestBody{
 	"PUT /v1/settings":                                                  {body: domain.TenantSettings{}, undocumented: readOnly("tenant_id", "created_at", "updated_at")},
 	"POST /v1/settings/stripe":                                          {body: tenantstripe.ConnectInput{}},
 	"PATCH /v1/settings/stripe/{mode}/webhook":                          {body: tenantstripe.SetWebhookInput{}},
-	"POST /v1/tenants":                                                  {body: tenant.CreateInput{}},
 	"POST /v1/bootstrap":                                                {body: tenant.BootstrapRequest{}},
 }
 

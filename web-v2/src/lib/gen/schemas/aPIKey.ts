@@ -13,6 +13,11 @@ export interface APIKey {
   id: string;
   /** The start of the key (type, mode and a few characters), enough to tell keys apart. Never the full key. */
   key_prefix: string;
+  /**
+     * `secret` can read and change everything in the account.
+     * `ingest` can only send usage events, for LiteLLM or another
+     * gateway (ADR-133).
+     */
   key_type: APIKeyKeyType;
   livemode: boolean;
   name: string;

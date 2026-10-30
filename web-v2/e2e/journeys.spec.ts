@@ -1065,6 +1065,31 @@ test('a new API key shows once, with a try-it line, and closes only from "I\'ve 
   await expect(shown).toHaveCount(0)
 })
 
+test('a usage-only API key is made from the dialog and shows its type in the list', async ({ page }) => {
+  const name = `e2e usage-only ${uniq()}`
+  await page.goto('/api-keys')
+  await page.getByRole('button', { name: 'Create API key' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Create API key' })
+  // Secret stays the default; the operator picks the other type.
+  await expect(dialog.getByRole('radio', { name: /^Secret/ })).toHaveAttribute('aria-checked', 'true')
+  await dialog.getByRole('radio', { name: /^Usage only/ }).click()
+  await expect(dialog.getByRole('radio', { name: /^Usage only/ })).toHaveAttribute('aria-checked', 'true')
+  await expect(dialog.getByRole('radio', { name: /^Secret/ })).toHaveAttribute('aria-checked', 'false')
+  await expect(dialog.getByText('Can only send usage events. Use it in LiteLLM or another gateway.')).toBeVisible()
+  await dialog.getByPlaceholder('e.g. Production, Staging, CI/CD').fill(name)
+  await dialog.getByRole('button', { name: 'Create key' }).click()
+
+  const shown = page.getByRole('dialog', { name: 'API key created' })
+  await expect(shown.locator('code').first()).toHaveText(/^hc_ingest_test_/)
+  await shown.getByRole('button', { name: "I've copied it" }).click()
+
+  // The list says what the key is in plain words, and the API agrees.
+  const row = page.getByRole('main').getByRole('row').filter({ hasText: name })
+  await expect(row.getByRole('cell').nth(1)).toHaveText('Usage only')
+  const keys = await api<{ data: { name: string; key_type: string }[] }>('GET', '/api-keys?limit=100')
+  expect(keys.data.find(k => k.name === name)?.key_type).toBe('ingest')
+})
+
 test('each Home attention line counts the rows of the list it opens', async ({ page }) => {
   // Each count is its list's total (other workers add invoices meanwhile, so
   // the answers are fixed here). The overview, which leaves out test-clock

@@ -75,7 +75,7 @@ cmd/hardcount/                  — single Go binary
 cmd/hardcount-doctor/           — read-only money-invariant sweep (see ENGINEERING.md)
 internal/                     (abridged — one package per domain)
   domain/                   — pure domain models, zero deps
-  auth/                     — API key auth (2 stored key types, platform and secret, plus dashboard sessions, per-route permissions)
+  auth/                     — API key auth (2 stored key types, secret and ingest, plus dashboard sessions, per-route permissions)
   customer/                 — customer CRUD + billing profiles
   pricing/                  — meters, plans and their prices, price overrides
   subscription/             — lifecycle (created trialing or active, or as a draft until activated; trialing → active → canceled)

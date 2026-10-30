@@ -24,11 +24,11 @@ Words used in the Hardcount docs and dashboard. For the big picture, read
   `_live_` in its prefix) or the dashboard's mode switch picks which set you
   see. Tenant settings are shared, but each mode has its own Stripe
   connection. [More](api-keys.md)
-- **API key types (secret, platform)**: The two kinds of key you send as
+- **API key types (secret, usage only)**: The two kinds of key you send as
   `Authorization: Bearer <key>`. A secret key (`hc_secret_`) has full
-  access to one tenant and stays on your server. A platform key
-  (`hc_platform_`) manages tenants and is not issued in the product.
-  [More](api-keys.md)
+  access to one tenant and stays on your server. A usage-only key
+  (`hc_ingest_`, `ingest` in the API) can only send usage events, for
+  LiteLLM or another gateway. [More](api-keys.md)
 
 ## Pricing and usage
 

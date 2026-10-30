@@ -13,22 +13,23 @@ printed a test key and saved it in
 To make a new key in the dashboard:
 
 1. Open **API keys** and click **Create API key**.
-   **You see:** a dialog with a name field, the key type **Secret**, and an
-   expiry choice.
-2. Give the key a name, such as `Production server`, and click **Create
-   key**.
+   **You see:** a dialog with a name field, two key types, **Secret**
+   (picked) and **Usage only**, and an expiry choice.
+2. Give the key a name, such as `Production server`, pick its type (see
+   [Key types](#key-types)), and click **Create key**.
    **You see:** the full key, with "Copy it now. Hardcount shows it only
    this once.", and a `curl` line that tries it. Copy the key into your
    secret store, then click **I've copied it**: the dialog closes no other
    way.
 
 The new key gets the mode the dashboard is in. In test mode you get a
-`hc_secret_test_…` key; switch to live mode first to get a
-`hc_secret_live_…` key.
+`hc_secret_test_…` key (`hc_ingest_test_…` for a usage-only key); switch to
+live mode first to get a `hc_secret_live_…` key.
 
 You can also create a key with the API: `POST /v1/api-keys` with
-`{"name": "…", "key_type": "secret"}`. The response's `raw_key` is the full
-key, and it is shown only this once.
+`{"name": "…", "key_type": "secret"}`, or `"key_type": "ingest"` for a
+usage-only key. The response's `raw_key` is the full key, and it is shown
+only this once.
 
 ## Send it
 
@@ -43,7 +44,8 @@ curl -s "$HARDCOUNT/v1/whoami" -H "Authorization: Bearer $HARDCOUNT_KEY"
 ```
 
 **You see:** JSON with your `tenant_id` (your account's ID), `"livemode":
-false` for a test key, and `"key_type": "secret"`.
+false` for a test key, and `"key_type": "secret"` (`"ingest"` for a
+usage-only key).
 
 A call with no key gets `401` and the message `missing credentials — sign
 in at /login or send Authorization: Bearer hc_secret_...`.
@@ -67,7 +69,16 @@ mode.
 | Type | Starts with | Use it for |
 |---|---|---|
 | Secret | `hc_secret_` | All API calls from your server. It can read and change everything in one account, so keep it out of browsers and out of source control. |
-| Platform | `hc_platform_` | Managing accounts across a whole Hardcount server. You cannot create one in the dashboard or with a secret key. |
+| Usage only (`ingest` in the API) | `hc_ingest_` | Sending usage from LiteLLM or another gateway. It can call only `POST /v1/usage-events`, `POST /v1/usage-events/batch` and `POST /v1/integrations/litellm/spend`, plus `GET /v1/whoami`. |
+
+A gateway keeps its key in a config file, often on another machine. Give
+it a usage-only key: if that key leaks, it can add usage but cannot refund,
+void, read your customers or make keys. Every other call with it gets
+`403` and a message such as `insufficient permissions: this key type does
+not have customer:read access`. It cannot backfill past usage or release
+held usage either: do those with a secret key or in the dashboard.
+
+A dashboard session can do everything a secret key can.
 
 ## Rotate a key
 

@@ -396,7 +396,7 @@ func simColumns(ctx context.Context, metadata map[string]any) (simAt, clockID an
 //     spot is bounded and named: a route that emits nothing of its own but nests
 //     someone else's emission reads as covered at runtime.
 //
-// Self-marking is also load-bearing: POST /v1/tenants and both public checkout
+// Self-marking is also load-bearing: both public checkout
 // routes emit ONLY in-tx, and nothing else would account for them.
 func (l *Logger) LogInTx(ctx context.Context, tx *sql.Tx, e Entry) error {
 	simAt, clockID, metadata := simColumns(ctx, e.Metadata)

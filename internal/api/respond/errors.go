@@ -93,8 +93,8 @@ func FromError(w http.ResponseWriter, r *http.Request, err error, resource strin
 	case errors.Is(err, errs.ErrForbidden):
 		// Authenticated but not permitted → 403. The request is well-formed
 		// and the resource state is fine; the caller's principal simply lacks
-		// authority for this action (e.g. minting a platform key without being
-		// a platform principal).
+		// authority for this action (an authz rule a service enforces itself,
+		// through errs.Forbidden).
 		Forbidden(w, r, err.Error())
 
 	case errors.Is(err, errs.ErrValidation):

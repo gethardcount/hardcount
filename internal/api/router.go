@@ -183,7 +183,6 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 
 	// Domain handlers
 	tenantSvc := tenant.NewService(tenant.NewPostgresStore(db))
-	tenantH := tenant.NewHandler(tenantSvc)
 	customerStore := customer.NewPostgresStore(db)
 
 	// PII + webhook-secret encryption at rest — AES-256-GCM via HARDCOUNT_ENCRYPTION_KEY.
@@ -720,13 +719,6 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// credit: in-tx emission on the SERVICE (ADR-090 first domain batch) —
 	// grant/adjust audit rows ride the ledger transaction.
 	creditSvc.SetAuditLogger(auditLogger)
-	// tenant: platform provisioning previously left NO audit trail (the
-	// /v1/tenants group mounts no catch-all); the create row now rides the
-	// tenants INSERT tx, landing in the NEW tenant's own log (panel Q6).
-	tenantSvc.SetAuditLogger(auditLogger)
-	// POST /v1/tenants creates accounts too; they get the same default
-	// dunning policies as a bootstrap (ADR-123). Create refuses without it.
-	tenantSvc.SetDunningSeeder(dunningSvc.SeedDefaultPoliciesTx)
 	// creditnote: Issue()/relief emit on their coordinator tx — one
 	// canonical credit_note.issued row for operator, engine, reconciler,
 	// and catchup paths; refund-webhook status flips emit on the store tx.
@@ -1108,7 +1100,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// TestMustWired_CoversEveryAuditedComponent pins the list.
 	// (publicPaymentH is exempt: its constructor legitimately returns nil
 	// when Stripe isn't configured, so its wiring is guarded above.)
-	audit.MustWired(creditSvc, tenantSvc, subSvc, invoiceSvc, creditNoteSvc,
+	audit.MustWired(creditSvc, subSvc, invoiceSvc, creditNoteSvc,
 		stripeAdapter, paymentMethodsSvc, engine, hostedInvoiceStripe,
 		customerSvc, pricingSvc, recipeSvc, providerCostH, usageSvc)
 	if publicPaymentH != nil {
@@ -1529,7 +1521,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// response and never buffers the body.
 	//
 	// Mounted at the ROOT, not on /v1: the catch-all it replaces only ever saw
-	// the /v1 block, so /v1/auth, /v1/tenants, /v1/public/*, /v1/webhooks and
+	// the /v1 block, so /v1/auth, /v1/public/*, /v1/webhooks and
 	// /v1/bootstrap were invisible to it (ADR-090 RC1). It also sits AFTER
 	// RequestID + TrustedClientIP so the ctx it seeds for every downstream audit
 	// emission carries the request id and the real client IP.
@@ -1637,14 +1629,6 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		r.Use(hostedInvoiceRL.Middleware())
 		r.Use(mw.Timeout(30 * time.Second))
 		r.Mount("/", customerH.PublicCostDashboardRoutes())
-	})
-
-	// Platform routes
-	r.Route("/v1/tenants", func(r chi.Router) {
-		r.Use(auth.Middleware(authSvc))
-		r.Use(auth.Require(auth.PermTenantWrite))
-		r.Use(mw.Timeout(30 * time.Second))
-		r.Mount("/", tenantH.Routes())
 	})
 
 	// Real-time webhook event SSE stream — mounted ABOVE the /v1 route
@@ -1811,16 +1795,21 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		r.With(auth.RequireMethod(auth.PermSubscriptionRead, auth.PermSubscriptionWrite)).Mount("/subscriptions", subH.Routes())
 		// Backfill is mounted ahead of the /usage-events subtree so chi picks
 		// the more-specific pattern; PermUsageWrite gates it to secret-tier
-		// keys.
+		// keys. An ingest key cannot backfill (ADR-133).
 		r.With(auth.Require(auth.PermUsageWrite)).Post("/usage-events/backfill", usageH.Backfill)
-		r.With(auth.RequireMethod(auth.PermUsageRead, auth.PermUsageWrite)).Mount("/usage-events", usageH.Routes())
-		// LiteLLM adapter — POST /v1/integrations/litellm/spend.
-		// Authenticated with a standard secret key (the operator's
-		// LiteLLM proxy carries the Bearer token on every callback);
-		// gated on PermUsageWrite because the call shape is "write
-		// usage events on behalf of the partner." See ADR-033 +
-		// docs/integrations/litellm.md.
-		r.With(auth.Require(auth.PermUsageWrite)).Mount("/integrations/litellm",
+		// Sending events needs PermUsageIngest, the one permission an ingest
+		// key holds (ADR-133); the reads and the held-usage release and
+		// discard need usage read and write.
+		r.Mount("/usage-events", usageH.Routes(
+			auth.Require(auth.PermUsageIngest),
+			auth.Require(auth.PermUsageRead),
+			auth.Require(auth.PermUsageWrite),
+		))
+		// LiteLLM adapter — POST /v1/integrations/litellm/spend. The
+		// operator's LiteLLM proxy carries the Bearer key on every callback,
+		// so it needs only PermUsageIngest: an ingest key (ADR-133) or a
+		// secret key. See ADR-033 + docs/integrations/litellm.md.
+		r.With(auth.Require(auth.PermUsageIngest)).Mount("/integrations/litellm",
 			litellm.New(customerStore, pricingSvc, usageSvc, usageSvc).Routes())
 		// create_preview must mount BEFORE /invoices because chi tries
 		// patterns in registration order — once /invoices is mounted with

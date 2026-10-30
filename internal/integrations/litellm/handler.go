@@ -49,10 +49,10 @@ type Holder interface {
 	HoldCall(ctx context.Context, tenantID string, in usage.HoldCallInput) (usage.CallResult, error)
 }
 
-// Handler exposes POST /v1/integrations/litellm/spend. Auth is the
-// standard API key (Bearer); operator generates a Hardcount key and
-// pastes it into LiteLLM's GENERIC_LOGGER_HEADERS as
-// `Authorization: Bearer <hc_secret_…>`.
+// Handler exposes POST /v1/integrations/litellm/spend. Auth is a Bearer
+// API key holding usage:ingest: the operator creates a usage-only key
+// (ADR-133) and puts it in the proxy's callback headers as
+// `Authorization: Bearer <hc_ingest_…>`. A secret key works too.
 type Handler struct {
 	customers CustomerLookup
 	meters    MeterLookup

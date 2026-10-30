@@ -7,10 +7,7 @@ first. Every shipped change, with its date, is in the
 
 ## Now
 
-Right after v0.9.0:
-
-- A secret API key that can only send usage, for LiteLLM and other
-  gateways.
+The item planned right after v0.9.0 has shipped ([Shipped recently](#shipped-recently)). What comes next is below.
 
 ## Next
 
@@ -86,6 +83,10 @@ Each item waits until someone using Hardcount needs it:
 - A separate docs site. The docs stay in this repo.
 
 ## Shipped recently
+
+After v0.9.0 (in [Unreleased](../CHANGELOG.md#unreleased)):
+
+- **A usage-only API key for LiteLLM and other gateways.** It can send usage events and nothing else ([key types](api-keys.md#key-types)). The platform key type and `/v1/tenants`, which nothing could use, are removed ([ADR-133](adr/133-api-key-types-secret-and-ingest.md)).
 
 October 2026, v0.9.0 ([everything it changes](../CHANGELOG.md)):
 

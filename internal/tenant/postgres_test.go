@@ -11,34 +11,18 @@ import (
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
-func TestPostgresStore_CreateAndGet(t *testing.T) {
+func TestPostgresStore_Get(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	store := tenant.NewPostgresStore(db)
 	ctx := postgres.WithLivemode(context.Background(), false)
+	id := testutil.CreateTestTenant(t, db, "Acme Corp")
 
-	created, err := store.Create(ctx, domain.Tenant{Name: "Acme Corp"})
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	if created.ID == "" {
-		t.Fatal("ID should be generated")
-	}
-	if created.Name != "Acme Corp" {
-		t.Errorf("name: got %q, want Acme Corp", created.Name)
-	}
-	if created.Status != domain.TenantStatusActive {
-		t.Errorf("status: got %q, want active", created.Status)
-	}
-
-	got, err := store.Get(ctx, created.ID)
+	got, err := store.Get(ctx, id)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if got.ID != created.ID {
-		t.Errorf("get ID mismatch: got %q, want %q", got.ID, created.ID)
-	}
-	if got.Name != "Acme Corp" {
-		t.Errorf("get name: got %q", got.Name)
+	if got.ID != id || got.Name != "Acme Corp" || got.Status != domain.TenantStatusActive {
+		t.Errorf("get: %+v, want %s, Acme Corp, active", got, id)
 	}
 }
 
@@ -81,40 +65,14 @@ func TestSettingsStore_GetSynthesizesDefaultsOnMiss(t *testing.T) {
 	}
 }
 
-func TestPostgresStore_List(t *testing.T) {
-	db := testutil.SetupTestDB(t)
-	store := tenant.NewPostgresStore(db)
-	ctx := postgres.WithLivemode(context.Background(), false)
-
-	_, _ = store.Create(ctx, domain.Tenant{Name: "Tenant A"})
-	_, _ = store.Create(ctx, domain.Tenant{Name: "Tenant B"})
-
-	all, total, err := store.List(ctx, tenant.ListFilter{})
-	if err != nil {
-		t.Fatalf("list: %v", err)
-	}
-	if len(all) != 2 || total != 2 {
-		t.Errorf("list count: got %d rows, total %d, want 2", len(all), total)
-	}
-
-	// Filter by status
-	active, _, err := store.List(ctx, tenant.ListFilter{Status: "active"})
-	if err != nil {
-		t.Fatalf("list active: %v", err)
-	}
-	if len(active) != 2 {
-		t.Errorf("active count: got %d, want 2", len(active))
-	}
-}
-
 func TestPostgresStore_UpdateStatus(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	store := tenant.NewPostgresStore(db)
 	ctx := postgres.WithLivemode(context.Background(), false)
 
-	created, _ := store.Create(ctx, domain.Tenant{Name: "Test"})
+	id := testutil.CreateTestTenant(t, db, "Test")
 
-	updated, err := store.UpdateStatus(ctx, created.ID, domain.TenantStatusSuspended)
+	updated, err := store.UpdateStatus(ctx, id, domain.TenantStatusSuspended)
 	if err != nil {
 		t.Fatalf("update: %v", err)
 	}
@@ -123,7 +81,7 @@ func TestPostgresStore_UpdateStatus(t *testing.T) {
 	}
 
 	// Verify persisted
-	got, _ := store.Get(ctx, created.ID)
+	got, _ := store.Get(ctx, id)
 	if got.Status != domain.TenantStatusSuspended {
 		t.Errorf("persisted status: got %q, want suspended", got.Status)
 	}

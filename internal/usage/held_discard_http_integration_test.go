@@ -48,7 +48,7 @@ func TestHeldDiscard_HTTP_UnknownFieldDiscardsNothing(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/held/discard", strings.NewReader(body))
 		req = req.WithContext(auth.WithTenantID(f.ctx, f.tenantID))
 		rec := httptest.NewRecorder()
-		h.Routes().ServeHTTP(rec, req)
+		h.Routes(ungated, ungated, ungated).ServeHTTP(rec, req)
 		return rec.Code, rec.Body.String()
 	}
 

@@ -40,7 +40,7 @@ func TestBootstrap_AuditsItsProvisioning(t *testing.T) {
 		t.Fatalf("bootstrap: %v", err)
 	}
 
-	// Account-plane facts are recorded live, matching POST /v1/tenants.
+	// Account-plane facts are recorded live.
 	liveCtx := postgres.WithLivemode(ctx, true)
 
 	rows, _, err := logger.Query(liveCtx, res.Tenant.ID, audit.QueryFilter{})

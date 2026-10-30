@@ -2198,9 +2198,9 @@ func DefaultSeedPolicy() domain.DunningPolicy {
 
 // SeedDefaultPoliciesTx creates DefaultSeedPolicy in test and live mode on
 // the caller's account-creation tx, as each mode's default (ADR-123). It is
-// the one writer of seeded policies; both account-creation paths
-// (tenant.RunBootstrap and tenant.Service.Create) call it, so an account
-// that exists has retries on from its first failed payment. The policy goes
+// the one writer of seeded policies; account creation (tenant.RunBootstrap)
+// calls it, so an account that exists has retries on from its first failed
+// payment. The policy goes
 // through the same normalize+validate as every other writer. onSeeded runs
 // after each insert in that insert's mode (the callers write an audit row
 // there); an error from it, or from either insert, fails account creation.

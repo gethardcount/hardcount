@@ -4,9 +4,6 @@ package auth
 type Permission string
 
 const (
-	PermTenantRead  Permission = "tenant:read"
-	PermTenantWrite Permission = "tenant:write"
-
 	PermCustomerRead  Permission = "customer:read"
 	PermCustomerWrite Permission = "customer:write"
 
@@ -18,6 +15,11 @@ const (
 
 	PermUsageRead  Permission = "usage:read"
 	PermUsageWrite Permission = "usage:write"
+	// PermUsageIngest sends usage events: POST /v1/usage-events, its
+	// /batch, and the LiteLLM callback. It is the only permission an
+	// ingest key holds (ADR-133). Backfill and the held-usage release and
+	// discard need PermUsageWrite.
+	PermUsageIngest Permission = "usage:ingest"
 
 	PermInvoiceRead  Permission = "invoice:read"
 	PermInvoiceWrite Permission = "invoice:write"
@@ -29,7 +31,7 @@ const (
 	PermAPIKeyWrite Permission = "apikey:write"
 
 	// PermTestClockWrite grants create / advance / delete on test_clocks.
-	// Secret keys and dashboard sessions hold it; platform keys do not.
+	// Secret keys and dashboard sessions hold it; ingest keys do not.
 	PermTestClockWrite Permission = "testclock:write"
 )
 
@@ -37,19 +39,27 @@ const (
 type KeyType string
 
 const (
-	KeyTypePlatform KeyType = "platform" // hc_platform_ — tenant management
-	KeyTypeSecret   KeyType = "secret"   // hc_secret_   — full tenant access
-	KeyTypeSession  KeyType = "session"  // dashboard cookie session — role-scoped access
+	KeyTypeSecret  KeyType = "secret"  // hc_secret_ — full access to one tenant
+	KeyTypeIngest  KeyType = "ingest"  // hc_ingest_ — sends usage events only (ADR-133)
+	KeyTypeSession KeyType = "session" // dashboard cookie session, never stored in api_keys
 )
 
+// StoredKeyTypes are the key types api_keys holds: the values
+// api_keys_key_type_check allows. CreateKey issues only these, and
+// ValidateKey reads only their prefixes.
+var StoredKeyTypes = []KeyType{KeyTypeSecret, KeyTypeIngest}
+
 // TypePrefix returns the type-only prefix (e.g. "hc_secret_"). Used when
-// parsing a raw key to identify its type before the mode infix.
+// parsing a raw key to identify its type before the mode infix. A type
+// that is never stored (a session) has no prefix, so it returns "".
 func (kt KeyType) TypePrefix() string {
 	switch kt {
-	case KeyTypePlatform:
-		return "hc_platform_"
-	default:
+	case KeyTypeSecret:
 		return "hc_secret_"
+	case KeyTypeIngest:
+		return "hc_ingest_"
+	default:
+		return ""
 	}
 }
 
@@ -65,27 +75,34 @@ func KeyPrefix(kt KeyType, livemode bool) string {
 	return kt.TypePrefix() + mode + "_"
 }
 
+// fullAccess is every permission. A secret key and a dashboard session
+// hold it.
+var fullAccess = map[Permission]bool{
+	PermCustomerRead:      true,
+	PermCustomerWrite:     true,
+	PermPricingRead:       true,
+	PermPricingWrite:      true,
+	PermSubscriptionRead:  true,
+	PermSubscriptionWrite: true,
+	PermUsageRead:         true,
+	PermUsageWrite:        true,
+	PermUsageIngest:       true,
+	PermInvoiceRead:       true,
+	PermInvoiceWrite:      true,
+	PermDunningRead:       true,
+	PermDunningWrite:      true,
+	PermAPIKeyRead:        true,
+	PermAPIKeyWrite:       true,
+	PermTestClockWrite:    true,
+}
+
 var keyPermissions = map[KeyType]map[Permission]bool{
-	KeyTypePlatform: {
-		PermTenantRead:  true,
-		PermTenantWrite: true,
-	},
-	KeyTypeSecret: {
-		PermCustomerRead:      true,
-		PermCustomerWrite:     true,
-		PermPricingRead:       true,
-		PermPricingWrite:      true,
-		PermSubscriptionRead:  true,
-		PermSubscriptionWrite: true,
-		PermUsageRead:         true,
-		PermUsageWrite:        true,
-		PermInvoiceRead:       true,
-		PermInvoiceWrite:      true,
-		PermDunningRead:       true,
-		PermDunningWrite:      true,
-		PermAPIKeyRead:        true,
-		PermAPIKeyWrite:       true,
-		PermTestClockWrite:    true,
+	KeyTypeSecret: fullAccess,
+	// An ingest key sends usage and nothing else (ADR-133). A LiteLLM proxy
+	// or another gateway keeps it in its config, so a leaked copy cannot
+	// refund, void, read customers or mint keys.
+	KeyTypeIngest: {
+		PermUsageIngest: true,
 	},
 	// Dashboard sessions inherit the full secret-key permission set today.
 	// Invites shipped (ADR-081) but roles are deliberately NOT enforced:
@@ -93,23 +110,7 @@ var keyPermissions = map[KeyType]map[Permission]bool{
 	// and every session still gets this full set. When role-scoped
 	// permissions land, this map gets replaced by a per-role lookup driven
 	// by user_tenants.role.
-	KeyTypeSession: {
-		PermCustomerRead:      true,
-		PermCustomerWrite:     true,
-		PermPricingRead:       true,
-		PermPricingWrite:      true,
-		PermSubscriptionRead:  true,
-		PermSubscriptionWrite: true,
-		PermUsageRead:         true,
-		PermUsageWrite:        true,
-		PermInvoiceRead:       true,
-		PermInvoiceWrite:      true,
-		PermDunningRead:       true,
-		PermDunningWrite:      true,
-		PermAPIKeyRead:        true,
-		PermAPIKeyWrite:       true,
-		PermTestClockWrite:    true,
-	},
+	KeyTypeSession: fullAccess,
 }
 
 func HasPermission(keyType KeyType, perm Permission) bool {

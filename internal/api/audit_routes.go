@@ -207,9 +207,6 @@ var auditRouteRegistry = map[routeKey]auditDecl{
 	{"DELETE", "/v1/api-keys/{id}"}:      explicit("auth.Handler.revoke → Log(revoke, api_key)."),
 	{"POST", "/v1/api-keys/{id}/rotate"}: explicit("auth.Handler.rotate → Log(rotate, api_key)."),
 
-	// --- tenants (platform) ---------------------------------------------
-	{"POST", "/v1/tenants"}: explicit("tenant.Service.Create → LogInTx(create, tenant) on the tenants INSERT tx — the row lands in the NEW tenant's own log (ADR-090 PR4; this route mounts no catch-all and had NO trail before)."),
-
 	// --- customers ------------------------------------------------------
 	{"POST", "/v1/customers"}:                                  explicit("customer.Service.Create → LogInTx(create, customer) on the customer's own tx."),
 	{"PATCH", "/v1/customers/{id}"}:                            explicit("customer.Handler.update → Log(update, customer) with a field diff."),

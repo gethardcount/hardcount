@@ -203,6 +203,37 @@ and create the database, then run `hardcount-bootstrap`), or point Hardcount at 
 new one. Never run `docker compose down -v` on a volume another checkout
 uses.
 
+## 00221 found platform API keys
+
+**Symptom:**
+
+```
+migration 00221_api_key_type_ingest.sql failed: ERROR: migration 00221 removes the platform API key type, and this database holds 1 platform key(s)
+```
+
+**Why:** from this release an API key is a secret key or a usage-only
+(ingest) key, and the platform type is gone with the `/v1/tenants` routes
+([ADR-133](../../adr/133-api-key-types-secret-and-ingest.md)). No Hardcount
+route ever issued a platform key, so these rows were written by hand. The
+migration does not delete a credential, and nothing was changed.
+
+**Fix:** find the rows (as the database owner, in a transaction that
+bypasses row-level security):
+
+```sql
+BEGIN;
+SET LOCAL app.bypass_rls = 'on';
+SELECT id, tenant_id, name, key_prefix, revoked_at FROM api_keys WHERE key_type = 'platform';
+```
+
+Nothing in this release can use them. Delete them in the same
+transaction, then commit and run `hardcount migrate` again:
+
+```sql
+DELETE FROM api_keys WHERE key_type = 'platform';
+COMMIT;
+```
+
 ## It waited 5s for a table lock
 
 First stop the API: see [Before anything else](#before-anything-else).
