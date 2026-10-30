@@ -182,7 +182,7 @@ services:
       start_period: 5s
 
   nginx:
-    image: nginx:1.30-alpine
+    image: nginx:1.31-alpine
     restart: unless-stopped
     depends_on:
       - hardcount-api
