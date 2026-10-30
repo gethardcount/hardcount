@@ -6,7 +6,7 @@
 // must return null for those, so the form can refuse.
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { dollarsToRateCents, dollarsToWholeCents, wholeUnits } from '../src/lib/priceInput.ts'
+import { amountInputError, dollarsToRateCents, dollarsToWholeCents, percentRate, wholeNumberIn, wholeUnits } from '../src/lib/priceInput.ts'
 
 test('a blank price is not a price — it must never become a free rate', () => {
   assert.equal(dollarsToRateCents(''), null)
@@ -64,5 +64,42 @@ test('a unit count is a whole number above 0, or refused', () => {
   for (const bad of ['', '0', '-1', '1000.5', '1e3', '1,000', 'abc']) {
     assert.equal(wholeUnits(bad), null, `"${bad}" must be refused`)
   }
+})
+
+// Trial days take 0 (no trial) to 730. parseInt cut "2.7" to 2 and sent "-5"
+// as -5; a blank box is the caller's choice, never read as 0 here.
+test('a whole number in a range takes 0 where the range does, and refuses the rest', () => {
+  assert.equal(wholeNumberIn('0', 0, 730), 0)
+  assert.equal(wholeNumberIn(' 14 ', 0, 730), 14)
+  assert.equal(wholeNumberIn('730', 0, 730), 730)
+  for (const bad of ['', ' ', '731', '-5', '2.7', '1e2', '1,000', 'abc']) {
+    assert.equal(wholeNumberIn(bad, 0, 730), null, `"${bad}" must be refused`)
+  }
+  assert.equal(wholeNumberIn('0', 1, 10), null)
+})
+
+// The tax rate box read a blank as 0 (tax off) and "8,5" as 8. The server
+// stores four decimals, so a fifth would be rounded away without a word.
+test('a percent is 0 to 100 with at most four decimals, or refused', () => {
+  assert.equal(percentRate('0'), 0)
+  assert.equal(percentRate('8.875'), 8.875)
+  assert.equal(percentRate('8.8750'), 8.875)
+  assert.equal(percentRate('.5'), 0.5)
+  assert.equal(percentRate('100'), 100)
+  for (const bad of ['', ' ', '.', '8,5', '8.87501', '100.0001', '101', '-1', '1e1', 'abc']) {
+    assert.equal(percentRate(bad), null, `"${bad}" must be refused`)
+  }
+})
+
+// The line under a refused box says what to change, not only that it is wrong.
+test('a refused amount says why', () => {
+  assert.equal(amountInputError('', '25.00', true), 'Enter an amount, for example 25.00.')
+  assert.equal(amountInputError('9,50', '9.50', true), 'Use a point for decimals, not a comma: for example 9.50.')
+  assert.equal(amountInputError('-5', '49.00', true), "Enter 0 or more. An amount can't be negative.")
+  assert.equal(amountInputError('2.505', '25.00', true), 'Enter at most two decimals, for example 25.00.')
+  assert.equal(amountInputError('99999999999999', '25.00', true), 'That amount is too large.')
+  assert.equal(amountInputError('abc', '25.00', true), 'Enter a plain number, for example 25.00.')
+  // A rate takes sub-cent decimals, so many decimals are not the reason.
+  assert.equal(amountInputError('1e-7', '0.01', false), 'Enter a plain number, for example 0.01.')
 })
 

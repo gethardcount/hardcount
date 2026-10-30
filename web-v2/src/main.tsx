@@ -250,6 +250,15 @@ const App = () => (
   </ErrorBoundary>
 )
 
+// A focused number box steps its value on the mouse wheel, so scrolling a
+// dialog past a typed quantity changed it, and the form saved the new one.
+// Blurring the box first lets the page scroll and leaves the value as typed.
+// Amount boxes are text boxes; this covers the whole-number boxes.
+document.addEventListener('wheel', (e) => {
+  const t = e.target
+  if (t instanceof HTMLInputElement && t.type === 'number' && t === document.activeElement) t.blur()
+}, { passive: true })
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />

@@ -51,3 +51,38 @@ export function wholeUnits(input: string): number | null {
   const n = Number(t)
   return n > 0 && Number.isSafeInteger(n) ? n : null
 }
+
+// amountInputError says why a typed amount was refused, for the line under
+// its box. `example` is a valid amount for that box ("25.50"). `wholeCents`
+// is set for an amount in whole cents (dollarsToWholeCents), which takes at
+// most two decimals; a per-unit rate takes more.
+export function amountInputError(input: string, example: string, wholeCents: boolean): string {
+  const t = input.trim()
+  if (t === '') return `Enter an amount, for example ${example}.`
+  if (t.includes(',')) return `Use a point for decimals, not a comma: for example ${example}.`
+  if (t.startsWith('-')) return "Enter 0 or more. An amount can't be negative."
+  if (wholeCents && /^\d*\.\d{3,}$/.test(t)) return `Enter at most two decimals, for example ${example}.`
+  if (wholeCents && /^0*[1-9]\d{13,}(\.\d*)?$/.test(t)) return 'That amount is too large.'
+  return `Enter a plain number, for example ${example}.`
+}
+
+// wholeNumberIn reads a whole number typed in a box that takes a range, 0
+// included where the field allows it (trial days, 0 to 730): digits only and
+// from min to max, or null. parseInt cut "2.7" to 2; a blank box is not 0;
+// "1e3" is not 1000.
+export function wholeNumberIn(input: string, min: number, max: number): number | null {
+  const t = input.trim()
+  if (!/^\d+$/.test(t)) return null
+  const n = Number(t)
+  return Number.isSafeInteger(n) && n >= min && n <= max ? n : null
+}
+
+// percentRate reads a percent typed in a box ("8.875" for 8.875%): from 0 to
+// 100 with at most four decimals, the precision the server stores, or null.
+// A blank box is not 0: a rate of 0 turns tax off, so it must be typed.
+export function percentRate(input: string): number | null {
+  const m = /^(\d*)(?:\.(\d{0,4}))?$/.exec(input.trim())
+  if (!m || (!m[1] && !m[2])) return null
+  const n = Number(`${m[1] || '0'}.${m[2] || '0'}`)
+  return n <= 100 ? n : null
+}

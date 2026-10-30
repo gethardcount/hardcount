@@ -25,7 +25,7 @@ import {
 import { api } from '@/lib/api'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { money, shiftDecimal } from '@/lib/priceDisplay'
-import { dollarsToRateCents } from '@/lib/priceInput'
+import { amountInputError, dollarsToRateCents } from '@/lib/priceInput'
 
 // Provider costs (ADR-079): the operator's COGS table — what THEY pay LLM
 // providers per token. Feeds the per-event cost stamp at ingest and the
@@ -81,6 +81,11 @@ export default function ProviderCostsPage() {
 
   // Cents per 1M tokens, or null when the box does not hold a plain number.
   const centsPerMillion = dollarsToRateCents(costPerMillion)
+  // Said under the box once something is typed, so a disabled Save is never
+  // the only sign ("9,50" is refused, not read as 950).
+  const costError = costPerMillion.trim() !== '' && (centsPerMillion === null || centsPerMillion.startsWith('-'))
+    ? amountInputError(costPerMillion, '3.00', false)
+    : null
   const canSave =
     provider.trim() !== '' && model.trim() !== '' && tokenType.trim() !== '' &&
     centsPerMillion !== null && !centsPerMillion.startsWith('-')
@@ -140,7 +145,9 @@ export default function ProviderCostsPage() {
             <div className="space-y-1.5">
               <Label htmlFor="pc-cost">$ per 1M tokens</Label>
               <Input id="pc-cost" placeholder="3.00" inputMode="decimal" className="w-[150px]"
+                aria-invalid={costError ? true : undefined}
                 value={costPerMillion} onChange={e => setCostPerMillion(e.target.value)} />
+              {costError && <p className="text-xs text-destructive max-w-[150px]">{costError}</p>}
             </div>
             <Button onClick={save} disabled={!canSave || upsert.isPending}>
               {upsert.isPending

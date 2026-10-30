@@ -306,11 +306,16 @@ function PolicyDialog({ mode, initial, policies = [], onClose, onSaved }: {
     final_invoice_action: initial?.final_invoice_action || 'none',
   })
   const [saving, setSaving] = useState(false)
+  const [nameError, setNameError] = useState('')
   const schedule = parseRetryDays(form.retry_days)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (schedule.error) return
+    // The server saves a blank name, and the policy then shows in every
+    // list and picker with no name.
+    const blankName = form.name.trim() === ''
+    setNameError(blankName ? 'Enter a name for this policy.' : '')
+    if (schedule.error || blankName) return
     setSaving(true)
     try {
       const payload: Partial<DunningPolicy> = {
@@ -347,8 +352,10 @@ function PolicyDialog({ mode, initial, policies = [], onClose, onSaved }: {
         <form onSubmit={handleSubmit} noValidate className="space-y-4">
           <div className="space-y-2">
             <Label>Name</Label>
-            <Input value={form.name} placeholder="Enterprise — Net 30 grace"
-              onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+            <Input value={form.name} placeholder="Enterprise — Net 30 grace" maxLength={255}
+              aria-invalid={nameError ? true : undefined}
+              onChange={e => { setNameError(''); setForm(f => ({ ...f, name: e.target.value })) }} />
+            {nameError && <p className="text-xs text-destructive">{nameError}</p>}
           </div>
           <div className="flex items-center justify-between">
             <Label>Enabled</Label>

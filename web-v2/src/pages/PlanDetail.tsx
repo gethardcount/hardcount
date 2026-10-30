@@ -35,6 +35,7 @@ import { Loader2, Lock, Pencil } from 'lucide-react'
 import { NoticeRow } from '@/components/NoticeRow'
 import { PLAN_LOCKED_TITLE, planLockedSentence } from '@/lib/pricingCopy'
 import { editPlanBaseFee } from '@/lib/planBaseFee'
+import { amountInputError, dollarsToWholeCents } from '@/lib/priceInput'
 import { PlanPricesCard } from '@/components/PlanPricesCard'
 import { CopyButton } from '@/components/CopyButton'
 import { DetailBreadcrumb } from '@/components/DetailBreadcrumb'
@@ -55,7 +56,9 @@ const PLAN_STATUS_OPTIONS = [
 ]
 
 const editPlanSchema = z.object({
-  name: z.string().min(1, 'Name is required'),
+  // Trimmed first: the server keeps the old name when it gets a blank one,
+  // so "   " saved as "Plan updated" with nothing changed.
+  name: z.string().trim().min(1, 'Name is required'),
 })
 type EditPlanData = z.infer<typeof editPlanSchema>
 
@@ -340,9 +343,12 @@ function EditPlanDialog({ plan, liveSubscriptions, onClose, onSaved }: {
   const { register, handleSubmit, watch, formState: { errors, isSubmitting } } = form
 
   const name = watch('name')
-  const baseCents = Math.round(parseFloat(basePrice || '0') * 100)
+  // null while the box does not hold an amount: refused under the box, never
+  // rounded or read as 0.
+  const baseCents = dollarsToWholeCents(basePrice)
+  const baseInputError = baseCents === null ? amountInputError(basePrice, '49.00', true) : null
   const fee = editPlanBaseFee({
-    baseCents,
+    baseCents: baseCents ?? plan.base_amount_cents,
     chosenTiming: billTiming,
     storedTiming: plan.base_bill_timing ?? 'in_arrears',
     used: plan.used,
@@ -355,7 +361,7 @@ function EditPlanDialog({ plan, liveSubscriptions, onClose, onSaved }: {
     timing !== (plan.base_bill_timing ?? 'in_arrears')
 
   const onSubmit = handleSubmit(async (data) => {
-    if (fee.baseError) return
+    if (fee.baseError || baseCents === null) return
     try {
       await api.updatePlan(plan.id, {
         name: data.name,
@@ -403,18 +409,16 @@ function EditPlanDialog({ plan, liveSubscriptions, onClose, onSaved }: {
             <Label htmlFor="basePrice">Base Price ({plan.currency.toUpperCase()})</Label>
             <Input
               id="basePrice"
-              type="number"
-              step="0.01"
-              min={0}
-              max={999999.99}
+              type="text"
+              inputMode="decimal"
               value={basePrice}
               onChange={e => setBasePrice(e.target.value)}
               placeholder="49.00"
               disabled={locked}
-              aria-invalid={fee.baseError ? true : undefined}
+              aria-invalid={baseInputError || fee.baseError ? true : undefined}
             />
             <p className="text-xs text-muted-foreground">{fee.baseHint}</p>
-            {fee.baseError && <p className="text-xs text-destructive">{fee.baseError}</p>}
+            {(baseInputError ?? fee.baseError) && <p className="text-xs text-destructive">{baseInputError ?? fee.baseError}</p>}
           </div>
 
           <div className="space-y-2">
@@ -449,7 +453,7 @@ function EditPlanDialog({ plan, liveSubscriptions, onClose, onSaved }: {
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-            <Button type="submit" disabled={isSubmitting || !hasChanges || fee.baseError !== null}>
+            <Button type="submit" disabled={isSubmitting || !hasChanges || fee.baseError !== null || baseInputError !== null}>
               {isSubmitting ? (
                 <><Loader2 size={14} className="animate-spin mr-2" />Saving...</>
               ) : hasChanges ? 'Save' : 'No changes'}

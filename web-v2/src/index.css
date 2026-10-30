@@ -248,6 +248,17 @@
   html {
     @apply font-sans;
     }
+  /* Number boxes take typed values only. The spinner arrows stepped a
+     typed count by one with a stray click. */
+  input[type='number']::-webkit-outer-spin-button,
+  input[type='number']::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+    }
+  input[type='number'] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+    }
 }
 
 /* Clickable elements: hand cursor + smooth transitions */

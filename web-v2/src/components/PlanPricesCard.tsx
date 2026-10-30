@@ -8,7 +8,9 @@ import { showApiError } from '@/lib/formErrors'
 import { money, priceRate, unitScale } from '@/lib/priceDisplay'
 import { buildRateCard, rowMatches } from '@/lib/rateCard'
 import { planPricesNotice, priceRemoveSentence, priceWriteToast } from '@/lib/pricingCopy'
-import { PriceShapeFields, buildPriceShape, usePriceShape } from '@/components/PriceShapeFields'
+import { labelRowsToMatch, type LabelRow, type LabelRowError } from '@/lib/dimensionLabels'
+import { buildPriceShape } from '@/lib/priceShapeForm'
+import { PriceShapeFields, usePriceShape } from '@/components/PriceShapeFields'
 import { Combobox } from '@/components/Combobox'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -230,29 +232,26 @@ function RateCardTable({ card, meter, meterId, currency, query, onEdit }: {
   )
 }
 
-interface LabelRow { key: string; value: string }
-
 function AddPriceDialog({ plan, meters, onClose, onSaved }: { plan: PlanDetail; meters: Meter[]; onClose: () => void; onSaved: (w: PriceWrite) => void }) {
   const [meterId, setMeterId] = useState('')
-  const [labels, setLabels] = useState<LabelRow[]>([])
+  const [labels, setLabelsRaw] = useState<LabelRow[]>([])
+  const [labelErrors, setLabelErrors] = useState<Record<number, LabelRowError>>({})
+  // Any edit to the labels clears their refusals.
+  const setLabels: typeof setLabelsRaw = (v) => { setLabelErrors({}); setLabelsRaw(v) }
   const shape = usePriceShape()
-  const [formError, setFormError] = useState('')
   const [saving, setSaving] = useState(false)
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setFormError('')
+    // Both checks run, so every refusal shows at once.
+    const read = labelRowsToMatch(labels)
     const built = buildPriceShape(shape)
-    if ('error' in built) { setFormError(built.error); return }
-    const match: Record<string, string> = {}
-    for (const row of labels) {
-      const k = row.key.trim()
-      if (!k) continue
-      match[k] = row.value.trim()
-    }
+    setLabelErrors('errors' in read ? read.errors : {})
+    shape.setError('error' in built ? built.error : null)
+    if ('errors' in read || 'error' in built) return
     setSaving(true)
     try {
-      onSaved(await api.addPlanPrice(plan.id, { meter_id: meterId, dimension_match: match, ...built.shape }))
+      onSaved(await api.addPlanPrice(plan.id, { meter_id: meterId, dimension_match: read.match, ...built.shape }))
     } catch (err) {
       showApiError(err, 'Failed to add price')
     } finally {
@@ -286,16 +285,22 @@ function AddPriceDialog({ plan, meters, onClose, onSaved }: { plan: PlanDetail; 
             <Label>Only for events with these labels</Label>
             <div className="space-y-2 mt-1">
               {labels.map((row, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <Input aria-label={`Label ${i + 1} key`} placeholder="key (e.g. model)" value={row.key} className="font-mono text-sm"
-                    onChange={e => setLabels(rs => rs.map((r, j) => j === i ? { ...r, key: e.target.value } : r))} />
-                  <span className="text-muted-foreground">=</span>
-                  <Input aria-label={`Label ${i + 1} value`} placeholder="value (e.g. gpt-4o)" value={row.value} className="font-mono text-sm"
-                    onChange={e => setLabels(rs => rs.map((r, j) => j === i ? { ...r, value: e.target.value } : r))} />
-                  <Button type="button" variant="ghost" size="icon" className="h-9 w-9 shrink-0 text-muted-foreground" aria-label={`Remove label ${i + 1}`}
-                    onClick={() => setLabels(rs => rs.filter((_, j) => j !== i))}>
-                    <Trash2 size={14} />
-                  </Button>
+                <div key={i}>
+                  <div className="flex items-center gap-2">
+                    <Input aria-label={`Label ${i + 1} key`} placeholder="key (e.g. model)" value={row.key} className="font-mono text-sm"
+                      aria-invalid={labelErrors[i]?.key ? true : undefined}
+                      onChange={e => setLabels(rs => rs.map((r, j) => j === i ? { ...r, key: e.target.value } : r))} />
+                    <span className="text-muted-foreground">=</span>
+                    <Input aria-label={`Label ${i + 1} value`} placeholder="value (e.g. gpt-4o)" value={row.value} className="font-mono text-sm"
+                      aria-invalid={labelErrors[i]?.value ? true : undefined}
+                      onChange={e => setLabels(rs => rs.map((r, j) => j === i ? { ...r, value: e.target.value } : r))} />
+                    <Button type="button" variant="ghost" size="icon" className="h-9 w-9 shrink-0 text-muted-foreground" aria-label={`Remove label ${i + 1}`}
+                      onClick={() => setLabels(rs => rs.filter((_, j) => j !== i))}>
+                      <Trash2 size={14} />
+                    </Button>
+                  </div>
+                  {labelErrors[i]?.key && <p className="text-xs text-destructive mt-1">{labelErrors[i].key}</p>}
+                  {labelErrors[i]?.value && <p className="text-xs text-destructive mt-1">{labelErrors[i].value}</p>}
                 </div>
               ))}
             </div>
@@ -308,8 +313,6 @@ function AddPriceDialog({ plan, meters, onClose, onSaved }: { plan: PlanDetail; 
           </div>
 
           <PriceShapeFields f={shape} currency={plan.currency} idPrefix="add-price" />
-
-          {formError && <p className="text-sm text-destructive">{formError}</p>}
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
@@ -325,14 +328,13 @@ function AddPriceDialog({ plan, meters, onClose, onSaved }: { plan: PlanDetail; 
 
 function EditPriceDialog({ plan, price, meter, onClose, onSaved, onRemove }: { plan: PlanDetail; price: PlanPrice; meter?: Meter; onClose: () => void; onSaved: (w: PriceWrite) => void; onRemove: () => void }) {
   const shape = usePriceShape(price)
-  const [formError, setFormError] = useState('')
   const [saving, setSaving] = useState(false)
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setFormError('')
     const built = buildPriceShape(shape)
-    if ('error' in built) { setFormError(built.error); return }
+    shape.setError('error' in built ? built.error : null)
+    if ('error' in built) return
     setSaving(true)
     try {
       onSaved(await api.updatePlanPrice(plan.id, price.id, built.shape))
@@ -357,7 +359,6 @@ function EditPriceDialog({ plan, price, meter, onClose, onSaved, onRemove }: { p
             <p className="text-xs text-muted-foreground">The meter and labels can't change. For other events, add another price.</p>
           </div>
           <PriceShapeFields f={shape} currency={plan.currency} idPrefix="edit-price" />
-          {formError && <p className="text-sm text-destructive">{formError}</p>}
           <DialogFooter>
             {/* The rate card's cells have no remove icon; removing starts here. */}
             <Button type="button" variant="ghost" className="sm:mr-auto text-destructive hover:text-destructive" onClick={onRemove}>Remove price</Button>

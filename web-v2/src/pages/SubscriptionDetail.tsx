@@ -10,6 +10,7 @@ import { cancelImmediatelyText, changePlanNowHelper, changeQuantityText, PAUSE_D
 import { api, formatCents, formatCentsBare, prorationText, formatDate, formatDateTime, getTenantTimezone, type Subscription, type SubscriptionItem, type Plan, type ItemChangeResult } from '@/lib/api'
 import { civilDateFrom, formatCivilDate, formatCivilPeriod, startOfDayInTZ } from '@/lib/dates'
 import { showApiError } from '@/lib/formErrors'
+import { amountInputError, dollarsToWholeCents, wholeUnits } from '@/lib/priceInput'
 import { Layout } from '@/components/Layout'
 import { Combobox, type ComboboxOption } from '@/components/Combobox'
 import { TestClockBanner } from '@/components/TestClockBanner'
@@ -1511,6 +1512,7 @@ function AddItemDialog({ subscription, plans, existingPlanIDs, onClose, onAdded,
 }) {
   const [selectedPlan, setSelectedPlan] = useState('')
   const [quantity, setQuantity] = useState('1')
+  const [quantityError, setQuantityError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   // One idempotency key per dialog open (same contract as the credit
   // dialogs): item adds fire prorations, so a transient-failure retry must
@@ -1531,9 +1533,10 @@ function AddItemDialog({ subscription, plans, existingPlanIDs, onClose, onAdded,
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!selectedPlan) return
-    const qty = parseInt(quantity, 10)
-    if (!Number.isFinite(qty) || qty < 1) {
-      toast.error('Enter a whole number of 1 or more')
+    // parseInt cut "2.7" to 2 and saved it; the box refuses it instead.
+    const qty = wholeUnits(quantity)
+    if (qty === null) {
+      setQuantityError('Enter a whole number, 1 or more.')
       return
     }
     setSubmitting(true)
@@ -1582,9 +1585,12 @@ function AddItemDialog({ subscription, plans, existingPlanIDs, onClose, onAdded,
               id="add-qty"
               type="number"
               min="1"
+              step="1"
               value={quantity}
-              onChange={(e) => setQuantity(e.target.value)}
+              aria-invalid={quantityError ? true : undefined}
+              onChange={(e) => { setQuantity(e.target.value); setQuantityError('') }}
             />
+            {quantityError && <p className="text-xs text-destructive">{quantityError}</p>}
           </div>
 
           <DialogFooter>
@@ -1743,6 +1749,7 @@ function ChangeItemQuantityDialog({ subscriptionID, item, plan, onClose, onChang
   onFailed: () => void
 }) {
   const [quantity, setQuantity] = useState(String(item.quantity))
+  const [quantityError, setQuantityError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   // One idempotency key per dialog open — quantity changes fire prorations;
   // a retry must replay, not re-prorate.
@@ -1750,13 +1757,14 @@ function ChangeItemQuantityDialog({ subscriptionID, item, plan, onClose, onChang
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    const qty = parseInt(quantity, 10)
-    if (!Number.isFinite(qty) || qty < 1) {
-      toast.error('Enter a whole number of 1 or more')
+    // parseInt cut "2.7" to 2 and saved it; the box refuses it instead.
+    const qty = wholeUnits(quantity)
+    if (qty === null) {
+      setQuantityError('Enter a whole number, 1 or more.')
       return
     }
     if (qty === item.quantity) {
-      toast.error('That is already the quantity')
+      setQuantityError('That is already the quantity.')
       return
     }
     setSubmitting(true)
@@ -1792,9 +1800,12 @@ function ChangeItemQuantityDialog({ subscriptionID, item, plan, onClose, onChang
               id="qty-input"
               type="number"
               min="1"
+              step="1"
               value={quantity}
-              onChange={(e) => setQuantity(e.target.value)}
+              aria-invalid={quantityError ? true : undefined}
+              onChange={(e) => { setQuantity(e.target.value); setQuantityError('') }}
             />
+            {quantityError && <p className="text-xs text-destructive">{quantityError}</p>}
             <p className="text-xs text-muted-foreground">Current: {item.quantity}</p>
           </div>
 
@@ -1883,31 +1894,37 @@ function EditBillingThresholdsDialog({ subscription, items, planById, onClose, o
     return out
   })
   const [submitting, setSubmitting] = useState(false)
+  const [amountError, setAmountError] = useState('')
+  const [itemErrors, setItemErrors] = useState<Record<string, string>>({})
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     const body: { amount_gte?: number; item_thresholds?: { subscription_item_id: string; usage_gte: string }[] } = {}
 
-    const trimmedAmount = amountStr.trim()
-    if (trimmedAmount !== '') {
-      const amt = Number(trimmedAmount)
-      if (!Number.isFinite(amt) || amt <= 0) {
-        toast.error('The usage total must be more than zero')
-        return
-      }
-      body.amount_gte = Math.round(amt * 100)
+    // Each box is read exactly or refused under it: Math.round(Number(x) *
+    // 100) turned "10.005" into $10.01.
+    let amtErr = ''
+    if (amountStr.trim() !== '') {
+      const cents = dollarsToWholeCents(amountStr)
+      if (cents === null) amtErr = amountInputError(amountStr, '1000.00', true)
+      else if (cents === 0) amtErr = 'The usage total must be more than zero.'
+      else body.amount_gte = cents
     }
 
     const itemThresholds: { subscription_item_id: string; usage_gte: string }[] = []
+    const itemErrs: Record<string, string> = {}
     for (const item of items) {
       const raw = (perItem[item.id] ?? '').trim()
       if (raw === '') continue
       if (!/^\d+(\.\d+)?$/.test(raw) || Number(raw) <= 0) {
-        toast.error(`The threshold for ${planById(item.plan_id)?.name || 'an item'} must be a number more than 0`)
-        return
+        itemErrs[item.id] = 'Enter a number more than 0, for example 1000 or 0.5.'
+        continue
       }
       itemThresholds.push({ subscription_item_id: item.id, usage_gte: raw })
     }
+    setAmountError(amtErr)
+    setItemErrors(itemErrs)
+    if (amtErr || Object.keys(itemErrs).length > 0) return
     if (itemThresholds.length > 0) {
       body.item_thresholds = itemThresholds
     }
@@ -1952,14 +1969,14 @@ function EditBillingThresholdsDialog({ subscription, items, planById, onClose, o
             <Label htmlFor="amount-gte">Usage total{subCurrency ? ` (${subCurrency.toUpperCase()})` : ''}</Label>
             <Input
               id="amount-gte"
-              type="number"
+              type="text"
               inputMode="decimal"
-              step="0.01"
-              min="0"
               placeholder="e.g. 1000.00"
               value={amountStr}
-              onChange={(e) => setAmountStr(e.target.value)}
+              aria-invalid={amountError ? true : undefined}
+              onChange={(e) => { setAmountStr(e.target.value); setAmountError('') }}
             />
+            {amountError && <p className="text-xs text-destructive">{amountError}</p>}
             <p className="text-xs text-muted-foreground">
               Usage is invoiced early when the period's usage reaches this amount. The base fee is not counted. Leave blank for none.
             </p>
@@ -1972,17 +1989,25 @@ function EditBillingThresholdsDialog({ subscription, items, planById, onClose, o
                 {items.map(item => {
                   const plan = planById(item.plan_id)
                   return (
-                    <div key={item.id} className="flex items-center gap-3 px-3 py-2">
-                      <span className="text-sm text-foreground flex-1 truncate">{plan?.name || item.id}</span>
-                      <Input
-                        type="text"
-                        inputMode="decimal"
-                        placeholder="leave blank for none"
-                        className="w-40 h-8 text-sm"
-                        value={perItem[item.id] ?? ''}
-                        onChange={(e) => setPerItem(prev => ({ ...prev, [item.id]: e.target.value }))}
-                      />
-                      <span className="text-xs text-muted-foreground w-10 shrink-0">units</span>
+                    <div key={item.id} className="px-3 py-2">
+                      <div className="flex items-center gap-3">
+                        <span className="text-sm text-foreground flex-1 truncate">{plan?.name || item.id}</span>
+                        <Input
+                          type="text"
+                          inputMode="decimal"
+                          placeholder="leave blank for none"
+                          aria-label={`Threshold for ${plan?.name || 'item'}`}
+                          aria-invalid={itemErrors[item.id] ? true : undefined}
+                          className="w-40 h-8 text-sm"
+                          value={perItem[item.id] ?? ''}
+                          onChange={(e) => {
+                            setPerItem(prev => ({ ...prev, [item.id]: e.target.value }))
+                            setItemErrors(prev => ({ ...prev, [item.id]: '' }))
+                          }}
+                        />
+                        <span className="text-xs text-muted-foreground w-10 shrink-0">units</span>
+                      </div>
+                      {itemErrors[item.id] && <p className="text-xs text-destructive mt-1 text-right">{itemErrors[item.id]}</p>}
                     </div>
                   )
                 })}

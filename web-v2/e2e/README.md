@@ -35,7 +35,10 @@ the screen, and that the main things an operator does work end to end.
 - `account-setup.spec.ts` sets up what an operator sells and how they
   collect. It creates a meter and a plan, then adds the plan's price for the
   meter, which applies at once while no one has subscribed. It saves a
-  graduated and a package price with labels. It previews and installs a
+  graduated and a package price with labels. It checks that the price and
+  plan forms refuse "9,50", a negative base fee, a package of 0 units, two
+  labels with one name and a blank plan name, each under its box, and send
+  nothing. It previews and installs a
   recipe, which creates only a meter, a plan and its prices, then installs it
   again. It adds and ends a customer's price override on a test clock and
   checks the upcoming invoice each time: each change applies from the next

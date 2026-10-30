@@ -9,7 +9,8 @@ import { z } from 'zod'
 import { toast } from 'sonner'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
 import { api, formatCents, formatCentsBare, formatDate, formatDateTime, getActiveCurrency, getCurrencySymbol } from '@/lib/api'
-import { amountInputToCents, amountsByCurrencyText, sumByCurrency } from '@/lib/money'
+import { amountsByCurrencyText, sumByCurrency } from '@/lib/money'
+import { amountInputError, dollarsToWholeCents } from '@/lib/priceInput'
 import { CURRENCIES as GEO_CURRENCIES } from '@/lib/geo'
 import { useCustomerCurrency } from '@/hooks/useCustomerCurrency'
 import { CustomerCombobox } from '@/components/CustomerCombobox'
@@ -84,7 +85,13 @@ import { Plus, Minus, Download, ChevronRight, ArrowLeft, Loader2, ArrowUpDown, A
 import { EmptyState } from '@/components/EmptyState'
 
 const creditSchema = z.object({
-  amount: z.string().min(1, 'Amount is required').refine(v => parseFloat(v) >= 0.01, 'Must be at least 0.01'),
+  // Read exactly or refused: parseFloat read "9,50" as 9 and rounded
+  // "10.005" to 10.01.
+  amount: z.string().superRefine((v, ctx) => {
+    const cents = dollarsToWholeCents(v)
+    if (cents === null) ctx.addIssue({ code: 'custom', message: amountInputError(v, '50.00', true) })
+    else if (cents < 1) ctx.addIssue({ code: 'custom', message: 'Must be at least 0.01' })
+  }),
   description: z.string().min(1, 'Description is required'),
   expiresAt: z.string(),
   // ADR-078: free/marketing credits — drained before paid credits.
@@ -717,7 +724,8 @@ export function CreditDialog({ mode, customerId, customerName, customers, curren
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      const amountCents = amountInputToCents(form.getValues('amount'))
+      // The schema refused anything this cannot read, so it is never null here.
+      const amountCents = dollarsToWholeCents(form.getValues('amount')) ?? 0
       const description = form.getValues('description')
       const expiresAt = form.getValues('expiresAt')
       if (isDeduct) {
@@ -766,7 +774,7 @@ export function CreditDialog({ mode, customerId, customerName, customers, curren
 
   // The confirm restates exactly the cents the submit sends, in the same
   // currency the Amount field is labeled with.
-  const confirmCents = amountInputToCents(form.watch('amount'))
+  const confirmCents = dollarsToWholeCents(form.watch('amount')) ?? 0
 
   return (
     <>
@@ -849,7 +857,7 @@ export function CreditDialog({ mode, customerId, customerName, customers, curren
                   <FormItem>
                     <FormLabel>Amount{dialogCurrency ? ` (${getCurrencySymbol(dialogCurrency).trim()})` : ''}</FormLabel>
                     <FormControl>
-                      <Input type="number" step="0.01" min="0.01" max={999999.99} placeholder="50.00" {...field} />
+                      <Input type="text" inputMode="decimal" placeholder="50.00" {...field} />
                     </FormControl>
                     <FormDescription>
                       {isDeduct ? "Removed from the customer's prepaid balance" : "Added to the customer's prepaid balance"}

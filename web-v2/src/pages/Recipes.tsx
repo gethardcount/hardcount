@@ -343,6 +343,7 @@ function OverrideField({
   const id = `override-${schema.key}`
   const label = overrideLabel(schema.key)
   const hint = OVERRIDE_LABELS[schema.key]?.hint
+  const intInvalid = schema.type === 'int' && typeof value !== 'number'
   return (
     <div>
       <div className="flex items-center justify-between gap-3">
@@ -355,13 +356,18 @@ function OverrideField({
         value={String(value)}
         onChange={(e) => {
           const raw = e.target.value
-          onChange(schema.type === 'int' ? Number(raw) : raw)
+          // A whole number goes as a number. Anything else stays text, is
+          // refused below, and the server refuses it too: Number() read a
+          // blank box as 0 and kept "2.5".
+          onChange(schema.type === 'int' && /^-?\d+$/.test(raw.trim()) ? Number(raw) : raw)
         }}
+        aria-invalid={intInvalid ? true : undefined}
         className="mt-1.5"
         maxLength={schema.max_length}
         pattern={schema.pattern}
         disabled={disabled}
       />
+      {intInvalid && <p className="text-xs text-destructive mt-1">Enter a whole number.</p>}
     </div>
   )
 }

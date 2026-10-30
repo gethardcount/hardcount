@@ -4,7 +4,8 @@ import { Loader2, Trash2 } from 'lucide-react'
 import { api, formatDate, type Meter, type Plan, type PlanPrice, type PriceOverride } from '@/lib/api'
 import { priceRate } from '@/lib/priceDisplay'
 import { showApiError } from '@/lib/formErrors'
-import { PriceShapeFields, buildPriceShape, usePriceShape } from '@/components/PriceShapeFields'
+import { buildPriceShape } from '@/lib/priceShapeForm'
+import { PriceShapeFields, usePriceShape } from '@/components/PriceShapeFields'
 import { useCustomerSubscriptions } from '@/hooks/useCustomerCurrency'
 import { CUSTOMER_PLANS_FIRST_HINT, customerPlanIds, customerPlansFirst } from '@/lib/overridePlans'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -162,7 +163,6 @@ function CreateOverrideDialog({ customerId, prices, customerPlans, existing, onC
   const [priceId, setPriceId] = useState('')
   const shape = usePriceShape()
   const [reason, setReason] = useState('')
-  const [formError, setFormError] = useState('')
   const [saving, setSaving] = useState(false)
 
   const selected = prices.find(p => p.price.id === priceId)
@@ -184,9 +184,9 @@ function CreateOverrideDialog({ customerId, prices, customerPlans, existing, onC
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!priceId) return
-    setFormError('')
     const built = buildPriceShape(shape)
-    if ('error' in built) { setFormError(built.error); return }
+    shape.setError('error' in built ? built.error : null)
+    if ('error' in built) return
     setSaving(true)
     try {
       await api.createPriceOverride({ customer_id: customerId, price_id: priceId, reason: reason.trim() || undefined, ...built.shape })
@@ -244,8 +244,6 @@ function CreateOverrideDialog({ customerId, prices, customerPlans, existing, onC
               placeholder="e.g. Annual contract — negotiated Jan 2027" className="mt-1" />
             <p className="text-xs text-muted-foreground mt-1">Shown on this card and in the audit trail.</p>
           </div>
-
-          {formError && <p className="text-sm text-destructive">{formError}</p>}
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
