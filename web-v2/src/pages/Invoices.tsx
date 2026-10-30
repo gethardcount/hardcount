@@ -51,6 +51,7 @@ import { TableSkeleton } from '@/components/ui/TableSkeleton'
 import { Search, Download, ArrowUpDown, ArrowUp, ArrowDown, Receipt } from 'lucide-react'
 import { EmptyState } from '@/components/EmptyState'
 import { CustomerCombobox } from '@/components/CustomerCombobox'
+import { useIsPhone } from '@/hooks/useIsPhone'
 
 const PAGE_SIZE = 25
 
@@ -113,6 +114,7 @@ export default function InvoicesPage() {
   const sortDir = urlState.dir as SortDir
   const page = Math.max(1, parseInt(urlState.page) || 1)
   const navigate = useNavigate()
+  const phone = useIsPhone()
 
   // Debounce the search term so the API sees one request per typing
   // pause; the input itself stays keystroke-responsive via URL state.
@@ -398,12 +400,14 @@ export default function InvoicesPage() {
                 <TableHeader>
                   <TableRow>
                     <SortableHead label="Invoice" sortKey="invoice_number" activeSortKey={sortKey} sortDir={sortDir} onSort={onSort} />
-                    <TableHead className="text-xs font-medium">Customer</TableHead>
-                    <SortableHead label="Status" sortKey="status" activeSortKey={sortKey} sortDir={sortDir} onSort={onSort} />
-                    <SortableHead label="Payment" sortKey="payment_status" activeSortKey={sortKey} sortDir={sortDir} onSort={onSort} />
-                    <SortableHead label="Period" sortKey="billing_period_start" activeSortKey={sortKey} sortDir={sortDir} onSort={onSort} />
-                    <SortableHead label="Amount" sortKey="amount_due_cents" activeSortKey={sortKey} sortDir={sortDir} onSort={onSort} className="text-right" />
-                    <TableHead className="text-xs font-medium text-right">PDF</TableHead>
+                    {/* On a phone the first cell stacks the row (PHONE); the
+                        other columns show from 640px up. */}
+                    <TableHead className="text-xs font-medium hidden sm:table-cell">Customer</TableHead>
+                    <SortableHead label="Status" sortKey="status" activeSortKey={sortKey} sortDir={sortDir} onSort={onSort} className="hidden sm:table-cell" />
+                    <SortableHead label="Payment" sortKey="payment_status" activeSortKey={sortKey} sortDir={sortDir} onSort={onSort} className="hidden sm:table-cell" />
+                    <SortableHead label="Period" sortKey="billing_period_start" activeSortKey={sortKey} sortDir={sortDir} onSort={onSort} className="hidden sm:table-cell" />
+                    <SortableHead label="Amount" sortKey="amount_due_cents" activeSortKey={sortKey} sortDir={sortDir} onSort={onSort} className="hidden sm:table-cell text-right" />
+                    <TableHead className="text-xs font-medium text-right hidden sm:table-cell">PDF</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -414,6 +418,15 @@ export default function InvoicesPage() {
                     // none → wall time.
                     const now = effectiveNow(clockFrozenMap[inv.test_clock_id ?? ''])
                     const badge = invoiceStatus(inv, now)
+                    const chip = invoicePaymentChip(inv)
+                    const customerName = customerMap[inv.customer_id]?.display_name || unknownCustomer
+                    const amount = formatCents(invoiceAmountCents(inv), inv.currency)
+                    // Due-date countdown only on open invoices
+                    // (status='finalized'). 'paid' and 'voided' are terminal;
+                    // 'draft' has no issued state yet.
+                    const due = inv.due_at && inv.status === 'finalized'
+                      ? <DueBadge dueAt={inv.due_at} warningDays={3} now={now} />
+                      : null
                     return (
                     <TableRow
                       key={inv.id}
@@ -425,7 +438,27 @@ export default function InvoicesPage() {
                       }}
                     >
                       <TableCell>
-                        <div className="flex items-center gap-1.5">
+                        {/* PHONE: two lines, number and customer then the
+                            amount; status and payment then the due date
+                            (plan 1.14, L-04). The row opens the invoice. */}
+                        {phone && <div className="space-y-1.5">
+                          <div className="flex items-baseline justify-between gap-3">
+                            <div className="min-w-0 truncate text-sm">
+                              <Link to={`/invoices/${inv.id}`} className="font-medium text-foreground hover:text-primary">{inv.invoice_number}</Link>
+                              <span className="text-muted-foreground"> · {customerName}</span>
+                            </div>
+                            <span className="shrink-0 tabular-nums font-mono text-sm">{amount}</span>
+                          </div>
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <StatusBadge status={badge} />
+                              {chip && <StatusBadge status={chip} />}
+                              {inv.is_simulated && <SimulatedBadge />}
+                            </div>
+                            {due}
+                          </div>
+                        </div>}
+                        {!phone && <div className="flex items-center gap-1.5">
                           <Link
                             to={`/invoices/${inv.id}`}
                             className="text-sm font-medium text-foreground hover:text-primary transition-colors whitespace-nowrap"
@@ -439,25 +472,25 @@ export default function InvoicesPage() {
                               through) and survives a later clock unpin, unlike
                               the old sub→clock-map lookup. */}
                           {inv.is_simulated && <SimulatedBadge />}
-                        </div>
+                        </div>}
                       </TableCell>
-                      <TableCell className="text-sm">
+                      <TableCell className="text-sm hidden sm:table-cell">
                         <div className="flex items-center gap-2.5">
-                          <InitialsAvatar name={customerMap[inv.customer_id]?.display_name || unknownCustomer} size="xs" />
+                          <InitialsAvatar name={customerName} size="xs" />
                           <Link
                             to={`/customers/${inv.customer_id}`}
                             onClick={e => e.stopPropagation()}
                             className="text-sm font-medium text-foreground hover:text-primary truncate block max-w-[160px]"
-                            title={customerMap[inv.customer_id]?.display_name || unknownCustomer}
+                            title={customerName}
                           >
-                            {customerMap[inv.customer_id]?.display_name || unknownCustomer}
+                            {customerName}
                           </Link>
                         </div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="hidden sm:table-cell">
                         <StatusBadge status={badge} />
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="hidden sm:table-cell">
                         <div className="flex items-center gap-2">
                           {/* payment_status is only meaningful once an invoice
                               is finalized — drafts default to "pending" but
@@ -467,38 +500,23 @@ export default function InvoicesPage() {
                           {/* The payment chip only shows a payment state the
                               badge beside it does not already carry — never
                               "Payment failed" next to "Failed". */}
-                          {(() => {
-                            const chip = invoicePaymentChip(inv)
-                            return chip && <StatusBadge status={chip} />
-                          })()}
-                          {/* Due-date countdown only on open invoices
-                              (status='finalized'). 'paid' and
-                              'voided' are terminal; 'draft' has no
-                              issued state yet. Pre-fix gate used
-                              payment_status !== 'paid' which never
-                              matched (domain uses 'succeeded'). */}
-                          {inv.due_at && inv.status === 'finalized' && (
-                            <DueBadge
-                              dueAt={inv.due_at}
-                              warningDays={3}
-                              now={now}
-                            />
-                          )}
+                          {chip && <StatusBadge status={chip} />}
+                          {due}
                           {inv.status === 'draft' && (
                             <span className="text-xs text-muted-foreground">—</span>
                           )}
                         </div>
                       </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
+                      <TableCell className="text-sm text-muted-foreground hidden sm:table-cell">
                         {inv.billing_period_display || '\u2014'}
                       </TableCell>
-                      <TableCell className="text-right tabular-nums font-mono text-sm">
+                      <TableCell className="text-right tabular-nums font-mono text-sm hidden sm:table-cell">
                         {/* The invoice's amount, as the amount sort orders
                             it: a void at what it was voided at, a paid
                             invoice at what paid it. */}
-                        {formatCents(invoiceAmountCents(inv), inv.currency)}
+                        {amount}
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="text-right hidden sm:table-cell">
                         <Button
                           variant="outline"
                           size="sm"

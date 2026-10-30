@@ -654,3 +654,27 @@ test('invoices: search by customer name or email, and filter by customer', async
   await expect(rows).toHaveCount(1)
   await expect(rows.first()).toContainText(invoice.invoice_number)
 })
+
+// On a phone (390px) an invoice row and its lines keep the amount and status
+// on screen: the list stacks each row, the invoice puts quantity and unit
+// price under the item (L-04). They were off the right edge.
+test('invoices on a phone: the list row and the lines keep amount and status on screen', async ({ page }) => {
+  const { customer, invoice } = await billedCustomer()
+  await page.setViewportSize({ width: 390, height: 844 })
+  const onScreen = async (l: Locator) => {
+    const box = (await l.boundingBox())!
+    expect(box.x + box.width).toBeLessThanOrEqual(390)
+  }
+
+  await page.goto(`/invoices?customer=${customer.id}`)
+  const row = page.getByRole('table').locator('tbody tr').first()
+  await expect(row).toContainText(invoice.invoice_number)
+  await onScreen(row.getByText(usd(invoice.amount_due_cents), { exact: true }).filter({ visible: true }))
+  await onScreen(row.getByText('Open', { exact: true }).filter({ visible: true }))
+
+  await page.goto(`/invoices/${invoice.id}`)
+  const line = page.getByRole('table').locator('tbody tr').first()
+  await expect(line).toContainText('×')
+  await onScreen(line.locator('td').last())
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
+})
