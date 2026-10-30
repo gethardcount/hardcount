@@ -27,9 +27,10 @@ import (
 type cnGrantAdapter struct{ svc *credit.Service }
 
 func (a *cnGrantAdapter) GrantForCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, creditNoteID string, in creditnote.CreditGrantInput) error {
-	_, err := a.svc.GrantForCreditNoteTx(ctx, tx, tenantID, creditNoteID, credit.GrantInput{
+	_, err := a.svc.GrantForCreditNoteTx(ctx, tx, tenantID, creditNoteID, credit.CreditNoteReturnInput{
 		Currency:   in.Currency,
 		CustomerID: in.CustomerID, AmountCents: in.AmountCents, Description: in.Description, InvoiceID: in.InvoiceID,
+		InvoicePaid: in.InvoicePaid, InvoiceTotalCents: in.InvoiceTotalCents,
 	})
 	return err
 }

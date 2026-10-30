@@ -101,7 +101,7 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [058](058-billing-date-math-tenant-timezone.md) | 2026-06-09 | Accepted | Timezones | All month and year billing date math is anchored in the tenant timezone |
 | [059](059-guard-invoice-mutations-while-payment-in-flight.md) | 2026-06-22 | Accepted | Payments | In-flight payments block void, offline payment and write-off (parked excepted); clawbacks wait |
 | [060](060-no-payment-method-dunning-enrollment.md) | 2026-06-23 | Accepted (amended) | Dunning | Invoices with no payment method enter dunning, like declined charges |
-| [061](061-credit-note-issue-atomicity.md) | 2026-06-24 | Accepted (amended) | Credits | Issuing a credit note commits internal effects in one transaction; external effects retry |
+| [061](061-credit-note-issue-atomicity.md) | 2026-06-24 | Accepted (amended); ADR-132 decides what kind of credit comes back | Credits | Issuing a credit note commits internal effects in one transaction; external effects retry |
 | [062](062-async-obligation-backbone.md) | 2026-06-25 | Accepted (amended) | Platform & ops | Move the retry sweeps onto one separate in-database obligations queue; the build is deferred |
 | [063](063-refund-status-webhook-reconciliation.md) | 2026-06-28 | Accepted (amended) | Payments | Stripe webhooks decide refund status; a retry looks the refund up before creating one |
 | [064](064-dunning-run-creation-derived-from-invoice-state.md) | 2026-07-02 | Accepted | Dunning | A decline starts dunning at once; a background sweep creates any missed run |
@@ -111,16 +111,16 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [068](068-checkout-session-dedup.md) | 2026-07-02 | Accepted (amended) | Payments | One open checkout session per invoice; hosted payment and Hardcount charges exclude each other |
 | [069](069-trial-cancel-semantics.md) | 2026-07-02 | Accepted | Subscriptions | Cancelling a trial is free at trial end; SQL guards enforce it at every activation |
 | [070](070-price-change-semantics.md) | 2026-07-02 | Accepted (amended); ADR-130 changes decisions 1, 4 and 5 (built in #1386) | Pricing & usage | Customer price overrides follow the rule across versions; a period keeps its opening price; a meter pricing edit that would reprice usage is refused while a subscription uses the meter |
-| [071](071-credit-expiry-retires-the-block.md) | 2026-07-03 | Accepted (amended) | Credits | An expired credit grant is fully retired in the same transaction as its expiry entry, once no period invoice still owed can draw on it |
+| [071](071-credit-expiry-retires-the-block.md) | 2026-07-03 | Accepted (amended); ADR-132 removes the void-reversal residual | Credits | An expired credit grant is fully retired in the same transaction as its expiry entry, once no period invoice still owed can draw on it |
 | [072](072-transport-lease-model.md) | 2026-07-03 | Accepted (amended) | Platform & ops | Outbox workers claim rows with a time-limited lease; budgets and lease lengths are derived |
 | [073](073-selfhost-boot-and-bootstrap-contract.md) | 2026-07-03 | Accepted (amended) | Platform & ops | One bootstrap path creates a tenant in one transaction; migrations run one at a time |
 | [074](074-subscription-billing-timezone-snapshot.md) | 2026-07-04 | Superseded by ADR-077 | Timezones | Each subscription snapshots its billing timezone at creation |
 | [075](075-canonical-utc-api-timestamps.md) | 2026-07-04 | Accepted | Timezones | The process runs in UTC, so API timestamps are the same on any host |
 | [076](076-enforcing-the-timezone-invariant.md) | 2026-07-04 | Accepted | Timezones | A Go test and typed dashboard helpers make every shown date name its timezone |
 | [077](077-org-level-billing-timezone.md) | 2026-07-04 | Accepted | Timezones | One org-level billing timezone; subscriptions have none, and each invoice keeps its issue zone |
-| [078](078-prepaid-commits-phase-1.md) | 2026-07-05 | Accepted (amended) | Credits | A prepaid commit is a credit grant funded at invoice finalize and retired on void |
+| [078](078-prepaid-commits-phase-1.md) | 2026-07-05 | Accepted (amended); ADR-132 removes the void re-grant limitation | Credits | A prepaid commit is a credit grant funded at invoice finalize and retired on void |
 | [079](079-provider-cost-tables.md) | 2026-07-05 | Accepted (amended) | Pricing & usage | Stamp each usage event's provider cost at ingest; report usage margin per customer |
-| [080](080-paid-commit-cn-relief.md) | 2026-07-06 | Accepted | Credits | Refund unused paid commit credits at the price paid per credit, in one transaction |
+| [080](080-paid-commit-cn-relief.md) | 2026-07-06 | Accepted; ADR-132 changes the ratio-integrity line | Credits | Refund unused paid commit credits at the price paid per credit, in one transaction |
 | [081](081-minimal-team-invites.md) | 2026-07-06 | Accepted | Auth & security | Invite teammates by single-use email link; removal ends sessions; roles are not enforced |
 | [082](082-email-recipient-semantics.md) | 2026-07-06 | Accepted (amended) | Platform & ops | Up to 10 extra addresses are CC'd on six email types, never on credential emails |
 | [083](083-recipe-adoption-conformance-gate.md) | 2026-07-07 | Superseded by ADR-085 | Pricing & usage | A recipe reuses an existing plan or meter only if its money settings match |
@@ -171,6 +171,7 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [129](129-credit-carries-its-own-currency.md) | 2026-10-23 | Accepted | Credits | Each credit ledger row stores its currency; credit pays only invoices in it, never converted; a manual invoice uses the customer's currency |
 | [130](130-usage-prices-belong-to-the-plan.md) | 2026-10-23 | Accepted (lock order, one rater, one aggregation per meter, price shapes, plan prices, catalog-only recipes and ingest's unbilled statuses shipped; PR-7 cut, PR-8 not built yet) | Pricing & usage | Usage prices are rows on the plan; the most specific price wins; an edit on a used plan applies from each subscriber's next period |
 | [131](131-webhook-events-carry-their-resource.md) | 2026-10-24 | Accepted | Integrations | A webhook event's data is the resource it is about, as the API returns it, plus the few facts the resource lacks; one resource per family |
+| [132](132-returned-credit-goes-back-to-its-grants.md) | 2026-10-30 | Accepted | Credits | Credit a void or credit note hands back goes back to the grants it was drawn from, with their expiry and kind; past expiry, it expires at once |
 | [133](133-api-key-types-secret-and-ingest.md) | 2026-10-30 | Accepted | Platform & ops | API keys are secret or ingest (usage only); platform keys and /v1/tenants are removed |
 
 > ℹ️ **ADR-084 was never used.** No file has ever carried that number (verified

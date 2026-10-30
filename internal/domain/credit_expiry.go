@@ -46,6 +46,20 @@ func DrawsCreditAsOfIssue(reason InvoiceBillingReason) bool {
 //
 // Both terms are EXISTS, so the expression is never NULL and safe under NOT.
 func CreditDrawOwedSQL(g string) string {
+	return CreditDrawOwedExceptSQL(g, "")
+}
+
+// CreditDrawOwedExceptSQL is CreditDrawOwedSQL with one invoice left out of
+// the owed-invoice term: exceptInvoice is a SQL expression for its id, or ""
+// for none. A credit return (ADR-132) leaves out the invoice it is handing
+// credit back for: that invoice is the draw being undone, so it cannot be a
+// draw the returned credit is still owed to.
+func CreditDrawOwedExceptSQL(g, exceptInvoice string) string {
+	except := ""
+	if exceptInvoice != "" {
+		except = `
+			   AND i.id <> ` + exceptInvoice
+	}
 	reasons := make([]string, len(creditDrawAsOfIssueReasons))
 	for i, r := range creditDrawAsOfIssueReasons {
 		reasons[i] = "'" + string(r) + "'"
@@ -59,6 +73,6 @@ func CreditDrawOwedSQL(g string) string {
 			SELECT 1 FROM invoices i
 			 WHERE i.tenant_id = ` + g + `.tenant_id AND i.customer_id = ` + g + `.customer_id
 			   AND i.billing_reason IN (` + strings.Join(reasons, ",") + `)
-			   AND i.issued_at <= ` + g + `.expires_at
+			   AND i.issued_at <= ` + g + `.expires_at` + except + `
 			   AND (i.status = 'draft' OR i.auto_charge_pending)))`
 }

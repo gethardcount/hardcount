@@ -22,7 +22,7 @@ import (
 type reliefGranterAdapter struct{ svc *credit.Service }
 
 func (a reliefGranterAdapter) GrantForCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, cnID string, in creditnote.CreditGrantInput) error {
-	_, err := a.svc.GrantForCreditNoteTx(ctx, tx, tenantID, cnID, credit.GrantInput{Currency: in.Currency, CustomerID: in.CustomerID, AmountCents: in.AmountCents, Description: in.Description, InvoiceID: in.InvoiceID})
+	_, err := a.svc.GrantForCreditNoteTx(ctx, tx, tenantID, cnID, credit.CreditNoteReturnInput{Currency: in.Currency, CustomerID: in.CustomerID, AmountCents: in.AmountCents, Description: in.Description, InvoiceID: in.InvoiceID, InvoicePaid: in.InvoicePaid, InvoiceTotalCents: in.InvoiceTotalCents})
 	return err
 }
 func (a reliefGranterAdapter) LockCommitGrantForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string) (int64, int64, int64, bool, error) {

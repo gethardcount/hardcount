@@ -3388,7 +3388,8 @@ export const getListCreditBalancesUrl = (params?: ListCreditBalancesParams,) => 
  * One row per customer and currency that has any credit ledger
  * entry, highest balance first.
  * `total_granted` is the sum of every credit added in that currency
- * (grants, positive adjustments and reversals).
+ * (grants, positive adjustments, and what a void or credit note gave
+ * back as new credit).
  * @summary List credit balances for all customers
  */
 export const listCreditBalances = async (params?: ListCreditBalancesParams, options?: RequestInit): Promise<ListCreditBalances200> => {

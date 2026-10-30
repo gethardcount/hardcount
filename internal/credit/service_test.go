@@ -20,6 +20,7 @@ import (
 // currency_integration_test.go and the api route tests.
 type memStore struct {
 	entries []domain.CreditLedgerEntry
+	returns []ReturnEntry
 }
 
 func newMemStore() *memStore {
@@ -361,6 +362,29 @@ func (m *memStore) RetireCommitGrantForInvoiceTx(_ context.Context, _ *sql.Tx, t
 		return remaining, nil
 	}
 	return 0, nil
+}
+
+// ReturnCreditTx records the return and appends its row. It does not model
+// the restore to source blocks: that is proven against Postgres
+// (credit_return_integration_test.go); the fake serves the service's own
+// rules (what it asks to return, with which source and mode).
+func (m *memStore) ReturnCreditTx(ctx context.Context, _ *sql.Tx, tenantID string, in ReturnEntry) (domain.CreditLedgerEntry, domain.CreditReturn, error) {
+	m.returns = append(m.returns, in)
+	out, err := m.AppendEntry(ctx, tenantID, domain.CreditLedgerEntry{
+		CustomerID:              in.CustomerID,
+		EntryType:               domain.CreditGrant,
+		Currency:                in.Currency,
+		AmountCents:             in.AmountCents,
+		Description:             in.Description,
+		InvoiceID:               in.InvoiceID,
+		SourceCreditNoteID:      in.SourceCreditNoteID,
+		SourceInvoiceReversalID: in.SourceInvoiceReversalID,
+		CreatedAt:               in.At,
+	})
+	if err != nil {
+		return domain.CreditLedgerEntry{}, domain.CreditReturn{}, err
+	}
+	return out, domain.CreditReturn{ReturnedCents: in.AmountCents, UnattributedCents: in.AmountCents}, nil
 }
 
 func (m *memStore) InvoiceCreditsTx(_ context.Context, _ *sql.Tx, _, customerID, invoiceID string) ([]InvoiceCredits, error) {

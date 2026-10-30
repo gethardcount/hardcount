@@ -507,10 +507,10 @@ type blockingReverser struct {
 	entered, release chan struct{}
 }
 
-func (b *blockingReverser) ReverseForInvoiceTx(context.Context, *sql.Tx, string, string, string, string) (int64, error) {
+func (b *blockingReverser) ReverseForInvoiceTx(context.Context, *sql.Tx, string, string, string, string) (domain.CreditReturn, error) {
 	close(b.entered)
 	<-b.release
-	return 0, nil
+	return domain.CreditReturn{}, nil
 }
 
 func (b *blockingReverser) RetireCommitGrantForInvoiceTx(context.Context, *sql.Tx, string, string) (int64, error) {

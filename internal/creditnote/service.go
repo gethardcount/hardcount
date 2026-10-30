@@ -161,6 +161,8 @@ func afterRefundCall(ctx context.Context) (context.Context, context.CancelFunc) 
 type CreditGranter interface {
 	// GrantForCreditNoteTx grants on the caller's coordinator tx, so the credit
 	// ledger entry commits atomically with Issue()'s draft→issued CAS (ADR-061).
+	// Credit the invoice drew from credit blocks goes back to those blocks,
+	// with their expiry and kind (ADR-132).
 	// The 0093 dedup index still backs it, but the CAS makes it unreachable: a
 	// dedup conflict here would mean a second CAS winner, which cannot happen.
 	GrantForCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, creditNoteID string, input CreditGrantInput) error
@@ -196,6 +198,15 @@ type CreditGrantInput struct {
 	AmountCents int64
 	Description string
 	InvoiceID   string
+	// InvoicePaid is set on the paid branch: the amount is the note's credit
+	// channel, and the customer's balance rises by exactly that amount. The
+	// note's drawn share, pro rata to how the invoice was paid, goes back to
+	// the grants it came from where it stays spendable (ADR-132). Unset on the
+	// unpaid branch, where the amount is applied credit the note relieves.
+	InvoicePaid bool
+	// InvoiceTotalCents is the invoice's total, the base of that pro-rata
+	// split. Set with InvoicePaid.
+	InvoiceTotalCents int64
 }
 
 type Service struct {
@@ -1688,6 +1699,11 @@ func (s *Service) Issue(ctx context.Context, tenantID, id string) (domain.Credit
 				AmountCents: cn.CreditAmountCents,
 				Description: fmt.Sprintf("Credit note %s — %s", cn.CreditNoteNumber, cn.Reason),
 				InvoiceID:   cn.InvoiceID,
+				// The balance rises by this whole amount; its drawn share goes
+				// back to the grants it came from where it stays spendable
+				// (ADR-132).
+				InvoicePaid:       true,
+				InvoiceTotalCents: inv.TotalAmountCents,
 			}); err != nil {
 				return domain.CreditNote{}, fmt.Errorf("grant credit: %w", err)
 			}

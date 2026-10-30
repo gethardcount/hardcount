@@ -235,15 +235,20 @@ type creditGrantAdapter struct {
 
 // GrantForCreditNoteTx bridges to credit.Service.GrantForCreditNoteTx so the
 // grant rides CN Issue()'s coordinator tx (ADR-061): the credit ledger entry
-// commits atomically with the draft→issued CAS.
+// commits atomically with the draft→issued CAS. The credit goes back to the
+// blocks the invoice drew it from (ADR-132).
 func (a *creditGrantAdapter) GrantForCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, creditNoteID string, input creditnote.CreditGrantInput) error {
-	_, err := a.svc.GrantForCreditNoteTx(ctx, tx, tenantID, creditNoteID, credit.GrantInput{
-		CustomerID:  input.CustomerID,
-		Currency:    input.Currency,
-		AmountCents: input.AmountCents,
-		Description: input.Description,
-		InvoiceID:   input.InvoiceID,
+	_, err := a.svc.GrantForCreditNoteTx(ctx, tx, tenantID, creditNoteID, credit.CreditNoteReturnInput{
+		CustomerID:        input.CustomerID,
+		Currency:          input.Currency,
+		AmountCents:       input.AmountCents,
+		Description:       input.Description,
+		InvoiceID:         input.InvoiceID,
+		InvoicePaid:       input.InvoicePaid,
+		InvoiceTotalCents: input.InvoiceTotalCents,
 	})
+	// The split is not returned: whatever it is, the balance rises by the
+	// note's credit amount, which is what the note's documents state.
 	return err
 }
 

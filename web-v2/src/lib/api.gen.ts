@@ -1263,7 +1263,8 @@ export interface paths {
          * @description One row per customer and currency that has any credit ledger
          *     entry, highest balance first.
          *     `total_granted` is the sum of every credit added in that currency
-         *     (grants, positive adjustments and reversals).
+         *     (grants, positive adjustments, and what a void or credit note gave
+         *     back as new credit).
          */
         get: operations["listCreditBalances"];
         put?: never;
@@ -8102,12 +8103,12 @@ export interface components {
             balance_cents: number;
             /**
              * Format: int64
-             * @description Every credit added: grants, positive adjustments, and credit given back when an invoice it was applied to was voided.
+             * @description Every credit added: grants, positive adjustments, and credit a void or credit note gave back as new credit. Credit a void or credit note put back on the grant it was drawn from is not added again.
              */
             total_granted: number;
             /**
              * Format: int64
-             * @description Credit applied to invoices.
+             * @description Credit applied to invoices, less what a void or credit note put back on the grant it was drawn from.
              */
             total_used: number;
             /**

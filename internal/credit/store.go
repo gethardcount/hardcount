@@ -62,10 +62,18 @@ type Store interface {
 	// InvoiceCreditsTx adds up the invoice's credit rows per currency, on
 	// the caller's transaction, with no LIMIT: what the invoice drew from
 	// the balance (its usage rows) and what issued credit notes already
-	// handed back for it (grants on the invoice with a credit-note source).
-	// The void reversal reads it under the void's invoice lock and hands
-	// back the difference.
+	// handed back for it (grants on the invoice with a credit-note source,
+	// each at its whole amount, including what it restored to other
+	// blocks). The void reversal reads it under the void's invoice lock and
+	// hands back the difference.
 	InvoiceCreditsTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, invoiceID string) ([]InvoiceCredits, error)
+	// ReturnCreditTx hands back credit an invoice drew, on the caller's tx
+	// (ADR-132): the part the invoice drew from credit blocks goes back to
+	// those blocks, last drawn first, keeping their expiry and kind; a share
+	// whose grant is past expiry expires at once, by the expiry sweep's rule;
+	// a share whose commit grant's funding invoice is voided is retired
+	// again. The whole amount is one grant row for the entry's source.
+	ReturnCreditTx(ctx context.Context, tx *sql.Tx, tenantID string, in ReturnEntry) (domain.CreditLedgerEntry, domain.CreditReturn, error)
 
 	// ExpireGrantAtomic retires one expired grant — flips its
 	// consumed_cents to amount_cents and appends the -remaining expiry

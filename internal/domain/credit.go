@@ -39,6 +39,11 @@ type CreditLedgerEntry struct {
 	// Expiry flips consumed_cents to amount_cents atomically with its
 	// -remaining ledger entry (ExpireGrantAtomic, ADR-071), so a
 	// backdated apply can never re-drain a retired grant.
+	//
+	// A return row (a void or a credit note handing back drawn credit,
+	// ADR-132) is written with consumed_cents = the part it restored to the
+	// blocks the invoice drew from: that part is spendable on those blocks,
+	// not on the return row. Its metadata names them (restored_blocks).
 	ConsumedCents int64 `json:"consumed_cents,omitempty"`
 
 	// SourceSubscriptionID + SourceSubscriptionItemID + SourcePlanChangedAt +
@@ -102,6 +107,29 @@ const (
 	// spend). Drains before every paid-class block.
 	GrantKindPromotional GrantKind = "promotional"
 )
+
+// CreditReturn is what one hand-back of an invoice's drawn credit did
+// (ADR-132): a void, or a credit note on the invoice. The whole amount is one
+// grant row on the ledger. The part the invoice drew from credit blocks goes
+// back to those blocks, with their expiry and kind; the rest stays on the row
+// as new credit with no expiry.
+type CreditReturn struct {
+	// ReturnedCents is the whole amount handed back: the row's amount_cents.
+	ReturnedCents int64
+	// RestoredCents is the part that went back to the blocks the invoice
+	// drew from.
+	RestoredCents int64
+	// ExpiredOnReturnCents is the part of RestoredCents that expired at once,
+	// because its block was already past its expiry.
+	ExpiredOnReturnCents int64
+	// CommitRetiredOnReturnCents is the part of RestoredCents that was retired
+	// again, because its commit grant's funding invoice is voided.
+	CommitRetiredOnReturnCents int64
+	// UnattributedCents is the part handed back as new credit with no expiry:
+	// credit drawn before drains recorded their blocks (2026-07-05), and on a
+	// paid invoice the part the customer paid in cash.
+	UnattributedCents int64
+}
 
 type CreditBalance struct {
 	CustomerID string `json:"customer_id"`

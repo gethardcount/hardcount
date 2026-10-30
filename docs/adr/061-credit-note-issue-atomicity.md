@@ -310,7 +310,7 @@ Not changed: the dashboard's credit-note dialog still offers amount due as the m
 ### Not decided here, with triggers
 
 - **A charge already sent to the card network.** It is marked only by the charge lease. `Issue()` reads the lease only to decide whether to mark the invoice paid (amendment 2026-10-19), never before it lowers the amount due. Trigger: the first payment recorded with an amount that differs from what the card was charged.
-- **What kind of credit comes back.** It is a plain grant with no expiry and no promotional kind, as a void's hand-back already is. Trigger: the first tenant with expiring or promotional credits applied to an invoice that is then credited or voided.
+- **What kind of credit comes back.** It is a plain grant with no expiry and no promotional kind, as a void's hand-back already is. Trigger: the first tenant with expiring or promotional credits applied to an invoice that is then credited or voided. *(Decided 2026-10-30 by [ADR-132](132-returned-credit-goes-back-to-its-grants.md): the credit goes back to the grants it was drawn from, with their expiry and kind.)*
 
 ## Amendment (2026-10-19): a note that leaves nothing due marks the invoice paid
 

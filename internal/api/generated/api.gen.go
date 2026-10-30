@@ -3619,13 +3619,13 @@ type CreditBalance struct {
 	// TotalExpired Credit written off by expiry.
 	TotalExpired int64 `json:"total_expired"`
 
-	// TotalGranted Every credit added: grants, positive adjustments, and credit given back when an invoice it was applied to was voided.
+	// TotalGranted Every credit added: grants, positive adjustments, and credit a void or credit note gave back as new credit. Credit a void or credit note put back on the grant it was drawn from is not added again.
 	TotalGranted int64 `json:"total_granted"`
 
 	// TotalRetired Prepaid commit credit taken back because the invoice that funded it was voided or refunded by a credit note.
 	TotalRetired int64 `json:"total_retired"`
 
-	// TotalUsed Credit applied to invoices.
+	// TotalUsed Credit applied to invoices, less what a void or credit note put back on the grant it was drawn from.
 	TotalUsed int64 `json:"total_used"`
 }
 

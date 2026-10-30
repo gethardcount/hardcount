@@ -16,9 +16,9 @@ export interface CreditBalance {
   /** The currency of this balance, uppercase. Each credit ledger entry stores its own currency, and credit pays only invoices in that currency. A customer with credit in two currencies has two balances; they are never added together or converted. */
   currency: string;
   balance_cents: number;
-  /** Every credit added: grants, positive adjustments, and credit given back when an invoice it was applied to was voided. */
+  /** Every credit added: grants, positive adjustments, and credit a void or credit note gave back as new credit. Credit a void or credit note put back on the grant it was drawn from is not added again. */
   total_granted: number;
-  /** Credit applied to invoices. */
+  /** Credit applied to invoices, less what a void or credit note put back on the grant it was drawn from. */
   total_used: number;
   /** Credit written off by expiry. */
   total_expired: number;

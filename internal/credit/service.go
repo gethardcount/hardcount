@@ -415,21 +415,102 @@ func (s *Service) GrantTx(ctx context.Context, tx *sql.Tx, tenantID string, inpu
 	return out, nil
 }
 
+// CreditNoteReturnInput is the credit a credit note hands to the customer's
+// balance, from creditnote.Issue.
+type CreditNoteReturnInput struct {
+	CustomerID  string
+	Currency    string // the invoice's (ADR-129)
+	AmountCents int64
+	Description string
+	InvoiceID   string
+	// InvoicePaid: the note is on a paid invoice and the amount is its credit
+	// channel. The balance rises by exactly the amount: the note's drawn
+	// share (pro rata to how the invoice was paid) goes back to the blocks it
+	// came from where it stays spendable, the rest is new credit with no
+	// expiry. Unset: the note is on an unpaid invoice and the amount is the
+	// applied credit it relieves, every cent drawn credit.
+	InvoicePaid bool
+	// InvoiceTotalCents is the invoice's total, the base of the pro-rata
+	// split. Required when InvoicePaid is set.
+	InvoiceTotalCents int64
+}
+
 // GrantForCreditNoteTx is the credit-note grant, on the caller's coordinator
-// tx: it sets SourceCreditNoteID and appends via GrantTx, so the ledger entry
-// commits atomically with the credit note's draft→issued CAS (ADR-061,
-// creditnote.Issue). The 0093 (tenant, CN) dedup index still backs uniqueness,
-// but the issue CAS makes a duplicate UNREACHABLE — exactly one Issue() reaches
-// the grant per credit note. A conflict here would ABORT the shared
-// coordinator tx, so we do NOT swallow ErrAlreadyExists: surfacing it correctly
-// fails the whole Issue() rather than committing a poisoned tx. Given the CAS
-// invariant it never fires; if it does, the invariant is broken.
-func (s *Service) GrantForCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, creditNoteID string, input GrantInput) (domain.CreditLedgerEntry, error) {
+// tx, so the ledger entry commits atomically with the credit note's
+// draft→issued CAS (ADR-061, creditnote.Issue). It is a credit return
+// (ADR-132). On an unpaid invoice the credit the note relieves goes back to
+// the blocks it was drawn from, with their expiry and kind, last drawn
+// first. On a paid invoice the balance rises by exactly the note's credit
+// amount: its drawn share goes back to its blocks only where it stays
+// spendable, and the rest is new credit. Stripe reinstates no credit grant on
+// a credit note.
+//
+// The 0093 (tenant, CN) dedup index still backs uniqueness, but the issue CAS
+// makes a duplicate UNREACHABLE — exactly one Issue() reaches the grant per
+// credit note. A conflict is returned, never swallowed: it fails the whole
+// Issue() rather than committing a poisoned tx. Given the CAS invariant it
+// never fires; if it does, the invariant is broken.
+//
+// It runs GrantTx's checks and writes the same in-tx "grant" audit row
+// (ADR-090). It does not rebind the clock: the caller bound ctx to the
+// invoice, which is on the customer's clock.
+func (s *Service) GrantForCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, creditNoteID string, input CreditNoteReturnInput) (domain.CreditReturn, error) {
 	if creditNoteID == "" {
-		return domain.CreditLedgerEntry{}, errs.Required("credit_note_id")
+		return domain.CreditReturn{}, errs.Required("credit_note_id")
 	}
-	input.SourceCreditNoteID = creditNoteID
-	return s.GrantTx(ctx, tx, tenantID, input)
+	if input.CustomerID == "" {
+		return domain.CreditReturn{}, errs.Required("customer_id")
+	}
+	if input.InvoiceID == "" {
+		return domain.CreditReturn{}, errs.Required("invoice_id")
+	}
+	currency, err := normalizeCurrency(input.Currency)
+	if err != nil {
+		return domain.CreditReturn{}, err
+	}
+	if input.AmountCents <= 0 {
+		return domain.CreditReturn{}, errs.Invalid("amount_cents", "must be greater than 0")
+	}
+	if input.AmountCents > 100_000_000 {
+		return domain.CreditReturn{}, errs.Invalid("amount_cents", "cannot exceed 1,000,000")
+	}
+	desc := strings.TrimSpace(input.Description)
+	if desc == "" {
+		return domain.CreditReturn{}, errs.Required("description")
+	}
+	if len(desc) > 500 {
+		return domain.CreditReturn{}, errs.Invalid("description", "must be at most 500 characters")
+	}
+	if input.InvoicePaid && input.InvoiceTotalCents <= 0 {
+		// A caller bug, not bad input: the paid branch always has the invoice.
+		return domain.CreditReturn{}, fmt.Errorf("credit note %s on paid invoice %s: invoice total %d is not positive", creditNoteID, input.InvoiceID, input.InvoiceTotalCents)
+	}
+	out, res, err := s.store.ReturnCreditTx(ctx, tx, tenantID, ReturnEntry{
+		CustomerID:         input.CustomerID,
+		InvoiceID:          input.InvoiceID,
+		Currency:           currency,
+		AmountCents:        input.AmountCents,
+		Description:        desc,
+		SourceCreditNoteID: creditNoteID,
+		PaidInvoice:        input.InvoicePaid,
+		InvoiceTotalCents:  input.InvoiceTotalCents,
+		At:                 clock.Now(ctx),
+	})
+	if err != nil {
+		return domain.CreditReturn{}, err
+	}
+	if s.auditLogger != nil {
+		if err := s.auditLogger.LogInTx(ctx, tx, audit.Entry{
+			Action:        domain.AuditActionGrant,
+			ResourceType:  "credit",
+			ResourceID:    out.ID,
+			ResourceLabel: out.Description,
+			Metadata:      grantAuditMetadata(out),
+		}); err != nil {
+			return domain.CreditReturn{}, fmt.Errorf("audit emission: %w", err)
+		}
+	}
+	return res, nil
 }
 
 // ApplyToInvoice deducts credits from a customer's balance AND reduces the
@@ -458,8 +539,12 @@ func (s *Service) ApplyToInvoiceAt(ctx context.Context, tenantID, customerID, in
 	return s.store.ApplyToInvoiceAtomic(ctx, tenantID, customerID, invoiceID, desc, invoiceAmountCents, at)
 }
 
-// ReverseForInvoiceTx hands back the credits applied to a voided invoice. The
-// reversal grant is appended on the caller's *sql.Tx so it commits (or rolls
+// ReverseForInvoiceTx hands back the credits applied to a voided invoice, as a
+// credit return (ADR-132): each share goes back to the block it was drawn
+// from, with that block's expiry and kind, and a share whose grant is already
+// past its expiry expires at once. This is what Stripe does on a void ("the
+// applied balance is reinstated to the credit grant"). The
+// reversal is appended on the caller's *sql.Tx so it commits (or rolls
 // back) atomically with the invoice status flip that drives the void. invoice.Service.Void
 // threads its coordinator tx through here — a reversal failure rolls the void
 // back, so the invoice never lands voided with the customer's applied credits
@@ -470,17 +555,19 @@ func (s *Service) ApplyToInvoiceAt(ctx context.Context, tenantID, customerID, in
 //
 // The 0106 dedup index allows one reversal per invoice. The void refuses an
 // invoice that is already voided, on the locked row, so a second reversal is
-// not expected. If one comes, the index refuses the INSERT, which aborts the
-// caller's tx, so the error (code credit_reversal_source_taken) is returned,
-// not swallowed: the caller must fail, not carry on with a dead tx.
+// not expected. If one comes, the return refuses it before it restores
+// anything (and the index would refuse the INSERT, aborting the caller's tx),
+// so the error (code credit_reversal_source_taken) is returned, not
+// swallowed: the caller must fail, not carry on.
 //
 // bindForCustomer stamps the grant in simulated time when the customer is
-// clock-pinned.
-func (s *Service) ReverseForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, invoiceID, invoiceNumber string) (int64, error) {
+// clock-pinned, and the same instant decides which source grants are past
+// their expiry.
+func (s *Service) ReverseForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, invoiceID, invoiceNumber string) (domain.CreditReturn, error) {
 	ctx = s.bindForCustomer(ctx, tenantID, customerID)
 	sums, err := s.store.InvoiceCreditsTx(ctx, tx, tenantID, customerID, invoiceID)
 	if err != nil {
-		return 0, fmt.Errorf("reverse credits for invoice %s: %w", invoiceID, err)
+		return domain.CreditReturn{}, fmt.Errorf("reverse credits for invoice %s: %w", invoiceID, err)
 	}
 
 	// The reversal hands the credit back in the currency it was drawn in
@@ -494,12 +581,12 @@ func (s *Service) ReverseForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID,
 			continue
 		}
 		if used != nil {
-			return 0, fmt.Errorf("reverse credits for invoice %s: its credit rows are in %s and %s; refusing to guess the currency to return", invoiceID, used.Currency, sums[i].Currency)
+			return domain.CreditReturn{}, fmt.Errorf("reverse credits for invoice %s: its credit rows are in %s and %s; refusing to guess the currency to return", invoiceID, used.Currency, sums[i].Currency)
 		}
 		used = &sums[i]
 	}
 	if used == nil || used.UsedCents <= 0 {
-		return 0, nil // No credits were applied to this invoice
+		return domain.CreditReturn{}, nil // No credits were applied to this invoice
 	}
 
 	// A credit note issued against this invoice while it was unpaid may already
@@ -509,7 +596,7 @@ func (s *Service) ReverseForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID,
 	// kind is written for a PAID invoice, which cannot be voided.
 	totalUsed := used.UsedCents - used.ReturnedCents
 	if totalUsed <= 0 {
-		return 0, nil // Credit notes already returned everything that was applied
+		return domain.CreditReturn{}, nil // Credit notes already returned everything that was applied
 	}
 
 	desc := fmt.Sprintf("Reversed — invoice %s voided", invoiceNumber)
@@ -517,19 +604,19 @@ func (s *Service) ReverseForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID,
 		desc = fmt.Sprintf("Reversed — invoice %s voided", invoiceID)
 	}
 
-	if _, err := s.store.AppendEntryTx(ctx, tx, tenantID, domain.CreditLedgerEntry{
+	_, res, err := s.store.ReturnCreditTx(ctx, tx, tenantID, ReturnEntry{
 		CustomerID:              customerID,
-		EntryType:               domain.CreditGrant,
+		InvoiceID:               invoiceID,
 		Currency:                used.Currency,
 		AmountCents:             totalUsed,
 		Description:             desc,
-		InvoiceID:               invoiceID,
 		SourceInvoiceReversalID: invoiceID,
-	}); err != nil {
-		return 0, err
+		At:                      clock.Now(ctx),
+	})
+	if err != nil {
+		return domain.CreditReturn{}, err
 	}
-
-	return totalUsed, nil
+	return res, nil
 }
 
 // ExpireCredits finds unexpired grant entries past their expiry date and creates

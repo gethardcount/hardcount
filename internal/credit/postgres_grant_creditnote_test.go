@@ -40,11 +40,16 @@ func TestGrantForCreditNoteTx_IdempotentNoDoubleCredit(t *testing.T) {
 
 	// Same shape creditnote.Issue() uses for a credit-type CN.
 	const creditNoteID = "hc_cn_grant_idem"
-	input := credit.GrantInput{
-		Currency:    "USD",
-		CustomerID:  cust.ID,
-		AmountCents: 4000,
-		Description: "Credit note CN-001 — duplicate_charge",
+	// A paid invoice that drew no credit: the whole amount is cash-paid
+	// money, so it is new credit (ADR-132 changes nothing here).
+	input := credit.CreditNoteReturnInput{
+		Currency:          "USD",
+		CustomerID:        cust.ID,
+		AmountCents:       4000,
+		Description:       "Credit note CN-001 — duplicate_charge",
+		InvoiceID:         "hc_inv_grant_idem",
+		InvoicePaid:       true,
+		InvoiceTotalCents: 4000,
 	}
 
 	// First grant, on its own committed tx: restores $40 to the balance.
@@ -60,8 +65,8 @@ func TestGrantForCreditNoteTx_IdempotentNoDoubleCredit(t *testing.T) {
 	if err := tx1.Commit(); err != nil {
 		t.Fatalf("commit first tx: %v", err)
 	}
-	if first.AmountCents != 4000 {
-		t.Fatalf("first grant amount: got %d, want 4000", first.AmountCents)
+	if first.ReturnedCents != 4000 || first.UnattributedCents != 4000 {
+		t.Fatalf("first grant: %+v, want 4000 returned, all of it new credit", first)
 	}
 
 	balAfterFirst, err := testutil.BalanceUSD(svc.GetBalance(ctx, tenantID, cust.ID))
