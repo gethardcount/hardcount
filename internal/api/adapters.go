@@ -1855,3 +1855,18 @@ func (a customerCurrencyFactsAdapter) CustomerCurrencyFacts(ctx context.Context,
 	}
 	return profile, plans, nil
 }
+
+// heldReliefIssuerAdapter bridges creditnote.Service to
+// invoice.HeldReliefIssuer: finalize issues the relief notes held on a draft
+// on its own transaction, and runs their after-commit steps once it commits.
+type heldReliefIssuerAdapter struct {
+	svc *creditnote.Service
+}
+
+func (a heldReliefIssuerAdapter) IssueHeldReliefTx(ctx context.Context, tx *sql.Tx, tenantID string, inv domain.Invoice) (func(context.Context), error) {
+	issued, err := a.svc.IssueHeldReliefTx(ctx, tx, tenantID, inv)
+	if err != nil || len(issued) == 0 {
+		return nil, err
+	}
+	return func(ctx context.Context) { a.svc.FinishHeldRelief(ctx, tenantID, issued) }, nil
+}

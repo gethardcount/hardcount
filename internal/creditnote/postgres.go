@@ -333,6 +333,33 @@ func (s *PostgresStore) ListPendingClawbackDrafts(ctx context.Context, batch int
 	return notes, rows.Err()
 }
 
+// ListHeldReliefTx returns the issue_pending draft notes on one invoice, in
+// the order they were written, locked FOR UPDATE on the caller's tx. Finalize
+// calls it with the invoice row already locked, the same order Issue takes
+// (invoice row, then the note), so it cannot deadlock with the reconciler.
+func (s *PostgresStore) ListHeldReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string) ([]domain.CreditNote, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT `+cnReadCols+`
+		FROM credit_notes
+		WHERE tenant_id = $1 AND invoice_id = $2 AND issue_pending AND status = 'draft'
+		ORDER BY created_at, id
+		FOR UPDATE`, tenantID, invoiceID)
+	if err != nil {
+		return nil, fmt.Errorf("list held relief notes: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var notes []domain.CreditNote
+	for rows.Next() {
+		var cn domain.CreditNote
+		var metaJSON []byte
+		if err := rows.Scan(s.cnScanDest(&cn, &metaJSON)...); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal(metaJSON, &cn.Metadata)
+		notes = append(notes, cn)
+	}
+	return notes, rows.Err()
+}
+
 // ListPendingClawbackDraftsForClock is the catchup counterpart to
 // ListPendingClawbackDrafts (ADR-029 disjoint flows): it returns the pending
 // auto-issue clawback drafts owned by ONE test clock's simulated customers, so

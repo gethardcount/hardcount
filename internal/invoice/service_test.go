@@ -288,7 +288,7 @@ func (m *memStore) UpdateStatusWithReversal(ctx context.Context, tenantID, id st
 	return inv, nil
 }
 
-func (m *memStore) FinalizeWithDates(_ context.Context, tenantID, id string, issuedAt, dueAt time.Time, taxedLineIDs []string) (domain.Invoice, error) {
+func (m *memStore) FinalizeWithDates(_ context.Context, tenantID, id string, issuedAt, dueAt time.Time, taxedLineIDs []string, onFinalized func(tx *sql.Tx, inv domain.Invoice) error) (domain.Invoice, error) {
 	inv, ok := m.invoices[id]
 	if !ok || inv.TenantID != tenantID {
 		return domain.Invoice{}, errs.ErrNotFound
@@ -310,7 +310,24 @@ func (m *memStore) FinalizeWithDates(_ context.Context, tenantID, id string, iss
 	inv.DueAt = &dueAt
 	inv.UpdatedAt = time.Now().UTC()
 	m.invoices[id] = inv
+	if onFinalized != nil {
+		if err := onFinalized(nil, inv); err != nil {
+			return domain.Invoice{}, err
+		}
+		inv = m.invoices[id]
+	}
 	return inv, nil
+}
+
+func (m *memStore) FinalizeDraft(ctx context.Context, tenantID, id string, onFinalized func(tx *sql.Tx, inv domain.Invoice) error) (domain.Invoice, error) {
+	inv, err := m.UpdateStatus(ctx, tenantID, id, domain.InvoiceFinalized)
+	if err != nil || onFinalized == nil {
+		return inv, err
+	}
+	if err := onFinalized(nil, inv); err != nil {
+		return domain.Invoice{}, err
+	}
+	return m.invoices[id], nil
 }
 
 func (m *memStore) StampChargeOutcome(_ context.Context, tenantID, id string, attemptSeq int64, ps domain.InvoicePaymentStatus, stripeID, errMsg string) (domain.Invoice, bool, error) {

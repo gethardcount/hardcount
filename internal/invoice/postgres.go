@@ -768,7 +768,7 @@ func (s *PostgresStore) updateStatusInTx(ctx context.Context, tx *sql.Tx, id str
 // rejected by its own draft re-check). A funder error fails finalize by
 // design: operator-synchronous, loud, retryable — never weaken to
 // post-commit.
-func (s *PostgresStore) FinalizeWithDates(ctx context.Context, tenantID, id string, issuedAt, dueAt time.Time, taxedLineIDs []string) (domain.Invoice, error) {
+func (s *PostgresStore) FinalizeWithDates(ctx context.Context, tenantID, id string, issuedAt, dueAt time.Time, taxedLineIDs []string, onFinalized func(tx *sql.Tx, inv domain.Invoice) error) (domain.Invoice, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return domain.Invoice{}, err
@@ -858,10 +858,54 @@ func (s *PostgresStore) FinalizeWithDates(ctx context.Context, tenantID, id stri
 		}
 	}
 
+	if inv, err = s.runOnFinalizedTx(ctx, tx, inv, onFinalized); err != nil {
+		return domain.Invoice{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return domain.Invoice{}, err
 	}
 	return inv, nil
+}
+
+// FinalizeDraft flips a draft (a cycle invoice kept as a draft) to finalized
+// and runs onFinalized on the same tx before it commits, as FinalizeWithDates
+// does for an operator-composed invoice. Finalize issues the relief held on
+// the draft there (release plan row 13).
+func (s *PostgresStore) FinalizeDraft(ctx context.Context, tenantID, id string, onFinalized func(tx *sql.Tx, inv domain.Invoice) error) (domain.Invoice, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return domain.Invoice{}, err
+	}
+	defer postgres.Rollback(tx)
+	inv, err := s.updateStatusInTx(ctx, tx, id, domain.InvoiceFinalized)
+	if err != nil {
+		return domain.Invoice{}, err
+	}
+	if inv, err = s.runOnFinalizedTx(ctx, tx, inv, onFinalized); err != nil {
+		return domain.Invoice{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.Invoice{}, err
+	}
+	return inv, nil
+}
+
+// runOnFinalizedTx runs a finalize hook on the finalize tx and returns the row
+// as the hook left it (a relief note lowers amount_due, or marks it paid). A
+// hook error rolls the finalize back: the invoice stays a draft and nothing
+// is charged.
+func (s *PostgresStore) runOnFinalizedTx(ctx context.Context, tx *sql.Tx, inv domain.Invoice, onFinalized func(tx *sql.Tx, inv domain.Invoice) error) (domain.Invoice, error) {
+	if onFinalized == nil {
+		return inv, nil
+	}
+	if err := onFinalized(tx, inv); err != nil {
+		return domain.Invoice{}, err
+	}
+	var after domain.Invoice
+	if err := tx.QueryRowContext(ctx, `SELECT `+invCols+` FROM invoices WHERE id = $1`, inv.ID).Scan(s.scanInvDest(&after)...); err != nil {
+		return domain.Invoice{}, fmt.Errorf("read the invoice after its finalize hook: %w", err)
+	}
+	return after, nil
 }
 
 // StampChargeOutcome records a charge attempt's outcome (processing, unknown,
