@@ -1,7 +1,7 @@
 import { StrictMode, lazy, Suspense, Component } from 'react'
 import type { ReactNode, ErrorInfo } from 'react'
 import { createRoot } from 'react-dom/client'
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { createBrowserRouter, createRoutesFromElements, RouterProvider, Route, Navigate, Outlet, useLocation, useRouteError } from 'react-router-dom'
 import { returnPath } from '@/lib/returnPath'
 import { Toaster } from '@/components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -29,46 +29,54 @@ class ErrorBoundary extends Component<
 
   render() {
     if (this.state.hasError) {
-      // The raw error ("Cannot read properties of undefined") means nothing
-      // to an operator, so it sits in Details for support. A failed page
-      // download after an upgrade lands here too, and a reload fixes it.
-      const raw = this.state.error?.message
-      return (
-        <div className="min-h-screen flex items-center justify-center p-8 bg-background">
-          <div className="text-center max-w-md">
-            <h1 className="text-lg font-semibold mb-2 text-foreground">This page hit an error</h1>
-            <p className="text-sm text-muted-foreground mb-4">
-              Reload to try again. If it keeps happening, send the details below to support.
-            </p>
-            <div className="flex items-center justify-center gap-2">
-              <button
-                onClick={() => window.location.reload()}
-                className="px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm"
-              >
-                Reload page
-              </button>
-              <button
-                onClick={() => {
-                  this.setState({ hasError: false })
-                  window.location.href = '/'
-                }}
-                className="px-4 py-2 border border-border text-foreground rounded-lg text-sm"
-              >
-                Go to Dashboard
-              </button>
-            </div>
-            {raw && (
-              <details className="mt-4 text-left text-xs text-muted-foreground">
-                <summary className="cursor-pointer text-center hover:text-foreground">Details</summary>
-                <pre className="mt-2 whitespace-pre-wrap break-words rounded bg-muted p-2 font-mono text-[11px]">{raw}</pre>
-              </details>
-            )}
-          </div>
-        </div>
-      )
+      return <ErrorFallback message={this.state.error?.message} />
     }
     return this.props.children
   }
+}
+
+function ErrorFallback({ message }: { message?: string }) {
+  // The raw error ("Cannot read properties of undefined") means nothing
+  // to an operator, so it sits in Details for support. A failed page
+  // download after an upgrade lands here too, and a reload fixes it.
+  const raw = message
+  return (
+    <div className="min-h-screen flex items-center justify-center p-8 bg-background">
+      <div className="text-center max-w-md">
+        <h1 className="text-lg font-semibold mb-2 text-foreground">This page hit an error</h1>
+        <p className="text-sm text-muted-foreground mb-4">
+          Reload to try again. If it keeps happening, send the details below to support.
+        </p>
+        <div className="flex items-center justify-center gap-2">
+          <button
+            onClick={() => window.location.reload()}
+            className="px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm"
+          >
+            Reload page
+          </button>
+          <button
+            onClick={() => { window.location.href = '/' }}
+            className="px-4 py-2 border border-border text-foreground rounded-lg text-sm"
+          >
+            Go to Dashboard
+          </button>
+        </div>
+        {raw && (
+          <details className="mt-4 text-left text-xs text-muted-foreground">
+            <summary className="cursor-pointer text-center hover:text-foreground">Details</summary>
+            <pre className="mt-2 whitespace-pre-wrap break-words rounded bg-muted p-2 font-mono text-[11px]">{raw}</pre>
+          </details>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// The router catches a page's render error before ErrorBoundary can, so
+// its error element shows the same screen.
+function RouteError() {
+  const error = useRouteError()
+  return <ErrorFallback message={error instanceof Error ? error.message : undefined} />
 }
 
 function ProtectedRoute({ children }: { children: ReactNode }) {
@@ -146,65 +154,76 @@ const MeterDetailPage = lazy(() => import('@/pages/MeterDetail'))
 const RecipesPage = lazy(() => import('@/pages/Recipes'))
 const NotFoundPage = lazy(() => import('@/pages/NotFound'))
 
+// Every page renders inside RouteShell: one Suspense for the lazy pages.
+function RouteShell() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full" />
+        </div>
+      }
+    >
+      <Outlet />
+    </Suspense>
+  )
+}
+
+// A data router, so a page can ask before the operator leaves it with
+// unsaved changes (useBlocker; components/UnsavedChangesGuard).
+const router = createBrowserRouter(createRoutesFromElements(
+  <Route element={<RouteShell />} errorElement={<RouteError />}>
+    <Route path="/login" element={<PublicOnlyRoute><LoginPage /></PublicOnlyRoute>} />
+    <Route path="/forgot-password" element={<PublicOnlyRoute><ForgotPasswordPage /></PublicOnlyRoute>} />
+    <Route path="/reset-password" element={<PublicOnlyRoute><ResetPasswordPage /></PublicOnlyRoute>} />
+    {/* Token-driven: no PublicOnlyRoute — see comment above. */}
+    <Route path="/accept-invite" element={<AcceptInvitePage />} />
+    <Route path="/" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
+    <Route path="/recipes" element={<ProtectedRoute><RecipesPage /></ProtectedRoute>} />
+    <Route path="/customers" element={<ProtectedRoute><CustomersPage /></ProtectedRoute>} />
+    <Route path="/pricing" element={<ProtectedRoute><PricingPage /></ProtectedRoute>} />
+    <Route path="/dunning" element={<ProtectedRoute><DunningPage /></ProtectedRoute>} />
+    <Route path="/dunning-policies" element={<ProtectedRoute><DunningPoliciesPage /></ProtectedRoute>} />
+    <Route path="/webhooks" element={<ProtectedRoute><WebhooksPage /></ProtectedRoute>} />
+    <Route path="/webhooks/events" element={<ProtectedRoute><WebhookEventsPage /></ProtectedRoute>} />
+    <Route path="/webhooks/endpoints/:id" element={<ProtectedRoute><WebhookEndpointDetailPage /></ProtectedRoute>} />
+    <Route path="/api-keys" element={<ProtectedRoute><ApiKeysPage /></ProtectedRoute>} />
+    <Route path="/test-clocks" element={<ProtectedRoute><TestClocksPage /></ProtectedRoute>} />
+    <Route path="/test-clocks/:id" element={<ProtectedRoute><TestClockDetailPage /></ProtectedRoute>} />
+    <Route path="/invoices" element={<ProtectedRoute><InvoicesPage /></ProtectedRoute>} />
+    <Route path="/subscriptions" element={<ProtectedRoute><SubscriptionsPage /></ProtectedRoute>} />
+    <Route path="/usage" element={<ProtectedRoute><UsageEventsPage /></ProtectedRoute>} />
+    <Route path="/credits" element={<ProtectedRoute><CreditsPage /></ProtectedRoute>} />
+    <Route path="/provider-costs" element={<ProtectedRoute><ProviderCostsPage /></ProtectedRoute>} />
+    <Route path="/credit-notes" element={<ProtectedRoute><CreditNotesPage /></ProtectedRoute>} />
+    <Route path="/audit-log" element={<ProtectedRoute><AuditLogPage /></ProtectedRoute>} />
+    <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
+    <Route path="/customers/:id" element={<ProtectedRoute><CustomerDetailPage /></ProtectedRoute>} />
+    <Route path="/invoices/:id" element={<ProtectedRoute><InvoiceDetailPage /></ProtectedRoute>} />
+    <Route path="/subscriptions/:id" element={<ProtectedRoute><SubscriptionDetailPage /></ProtectedRoute>} />
+    <Route path="/plans/:id" element={<ProtectedRoute><PlanDetailPage /></ProtectedRoute>} />
+    <Route path="/meters/:id" element={<ProtectedRoute><MeterDetailPage /></ProtectedRoute>} />
+    <Route path="/update-payment" element={<UpdatePaymentPage />} />
+    {/* Stripe Checkout setup-session return URL.
+        Public, unauthenticated — customers arrive here via
+        the email link → Stripe Checkout → here, with no
+        sign-in. Renders success/cancel copy based on
+        ?status=success|cancel query. */}
+    <Route path="/payment-method-added" element={<PaymentMethodAddedPage />} />
+    <Route path="/invoice/:token" element={<HostedInvoicePage />} />
+    {/* Any other address: a mistyped or old link. Signed-out
+        visitors sign in first, then see this page. */}
+    <Route path="*" element={<ProtectedRoute><NotFoundPage /></ProtectedRoute>} />
+  </Route>,
+))
+
 const App = () => (
   <ErrorBoundary>
     <AuthProvider>
       <ModeAwareQueryProvider>
       <TenantTimezoneBootstrap />
       <TooltipProvider>
-        <BrowserRouter>
-          <Suspense
-            fallback={
-              <div className="min-h-screen flex items-center justify-center">
-                <div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full" />
-              </div>
-            }
-          >
-            <Routes>
-              <Route path="/login" element={<PublicOnlyRoute><LoginPage /></PublicOnlyRoute>} />
-              <Route path="/forgot-password" element={<PublicOnlyRoute><ForgotPasswordPage /></PublicOnlyRoute>} />
-              <Route path="/reset-password" element={<PublicOnlyRoute><ResetPasswordPage /></PublicOnlyRoute>} />
-              {/* Token-driven: no PublicOnlyRoute — see comment above. */}
-              <Route path="/accept-invite" element={<AcceptInvitePage />} />
-              <Route path="/" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
-              <Route path="/recipes" element={<ProtectedRoute><RecipesPage /></ProtectedRoute>} />
-              <Route path="/customers" element={<ProtectedRoute><CustomersPage /></ProtectedRoute>} />
-              <Route path="/pricing" element={<ProtectedRoute><PricingPage /></ProtectedRoute>} />
-              <Route path="/dunning" element={<ProtectedRoute><DunningPage /></ProtectedRoute>} />
-              <Route path="/dunning-policies" element={<ProtectedRoute><DunningPoliciesPage /></ProtectedRoute>} />
-              <Route path="/webhooks" element={<ProtectedRoute><WebhooksPage /></ProtectedRoute>} />
-              <Route path="/webhooks/events" element={<ProtectedRoute><WebhookEventsPage /></ProtectedRoute>} />
-              <Route path="/webhooks/endpoints/:id" element={<ProtectedRoute><WebhookEndpointDetailPage /></ProtectedRoute>} />
-              <Route path="/api-keys" element={<ProtectedRoute><ApiKeysPage /></ProtectedRoute>} />
-              <Route path="/test-clocks" element={<ProtectedRoute><TestClocksPage /></ProtectedRoute>} />
-              <Route path="/test-clocks/:id" element={<ProtectedRoute><TestClockDetailPage /></ProtectedRoute>} />
-              <Route path="/invoices" element={<ProtectedRoute><InvoicesPage /></ProtectedRoute>} />
-              <Route path="/subscriptions" element={<ProtectedRoute><SubscriptionsPage /></ProtectedRoute>} />
-              <Route path="/usage" element={<ProtectedRoute><UsageEventsPage /></ProtectedRoute>} />
-              <Route path="/credits" element={<ProtectedRoute><CreditsPage /></ProtectedRoute>} />
-              <Route path="/provider-costs" element={<ProtectedRoute><ProviderCostsPage /></ProtectedRoute>} />
-              <Route path="/credit-notes" element={<ProtectedRoute><CreditNotesPage /></ProtectedRoute>} />
-              <Route path="/audit-log" element={<ProtectedRoute><AuditLogPage /></ProtectedRoute>} />
-              <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
-              <Route path="/customers/:id" element={<ProtectedRoute><CustomerDetailPage /></ProtectedRoute>} />
-              <Route path="/invoices/:id" element={<ProtectedRoute><InvoiceDetailPage /></ProtectedRoute>} />
-              <Route path="/subscriptions/:id" element={<ProtectedRoute><SubscriptionDetailPage /></ProtectedRoute>} />
-              <Route path="/plans/:id" element={<ProtectedRoute><PlanDetailPage /></ProtectedRoute>} />
-              <Route path="/meters/:id" element={<ProtectedRoute><MeterDetailPage /></ProtectedRoute>} />
-              <Route path="/update-payment" element={<UpdatePaymentPage />} />
-              {/* Stripe Checkout setup-session return URL.
-                  Public, unauthenticated — customers arrive here via
-                  the email link → Stripe Checkout → here, with no
-                  sign-in. Renders success/cancel copy based on
-                  ?status=success|cancel query. */}
-              <Route path="/payment-method-added" element={<PaymentMethodAddedPage />} />
-              <Route path="/invoice/:token" element={<HostedInvoicePage />} />
-              {/* Any other address: a mistyped or old link. Signed-out
-                  visitors sign in first, then see this page. */}
-              <Route path="*" element={<ProtectedRoute><NotFoundPage /></ProtectedRoute>} />
-            </Routes>
-          </Suspense>
-        </BrowserRouter>
+        <RouterProvider router={router} />
       </TooltipProvider>
       </ModeAwareQueryProvider>
       {/* Outside ModeAwareQueryProvider on purpose. That provider is

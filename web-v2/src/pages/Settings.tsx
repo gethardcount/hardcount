@@ -53,6 +53,7 @@ import { Building2, CreditCard, FileText, Receipt, Check, AlertCircle, Info, Loa
 import { TeamTab } from '@/components/TeamTab'
 import { EmailSettingsPanel } from '@/components/settings/EmailSettingsPanel'
 import { Callout } from '@/components/Callout'
+import { UnsavedChangesGuard } from '@/components/UnsavedChangesGuard'
 import { stripeVerifyNotice, STRIPE_VERIFY_TOAST_BODY } from '@/lib/stripeVerify'
 import { CONTENT_BAND } from '@/lib/contentBand'
 import { COMPANY_EMAIL_HINT, CREDIT_LOW_THRESHOLD_HINT, sharedSettingsNotice, invoiceNumberPreview } from '@/lib/settingsCopy'
@@ -194,14 +195,6 @@ export default function SettingsPage() {
 
   const form = watch()
   const hasChanges = isDirty
-
-  useEffect(() => {
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (hasChanges) { e.preventDefault(); e.returnValue = '' }
-    }
-    window.addEventListener('beforeunload', handleBeforeUnload)
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
-  }, [hasChanges])
 
   const loadSettings = () => {
     setLoading(true); setError(null)
@@ -946,6 +939,8 @@ export default function SettingsPage() {
 
         </div>
       </Tabs>
+
+      <UnsavedChangesGuard dirty={hasChanges} />
 
       {/* Sticky save bar. */}
       {hasChanges && (
