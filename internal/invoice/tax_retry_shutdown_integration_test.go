@@ -2,6 +2,7 @@ package invoice
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 	"time"
 
@@ -82,13 +83,13 @@ type rivalAtCASStore struct {
 	rival func()
 }
 
-func (s *rivalAtCASStore) UpdateStatus(ctx context.Context, tenantID, id string, status domain.InvoiceStatus) (domain.Invoice, error) {
-	if status == domain.InvoiceFinalized && s.rival != nil {
+func (s *rivalAtCASStore) FinalizeDraft(ctx context.Context, tenantID, id string, onFinalized func(tx *sql.Tx, inv domain.Invoice) error) (domain.Invoice, error) {
+	if s.rival != nil {
 		rival := s.rival
 		s.rival = nil
 		rival()
 	}
-	return s.PostgresStore.UpdateStatus(ctx, tenantID, id, status)
+	return s.PostgresStore.FinalizeDraft(ctx, tenantID, id, onFinalized)
 }
 
 // TestRetryTax_RivalFinalizeWinsTheCAS: the connect fan-out and the tax_retry

@@ -501,6 +501,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// and closes the invoice's dunning run (invoice.Service.AfterVoid).
 	invoiceSvc.SetCollectionStopper(stripeAdapter)
 	invoiceSvc.SetDunningResolver(dunningSvc)
+	// Finalize issues relief held on a draft before the invoice can be charged
+	// (release plan row 13).
+	invoiceSvc.SetHeldReliefIssuer(heldReliefIssuerAdapter{svc: creditNoteSvc})
 	// Mark-uncollectible adapter (ADR-036 amendment) — Stripe-standard
 	// dunning terminal action. Wires here because it depends on the
 	// invoice service which is defined just above; other dunning

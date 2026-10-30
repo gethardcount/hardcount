@@ -170,10 +170,10 @@ func TestFinalizeWithDates_RefusesAnUnreadLine(t *testing.T) {
 	}
 	issued, due := lines[0].CreatedAt, lines[0].CreatedAt.AddDate(0, 0, 30)
 
-	_, err = r.store.FinalizeWithDates(r.ctx, r.tenantID, d.ID, issued, due, read)
+	_, err = r.store.FinalizeWithDates(r.ctx, r.tenantID, d.ID, issued, due, read, nil)
 	wantLinesChanged(t, err, "finalize with an unread line")
 
-	inv, err := r.store.FinalizeWithDates(r.ctx, r.tenantID, d.ID, issued, due, append(read, added.ID))
+	inv, err := r.store.FinalizeWithDates(r.ctx, r.tenantID, d.ID, issued, due, append(read, added.ID), nil)
 	if err != nil {
 		t.Fatalf("finalize with every line: %v", err)
 	}

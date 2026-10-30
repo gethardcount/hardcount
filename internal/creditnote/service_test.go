@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -421,6 +422,17 @@ func (m *memStore) LockInvoicesTx(context.Context, *sql.Tx, string, []string) er
 
 func (m *memStore) BeginTx(_ context.Context, _ string) (*sql.Tx, error) {
 	return nil, nil
+}
+
+func (m *memStore) ListHeldReliefTx(_ context.Context, _ *sql.Tx, tenantID, invoiceID string) ([]domain.CreditNote, error) {
+	var out []domain.CreditNote
+	for _, cn := range m.notes {
+		if cn.TenantID == tenantID && cn.InvoiceID == invoiceID && cn.IssuePending && cn.Status == domain.CreditNoteDraft {
+			out = append(out, cn)
+		}
+	}
+	slices.SortFunc(out, func(a, b domain.CreditNote) int { return a.CreatedAt.Compare(b.CreatedAt) })
+	return out, nil
 }
 
 func (m *memStore) TransitionStatusTx(ctx context.Context, _ *sql.Tx, tenantID, id string, from, to domain.CreditNoteStatus) (bool, error) {

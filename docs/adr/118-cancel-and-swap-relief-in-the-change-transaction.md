@@ -418,3 +418,43 @@ before the write-off stays as the fallback if that resolve fails.
 (cancel, same-day cross-interval swap, dunning's final cancel under both
 invoice actions), `internal/invoice/void_effects_integration_test.go` and
 `internal/dunning/resolve_void_integration_test.go`, on real Postgres.
+
+## Amendment 2026-10-30: finalize issues the relief held on a draft
+
+**What was wrong.** "Issue holds that note until the invoice is finalized" was
+true, but nothing issued it at finalize. The operator's Finalize collects in
+the same request (`invoice.Handler.finalize` → `CollectInvoice`), so a card on
+file was charged the full amount at once. `RetryPendingClawbackIssue` issued
+the note up to an hour later (the reconciler tick), on a paid invoice, so the
+relief became balance credit instead of coming off the charge. Example: a
+$50.00 renewal kept as a draft, 5 → 1 seats on Oct 21 holds $14.19; Finalize
+charged $50.00 instead of $35.81. "The fourth is the hold doing its job"
+above did not hold for a draft: what the note can relieve is known the moment
+the draft is finalized.
+
+**Decision.** `invoice.Service.finalize` issues the relief notes held on the
+draft on the finalize transaction, after the flip to finalized and before
+commit (`creditnote.Service.IssueHeldReliefTx`, through the consumer-defined
+`invoice.HeldReliefIssuer`). Each note takes the same draft→issued CAS and the
+same unpaid branch as `Issue` (one `ApplyCreditNoteTx` call site, ADR-061), so
+the reconciler can never apply it again. The invoice is chargeable only at
+the relieved amount; one that the notes leave owing nothing is marked paid on
+that transaction. The notes' tax reversals run after the finalize's tax commit
+(`FinishHeldRelief`). If issuing fails, the finalize rolls back: the invoice
+stays a draft and nothing is charged.
+
+Every way a draft becomes finalized goes through `finalize()` (the operator's
+Finalize, the tax-retry auto-finalize, a test-clock invoice), so all of them
+are covered. The reconciler still issues a note held on an invoice that left
+draft before this change.
+
+**Not closed here.** A note can issue on an open invoice while a charge hold
+is live, between the collector's re-read and the PaymentIntent; the charge
+then goes out at the earlier amount. The window is seconds, and it is not
+specific to drafts.
+
+**Tests.** `internal/api` `TestE2E_HeldReliefIssuesAtFinalize` (real Postgres:
+$35.81 due after Finalize, the note issued, the balance untouched);
+`internal/invoice` `TestFinalizeDraft_HookFailureRollsTheFlipBack`;
+`internal/creditnote/held_relief_test.go` (each note comes off what is due, a
+lost CAS is not applied, issuing stops once the invoice is paid).

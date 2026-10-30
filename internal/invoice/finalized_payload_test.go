@@ -2,6 +2,7 @@ package invoice
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"reflect"
@@ -72,9 +73,9 @@ type getFailsAfterFinalize struct {
 	finalized bool
 }
 
-func (s *getFailsAfterFinalize) FinalizeWithDates(ctx context.Context, tenantID, id string, issuedAt, dueAt time.Time, taxedLineIDs []string) (domain.Invoice, error) {
+func (s *getFailsAfterFinalize) FinalizeWithDates(ctx context.Context, tenantID, id string, issuedAt, dueAt time.Time, taxedLineIDs []string, onFinalized func(tx *sql.Tx, inv domain.Invoice) error) (domain.Invoice, error) {
 	s.finalized = true
-	return s.memStore.FinalizeWithDates(ctx, tenantID, id, issuedAt, dueAt, taxedLineIDs)
+	return s.memStore.FinalizeWithDates(ctx, tenantID, id, issuedAt, dueAt, taxedLineIDs, onFinalized)
 }
 
 func (s *getFailsAfterFinalize) Get(ctx context.Context, tenantID, id string) (domain.Invoice, error) {

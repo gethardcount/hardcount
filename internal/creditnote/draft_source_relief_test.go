@@ -44,7 +44,11 @@ func TestReliefNote_DraftSourceHeldUntilFinalized(t *testing.T) {
 			held.Status, reader.invoices[draft.ID].AmountDueCents)
 	}
 
-	// The invoice is finalized; the reconciler's next Issue applies the note.
+	// Finalize issues held notes on its own tx (IssueHeldReliefTx, release
+	// plan row 13), so the invoice is never charged at the full amount. Issue
+	// still applies a note held on an invoice that left draft some other way
+	// (the reconciler's fallback); a note finalize already issued is refused
+	// there (held_relief_test.go).
 	fin := reader.invoices[draft.ID]
 	fin.Status = domain.InvoiceFinalized
 	reader.invoices[draft.ID] = fin

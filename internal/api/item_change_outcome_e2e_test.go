@@ -1,11 +1,13 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"testing"
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 // What an item change answers about its money (#1280). The change itself is
@@ -157,6 +159,58 @@ func TestE2E_ItemChangeOutcome_DraftInvoiceHeld(t *testing.T) {
 	if got := r.auditInt(domain.AuditActionSubscriptionItemUpdated, "adjusted_cents"); got != 0 {
 		t.Errorf("audit adjusted_cents = %d, want 0", got)
 	}
+}
+
+// Finalizing that draft issues the held note on the finalize transaction, so
+// the invoice owes $35.81 the moment it is finalized, and that is what a
+// charge takes (release plan row 13). Before, finalize left $50.00 due and
+// charged it at once; the reconciler issued the note up to an hour later on
+// the paid invoice, as account credit.
+func TestE2E_HeldReliefIssuesAtFinalize(t *testing.T) {
+	skipShort(t)
+	r := newSeatRig(t, ocP0, 5)
+	r.pay(r.baseID, ocP0.Add(time.Hour))
+	r.must(http.MethodPut, "/v1/subscriptions/"+r.subID+"/pause-collection", ocP0.AddDate(0, 0, 1),
+		map[string]any{"behavior": "keep_as_draft"}, http.StatusOK)
+	oct1 := ocP0.AddDate(0, 1, 0)
+	r.run(oct1.Add(time.Minute))
+	renewal := r.cycleInvoice(r.invoices(), oct1)
+	r.must(http.MethodPatch, "/v1/subscriptions/"+r.subID+"/items/"+r.itemA, oct1.AddDate(0, 0, 20), map[string]any{"quantity": 1}, http.StatusOK)
+	if due := flowInt(r.invoice(renewal.id), "amount_due_cents"); due != 5000 {
+		t.Fatalf("draft has %dc due before finalize, want 5000c (the note is held)", due)
+	}
+
+	r.must(http.MethodPost, "/v1/invoices/"+renewal.id+"/finalize", oct1.AddDate(0, 0, 21), nil, http.StatusOK)
+
+	inv := r.invoice(renewal.id)
+	if st := flowStr(inv, "status"); st != string(domain.InvoiceFinalized) {
+		t.Fatalf("status = %s, want finalized", st)
+	}
+	if due := flowInt(inv, "amount_due_cents"); due != 3581 {
+		t.Errorf("finalized invoice owes %dc, want 3581c (5000 - the 1419 relief)", due)
+	}
+	if got := r.issuedCreditNoteCentsOn(renewal.id); got != 1419 {
+		t.Errorf("issued credit notes on the invoice = %dc, want 1419c", got)
+	}
+	if bal := r.creditBalance(); bal != 0 {
+		t.Errorf("balance = %dc, want 0c (the relief came off the invoice, not to credit)", bal)
+	}
+}
+
+// issuedCreditNoteCentsOn sums the invoice's issued credit notes.
+func (r *seatRig) issuedCreditNoteCentsOn(invID string) int64 {
+	r.t.Helper()
+	tx, err := r.db.BeginTx(context.Background(), postgres.TxBypass, "")
+	if err != nil {
+		r.t.Fatalf("begin: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	var sum int64
+	if err := tx.QueryRowContext(context.Background(),
+		`SELECT COALESCE(SUM(total_cents), 0) FROM credit_notes WHERE invoice_id = $1 AND status = 'issued'`, invID).Scan(&sum); err != nil {
+		r.t.Fatalf("sum issued credit notes: %v", err)
+	}
+	return sum
 }
 
 // An immediate swap to a plan with another billing interval starts a new

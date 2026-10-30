@@ -81,6 +81,10 @@ type Store interface {
 	// TransitionStatusTx is TransitionStatus on the caller's coordinator tx, so
 	// the CAS commits atomically with Issue()'s internal money effect.
 	TransitionStatusTx(ctx context.Context, tx *sql.Tx, tenantID, id string, from, to domain.CreditNoteStatus) (bool, error)
+	// ListHeldReliefTx returns the relief notes held on one invoice
+	// (issue_pending drafts), row-locked on the caller's tx: finalize issues
+	// them before the invoice can be charged.
+	ListHeldReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string) ([]domain.CreditNote, error)
 	UpdateRefundStatus(ctx context.Context, tenantID, id string, status domain.RefundStatus, stripeRefundID string) error
 	// UpdateRefundStatusAudited is UpdateRefundStatus with the ADR-090 in-tx
 	// emission for the operator refund RETRY: `prior` is read under the row

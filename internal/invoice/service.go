@@ -171,6 +171,7 @@ type Service struct {
 	creditNotes    CreditNoteTotaler
 	creditReverser CreditReverser
 	taxRetrier     TaxRetrier
+	heldRelief     HeldReliefIssuer
 	paymentMethods PaymentMethodReader
 	stripeChecker  StripeChecker
 	customerReader CustomerReader
@@ -439,6 +440,21 @@ func (s *Service) AuditCtx(ctx context.Context, inv domain.Invoice) context.Cont
 
 // SetTaxRetrier wires the orchestrator behind the retry-tax endpoint.
 // Production passes billing.Engine; tests can pass any implementation.
+// HeldReliefIssuer issues the relief credit notes held on a draft (a cancel,
+// plan swap or decrease while collection was paused, ADR-118) on the finalize
+// transaction, so the invoice becomes chargeable only at the relieved amount.
+// The credit-note service implements it (wired in api); the returned finish
+// runs after the finalize commits. Without it, finalize charged the full
+// amount and the relief came later as account credit (release plan row 13).
+type HeldReliefIssuer interface {
+	IssueHeldReliefTx(ctx context.Context, tx *sql.Tx, tenantID string, inv domain.Invoice) (finish func(context.Context), err error)
+}
+
+// SetHeldReliefIssuer wires finalize's held-relief step.
+func (s *Service) SetHeldReliefIssuer(h HeldReliefIssuer) {
+	s.heldRelief = h
+}
+
 func (s *Service) SetTaxRetrier(r TaxRetrier) {
 	s.taxRetrier = r
 }
@@ -1591,13 +1607,28 @@ func (s *Service) finalize(ctx context.Context, tenantID, id string, checkTaxExp
 	// clock.Now is simulated time for clock-pinned customers. Net term is the
 	// value the draft was created with. Cycle invoices are born finalized at
 	// build time and keep those dates (the UpdateStatus branch).
+	// Relief held on the draft is issued on the finalize tx, so the invoice
+	// is never chargeable at its full amount (row 13). A failure rolls the
+	// finalize back: the invoice stays a draft and nothing is charged.
+	var finishRelief func(context.Context)
+	onFinalized := func(tx *sql.Tx, flipped domain.Invoice) error {
+		if s.heldRelief == nil {
+			return nil
+		}
+		finish, err := s.heldRelief.IssueHeldReliefTx(ctx, tx, tenantID, flipped)
+		if err != nil {
+			return fmt.Errorf("issue the relief held on this draft: %w", err)
+		}
+		finishRelief = finish
+		return nil
+	}
 	var finalized domain.Invoice
 	if isOperatorComposed(inv) {
 		issuedAt := s.clock.Now(ctx)
 		dueAt := domain.AddDaysIn(issuedAt, inv.NetPaymentTermDays, s.invoiceDisplayLoc(ctx, inv))
-		finalized, err = s.store.FinalizeWithDates(ctx, tenantID, id, issuedAt, dueAt, taxedLineIDs)
+		finalized, err = s.store.FinalizeWithDates(ctx, tenantID, id, issuedAt, dueAt, taxedLineIDs, onFinalized)
 	} else {
-		finalized, err = s.store.UpdateStatus(ctx, tenantID, id, domain.InvoiceFinalized)
+		finalized, err = s.store.FinalizeDraft(ctx, tenantID, id, onFinalized)
 	}
 	if err != nil {
 		return domain.Invoice{}, err
@@ -1631,6 +1662,11 @@ func (s *Service) finalize(ctx context.Context, tenantID, id string, checkTaxExp
 				"error", err, "tenant_id", tenantID, "invoice_id", finalized.ID,
 				"tax_provider", finalized.TaxProvider, "calculation_id", finalized.TaxCalculationID)
 		}
+	}
+	// The held relief's own steps after commit: its tax reversal needs the
+	// invoice's tax transaction, committed just above.
+	if finishRelief != nil {
+		finishRelief(ctx)
 	}
 	// Canonical finalize audit row — written HERE (not per entry point) so
 	// every path through Finalize gets exactly one row: the operator HTTP

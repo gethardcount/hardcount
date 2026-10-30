@@ -1693,53 +1693,99 @@ func (s *Service) Issue(ctx context.Context, tenantID, id string) (domain.Credit
 			}
 		}
 	} else {
-		// Invoice not yet paid — reduce amount_due IN the coordinator tx. The
-		// draft→issued CAS guarantees exactly one caller reaches here per credit
-		// note, so the reduction is idempotent by construction (see the tx
-		// comment above): a concurrent/retried Issue() can't double-reduce.
-		//
-		// The note was sized when it was drafted, and customer credits may have
-		// been applied to the invoice since, so less may be due now than the
-		// note's total. The note reduces what is still due; the rest of it
-		// relieves the part those credits covered, so that many credits come
-		// off the invoice and go back to the customer's balance on this same
-		// tx. Without this the invoice was relieved by more than its total and
-		// the customer's credits were spent on nothing (ADR-061 amendment,
-		// 2026-10-12).
-		dueReduced = min(cn.TotalCents, inv.AmountDueCents)
-		creditsReturned = cn.TotalCents - dueReduced
-		if creditsReturned > 0 && s.credits == nil {
-			return domain.CreditNote{}, fmt.Errorf("credit note %s returns %d credits to the balance but no credit granter is wired", cn.ID, creditsReturned)
-		}
-		applied, err := s.invoices.ApplyCreditNoteTx(ctx, tx, tenantID, cn.InvoiceID, dueReduced, creditsReturned)
+		dueReduced, creditsReturned, settled, err = s.issueUnpaidTx(ctx, tx, tenantID, cn, inv)
 		if err != nil {
-			return domain.CreditNote{}, fmt.Errorf("reduce invoice amount: %w", err)
-		}
-		if creditsReturned > 0 {
-			if err := s.credits.GrantForCreditNoteTx(ctx, tx, tenantID, cn.ID, CreditGrantInput{
-				CustomerID:  cn.CustomerID,
-				Currency:    inv.Currency, // the credits came off this invoice, in its currency
-				AmountCents: creditsReturned,
-				Description: fmt.Sprintf("Credit note %s — credits returned from invoice %s", cn.CreditNoteNumber, inv.InvoiceNumber),
-				InvoiceID:   cn.InvoiceID,
-			}); err != nil {
-				return domain.CreditNote{}, fmt.Errorf("return credits to balance: %w", err)
-			}
-		}
-		// A note that leaves nothing due marks the invoice paid on this tx,
-		// with invoice.paid (ADR-061 amendment 2026-10-19; Stripe: a credit
-		// note that "reduces the balance of an open invoice to 0" makes it
-		// paid). Before, the invoice stayed open at $0: no charge path takes a
-		// $0 invoice, and dunning closed the run as recovered with the invoice
-		// still unpaid, or ran its final action on it. The store leaves the
-		// invoice open while a charge hold is set, the hold's owner included.
-		if applied.AmountDueCents == 0 {
-			if _, settled, err = s.invoices.SettleZeroDueTx(ctx, tx, tenantID, cn.InvoiceID, clock.Now(ctx)); err != nil {
-				return domain.CreditNote{}, fmt.Errorf("mark the invoice paid: %w", err)
-			}
+			return domain.CreditNote{}, err
 		}
 	}
 
+	if err := s.emitIssuedTx(ctx, tx, cn, dueReduced, creditsReturned, settled); err != nil {
+		return domain.CreditNote{}, err
+	}
+
+	// Commit the CAS + internal effect atomically. From here the credit note is
+	// durably issued; the remaining steps are EXTERNAL and recover independently.
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			return domain.CreditNote{}, fmt.Errorf("commit issue tx: %w", err)
+		}
+	}
+
+	// The invoice is paid: close its dunning run now. An active run would
+	// close at its next retry, days away; an escalated one never would, since
+	// the dunning ticks skip escalated runs. Best-effort, after the commit,
+	// like every other settle path's resolve.
+	if settled && s.dunning != nil {
+		if err := s.dunning.ResolveByInvoice(ctx, tenantID, cn.InvoiceID, domain.ResolutionPaymentRecovered); err != nil {
+			slog.WarnContext(ctx, "credit note marked the invoice paid but closing its dunning run failed; an active run closes at its next retry, an escalated one needs Resolve",
+				"credit_note_id", cn.ID, "invoice_id", cn.InvoiceID, "error", err)
+		}
+	}
+
+	// inv is the invoice as locked, before this note: the refund leg reads
+	// its payment status, and a note that marked it paid must not look like a
+	// note on a paid invoice there.
+	return s.runPostIssueExternalLegs(ctx, tenantID, id, cn, inv)
+}
+
+// issueUnpaidTx is Issue's unpaid branch on the caller's tx, after the
+// draft→issued CAS: it lowers what the invoice asks for, returns credits the
+// note relieves beyond that, and marks the invoice paid when nothing is left
+// due. It is the one caller of ApplyCreditNoteTx (ADR-061), shared by Issue
+// and finalize's IssueHeldReliefTx.
+func (s *Service) issueUnpaidTx(ctx context.Context, tx *sql.Tx, tenantID string, cn domain.CreditNote, inv domain.Invoice) (dueReduced, creditsReturned int64, settled bool, err error) {
+	// Invoice not yet paid — reduce amount_due IN the coordinator tx. The
+	// draft→issued CAS guarantees exactly one caller reaches here per credit
+	// note, so the reduction is idempotent by construction (see Issue's
+	// coordinator-tx comment): a concurrent/retried Issue() can't double-reduce.
+	//
+	// The note was sized when it was drafted, and customer credits may have
+	// been applied to the invoice since, so less may be due now than the
+	// note's total. The note reduces what is still due; the rest of it
+	// relieves the part those credits covered, so that many credits come
+	// off the invoice and go back to the customer's balance on this same
+	// tx. Without this the invoice was relieved by more than its total and
+	// the customer's credits were spent on nothing (ADR-061 amendment,
+	// 2026-10-12).
+	dueReduced = min(cn.TotalCents, inv.AmountDueCents)
+	creditsReturned = cn.TotalCents - dueReduced
+	if creditsReturned > 0 && s.credits == nil {
+		return 0, 0, false, fmt.Errorf("credit note %s returns %d credits to the balance but no credit granter is wired", cn.ID, creditsReturned)
+	}
+	applied, err := s.invoices.ApplyCreditNoteTx(ctx, tx, tenantID, cn.InvoiceID, dueReduced, creditsReturned)
+	if err != nil {
+		return 0, 0, false, fmt.Errorf("reduce invoice amount: %w", err)
+	}
+	if creditsReturned > 0 {
+		if err := s.credits.GrantForCreditNoteTx(ctx, tx, tenantID, cn.ID, CreditGrantInput{
+			CustomerID:  cn.CustomerID,
+			Currency:    inv.Currency, // the credits came off this invoice, in its currency
+			AmountCents: creditsReturned,
+			Description: fmt.Sprintf("Credit note %s — credits returned from invoice %s", cn.CreditNoteNumber, inv.InvoiceNumber),
+			InvoiceID:   cn.InvoiceID,
+		}); err != nil {
+			return 0, 0, false, fmt.Errorf("return credits to balance: %w", err)
+		}
+	}
+	// A note that leaves nothing due marks the invoice paid on this tx,
+	// with invoice.paid (ADR-061 amendment 2026-10-19; Stripe: a credit
+	// note that "reduces the balance of an open invoice to 0" makes it
+	// paid). Before, the invoice stayed open at $0: no charge path takes a
+	// $0 invoice, and dunning closed the run as recovered with the invoice
+	// still unpaid, or ran its final action on it. The store leaves the
+	// invoice open while a charge hold is set, the hold's owner included.
+	if applied.AmountDueCents == 0 {
+		if _, settled, err = s.invoices.SettleZeroDueTx(ctx, tx, tenantID, cn.InvoiceID, clock.Now(ctx)); err != nil {
+			return 0, 0, false, fmt.Errorf("mark the invoice paid: %w", err)
+		}
+	}
+
+	return dueReduced, creditsReturned, settled, nil
+}
+
+// emitIssuedTx writes the credit_note.issued audit row on the issuing tx,
+// on the CAS-won path only (ADR-090).
+func (s *Service) emitIssuedTx(ctx context.Context, tx *sql.Tx, cn domain.CreditNote, dueReduced, creditsReturned int64, settled bool) error {
 	// ADR-090 in-tx emission — rides the coordinator tx with the CAS and
 	// the internal effect, and only on the CAS-won path (lost CAS, defers,
 	// and orphan-void produce no new issue fact). One canonical row for
@@ -1766,33 +1812,98 @@ func (s *Service) Issue(ctx context.Context, tenantID, id string) (domain.Credit
 				"currency":                 cn.Currency,
 			},
 		}); auditErr != nil {
-			return domain.CreditNote{}, fmt.Errorf("audit emission: %w", auditErr)
+			return fmt.Errorf("audit emission: %w", auditErr)
 		}
 	}
+	return nil
+}
 
-	// Commit the CAS + internal effect atomically. From here the credit note is
-	// durably issued; the remaining steps are EXTERNAL and recover independently.
-	if tx != nil {
-		if err := tx.Commit(); err != nil {
-			return domain.CreditNote{}, fmt.Errorf("commit issue tx: %w", err)
+// HeldRelief is a relief note IssueHeldReliefTx issued on finalize's tx.
+// FinishHeldRelief runs what has to wait for that tx to commit.
+type HeldRelief struct {
+	CreditNoteID string
+	// Settled: the note left nothing due and marked the invoice paid.
+	Settled bool
+}
+
+// IssueHeldReliefTx issues the relief notes held on a draft invoice (a cancel,
+// plan swap or decrease while collection was paused, ADR-118) on the finalize
+// transaction: after the flip to finalized, before commit. The invoice then
+// becomes chargeable only at the relieved amount. Before, finalize charged the
+// full amount at once and the reconciler issued the note up to an hour later
+// on a paid invoice, so the relief became account credit instead of coming off
+// the charge (release plan row 13).
+//
+// inv is the invoice as finalized, locked by the caller's tx. Each note goes
+// through the same CAS and unpaid branch as Issue, so the reconciler can never
+// apply it a second time. Once a note leaves nothing due, the rest stay held:
+// the invoice is paid, and the reconciler issues them on the paid branch, as
+// account credit.
+func (s *Service) IssueHeldReliefTx(ctx context.Context, tx *sql.Tx, tenantID string, inv domain.Invoice) ([]HeldRelief, error) {
+	notes, err := s.store.ListHeldReliefTx(ctx, tx, tenantID, inv.ID)
+	if err != nil {
+		return nil, err
+	}
+	var issued []HeldRelief
+	cur := inv
+	for _, cn := range notes {
+		won, err := s.store.TransitionStatusTx(ctx, tx, tenantID, cn.ID, domain.CreditNoteDraft, domain.CreditNoteIssued)
+		if err != nil {
+			return nil, fmt.Errorf("claim issue of held relief %s: %w", cn.CreditNoteNumber, err)
+		}
+		if !won {
+			continue
+		}
+		dueReduced, creditsReturned, settled, err := s.issueUnpaidTx(ctx, tx, tenantID, cn, cur)
+		if err != nil {
+			return nil, fmt.Errorf("issue held relief %s: %w", cn.CreditNoteNumber, err)
+		}
+		if err := s.emitIssuedTx(ctx, tx, cn, dueReduced, creditsReturned, settled); err != nil {
+			return nil, err
+		}
+		issued = append(issued, HeldRelief{CreditNoteID: cn.ID, Settled: settled})
+		if settled {
+			break
+		}
+		// The next note sees what this one left due.
+		if cur, err = s.invoices.LockForCreditNoteTx(ctx, tx, tenantID, inv.ID); err != nil {
+			return nil, fmt.Errorf("read the invoice after held relief %s: %w", cn.CreditNoteNumber, err)
 		}
 	}
+	return issued, nil
+}
 
-	// The invoice is paid: close its dunning run now. An active run would
-	// close at its next retry, days away; an escalated one never would, since
-	// the dunning ticks skip escalated runs. Best-effort, after the commit,
-	// like every other settle path's resolve.
-	if settled && s.dunning != nil {
-		if err := s.dunning.ResolveByInvoice(ctx, tenantID, cn.InvoiceID, domain.ResolutionPaymentRecovered); err != nil {
-			slog.WarnContext(ctx, "credit note marked the invoice paid but closing its dunning run failed; an active run closes at its next retry, an escalated one needs Resolve",
-				"credit_note_id", cn.ID, "invoice_id", cn.InvoiceID, "error", err)
+// FinishHeldRelief runs, after finalize commits, what Issue runs after its
+// own commit for each note IssueHeldReliefTx issued: the external legs (the
+// upstream tax reversal; an unpaid-branch note has no refund leg) and, when a
+// note marked the invoice paid, closing its dunning run. Best-effort like
+// Issue's: each leg is recorded and recovered by its own sweep.
+func (s *Service) FinishHeldRelief(ctx context.Context, tenantID string, issued []HeldRelief) {
+	for _, h := range issued {
+		cn, err := s.store.Get(ctx, tenantID, h.CreditNoteID)
+		if err != nil {
+			slog.WarnContext(ctx, "held relief issued at finalize, but reading it back for its tax reversal failed; the reversal sweep retries it",
+				"credit_note_id", h.CreditNoteID, "error", err)
+			continue
+		}
+		ctx := s.bindForInvoice(ctx, tenantID, cn.InvoiceID)
+		inv, err := s.invoices.Get(ctx, tenantID, cn.InvoiceID)
+		if err != nil {
+			slog.WarnContext(ctx, "held relief issued at finalize, but reading its invoice failed; the reversal sweep retries it",
+				"credit_note_id", cn.ID, "error", err)
+			continue
+		}
+		if h.Settled && s.dunning != nil {
+			if err := s.dunning.ResolveByInvoice(ctx, tenantID, cn.InvoiceID, domain.ResolutionPaymentRecovered); err != nil {
+				slog.WarnContext(ctx, "held relief marked the invoice paid but closing its dunning run failed",
+					"credit_note_id", cn.ID, "invoice_id", cn.InvoiceID, "error", err)
+			}
+		}
+		if _, err := s.runPostIssueExternalLegs(ctx, tenantID, cn.ID, cn, inv); err != nil {
+			slog.WarnContext(ctx, "held relief issued at finalize; its external legs failed and are retried by their sweeps",
+				"credit_note_id", cn.ID, "error", err)
 		}
 	}
-
-	// inv is the invoice as locked, before this note: the refund leg reads
-	// its payment status, and a note that marked it paid must not look like a
-	// note on a paid invoice there.
-	return s.runPostIssueExternalLegs(ctx, tenantID, id, cn, inv)
 }
 
 // issueHeld reports whether a draft credit note cannot issue against its

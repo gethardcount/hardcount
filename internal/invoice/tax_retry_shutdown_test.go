@@ -2,6 +2,7 @@ package invoice
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -23,11 +24,8 @@ type finalizeFailingStore struct {
 	*memStore
 }
 
-func (s finalizeFailingStore) UpdateStatus(ctx context.Context, tenantID, id string, status domain.InvoiceStatus) (domain.Invoice, error) {
-	if status == domain.InvoiceFinalized {
-		return domain.Invoice{}, errors.New("connection reset")
-	}
-	return s.memStore.UpdateStatus(ctx, tenantID, id, status)
+func (s finalizeFailingStore) FinalizeDraft(context.Context, string, string, func(*sql.Tx, domain.Invoice) error) (domain.Invoice, error) {
+	return domain.Invoice{}, errors.New("connection reset")
 }
 
 func taxPendingCycleDraft(id string) domain.Invoice {

@@ -53,7 +53,12 @@ type Store interface {
 	// dates via UpdateStatus.
 	// taxedLineIDs are the lines Finalize read before computing tax; it
 	// refuses when the invoice's lines differ (#1298).
-	FinalizeWithDates(ctx context.Context, tenantID, id string, issuedAt, dueAt time.Time, taxedLineIDs []string) (domain.Invoice, error)
+	// onFinalized runs on the finalize tx after the flip, before commit (nil:
+	// nothing); its error rolls the finalize back.
+	FinalizeWithDates(ctx context.Context, tenantID, id string, issuedAt, dueAt time.Time, taxedLineIDs []string, onFinalized func(tx *sql.Tx, inv domain.Invoice) error) (domain.Invoice, error)
+	// FinalizeDraft is the draft→finalized flip for a cycle invoice, with the
+	// same onFinalized hook.
+	FinalizeDraft(ctx context.Context, tenantID, id string, onFinalized func(tx *sql.Tx, inv domain.Invoice) error) (domain.Invoice, error)
 	// StampChargeOutcome records a charge attempt's outcome (processing /
 	// unknown, or a failure with no PaymentIntent) only if no outcome was
 	// recorded since the attempt read attemptSeq — the charge_attempt_seq its
