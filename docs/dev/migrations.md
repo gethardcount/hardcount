@@ -94,13 +94,13 @@ Step 3 needs the local Postgres from
    2026/10/18 01:00:33 INFO migration applied migration="00180 baseline" version=180 duration_ms=493
    2026/10/18 01:00:33 INFO migration applied migration=00181_add_invoice_purchase_order.sql version=181 duration_ms=4
    2026/10/18 01:00:33 INFO migrations applied version=181 applied=2 duration_ms=507
-   migrations applied successfully
+   applied 2 migrations: the database is at version 181
    $ go run ./cmd/hardcount migrate rollback
    rolled back to version 180
    $ go run ./cmd/hardcount migrate
    2026/10/18 01:00:33 INFO migration applied migration=00181_add_invoice_purchase_order.sql version=181 duration_ms=2
    2026/10/18 01:00:33 INFO migrations applied version=181 applied=1 duration_ms=5
-   migrations applied successfully
+   applied 1 migration: the database is at version 181
    ```
 
    `hardcount migrate rollback` undoes one migration at a time, and only when

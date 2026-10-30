@@ -157,28 +157,45 @@ func Up(dsn string) error {
 	return up(context.Background(), dsn, migrationFiles())
 }
 
+// UpSummary is what Up did: how many files it applied, and the version the
+// database is at afterwards.
+type UpSummary struct {
+	Applied int
+	Version int64
+}
+
+// UpReport is Up, also saying what it did, for `hardcount migrate` to print.
+func UpReport(dsn string) (UpSummary, error) {
+	return upReport(context.Background(), dsn, migrationFiles())
+}
+
 // up is Up with the files as a parameter, for tests.
 func up(ctx context.Context, dsn string, fsys fs.FS) error {
+	_, err := upReport(ctx, dsn, fsys)
+	return err
+}
+
+func upReport(ctx context.Context, dsn string, fsys fs.FS) (UpSummary, error) {
 	db, err := openPool(dsn)
 	if err != nil {
-		return err
+		return UpSummary{}, err
 	}
 	defer func() { _ = db.Close() }()
 
 	st, err := readState(ctx, db)
 	if err != nil {
-		return fmt.Errorf("read migration state: %w", err)
+		return UpSummary{}, fmt.Errorf("read migration state: %w", err)
 	}
 	// Before the provider runs: goose creates goose_db_version first thing.
 	switch decide(st) {
 	case actRefuse:
-		return ErrNoMigrationRecord
+		return UpSummary{}, ErrNoMigrationRecord
 	case actRefuseVelox:
-		return ErrVeloxDatabase
+		return UpSummary{}, ErrVeloxDatabase
 	}
 	p, err := newProvider(db, fsys, true)
 	if err != nil {
-		return err
+		return UpSummary{}, err
 	}
 
 	start := time.Now()
@@ -195,7 +212,7 @@ func up(ctx context.Context, dsn string, fsys fs.FS) error {
 		)
 	}
 	if err != nil {
-		return upError(err, fsys, st, results)
+		return UpSummary{Applied: len(results)}, upError(err, fsys, st, results)
 	}
 	if len(results) == 0 {
 		// Read again: another copy may have applied everything while this
@@ -203,21 +220,21 @@ func up(ctx context.Context, dsn string, fsys fs.FS) error {
 		// the provider's GetDBVersion, which takes the migration lock again.
 		store, err := versionStore()
 		if err != nil {
-			return err
+			return UpSummary{}, err
 		}
 		version, err := store.GetLatestVersion(ctx, db)
 		if err != nil {
-			return fmt.Errorf("read the applied version: %w", err)
+			return UpSummary{}, fmt.Errorf("read the applied version: %w", err)
 		}
 		slog.Info("migrations up to date", "version", version)
-		return nil
+		return UpSummary{Version: version}, nil
 	}
 	slog.Info("migrations applied",
 		"version", results[len(results)-1].Source.Version,
 		"applied", len(results),
 		"duration_ms", time.Since(start).Milliseconds(),
 	)
-	return nil
+	return UpSummary{Applied: len(results), Version: results[len(results)-1].Source.Version}, nil
 }
 
 // upError maps goose's error to Hardcount's typed errors.
