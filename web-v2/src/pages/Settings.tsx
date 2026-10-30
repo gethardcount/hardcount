@@ -57,6 +57,7 @@ import { UnsavedChangesGuard } from '@/components/UnsavedChangesGuard'
 import { stripeVerifyNotice, STRIPE_VERIFY_TOAST_BODY } from '@/lib/stripeVerify'
 import { CONTENT_BAND } from '@/lib/contentBand'
 import { COMPANY_EMAIL_HINT, CREDIT_LOW_THRESHOLD_HINT, sharedSettingsNotice, invoiceNumberPreview } from '@/lib/settingsCopy'
+import { API_ORIGIN } from '@/lib/apiOrigin'
 
 const settingsSchema = z.object({
   company_name: z.string().max(255, 'Must be at most 255 characters'),
@@ -105,14 +106,6 @@ const settingsSchema = z.object({
 })
 
 type SettingsFormData = z.infer<typeof settingsSchema>
-
-// Prefer the deployment-configured public API origin (VITE_API_URL) over
-// window.location.origin — in dev the browser loads from Vite at :5173 while
-// the Go API runs on :8080, so window.location.origin produces a misleading
-// value for both the "API Endpoint" display and the Stripe Webhook URL
-// (Stripe can't reach a dev-server port). Falls back to the current origin
-// so production deployments that don't set the env var still render.
-const API_ORIGIN = import.meta.env.VITE_API_URL || window.location.origin
 
 // Common net-term presets. Covers 95% of real-world billing setups; the
 // custom field below handles everything else (e.g. Net 45, Net 90).

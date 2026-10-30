@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { StatusBadge as SharedStatusBadge } from '@/components/StatusBadge'
-import { genericStatus } from '@/lib/statusLabels'
+import { webhookStatus } from '@/lib/statusLabels'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -171,7 +171,7 @@ export default function WebhookEventsPage() {
       queryClient.invalidateQueries({ queryKey: ['webhook-deliveries'] })
       setExpanded(id)
     } catch (err) {
-      showApiError(err, 'Failed to replay event')
+      showApiError(err, "Couldn't resend event")
     }
   })
 
@@ -281,7 +281,7 @@ function FrameRows({
           <div className="flex items-center gap-2">
             <Badge variant="outline">{frame.event_type}</Badge>
             {frame.replay_of_event_id && (
-              <Badge variant="secondary" className="text-xs">replay</Badge>
+              <Badge variant="secondary" className="text-xs">Resent</Badge>
             )}
           </div>
           <div className="text-xs text-muted-foreground font-mono mt-1">
@@ -295,7 +295,7 @@ function FrameRows({
             : '\u2014'}
         </TableCell>
         <TableCell>
-          <StatusBadge status={frame.status} />
+          <SharedStatusBadge status={webhookStatus(frame.status)} />
         </TableCell>
         <TableCell className="text-muted-foreground" title={formatDateTime(frame.created_at)}>
           {timeAgo(frame.created_at, wallClockNow())}
@@ -311,7 +311,7 @@ function FrameRows({
             }}
           >
             <RefreshCw size={12} className="mr-1.5" />
-            Replay
+            Resend
           </Button>
         </TableCell>
       </TableRow>
@@ -386,7 +386,7 @@ function DeliveryTimeline({ eventID, highlightEventId }: { eventID: string; high
             retry ladder can span up to 6 HTTP attempts (attempt_count). The
             old label under-counted reality by up to 6×. */}
         Delivery Timeline ({deliveries.length} {deliveries.length === 1 ? 'delivery' : 'deliveries'}
-        {replayCount > 0 && ` · original + ${replayCount} ${replayCount === 1 ? 'replay' : 'replays'}`})
+        {replayCount > 0 && ` · original + ${replayCount} ${replayCount === 1 ? 'resend' : 'resends'}`})
       </h3>
       <ol className="space-y-3">
         {deliveries.map((d, i) => (
@@ -435,9 +435,10 @@ function DeliveryRow({
                 numbering. "Delivery #" matches what the number actually
                 counts. */}
             <span className="font-medium text-sm">Delivery #{delivery.attempt_no}</span>
-            <StatusBadge status={delivery.status} />
+            {/* Tried once it has a response code or an error. */}
+            <SharedStatusBadge status={webhookStatus(delivery.status, delivery.status_code > 0 || !!delivery.error)} />
             {delivery.is_replay && (
-              <Badge variant="secondary" className="text-xs">replay clone</Badge>
+              <Badge variant="secondary" className="text-xs">Resent</Badge>
             )}
             {delivery.status_code > 0 && (
               <Badge variant="outline" className="font-mono text-xs">HTTP {delivery.status_code}</Badge>
@@ -498,10 +499,6 @@ function DeliveryRow({
   )
 }
 
-// A delivery's status in the shared vocabulary (lib/statusLabels).
-function StatusBadge({ status }: { status: string }) {
-  return <SharedStatusBadge status={genericStatus(status)} />
-}
 
 function ConnectionPill({ status, count }: { status: StreamStatus; count: number }) {
   const label =

@@ -53,6 +53,8 @@ import { TableSkeleton } from '@/components/ui/TableSkeleton'
 import { Loader2, Plus, Webhook } from 'lucide-react'
 import { EmptyState } from '@/components/EmptyState'
 import { ScrollPane } from '@/components/ui/scroll-pane'
+import { ShowOnceSecretDialog } from '@/components/ShowOnceSecretDialog'
+import { DOCS_BASE } from '@/lib/apiOrigin'
 
 const createEndpointSchema = z.object({
   url: z.string().min(1, 'URL is required').refine(v => {
@@ -203,8 +205,8 @@ function EndpointsTab() {
                     <TableCell className="font-mono text-sm max-w-xs" title={ep.url}>
                       <div className="truncate hover:underline">{ep.url}</div>
                       {rotationActive && ep.secondary_secret_expires_at && (
-                        <div className="text-xs text-emerald-700 dark:text-emerald-400 font-normal mt-0.5">
-                          Dual-signing until {formatDateTime(ep.secondary_secret_expires_at)}
+                        <div className="text-xs text-muted-foreground font-sans font-normal mt-0.5">
+                          Old signing secret works until {formatDateTime(ep.secondary_secret_expires_at)}
                         </div>
                       )}
                     </TableCell>
@@ -305,51 +307,23 @@ function EndpointsTab() {
           their previous secret keeps working for the grace window,
           preventing a panic deploy. */}
       {createdSecret && (
-        <Dialog open onOpenChange={() => setCreatedSecret(null)}>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle>Signing secret</DialogTitle>
-              {createdSecret.secondary_valid_until ? (
-                <DialogDescription>
-                  Save this secret now. It won't be shown again. The previous secret stays valid in parallel during the rollout window below.
-                </DialogDescription>
-              ) : (
-                <DialogDescription>
-                  Save this signing secret now. It will not be shown again.
-                </DialogDescription>
-              )}
-            </DialogHeader>
-            <div className="space-y-3">
-              <div className="bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 rounded-lg p-4">
-                <p className="text-xs text-amber-700 dark:text-amber-400 font-medium mb-1">New signing secret</p>
-                <div className="flex items-start gap-2">
-                  <p className="font-mono text-sm text-amber-900 dark:text-amber-300 break-all select-all flex-1">{createdSecret.secret}</p>
-                  <Button variant="outline" size="sm" className="shrink-0"
-                    onClick={() => {
-                      navigator.clipboard.writeText(createdSecret.secret)
-                      toast.success('Copied to clipboard')
-                    }}>
-                    Copy
-                  </Button>
-                </div>
-              </div>
-
-              {createdSecret.secondary_valid_until && (
-                <div className="bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 rounded-lg p-4 space-y-1">
-                  <p className="text-xs font-medium text-emerald-800 dark:text-emerald-300">
-                    Previous secret valid until {formatDateTime(createdSecret.secondary_valid_until)}
-                  </p>
-                  <p className="text-xs text-emerald-700/80 dark:text-emerald-400/80">
-                    Webhook deliveries are signed with both secrets during this window, so your receiver keeps accepting requests while you deploy the new key. After that the old secret is dropped.
-                  </p>
-                </div>
-              )}
-            </div>
-            <DialogFooter>
-              <Button onClick={() => setCreatedSecret(null)}>Done</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        <ShowOnceSecretDialog
+          title={createdSecret.secondary_valid_until ? 'Signing secret rotated' : 'Signing secret'}
+          label={createdSecret.secondary_valid_until ? 'New signing secret' : 'Signing secret'}
+          secret={createdSecret.secret}
+          onDone={() => setCreatedSecret(null)}
+        >
+          <p className="text-xs text-muted-foreground">
+            Every delivery carries a <code className="font-mono">Hardcount-Signature</code> header made with this secret.
+            Check it before you trust a request: <a href={`${DOCS_BASE}/webhooks.md`} target="_blank" rel="noreferrer" className="text-primary underline-offset-2 hover:underline">how to check the signature</a>.
+          </p>
+          {createdSecret.secondary_valid_until && (
+            <p className="text-xs text-muted-foreground">
+              <span className="font-medium text-foreground">The old secret works until {formatDateTime(createdSecret.secondary_valid_until)}.</span>{' '}
+              Until then each delivery is signed with both, so your receiver keeps accepting requests while you deploy the new one.
+            </p>
+          )}
+        </ShowOnceSecretDialog>
       )}
 
       {/* Delete confirmation */}

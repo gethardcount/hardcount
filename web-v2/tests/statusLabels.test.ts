@@ -1,7 +1,7 @@
 // One status vocabulary: each state has one label and one tone everywhere.
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { dunningRunStatus, genericStatus, humanizeStatus, invoicePaymentChip, invoiceStatus, sentEmailStatus, subscriptionFlags, subscriptionStatus, trialBadgeEndsAt } from '../src/lib/statusLabels.ts'
+import { dunningRunStatus, genericStatus, humanizeStatus, invoicePaymentChip, invoiceStatus, sentEmailStatus, subscriptionFlags, subscriptionStatus, trialBadgeEndsAt, webhookStatus } from '../src/lib/statusLabels.ts'
 
 const now = Date.parse('2026-10-16T12:00:00Z')
 
@@ -97,4 +97,15 @@ test('credit notes and invitations have words and tones', () => {
   assert.deepEqual(genericStatus('voided'), { label: 'Void', tone: 'neutral' })
   assert.deepEqual(genericStatus('accepted'), { label: 'Accepted', tone: 'success' })
   assert.deepEqual(genericStatus('paused'), { label: 'Paused', tone: 'warning' })
+})
+
+// Webhooks say what happened to the event, not the table's code.
+test('a webhook event or delivery reads Delivered, Sending, Retrying, In progress, Failed, Not sent', () => {
+  assert.deepEqual(webhookStatus('delivered'), { label: 'Delivered', tone: 'success' })
+  assert.deepEqual(webhookStatus('succeeded', true), { label: 'Delivered', tone: 'success' })
+  assert.deepEqual(webhookStatus('pending', false), { label: 'Sending', tone: 'info' })
+  assert.deepEqual(webhookStatus('pending', true), { label: 'Retrying', tone: 'warning' })
+  assert.deepEqual(webhookStatus('pending'), { label: 'In progress', tone: 'info' })
+  assert.deepEqual(webhookStatus('failed', true), { label: 'Failed', tone: 'danger' })
+  assert.deepEqual(webhookStatus('no_endpoints'), { label: 'Not sent', tone: 'neutral' })
 })

@@ -172,3 +172,22 @@ const LABELS: Record<string, string> = {
 export function genericStatus(code: string): StatusDisplay {
   return { label: LABELS[code] ?? humanizeStatus(code), tone: TONES[code] ?? 'neutral' }
 }
+
+// webhookStatus is a webhook event's or delivery's badge. An event rolls its
+// deliveries up (pending, failed, delivered) or no endpoint listens for it
+// (no_endpoints); a delivery is pending, succeeded or failed. A pending
+// delivery is "Sending" before its first try and "Retrying" after one failed;
+// an event can't tell which, so it is "In progress". Raw codes used to show
+// ("succeeded", "pending").
+export function webhookStatus(status: string, tried?: boolean): StatusDisplay {
+  switch (status) {
+    case 'delivered':
+    case 'succeeded': return { label: 'Delivered', tone: 'success' }
+    case 'pending':
+      if (tried === undefined) return { label: 'In progress', tone: 'info' }
+      return tried ? { label: 'Retrying', tone: 'warning' } : { label: 'Sending', tone: 'info' }
+    case 'failed': return { label: 'Failed', tone: 'danger' }
+    case 'no_endpoints': return { label: 'Not sent', tone: 'neutral' }
+  }
+  return genericStatus(status)
+}

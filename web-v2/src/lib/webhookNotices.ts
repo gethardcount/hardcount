@@ -37,7 +37,7 @@ export function pausedEndpointNotice(active: boolean | undefined): { title: stri
   if (active !== false) return null
   return {
     title: 'Endpoint paused',
-    body: 'No events are sent here, and Replay is off, until you resume it.',
+    body: 'No events are sent here, and Resend is off, until you resume it.',
   }
 }
 

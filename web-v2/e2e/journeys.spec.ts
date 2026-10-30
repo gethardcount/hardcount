@@ -1042,6 +1042,29 @@ test('the setup checklist ticks Connect Stripe only for a working key in this mo
   await expect(step.locator('[aria-label="done"]')).toHaveCount(1)
 })
 
+test('a new API key shows once, with a try-it line, and closes only from "I\'ve copied it"', async ({ page }) => {
+  await page.goto('/api-keys')
+  const main = page.getByRole('main')
+  await expect(main.getByText('Quick start', { exact: true })).toBeVisible()
+  const origin = new URL(page.url()).origin
+  await expect(main.getByText(origin, { exact: true })).toBeVisible()
+
+  await page.getByRole('button', { name: 'Create API key' }).click()
+  await page.getByPlaceholder('e.g. Production, Staging, CI/CD').fill(`e2e show-once ${uniq()}`)
+  await page.getByRole('button', { name: 'Create key' }).click()
+  const shown = page.getByRole('dialog', { name: 'API key created' })
+  await expect(shown).toBeVisible()
+  const key = await shown.locator('code').first().innerText()
+  await expect(shown.locator('code').nth(1)).toHaveText(`curl ${origin}/v1/whoami -H "Authorization: Bearer ${key}"`)
+  // Esc and a click outside used to close it, and the key was lost.
+  await page.keyboard.press('Escape')
+  await page.mouse.click(5, 450)
+  await expect(shown).toBeVisible()
+  await expect(shown.getByRole('button', { name: 'Close' })).toHaveCount(0)
+  await shown.getByRole('button', { name: "I've copied it" }).click()
+  await expect(shown).toHaveCount(0)
+})
+
 test('Home defines MRR on its card', async ({ page }) => {
   await page.goto('/')
   await expect(page.getByText('Monthly recurring revenue: the base fees of active subscriptions, per month.', { exact: false })).toBeVisible()
@@ -1186,7 +1209,7 @@ test('held usage released into a plan with no matching price says so', async ({ 
 })
 
 // The endpoint page reads the endpoint on its own, apart from its deliveries.
-// Resume must refresh that read: the badge, the notice and Replay change at
+// Resume must refresh that read: the badge, the notice and Resend change at
 // once, not after a reload.
 test('resuming a paused endpoint on its page shows it active', async ({ page }) => {
   const created = await api<{ endpoint: { id: string } }>('POST', '/webhook-endpoints/endpoints', {
