@@ -872,17 +872,32 @@ test('a refund made in Stripe after a failed refund: Attach to the note, and Ret
 })
 
 // A credit note whose card refund is a refund made in Stripe carries a
-// "Recorded from Stripe" tag and the refund's id, on the Credit notes page and
-// under the paid invoice, where it links to the payment in Stripe.
+// "Recorded from Stripe" tag: on the Credit notes page, with the refund's id
+// in its tooltip and no extra width for the table, and under the paid invoice
+// with the refund's id and a link to the payment in Stripe.
 test('a credit note recorded from Stripe is tagged, with its refund, on the credit notes page and the invoice', async ({ page }) => {
   const { customer, invoice } = await finalizedOneOff()
   await stubPaidWithRefundNotice(page, invoice.id, 'seen_late')
-  await stubCreditNoteList(page, [stubNote(invoice.id, customer.id, { recorded_from_stripe: true, stripe_refund_id: STRIPE_REFUND_ID })])
+  let recorded = true
+  await page.route(url => url.pathname === '/v1/credit-notes', route => route.request().method() === 'GET'
+    ? route.fulfill({ json: { data: [stubNote(invoice.id, customer.id, recorded ? { recorded_from_stripe: true, stripe_refund_id: STRIPE_REFUND_ID } : {})], total: 1 } })
+    : route.fallback())
+  // How far the list's table runs past its card, which scrolls it sideways.
+  const overflow = () => page.locator('[data-slot="table-container"]').evaluate(c => c.scrollWidth - c.clientWidth)
 
   await page.goto('/credit-notes')
   const row = page.getByRole('row').filter({ hasText: 'CN-E2E-1' })
-  await expect(row.getByText('Recorded from Stripe', { exact: true })).toBeVisible()
-  await expect(row.getByText(STRIPE_REFUND_ID, { exact: true })).toBeVisible()
+  const tag = row.getByText('Recorded from Stripe', { exact: true })
+  await expect(tag).toBeVisible()
+  await expect(tag).toHaveAttribute('title', `Stripe refund ${STRIPE_REFUND_ID}`)
+  const withTag = await overflow()
+  // The same note without the tag: the table is no wider with it.
+  recorded = false
+  await page.reload()
+  await expect(row).toBeVisible()
+  await expect(tag).toHaveCount(0)
+  expect(withTag, 'the tag widens the credit notes table').toBeLessThanOrEqual(await overflow())
+  recorded = true
 
   await page.goto(`/invoices/${invoice.id}`)
   const adjustments = page.getByText('Post-payment adjustments', { exact: true }).locator('..')

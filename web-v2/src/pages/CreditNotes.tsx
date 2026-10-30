@@ -464,13 +464,8 @@ export default function CreditNotesPage() {
                           <span className="inline-flex items-center gap-2">
                             <p className="text-sm font-medium text-foreground">{note.credit_note_number}</p>
                             {note.is_simulated && <SimulatedBadge title="Dates on this credit note follow its test clock's calendar, not today's date" />}
-                            <RecordedFromStripeTag note={note} />
                           </span>
                           <p className="text-xs text-muted-foreground mt-0.5">{channelLabel}</p>
-                          {/* The refund made in Stripe this note records (ADR-134). */}
-                          {note.recorded_from_stripe && note.stripe_refund_id && (
-                            <p className="text-xs text-muted-foreground mt-0.5 font-mono break-all">{note.stripe_refund_id}</p>
-                          )}
                         </TableCell>
                         <TableCell className="text-sm">
                           <Link to={`/customers/${note.customer_id}`} className="text-primary hover:underline">
@@ -489,6 +484,16 @@ export default function CreditNotesPage() {
                             the two are identical, so nothing is lost either way. */}
                         <TableCell className="text-sm text-muted-foreground max-w-[220px] truncate" title={creditNoteReasonLabel(note.reason)}>
                           {creditNoteReasonLabel(note.reason)}
+                          {/* A note whose card refund is a refund made in Stripe
+                              (ADR-134). Under the reason, which is capped in
+                              width, so the tag adds no width to the table; the
+                              refund's id is in the tag's tooltip, and on the
+                              invoice. */}
+                          {note.recorded_from_stripe && (
+                            <div className="mt-0.5">
+                              <RecordedFromStripeTag note={note} />
+                            </div>
+                          )}
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-1.5">

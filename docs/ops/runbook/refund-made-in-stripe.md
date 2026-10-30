@@ -83,8 +83,11 @@ before it acts:
 
 With several refunds flagged on one invoice, each gets its own row of
 buttons. On an invoice whose payment Hardcount also flagged, the notice is
-titled "Payment needs review" and carries the same buttons after its own. A note recorded either way shows the tag "Recorded from Stripe" on
-the Credit notes page and under the invoice, with the refund's id.
+titled "Payment needs review" and carries the same buttons after its own.
+
+A note recorded either way shows the tag "Recorded from Stripe". Under the
+invoice the refund's id is shown with it; on the Credit notes page the id is
+in the tag's tooltip.
 
 The same steps through the API follow. Act on a `needs_review` refund by its
 `review_reason`:
