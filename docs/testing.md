@@ -108,7 +108,7 @@ the built dashboard (`vite preview`, which forwards `/v1` to the API).
   test-mode secret key from `hardcount-bootstrap`. Each test uses its own unique
   names, so the suite can run many times against the same database. Use a
   database of your own anyway, so the tests never touch your dev data.
-- **In CI:** the `e2e` job runs on every PR. It is not a required check.
+- **In CI:** the `e2e` job runs on every PR and is a required check: a PR cannot merge while it fails.
   On a failure, download the `playwright-report` artifact and open its trace
   with `npx playwright show-trace`.
 

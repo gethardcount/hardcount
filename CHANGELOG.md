@@ -26,6 +26,7 @@ original text.
 
 ### Changed
 
+- **A pull request merges only when the upgrade, pricing and browser checks pass on a branch up to date with `main`.** The `migrations`, `pricing-shapes` and `e2e` jobs are now required, so two pull requests can no longer both merge the same migration number. ([#1495](https://github.com/gethardcount/hardcount/pull/1495))
 - **Find a customer's invoices from the Invoices list.** Search matches the customer's name or email as well as the invoice number, and a customer picker filters the list to one customer. `GET /v1/invoices?search=` matches the same way. ([#1483](https://github.com/gethardcount/hardcount/pull/1483))
 - **Invoices and Dunning work on a phone.** At phone width each row reads in two lines: number or customer with the amount, then the status with the due date or next retry, and **Open invoice** on a dunning run. An invoice's lines show quantity and unit price under the item. The amount and status were off the right edge of the screen. ([#1484](https://github.com/gethardcount/hardcount/pull/1484))
 - **Settings asks before unsaved changes are lost.** Leaving the page by a link or Back, or flipping the Test/Live switch, with changes not yet saved now asks "Discard changes?". Moving between Settings tabs and signing out don't ask. A reload or closed tab already showed the browser's own warning. ([#1479](https://github.com/gethardcount/hardcount/pull/1479))
