@@ -81,9 +81,11 @@ function statusPill(page: Page, label: string) {
   return page.locator('[data-slot="badge"]').filter({ hasText: new RegExp(`^${label}$`) })
 }
 
-// A labelled figure (a total, a date, a balance) and its value.
+// A labelled figure (a total, a date, a balance) and its value. On the
+// invoice page the summary strip repeats some labels (Amount due, Due) above
+// the document; the last match is the document's own figure.
 function figure(scope: Page | Locator, label: string) {
-  return scope.getByText(label, { exact: true }).locator('..')
+  return scope.getByText(label, { exact: true }).last().locator('..')
 }
 
 // The customer page's row for an invoice under "Recent invoices".
