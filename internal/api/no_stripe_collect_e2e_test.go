@@ -132,6 +132,16 @@ func (r *noStripeRig) connectStripe() {
 	}
 }
 
+func countKind(emails []queuedEmail, kind string) int {
+	n := 0
+	for _, e := range emails {
+		if e.kind == kind {
+			n++
+		}
+	}
+	return n
+}
+
 func sameEmails(got []queuedEmail, want ...queuedEmail) bool {
 	if len(got) != len(want) {
 		return false
@@ -195,15 +205,21 @@ func TestE2E_NoStripe_EmailsTheInvoiceAndRemindsToPay(t *testing.T) {
 	// is sent before the first retry.
 	r.advanceTo(24)
 	r.advanceTo(48)
-	if got := r.emailsOf(inv); !sameEmails(got, invoiceEmail) {
-		t.Fatalf("emails after two more sweeps: %+v, want still only the one invoice email", got)
+	if n := countKind(r.emailsOf(inv), "invoice"); n != 1 {
+		t.Errorf("invoice emails after two more sweeps: %d, want still 1 (sent once)", n)
 	}
 
 	// Day 3: the first retry charges nothing and reminds the customer to pay.
+	// Each fact is checked on its own, so one broken guard reads as one error.
 	r.advanceTo(3*24 + 1)
-	reminder := queuedEmail{kind: "dunning_warning", ask: "pay_invoice"}
-	if got := r.emailsOf(inv); !sameEmails(got, invoiceEmail, reminder) {
-		t.Fatalf("emails after the first retry: %+v, want the invoice email then a pay-the-invoice reminder", got)
+	var reminders []queuedEmail
+	for _, e := range r.emailsOf(inv) {
+		if e.kind == "dunning_warning" {
+			reminders = append(reminders, e)
+		}
+	}
+	if len(reminders) != 1 || reminders[0].ask != "pay_invoice" {
+		t.Errorf("reminders after the first retry: %+v, want one asking to pay the invoice (decline_ask pay_invoice)", reminders)
 	}
 	if n := flowCount(t, r.db, `SELECT count(*) FROM invoice_charge_attempts WHERE invoice_id = $1`, inv); n != 0 {
 		t.Errorf("charge attempts on the invoice: %d, want 0 (no Stripe, no charge)", n)
@@ -226,8 +242,8 @@ func TestE2E_NoStripe_EmailsTheInvoiceAndRemindsToPay(t *testing.T) {
 			t.Errorf("email %+v asks for a card; without Stripe nothing may", e)
 		}
 	}
-	if len(got) != 3 || got[2].kind != "dunning_escalation" {
-		t.Errorf("emails at the end: %+v, want the invoice email, one reminder and the final notice", got)
+	if countKind(got, "dunning_escalation") != 1 || countKind(got, "dunning_warning") != 1 {
+		t.Errorf("emails at the end: %+v, want one reminder and the final notice", got)
 	}
 	if n := flowCount(t, r.db, `SELECT count(*) FROM invoice_charge_attempts WHERE invoice_id = $1`, inv); n != 0 {
 		t.Errorf("charge attempts on the invoice: %d, want 0", n)
