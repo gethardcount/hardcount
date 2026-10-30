@@ -887,9 +887,11 @@ test('a credit note recorded from Stripe is tagged, with its refund, on the cred
 
   await page.goto('/credit-notes')
   const row = page.getByRole('row').filter({ hasText: 'CN-E2E-1' })
-  const tag = row.getByText('Recorded from Stripe', { exact: true })
+  // Its tooltip names it and the refund in full: under a short reason the
+  // tag is cut to the column's width.
+  const tag = row.getByTitle(`Recorded from Stripe: refund ${STRIPE_REFUND_ID}`)
   await expect(tag).toBeVisible()
-  await expect(tag).toHaveAttribute('title', `Stripe refund ${STRIPE_REFUND_ID}`)
+  await expect(tag).toContainText('Recorded from Stripe')
   const withTag = await overflow()
   // The same note without the tag: the table is no wider with it.
   recorded = false

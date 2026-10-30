@@ -268,11 +268,19 @@ function DismissStripeRefundDialog({ invoiceId, refund, amountLabel, dayLabel, o
 // RecordedFromStripeTag marks a credit note whose card refund is a refund
 // made in Stripe outside Hardcount (recorded_from_stripe). Hardcount sent no
 // refund for it; the refund's id says which one it is.
-export function RecordedFromStripeTag({ note }: { note: Pick<CreditNote, 'recorded_from_stripe' | 'stripe_refund_id'> }) {
+// The text truncates when the tag is given less room than it needs.
+export function RecordedFromStripeTag({ note, className }: {
+  note: Pick<CreditNote, 'recorded_from_stripe' | 'stripe_refund_id'>
+  className?: string
+}) {
   if (!note.recorded_from_stripe) return null
   return (
-    <Badge variant="info" title={note.stripe_refund_id ? `Stripe refund ${note.stripe_refund_id}` : undefined}>
-      Recorded from Stripe
+    <Badge
+      variant="info"
+      className={className}
+      title={note.stripe_refund_id ? `Recorded from Stripe: refund ${note.stripe_refund_id}` : 'Recorded from Stripe'}
+    >
+      <span className="truncate">Recorded from Stripe</span>
     </Badge>
   )
 }

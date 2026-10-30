@@ -485,13 +485,15 @@ export default function CreditNotesPage() {
                         <TableCell className="text-sm text-muted-foreground max-w-[220px] truncate" title={creditNoteReasonLabel(note.reason)}>
                           {creditNoteReasonLabel(note.reason)}
                           {/* A note whose card refund is a refund made in Stripe
-                              (ADR-134). Under the reason, which is capped in
-                              width, so the tag adds no width to the table; the
-                              refund's id is in the tag's tooltip, and on the
-                              invoice. */}
+                              (ADR-134), under the reason. The wrapper is 0 wide
+                              to the table's sizing (w-0) and then takes the
+                              column's width (min-w-full), so the tag never
+                              widens the table: under a short reason it is cut
+                              with an ellipsis, and its tooltip names it in full
+                              with the refund's id (also shown on the invoice). */}
                           {note.recorded_from_stripe && (
-                            <div className="mt-0.5">
-                              <RecordedFromStripeTag note={note} />
+                            <div className="mt-0.5 w-0 min-w-full">
+                              <RecordedFromStripeTag note={note} className="max-w-full h-4 px-1.5 py-0 text-[10px]" />
                             </div>
                           )}
                         </TableCell>
