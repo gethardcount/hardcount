@@ -32,8 +32,7 @@ export type PostV1CreditNotesBody = {
      * note's card refund, Stripe's `refunds[]` shape: Hardcount
      * reads the refund from Stripe and calls nothing else
      * there for it. The refund must be of the payment that paid
-     * this invoice, not made by Hardcount, and not failed or
-     * canceled; `refund_amount_cents` must be its amount,
+     * this invoice, not made by Hardcount, and succeeded; `refund_amount_cents` must be its amount,
      * `credit_amount_cents` 0, and `auto_issue` true (the
      * note is issued at once). The caps on the invoice still
      * apply. A refund Hardcount flagged on the invoice

@@ -33,17 +33,31 @@ func TestDecideStripeRefund(t *testing.T) {
 		return domain.CreditNote{Status: domain.CreditNoteIssued, TotalCents: total, RefundAmountCents: refund}
 	}
 	cases := []struct {
-		name     string
-		inv      func(*domain.Invoice)
-		snap     func(*domain.StripeRefundSnapshot)
-		commit   bool
-		existing []domain.CreditNote
-		want     stripeRefundDecision
+		name      string
+		inv       func(*domain.Invoice)
+		snap      func(*domain.StripeRefundSnapshot)
+		commit    bool
+		existing  []domain.CreditNote
+		firstSeen func(domain.StripeRefundSnapshot) time.Time
+		want      stripeRefundDecision
 	}{
 		{name: "full refund of the invoice's own payment", want: stripeRefundDecision{outcome: domain.StripeRefundRecordedAsCreditNote}},
-		{name: "pending refund is recorded too (its note's refund is pending)",
-			snap: func(s *domain.StripeRefundSnapshot) { s.Status = domain.StripeRefundPending },
-			want: stripeRefundDecision{outcome: domain.StripeRefundRecordedAsCreditNote}},
+		{name: "pending refund waits", snap: func(s *domain.StripeRefundSnapshot) { s.Status = domain.StripeRefundPending },
+			want: stripeRefundDecision{outcome: domain.StripeRefundAwaiting}},
+		{name: "requires_action refund waits", snap: func(s *domain.StripeRefundSnapshot) { s.Status = domain.StripeRefundRequiresAction },
+			want: stripeRefundDecision{outcome: domain.StripeRefundAwaiting}},
+		{name: "succeeded a day after a pending first sighting: the rule counts from the first sighting",
+			snap:      func(s *domain.StripeRefundSnapshot) { s.EventAt = s.CreatedAt.Add(30 * time.Hour) },
+			firstSeen: func(s domain.StripeRefundSnapshot) time.Time { return s.CreatedAt.Add(time.Minute) },
+			want:      stripeRefundDecision{outcome: domain.StripeRefundRecordedAsCreditNote}},
+		{name: "first seen late, pending, succeeded later",
+			snap:      func(s *domain.StripeRefundSnapshot) { s.EventAt = s.CreatedAt.Add(60 * time.Hour) },
+			firstSeen: func(s domain.StripeRefundSnapshot) time.Time { return s.CreatedAt.Add(30 * time.Hour) },
+			want:      stripeRefundDecision{outcome: domain.StripeRefundNeedsReview, reviewReason: domain.StripeRefundReviewSeenLate}},
+		{name: "a note's card refund failed: flagged, whatever the caps say",
+			existing: []domain.CreditNote{{Status: domain.CreditNoteIssued, TotalCents: 4000, RefundAmountCents: 4000, RefundStatus: domain.RefundFailed}},
+			snap:     func(s *domain.StripeRefundSnapshot) { s.AmountCents = 4000 },
+			want:     stripeRefundDecision{outcome: domain.StripeRefundNeedsReview, reviewReason: domain.StripeRefundReviewCreditNoteRefundFailed}},
 		{name: "failed at first sighting", snap: func(s *domain.StripeRefundSnapshot) { s.Status = domain.StripeRefundFailed },
 			want: stripeRefundDecision{outcome: domain.StripeRefundNotRefunded}},
 		{name: "canceled at first sighting", snap: func(s *domain.StripeRefundSnapshot) { s.Status = domain.StripeRefundCanceled },
@@ -111,7 +125,11 @@ func TestDecideStripeRefund(t *testing.T) {
 			if tc.snap != nil {
 				tc.snap(&snap)
 			}
-			got, err := decideStripeRefund(inv, snap, tc.commit, tc.existing)
+			firstSeen := snap.EventAt
+			if tc.firstSeen != nil {
+				firstSeen = tc.firstSeen(snap)
+			}
+			got, err := decideStripeRefund(inv, snap, firstSeen, tc.commit, tc.existing)
 			if err != nil {
 				t.Fatalf("decide: %v", err)
 			}

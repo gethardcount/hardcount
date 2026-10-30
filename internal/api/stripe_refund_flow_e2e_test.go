@@ -46,6 +46,12 @@ type refundFlow struct {
 	// duringRefund runs inside the stub's POST /v1/refunds, while
 	// Hardcount's refund call is "at Stripe", with the refund's id and form.
 	duringRefund func(refundID string, form url.Values)
+	// duringRead runs inside the stub's GET /v1/refunds/{id}, while
+	// Hardcount reads a refund the operator links.
+	duringRead func(refundID string)
+	// refundStatus is the status the stub's POST /v1/refunds answers;
+	// empty is succeeded.
+	refundStatus string
 }
 
 func newRefundFlow(t *testing.T, db *postgres.DB, ts *httptest.Server, name string) *refundFlow {
@@ -104,22 +110,33 @@ func (f *refundFlow) answer(call string, form url.Values) (int, string, bool) {
 		f.mu.Lock()
 		f.madeRefunds++
 		id := fmt.Sprintf("re_hc_%s_%d", f.tenantID[len(f.tenantID)-6:], f.madeRefunds)
-		during := f.duringRefund
+		during, status := f.duringRefund, f.refundStatus
 		f.mu.Unlock()
 		if during != nil {
 			during(id, form)
 		}
+		if status == "" {
+			status = "succeeded"
+		}
 		amount, _ := strconv.ParseInt(form.Get("amount"), 10, 64)
-		return 200, refundJSON(id, form.Get("payment_intent"), amount, "succeeded",
+		return 200, refundJSON(id, form.Get("payment_intent"), amount, status,
 			map[string]string{"hardcount_cn_id": form.Get("metadata[hardcount_cn_id]")}), true
 	case strings.HasPrefix(call, "GET /v1/refunds/"):
+		id := strings.TrimPrefix(call, "GET /v1/refunds/")
 		f.mu.Lock()
-		body, ok := f.stripeRefunds[strings.TrimPrefix(call, "GET /v1/refunds/")]
+		body, ok := f.stripeRefunds[id]
+		during := f.duringRead
 		f.mu.Unlock()
+		if during != nil {
+			during(id)
+		}
 		if !ok {
 			return 404, `{"error":{"type":"invalid_request_error","code":"resource_missing","message":"No such refund"}}`, true
 		}
 		return 200, body, true
+	case call == "GET /v1/payment_intents/pi_hc_unheld":
+		// A Hardcount payment whose record has not reached any invoice.
+		return 200, `{"id":"pi_hc_unheld","object":"payment_intent","status":"succeeded","metadata":{"hardcount_invoice_id":"hc_inv_elsewhere","hardcount_tenant_id":"t"}}`, true
 	case call == "POST /v1/tax/transactions/create_reversal":
 		return 200, fmt.Sprintf(`{"id":"tax_rev_%s","object":"tax.transaction","type":"reversal"}`, form.Get("reference")), true
 	}
@@ -693,41 +710,110 @@ func TestE2E_StripeRefund_OtherPayment(t *testing.T) {
 	}
 }
 
-// TestE2E_StripeRefund_Ordering: refund.failed before refund.created records
-// a refund that moved no money and no note, and the older created event
-// changes nothing. A pending refund then failed: the note exists, its refund
-// status goes to failed and it shows in the refunds needing attention; the
-// note is never undone.
+// TestE2E_StripeRefund_Ordering: a refund is recorded as a credit note only
+// once it succeeded. refund.failed before refund.created records a refund
+// that moved no money and no note, and the older created event changes
+// nothing. A pending refund waits: canceled later, it gets no note and no tax
+// reversal; succeeded later, one note; one first seen requiring action, then
+// succeeded, one note. A recorded refund that fails later keeps its note,
+// whose refund status goes to failed and shows in the refunds needing
+// attention. Each refund sends one event, when its outcome is decided.
 func TestE2E_StripeRefund_Ordering(t *testing.T) {
 	db, ts, _, register := newRefundServer(t)
 	f := newRefundFlow(t, db, ts, "Refund ordering Co")
 	register(f)
 	invX, piX := f.paidInvoice("rf_ord_x", 5000, 0)
-	invY, piY := f.paidInvoice("rf_ord_y", 5000, 0)
+	invC, piC := f.paidInvoice("rf_ord_c", 10000, 1000)
+	invS, piS := f.paidInvoice("rf_ord_s", 5000, 0)
+	invA, piA := f.paidInvoice("rf_ord_a", 5000, 0)
+	invF, piF := f.paidInvoice("rf_ord_f", 5000, 0)
+	f.useStripeTax()
 	created := time.Now().Add(-time.Hour).Truncate(time.Second).UTC()
+	rowOf := func(invID string) map[string]any {
+		t.Helper()
+		rows := f.refundRows(invID)
+		if len(rows) != 1 {
+			t.Fatalf("refund rows on %s: %v, want 1", invID, rows)
+		}
+		return rows[0]
+	}
 
 	failed := refundSpec{id: "re_ord_x", pi: piX, status: "failed", amount: 5000, created: created}
 	f.deliver(refundEvent("evt_ord_x_failed", "refund.failed", failed, created.Add(time.Minute))).want(t, 200, "refund.failed first")
 	failed.status = "pending"
 	f.deliver(refundEvent("evt_ord_x_created", "refund.created", failed, created)).want(t, 200, "older refund.created")
-	rows := f.refundRows(invX)
-	if len(rows) != 1 || flowStr(rows[0], "outcome") != "not_refunded" || flowStr(rows[0], "status") != "failed" {
-		t.Errorf("refund rows = %v, want one not_refunded, failed", rows)
+	if r := rowOf(invX); flowStr(r, "outcome") != "not_refunded" || flowStr(r, "status") != "failed" {
+		t.Errorf("refund row = %v, want not_refunded, failed", r)
 	}
 	if n := len(f.notes(invX)); n != 0 {
 		t.Errorf("credit notes: %d, want 0", n)
 	}
 
-	pending := refundSpec{id: "re_ord_y", pi: piY, status: "pending", amount: 5000, created: created}
-	f.deliver(refundEvent("evt_ord_y_created", "refund.created", pending, created)).want(t, 200, "pending refund")
-	notes := f.notes(invY)
-	if len(notes) != 1 || flowStr(notes[0], "refund_status") != "pending" {
-		t.Fatalf("credit notes = %v, want one with a pending refund", notes)
+	// Pending, then canceled in the Stripe dashboard: no document, no tax.
+	canceled := refundSpec{id: "re_ord_c", pi: piC, status: "pending", amount: 11000, created: created}
+	f.deliver(refundEvent("evt_ord_c_created", "refund.created", canceled, created)).want(t, 200, "pending refund")
+	if r := rowOf(invC); flowStr(r, "outcome") != "awaiting" {
+		t.Errorf("refund row = %v, want awaiting", r)
+	}
+	if n := len(f.notes(invC)); n != 0 || f.events("re_ord_c") != 0 {
+		t.Errorf("a pending refund made %d notes and %d events, want none", n, f.events("re_ord_c"))
+	}
+	if att := f.invoice(invC)["attention"]; att != nil {
+		t.Errorf("attention for a pending refund = %v, want none", att)
+	}
+	canceled.status = "canceled"
+	f.deliver(refundEvent("evt_ord_c_canceled", "refund.updated", canceled, created.Add(time.Minute))).want(t, 200, "refund canceled")
+	if r := rowOf(invC); flowStr(r, "outcome") != "not_refunded" || flowStr(r, "status") != "canceled" {
+		t.Errorf("refund row = %v, want not_refunded, canceled", r)
+	}
+	if n := len(f.notes(invC)); n != 0 {
+		t.Errorf("credit notes after the cancel: %d, want 0", n)
+	}
+	if n := f.stub.count("POST /v1/tax/transactions/create_reversal"); n != 0 {
+		t.Errorf("tax reversals for a canceled refund: %d, want 0", n)
+	}
+	if n := f.events("re_ord_c"); n != 1 {
+		t.Errorf("events for the canceled refund: %d, want 1 (when decided)", n)
+	}
+
+	// Pending, then succeeded: one note.
+	ok := refundSpec{id: "re_ord_s", pi: piS, status: "pending", amount: 5000, created: created}
+	f.deliver(refundEvent("evt_ord_s_created", "refund.created", ok, created)).want(t, 200, "pending refund")
+	ok.status = "succeeded"
+	f.deliver(refundEvent("evt_ord_s_updated", "refund.updated", ok, created.Add(time.Minute))).want(t, 200, "refund succeeded")
+	if notes := f.notes(invS); len(notes) != 1 || flowStr(notes[0], "refund_status") != "succeeded" {
+		t.Errorf("credit notes = %v, want one, succeeded", notes)
+	}
+	if r := rowOf(invS); flowStr(r, "outcome") != "credit_note" {
+		t.Errorf("refund row = %v, want credit_note", r)
+	}
+	if n := f.events("re_ord_s"); n != 1 {
+		t.Errorf("events: %d, want 1", n)
+	}
+
+	// Requires action, then succeeded: one note.
+	act := refundSpec{id: "re_ord_a", pi: piA, status: "requires_action", amount: 5000, created: created}
+	f.deliver(refundEvent("evt_ord_a_created", "refund.created", act, created)).want(t, 200, "refund needing action")
+	if n := len(f.notes(invA)); n != 0 {
+		t.Errorf("credit notes for a refund needing action: %d, want 0", n)
+	}
+	act.status = "succeeded"
+	f.deliver(refundEvent("evt_ord_a_updated", "refund.updated", act, created.Add(time.Minute))).want(t, 200, "refund succeeded")
+	if notes := f.notes(invA); len(notes) != 1 {
+		t.Errorf("credit notes = %v, want one", notes)
+	}
+
+	// Recorded, then failed: the note stays, its refund failed.
+	later := refundSpec{id: "re_ord_f", pi: piF, status: "succeeded", amount: 5000, created: created}
+	f.deliver(refundEvent("evt_ord_f_created", "refund.created", later, created)).want(t, 200, "succeeded refund")
+	notes := f.notes(invF)
+	if len(notes) != 1 {
+		t.Fatalf("credit notes = %v, want one", notes)
 	}
 	cnID := flowStr(notes[0], "id")
-	pending.status = "failed"
-	f.deliver(refundEvent("evt_ord_y_failed", "refund.failed", pending, created.Add(time.Hour))).want(t, 200, "refund.failed later")
-	notes = f.notes(invY)
+	later.status = "failed"
+	f.deliver(refundEvent("evt_ord_f_failed", "refund.failed", later, created.Add(time.Hour))).want(t, 200, "refund.failed later")
+	notes = f.notes(invF)
 	if len(notes) != 1 || flowStr(notes[0], "refund_status") != "failed" || flowStr(notes[0], "status") != "issued" {
 		t.Errorf("credit notes = %v, want the issued note with a failed refund", notes)
 	}
@@ -739,18 +825,141 @@ func TestE2E_StripeRefund_Ordering(t *testing.T) {
 	if !listed {
 		t.Errorf("the note whose refund failed is not in the refunds needing attention")
 	}
-	if rows := f.refundRows(invY); len(rows) != 1 || flowStr(rows[0], "status") != "failed" || flowStr(rows[0], "outcome") != "credit_note" {
-		t.Errorf("refund rows = %v, want the credit_note row, status failed", rows)
+	if r := rowOf(invF); flowStr(r, "status") != "failed" || flowStr(r, "outcome") != "credit_note" {
+		t.Errorf("refund row = %v, want the credit_note row, status failed", r)
 	}
-	if n := f.events("re_ord_y"); n != 1 {
+	if n := f.events("re_ord_f"); n != 1 {
 		t.Errorf("events for the refund that later failed: %d, want 1 (a later change sends nothing)", n)
+	}
+}
+
+// TestE2E_StripeRefund_FailedHardcountRefundReplacedInStripe: Hardcount's
+// refund on a note fails, and the operator refunds the same amount in the
+// Stripe dashboard. The dashboard refund is flagged with the true reason (a
+// note's refund failed), Retry refund on the note is refused so the customer
+// is not refunded twice, and attaching the dashboard refund to the note
+// settles it: one note, its refund succeeded, the tax reversed once.
+func TestE2E_StripeRefund_FailedHardcountRefundReplacedInStripe(t *testing.T) {
+	db, ts, _, register := newRefundServer(t)
+	f := newRefundFlow(t, db, ts, "Refund replaced Co")
+	register(f)
+	invID, pi := f.paidInvoice("rf_repl", 10000, 1000)
+	f.useStripeTax()
+
+	f.mu.Lock()
+	f.refundStatus = "failed"
+	f.mu.Unlock()
+	cn := f.call("POST", "/v1/invoices/"+invID+"/refund", map[string]any{"amount_cents": 5500, "reason": "requested_by_customer"}).want(t, 200, "Hardcount refund").body
+	cnID := flowStr(cn, "id")
+	if flowStr(cn, "refund_status") != "failed" {
+		t.Fatalf("Hardcount refund status = %q, want failed", flowStr(cn, "refund_status"))
+	}
+	if n := f.stub.count("POST /v1/tax/transactions/create_reversal"); n != 1 {
+		t.Fatalf("tax reversals after the note: %d, want 1", n)
+	}
+
+	created := time.Now().Add(-time.Minute).Truncate(time.Second).UTC()
+	f.deliver(refundEvent("evt_rf_repl", "refund.created", refundSpec{id: "re_repl", pi: pi, status: "succeeded", amount: 5500, created: created}, created)).want(t, 200, "dashboard refund")
+	rows := f.refundRows(invID)
+	if len(rows) != 1 || flowStr(rows[0], "outcome") != "needs_review" || flowStr(rows[0], "review_reason") != "credit_note_refund_failed" {
+		t.Fatalf("refund rows = %v, want needs_review credit_note_refund_failed", rows)
+	}
+	if n := len(f.notes(invID)); n != 1 {
+		t.Errorf("credit notes: %d, want the one Hardcount note", n)
+	}
+
+	before := f.refundCalls()
+	if r := f.call("POST", "/v1/credit-notes/"+cnID+"/retry-refund", nil); r.status != 409 || r.errCode() != "stripe_refund_unresolved" {
+		t.Errorf("retry while the dashboard refund is unresolved answered %d %s, want 409 stripe_refund_unresolved", r.status, r.raw)
+	}
+	if n := f.refundCalls(); n != before {
+		t.Errorf("refund calls at Stripe after the refused retry: %d, want %d", n, before)
+	}
+
+	f.mu.Lock()
+	f.stripeRefunds["re_repl"] = refundJSON("re_repl", pi, 5500, "succeeded", nil)
+	f.stripeRefunds["re_repl_short"] = refundJSON("re_repl_short", pi, 5000, "succeeded", nil)
+	f.mu.Unlock()
+	if r := f.call("POST", "/v1/credit-notes/"+cnID+"/attach-stripe-refund", map[string]any{"stripe_refund_id": "re_repl_short"}); r.status != 422 {
+		t.Errorf("attaching a refund of another amount answered %d (%s), want 422", r.status, r.raw)
+	}
+	got := f.call("POST", "/v1/credit-notes/"+cnID+"/attach-stripe-refund", map[string]any{"stripe_refund_id": "re_repl"}).want(t, 200, "attach").body
+	if flowStr(got, "stripe_refund_id") != "re_repl" || flowStr(got, "refund_status") != "succeeded" || got["recorded_from_stripe"] != true {
+		t.Errorf("note after the attach = %v, want re_repl, succeeded, recorded_from_stripe", got)
+	}
+	if rows := f.refundRows(invID); len(rows) != 1 || flowStr(rows[0], "outcome") != "credit_note" || flowStr(rows[0], "credit_note_id") != cnID {
+		t.Errorf("refund rows = %v, want the row recorded by %s", rows, cnID)
+	}
+	if n := len(f.notes(invID)); n != 1 {
+		t.Errorf("credit notes after the attach: %d, want 1", n)
+	}
+	if n := f.stub.count("POST /v1/tax/transactions/create_reversal"); n != 1 {
+		t.Errorf("tax reversals after the attach: %d, want 1", n)
+	}
+	if n := f.refundCalls(); n != before {
+		t.Errorf("refund calls at Stripe after the attach: %d, want %d", n, before)
+	}
+	if r := f.call("POST", "/v1/credit-notes/"+cnID+"/retry-refund", nil); r.status != 409 {
+		t.Errorf("retry after the attach answered %d, want 409 (the refund succeeded)", r.status)
+	}
+	if r := f.call("POST", "/v1/credit-notes/"+cnID+"/attach-stripe-refund", map[string]any{"stripe_refund_id": "re_repl"}); r.status != 409 {
+		t.Errorf("a second attach answered %d, want 409", r.status)
+	}
+	if att := f.invoice(invID)["attention"]; att != nil {
+		t.Errorf("attention after the attach = %v, want none", att)
+	}
+	if n := flowCount(t, db, `SELECT count(*) FROM audit_log WHERE resource_id = $1 AND metadata->>'action' = 'stripe_refund_attached'`, cnID); n != 1 {
+		t.Errorf("attach audit rows: %d, want 1", n)
+	}
+}
+
+// TestE2E_StripeRefund_LinkRacesFirstSighting: the operator links a refund
+// Hardcount has no row for while its first refund.created arrives (the
+// concurrent-resolver stub delivers it while the link reads the refund from
+// Stripe). The webhook records it first; the link, under the same locks,
+// finds the note holding it and is refused. One note.
+func TestE2E_StripeRefund_LinkRacesFirstSighting(t *testing.T) {
+	db, ts, _, register := newRefundServer(t)
+	f := newRefundFlow(t, db, ts, "Refund link race Co")
+	register(f)
+	invID, pi := f.paidInvoice("rf_race_link", 5000, 0)
+	created := time.Now().Add(-time.Minute).Truncate(time.Second).UTC()
+	var inner flowResp
+	f.mu.Lock()
+	f.stripeRefunds["re_race_link"] = refundJSON("re_race_link", pi, 3000, "succeeded", nil)
+	f.duringRead = func(refundID string) {
+		if refundID != "re_race_link" {
+			return
+		}
+		inner = f.deliver(refundEvent("evt_rf_race_link", "refund.created", refundSpec{id: refundID, pi: pi, status: "succeeded", amount: 3000, created: created}, created))
+	}
+	f.mu.Unlock()
+	r := f.call("POST", "/v1/credit-notes", map[string]any{
+		"invoice_id": invID, "reason": "Refund made in Stripe", "auto_issue": true,
+		"refund_amount_cents": 3000, "stripe_refund_id": "re_race_link",
+		"lines": []map[string]any{{"description": "Refund made in Stripe", "quantity": 1, "unit_amount_cents": 3000}},
+	})
+	if inner.status != 200 {
+		t.Errorf("the webhook during the link answered %d, want 200", inner.status)
+	}
+	if r.status != 409 {
+		t.Errorf("the link after the webhook recorded the refund answered %d (%s), want 409", r.status, r.raw)
+	}
+	notes := f.notes(invID)
+	if len(notes) != 1 || flowStr(notes[0], "stripe_refund_id") != "re_race_link" {
+		t.Errorf("credit notes = %v, want the one the webhook recorded", notes)
+	}
+	if n := f.refundCalls(); n != 0 {
+		t.Errorf("refund calls at Stripe: %d, want 0", n)
 	}
 }
 
 // TestE2E_StripeRefund_InvoiceNotPaidYet: a young refund of a payment on an
 // invoice Hardcount has not marked paid asks Stripe to deliver it again; an
 // old one is flagged. A young refund of a payment no invoice holds asks for
-// redelivery too; an old one is acknowledged and recorded nowhere.
+// redelivery too. An old one is acknowledged and recorded nowhere when
+// Stripe says the payment is not Hardcount's, and redelivered when the
+// payment carries Hardcount metadata.
 func TestE2E_StripeRefund_InvoiceNotPaidYet(t *testing.T) {
 	db, ts, _, register := newRefundServer(t)
 	f := newRefundFlow(t, db, ts, "Refund not paid Co")
@@ -789,6 +998,12 @@ func TestE2E_StripeRefund_InvoiceNotPaidYet(t *testing.T) {
 
 	f.deliver(refundEvent("evt_rf_foreign_young", "refund.created", refundSpec{id: "re_foreign_young", pi: "pi_not_hardcount", status: "succeeded", amount: 700, created: now}, now)).want(t, 500, "young refund on a payment no invoice holds")
 	f.deliver(refundEvent("evt_rf_foreign_old", "refund.created", refundSpec{id: "re_foreign_old", pi: "pi_not_hardcount", status: "succeeded", amount: 700, created: old}, old)).want(t, 200, "old refund on a payment no invoice holds")
+	// An old refund of a Hardcount payment no invoice holds yet is not
+	// dropped: Stripe is asked to send it again.
+	f.deliver(refundEvent("evt_rf_unheld_old", "refund.created", refundSpec{id: "re_unheld_old", pi: "pi_hc_unheld", status: "succeeded", amount: 700, created: old}, old)).want(t, 500, "old refund of a Hardcount payment no invoice holds")
+	if n := flowCount(t, db, `SELECT count(*) FROM stripe_webhook_events WHERE stripe_event_id = 'evt_rf_unheld_old'`); n != 0 {
+		t.Errorf("dedup rows for a refund Stripe must redeliver: %d, want 0", n)
+	}
 	if n := flowCount(t, db, `SELECT count(*) FROM invoice_stripe_refunds WHERE stripe_refund_id LIKE 're_foreign_%'`); n != 0 {
 		t.Errorf("rows for refunds of a payment no invoice holds: %d, want 0", n)
 	}

@@ -14,9 +14,10 @@ import type { InvoiceStripeRefund } from './invoiceStripeRefund';
  * The `data` of the outbound webhook event `payment.refunded_in_stripe`
  * (docs/webhooks.md): the invoice the refunded payment belongs to, as
  * it stood (a refund never changes it), and the refund as the API
- * returns it. Sent once per refund, when Hardcount first sees it,
- * saved in the same transaction that records it. A later change to
- * the refund sends nothing more.
+ * returns it. Sent once per refund, when its outcome is decided: when
+ * Hardcount first sees it, or, for a refund first seen in flight, when
+ * it succeeds, fails or is canceled. Saved in the same transaction that
+ * records it. A later change to the refund sends nothing more.
  */
 export interface StripeRefundWebhookEventData {
   invoice: Invoice;

@@ -103,6 +103,7 @@ var requestBodies = map[string]requestBody{
 	"POST /v1/invoices/{id}/record-payment":                             {body: invoice.RecordPaymentInput{}},
 	"POST /v1/invoices/{id}/refund":                                     {body: invoice.RefundRequest{}},
 	"POST /v1/invoices/{id}/stripe-refunds/{stripe_refund_id}/dismiss":  {body: invoice.DismissStripeRefundRequest{}},
+	"POST /v1/credit-notes/{id}/attach-stripe-refund":                   {body: creditnote.AttachStripeRefundRequest{}},
 	"POST /v1/auth/login":                                               {body: user.LoginReq{}},
 	"POST /v1/auth/mode":                                                {body: user.SetModeReq{}},
 	"POST /v1/auth/password-reset/request":                              {body: user.RequestResetReq{}},

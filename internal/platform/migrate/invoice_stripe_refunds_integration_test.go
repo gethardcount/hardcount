@@ -68,13 +68,14 @@ func TestInvoiceStripeRefunds_UpAndRollback(t *testing.T) {
 
 	row := func(outcome, reason, creditNote string) string {
 		return `INSERT INTO invoice_stripe_refunds (tenant_id, invoice_id, stripe_refund_id, stripe_payment_intent_id,
-				amount_cents, currency, status, outcome, review_reason, credit_note_id, refund_created_at, last_event_at, last_stripe_event_id)
+				amount_cents, currency, status, outcome, review_reason, credit_note_id, refund_created_at, first_event_at, last_event_at, last_stripe_event_id)
 			VALUES ('ten_isr', 'inv_isr', 're_` + outcome + reason + `', 'pi_isr', 4900, 'USD', 'succeeded', '` + outcome + `', '` + reason + `', ` +
-			creditNote + `, now(), now(), 'evt_isr')`
+			creditNote + `, now(), now(), now(), 'evt_isr')`
 	}
 	must(row("credit_note", "", "'cn_isr'"))
 	must(row("needs_review", "seen_late", "NULL"))
 	must(row("other_payment", "", "NULL"))
+	must(row("awaiting", "", "NULL"))
 	for _, bad := range []struct{ name, q string }{
 		{"credit_note without a credit note", row("credit_note", "x", "NULL")},
 		{"needs_review without a reason", row("needs_review", "", "NULL")},
@@ -82,8 +83,9 @@ func TestInvoiceStripeRefunds_UpAndRollback(t *testing.T) {
 		{"a reason the CHECK does not list", row("needs_review", "because", "NULL")},
 		{"dismissed without a dismissal time", row("dismissed", "seen_late", "NULL")},
 		{"lower-case currency", `INSERT INTO invoice_stripe_refunds (tenant_id, invoice_id, stripe_refund_id, stripe_payment_intent_id,
-				amount_cents, currency, status, outcome, refund_created_at, last_event_at, last_stripe_event_id)
-			VALUES ('ten_isr', 'inv_isr', 're_lower', 'pi_isr', 4900, 'usd', 'succeeded', 'other_payment', now(), now(), 'evt_isr')`},
+				amount_cents, currency, status, outcome, refund_created_at, first_event_at, last_event_at, last_stripe_event_id)
+			VALUES ('ten_isr', 'inv_isr', 're_lower', 'pi_isr', 4900, 'usd', 'succeeded', 'other_payment', now(), now(), now(), 'evt_isr')`},
+		{"awaiting with a reason", row("awaiting", "seen_late", "NULL")},
 		{"a second row for one refund", row("other_payment", "", "NULL")},
 	} {
 		if err := exec(bad.q); err == nil {

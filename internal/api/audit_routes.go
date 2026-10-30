@@ -263,6 +263,7 @@ var auditRouteRegistry = map[routeKey]auditDecl{
 	{"POST", "/v1/invoices/{id}/mark-uncollectible"}:                        explicit("invoice.Service.MarkUncollectible → Log(update, invoice). Single service entry for operator + dunning terminal + resolve paths."),
 	{"POST", "/v1/invoices/{id}/record-payment"}:                            explicit("invoice.Service.RecordOfflinePayment → Log(update, invoice: payment_recorded)."),
 	{"POST", "/v1/invoices/{id}/collect"}:                                   explicit("invoice.Handler.collectPayment → Log(collect, invoice) — the money-movement row."),
+	{"POST", "/v1/credit-notes/{id}/attach-stripe-refund"}:                  explicit("creditnote.Service.AttachStripeRefund → LogInTx(update, credit_note, action stripe_refund_attached) on the attach's tx (ADR-134)."),
 	{"POST", "/v1/invoices/{id}/stripe-refunds/{stripe_refund_id}/dismiss"}: explicit("creditnote.Service.DismissStripeRefund → LogInTx(update, invoice, action stripe_refund_dismissed) on the dismissal's tx (ADR-134)."),
 	{"POST", "/v1/invoices/{id}/refund"}:                                    explicit("invoice.Handler.refund → Log(refund, invoice); the credit note carries its own issued row."),
 	{"POST", "/v1/invoices/{id}/retry-tax"}:                                 explicit("invoice.Handler.retryTax → Log(retry_tax, invoice)."),

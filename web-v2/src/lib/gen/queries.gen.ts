@@ -34,6 +34,7 @@ import type {
   AdjustCreditsBody,
   AggregateUsageEventsParams,
   AnalyticsOverview,
+  AttachStripeRefundToCreditNoteBody,
   AuditLogFilters,
   BackfillUsageEventBody,
   BootstrapBody,
@@ -10139,6 +10140,88 @@ export const useIssueCreditNote = <TError = Error,
         TContext
       > => {
       return useMutation(getIssueCreditNoteMutationOptions(options), queryClient);
+    }
+
+export const getAttachStripeRefundToCreditNoteUrl = (id: string,) => {
+
+
+
+
+  return `/v1/credit-notes/${id}/attach-stripe-refund`
+}
+
+/**
+ * Makes a refund made in Stripe outside Hardcount the card refund of an
+ * `issued` credit note whose own refund `failed`: use it when you
+ * refunded in the Stripe dashboard what the note's refund was for.
+ * Hardcount reads the refund from Stripe first. It must be of the
+ * payment that paid the invoice, not made by Hardcount, succeeded, and
+ * of exactly the note's `refund_amount_cents`. The note then holds the
+ * refund (`stripe_refund_id`, `refund_status`, `recorded_from_stripe`),
+ * and a flagged row for it is marked recorded. No new credit note, no
+ * second tax reversal and no Stripe refund call. Hardcount never matches
+ * a refund to a note by amount on its own.
+ * @summary Attach a refund made in Stripe to a credit note whose refund failed
+ */
+export const attachStripeRefundToCreditNote = async (id: string,
+    attachStripeRefundToCreditNoteBody: AttachStripeRefundToCreditNoteBody, options?: RequestInit): Promise<CreditNote> => {
+
+  return orvalClient<CreditNote>(getAttachStripeRefundToCreditNoteUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(attachStripeRefundToCreditNoteBody)
+  }
+);}
+
+
+
+
+
+export const getAttachStripeRefundToCreditNoteMutationOptions = <TError = Error,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof attachStripeRefundToCreditNote>>, TError,{id: string;data: AttachStripeRefundToCreditNoteBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof attachStripeRefundToCreditNote>>, TError,{id: string;data: AttachStripeRefundToCreditNoteBody}, TContext> => {
+
+const mutationKey = ['attachStripeRefundToCreditNote'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof attachStripeRefundToCreditNote>>, {id: string;data: AttachStripeRefundToCreditNoteBody}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  attachStripeRefundToCreditNote(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AttachStripeRefundToCreditNoteMutationResult = NonNullable<Awaited<ReturnType<typeof attachStripeRefundToCreditNote>>>
+    export type AttachStripeRefundToCreditNoteMutationBody = AttachStripeRefundToCreditNoteBody
+    export type AttachStripeRefundToCreditNoteMutationError = Error
+
+    /**
+ * @summary Attach a refund made in Stripe to a credit note whose refund failed
+ */
+export const useAttachStripeRefundToCreditNote = <TError = Error,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof attachStripeRefundToCreditNote>>, TError,{id: string;data: AttachStripeRefundToCreditNoteBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof attachStripeRefundToCreditNote>>,
+        TError,
+        {id: string;data: AttachStripeRefundToCreditNoteBody},
+        TContext
+      > => {
+      return useMutation(getAttachStripeRefundToCreditNoteMutationOptions(options), queryClient);
     }
 
 export const getRetryCreditNoteRefundUrl = (id: string,) => {

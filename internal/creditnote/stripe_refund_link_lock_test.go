@@ -48,6 +48,7 @@ func TestLinkUnderLockTx(t *testing.T) {
 		{name: "flagged row", row: row(domain.StripeRefundNeedsReview, "inv_1"), wantRow: true},
 		{name: "dismissed row", row: row(domain.StripeRefundDismissed, "inv_1"), wantRow: true},
 		{name: "flagged row, but a note holds it", row: row(domain.StripeRefundNeedsReview, "inv_1"), existing: held, wantErr: errs.ErrInvalidState},
+		{name: "awaiting row", row: row(domain.StripeRefundAwaiting, "inv_1"), wantErr: errs.ErrInvalidState},
 		{name: "recorded row", row: row(domain.StripeRefundRecordedAsCreditNote, "inv_1"), wantErr: errs.ErrInvalidState},
 		{name: "another payment", row: row(domain.StripeRefundOtherPayment, "inv_1"), wantErr: errs.ErrValidation},
 		{name: "moved no money", row: row(domain.StripeRefundNotRefunded, "inv_1"), wantErr: errs.ErrValidation},

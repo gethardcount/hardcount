@@ -21,7 +21,8 @@ One of these:
   document that lowers what a customer owes on an invoice, or records money
   given back after it was paid. The invoice page, the customer's invoice page,
   the PDF, the refund limit and the Stripe Tax reversal all read credit notes.
-- **Hardcount writes the credit note itself when the refund is plain.** A
+- **Hardcount writes the credit note itself when the refund is plain,** once
+  Stripe says it succeeded (a pending refund waits). A
   refund of the payment that paid a paid invoice, in the invoice's currency,
   that fits what the invoice has left, and that Hardcount hears of within a
   day, becomes an issued credit note. Its card refund is that refund, so
@@ -59,9 +60,10 @@ curl -s "$API/v1/invoices/$INVOICE_ID/stripe-refunds" -H "Authorization: Bearer 
 
 | `outcome` | Meaning | To do |
 |---|---|---|
+| `awaiting` | Stripe has not said yet whether it went through | Nothing: Hardcount decides it on Stripe's next event |
 | `credit_note` | Recorded as the credit note `credit_note_id` | Nothing |
 | `other_payment` | A refund of a payment that did not pay this invoice | Nothing: that money was never on the invoice |
-| `not_refunded` | It failed or was canceled before Hardcount saw it | Nothing: no money moved |
+| `not_refunded` | It failed or was canceled before it succeeded | Nothing: no money moved |
 | `needs_review` | Not recorded; `review_reason` says why | See Fix |
 | `dismissed` | You marked it handled outside Hardcount | Nothing |
 
@@ -71,6 +73,7 @@ Act on a `needs_review` refund by its `review_reason`:
 
 | `review_reason` | Do this |
 |---|---|
+| `credit_note_refund_failed` | A credit note on the invoice has a card refund that failed. If this refund replaces it, attach it to that note (step 3). Otherwise record it (step 1) or dismiss it (step 2). **Retry refund** on that note is refused until then, so the customer is not refunded twice. |
 | `seen_late` | If no credit note on the invoice records it yet, record it (step 1). If you already recorded it by hand, dismiss it (step 2). |
 | `invoice_not_paid` | Check the invoice's payments in Stripe. Once the invoice is paid, record it (step 1); otherwise dismiss it. |
 | `exceeds_card_refundable` | The refund is more than the card payment had left after the credit notes on the invoice. Check the payment in Stripe, record the difference in your own books, and dismiss it. |
@@ -107,12 +110,31 @@ Act on a `needs_review` refund by its `review_reason`:
 
    **You see:** `200` with `outcome: dismissed`. The note is kept on the
    refund and in the audit log.
+3. **Or attach it to the credit note whose refund failed,** when you refunded
+   in Stripe what that note's refund was for. The amounts must match:
+
+   ```bash
+   curl -s -X POST "$API/v1/credit-notes/$CREDIT_NOTE_ID/attach-stripe-refund" \
+     -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+     -d '{"stripe_refund_id": "re_…"}'
+   ```
+
+   **You see:** `200` with the note, its `stripe_refund_id` the refund and
+   `refund_status` `succeeded`. No new note, and no second tax reversal.
+
+**Never record a refund made in Stripe by hand** with an ordinary credit note.
+One with a card refund refunds the customer again; one without leaves the
+refund unlinked, and Hardcount may record it a second time. Use step 1 or 3.
 
 **If the refund of a recorded credit note fails later** (Stripe can fail a
-card refund up to 30 days on), the note's `refund_status` becomes `failed`
-and it shows in the refunds needing attention list. The customer was not
-refunded. **Retry refund** on the note makes a new refund through Hardcount;
-use it only if you still mean to refund.
+card refund up to 30 days on, and you can cancel a card refund in the Stripe
+dashboard for a short time), the note's `refund_status` becomes `failed` and
+it shows in the refunds needing attention list. The customer was not
+refunded. **Retry refund** on the note makes a new refund through Hardcount:
+use it only if you still mean to refund. If you canceled it on purpose, the
+note stays as a record of the attempt; issue a new invoice if the customer
+owes the money again. A refund canceled before it succeeded never gets a
+note (`not_refunded`).
 
 ## Verify
 

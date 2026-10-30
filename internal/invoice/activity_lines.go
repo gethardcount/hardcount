@@ -505,6 +505,10 @@ func stripeRefundLine(r domain.InvoiceStripeRefund) activity.Line {
 	case domain.StripeRefundDismissed:
 		l.Tone = activity.ToneNeutral
 		l.Detail = append(l.Detail, activity.Text("Handled outside Hardcount: "+r.DismissedNote))
+	case domain.StripeRefundAwaiting:
+		// Not yet known to have gone through: no amount moved yet.
+		l.Title, l.Tone, l.Amount = "Refund in Stripe in progress", activity.ToneNeutral, nil
+		l.Detail = append(l.Detail, activity.Segment{activity.M(r.AmountCents, r.Currency), activity.T(" waiting for Stripe")})
 	default: // needs_review
 		l.Tone = activity.ToneWarning
 		l.Problem = "Not recorded here: " + stripeRefundReviewWords(r.ReviewReason) + "."
@@ -524,6 +528,8 @@ func stripeRefundReviewWords(r domain.StripeRefundReviewReason) string {
 		return "the invoice bought prepaid credit"
 	case domain.StripeRefundReviewSeenLate:
 		return "Hardcount heard of it more than a day late"
+	case domain.StripeRefundReviewCreditNoteRefundFailed:
+		return "a credit note's card refund on this invoice failed, and this may replace it"
 	case domain.StripeRefundReviewExceedsCardRefundable:
 		return "it is more than the payment had left to refund"
 	case domain.StripeRefundReviewExceedsCreditable:

@@ -649,6 +649,9 @@ func classifyAttentionCause(inv Invoice, atc AttentionContext) *Attention {
 		if atc.LostDispute != nil {
 			att = withLostDispute(att, *atc.LostDispute)
 		}
+		if atc.StripeRefundReview != nil {
+			att = withRefundedInStripe(att, inv, *atc.StripeRefundReview)
+		}
 		return att
 	}
 	// A lost dispute pierces it too: disputes land on paid invoices, so the
@@ -1804,6 +1807,9 @@ func classifyRefundedInStripe(inv Invoice, r InvoiceStripeRefund) *Attention {
 	case StripeRefundReviewSeenLate:
 		why = "Hardcount first heard of it more than a day after it was made, so it may already be recorded"
 		record = "If no credit note records it yet, record it with a credit note linked to the refund; otherwise dismiss it."
+	case StripeRefundReviewCreditNoteRefundFailed:
+		why = "a credit note on this invoice has a card refund that failed, which this refund may replace"
+		record = "If it replaces that refund, attach it to that credit note; otherwise record it with a credit note linked to the refund, or dismiss it. Retry refund on that credit note is refused until then."
 	case StripeRefundReviewExceedsCardRefundable:
 		why = "it is more than the card payment had left to refund after the invoice's credit notes"
 		record = "Check the payment in Stripe and record the difference in your own books, then dismiss it here."
@@ -1816,6 +1822,9 @@ func classifyRefundedInStripe(inv Invoice, r InvoiceStripeRefund) *Attention {
 	detail := "Stripe refund " + r.StripeRefundID + " on payment " + r.StripePaymentIntentID + ". " +
 		"To record it: POST /v1/credit-notes with stripe_refund_id and refund_amount_cents set to the refund's amount; Hardcount calls nothing at Stripe for it. " +
 		"To dismiss it: POST /v1/invoices/" + inv.ID + "/stripe-refunds/" + r.StripeRefundID + "/dismiss with a note."
+	if r.ReviewReason == StripeRefundReviewCreditNoteRefundFailed {
+		detail += " To attach it to the credit note whose refund failed: POST /v1/credit-notes/{id}/attach-stripe-refund with stripe_refund_id; the amounts must match."
+	}
 	return &Attention{
 		Severity: AttentionSeverityWarning,
 		Reason:   AttentionReasonRefundedInStripe,
@@ -1825,6 +1834,22 @@ func classifyRefundedInStripe(inv Invoice, r InvoiceStripeRefund) *Attention {
 		DocURL:   docURL("refunded-in-stripe"),
 		Since:    &since,
 	}
+}
+
+// withRefundedInStripe adds a flagged refund made in Stripe (ADR-134) to a
+// payment-anomaly notice, which wins the priority chain: an anomaly invoice
+// is where a refund that does not fit the invoice is most likely (a refund
+// of an amount-mismatch charge). The anomaly keeps its reason, code and
+// "Open in Stripe" button; the message names the refund first, and Detail
+// carries both, the refund's first.
+func withRefundedInStripe(att *Attention, inv Invoice, r InvoiceStripeRefund) *Attention {
+	if att == nil {
+		return nil
+	}
+	refund := classifyRefundedInStripe(inv, r)
+	att.Message = refund.Message + " Hardcount also flagged a payment on this invoice: check both in Stripe."
+	att.Detail = joinDetail(refund.Detail, "Hardcount also flagged a payment on this invoice. "+att.Detail)
+	return att
 }
 
 // withLostDispute rewrites a payment-anomaly notice for an invoice that also

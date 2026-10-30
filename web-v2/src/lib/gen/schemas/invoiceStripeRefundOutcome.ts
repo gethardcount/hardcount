@@ -9,7 +9,11 @@
  */
 
 /**
- * `credit_note`: recorded as an issued credit note whose card
+ * `awaiting`: first seen pending or requiring action. Nothing is
+ * recorded or sent until a later event shows how it ended: once it
+ * succeeded it is decided as below (the 24-hour rule counts from
+ * Hardcount's first sighting); failed or canceled, it becomes
+ * `not_refunded`. `credit_note`: recorded as an issued credit note whose card
  * refund is this refund (`credit_note_id`); Hardcount called
  * nothing at Stripe for it. `other_payment`: a refund of a payment
  * that did not pay the invoice (a second charge, or money on a
@@ -25,6 +29,7 @@ export type InvoiceStripeRefundOutcome = typeof InvoiceStripeRefundOutcome[keyof
 
 
 export const InvoiceStripeRefundOutcome = {
+  awaiting: 'awaiting',
   credit_note: 'credit_note',
   other_payment: 'other_payment',
   needs_review: 'needs_review',

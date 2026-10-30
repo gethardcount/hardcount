@@ -1096,6 +1096,7 @@ func (e InvoiceStatus) Valid() bool {
 
 // Defines values for InvoiceStripeRefundOutcome.
 const (
+	InvoiceStripeRefundOutcomeAwaiting     InvoiceStripeRefundOutcome = "awaiting"
 	InvoiceStripeRefundOutcomeCreditNote   InvoiceStripeRefundOutcome = "credit_note"
 	InvoiceStripeRefundOutcomeDismissed    InvoiceStripeRefundOutcome = "dismissed"
 	InvoiceStripeRefundOutcomeNeedsReview  InvoiceStripeRefundOutcome = "needs_review"
@@ -1106,6 +1107,8 @@ const (
 // Valid indicates whether the value is a known member of the InvoiceStripeRefundOutcome enum.
 func (e InvoiceStripeRefundOutcome) Valid() bool {
 	switch e {
+	case InvoiceStripeRefundOutcomeAwaiting:
+		return true
 	case InvoiceStripeRefundOutcomeCreditNote:
 		return true
 	case InvoiceStripeRefundOutcomeDismissed:
@@ -1123,17 +1126,20 @@ func (e InvoiceStripeRefundOutcome) Valid() bool {
 
 // Defines values for InvoiceStripeRefundReviewReason.
 const (
-	CurrencyMismatch      InvoiceStripeRefundReviewReason = "currency_mismatch"
-	ExceedsCardRefundable InvoiceStripeRefundReviewReason = "exceeds_card_refundable"
-	ExceedsCreditable     InvoiceStripeRefundReviewReason = "exceeds_creditable"
-	InvoiceNotPaid        InvoiceStripeRefundReviewReason = "invoice_not_paid"
-	PrepaidCommit         InvoiceStripeRefundReviewReason = "prepaid_commit"
-	SeenLate              InvoiceStripeRefundReviewReason = "seen_late"
+	CreditNoteRefundFailed InvoiceStripeRefundReviewReason = "credit_note_refund_failed"
+	CurrencyMismatch       InvoiceStripeRefundReviewReason = "currency_mismatch"
+	ExceedsCardRefundable  InvoiceStripeRefundReviewReason = "exceeds_card_refundable"
+	ExceedsCreditable      InvoiceStripeRefundReviewReason = "exceeds_creditable"
+	InvoiceNotPaid         InvoiceStripeRefundReviewReason = "invoice_not_paid"
+	PrepaidCommit          InvoiceStripeRefundReviewReason = "prepaid_commit"
+	SeenLate               InvoiceStripeRefundReviewReason = "seen_late"
 )
 
 // Valid indicates whether the value is a known member of the InvoiceStripeRefundReviewReason enum.
 func (e InvoiceStripeRefundReviewReason) Valid() bool {
 	switch e {
+	case CreditNoteRefundFailed:
+		return true
 	case CurrencyMismatch:
 		return true
 	case ExceedsCardRefundable:
@@ -5359,7 +5365,11 @@ type InvoiceStripeRefund struct {
 	InvoiceId     string `json:"invoice_id"`
 	Livemode      bool   `json:"livemode"`
 
-	// Outcome `credit_note`: recorded as an issued credit note whose card
+	// Outcome `awaiting`: first seen pending or requiring action. Nothing is
+	// recorded or sent until a later event shows how it ended: once it
+	// succeeded it is decided as below (the 24-hour rule counts from
+	// Hardcount's first sighting); failed or canceled, it becomes
+	// `not_refunded`. `credit_note`: recorded as an issued credit note whose card
 	// refund is this refund (`credit_note_id`); Hardcount called
 	// nothing at Stripe for it. `other_payment`: a refund of a payment
 	// that did not pay the invoice (a second charge, or money on a
@@ -5393,7 +5403,11 @@ type InvoiceStripeRefund struct {
 	UpdatedAt             time.Time `json:"updated_at"`
 }
 
-// InvoiceStripeRefundOutcome `credit_note`: recorded as an issued credit note whose card
+// InvoiceStripeRefundOutcome `awaiting`: first seen pending or requiring action. Nothing is
+// recorded or sent until a later event shows how it ended: once it
+// succeeded it is decided as below (the 24-hour rule counts from
+// Hardcount's first sighting); failed or canceled, it becomes
+// `not_refunded`. `credit_note`: recorded as an issued credit note whose card
 // refund is this refund (`credit_note_id`); Hardcount called
 // nothing at Stripe for it. `other_payment`: a refund of a payment
 // that did not pay the invoice (a second charge, or money on a
@@ -6320,9 +6334,10 @@ type StripeConnectionLastVerifiedErrorKind string
 // StripeRefundWebhookEventData The `data` of the outbound webhook event `payment.refunded_in_stripe`
 // (docs/webhooks.md): the invoice the refunded payment belongs to, as
 // it stood (a refund never changes it), and the refund as the API
-// returns it. Sent once per refund, when Hardcount first sees it,
-// saved in the same transaction that records it. A later change to
-// the refund sends nothing more.
+// returns it. Sent once per refund, when its outcome is decided: when
+// Hardcount first sees it, or, for a refund first seen in flight, when
+// it succeeds, fails or is canceled. Saved in the same transaction that
+// records it. A later change to the refund sends nothing more.
 type StripeRefundWebhookEventData struct {
 	// Invoice A Hardcount invoice. Returned from create, finalize, void, list, get,
 	// rotate-public-token, and collect-payment endpoints.
@@ -7591,8 +7606,7 @@ type PostV1CreditNotesJSONBody struct {
 	// note's card refund, Stripe's `refunds[]` shape: Hardcount
 	// reads the refund from Stripe and calls nothing else
 	// there for it. The refund must be of the payment that paid
-	// this invoice, not made by Hardcount, and not failed or
-	// canceled; `refund_amount_cents` must be its amount,
+	// this invoice, not made by Hardcount, and succeeded; `refund_amount_cents` must be its amount,
 	// `credit_amount_cents` 0, and `auto_issue` true (the
 	// note is issued at once). The caps on the invoice still
 	// apply. A refund Hardcount flagged on the invoice
@@ -7614,6 +7628,22 @@ type PostV1CreditNotesParams struct {
 
 // PostV1CreditNotesJSONBodyRefundType defines parameters for PostV1CreditNotes.
 type PostV1CreditNotesJSONBodyRefundType string
+
+// AttachStripeRefundToCreditNoteJSONBody defines parameters for AttachStripeRefundToCreditNote.
+type AttachStripeRefundToCreditNoteJSONBody struct {
+	StripeRefundId string `json:"stripe_refund_id"`
+}
+
+// AttachStripeRefundToCreditNoteParams defines parameters for AttachStripeRefundToCreditNote.
+type AttachStripeRefundToCreditNoteParams struct {
+	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
+	// the same value on every retry. For 24 hours, a repeat with the same
+	// key, method, path and body gets the first response again, with an
+	// `Idempotent-Replayed: true` header, instead of running again. The
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
 
 // IssueCreditNoteParams defines parameters for IssueCreditNote.
 type IssueCreditNoteParams struct {
@@ -9550,6 +9580,9 @@ type BootstrapJSONRequestBody BootstrapJSONBody
 // PostV1CreditNotesJSONRequestBody defines body for PostV1CreditNotes for application/json ContentType.
 type PostV1CreditNotesJSONRequestBody PostV1CreditNotesJSONBody
 
+// AttachStripeRefundToCreditNoteJSONRequestBody defines body for AttachStripeRefundToCreditNote for application/json ContentType.
+type AttachStripeRefundToCreditNoteJSONRequestBody AttachStripeRefundToCreditNoteJSONBody
+
 // PostV1CreditNotesIdSendJSONRequestBody defines body for PostV1CreditNotesIdSend for application/json ContentType.
 type PostV1CreditNotesIdSendJSONRequestBody PostV1CreditNotesIdSendJSONBody
 
@@ -10060,6 +10093,9 @@ type ServerInterface interface {
 	// Get a credit note
 	// (GET /v1/credit-notes/{id})
 	GetCreditNote(w http.ResponseWriter, r *http.Request, id string)
+	// Attach a refund made in Stripe to a credit note whose refund failed
+	// (POST /v1/credit-notes/{id}/attach-stripe-refund)
+	AttachStripeRefundToCreditNote(w http.ResponseWriter, r *http.Request, id string, params AttachStripeRefundToCreditNoteParams)
 	// Issue a draft credit note
 	// (POST /v1/credit-notes/{id}/issue)
 	IssueCreditNote(w http.ResponseWriter, r *http.Request, id string, params IssueCreditNoteParams)
@@ -10693,6 +10729,12 @@ func (_ Unimplemented) GetCreditNoteStats(w http.ResponseWriter, r *http.Request
 // Get a credit note
 // (GET /v1/credit-notes/{id})
 func (_ Unimplemented) GetCreditNote(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Attach a refund made in Stripe to a credit note whose refund failed
+// (POST /v1/credit-notes/{id}/attach-stripe-refund)
+func (_ Unimplemented) AttachStripeRefundToCreditNote(w http.ResponseWriter, r *http.Request, id string, params AttachStripeRefundToCreditNoteParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -12670,6 +12712,62 @@ func (siw *ServerInterfaceWrapper) GetCreditNote(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetCreditNote(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AttachStripeRefundToCreditNote operation middleware
+func (siw *ServerInterfaceWrapper) AttachStripeRefundToCreditNote(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params AttachStripeRefundToCreditNoteParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AttachStripeRefundToCreditNote(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -20616,6 +20714,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/credit-notes/{id}", wrapper.GetCreditNote)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/credit-notes/{id}/attach-stripe-refund", wrapper.AttachStripeRefundToCreditNote)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/credit-notes/{id}/issue", wrapper.IssueCreditNote)

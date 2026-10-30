@@ -33,6 +33,7 @@ export * from './aPIKey';
 export * from './aPIKeyCreated';
 export * from './aPIKeyKeyType';
 export * from './aPIKeyRotation';
+export * from './attachStripeRefundToCreditNoteBody';
 export * from './attention';
 export * from './attentionAction';
 export * from './attentionActionItem';

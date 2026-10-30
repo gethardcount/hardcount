@@ -7,7 +7,9 @@
 -- recorded here: they carry hardcount_cn_id metadata, or a credit note already
 -- holds their id.
 --
--- outcome is what Hardcount did with the refund when it first saw it:
+-- outcome is what Hardcount did with the refund:
+--   awaiting:      first seen pending or requiring action; decided when a
+--                  later event shows it succeeded, failed or was canceled;
 --   credit_note:   recorded as an issued credit note whose card refund is
 --                  this refund (credit_note_id names it);
 --   other_payment: the refund is of a payment that did not pay the invoice
@@ -35,14 +37,18 @@ CREATE TABLE invoice_stripe_refunds (
     reason                   TEXT NOT NULL DEFAULT '',
     failure_reason           TEXT NOT NULL DEFAULT '',
     outcome                  TEXT NOT NULL CHECK (outcome IN (
-        'credit_note', 'other_payment', 'needs_review', 'not_refunded', 'dismissed')),
+        'awaiting', 'credit_note', 'other_payment', 'needs_review', 'not_refunded', 'dismissed')),
     review_reason            TEXT NOT NULL DEFAULT '' CHECK (review_reason IN (
         '', 'invoice_not_paid', 'currency_mismatch', 'prepaid_commit', 'seen_late',
-        'exceeds_card_refundable', 'exceeds_creditable')),
+        'credit_note_refund_failed', 'exceeds_card_refundable', 'exceeds_creditable')),
     credit_note_id           TEXT REFERENCES credit_notes(id) ON DELETE RESTRICT,
     dismissed_note           TEXT NOT NULL DEFAULT '',
     dismissed_at             TIMESTAMPTZ,
     refund_created_at        TIMESTAMPTZ NOT NULL,
+    -- The creation time of the first event Hardcount saw for the refund: the
+    -- 24-hour rule compares it with refund_created_at, whenever the refund
+    -- is decided.
+    first_event_at           TIMESTAMPTZ NOT NULL,
     last_event_at            TIMESTAMPTZ NOT NULL,
     last_stripe_event_id     TEXT NOT NULL,
     created_at               TIMESTAMPTZ NOT NULL DEFAULT now(),

@@ -1912,6 +1912,38 @@ func (s *Stripe) handleRefundUpdated(ctx context.Context, tenantID string, event
 	return nil
 }
 
+// unmatchedRefund decides what an old refund whose PaymentIntent no invoice
+// holds does. A payment Hardcount made carries hardcount_invoice_id on its
+// PaymentIntent, and its record can still be on its way (a hosted-page
+// payment whose settle has not landed): the delivery fails, so Stripe sends
+// it again for up to three days, instead of the refund being dropped for
+// good. A PaymentIntent with no Hardcount metadata is a charge the tenant made
+// outside Hardcount on the same Stripe account: acknowledged. When Stripe
+// cannot be asked, the delivery fails too. Logged at Warn either way.
+func (s *Stripe) unmatchedRefund(ctx context.Context, event domain.StripeWebhookEvent, refundID, pi, status string) error {
+	if s.client == nil {
+		slog.WarnContext(ctx, "refund webhook names a payment no Hardcount invoice holds, and Stripe cannot be asked whose it is — acknowledged",
+			"stripe_event_id", event.StripeEventID, "stripe_refund_id", refundID, "stripe_payment_intent_id", pi, "status", status)
+		return nil
+	}
+	got, err := s.client.GetPaymentIntent(ctx, pi)
+	if err != nil {
+		slog.WarnContext(ctx, "refund webhook names a payment no Hardcount invoice holds, and reading the payment from Stripe failed — Stripe will send it again",
+			"stripe_event_id", event.StripeEventID, "stripe_refund_id", refundID, "stripe_payment_intent_id", pi, "error", err)
+		return fmt.Errorf("%s: refund %s: read payment %s: %w", event.EventType, refundID, pi, err)
+	}
+	if got.InvoiceID != "" {
+		slog.WarnContext(ctx, "refund webhook names a Hardcount payment no invoice holds yet — Stripe will send it again; if it keeps failing, find invoice hardcount_invoice_id and its payment",
+			"stripe_event_id", event.StripeEventID, "stripe_refund_id", refundID, "stripe_payment_intent_id", pi,
+			"hardcount_invoice_id", got.InvoiceID, "status", status)
+		return fmt.Errorf("%s: refund %s: payment %s carries hardcount_invoice_id %s but no invoice holds it yet (retry)",
+			event.EventType, refundID, pi, got.InvoiceID)
+	}
+	slog.WarnContext(ctx, "refund webhook names a payment no Hardcount invoice holds — acknowledged",
+		"stripe_event_id", event.StripeEventID, "stripe_refund_id", refundID, "stripe_payment_intent_id", pi, "status", status)
+	return nil
+}
+
 // recordExternalRefund hands a refund with no hardcount_cn_id to the
 // ExternalRefundRecorder (ADR-134). A status Hardcount does not know (Stripe
 // added one) fails the delivery so Stripe sends it again, which shows on
@@ -1951,9 +1983,7 @@ func (s *Stripe) recordExternalRefund(ctx context.Context, tenantID string, even
 		if young {
 			return fmt.Errorf("%s: refund %s: no invoice holds payment %s yet (recent refund — retry)", event.EventType, refundID, pi)
 		}
-		slog.InfoContext(ctx, "refund webhook names a payment no Hardcount invoice holds — acknowledged",
-			"stripe_event_id", event.StripeEventID, "stripe_refund_id", refundID, "stripe_payment_intent_id", pi, "status", status)
-		return nil
+		return s.unmatchedRefund(ctx, event, refundID, pi, status)
 	}
 	if err != nil {
 		return fmt.Errorf("%s: record refund %s: %w", event.EventType, refundID, err)

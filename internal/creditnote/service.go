@@ -391,6 +391,7 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 			return domain.CreditNote{}, err
 		}
 		input.linked = link
+		return s.createAndIssueLinked(ctx, tenantID, input)
 	}
 	return s.create(ctx, tenantID, input, nil)
 }
@@ -2307,6 +2308,12 @@ func (s *Service) RetryRefund(ctx context.Context, tenantID, id string) (domain.
 	inv, err := s.invoices.Get(ctx, tenantID, cn.InvoiceID)
 	if err != nil {
 		return domain.CreditNote{}, fmt.Errorf("get invoice: %w", err)
+	}
+	// No path may refund a customer twice: a refund made in Stripe on this
+	// invoice that is not settled yet may already be what this retry would
+	// send (ADR-134).
+	if err := s.refundBlockedByStripeRefund(ctx, tenantID, cn.InvoiceID); err != nil {
+		return domain.CreditNote{}, err
 	}
 	// The operator-facing dead end this closes: a refund leg written against an
 	// offline-paid invoice can NEVER succeed, because no Stripe payment backs

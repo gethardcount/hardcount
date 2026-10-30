@@ -21,6 +21,7 @@ export const InvoiceStripeRefundReviewReason = {
   currency_mismatch: 'currency_mismatch',
   prepaid_commit: 'prepaid_commit',
   seen_late: 'seen_late',
+  credit_note_refund_failed: 'credit_note_refund_failed',
   exceeds_card_refundable: 'exceeds_card_refundable',
   exceeds_creditable: 'exceeds_creditable',
 } as const;

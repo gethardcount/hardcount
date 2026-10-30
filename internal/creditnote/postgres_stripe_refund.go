@@ -39,6 +39,13 @@ type StripeRefundStore interface {
 	// UpdateStripeRefundSnapshotTx writes a newer snapshot's status, reason,
 	// failure reason and event onto the row. The outcome never changes here.
 	UpdateStripeRefundSnapshotTx(ctx context.Context, tx *sql.Tx, id string, snap domain.StripeRefundSnapshot) (domain.InvoiceStripeRefund, error)
+	// DecideStripeRefundTx writes the outcome of an awaiting row, decided on
+	// a later event, with that event's snapshot.
+	DecideStripeRefundTx(ctx context.Context, tx *sql.Tx, id string, snap domain.StripeRefundSnapshot, outcome domain.StripeRefundOutcome, reason domain.StripeRefundReviewReason, creditNoteID string) (domain.InvoiceStripeRefund, error)
+	// AttachStripeRefundTx makes a refund made in Stripe the card refund of
+	// an issued credit note whose own refund failed, as a CAS on the refund
+	// id the caller read: found false when the note moved since.
+	AttachStripeRefundTx(ctx context.Context, tx *sql.Tx, creditNoteID, priorRefundID, stripeRefundID string, status domain.RefundStatus) (attached bool, err error)
 	// LinkStripeRefundTx marks a needs_review or dismissed row as recorded by
 	// the credit note.
 	LinkStripeRefundTx(ctx context.Context, tx *sql.Tx, id, creditNoteID string) (domain.InvoiceStripeRefund, error)
@@ -58,7 +65,7 @@ type StripeRefundStore interface {
 const stripeRefundCols = `id, invoice_id, stripe_refund_id, stripe_payment_intent_id, stripe_charge_id,
 	amount_cents, currency, status, reason, failure_reason, outcome, review_reason,
 	COALESCE(credit_note_id, ''), dismissed_note, dismissed_at, refund_created_at,
-	last_event_at, last_stripe_event_id, livemode, created_at, updated_at`
+	first_event_at, last_event_at, last_stripe_event_id, livemode, created_at, updated_at`
 
 func scanStripeRefundDest(r *domain.InvoiceStripeRefund) []any {
 	return []any{
@@ -66,7 +73,7 @@ func scanStripeRefundDest(r *domain.InvoiceStripeRefund) []any {
 		&r.AmountCents, &r.Currency, (*string)(&r.Status), &r.Reason, &r.FailureReason,
 		(*string)(&r.Outcome), (*string)(&r.ReviewReason),
 		&r.CreditNoteID, &r.DismissedNote, &r.DismissedAt, &r.RefundCreatedAt,
-		&r.LastEventAt, &r.LastStripeEventID, &r.Livemode, &r.CreatedAt, &r.UpdatedAt,
+		&r.FirstEventAt, &r.LastEventAt, &r.LastStripeEventID, &r.Livemode, &r.CreatedAt, &r.UpdatedAt,
 	}
 }
 
@@ -133,12 +140,12 @@ func (s *PostgresStore) InsertStripeRefundTx(ctx context.Context, tx *sql.Tx, te
 		INSERT INTO invoice_stripe_refunds
 			(tenant_id, invoice_id, stripe_refund_id, stripe_payment_intent_id, stripe_charge_id,
 			 amount_cents, currency, status, reason, failure_reason, outcome, review_reason,
-			 credit_note_id, refund_created_at, last_event_at, last_stripe_event_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NULLIF($13, ''), $14, $15, $16)
+			 credit_note_id, refund_created_at, first_event_at, last_event_at, last_stripe_event_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NULLIF($13, ''), $14, $15, $16, $17)
 		RETURNING `+stripeRefundCols,
 		tenantID, r.InvoiceID, r.StripeRefundID, r.StripePaymentIntentID, r.StripeChargeID,
 		r.AmountCents, strings.ToUpper(strings.TrimSpace(r.Currency)), string(r.Status), r.Reason, r.FailureReason,
-		string(r.Outcome), string(r.ReviewReason), r.CreditNoteID, r.RefundCreatedAt, r.LastEventAt, r.LastStripeEventID,
+		string(r.Outcome), string(r.ReviewReason), r.CreditNoteID, r.RefundCreatedAt, r.FirstEventAt, r.LastEventAt, r.LastStripeEventID,
 	).Scan(scanStripeRefundDest(&out)...); err != nil {
 		return domain.InvoiceStripeRefund{}, fmt.Errorf("insert refund %s: %w", r.StripeRefundID, err)
 	}
@@ -159,6 +166,44 @@ func (s *PostgresStore) UpdateStripeRefundSnapshotTx(ctx context.Context, tx *sq
 		return domain.InvoiceStripeRefund{}, fmt.Errorf("update refund %s: %w", snap.StripeRefundID, err)
 	}
 	return out, nil
+}
+
+func (s *PostgresStore) DecideStripeRefundTx(ctx context.Context, tx *sql.Tx, id string, snap domain.StripeRefundSnapshot, outcome domain.StripeRefundOutcome, reason domain.StripeRefundReviewReason, creditNoteID string) (domain.InvoiceStripeRefund, error) {
+	var out domain.InvoiceStripeRefund
+	err := tx.QueryRowContext(ctx, `
+		UPDATE invoice_stripe_refunds SET
+			status = $2, reason = $3, failure_reason = $4,
+			stripe_charge_id = COALESCE(NULLIF($5, ''), stripe_charge_id),
+			last_event_at = $6, last_stripe_event_id = $7,
+			outcome = $8, review_reason = $9, credit_note_id = NULLIF($10, ''), updated_at = now()
+		WHERE id = $1 AND outcome = 'awaiting'
+		RETURNING `+stripeRefundCols,
+		id, string(snap.Status), snap.Reason, snap.FailureReason, snap.StripeChargeID, snap.EventAt, snap.StripeEventID,
+		string(outcome), string(reason), creditNoteID,
+	).Scan(scanStripeRefundDest(&out)...)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.InvoiceStripeRefund{}, fmt.Errorf("refund row %s is no longer awaiting (decided under the lock: impossible; investigate)", id)
+	}
+	if err != nil {
+		return domain.InvoiceStripeRefund{}, fmt.Errorf("decide refund %s: %w", snap.StripeRefundID, err)
+	}
+	return out, nil
+}
+
+func (s *PostgresStore) AttachStripeRefundTx(ctx context.Context, tx *sql.Tx, creditNoteID, priorRefundID, stripeRefundID string, status domain.RefundStatus) (bool, error) {
+	res, err := tx.ExecContext(ctx, `
+		UPDATE credit_notes SET stripe_refund_id = $3, refund_status = $4, recorded_from_stripe = true,
+			refund_unknown_key = NULL, updated_at = $5
+		WHERE id = $1 AND status = 'issued' AND refund_status = 'failed' AND COALESCE(stripe_refund_id, '') = $2`,
+		creditNoteID, priorRefundID, stripeRefundID, status, clock.Now(ctx))
+	if err != nil {
+		return false, fmt.Errorf("attach refund %s to credit note %s: %w", stripeRefundID, creditNoteID, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n == 1, nil
 }
 
 func (s *PostgresStore) LinkStripeRefundTx(ctx context.Context, tx *sql.Tx, id, creditNoteID string) (domain.InvoiceStripeRefund, error) {

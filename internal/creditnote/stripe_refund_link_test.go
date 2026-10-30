@@ -38,7 +38,8 @@ func TestCheckLinkedStripeRefund(t *testing.T) {
 		field string // "" = accepted
 	}{
 		{name: "a refund of the invoice's payment"},
-		{name: "a pending refund", facts: func(f *domain.StripeRefundFacts) { f.Status = domain.StripeRefundPending }},
+		{name: "a pending refund", facts: func(f *domain.StripeRefundFacts) { f.Status = domain.StripeRefundPending }, field: "stripe_refund_id"},
+		{name: "a refund needing action", facts: func(f *domain.StripeRefundFacts) { f.Status = domain.StripeRefundRequiresAction }, field: "stripe_refund_id"},
 		{name: "made by Hardcount", facts: func(f *domain.StripeRefundFacts) { f.HardcountCreditNoteID = "hc_cn_x" }, field: "stripe_refund_id"},
 		{name: "another payment", facts: func(f *domain.StripeRefundFacts) { f.PaymentIntentID = "pi_dup" }, field: "stripe_refund_id"},
 		{name: "no payment", facts: func(f *domain.StripeRefundFacts) { f.PaymentIntentID = "" }, field: "stripe_refund_id"},

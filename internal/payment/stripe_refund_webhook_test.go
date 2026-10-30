@@ -249,3 +249,36 @@ func TestStripeWebhook_RefundCreatedThroughHandler(t *testing.T) {
 		t.Errorf("ingested %d events, want 1 (the dedup row, written after the record)", len(webhooks.ingested))
 	}
 }
+
+// TestRefundWebhook_OldUnmatchedRefundOfAHardcountPayment: an old refund
+// whose PaymentIntent no invoice holds is acknowledged only when Stripe says
+// the PaymentIntent is not Hardcount's. One carrying hardcount_invoice_id (its
+// record may still be on its way), or one Stripe cannot be asked about,
+// fails the delivery so Stripe sends it again.
+func TestRefundWebhook_OldUnmatchedRefundOfAHardcountPayment(t *testing.T) {
+	old := time.Now().Add(-48 * time.Hour).Unix()
+	for _, tc := range []struct {
+		name    string
+		client  *mockStripeClient
+		wantErr bool
+	}{
+		{"not Hardcount's", &mockStripeClient{}, false},
+		{"a Hardcount payment", &mockStripeClient{piStates: map[string]PaymentIntentResult{"pi_dash": {ID: "pi_dash", InvoiceID: "hc_inv_1"}}}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := NewStripe(tc.client, newMockInvoiceUpdater(), newMockWebhookStore(), nil)
+			s.SetRefundStatusUpdater(&fakeRefundUpdater{})
+			s.SetExternalRefundRecorder(&fakeExternalRefunds{err: errs.ErrNotFound})
+			err := s.handleRefundUpdated(context.Background(), "t1", domain.StripeWebhookEvent{
+				StripeEventID: "evt_um", EventType: "refund.updated", OccurredAt: time.Now(),
+				Payload: map[string]any{"raw": refundRaw(t, dashboardRefund(old, nil))},
+			})
+			if (err != nil) != tc.wantErr {
+				t.Errorf("err = %v, want error %v", err, tc.wantErr)
+			}
+			if err != nil && errors.Is(err, errs.ErrNotFound) {
+				t.Errorf("err = %v: a retry must not wrap ErrNotFound, which HandleWebhook acknowledges", err)
+			}
+		})
+	}
+}

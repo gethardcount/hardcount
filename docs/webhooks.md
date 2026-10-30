@@ -371,7 +371,12 @@ with `stripe_refund_id`, `stripe_payment_intent_id`, `amount_cents`,
 - `needs_review`: a refund of the invoice's own payment that Hardcount did
   not record; `review_reason` says why. The invoice shows a notice until the
   operator records it with a credit note or dismisses it.
-- `not_refunded`: it had already failed or been canceled. No money moved.
+- `not_refunded`: it failed or was canceled before it succeeded. No money
+  moved.
+
+The event is sent when the outcome is decided: at once for most refunds, and
+for a refund first seen pending, when Stripe says it succeeded, failed or was
+canceled.
 
 The invoice is as it was: a refund never changes its status or amounts. A
 later change to the refund, such as a failure, sends nothing more; a

@@ -23,6 +23,13 @@ func (s StripeRefundStatus) Valid() bool { return s.stage() > 0 }
 // MovedNoMoney reports whether the refund ended without returning money to
 // the customer: it failed, or the operator canceled it in time. Either way
 // the money went back to the Stripe balance.
+// InFlight reports whether the refund is still on its way: Stripe has not
+// said yet whether it went through. A refund made in Stripe is recorded as a
+// credit note only once it succeeded (ADR-134, 2026-10-30 review).
+func (s StripeRefundStatus) InFlight() bool {
+	return s == StripeRefundPending || s == StripeRefundRequiresAction
+}
+
 func (s StripeRefundStatus) MovedNoMoney() bool {
 	return s == StripeRefundFailed || s == StripeRefundCanceled
 }
@@ -65,6 +72,11 @@ const (
 	// StripeRefundRecordedAsCreditNote: recorded as an issued credit note
 	// whose card refund is this refund. Hardcount made no refund call for it.
 	StripeRefundRecordedAsCreditNote StripeRefundOutcome = "credit_note"
+	// StripeRefundAwaiting: first seen pending or requiring action. Nothing is
+	// recorded until a later event shows it succeeded (then it is decided as
+	// any first sighting, with the 24-hour rule measured from Hardcount's
+	// first sighting), or failed or was canceled (not_refunded).
+	StripeRefundAwaiting StripeRefundOutcome = "awaiting"
 	// StripeRefundOtherPayment: the refund is of a payment that did not pay
 	// the invoice (a second charge, or money on a voided invoice). That money
 	// was never on the invoice, so no credit note.
@@ -99,6 +111,12 @@ const (
 	// Hardcount first saw the refund more than StripeRefundLateAfter after
 	// Stripe made it, so the operator may already have recorded it by hand.
 	StripeRefundReviewSeenLate StripeRefundReviewReason = "seen_late"
+	// A credit note on the invoice has a card refund that failed. The refund
+	// made in Stripe may replace it: the operator attaches it to that note
+	// (POST /v1/credit-notes/{id}/attach-stripe-refund), records it, or
+	// dismisses it. Retry refund on that note is refused meanwhile, so the
+	// customer is never refunded twice.
+	StripeRefundReviewCreditNoteRefundFailed StripeRefundReviewReason = "credit_note_refund_failed"
 	// The refund is more than the card payment has left to refund after the
 	// credit notes already on the invoice.
 	StripeRefundReviewExceedsCardRefundable StripeRefundReviewReason = "exceeds_card_refundable"
@@ -146,6 +164,9 @@ type InvoiceStripeRefund struct {
 	DismissedAt   *time.Time `json:"dismissed_at,omitempty"`
 	// RefundCreatedAt is when Stripe made the refund.
 	RefundCreatedAt time.Time `json:"refund_created_at"`
+	// FirstEventAt is the creation time of the first event Hardcount saw for
+	// the refund. The 24-hour rule compares it with RefundCreatedAt.
+	FirstEventAt time.Time `json:"-"`
 	// LastEventAt and LastStripeEventID name the Stripe event whose snapshot
 	// the row holds. They decide whether a later event is newer.
 	LastEventAt       time.Time `json:"-"`
@@ -182,7 +203,14 @@ type StripeRefundSnapshot struct {
 // SeenLate reports whether this event, the first Hardcount sees for the
 // refund, came more than StripeRefundLateAfter after Stripe made it.
 func (s StripeRefundSnapshot) SeenLate() bool {
-	return !s.CreatedAt.IsZero() && s.EventAt.Sub(s.CreatedAt) > StripeRefundLateAfter
+	return StripeRefundSeenLate(s.CreatedAt, s.EventAt)
+}
+
+// StripeRefundSeenLate reports whether Hardcount first saw a refund (the
+// creation time of its first event) more than StripeRefundLateAfter after
+// Stripe made it. An unknown creation time is not late.
+func StripeRefundSeenLate(created, firstSeen time.Time) bool {
+	return !created.IsZero() && firstSeen.Sub(created) > StripeRefundLateAfter
 }
 
 // SupersededBy reports whether snapshot s is newer than what the row holds.

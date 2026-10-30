@@ -30,14 +30,17 @@ The common practice is that the invoice stays paid and a credit note carries the
 
 3. **A refund without that metadata is recorded by one writer,** `creditnote.Service.RecordStripeRefund`, reached from the payment webhook handler through a consumer-defined interface (`payment.ExternalRefundRecorder`). It finds the invoice from the refund's row, else from the credit note that holds the refund id, else by the refund's PaymentIntent (the dispute lookup). It locks the invoice row, then the credit-note lock, then the refund's row, and decides under them. A credit note that already holds the refund id gets the status, monotonically, as from any refund webhook.
 
-4. **At first sighting a refund becomes a credit note only when all of these hold:**
-   - it did not fail or get canceled;
+4. **A refund is recorded only once it succeeded.** One first seen pending or requiring action gets an `awaiting` row and nothing else: no note, no notice, no event. The first later event that says how it ended decides it. Failed or canceled (an operator can cancel a card refund in the dashboard for a short time), it becomes `not_refunded` with no document. Succeeded, it is decided by the rules below, and the 24-hour rule still counts from the refund's creation to Hardcount's first sighting.
+
+   **A refund becomes a credit note only when all of these hold:**
+   - it succeeded;
    - its PaymentIntent is the invoice's own payment;
    - the invoice is paid, with payment status succeeded;
    - the currency matches;
    - the invoice bought no prepaid credit (ordinary credit notes are refused there, ADR-078 D4);
-   - Hardcount sees it within 24 hours of its creation;
-   - it fits both caps: what the card payment has left to refund after the notes not voided, and what the invoice has left to credit.
+   - Hardcount first saw it within 24 hours of its creation;
+   - no credit note on the invoice has a card refund that failed: the refund may replace it, and only the operator can say (`credit_note_refund_failed`);
+   - it fits both caps: what the card payment has left to refund after the refunds of notes not voided that did not fail, and what the invoice has left to credit.
 
 5. **The recorded note** is issued in the transaction that creates it, with no draft ever visible, like commit relief. It has one gross line, "Refund made in Stripe (re_…)", with the proportional tax and last-note true-up every note has. All of it goes to the card refund. `stripe_refund_id` names the refund, `refund_status` is mapped from Stripe's, and `recorded_from_stripe` is true. The reason is "Refunded in Stripe", with Stripe's reason when given. After the commit the shared external legs run: the refund leg skips because the note holds a refund id, and the tax reversal runs, recovered by its sweep if it fails.
 
@@ -47,19 +50,27 @@ The common practice is that the invoice stays paid and a credit note carries the
    |---|---|---|
    | `other_payment` | A refund of a payment that did not pay the invoice: a second charge, or money on a voided invoice | A timeline row. No credit note: that money was never on the invoice |
    | `needs_review` | A refund of the invoice's own payment that failed a check (the review reason says which) | The `refunded_in_stripe` notice, until recorded with a credit note or dismissed |
-   | `not_refunded` | First seen already failed or canceled | A timeline row. No money moved |
+   | `not_refunded` | Failed or canceled before it succeeded | A timeline row. No money moved |
+   | `awaiting` | Seen so far only in flight | A timeline row. Decided by a later event |
 
-   A young refund of a payment on an invoice not paid yet asks Stripe to deliver it again, because the payment's own record may be on its way. An old one is flagged `invoice_not_paid`.
+   A young refund of a payment on an invoice not paid yet asks Stripe to deliver it again, because the payment's own record may be on its way. An old one is flagged `invoice_not_paid`. A refund of a payment no invoice holds is acknowledged only when Stripe says that PaymentIntent is not Hardcount's: one carrying `hardcount_invoice_id` keeps failing the delivery, so Stripe sends it again for up to three days, and each try logs a warning.
 
 7. **A refund larger than what is left to credit is flagged only.** Example: $100 paid by card, a $50 note to the credit balance, then $100 refunded in Stripe. Hardcount never writes a partial note, and never takes the credit back by itself: that would be a new money rule. The operator decides and dismisses it.
 
 8. **One table, `invoice_stripe_refunds`** (migration 00222), one row per refund, owned by the credit-note domain. It keeps the newest snapshot by Stripe's event time. Its unique `(tenant_id, stripe_refund_id)` index is the backstop for two deliveries at once; the invoice row lock is what serializes them. It forces row-level security by tenant and mode, and cascades with its invoice for test-clock teardown, which deletes it before the clock's credit notes.
 
-9. **One event, `payment.refunded_in_stripe`,** queued in the transaction that first records the refund, with the invoice and the refund. A later change to the refund sends nothing more. A recorded note's refund status follows it as for any refund, and a later failure follows the existing refund-failure path (the refunds needing attention list).
+9. **One event, `payment.refunded_in_stripe`,** queued in the transaction that decides the refund's outcome, with the invoice and the refund. A later change to the refund sends nothing more. A recorded note's refund status follows it as for any refund, and a later failure follows the existing refund-failure path (the refunds needing attention list).
 
-10. **The operator's two actions.** `POST /v1/credit-notes` takes an optional `stripe_refund_id`, and Hardcount reads the refund from Stripe before the create. The refund must be of this invoice's payment, not made by Hardcount, and not failed or canceled. The note sends exactly its amount to the card, nothing to the credit balance, and is issued at once. Its card refund is then done, with no Stripe call, and a flagged row is marked recorded. `POST /v1/invoices/{id}/stripe-refunds/{stripe_refund_id}/dismiss` records "handled outside Hardcount" with the operator's note and an audit row.
+10. **The operator's three actions.**
+    - **Record:** `POST /v1/credit-notes` takes an optional `stripe_refund_id`, and Hardcount reads the refund from Stripe before the create. The refund must be of this invoice's payment, not made by Hardcount, and succeeded. The note sends exactly its amount to the card and nothing to the credit balance. It is created and issued in one transaction, with the flagged row marked recorded in the same one, so a failed issue leaves no hidden draft holding the refund and the notice stays. No Stripe call.
+    - **Attach:** `POST /v1/credit-notes/{id}/attach-stripe-refund` makes a refund made in Stripe the card refund of an issued note whose Hardcount refund failed, when the operator refunded by hand what that note was for. Same checks, and the amounts must match. The note holds the refund, the row is marked recorded, and nothing else happens: no new note, no second tax reversal. Hardcount never matches a refund to a note by amount on its own.
+    - **Dismiss:** `POST /v1/invoices/{id}/stripe-refunds/{stripe_refund_id}/dismiss` records "handled outside Hardcount" with the operator's note and an audit row.
 
-11. **Nothing else moves.** The invoice keeps its status and payment status. Dunning is never started or ended, the credit ledger is never written, and Hardcount sends the customer no email (Stripe sends its own refund receipt when the operator turned that on).
+    A refund made in Stripe is never recorded by hand with an ordinary credit note: one with a card refund would refund the customer again, and one without would leave the refund unlinked.
+
+11. **No path refunds a customer twice.** Retry refund on a note is refused while its invoice has a refund made in Stripe that is not settled (flagged, or still in flight), with code `stripe_refund_unresolved`: that refund may be the operator's own redo of this one. The operator records, attaches or dismisses it first.
+
+12. **Nothing else moves.** The invoice keeps its status and payment status. Dunning is never started or ended, the credit ledger is never written, and Hardcount sends the customer no email (Stripe sends its own refund receipt when the operator turned that on).
 
 ## Consequences
 
@@ -68,7 +79,8 @@ The common practice is that the invoice stays paid and a credit note carries the
 - A Hardcount refund after a recorded one is refused up front by the existing cap.
 - An issued credit note cannot be voided, so a wrong recorded note cannot be taken back. That is why only a refund that passes every check is recorded.
 - Existing Stripe webhook endpoints lack `refund.created`. Without it many card refunds are still seen through their later `refund.updated`, but then more than 24 hours late, so they are flagged rather than recorded. The release notes tell operators to add the event.
-- Retry refund on a recorded note whose refund later failed reads the refund, sees it failed, and makes a new Hardcount refund. That is right when the operator asks for it.
+- Retry refund on a recorded note whose refund later failed (a card refund can fail days later) reads the refund, sees it failed, and makes a new Hardcount refund. That is right when the operator asks for it, and it is refused while another refund made in Stripe on the invoice is unsettled.
+- A payment-anomaly notice and a flagged refund made in Stripe on one invoice show as one notice: the anomaly's, which names the refund first.
 
 ## Rejected
 
