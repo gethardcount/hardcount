@@ -4,7 +4,8 @@ import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { api, formatCents } from '@/lib/api'
 import { fillRevenueBuckets } from '@/lib/revenueChart'
-import { formatCompactCents, outstandingText } from '@/lib/money'
+import { formatCompactCents } from '@/lib/money'
+import { ATTENTION_LISTS, homeAttentionLines, type AttentionSeverity } from '@/lib/homeAttention'
 import type { Invoice, Customer } from '@/lib/api'
 import { timeAgo, wallClockNow } from '@/lib/effectiveNow'
 import { useEffectiveNowResolver, useTestClocks } from '@/hooks/useClockFrozenMap'
@@ -33,6 +34,11 @@ import { PeriodTabs } from '@/components/analytics/PeriodTabs'
 import { PERIOD_LABELS, type Period } from '@/components/analytics/period'
 import { tooltipStyle, useChartTheme } from '@/lib/chartTheme'
 import { revenueBucketLabel } from '@/lib/chartLabels'
+
+// The total of a list, for a count that must equal it.
+function useListTotal(key: string, read: () => Promise<{ total: number }>) {
+  return useQuery({ queryKey: ['home-attention', key], queryFn: async () => (await read()).total })
+}
 
 export default function DashboardPage() {
   usePageTitle('Home')
@@ -98,52 +104,19 @@ export default function DashboardPage() {
     [chartData, chartRes?.period, period, chartFetchedAt],
   )
 
-  // Attention items surface things the operator should act on. Empty list = quiet state.
-  const alerts = useMemo(() => {
-    if (!overview) return []
-    // Tone follows urgency: failed payments and stuck refunds are money at
-    // risk (red); invoices in payment retry need watching (amber, the same
-    // colour as the sidebar count); open invoices are normal (neutral).
-    const items: { severity: AlertSeverity; text: string; to?: string }[] = []
-    if (overview.failed_payments > 0) {
-      items.push({
-        severity: 'danger',
-        text: `${overview.failed_payments} failed ${overview.failed_payments === 1 ? 'payment' : 'payments'} in the last ${PERIOD_LABELS[period].toLowerCase()}`,
-        // Open invoices only, the same set the count is over: a void or a
-        // write-off keeps its last payment_status.
-        to: '/invoices?status=finalized&payment_status=failed',
-      })
-    }
-    if (overview.dunning_active > 0) {
-      items.push({
-        severity: 'warning',
-        text: `${overview.dunning_active} ${overview.dunning_active === 1 ? 'invoice' : 'invoices'} in payment retry`,
-        to: '/dunning',
-      })
-    }
-    if (overview.refunds_needing_attention > 0) {
-      // A failed/pending refund = money owed to a customer that hasn't been
-      // pushed back. The refund is operator-retried (no auto-sweep), so this is
-      // the nudge that makes a stuck refund visible. Links to the filtered list.
-      items.push({
-        severity: 'danger',
-        text: `${overview.refunds_needing_attention} ${overview.refunds_needing_attention === 1 ? 'refund needs' : 'refunds need'} attention`,
-        to: '/credit-notes?refund_status=needs_attention',
-      })
-    }
-    // The count covers every currency, so the amount names every currency
-    // too (outstanding_ar alone is the default currency only: a tenant owed
-    // only in EUR lost this row, and a mixed one saw a USD-only sum).
-    const outstanding = overview.outstanding_by_currency ?? []
-    if (overview.open_invoices > 0 && outstanding.some(a => a.amount_cents > 0)) {
-      items.push({
-        severity: 'info',
-        text: outstandingText(overview.open_invoices, outstanding),
-        to: '/invoices?status=finalized',
-      })
-    }
-    return items
-  }, [overview, period])
+  // Needs attention: each count is the total of the list its line opens
+  // (lib/homeAttention), so the line and the list never disagree.
+  const { data: failedOpen } = useListTotal('failed', () => api.listInvoices(`${ATTENTION_LISTS.failed.query}&limit=1`))
+  const { data: retrying } = useListTotal('retrying', () => api.listDunningRuns(`${ATTENTION_LISTS.retrying.query}&limit=1`))
+  const { data: openTotal } = useListTotal('open', () => api.listInvoices(`${ATTENTION_LISTS.open.query}&limit=1`))
+  const alerts = useMemo(() => homeAttentionLines({
+    failed: failedOpen,
+    retrying,
+    open: openTotal,
+    refunds: overview?.refunds_needing_attention,
+    openOutsideClocks: overview?.open_invoices,
+    outstanding: overview?.outstanding_by_currency,
+  }), [failedOpen, retrying, openTotal, overview])
 
   return (
     <Layout>
@@ -392,7 +365,7 @@ export default function DashboardPage() {
   )
 }
 
-type AlertSeverity = 'info' | 'warning' | 'danger'
+type AlertSeverity = AttentionSeverity
 
 function AlertRow({ severity, text, to }: { severity: AlertSeverity; text: string; to?: string }) {
   const bg =

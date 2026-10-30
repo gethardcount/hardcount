@@ -2,7 +2,7 @@ import { Fragment, useState, useMemo } from 'react'
 import { dunningRunStatus } from '@/lib/statusLabels'
 import { StatusBadge } from '@/components/StatusBadge'
 import { usePageTitle } from '@/hooks/usePageTitle'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
   api,
@@ -143,11 +143,22 @@ export default function DunningPage() {
 /* ─────────────────────────── Runs Tab ─────────────────────────── */
 
 const RUNS_PAGE_SIZE = 25
+const RUN_STATES = ['active', 'escalated', 'resolved']
 
 function RunsTab() {
   const [expandedRun, setExpandedRun] = useState<string | null>(null)
   const [runEvents, setRunEvents] = useState<Record<string, DunningEvent[]>>({})
-  const [filterStatus, setFilterStatus] = useState('')
+  // The filter lives in ?state=, so Home's "in payment retry" line opens
+  // this list already filtered to the runs it counted.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const stateParam = searchParams.get('state') ?? ''
+  const filterStatus = RUN_STATES.includes(stateParam) ? stateParam : ''
+  const setFilterStatus = (state: string) => setSearchParams(prev => {
+    const next = new URLSearchParams(prev)
+    if (state) next.set('state', state)
+    else next.delete('state')
+    return next
+  }, { replace: true })
   const [page, setPage] = useState(1)
 
   const queryParams = useMemo(() => {
