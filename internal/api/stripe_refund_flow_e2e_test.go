@@ -868,6 +868,22 @@ func TestE2E_StripeRefund_SeenLateThenLinked(t *testing.T) {
 	if n := len(f.notes(invID)); n != 1 {
 		t.Errorf("credit notes: %d, want 1", n)
 	}
+
+	// A refund whose events never reached Hardcount has no row: it can be
+	// linked once, and the note holding it is what refuses a second link.
+	f.mu.Lock()
+	f.stripeRefunds["re_norow"] = refundJSON("re_norow", pi, 500, "succeeded", nil)
+	f.mu.Unlock()
+	link("re_norow", 500).want(t, 201, "link a refund Hardcount never heard of")
+	if r := link("re_norow", 500); r.status != 409 {
+		t.Errorf("linking a row-less refund again answered %d (%s), want 409", r.status, r.raw)
+	}
+	if n := len(f.notes(invID)); n != 2 {
+		t.Errorf("credit notes after linking a row-less refund: %d, want 2", n)
+	}
+	if n := flowCount(t, db, `SELECT count(*) FROM invoice_stripe_refunds WHERE stripe_refund_id = 're_norow'`); n != 0 {
+		t.Errorf("rows for a refund linked by hand: %d, want 0", n)
+	}
 }
 
 // TestE2E_StripeRefund_PrepaidCommitInvoice: a refund of an invoice that
