@@ -650,8 +650,8 @@ func TestBillTiming_InAdvance_E2E(t *testing.T) {
 // api.creditGrantAdapter does in production (that adapter is unexported).
 type reliefLedgerGranter struct{ svc *credit.Service }
 
-func (g reliefLedgerGranter) in(i creditnote.CreditGrantInput) credit.GrantInput {
-	return credit.GrantInput{Currency: i.Currency, CustomerID: i.CustomerID, AmountCents: i.AmountCents, Description: i.Description, InvoiceID: i.InvoiceID}
+func (g reliefLedgerGranter) in(i creditnote.CreditGrantInput) credit.CreditNoteReturnInput {
+	return credit.CreditNoteReturnInput{Currency: i.Currency, CustomerID: i.CustomerID, AmountCents: i.AmountCents, Description: i.Description, InvoiceID: i.InvoiceID, InvoicePaid: i.InvoicePaid}
 }
 func (g reliefLedgerGranter) GrantForCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, cnID string, i creditnote.CreditGrantInput) error {
 	_, err := g.svc.GrantForCreditNoteTx(ctx, tx, tenantID, cnID, g.in(i))

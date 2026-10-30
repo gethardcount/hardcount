@@ -81,6 +81,11 @@ func TestIssue_ReDerivesAllocationWhenInvoicePaidAfterCreate(t *testing.T) {
 	if got := granter.cnCalls[0].input.AmountCents; got != cn.TotalCents {
 		t.Errorf("granted amount: got %d, want %d (full CN total)", got, cn.TotalCents)
 	}
+	// ADR-132: on a paid invoice only the part drawn from credit grants goes
+	// back to them; the ledger needs to know the invoice was paid.
+	if !granter.cnCalls[0].input.InvoicePaid {
+		t.Error("credit grant on a paid invoice: InvoicePaid unset, want set")
+	}
 
 	// The persisted allocation must reflect the re-derived split so the
 	// dashboard and any retry observe what Issue acted on.

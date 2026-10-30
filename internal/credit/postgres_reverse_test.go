@@ -102,8 +102,8 @@ func TestReverseForInvoiceTx_SecondReversalRefused(t *testing.T) {
 	if err := tx1.Commit(); err != nil {
 		t.Fatalf("commit first tx: %v", err)
 	}
-	if reversed != 4000 {
-		t.Errorf("first reversal: got %d, want 4000", reversed)
+	if reversed.ReturnedCents != 4000 || reversed.RestoredCents != 4000 {
+		t.Errorf("first reversal: %+v, want 4000 returned, all of it restored to the grant", reversed)
 	}
 
 	balAfterFirst, err := testutil.BalanceUSD(svc.GetBalance(ctx, tenantID, cust.ID))
@@ -124,10 +124,10 @@ func TestReverseForInvoiceTx_SecondReversalRefused(t *testing.T) {
 	reversedAgain, err := svc.ReverseForInvoiceTx(ctx, tx2, tenantID, cust.ID, inv.ID, "INV-001")
 	_ = tx2.Rollback()
 	if !errors.Is(err, errs.ErrAlreadyExists) || errs.Code(err) != "credit_reversal_source_taken" {
-		t.Fatalf("second ReverseForInvoiceTx: (%d, %v), want already-exists credit_reversal_source_taken", reversedAgain, err)
+		t.Fatalf("second ReverseForInvoiceTx: (%+v, %v), want already-exists credit_reversal_source_taken", reversedAgain, err)
 	}
-	if reversedAgain != 0 {
-		t.Errorf("second reversal: got %d, want 0", reversedAgain)
+	if reversedAgain != (domain.CreditReturn{}) {
+		t.Errorf("second reversal: got %+v, want nothing", reversedAgain)
 	}
 
 	balAfterSecond, err := testutil.BalanceUSD(svc.GetBalance(ctx, tenantID, cust.ID))

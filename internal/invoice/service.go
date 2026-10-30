@@ -152,7 +152,11 @@ type TenantSettingsReader interface {
 // by *credit.Service. Kept as a local interface so this package doesn't
 // import internal/credit.
 type CreditReverser interface {
-	ReverseForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, invoiceID, invoiceNumber string) (int64, error)
+	// ReverseForInvoiceTx hands the invoice's applied credit back to the
+	// blocks it was drawn from (ADR-132) and says what it did: a share
+	// whose grant is past expiry expires at once, a share of a commit whose
+	// funding invoice is voided is retired again.
+	ReverseForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, invoiceID, invoiceNumber string) (domain.CreditReturn, error)
 	// RetireCommitGrantForInvoiceTx retires the remaining balance of the
 	// commit grant this invoice funded, if any (ADR-078 D3: voiding a
 	// commit funding invoice kills the unfunded credits; consumed stays
@@ -1968,13 +1972,14 @@ func (s *Service) VoidUnchangedTx(ctx context.Context, tx *sql.Tx, tenantID stri
 // VoidUnchangedTx: hand back the consumed customer credits, retire a funded
 // commit grant, and write the audit row — all on the void's transaction.
 func (s *Service) voidEffectsTx(ctx context.Context, tx *sql.Tx, tenantID string, inv domain.Invoice, prior domain.InvoiceStatus) error {
-	var creditsReversed, commitRetired int64
+	var reversed domain.CreditReturn
+	var commitRetired int64
 	if s.creditReverser != nil && inv.CustomerID != "" {
-		reversed, rerr := s.creditReverser.ReverseForInvoiceTx(ctx, tx, tenantID, inv.CustomerID, inv.ID, inv.InvoiceNumber)
+		var rerr error
+		reversed, rerr = s.creditReverser.ReverseForInvoiceTx(ctx, tx, tenantID, inv.CustomerID, inv.ID, inv.InvoiceNumber)
 		if rerr != nil {
 			return rerr
 		}
-		creditsReversed = reversed
 		// ADR-078 D3: voiding a commit FUNDING invoice retires the funded
 		// grant's remaining balance in this same tx (no-op for non-commit
 		// invoices). Void is the ONLY retire trigger — uncollectible and
@@ -2001,8 +2006,17 @@ func (s *Service) voidEffectsTx(ctx context.Context, tx *sql.Tx, tenantID string
 			"currency":           inv.Currency,
 			"status_before":      string(prior),
 		}
-		if creditsReversed > 0 {
-			meta["credits_reversed_cents"] = creditsReversed
+		if reversed.ReturnedCents > 0 {
+			meta["credits_reversed_cents"] = reversed.ReturnedCents
+		}
+		// ADR-132: of the credit handed back, what expired at once (its
+		// grant was past expiry) and what was retired again (its commit's
+		// funding invoice is voided). Both are inside credits_reversed_cents.
+		if reversed.ExpiredOnReturnCents > 0 {
+			meta["expired_on_return_cents"] = reversed.ExpiredOnReturnCents
+		}
+		if reversed.CommitRetiredOnReturnCents > 0 {
+			meta["commit_retired_on_return_cents"] = reversed.CommitRetiredOnReturnCents
 		}
 		if commitRetired > 0 {
 			meta["commit_retired_cents"] = commitRetired

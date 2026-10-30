@@ -546,8 +546,8 @@ func TestCurrency_EveryWriterRequiresOne(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	_, err = r.svc.GrantForCreditNoteTx(r.ctx, tx, r.tenantID, "hc_cn_writers", credit.GrantInput{
-		CustomerID: cust, AmountCents: 100, Description: "credit note",
+	_, err = r.svc.GrantForCreditNoteTx(r.ctx, tx, r.tenantID, "hc_cn_writers", credit.CreditNoteReturnInput{
+		CustomerID: cust, AmountCents: 100, Description: "credit note", InvoiceID: "hc_inv_writers",
 	})
 	postgres.Rollback(tx)
 	if err == nil {

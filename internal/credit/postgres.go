@@ -19,6 +19,10 @@ import (
 type PostgresStore struct {
 	db     *postgres.DB
 	outbox OutboxEnqueuer
+	// beforeRestore, when set (tests only, export_test.go), runs inside
+	// ReturnCreditTx after the source blocks are read under the locks and
+	// before the first restore write: the concurrent-resolver seam.
+	beforeRestore func(ctx context.Context, tx *sql.Tx)
 }
 
 func NewPostgresStore(db *postgres.DB) *PostgresStore {
@@ -143,14 +147,38 @@ func (s *PostgresStore) AppendEntryTx(ctx context.Context, tx *sql.Tx, tenantID 
 }
 
 // appendEntryInTx is the shared body. AppendEntry opens+commits its
-// own tx; AppendEntryTx delegates to the caller.
+// own tx; AppendEntryTx delegates to the caller. It inserts the entry and
+// enqueues the balance crossings the entry causes.
 func (s *PostgresStore) appendEntryInTx(ctx context.Context, tx *sql.Tx, tenantID string, entry domain.CreditLedgerEntry) (domain.CreditLedgerEntry, error) {
+	out, before, err := s.insertEntryInTx(ctx, tx, tenantID, entry)
+	if err != nil {
+		return domain.CreditLedgerEntry{}, err
+	}
+	// ADR-078 balance-crossing events, atomic with the entry (the advisory
+	// lock insertEntryInTx takes keeps crossings well-ordered per customer).
+	if err := s.emitBalanceCrossings(ctx, tx, tenantID, out.CustomerID, out.Currency, before, out.BalanceAfter); err != nil {
+		return domain.CreditLedgerEntry{}, err
+	}
+	return out, nil
+}
+
+// insertEntryInTx inserts one ledger entry and returns it with the balance in
+// its currency before it. It enqueues no balance crossing: a writer that
+// makes several entries as one change (a credit return, ADR-132) inserts each
+// through here and emits the crossings once, for the net change.
+//
+// entry.ConsumedCents is written as given. Only a return row sets it (the
+// part it restored to other blocks); it must be within the row's amount.
+func (s *PostgresStore) insertEntryInTx(ctx context.Context, tx *sql.Tx, tenantID string, entry domain.CreditLedgerEntry) (domain.CreditLedgerEntry, int64, error) {
 	// Every row stores its currency (ADR-129), uppercase. This is the
 	// chokepoint for every writer that appends through the store; a row with
 	// no currency is a caller bug, so the error is plain, not a 4xx.
 	entry.Currency = strings.ToUpper(strings.TrimSpace(entry.Currency))
 	if entry.Currency == "" {
-		return domain.CreditLedgerEntry{}, fmt.Errorf("credit ledger entry for customer %s has no currency", entry.CustomerID)
+		return domain.CreditLedgerEntry{}, 0, fmt.Errorf("credit ledger entry for customer %s has no currency", entry.CustomerID)
+	}
+	if entry.ConsumedCents < 0 || (entry.ConsumedCents > 0 && entry.ConsumedCents > entry.AmountCents) {
+		return domain.CreditLedgerEntry{}, 0, fmt.Errorf("credit ledger entry for customer %s: consumed %d is outside its amount %d", entry.CustomerID, entry.ConsumedCents, entry.AmountCents)
 	}
 	// Serialize concurrent AppendEntry-path writers for this customer so two
 	// grants can't compute the same balance_after off a stale snapshot. A
@@ -173,7 +201,7 @@ func (s *PostgresStore) appendEntryInTx(ctx context.Context, tx *sql.Tx, tenantI
 		`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
 		tenantID+":"+entry.CustomerID,
 	); err != nil {
-		return domain.CreditLedgerEntry{}, fmt.Errorf("acquire credit ledger lock: %w", err)
+		return domain.CreditLedgerEntry{}, 0, fmt.Errorf("acquire credit ledger lock: %w", err)
 	}
 	// A second entry for the same source (credit note, invoice reversal,
 	// commit funding, proration) is refused by the dedup indexes; the INSERT
@@ -184,19 +212,19 @@ func (s *PostgresStore) appendEntryInTx(ctx context.Context, tx *sql.Tx, tenantI
 	// because after a unique violation the tx is aborted and nothing more
 	// can be read.
 	if err := checkSameSourceAmount(ctx, tx, tenantID, entry); err != nil {
-		return domain.CreditLedgerEntry{}, err
+		return domain.CreditLedgerEntry{}, 0, err
 	}
 	var currentBalance int64
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COALESCE(SUM(amount_cents), 0) FROM customer_credit_ledger WHERE tenant_id = $1 AND customer_id = $2 AND currency = $3`,
 		tenantID, entry.CustomerID, entry.Currency,
 	).Scan(&currentBalance); err != nil {
-		return domain.CreditLedgerEntry{}, err
+		return domain.CreditLedgerEntry{}, 0, err
 	}
 
 	balanceAfter, serr := domain.SumCents(currentBalance, entry.AmountCents)
 	if serr != nil {
-		return domain.CreditLedgerEntry{}, fmt.Errorf("credit balance after entry: %w", serr)
+		return domain.CreditLedgerEntry{}, 0, fmt.Errorf("credit balance after entry: %w", serr)
 	}
 	entry.BalanceAfter = balanceAfter
 	entry.ID = postgres.NewID("hc_ccl")
@@ -222,13 +250,15 @@ func (s *PostgresStore) appendEntryInTx(ctx context.Context, tx *sql.Tx, tenantI
 		INSERT INTO customer_credit_ledger (id, tenant_id, customer_id, entry_type,
 			amount_cents, balance_after, description, invoice_id, expires_at, metadata, created_at,
 			source_subscription_id, source_subscription_item_id, source_plan_changed_at, source_change_type,
-			source_credit_note_id, source_invoice_reversal_id, grant_kind, source_invoice_id, currency)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+			source_credit_note_id, source_invoice_reversal_id, grant_kind, source_invoice_id, currency,
+			consumed_cents)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
 		RETURNING id, tenant_id, customer_id, entry_type, amount_cents, balance_after,
 			description, COALESCE(invoice_id,''), expires_at, metadata, created_at,
 			COALESCE(source_subscription_id,''), COALESCE(source_subscription_item_id,''),
 			source_plan_changed_at, COALESCE(source_change_type,''),
-			COALESCE(source_credit_note_id,''), COALESCE(grant_kind,''), COALESCE(source_invoice_id,''), currency
+			COALESCE(source_credit_note_id,''), COALESCE(grant_kind,''), COALESCE(source_invoice_id,''), currency,
+			consumed_cents
 	`, entry.ID, tenantID, entry.CustomerID, entry.EntryType,
 		entry.AmountCents, entry.BalanceAfter, entry.Description,
 		postgres.NullableString(entry.InvoiceID), postgres.NullableTime(entry.ExpiresAt),
@@ -242,12 +272,14 @@ func (s *PostgresStore) appendEntryInTx(ctx context.Context, tx *sql.Tx, tenantI
 		postgres.NullableString(string(entry.GrantKind)),
 		postgres.NullableString(entry.SourceInvoiceID),
 		entry.Currency,
+		entry.ConsumedCents,
 	).Scan(&entry.ID, &entry.TenantID, &entry.CustomerID, &entry.EntryType,
 		&entry.AmountCents, &entry.BalanceAfter, &entry.Description,
 		&entry.InvoiceID, &entry.ExpiresAt, &metaJSON, &entry.CreatedAt,
 		&entry.SourceSubscriptionID, &entry.SourceSubscriptionItemID, &entry.SourcePlanChangedAt,
 		(*string)(&entry.SourceChangeType),
-		&entry.SourceCreditNoteID, (*string)(&entry.GrantKind), &entry.SourceInvoiceID, &entry.Currency)
+		&entry.SourceCreditNoteID, (*string)(&entry.GrantKind), &entry.SourceInvoiceID, &entry.Currency,
+		&entry.ConsumedCents)
 
 	if err != nil {
 		if postgres.IsUniqueViolation(err) {
@@ -259,13 +291,13 @@ func (s *PostgresStore) appendEntryInTx(ctx context.Context, tx *sql.Tx, tenantI
 			// caller assumed it was proration (ADR-030 cross-flow audit).
 			switch postgres.UniqueViolationConstraint(err) {
 			case "idx_credit_ledger_proration_dedup":
-				return domain.CreditLedgerEntry{}, errs.AlreadyExists("proration_source",
+				return domain.CreditLedgerEntry{}, 0, errs.AlreadyExists("proration_source",
 					"credit ledger entry already exists for this item change").WithCode("credit_proration_source_taken")
 			case "idx_credit_ledger_credit_note_dedup":
-				return domain.CreditLedgerEntry{}, errs.AlreadyExists("credit_note_source",
+				return domain.CreditLedgerEntry{}, 0, errs.AlreadyExists("credit_note_source",
 					"credit ledger entry already exists for this credit note").WithCode("credit_note_source_taken")
 			case "idx_credit_ledger_reversal_dedup":
-				return domain.CreditLedgerEntry{}, errs.AlreadyExists("invoice_reversal_source",
+				return domain.CreditLedgerEntry{}, 0, errs.AlreadyExists("invoice_reversal_source",
 					"credit ledger reversal already exists for this invoice").WithCode("credit_reversal_source_taken")
 			case "idx_credit_ledger_commit_fund_dedup":
 				// ADR-078 fund-once backstop. The finalize CAS already
@@ -273,26 +305,20 @@ func (s *PostgresStore) appendEntryInTx(ctx context.Context, tx *sql.Tx, tenantI
 				// invoice, so hitting this index means an invariant broke —
 				// and inside the finalize coordinator tx the violation has
 				// poisoned the tx anyway (never catch-and-continue here).
-				return domain.CreditLedgerEntry{}, errs.AlreadyExists("commit_fund_source",
+				return domain.CreditLedgerEntry{}, 0, errs.AlreadyExists("commit_fund_source",
 					"commit grant already exists for this funding invoice").WithCode("credit_commit_fund_taken")
 			}
-			return domain.CreditLedgerEntry{}, errs.AlreadyExists("",
+			return domain.CreditLedgerEntry{}, 0, errs.AlreadyExists("",
 				fmt.Sprintf("unique constraint %q violated on credit ledger insert",
 					postgres.UniqueViolationConstraint(err))).WithCode("credit_unique_violation")
 		}
 		if postgres.IsForeignKeyViolation(err) {
-			return domain.CreditLedgerEntry{}, fmt.Errorf("customer %q not found", entry.CustomerID)
+			return domain.CreditLedgerEntry{}, 0, fmt.Errorf("customer %q not found", entry.CustomerID)
 		}
-		return domain.CreditLedgerEntry{}, err
+		return domain.CreditLedgerEntry{}, 0, err
 	}
 	_ = json.Unmarshal(metaJSON, &entry.Metadata)
-
-	// ADR-078 balance-crossing events, atomic with the entry (the advisory
-	// lock acquired above keeps crossings well-ordered per customer).
-	if err := s.emitBalanceCrossings(ctx, tx, tenantID, entry.CustomerID, entry.Currency, currentBalance, entry.BalanceAfter); err != nil {
-		return domain.CreditLedgerEntry{}, err
-	}
-	return entry, nil
+	return entry, currentBalance, nil
 }
 
 // ExpireGrantAtomic retires one expired grant: it flips the grant's
@@ -318,8 +344,9 @@ func (s *PostgresStore) appendEntryInTx(ctx context.Context, tx *sql.Tx, tenantI
 //     hole persists forever for that grant. Flip-then-entry split: the
 //     remainder is excluded from draining but never deducted from the
 //     balance — permanently inflated, unspendable, undrainable.
-//   - The flip's `consumed_cents < amount_cents` predicate is the
-//     exactly-once gate for the expiry entry: duplicate/overlapping sweeps
+//   - The flip's `consumed_cents = amount_cents - remaining` predicate
+//     (expireGrantRemainderTx) is the exactly-once gate for the expiry
+//     entry: duplicate/overlapping sweeps
 //     serialize on the row lock, the loser re-reads remaining == 0 and
 //     no-ops. No description-matching dedup needed (the old LIKE filter was
 //     operator-visible display copy doubling as an idempotency key).
@@ -374,26 +401,58 @@ func (s *PostgresStore) ExpireGrantAtomic(ctx context.Context, tenantID, custome
 		return 0, fmt.Errorf("expire grant %s: grant has no expires_at", grantID)
 	}
 
-	res, err := tx.ExecContext(ctx, `
-		UPDATE customer_credit_ledger
-		SET consumed_cents = amount_cents
-		WHERE tenant_id = $1 AND id = $2 AND consumed_cents < amount_cents
-	`, tenantID, grantID)
-	if err != nil {
-		return 0, fmt.Errorf("retire grant %s: %w", grantID, err)
-	}
-	if n, err := res.RowsAffected(); err != nil {
-		return 0, fmt.Errorf("retire grant %s: rows affected: %w", grantID, err)
-	} else if n == 0 {
-		// Unreachable after the locked re-read above; kept as the structural
-		// exactly-once gate so the entry below can never double-append.
-		return 0, nil
-	}
-
 	// Stamp the expiry entry at the grant's own expires_at — the simulated
 	// (or wall-clock) instant it actually expired — so the customer's
 	// Credits timeline shows per-fact chronology, not the sweep tick time.
-	if _, err := s.appendEntryInTx(ctx, tx, tenantID, domain.CreditLedgerEntry{
+	expired, entry, before, err := s.expireGrantRemainderTx(ctx, tx, tenantID, customerID, grantID, currency, remaining, expiresAt.Time)
+	if err != nil {
+		return 0, err
+	}
+	if !expired {
+		// Unreachable after the locked re-read above; the CAS inside is kept
+		// as the structural exactly-once gate so the entry can never
+		// double-append.
+		return 0, nil
+	}
+	if err := s.emitBalanceCrossings(ctx, tx, tenantID, customerID, currency, before, entry.BalanceAfter); err != nil {
+		return 0, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit expiry of grant %s: %w", grantID, err)
+	}
+	return remaining, nil
+}
+
+// expireGrantRemainderTx is the expiry write itself, shared by the sweep
+// (ExpireGrantAtomic) and a credit return that hands credit back to a grant
+// already past its expiry (ADR-132): it marks the grant fully used and
+// appends the -remaining expiry entry stamped at stampAt, on the caller's tx.
+// The caller holds the customer advisory lock and the ledger row locks and
+// read `remaining` under them.
+//
+// The UPDATE applies only while the grant still has exactly `remaining` left
+// (CAS); expired=false, with nothing written, when it does not. The entry's
+// balance crossings are the caller's to emit: the sweep emits them for this
+// entry, a return emits them once for its net change.
+func (s *PostgresStore) expireGrantRemainderTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, grantID, currency string, remaining int64, stampAt time.Time) (expired bool, entry domain.CreditLedgerEntry, before int64, err error) {
+	if remaining <= 0 {
+		return false, domain.CreditLedgerEntry{}, 0, fmt.Errorf("expire grant %s: remaining %d is not positive", grantID, remaining)
+	}
+	res, err := tx.ExecContext(ctx, `
+		UPDATE customer_credit_ledger
+		SET consumed_cents = amount_cents
+		WHERE tenant_id = $1 AND id = $2 AND consumed_cents = amount_cents - $3
+	`, tenantID, grantID, remaining)
+	if err != nil {
+		return false, domain.CreditLedgerEntry{}, 0, fmt.Errorf("retire grant %s: %w", grantID, err)
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return false, domain.CreditLedgerEntry{}, 0, fmt.Errorf("retire grant %s: rows affected: %w", grantID, err)
+	} else if n == 0 {
+		return false, domain.CreditLedgerEntry{}, 0, nil
+	}
+	entry, before, err = s.insertEntryInTx(ctx, tx, tenantID, domain.CreditLedgerEntry{
 		CustomerID:  customerID,
 		EntryType:   domain.CreditExpiry,
 		Currency:    currency, // the grant's own (ADR-129)
@@ -402,17 +461,15 @@ func (s *PostgresStore) ExpireGrantAtomic(ctx context.Context, tenantID, custome
 		// ListGrantSummaries' expired_cents JOIN on this exact string
 		// ('Expired grant ' || grant id) to pair expiry entries with their
 		// grants — change the format and both go silently blind. Change
-		// them together (internal/doctor/checks.go).
+		// them together (internal/doctor/checks.go). A credit return
+		// (ADR-132) pairs its at-once expiry entries the same way.
 		Description: fmt.Sprintf("Expired grant %s", grantID),
-		CreatedAt:   expiresAt.Time,
-	}); err != nil {
-		return 0, fmt.Errorf("append expiry entry for grant %s: %w", grantID, err)
+		CreatedAt:   stampAt,
+	})
+	if err != nil {
+		return false, domain.CreditLedgerEntry{}, 0, fmt.Errorf("append expiry entry for grant %s: %w", grantID, err)
 	}
-
-	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("commit expiry of grant %s: %w", grantID, err)
-	}
-	return remaining, nil
+	return true, entry, before, nil
 }
 
 // AdjustAtomic inserts a manual adjustment entry while holding a row lock on
@@ -1058,8 +1115,10 @@ func (s *PostgresStore) CommitGrantExposure(
 	return drawable, consumed, nil
 }
 
-// retireCommitSliceTx is the single retirement core both commit-unwind
-// writers share (invoice void + CN relief — the complete writer set).
+// retireCommitSliceTx is the single retirement core every commit-unwind
+// writer shares (the complete writer set: invoice void, CN relief, and a
+// credit return re-retiring commit credit it restored to a grant whose
+// funding invoice is voided, ADR-132).
 // Retires exactly `slice` credits from the locked grant: CAS-guarded
 // consumed bump (+ cn_retired bump for relief slices) and ONE negative
 // adjustment ledger entry. Caller holds the locks via lockCommitGrantTx.
@@ -1069,7 +1128,11 @@ func (s *PostgresStore) CommitGrantExposure(
 // to report retired_cents, and the balance totals (balanceWriteOffColumns)
 // tell a retire from an operator deduction by that reason — both callers
 // must keep setting both keys.
-func (s *PostgresStore) retireCommitSliceTx(ctx context.Context, tx *sql.Tx, tenantID string, g commitGrantState, slice int64, bumpCNRetired bool, description string, meta map[string]any) error {
+//
+// emitCrossings=false leaves the entry's balance crossings to the caller: a
+// credit return that re-retires restored commit credit (ADR-132) emits them
+// once for its net change.
+func (s *PostgresStore) retireCommitSliceTx(ctx context.Context, tx *sql.Tx, tenantID string, g commitGrantState, slice int64, bumpCNRetired, emitCrossings bool, description string, meta map[string]any) error {
 	if slice <= 0 || slice > g.Remaining() {
 		return fmt.Errorf("retire slice %d out of range (remaining %d) on grant %s", slice, g.Remaining(), g.GrantID)
 	}
@@ -1094,7 +1157,7 @@ func (s *PostgresStore) retireCommitSliceTx(ctx context.Context, tx *sql.Tx, ten
 		return fmt.Errorf("retire commit grant %s: concurrent drain won the CAS", g.GrantID)
 	}
 
-	if _, err := s.appendEntryInTx(ctx, tx, tenantID, domain.CreditLedgerEntry{
+	entry := domain.CreditLedgerEntry{
 		CustomerID:  g.CustomerID,
 		EntryType:   domain.CreditAdjustment,
 		Currency:    g.Currency,
@@ -1102,7 +1165,13 @@ func (s *PostgresStore) retireCommitSliceTx(ctx context.Context, tx *sql.Tx, ten
 		Description: description,
 		Metadata:    meta,
 		CreatedAt:   clock.Now(ctx),
-	}); err != nil {
+	}
+	if emitCrossings {
+		_, err = s.appendEntryInTx(ctx, tx, tenantID, entry)
+	} else {
+		_, _, err = s.insertEntryInTx(ctx, tx, tenantID, entry)
+	}
+	if err != nil {
 		return fmt.Errorf("append commit retirement entry for grant %s: %w", g.GrantID, err)
 	}
 	return nil
@@ -1134,7 +1203,7 @@ func (s *PostgresStore) RetireCommitGrantForInvoiceTx(ctx context.Context, tx *s
 	if remaining <= 0 {
 		return 0, nil // fully drawn or already retired — nothing to claw back
 	}
-	if err := s.retireCommitSliceTx(ctx, tx, tenantID, g, remaining, false,
+	if err := s.retireCommitSliceTx(ctx, tx, tenantID, g, remaining, false, true,
 		fmt.Sprintf("Commit retired — funding invoice voided (grant %s)", g.GrantID),
 		map[string]any{"reason": "commit_void_retire", "grant_id": g.GrantID, "funding_invoice_id": invoiceID},
 	); err != nil {
@@ -1161,7 +1230,7 @@ func (s *PostgresStore) RetireCommitSliceForReliefTx(ctx context.Context, tx *sq
 	if slice > g.Remaining() {
 		return commitGrantState{}, fmt.Errorf("%w: %d requested, %d remaining", ErrCommitInsufficientRemaining, slice, g.Remaining())
 	}
-	if err := s.retireCommitSliceTx(ctx, tx, tenantID, g, slice, true,
+	if err := s.retireCommitSliceTx(ctx, tx, tenantID, g, slice, true, true,
 		fmt.Sprintf("Commit relief — %d credits retired for credit note (grant %s)", slice, g.GrantID),
 		map[string]any{
 			"reason":               "commit_refund_retire",
@@ -1677,7 +1746,10 @@ func creditEntrySortColumn(key string) string {
 //     AdjustAtomicAudited) drew from this block.
 //
 // Used credit — what invoices drew — is consumed - expired - retired -
-// deducted.
+// deducted. Credit an invoice drew and a void or credit note handed back
+// (ADR-132) is no longer counted as used: it is back on the block it came
+// from, which shows it as remaining again (or as expired or retired, when
+// the block was past its expiry or its commit's funding invoice is voided).
 type GrantSummary struct {
 	ID              string     `json:"id"`
 	EntryType       string     `json:"entry_type"`
@@ -1699,7 +1771,9 @@ type GrantSummary struct {
 // positive adjustments + reversals) with per-block remaining, newest
 // first. Exhausted blocks are included when includeExhausted (history
 // view); live-only otherwise. Expired-but-unswept blocks report their
-// remaining honestly — the expiry sweep will retire them.
+// remaining honestly — the expiry sweep will retire them. A return row
+// (ADR-132) is reported for its unattributed rest only; what it restored
+// shows on the blocks it went back to.
 func (s *PostgresStore) ListGrantSummaries(ctx context.Context, tenantID, customerID string, includeExhausted bool) ([]GrantSummary, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -1711,6 +1785,13 @@ func (s *PostgresStore) ListGrantSummaries(ctx context.Context, tenantID, custom
 	if !includeExhausted {
 		exhausted = " AND g.consumed_cents < g.amount_cents"
 	}
+	// A return row (a void or a credit note handing back drawn credit,
+	// ADR-132) carries the part it restored to the blocks the invoice drew
+	// from as consumed_cents, and as metadata restored_cents. That part is
+	// spendable on those blocks and reported there, so it is taken off the
+	// row's amount and consumed here: the row is a block only for its
+	// unattributed rest, and a row with none is not a block at all. Without
+	// this the restored part would read as used on the return row.
 	// expired_cents, retired_cents and deducted_cents come from the entries
 	// that bump a grant's consumed_cents without an invoice using the credit,
 	// paired with their grant in one grouped pass over this customer's
@@ -1731,10 +1812,11 @@ func (s *PostgresStore) ListGrantSummaries(ctx context.Context, tenantID, custom
 	// them out — they are what "used" means.
 	rows, err := tx.QueryContext(ctx, `
 		SELECT g.id, g.entry_type, g.currency, COALESCE(g.grant_kind,''), g.description,
-			g.amount_cents, g.consumed_cents,
+			g.amount_cents - r.restored, g.consumed_cents - r.restored,
 			COALESCE(w.expired_cents, 0), COALESCE(w.retired_cents, 0), COALESCE(w.deducted_cents, 0),
 			g.expires_at, COALESCE(g.source_invoice_id,''), g.created_at
 		FROM customer_credit_ledger g
+		CROSS JOIN LATERAL (SELECT COALESCE((g.metadata->>'restored_cents')::bigint, 0) AS restored) r
 		LEFT JOIN (
 			SELECT o.grant_id,
 				SUM(o.cents) FILTER (WHERE o.kind = 'expired') AS expired_cents,
@@ -1763,7 +1845,7 @@ func (s *PostgresStore) ListGrantSummaries(ctx context.Context, tenantID, custom
 			) o
 			GROUP BY o.grant_id
 		) w ON w.grant_id = g.id
-		WHERE g.tenant_id = $2 AND g.customer_id = $1 AND g.amount_cents > 0`+exhausted+`
+		WHERE g.tenant_id = $2 AND g.customer_id = $1 AND g.amount_cents > r.restored`+exhausted+`
 		ORDER BY g.created_at DESC, g.id DESC`, customerID, tenantID)
 	if err != nil {
 		return nil, err

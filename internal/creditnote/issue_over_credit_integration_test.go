@@ -21,8 +21,8 @@ import (
 // unexported.
 type ledgerGranter struct{ svc *credit.Service }
 
-func (g ledgerGranter) in(i creditnote.CreditGrantInput) credit.GrantInput {
-	return credit.GrantInput{Currency: i.Currency, CustomerID: i.CustomerID, AmountCents: i.AmountCents, Description: i.Description, InvoiceID: i.InvoiceID}
+func (g ledgerGranter) in(i creditnote.CreditGrantInput) credit.CreditNoteReturnInput {
+	return credit.CreditNoteReturnInput{Currency: i.Currency, CustomerID: i.CustomerID, AmountCents: i.AmountCents, Description: i.Description, InvoiceID: i.InvoiceID, InvoicePaid: i.InvoicePaid}
 }
 func (g ledgerGranter) GrantForCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, cnID string, i creditnote.CreditGrantInput) error {
 	_, err := g.svc.GrantForCreditNoteTx(ctx, tx, tenantID, cnID, g.in(i))
