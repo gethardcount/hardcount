@@ -25,6 +25,9 @@ const REASON_LABELS: Record<string, string> = {
   // Stripe refused the amount, not the card: no automatic step will collect
   // it, so the operator voids it or records a payment.
   amount_below_minimum: 'Below Stripe\u2019s minimum charge',
+  // A refund made in the Stripe dashboard that Hardcount did not record
+  // (ADR-134): the operator records it, attaches it or dismisses it.
+  refunded_in_stripe: 'Refunded in Stripe',
 }
 
 export function attentionReasonLabel(reason: string, code?: string): string {

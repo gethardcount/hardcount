@@ -132,9 +132,11 @@ payment failures, and the gaps still open.
   `refund.created` sees most refunds only through a later `refund.updated`,
   more than a day late, so they are flagged rather than recorded
   ([runbook](ops/runbook/refund-made-in-stripe.md)).
-- **The dashboard has no button yet to record or dismiss a flagged refund
-  made in Stripe.** Use `POST /v1/credit-notes` with `stripe_refund_id`, or
-  `POST /v1/invoices/{id}/stripe-refunds/{stripe_refund_id}/dismiss`.
+- **The Credit notes page cannot filter to notes recorded from Stripe.**
+  Each such note carries the tag "Recorded from Stripe". The notes Hardcount
+  and the dashboard record have the reason "Refunded in Stripe", which the
+  page's search finds; a note linked through the API keeps the reason it was
+  given.
 
 **Next:** react to these events in your app with
 [webhooks](webhooks.md#event-catalog). Operators:

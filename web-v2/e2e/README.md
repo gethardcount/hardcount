@@ -52,7 +52,12 @@ the screen, and that the main things an operator does work end to end.
   browser), a credit note before and
   after an offline payment, void and write-off, and the credit notes page.
   Each journey checks the dashboard and the customer's payment page against
-  the API.
+  the API. It also opens the notice for a refund made in Stripe (Record as
+  credit note, Attach to a note whose refund failed, Dismiss), the "Recorded
+  from Stripe" tag, and Retry refund's refusal while such a refund is not
+  recorded. CI connects no Stripe, so the refund and the server's answers to
+  those buttons are stubbed in the browser; each test checks what the
+  buttons send.
 - `activity.spec.ts` takes screenshots of the activity cards for people to
   compare: the invoice and subscription Activity cards, a Dunning run and the
   customer's Sent emails, at 1440px and 390px wide. It runs each story for a

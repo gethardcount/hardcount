@@ -18,6 +18,8 @@ import { amountInputError, dollarsToWholeCents, wholeUnits } from '@/lib/priceIn
 import { collectOutcome, writeOffOutcome } from '@/lib/actionOutcomes'
 import { showOutcome } from '@/lib/outcomeToast'
 import { InvoiceAttention } from '@/components/InvoiceAttention'
+import { RecordedFromStripeTag, StripeRefundActions, StripeRefundLine } from '@/components/StripeRefundActions'
+import { flaggedStripeRefunds } from '@/lib/stripeRefunds'
 import { TestClockBanner } from '@/components/TestClockBanner'
 import { ActivityList, ActivityZone } from '@/components/ActivityList'
 import { Callout } from '@/components/Callout'
@@ -26,7 +28,7 @@ import { issueDates, sellerBlock, sellerMissing, SELLER_SETTINGS_PATH } from '@/
 import { authApi } from '@/lib/auth'
 import { useAuth } from '@/contexts/AuthContext'
 import { classifyError } from '@/lib/errorCopy'
-import { useGetInvoice } from '@/lib/gen/queries.gen'
+import { useGetInvoice, useListInvoiceStripeRefunds } from '@/lib/gen/queries.gen'
 import type { Invoice } from '@/lib/gen/schemas/invoice'
 import type { InvoiceLineItem as LineItem } from '@/lib/gen/schemas/invoiceLineItem'
 import { applyApiError, showApiError } from '@/lib/formErrors'
@@ -145,6 +147,7 @@ const LANE_LABELS: Record<string, string> = {
   dunning: 'payment recovery',
   disputes: 'disputes',
   charge_attempts: 'payment attempts',
+  stripe_refunds: 'refunds made in Stripe',
 }
 const laneLabel = (lane: string): string => LANE_LABELS[lane] ?? lane
 
@@ -396,8 +399,23 @@ export default function InvoiceDetailPage() {
   // A key Stripe refused charges nothing, so it isn't connected.
   const stripeConnected = stripeCreds && user ? stripeKeyState(stripeCreds.data, user.livemode) === 'connected' : undefined
 
+  // Refunds made in Stripe outside Hardcount (ADR-134), for the notice's
+  // Record / Attach / Dismiss buttons. Read only when the notice can carry
+  // one: its own reason, or a payment anomaly, whose notice names a flagged
+  // refund but keeps the anomaly's reason (withRefundedInStripe).
+  const attentionReason = invoice?.attention?.reason
+  const { data: stripeRefundsData } = useListInvoiceStripeRefunds(id!, undefined, {
+    query: {
+      queryKey: ['invoice-stripe-refunds', id],
+      enabled: !!id && (attentionReason === 'refunded_in_stripe' || attentionReason === 'payment_anomaly'),
+    },
+  })
+  const flaggedRefunds = flaggedStripeRefunds(stripeRefundsData?.data)
+
   const invalidateAll = () => {
     queryClient.invalidateQueries({ queryKey: ['invoice', id] })
+    queryClient.invalidateQueries({ queryKey: ['invoice-stripe-refunds', id] })
+    queryClient.invalidateQueries({ queryKey: ['credit-notes'] })
     queryClient.invalidateQueries({ queryKey: ['invoice-credit-notes', id] })
     queryClient.invalidateQueries({ queryKey: ['invoice-timeline', id] })
     queryClient.invalidateQueries({ queryKey: ['invoices'] })
@@ -1037,6 +1055,18 @@ export default function InvoiceDetailPage() {
           onVoidInvoice={() => setShowVoidConfirm(true)}
           // Same for the parked invoice's write-off.
           onMarkUncollectible={() => setShowMarkUncollectibleConfirm(true)}
+          // Record as credit note / Attach / Dismiss for each refund made in
+          // Stripe that Hardcount flagged. Drawn from the refunds themselves:
+          // the server sends this notice with no actions of its own.
+          extraActions={flaggedRefunds.length > 0 ? (
+            <StripeRefundActions
+              invoice={invoice}
+              refunds={flaggedRefunds}
+              creditNotes={allCreditNotes}
+              primary={(invoice.attention?.actions?.length ?? 0) === 0}
+              onChanged={invalidateAll}
+            />
+          ) : undefined}
           retrying={retryTaxMutation.isPending}
           charging={collectMutation.isPending}
           sending={resendSetupLinkMutation.isPending}
@@ -1471,6 +1501,16 @@ export default function InvoiceDetailPage() {
                                 <div className="text-[11px] mt-0.5 leading-snug">
                                   {channelDescription(cn)}
                                 </div>
+                                {/* A refund made in Stripe that this note records
+                                    (ADR-134): Hardcount sent no refund for it. A
+                                    recorded refund is always of this invoice's own
+                                    payment, so the link opens that payment. */}
+                                {cn.recorded_from_stripe && (
+                                  <div className="text-[11px] mt-1 leading-snug space-y-0.5">
+                                    <RecordedFromStripeTag note={cn} />
+                                    <StripeRefundLine refundId={cn.stripe_refund_id} paymentIntentId={invoice.stripe_payment_intent_id} />
+                                  </div>
+                                )}
                                 <TaxReversedLine cn={cn} currency={invoice.currency} />
                               </div>
                             )

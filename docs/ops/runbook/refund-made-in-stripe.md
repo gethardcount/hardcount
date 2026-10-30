@@ -69,7 +69,25 @@ curl -s "$API/v1/invoices/$INVOICE_ID/stripe-refunds" -H "Authorization: Bearer 
 
 ## Fix
 
-Act on a `needs_review` refund by its `review_reason`:
+**In the dashboard,** open the invoice. The "Refunded in Stripe" notice has
+a button for each step below that applies to the refund, and each asks
+before it acts:
+
+- **Record as credit note** (step 1). Offered on a paid invoice when the
+  reason is `seen_late`, `invoice_not_paid` or `credit_note_refund_failed`.
+- **Dismiss** (step 2), with a note saying how you handled it. Always
+  offered.
+- **Attach to** the credit note whose refund failed (step 3). Offered for
+  `credit_note_refund_failed` when that note's refund amount is the
+  refund's.
+
+With several refunds flagged on one invoice, each gets its own row of
+buttons. On an invoice whose payment Hardcount also flagged, the notice is
+titled "Payment needs review" and carries the same buttons after its own. A note recorded either way shows the tag "Recorded from Stripe" on
+the Credit notes page and under the invoice, with the refund's id.
+
+The same steps through the API follow. Act on a `needs_review` refund by its
+`review_reason`:
 
 | `review_reason` | Do this |
 |---|---|

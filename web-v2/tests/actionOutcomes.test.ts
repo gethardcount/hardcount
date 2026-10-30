@@ -6,11 +6,14 @@
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import {
+  attachStripeRefundOutcome,
   collectOutcome,
   emailStepAfterFinalize,
   isEmailNotConfigured,
+  isStripeRefundUnresolved,
   marginCardView,
   newInvoiceOutcome,
+  recordStripeRefundOutcome,
   writeOffOutcome,
 } from '../src/lib/actionOutcomes.ts'
 
@@ -145,4 +148,28 @@ test('Save & send: an invoice the finalize already emailed is not sent again', (
   assert.equal(emailStepAfterFinalize({}, 'ap@acme.test'), 'send')
   assert.equal(emailStepAfterFinalize({}, undefined), 'no_email')
   assert.equal(emailStepAfterFinalize({}, ''), 'no_email')
+})
+
+test('record a refund made in Stripe: an issued note says nothing was refunded again', () => {
+  const o = recordStripeRefundOutcome({ credit_note_number: 'CN-0003', status: 'issued' })
+  assert.equal(o.tone, 'success')
+  assert.equal(o.title, 'Recorded as CN-0003')
+  assert.match(o.description ?? '', /Nothing was refunded again/)
+})
+
+test('record a refund made in Stripe: a note that is not issued is not called recorded', () => {
+  const o = recordStripeRefundOutcome({ credit_note_number: 'CN-0003', status: 'draft' })
+  assert.equal(o.tone, 'warning')
+  assert.doesNotMatch(o.title, /Recorded/)
+})
+
+test('attach a refund made in Stripe: success only when the note now shows the refund succeeded', () => {
+  assert.equal(attachStripeRefundOutcome({ credit_note_number: 'CN-0001', refund_status: 'succeeded' }).title, 'Refund attached to CN-0001')
+  assert.equal(attachStripeRefundOutcome({ credit_note_number: 'CN-0001', refund_status: 'failed' }).tone, 'warning')
+})
+
+test('Retry refund refused over an unrecorded refund made in Stripe is told apart by its code', () => {
+  assert.equal(isStripeRefundUnresolved({ code: 'stripe_refund_unresolved' }), true)
+  assert.equal(isStripeRefundUnresolved({ code: 'invalid_state' }), false)
+  assert.equal(isStripeRefundUnresolved(null), false)
 })

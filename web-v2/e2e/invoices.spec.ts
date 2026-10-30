@@ -695,3 +695,194 @@ test('invoices on a phone: the list row and the lines keep amount and status on 
   await onScreen(line.locator('td').last())
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
 })
+
+// Refunds made in Stripe outside Hardcount (ADR-134). CI connects no Stripe,
+// so the refund, the invoice's card payment and the server's answers to
+// Record, Attach and Dismiss are stubbed in the browser; the invoice and its
+// customer are real. Each button asks first and sends exactly the refund.
+const STRIPE_REFUND_ID = 're_e2e_dashboard'
+
+async function finalizedOneOff() {
+  const customer = await createCustomer()
+  const draft = await api<Invoice>('POST', '/invoices', {
+    customer_id: customer.id,
+    currency: 'USD',
+    line_items: [{ description: 'E2E setup fee', line_type: 'add_on', quantity: 1, unit_amount_cents: 4900 }],
+  })
+  await api('POST', `/invoices/${draft.id}/finalize`)
+  return { customer, invoice: (await getInvoice(draft.id)).invoice }
+}
+
+// Shows the invoice as paid by card, with the notice the server sends for a
+// refund made in Stripe that it flagged, and that refund.
+async function stubPaidWithRefundNotice(page: Page, invoiceId: string, reviewReason: string) {
+  await page.route(url => url.pathname === `/v1/invoices/${invoiceId}`, async route => {
+    if (route.request().method() !== 'GET') return route.fallback()
+    const answer = await route.fetch()
+    const body = await answer.json()
+    Object.assign(body.invoice, {
+      status: 'paid',
+      payment_status: 'succeeded',
+      amount_paid_cents: body.invoice.total_amount_cents,
+      amount_due_cents: 0,
+      stripe_payment_intent_id: 'pi_e2e_dashboard',
+      attention: {
+        severity: 'warning',
+        reason: 'refunded_in_stripe',
+        code: `payment.refunded_in_stripe.${reviewReason}`,
+        message: 'A refund of $40.00 was made in Stripe and not recorded here. Record it with a credit note linked to the refund, or dismiss it if you handled it outside Hardcount.',
+      },
+    })
+    await route.fulfill({ response: answer, json: body })
+  })
+  const now = new Date().toISOString()
+  await page.route(url => url.pathname === `/v1/invoices/${invoiceId}/stripe-refunds`, route => route.fulfill({
+    json: {
+      data: [{
+        id: 'hc_srf_e2e', invoice_id: invoiceId, stripe_refund_id: STRIPE_REFUND_ID, stripe_payment_intent_id: 'pi_e2e_dashboard',
+        amount_cents: 4000, currency: 'USD', status: 'succeeded', reason: 'requested_by_customer',
+        outcome: 'needs_review', review_reason: reviewReason, refund_created_at: now,
+        livemode: false, created_at: now, updated_at: now,
+      }],
+      total: 1,
+    },
+  }))
+}
+
+// A credit note as the list API returns it, for a stubbed list.
+function stubNote(invoiceId: string, customerId: string, over: Record<string, unknown>) {
+  const now = new Date().toISOString()
+  return {
+    id: 'cn_e2e_stub', invoice_id: invoiceId, customer_id: customerId, credit_note_number: 'CN-E2E-1', status: 'issued',
+    reason: 'Refunded in Stripe', subtotal_cents: 4000, total_cents: 4000, refund_amount_cents: 4000, credit_amount_cents: 0,
+    out_of_band_amount_cents: 0, refund_status: 'succeeded', currency: 'USD', issued_at: now, created_at: now,
+    is_simulated: false, recorded_from_stripe: false, ...over,
+  }
+}
+
+// Answers every GET of the credit-note list (the invoice page's, by
+// invoice_id, and the Credit notes page's) with `notes`.
+async function stubCreditNoteList(page: Page, notes: unknown[]) {
+  await page.route(url => url.pathname === '/v1/credit-notes', route => route.request().method() === 'GET'
+    ? route.fulfill({ json: { data: notes, total: notes.length } })
+    : route.fallback())
+}
+
+test('a refund made in Stripe: the notice records it as a credit note or dismisses it, asking first', async ({ page }) => {
+  const { customer, invoice } = await finalizedOneOff()
+  await stubPaidWithRefundNotice(page, invoice.id, 'seen_late')
+  const sent: { path: string; body: unknown; idempotencyKey?: string }[] = []
+  await page.route(url => url.pathname === '/v1/credit-notes', async route => {
+    if (route.request().method() !== 'POST') return route.fallback()
+    sent.push({ path: 'create', body: route.request().postDataJSON(), idempotencyKey: route.request().headers()['idempotency-key'] })
+    await route.fulfill({ status: 201, json: stubNote(invoice.id, customer.id, { recorded_from_stripe: true, stripe_refund_id: STRIPE_REFUND_ID }) })
+  })
+  await page.route(url => url.pathname === `/v1/invoices/${invoice.id}/stripe-refunds/${STRIPE_REFUND_ID}/dismiss`, async route => {
+    sent.push({ path: 'dismiss', body: route.request().postDataJSON() })
+    await route.fulfill({ json: { stripe_refund_id: STRIPE_REFUND_ID, outcome: 'dismissed' } })
+  })
+
+  await page.goto(`/invoices/${invoice.id}`)
+  await expect(page.getByText('Refunded in Stripe', { exact: true })).toBeVisible()
+  await expect(page.getByText(/^A refund of \$40\.00 was made in Stripe and not recorded here\./)).toBeVisible()
+
+  // Dismiss needs a note: an empty one is refused under the box and sends nothing.
+  await page.getByRole('button', { name: 'Dismiss', exact: true }).click()
+  const dismiss = page.getByRole('dialog', { name: 'Dismiss this refund?' })
+  await expect(dismiss).toContainText("No credit note is made, so this invoice and its PDF still won't show the refund.")
+  await dismiss.getByRole('button', { name: 'Dismiss refund' }).click()
+  await expect(dismiss.getByText('Say how you handled this refund.')).toBeVisible()
+  expect(sent).toHaveLength(0)
+  await dismiss.getByLabel('How you handled it').fill('  Recorded in our books  ')
+  await dismiss.getByRole('button', { name: 'Dismiss refund' }).click()
+  await expect(dismiss).toBeHidden()
+  await expect(page.getByText('Refund dismissed')).toBeVisible()
+  expect(sent).toEqual([{ path: 'dismiss', body: { note: 'Recorded in our books' } }])
+
+  // Record: Cancel sends nothing; confirming sends the refund as the whole
+  // card refund of an issued note, with an Idempotency-Key.
+  sent.length = 0
+  await page.getByRole('button', { name: 'Record as credit note' }).click()
+  const record = page.getByRole('alertdialog', { name: 'Record $40.00 as a credit note?' })
+  await expect(record).toContainText(`Hardcount records it on ${invoice.invoice_number} as a credit note whose card refund is that refund.`)
+  await expect(record).toContainText('The customer is not refunded again.')
+  await record.getByRole('button', { name: 'Cancel' }).click()
+  await expect(record).toBeHidden()
+  expect(sent).toHaveLength(0)
+  await page.getByRole('button', { name: 'Record as credit note' }).click()
+  await record.getByRole('button', { name: 'Record $40.00' }).click()
+  await expect(record).toBeHidden()
+  await expect(page.getByText('Recorded as CN-E2E-1')).toBeVisible()
+  expect(sent).toHaveLength(1)
+  expect(sent[0].idempotencyKey).toBeTruthy()
+  expect(sent[0].body).toEqual({
+    invoice_id: invoice.id,
+    reason: 'Refunded in Stripe: requested by customer',
+    refund_amount_cents: 4000,
+    credit_amount_cents: 0,
+    out_of_band_amount_cents: 0,
+    auto_issue: true,
+    stripe_refund_id: STRIPE_REFUND_ID,
+    lines: [{ description: `Refund made in Stripe (${STRIPE_REFUND_ID})`, quantity: 1, unit_amount_cents: 4000 }],
+  })
+})
+
+// A refund made in Stripe that may replace a credit note's failed refund can
+// be attached to that note. Retry refund on the note is refused until then,
+// with the server's reason and a way back to the invoice.
+test('a refund made in Stripe after a failed refund: Attach to the note, and Retry refund says why it is refused', async ({ page }) => {
+  const { customer, invoice } = await finalizedOneOff()
+  await stubPaidWithRefundNotice(page, invoice.id, 'credit_note_refund_failed')
+  const failed = stubNote(invoice.id, customer.id, { id: 'cn_e2e_failed', credit_note_number: 'CN-E2E-FAILED', reason: 'Goodwill', refund_status: 'failed' })
+  await stubCreditNoteList(page, [failed])
+  const attached: unknown[] = []
+  await page.route(url => url.pathname === '/v1/credit-notes/cn_e2e_failed/attach-stripe-refund', async route => {
+    attached.push(route.request().postDataJSON())
+    await route.fulfill({ json: { ...failed, refund_status: 'succeeded', stripe_refund_id: STRIPE_REFUND_ID, recorded_from_stripe: true } })
+  })
+
+  await page.goto(`/invoices/${invoice.id}`)
+  await page.getByRole('button', { name: 'Attach to CN-E2E-FAILED' }).click()
+  const attach = page.getByRole('alertdialog', { name: 'Attach this refund to CN-E2E-FAILED?' })
+  await expect(attach).toContainText('The card refund of $40.00 on CN-E2E-FAILED failed.')
+  await expect(attach).toContainText('No new credit note is made, and the customer is not refunded again.')
+  await attach.getByRole('button', { name: 'Attach to CN-E2E-FAILED' }).click()
+  await expect(attach).toBeHidden()
+  await expect(page.getByText('Refund attached to CN-E2E-FAILED')).toBeVisible()
+  expect(attached).toEqual([{ stripe_refund_id: STRIPE_REFUND_ID }])
+  // Record and Dismiss stay offered: the refund in Stripe may be a separate one.
+  await expect(page.getByRole('button', { name: 'Record as credit note' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Dismiss', exact: true })).toBeVisible()
+
+  // Credit notes page: Retry refund on the failed note is refused (409).
+  const refusal = 'A refund of $40.00 was made in Stripe on this invoice (re_e2e_dashboard) and is not recorded here. If it replaces this refund, attach it to this credit note; otherwise record it or dismiss it. Then retry. Retrying now could refund the customer twice.'
+  await page.route(url => url.pathname === '/v1/credit-notes/cn_e2e_failed/retry-refund', route => route.fulfill({
+    status: 409, json: { error: { type: 'invalid_request_error', code: 'stripe_refund_unresolved', message: refusal } },
+  }))
+  await page.goto('/credit-notes')
+  await page.getByRole('row').filter({ hasText: 'CN-E2E-FAILED' }).getByRole('button', { name: 'Retry refund' }).click()
+  await expect(page.getByText('Refund not retried')).toBeVisible()
+  await expect(page.getByText(refusal)).toBeVisible()
+  await page.getByRole('button', { name: 'Open invoice' }).click()
+  await expect(page).toHaveURL(new RegExp(`/invoices/${invoice.id}$`))
+})
+
+// A credit note whose card refund is a refund made in Stripe carries a
+// "Recorded from Stripe" tag and the refund's id, on the Credit notes page and
+// under the paid invoice, where it links to the payment in Stripe.
+test('a credit note recorded from Stripe is tagged, with its refund, on the credit notes page and the invoice', async ({ page }) => {
+  const { customer, invoice } = await finalizedOneOff()
+  await stubPaidWithRefundNotice(page, invoice.id, 'seen_late')
+  await stubCreditNoteList(page, [stubNote(invoice.id, customer.id, { recorded_from_stripe: true, stripe_refund_id: STRIPE_REFUND_ID })])
+
+  await page.goto('/credit-notes')
+  const row = page.getByRole('row').filter({ hasText: 'CN-E2E-1' })
+  await expect(row.getByText('Recorded from Stripe', { exact: true })).toBeVisible()
+  await expect(row.getByText(STRIPE_REFUND_ID, { exact: true })).toBeVisible()
+
+  await page.goto(`/invoices/${invoice.id}`)
+  const adjustments = page.getByText('Post-payment adjustments', { exact: true }).locator('..')
+  await expect(adjustments.getByText('Recorded from Stripe', { exact: true })).toBeVisible()
+  await expect(adjustments.getByText(`Stripe refund ${STRIPE_REFUND_ID}`, { exact: true })).toBeVisible()
+  await expect(adjustments.getByRole('link', { name: 'Open in Stripe' })).toHaveAttribute('href', 'https://dashboard.stripe.com/test/payments/pi_e2e_dashboard')
+})
