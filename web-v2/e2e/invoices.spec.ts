@@ -825,6 +825,8 @@ test('a refund made in Stripe: the notice records it as a credit note or dismiss
     stripe_refund_id: STRIPE_REFUND_ID,
     lines: [{ description: `Refund made in Stripe (${STRIPE_REFUND_ID})`, quantity: 1, unit_amount_cents: 4000 }],
   })
+  // The page may still be refreshing the stubbed invoice; let the test end without it.
+  await page.unrouteAll({ behavior: 'ignoreErrors' })
 })
 
 // A refund made in Stripe that may replace a credit note's failed refund can
@@ -865,6 +867,8 @@ test('a refund made in Stripe after a failed refund: Attach to the note, and Ret
   await expect(page.getByText(refusal)).toBeVisible()
   await page.getByRole('button', { name: 'Open invoice' }).click()
   await expect(page).toHaveURL(new RegExp(`/invoices/${invoice.id}$`))
+  // The page may still be refreshing the stubbed invoice; let the test end without it.
+  await page.unrouteAll({ behavior: 'ignoreErrors' })
 })
 
 // A credit note whose card refund is a refund made in Stripe carries a
@@ -885,4 +889,6 @@ test('a credit note recorded from Stripe is tagged, with its refund, on the cred
   await expect(adjustments.getByText('Recorded from Stripe', { exact: true })).toBeVisible()
   await expect(adjustments.getByText(`Stripe refund ${STRIPE_REFUND_ID}`, { exact: true })).toBeVisible()
   await expect(adjustments.getByRole('link', { name: 'Open in Stripe' })).toHaveAttribute('href', 'https://dashboard.stripe.com/test/payments/pi_e2e_dashboard')
+  // The page may still be refreshing the stubbed invoice; let the test end without it.
+  await page.unrouteAll({ behavior: 'ignoreErrors' })
 })
