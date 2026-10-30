@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, type ReactNode } from 'react'
+import { listPathFor } from '@/lib/modeSwitch'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
@@ -208,13 +209,19 @@ export function Layout({ children }: { children: ReactNode }) {
     try {
       await setMode(next)
       toast.success(next ? 'Switched to live mode' : 'Switched to test mode')
+      // A record lives in one mode: from its page, go to its list in the
+      // other mode (listPathFor), not to a "Couldn't load" that Retry can't
+      // fix.
+      const list = listPathFor(location.pathname)
+      if (list) {
+        navigate(list, { replace: true })
+        return
+      }
       // Strip mode-scoped query params before staying on the page. Params
       // that name a ROW or an offset into the other mode's dataset go
       // stale the moment the mode flips: Usage Events' ?customer=<id>
       // filters on an id that doesn't exist in the new mode, and a ?page=
       // deep into 74 test invoices is out of range against 1 live one.
-      // Pathname stays so detail-page IDs surface the existing "Not found"
-      // branch for entities that don't exist in the new mode.
       //
       // MODE_INDEPENDENT_PARAMS survives the strip: ?tab= selects a pane,
       // not a row. Dropping it bounced the operator off Settings→Payments,

@@ -160,6 +160,9 @@ export default function SubscriptionsPage() {
     customers.forEach(c => { cMap[c.id] = c })
     return cMap
   }, [customers])
+  // While the names load a row reads "…", not "Unknown": a customer is
+  // unknown only once the names arrived without it (W-17).
+  const unknownCustomer = customersData ? 'Unknown customer' : '…'
   const plans = plansData?.data ?? []
 
   // Search is server-side (search= query param over display_name +
@@ -331,14 +334,14 @@ export default function SubscriptionsPage() {
                       </TableCell>
                       <TableCell className="text-sm">
                         <div className="flex items-center gap-2.5">
-                          <InitialsAvatar name={customerMap[sub.customer_id]?.display_name || 'Unknown'} size="xs" />
+                          <InitialsAvatar name={customerMap[sub.customer_id]?.display_name || unknownCustomer} size="xs" />
                           <Link
                             to={`/customers/${sub.customer_id}`}
                             onClick={e => e.stopPropagation()}
                             className="text-sm font-medium text-foreground hover:text-primary truncate block max-w-[160px]"
-                            title={customerMap[sub.customer_id]?.display_name || 'Unknown'}
+                            title={customerMap[sub.customer_id]?.display_name || unknownCustomer}
                           >
-                            {customerMap[sub.customer_id]?.display_name || 'Unknown'}
+                            {customerMap[sub.customer_id]?.display_name || unknownCustomer}
                           </Link>
                         </div>
                       </TableCell>

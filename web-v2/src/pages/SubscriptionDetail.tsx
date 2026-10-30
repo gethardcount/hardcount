@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { StaleNotice } from '@/components/StaleNotice'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -332,7 +333,9 @@ export default function SubscriptionDetailPage() {
     )
   }
 
-  if (error) {
+  // A failed refresh after a load keeps the page (StaleNotice below);
+  // only a page that never loaded becomes the error screen.
+  if (error && !sub) {
     return (
       <Layout>
         <LoadError what="this subscription" error={loadError} onRetry={() => refetch()} className="py-16" />
@@ -440,6 +443,7 @@ export default function SubscriptionDetailPage() {
   return (
     <Layout>
       <DetailBreadcrumb to="/subscriptions" parentLabel="Subscriptions" currentLabel={sub.display_name} />
+      {loadError && <StaleNotice what="this subscription" onRetry={() => refetch()} />}
 
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3 mb-6">

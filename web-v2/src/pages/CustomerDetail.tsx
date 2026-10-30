@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { StaleNotice } from '@/components/StaleNotice'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useEffectiveNow } from '@/hooks/useClockFrozenMap'
 import { useSingleFlight } from '@/hooks/useSingleFlight'
@@ -389,7 +390,9 @@ export default function CustomerDetailPage() {
     )
   }
 
-  if (error) {
+  // A failed refresh after a load keeps the page (StaleNotice below);
+  // only a page that never loaded becomes the error screen.
+  if (error && !customer) {
     return (
       <Layout>
         <LoadError what="this customer" error={loadError} onRetry={() => refetch()} className="py-16" />
@@ -408,6 +411,7 @@ export default function CustomerDetailPage() {
   return (
     <Layout>
       <DetailBreadcrumb to="/customers" parentLabel="Customers" currentLabel={customer.display_name} />
+      {loadError && <StaleNotice what="this customer" onRetry={() => refetch()} />}
 
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3 mb-6">
@@ -588,7 +592,7 @@ export default function CustomerDetailPage() {
             )}
             <div className="flex-1 min-w-0 px-6 py-4">
               <p className="text-sm text-muted-foreground">Subscriptions</p>
-              <p className="text-sm font-medium text-foreground mt-1">{subsTotal}</p>
+              <p className="text-sm font-medium text-foreground mt-1">{subsPage ? subsTotal : '…'}</p>
             </div>
             <div className="flex-1 min-w-0 px-6 py-4">
               <p className="text-sm text-muted-foreground">Created</p>
@@ -722,7 +726,8 @@ export default function CustomerDetailPage() {
             <Card>
               <CardHeader>
                 <div className="flex items-center justify-between">
-                  <CardTitle className="text-sm">Subscriptions ({subsTotal})</CardTitle>
+                  {/* No count until the list arrives: "(0)" read as "none" (W-17). */}
+                  <CardTitle className="text-sm">Subscriptions{subsPage ? ` (${subsTotal})` : ''}</CardTitle>
                   {!isArchived && <Button size="sm" onClick={() => setShowCreateSub(true)}>Create subscription</Button>}
                 </div>
               </CardHeader>
@@ -775,7 +780,10 @@ export default function CustomerDetailPage() {
                       ))}
                     </>
                   )}
-                  {(!allSubs || allSubs.length === 0) && (
+                  {!allSubs && (
+                    <p className="px-6 py-6 text-sm text-muted-foreground text-center">Loading…</p>
+                  )}
+                  {allSubs && allSubs.length === 0 && (
                     <p className="px-6 py-6 text-sm text-muted-foreground text-center">No subscriptions</p>
                   )}
                   {allSubs && subsTotal > allSubs.length && (
