@@ -9,6 +9,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 )
 
 func blocks(pairs ...any) []drainedBlock {
@@ -136,8 +137,8 @@ func TestPlanRestore_RefusesCorruptAttribution(t *testing.T) {
 //
 // Mutation-verify: `!b.ExpiresAt.After(at)` (boundary expired) → "at the
 // boundary" red; drop `b.Swept ||` → "swept and held" red; drop the Held
-// test → "held, not swept" red; move the funding check below expiry → "funding
-// voided and expired" red.
+// test → "held, not swept" red; drop the funding check → both "funding
+// voided" cases red.
 func TestClassifyRestore_FollowsTheSweepRule(t *testing.T) {
 	at := time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
 	past, boundary, future := at.Add(-time.Hour), at, at.Add(time.Hour)
@@ -200,6 +201,39 @@ func TestReverseForInvoiceTx_ReturnsWhatIsStillApplied(t *testing.T) {
 	}
 	if got.Description != "Reversed — invoice INV-1 voided" {
 		t.Errorf("description = %q", got.Description)
+	}
+}
+
+// A return judges expiry at the customer's instant: on a test clock that is
+// the clock's time on ctx, not the wall clock. The void and the credit-note
+// grant both pass it to the store as At.
+//
+// Mutation-verify: pass time.Now() as At in either method → red.
+func TestReturns_UseTheCustomersInstant(t *testing.T) {
+	frozen := time.Date(2027, 1, 15, 9, 0, 0, 0, time.UTC)
+	ctx := clock.WithSim(context.Background(), clock.Sim{At: frozen, TestClockID: "hc_tclk_1"})
+	store := newMemStore()
+	svc := NewService(store)
+	if _, err := store.AppendEntry(ctx, "t1", domain.CreditLedgerEntry{
+		CustomerID: "cus_1", EntryType: domain.CreditUsage, Currency: "USD", AmountCents: -500, InvoiceID: "inv_1",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := svc.ReverseForInvoiceTx(ctx, nil, "t1", "cus_1", "inv_1", ""); err != nil {
+		t.Fatalf("ReverseForInvoiceTx: %v", err)
+	}
+	if _, err := svc.GrantForCreditNoteTx(ctx, nil, "t1", "cn_1", CreditNoteReturnInput{
+		CustomerID: "cus_1", Currency: "USD", AmountCents: 100, Description: "note", InvoiceID: "inv_2",
+	}); err != nil {
+		t.Fatalf("GrantForCreditNoteTx: %v", err)
+	}
+	if len(store.returns) != 2 {
+		t.Fatalf("returns = %d, want 2", len(store.returns))
+	}
+	for i, r := range store.returns {
+		if !r.At.Equal(frozen) {
+			t.Errorf("return %d At = %v, want the clock's %v", i, r.At, frozen)
+		}
 	}
 }
 

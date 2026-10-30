@@ -348,11 +348,12 @@ func TestCreditReturn_VoidKeepsThePromotionalKind(t *testing.T) {
 // sweep's rule (Stripe: past expiry, the reinstated balance "expires
 // immediately"), and the net balance change fires no crossing webhook.
 //
-// Mutation-verify: drop the restoreThenExpire branch → every case keeps live
-// credit on an expired grant (balance and checkLedger red); emit the return
-// row's crossings on its own insert → "fully drawn" fires recovered then
-// depleted (events red); drop the unswept-remainder write-off → "unswept
-// remainder" leaves a reopened grant (checkLedger red).
+// Mutation-verify (CI, PR #1498): skip the at-once expiry → the three
+// expiring cases keep live credit on an expired grant (balance, expiry
+// entries and checkLedger red); emit the return row's crossings on its own
+// insert → "fully drawn" enqueues a balance_recovered (events red); drop the
+// unswept-remainder write-off → "unswept remainder" has no -2000 entry at
+// expires_at (red).
 func TestCreditReturn_PastExpiryExpiresAtOnce(t *testing.T) {
 	r := newReturnRig(t, "Return Past Expiry")
 	later := time.Now().UTC().Add(time.Hour)
@@ -688,9 +689,11 @@ func TestCreditReturn_TestClockCustomerUsesItsClock(t *testing.T) {
 // same customer and an operator grant both start. Neither may commit until
 // the return does: the drain then draws on the restored capacity.
 //
-// Mutation-verify: drop the return's advisory lock and its FOR UPDATE → the
-// drain commits inside the window ("finished while the return held its
-// locks") and the restore's CAS refuses the changed block (the void errors).
+// Mutation-verify (CI, PR #1498): drop the return's advisory lock and its
+// FOR UPDATE → the drain and the grant commit inside the window ("finished
+// while the return held its locks", red). The grant takes only the advisory
+// lock, so dropping that lock alone would let it through (not run); the drain takes the
+// advisory lock first, so dropping only the FOR UPDATE changes nothing here.
 func TestCreditReturn_ConcurrentWritersWaitForTheReturn(t *testing.T) {
 	r := newReturnRig(t, "Return Concurrent")
 	admin := testutil.AdminPool(t)
