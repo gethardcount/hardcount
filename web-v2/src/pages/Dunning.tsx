@@ -47,6 +47,7 @@ import {
 import { TableSkeleton } from '@/components/ui/TableSkeleton'
 
 import { Loader2 } from 'lucide-react'
+import { useIsPhone } from '@/hooks/useIsPhone'
 
 // effectiveNowMs resolves the "now" baseline for relative-time
 // Human labels for the resolution enum — raw values like
@@ -151,6 +152,7 @@ function RunsTab() {
   // The filter lives in ?state=, so Home's "in payment retry" line opens
   // this list already filtered to the runs it counted.
   const [searchParams, setSearchParams] = useSearchParams()
+  const phone = useIsPhone()
   const stateParam = searchParams.get('state') ?? ''
   const filterStatus = RUN_STATES.includes(stateParam) ? stateParam : ''
   const setFilterStatus = (state: string) => setSearchParams(prev => {
@@ -385,7 +387,7 @@ function RunsTab() {
                             {/* PHONE: customer and invoice, then the amount;
                                 status and the action, then the next step
                                 (plan 1.14, L-04). */}
-                            <div className="sm:hidden space-y-1.5">
+                            {phone && <div className="space-y-1.5">
                               <div className="flex items-baseline justify-between gap-3">
                                 <div className="min-w-0 truncate text-sm">
                                   <span className="font-medium text-foreground">{cust?.display_name || run.customer_id.slice(0, 8) + '...'}</span>
@@ -401,8 +403,8 @@ function RunsTab() {
                                 </div>
                                 {nextStep}
                               </div>
-                            </div>
-                            <div className="hidden sm:flex items-center gap-2.5">
+                            </div>}
+                            {!phone && <div className="flex items-center gap-2.5">
                               <InitialsAvatar name={cust?.display_name || 'Unknown'} size="xs" />
                               <div>
                                 <Link to={`/customers/${run.customer_id}`} onClick={e => e.stopPropagation()}
@@ -411,7 +413,7 @@ function RunsTab() {
                                 </Link>
                                 {cust?.email && <p className="text-xs text-muted-foreground truncate max-w-[180px]" title={cust.email}>{cust.email}</p>}
                               </div>
-                            </div>
+                            </div>}
                           </TableCell>
                           <TableCell className="hidden sm:table-cell">
                             <div className="flex items-center gap-1.5">
