@@ -66,9 +66,17 @@ type Config struct {
 // to fall back to the default without a word, so the install ran on a limit
 // nobody chose.
 type RateLimits struct {
-	// GeneralPerMinute is HARDCOUNT_RATE_LIMIT_GENERAL_PER_MIN, default 100: the
-	// general API bucket, and the per-address limit on /v1/auth.
+	// GeneralPerMinute is HARDCOUNT_RATE_LIMIT_GENERAL_PER_MIN, default 1000:
+	// the API and dashboard bucket, per API key or per account and mode for
+	// dashboard sessions. One dashboard page sends about 10 requests, so 100
+	// a minute stopped one operator after about 10 pages (ADR-095 amendment
+	// 2026-10-31).
 	GeneralPerMinute int
+	// AuthPerMinute is HARDCOUNT_RATE_LIMIT_AUTH_PER_MIN, default 100: the
+	// per-address limit on /v1/auth (sign-in, password reset, invites) and
+	// /v1/bootstrap, before anyone has signed in. Kept apart from the general
+	// limit so raising that one never loosens sign-in.
+	AuthPerMinute int
 	// IngestPerSecond is HARDCOUNT_RATE_LIMIT_INGEST_PER_SEC, default 1000: usage
 	// events and LiteLLM callbacks.
 	IngestPerSecond int
@@ -76,7 +84,7 @@ type RateLimits struct {
 
 // DefaultRateLimits are the limits when no HARDCOUNT_RATE_LIMIT_* is set.
 func DefaultRateLimits() RateLimits {
-	return RateLimits{GeneralPerMinute: 100, IngestPerSecond: 1000}
+	return RateLimits{GeneralPerMinute: 1000, AuthPerMinute: 100, IngestPerSecond: 1000}
 }
 
 type DBConfig struct {
@@ -515,11 +523,15 @@ func loadRateLimits() (RateLimits, error) {
 	if err != nil {
 		return RateLimits{}, err
 	}
+	authPerMin, err := rateLimitEnv("HARDCOUNT_RATE_LIMIT_AUTH_PER_MIN", def.AuthPerMinute)
+	if err != nil {
+		return RateLimits{}, err
+	}
 	ingest, err := rateLimitEnv("HARDCOUNT_RATE_LIMIT_INGEST_PER_SEC", def.IngestPerSecond)
 	if err != nil {
 		return RateLimits{}, err
 	}
-	return RateLimits{GeneralPerMinute: general, IngestPerSecond: ingest}, nil
+	return RateLimits{GeneralPerMinute: general, AuthPerMinute: authPerMin, IngestPerSecond: ingest}, nil
 }
 
 func rateLimitEnv(key string, fallback int) (int, error) {

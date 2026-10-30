@@ -99,6 +99,16 @@ export function errorSentence(err: unknown): string {
   }
 }
 
+export const RATE_LIMIT_RETRYING_MESSAGE = 'Too many requests. Trying again in a moment.'
+
+// loadErrorSentence is errorSentence for a load that failed (LoadError). A
+// 429 on a load is fetched again by itself after the API's Retry-After
+// (lib/rateLimitRetry), so it says so; an action's 429 is not, and keeps
+// errorSentence's "wait, then try again".
+export function loadErrorSentence(err: unknown): string {
+  return classifyError(err) === 'rate' ? RATE_LIMIT_RETRYING_MESSAGE : errorSentence(err)
+}
+
 // rawErrorDetail is what goes in a collapsed Details: the original text,
 // when the sentence above replaced it. Empty when the sentence already is it.
 export function rawErrorDetail(err: unknown): string {

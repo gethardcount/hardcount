@@ -21,7 +21,7 @@ func TestLocalLimiter_MatchesRedisLimit(t *testing.T) {
 	l := newLocalLimiter(redis_rate.PerMinute(5)) // one request per 12s, burst 5
 
 	for i := 1; i <= 5; i++ {
-		remaining, resetAt, ok := l.allow("ip:a", t0)
+		remaining, resetAt, _, ok := l.allow("ip:a", t0)
 		if !ok {
 			t.Fatalf("request %d: denied, want allowed", i)
 		}
@@ -32,16 +32,16 @@ func TestLocalLimiter_MatchesRedisLimit(t *testing.T) {
 			t.Errorf("request %d: reset %v, want %v", i, resetAt, want)
 		}
 	}
-	if remaining, _, ok := l.allow("ip:a", t0); ok || remaining != 0 {
+	if remaining, _, _, ok := l.allow("ip:a", t0); ok || remaining != 0 {
 		t.Fatalf("request 6: allowed=%v remaining=%d, want denied with 0 left", ok, remaining)
 	}
-	if _, _, ok := l.allow("ip:a", t0.Add(11900*time.Millisecond)); ok {
+	if _, _, _, ok := l.allow("ip:a", t0.Add(11900*time.Millisecond)); ok {
 		t.Fatal("11.9s later: allowed, want denied until a token refills at 12s")
 	}
-	if _, _, ok := l.allow("ip:a", t0.Add(12100*time.Millisecond)); !ok {
+	if _, _, _, ok := l.allow("ip:a", t0.Add(12100*time.Millisecond)); !ok {
 		t.Fatal("12.1s later: denied, want one refilled token")
 	}
-	if _, _, ok := l.allow("ip:b", t0.Add(12100*time.Millisecond)); !ok {
+	if _, _, _, ok := l.allow("ip:b", t0.Add(12100*time.Millisecond)); !ok {
 		t.Fatal("another key: denied, want its own full bucket")
 	}
 }
@@ -65,7 +65,7 @@ func TestLocalLimiter_SweepDropsOnlyFullBuckets(t *testing.T) {
 	if want := []string{"ip:busy", "ip:new"}; !slices.Equal(keys, want) {
 		t.Fatalf("buckets after sweep: %v, want %v", keys, want)
 	}
-	if _, _, ok := l.allow("ip:busy", t0.Add(61*time.Second)); ok {
+	if _, _, _, ok := l.allow("ip:busy", t0.Add(61*time.Second)); ok {
 		t.Fatal("ip:busy after the sweep: allowed, want still limited")
 	}
 }
@@ -79,7 +79,7 @@ func TestLocalLimiter_ConcurrentRequestsShareOneCount(t *testing.T) {
 	for range 20 {
 		wg.Go(func() {
 			for range 10 {
-				if _, _, ok := l.allow("ip:a", t0); ok {
+				if _, _, _, ok := l.allow("ip:a", t0); ok {
 					allowed.Add(1)
 				}
 			}

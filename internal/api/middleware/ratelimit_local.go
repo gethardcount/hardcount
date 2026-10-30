@@ -37,9 +37,10 @@ func newLocalLimiter(l redis_rate.Limit) *localLimiter {
 }
 
 // allow spends one token from key's bucket at now. It returns what the Redis
-// path returns: the requests left, when the bucket is full again, and whether
-// this request may proceed.
-func (l *localLimiter) allow(key string, now time.Time) (int, time.Time, bool) {
+// path returns: the requests left, when the bucket is full again, how long
+// until the next request may proceed (0 when this one may), and whether this
+// request may proceed.
+func (l *localLimiter) allow(key string, now time.Time) (int, time.Time, time.Duration, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -54,7 +55,11 @@ func (l *localLimiter) allow(key string, now time.Time) (int, time.Time, bool) {
 	allowed := b.AllowN(now, 1)
 	tokens := b.TokensAt(now)
 	untilFull := time.Duration(math.Round((float64(l.burst) - tokens) * float64(l.every)))
-	return int(math.Floor(tokens)), now.Add(untilFull), allowed
+	var retryAfter time.Duration
+	if !allowed {
+		retryAfter = time.Duration(math.Ceil((1 - tokens) * float64(l.every)))
+	}
+	return int(math.Floor(tokens)), now.Add(untilFull), retryAfter, allowed
 }
 
 // sweep drops every bucket that has refilled. A full bucket allows exactly

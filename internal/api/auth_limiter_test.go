@@ -20,7 +20,7 @@ import (
 func TestAuthLimiter_KeepsLimitingWithoutRedis(t *testing.T) {
 	const perMin = 5
 	limits := config.DefaultRateLimits()
-	limits.GeneralPerMinute = perMin
+	limits.AuthPerMinute = perMin
 
 	// Nothing listens on port 1, and retries are off, so every Redis call
 	// fails at once, as during an outage after boot.
@@ -65,5 +65,44 @@ func TestAuthLimiter_KeepsLimitingWithoutRedis(t *testing.T) {
 				t.Fatalf("first request from another address: status %d, want 400", got)
 			}
 		})
+	}
+}
+
+// Sign-in and first setup count per address on the auth limit, not the
+// general one. The general limit was raised for the dashboard (2026-10-31);
+// had /v1/auth or /v1/bootstrap kept it, password guessing would have got
+// ten times looser with it.
+func TestPreSignInRoutes_UseTheAuthLimit(t *testing.T) {
+	limits := config.RateLimits{GeneralPerMinute: 1000, AuthPerMinute: 3, IngestPerSecond: 1000}
+	srv := NewServer(&postgres.DB{}, nil, nil, WithRateLimits(limits))
+
+	// An invalid body is refused with 400 before either handler touches the
+	// database, after the limiter has run and set its headers.
+	send := func(path, addr string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader("{"))
+		req.RemoteAddr = addr
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		return rec
+	}
+	for _, path := range []string{"/v1/auth/login", "/v1/bootstrap"} {
+		rec := send(path, "198.51.100.20:4000")
+		if got := rec.Header().Get("X-RateLimit-Limit"); got != "3" {
+			t.Errorf("%s: X-RateLimit-Limit = %q, want the auth limit 3 (the general limit is 1000)", path, got)
+		}
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: status %d, want 400", path, rec.Code)
+		}
+	}
+
+	// The auth limit is enforced on /v1/auth without Redis: 3 pass, the 4th
+	// from that address is refused.
+	for i := 1; i <= 3; i++ {
+		if got := send("/v1/auth/login", "198.51.100.21:4000").Code; got != http.StatusBadRequest {
+			t.Fatalf("login %d of 3: status %d, want 400", i, got)
+		}
+	}
+	if got := send("/v1/auth/login", "198.51.100.21:4000").Code; got != http.StatusTooManyRequests {
+		t.Fatalf("login 4: status %d, want 429", got)
 	}
 }
