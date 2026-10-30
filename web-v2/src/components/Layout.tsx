@@ -255,7 +255,7 @@ export function Layout({ children }: { children: ReactNode }) {
   }
   // Drives the live-mode Stripe-missing hard-blocker. The launcher itself
   // calls the same hook — React Query dedupes by key, so no duplicate fetches.
-  const { hasLiveStripe, offerShowAgain: offerShowChecklist, setDismissed: setChecklistHidden } = useOnboardingSteps()
+  const { liveStripe, offerShowAgain: offerShowChecklist, setDismissed: setChecklistHidden } = useOnboardingSteps()
 
   const handleLogout = async () => {
     await logout()
@@ -526,20 +526,23 @@ export function Layout({ children }: { children: ReactNode }) {
               every real charge will 4xx. Non-dismissible; the only fix is to
               connect Stripe. Mutually exclusive with the test-mode banner
               (this only fires in live mode). */}
-          {user && user.livemode && hasLiveStripe === false && (
+          {user && user.livemode && (liveStripe === 'none' || liveStripe === 'refused') && (
             <div
               role="alert"
               className="flex items-center justify-center gap-2 bg-destructive px-4 py-1.5 text-xs font-medium text-destructive-foreground"
             >
               <AlertTriangle size={14} aria-hidden="true" />
               <span>
-                <strong className="font-semibold">Live mode:</strong> Stripe isn't connected for live payments, so charges will fail.
+                <strong className="font-semibold">Live mode:</strong>{' '}
+                {liveStripe === 'refused'
+                  ? 'Stripe refused your live key, so charges will fail.'
+                  : "Stripe isn't connected for live payments, so charges will fail."}
               </span>
               <Link
                 to="/settings?tab=payments"
                 className="ml-1 underline decoration-destructive-foreground/50 underline-offset-2 hover:decoration-destructive-foreground"
               >
-                Connect Stripe
+                {liveStripe === 'refused' ? 'Replace key' : 'Connect Stripe'}
               </Link>
             </div>
           )}

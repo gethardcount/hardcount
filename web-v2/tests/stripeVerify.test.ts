@@ -3,7 +3,7 @@
 // kind the server records.
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { stripeVerifyNotice } from '../src/lib/stripeVerify.ts'
+import { stripeKeyState, stripeVerifyNotice } from '../src/lib/stripeVerify.ts'
 
 test('a refused key asks for the current keys, red, with Stripe named in Details', () => {
   const n = stripeVerifyNotice('rejected')
@@ -41,4 +41,19 @@ test('a row from before the kind was recorded reads as refused, but Details stay
   assert.equal(legacy.tone, 'red')
   // Old rows stored stripe-go's JSON or a network error, not Stripe's sentence.
   assert.equal(legacy.detailsLabel, 'Details')
+})
+
+test('a mode is connected only by its own key that Stripe did not refuse', () => {
+  const test = { livemode: false }
+  const live = { livemode: true }
+  const refused = { livemode: true, last_verified_error: 'Invalid API Key provided', last_verified_error_kind: 'rejected' }
+  const oldFailed = { livemode: true, last_verified_error: '{"error":{}}' }
+  const unchecked = { livemode: true, last_verified_error: 'dial tcp: timeout', last_verified_error_kind: 'unavailable' }
+  assert.equal(stripeKeyState([], true), 'none')
+  assert.equal(stripeKeyState([test], true), 'none', 'a test key does not connect live mode')
+  assert.equal(stripeKeyState([test], false), 'connected')
+  assert.equal(stripeKeyState([test, live], true), 'connected')
+  assert.equal(stripeKeyState([test, refused], true), 'refused')
+  assert.equal(stripeKeyState([oldFailed], true), 'refused', 'a failure from before the kind was recorded reads as refused')
+  assert.equal(stripeKeyState([unchecked], true), 'connected', 'a key Stripe could not check was not refused')
 })

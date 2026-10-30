@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
 import { setupChecklistState } from '@/lib/homeNotices'
+import { stripeKeyState, type StripeKeyState } from '@/lib/stripeVerify'
 
 export interface OnboardingStep {
   key: 'stripe' | 'plan' | 'customer' | 'subscription' | 'usage' | 'webhook'
@@ -90,8 +91,10 @@ export function useOnboardingSteps() {
 
   // Stripe creds are queried even when the launcher is dismissed because the
   // live-mode hard blocker (rendered in Layout) depends on the same signal.
+  // Same key as Settings and the invoice page, so connecting or replacing a
+  // key in Settings refreshes the step and the warning at once.
   const { data: stripeCreds } = useQuery({
-    queryKey: ['onboarding-stripe-creds'],
+    queryKey: ['stripe-credentials'],
     queryFn: () => api.listStripeCredentials(),
     enabled: !!user,
   })
@@ -118,6 +121,14 @@ export function useOnboardingSteps() {
   // ones too). The overview's active_subscriptions leaves out trialing and
   // test-clock subscriptions, so a first subscription made either way left
   // the step undone. Home's welcome card reads the same answer.
+  // Any customer in this mode, test-clock ones too (#1153). The overview's
+  // active_customers leaves out test-clock customers, as Home's totals do,
+  // so following the docs' test-clock path never ticked the step.
+  const { data: anyCustomer } = useQuery({
+    queryKey: ['onboarding-any-customer'],
+    queryFn: () => api.listCustomers('limit=1'),
+    enabled,
+  })
   const { data: anySubscription } = useQuery({
     queryKey: ['onboarding-any-subscription'],
     queryFn: () => api.listSubscriptions('limit=1'),
@@ -135,15 +146,19 @@ export function useOnboardingSteps() {
     retry: false,
   })
 
-  const hasAnyStripe = (stripeCreds?.data?.length ?? 0) > 0
-  // Tri-state: undefined = still loading. Callers (live-mode blocker strip)
-  // must wait for a definitive false before raising an alert.
-  const hasLiveStripe: boolean | undefined = stripeCreds
-    ? stripeCreds.data.some(c => c.livemode)
+  // The step asks about the mode the operator is in: a test key doesn't
+  // connect live mode, and a key Stripe refused connects nothing.
+  const stripeState: StripeKeyState | undefined = stripeCreds && user
+    ? stripeKeyState(stripeCreds.data, user.livemode)
+    : undefined
+  // undefined = still loading. The live-mode warning waits for an answer
+  // before it shows.
+  const liveStripe: StripeKeyState | undefined = stripeCreds
+    ? stripeKeyState(stripeCreds.data, true)
     : undefined
   const hasPlans = (plansList?.data?.length ?? 0) > 0
   const hasWebhook = (webhookEndpoints?.data?.length ?? 0) > 0
-  const hasCustomer = (overview?.active_customers ?? 0) > 0
+  const hasCustomer = (anyCustomer?.data?.length ?? 0) > 0
   const hasSubscription = (anySubscription?.data?.length ?? 0) > 0
   const hasUsage = usageInWindow > 0 || anyUsageEver === true
   // undefined while loading: Home must not flash the welcome card at an
@@ -154,10 +169,12 @@ export function useOnboardingSteps() {
     {
       key: 'stripe',
       label: 'Connect Stripe',
-      desc: "Needed to charge your customers' cards",
+      desc: stripeState === 'refused'
+        ? "Stripe refused the saved key. Paste the current one from your Stripe dashboard."
+        : "Needed to charge your customers' cards",
       to: '/settings?tab=payments',
-      cta: 'Connect Stripe',
-      done: hasAnyStripe,
+      cta: stripeState === 'refused' ? 'Replace key' : 'Connect Stripe',
+      done: stripeState === 'connected',
     },
     {
       key: 'plan',
@@ -208,7 +225,7 @@ export function useOnboardingSteps() {
   // A failed "any usage ever" check counts as settled (step not done) so it
   // can't hold the whole checklist back.
   const usageSettled = usageInWindow > 0 || anyUsageEver !== undefined || anyUsageFailed
-  const loaded = !!overview && !!plansList && !!stripeCreds && !!webhookEndpoints && !!anySubscription && usageSettled
+  const loaded = !!overview && !!plansList && !!stripeCreds && !!webhookEndpoints && !!anyCustomer && !!anySubscription && usageSettled
   const { showPill: show, offerShowAgain } = setupChecklistState(dismissed, loaded, complete, total)
 
   return {
@@ -219,7 +236,7 @@ export function useOnboardingSteps() {
     setDismissed,
     show,
     offerShowAgain,
-    hasLiveStripe,
+    liveStripe,
     newAccount,
   }
 }
