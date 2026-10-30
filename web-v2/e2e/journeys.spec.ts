@@ -257,7 +257,9 @@ test('advance a test clock to the renewal and see the invoice', async ({ page })
   await page.getByRole('link', { name: invoice.invoice_number, exact: true }).click()
   await expect(page.getByRole('heading', { level: 1, name: invoice.invoice_number, exact: true })).toBeVisible()
   await expect(page.getByText('Subtotal', { exact: true }).locator('..')).toContainText(usd(invoice.subtotal_cents))
-  await expect(page.getByText('Amount due', { exact: true }).locator('..')).toContainText(usd(invoice.amount_due_cents))
+  // The summary strip repeats Amount due and Due above the document; the
+  // last match is the document's figure.
+  await expect(page.getByText('Amount due', { exact: true }).last().locator('..')).toContainText(usd(invoice.amount_due_cents))
 })
 
 test('a new test clock says customers, not subscriptions, go on it', async ({ page }) => {
@@ -285,7 +287,8 @@ test('a draft invoice reads as a draft and shows its memo', async ({ page }) => 
   // The API stamps provisional dates on a draft; the page must not show them
   // as if the invoice had been issued.
   await expect(page.getByText('Issued', { exact: true }).locator('..')).toContainText('Draft — not issued')
-  await expect(page.getByText('Due', { exact: true }).locator('..')).toContainText('Net 30 from finalizing')
+  await expect(page.getByText('Due', { exact: true }).last().locator('..')).toContainText('Net 30 from finalizing')
+  await expect(page.getByTestId('invoice-summary')).toContainText('Net 30 from finalizing')
   await expect(page.getByText('Memo', { exact: true }).locator('..')).toContainText(memo)
 })
 

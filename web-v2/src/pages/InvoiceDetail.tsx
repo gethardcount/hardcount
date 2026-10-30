@@ -880,6 +880,55 @@ export default function InvoiceDetailPage() {
         <TestClockBanner testClockId={resolvedTestClockId} />
       )}
 
+      {/* Summary strip (L-03): the invoice's state, what is owed and by when,
+          and whose it is, above the fold. The totals sat at the bottom of the
+          document, below every line. The document below stays as the PDF
+          reads. */}
+      <Card className="mb-6" data-testid="invoice-summary">
+        <CardContent className="p-0">
+          <div className="grid grid-cols-2 divide-border md:flex md:divide-x">
+            <div className="min-w-0 px-6 py-4 md:flex-1">
+              <p className="text-sm text-muted-foreground">Status</p>
+              <div className="mt-1 flex flex-wrap items-center gap-2">
+                <StatusBadge status={invoiceStatus(invoice, effectiveNow(testClock?.frozen_time))} />
+                {/* Bare date: the badge already says Paid or Void. */}
+                {invoice.status === 'voided' && invoice.voided_at && (
+                  <span className="text-xs text-muted-foreground">{formatInvoiceDate(invoice.voided_at, invoice.billing_timezone)}</span>
+                )}
+                {invoice.status === 'paid' && invoice.paid_at && (
+                  <span className="text-xs text-muted-foreground">{formatInvoiceDate(invoice.paid_at, invoice.billing_timezone)}</span>
+                )}
+              </div>
+            </div>
+            <div className="min-w-0 px-6 py-4 md:flex-1">
+              <p className="text-sm text-muted-foreground">Amount due</p>
+              <p className="mt-1 text-lg font-semibold tabular-nums text-foreground">{formatCents(invoiceDueCents(invoice), invoice.currency)}</p>
+            </div>
+            <div className="min-w-0 px-6 py-4 md:flex-1">
+              <p className="text-sm text-muted-foreground">Total</p>
+              <p className="mt-1 text-sm font-medium tabular-nums text-foreground">{formatCents(invoice.total_amount_cents, invoice.currency)}</p>
+            </div>
+            <div className="min-w-0 px-6 py-4 md:flex-1">
+              <p className="text-sm text-muted-foreground">Due</p>
+              <div className="mt-1 flex flex-wrap items-center gap-2">
+                {/* The document's own wording (issueDates), so a draft reads
+                    "Net 30 from finalizing" in both places. */}
+                <p className="text-sm font-medium text-foreground">{dates.dueHint ?? dates.due}</p>
+                {invoice.due_at && invoice.status === 'finalized' && (
+                  <DueBadge dueAt={invoice.due_at} warningDays={3} now={effectiveNow(testClock?.frozen_time)} />
+                )}
+              </div>
+            </div>
+            <div className="col-span-2 min-w-0 px-6 py-4 md:col-span-1 md:flex-1">
+              <p className="text-sm text-muted-foreground">Customer</p>
+              <Link to={`/customers/${invoice.customer_id}`} className="mt-1 block truncate text-sm font-medium text-primary hover:underline">
+                {customer?.display_name || invoice.bill_to_snapshot?.display_name || invoice.customer_id}
+              </Link>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* At most one notice above the invoice: the most urgent of the
           server's attention notice and the written-off notice
           (pickInvoiceNotice says why attention wins). Supporting facts sit
@@ -1025,32 +1074,18 @@ export default function InvoiceDetailPage() {
             </div>
           </div>
 
-          {/* Header status — single humanised pill. Payment-state detail
-              and operator actions live in the InvoiceAttention banner
-              below; duplicating "payment_awaiting" up here was leaky
-              domain-code and visually noisy. */}
-          <div className="flex items-center gap-2 mt-5">
-            <StatusBadge status={invoiceStatus(invoice, effectiveNow(testClock?.frozen_time))} />
-            {noSeller && (
+          {/* The status, and the date it was paid or voided, are in the summary
+              strip above; the document carries only the seller-details nudge. */}
+          {noSeller && (
+            <div className="flex items-center gap-2 mt-5">
               <Link
                 to={SELLER_SETTINGS_PATH}
                 className="inline-flex items-center gap-1 rounded-md bg-warning-subtle px-2 py-0.5 text-xs font-medium text-warning-foreground hover:underline"
               >
                 Missing seller details <ArrowRight size={11} aria-hidden /> Settings
               </Link>
-            )}
-            {/* Simulated disclosure lives in the page banner alone
-                (ADR-099: once per scope) — the header pill duplicated it. */}
-            {/* Bare date — the badge already says "Paid"/"Voided", so
-                prefixing the date with the same word is redundant.
-                "Paid Paid May 2, 2026" → "Paid · May 2, 2026". */}
-            {invoice.status === 'voided' && invoice.voided_at && (
-              <span className="text-xs text-muted-foreground ml-1">{formatInvoiceDate(invoice.voided_at, invoice.billing_timezone)}</span>
-            )}
-            {invoice.status === 'paid' && invoice.paid_at && (
-              <span className="text-xs text-muted-foreground ml-1">{formatInvoiceDate(invoice.paid_at, invoice.billing_timezone)}</span>
-            )}
-          </div>
+            </div>
+          )}
 
           <Separator className="my-6" />
 
@@ -1457,12 +1492,9 @@ export default function InvoiceDetailPage() {
             </div>
           )}
 
-          {/* ID footer */}
-          <div className="mt-8 pt-4 border-t border-dashed border-border flex items-center justify-between">
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <span className="font-mono">{invoice.id}</span>
-              <CopyButton text={invoice.id} />
-            </div>
+          {/* Footer: tax and currency. The ID is under the page title, with
+              its copy button; a second copy here was one more thing to read. */}
+          <div className="mt-8 pt-4 border-t border-dashed border-border flex items-center justify-end">
             <div className="flex items-center gap-3 text-xs text-muted-foreground">
               {invoice.tax_provider && invoice.tax_provider !== 'none' && (
                 <span className="uppercase">
