@@ -72,7 +72,7 @@ export const STRIPE_TAX_ID_TYPES: ReadonlyArray<TaxIdTypeOption> = [
 // tax engines apply any format rules.
 export const TAX_ID_HINTS: Record<string, string> = {
   in_gst: 'e.g. 27AAEPM1234C1Z5 (15-char India GSTIN)',
-  eu_vat: 'e.g. DE123456789 — 2-letter country prefix + alphanumerics',
+  eu_vat: 'e.g. DE123456789 — 2-letter country code, then letters or digits',
   gb_vat: 'e.g. GB123456789',
   au_abn: 'e.g. 51824753556 — 11 digits',
   us_ein: 'e.g. 12-3456789',

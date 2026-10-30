@@ -39,6 +39,24 @@ test.describe('signed out', () => {
     await expect(page.getByRole('button', { name: /^Pay/ })).toHaveCount(0)
   })
 
+  test('a failed status check after paying keeps the invoice on screen', async ({ page }) => {
+    const { invoice } = await billedCustomer()
+    // Stripe sends the customer back with ?paid=1 before the webhook lands,
+    // so the page checks the invoice every 3s. Every check after the first fails.
+    let loads = 0
+    await page.route(`**/v1/public/invoices/${invoice.public_token}`, async route => {
+      if (++loads === 1) return route.continue()
+      return route.fulfill({ status: 500, body: '{}' })
+    })
+    await page.goto(`/invoice/${invoice.public_token}?paid=1`)
+    await expect(page.getByText('Processing your payment…')).toBeVisible()
+    // A third check means the failed second one has been handled, and the
+    // checks go on after a failure.
+    await expect.poll(() => loads, { timeout: 10_000 }).toBeGreaterThanOrEqual(3)
+    await expect(page.getByRole('heading', { level: 1, name: `Invoice ${invoice.invoice_number}` })).toBeVisible()
+    await expect(page.getByText('Processing your payment…')).toBeVisible()
+  })
+
   test('a bad hosted invoice link reads as an invalid link', async ({ page }) => {
     await page.goto('/invoice/hc_pinv_does_not_exist')
     await expect(page.getByRole('heading', { level: 1, name: 'This link isn’t valid' })).toBeVisible()
@@ -884,6 +902,40 @@ test('Settings → Email says what this server can send', async ({ page }) => {
     await expect(row.getByText(l.set ? 'Set' : 'Not set', { exact: true })).toBeVisible()
     if (!l.set) await expect(row).toContainText(l.effect)
   }
+})
+
+test('Settings refuses part-day payment terms and a 0 alert threshold on the fields, before saving', async ({ page }) => {
+  const saves: string[] = []
+  page.on('request', r => { if (r.method() === 'PATCH' || r.method() === 'PUT') saves.push(r.url()) })
+  await page.goto('/settings?tab=invoicing')
+  const terms = page.locator('input[name="net_payment_terms"]')
+  await terms.fill('2.5')
+  await page.getByRole('button', { name: 'Save changes' }).click()
+  await expect(page.locator('p.text-destructive', { hasText: 'Enter whole days, like 30' })).toBeVisible()
+  await terms.fill('30')
+  await page.locator('input[name="credit_balance_low_threshold"]').fill('0')
+  await page.getByRole('button', { name: 'Save changes' }).click()
+  await expect(page.locator('p.text-destructive', { hasText: 'Enter an amount above 0, or leave it blank to turn alerts off' })).toBeVisible()
+  expect(saves).toEqual([])
+})
+
+test('a tax ID the server refuses shows its reason under the field', async ({ page }) => {
+  const customer = await createCustomer()
+  await page.goto(`/customers/${customer.id}`)
+  await page.getByRole('button', { name: 'Set up billing profile' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Set up billing profile' })
+  // The tax status reads in words, not its code.
+  await expect(dialog.getByText('Standard', { exact: true })).toBeVisible()
+  await dialog.locator('div.space-y-2', { has: page.getByText('Tax ID type', { exact: true }) }).locator('button[aria-haspopup="listbox"]').click()
+  await page.getByPlaceholder('Search...').fill('eu_vat')
+  await page.keyboard.press('Enter')
+  const taxId = dialog.getByPlaceholder('Identifier')
+  await taxId.fill('!!bad!!')
+  await dialog.getByRole('button', { name: 'Save' }).click()
+  // The server checks the format and names the field; the reason shows under it.
+  await expect(dialog.locator('p.text-destructive')).toHaveText('must be a 2-letter country code, then 2 to 12 letters or digits, like DE123456789')
+  await expect(taxId).toHaveAttribute('aria-invalid', 'true')
+  await expect(taxId).toBeFocused()
 })
 
 test('a new account: Home welcomes the operator and the setup checklist opens once', async ({ page }) => {

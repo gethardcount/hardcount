@@ -1,6 +1,9 @@
 package tax
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestNormalizeTaxID(t *testing.T) {
 	tests := []struct {
@@ -159,6 +162,23 @@ func TestValidateTaxID_AcceptsBothFormats(t *testing.T) {
 		if (errCanonical == nil) != (errLegacy == nil) {
 			t.Errorf("ValidateTaxID disagrees for %q: canonical(%q)=%v, legacy(%q)=%v",
 				p.value, p.canonical, errCanonical, p.legacy, errLegacy)
+		}
+	}
+}
+
+// Each refusal shows the operator an example; the example must pass.
+func TestValidateTaxID_RefusalExamplePasses(t *testing.T) {
+	for _, kind := range []string{"in_gst", "eu_vat", "au_abn"} {
+		err := ValidateTaxID(kind, "!")
+		if err == nil {
+			t.Fatalf("ValidateTaxID(%s, \"!\") expected error, got nil", kind)
+		}
+		_, example, ok := strings.Cut(err.Error(), ", like ")
+		if !ok {
+			t.Fatalf("%s refusal %q gives no example", kind, err)
+		}
+		if err := ValidateTaxID(kind, example); err != nil {
+			t.Errorf("%s refusal's example %q is refused: %v", kind, example, err)
 		}
 	}
 }

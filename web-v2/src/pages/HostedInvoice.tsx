@@ -182,9 +182,11 @@ export default function HostedInvoicePage() {
   const seller = data?.branding.company_name?.trim() ?? ''
   usePageTitle(data ? `Invoice ${data.invoice.invoice_number}${seller ? ` from ${seller}` : ''}` : 'Invoice')
   const loading = !!token && invoiceQuery.isLoading
+  // A failed settle-poll keeps the invoice it already has: the next poll
+  // may succeed, and a customer who just paid must not see "can't load".
   const loadError = !token
     ? loadErrorCopy(404)
-    : invoiceQuery.error
+    : invoiceQuery.error && !invoiceQuery.data
       ? loadErrorCopy(invoiceQuery.error instanceof LoadFailure ? invoiceQuery.error.status : 0)
       : null
 

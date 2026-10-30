@@ -81,7 +81,9 @@ const settingsSchema = z.object({
   credit_note_prefix: z.string()
     .max(20, 'Must be at most 20 characters')
     .regex(/^[A-Za-z0-9-]*$/, 'Letters, numbers, and hyphens only'),
+  // The server takes whole days only; 2.5 used to come back "invalid JSON body".
   net_payment_terms: z.number({ error: 'Enter a number of days from 0 to 365' })
+    .int('Enter whole days, like 30')
     .min(0, 'Enter a number of days from 0 to 365')
     .max(365, 'Enter a number of days from 0 to 365'),
   tax_provider: z.enum(['none', 'manual', 'stripe_tax']),
@@ -97,6 +99,7 @@ const settingsSchema = z.object({
   // Dollar amount (string-bound input); '' = low-balance alerts off.
   credit_balance_low_threshold: z.string()
     .regex(/^\d*(\.\d{1,2})?$/, 'Dollar amount like 50 or 50.00')
+    .refine(v => parseFloat(v) > 0, 'Enter an amount above 0, or leave it blank to turn alerts off')
     .or(z.literal('')),
 })
 
@@ -303,18 +306,24 @@ export default function SettingsPage() {
       setTenantTimezone(updated.timezone ? normalizeTimezone(updated.timezone) : null)
       toast.success('Settings saved')
     } catch (err) {
-      applyApiError(formMethods, err, [
-        'company_name', 'company_email', 'company_phone',
-        'company_address_line1', 'company_address_line2', 'company_city',
-        'company_state', 'company_postal_code', 'company_country',
-        'logo_url', 'brand_color',
-        'tax_id', 'support_url', 'invoice_footer',
-        'invoice_prefix', 'credit_note_prefix', 'net_payment_terms', 'tax_provider', 'tax_rate', 'tax_name', 'tax_inclusive',
-        'default_product_tax_code', 'default_currency', 'timezone',
-      ], { toastTitle: 'Failed to save settings' })
+      // The server names its fields; only the threshold is named differently
+      // in the form (dollars, not cents).
+      const fields: Record<string, string> = {
+        ...Object.fromEntries([
+          'company_name', 'company_email', 'company_phone',
+          'company_address_line1', 'company_address_line2', 'company_city',
+          'company_state', 'company_postal_code', 'company_country',
+          'logo_url', 'brand_color',
+          'tax_id', 'support_url', 'invoice_footer',
+          'invoice_prefix', 'credit_note_prefix', 'net_payment_terms', 'tax_provider', 'tax_rate', 'tax_name', 'tax_inclusive',
+          'default_product_tax_code', 'default_currency', 'timezone',
+        ].map(f => [f, f])),
+        credit_balance_low_threshold_cents: 'credit_balance_low_threshold',
+      }
+      applyApiError(formMethods, err, fields, { toastTitle: 'Failed to save settings' })
       // applyApiError marks a field the server named; if that field is on
       // another tab, take the operator to it.
-      const named = err instanceof ApiError ? SETTINGS_FIELDS.find(f => f.field === err.field) : undefined
+      const named = err instanceof ApiError ? SETTINGS_FIELDS.find(f => f.field === fields[err.field ?? '']) : undefined
       if (named && named.tab !== tab) setTab(named.tab)
     } finally { setSaving(false) }
   }, errors => { showInvalidField(errors) })
