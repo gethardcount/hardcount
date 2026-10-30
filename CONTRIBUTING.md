@@ -240,7 +240,7 @@ CI runs every check below on every PR. Run the ones your change touches
 locally before you push. Fork PRs get the same run, because no check uses
 secrets.
 
-**Required to merge.** A PR cannot merge until each of these passes.
+**Required to merge.** A PR cannot merge until each of these passes on a branch that is up to date with `main`. If `main` moved after your last push, use **Update branch** on the PR (or rebase) and let the checks run again: two PRs that each add the same migration number cannot both merge that way.
 
 | CI job | What it checks | Local command |
 |---|---|---|
@@ -251,16 +251,16 @@ secrets.
 | `lint` | golangci-lint (`.golangci.yml`), the Go version in `go.mod` against the `Dockerfile`, the quickstart release against the Compose template, and `govulncheck` | `make lint`, then `govulncheck ./...` |
 | `codegen-drift` | Generated Go and TypeScript match `api/openapi.yaml` | `make gen && git diff --exit-code` |
 | `frontend` | Dashboard build (`tsc -b` and Vite), unit tests, eslint, and knip (unused files, exports and dependencies) | `cd web-v2 && npm run build && npm test && npm run lint` |
+| `e2e` | Playwright tests against a real API and dashboard. Setup: [`web-v2/e2e/README.md`](web-v2/e2e/README.md) | `cd web-v2 && npm run test:e2e` |
+| `pricing-shapes` | Each common way to price, billed end to end and checked to the cent, plus the expected results of each price shape. The `test` job runs these too; this job gives them a check of their own | The `go test` lines in this job in `.github/workflows/ci.yml` (needs Postgres) |
+| `migrations` | A fresh install on an empty database under three role setups, then a second run that has nothing to do. Also a backup-restore drill and an install on Postgres 14 | `scripts/ci/migrations-fresh-install.sh` (needs Docker, `psql` and `pg_restore`) |
 
 **Also run, not required to merge.**
 
 | CI job | What it checks | Local command |
 |---|---|---|
-| `e2e` | Playwright tests against a real API and dashboard. Setup: [`web-v2/e2e/README.md`](web-v2/e2e/README.md) | `cd web-v2 && npm run test:e2e` |
 | `doc-links` | Every internal Markdown link and `#anchor` resolves. It turns red on a broken link; fix it before merging | `lychee --offline --include-fragments '**/*.md'` |
 | `doc-style` | Vale prose lint on the lines your PR adds. It comments only and never fails | `vale <changed .md files>` |
-| `pricing-shapes` | Each common way to price, billed end to end and checked to the cent, plus the expected results of each price shape. The `test` job runs these too; this job gives them a check of their own | The `go test` lines in this job in `.github/workflows/ci.yml` (needs Postgres) |
-| `migrations` | A fresh install on an empty database under three role setups, then a second run that has nothing to do. Also a backup-restore drill and an install on Postgres 14 | `scripts/ci/migrations-fresh-install.sh` (needs Docker, `psql` and `pg_restore`) |
 
 The `docker` job builds and publishes the images. It runs only on `main`
 and on release tags, after the jobs above pass.

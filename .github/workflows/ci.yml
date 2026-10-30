@@ -382,7 +382,7 @@ jobs:
   # The dashboard in a real browser (Playwright, Chromium) against a real API
   # and seeded data: every page at desktop and phone width, plus a few key
   # journeys, plus screenshots of the activity cards. The server setup is a
-  # copy of golden-path's. Not a required check yet. How to run it locally:
+  # copy of golden-path's. A required check. How to run it locally:
   # web-v2/e2e/README.md.
   e2e:
     runs-on: ubuntu-24.04
@@ -698,9 +698,9 @@ jobs:
 
   docker:
     timeout-minutes: 30
-    # Every check an image must pass before it is published. Not all of
-    # them are required checks on main (migrations and pricing-shapes are
-    # not today), so a merge can pass one this list still waits for.
+    # Every check an image must pass before it is published. Each one is
+    # also a required check on main (with e2e), so keep this list and the
+    # branch protection's required checks the same.
     needs: [test, unit, test-pgbouncer, pricing-shapes, migrations, golden-path, codegen-drift, frontend, lint]
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
