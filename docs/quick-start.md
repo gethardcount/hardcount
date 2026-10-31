@@ -28,13 +28,17 @@ You do not need Go, Node, jq or a database. Docker downloads everything else.
 
 ## Part 1: Start Hardcount
 
-1. Download Hardcount and start it.
+1. Download Hardcount at its latest release, v0.9.1, and start it.
 
    ```bash
-   git clone https://github.com/gethardcount/hardcount.git
+   git clone --branch v0.9.1 https://github.com/gethardcount/hardcount.git
    cd hardcount/deploy/compose
    ./quickstart.sh
    ```
+
+   The script starts the release's published images. The demo script and
+   these pages come from your download, so the tag keeps all three at the
+   same version.
 
    The script makes a private `.env` file with new secrets. Then it starts
    five containers: the Hardcount server, its dashboard, Postgres, Redis and
@@ -242,8 +246,9 @@ expected. Use the two links instead.
 | "Hardcount is not running. Run ./quickstart.sh first." | Run `./quickstart.sh`, then the demo again. |
 | A ✗ line during the demo | It says which check failed, under the step that failed. [Open an issue](https://github.com/gethardcount/hardcount/issues) with that output. |
 
-The quick start runs the latest published release, so changes merged after
-that release are not in it yet.
+The quick start runs the release you cloned. A clone of `main` instead
+still starts the release's images, but its demo script and pages can be
+ahead of them, and the demo can then fail.
 
 **Next:** do the same from your own code:
 [Send usage and get your first invoice](first-invoice.md).

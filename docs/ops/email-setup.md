@@ -31,6 +31,7 @@ Hardcount sends about 20 to 30 emails a minute, and you cannot change that. Emai
    ```bash
    HOSTED_INVOICE_BASE_URL=https://billing.example.com
    PAYMENT_UPDATE_URL=https://billing.example.com/update-payment
+   PAYMENT_UPDATE_RETURN_URL=https://billing.example.com/payment-method-added
    DASHBOARD_BASE_URL=https://billing.example.com
    CUSTOMER_PORTAL_URL=https://billing.example.com
    ```
@@ -71,7 +72,8 @@ Hardcount starts without any of these. It logs one warning at start-up for each 
 | `HOSTED_INVOICE_BASE_URL` | The "View & pay invoice" and "View receipt" buttons. Hardcount adds `/invoice/<token>`. | Invoice, receipt, dunning and payment-failed emails have no link in their button. |
 | `PAYMENT_UPDATE_URL` | The link in the email that asks a customer to add a payment method. Hardcount adds `?token=…`. | That email is not sent. Hardcount sends it when an invoice has no payment method on file, and when you click Resend setup link. Payment-failed and dunning emails link to the invoice page instead, so they do not need it. |
 | `DASHBOARD_BASE_URL` | Password-reset and team-invite links | Password-reset emails are not sent, and team invites are refused. Hardcount never builds these links from the address in a request. |
-| `CUSTOMER_PORTAL_URL` | Not an email link: where Stripe sends a customer after they save a card. Hardcount adds `/payment-method-added`. | Stripe sends the customer to `http://localhost:5173`, which exists only in local development. The card is still saved. |
+| `PAYMENT_UPDATE_RETURN_URL` | Not an email link: where Stripe sends a customer after they add a card from the `PAYMENT_UPDATE_URL` email. A full address. Hardcount adds `?status=success` or `?status=cancel`. | Stripe sends the customer to `http://localhost:5173/payment-method-added`, which exists only in local development. The card is still saved. |
+| `CUSTOMER_PORTAL_URL` | Not an email link: where Stripe sends a customer after they save a card from a card-setup page you started: the setup-link email you send (`send-setup-email`), or a `setup-session` link. Hardcount adds `/payment-method-added`. | Stripe sends the customer to `http://localhost:5173/payment-method-added`, which exists only in local development. The card is still saved. |
 
 ## Settings for each provider
 
@@ -140,7 +142,7 @@ SMTP_FROM=billing@yourdomain.com
 SMTP_TLS=starttls
 ```
 
-`SMTP_USERNAME` is the SMTP user from the Mailgun dashboard (domain → SMTP credentials), not your account email. [Mailgun SMTP docs](https://documentation.mailgun.com/en/latest/quickstart-sending.html#send-via-smtp)
+`SMTP_USERNAME` is the SMTP user from the Mailgun dashboard (domain → SMTP credentials), not your account email. [Mailgun SMTP docs](https://documentation.mailgun.com/docs/mailgun/user-manual/sending-messages/send-smtp)
 
 ### Resend
 
@@ -172,9 +174,9 @@ SMTP_TLS=starttls
 
 ### Mailpit (local development)
 
-Mailpit is a local email catcher with a web inbox. The repository's root `docker-compose.yml` runs it next to Postgres and Redis.
+Mailpit is a local email catcher with a web inbox. It comes with the source code: the repository's root `docker-compose.yml` runs it next to Postgres and Redis. The steps below are for Hardcount run from source on the same computer (`go run ./cmd/hardcount` or `make dev`).
 
-1. Start it.
+1. Start it, from the repository's root folder.
 
    ```bash
    docker compose up -d mailpit
@@ -198,6 +200,11 @@ Mailpit is a local email catcher with a web inbox. The repository's root `docker
 3. Send an email from Hardcount.
 
    **You see:** it in the inbox at <http://localhost:8025>. Nothing leaves your machine.
+
+Hardcount in a container, such as the quick start or the Compose stack, cannot use these settings as they are:
+
+- **`localhost` is the container itself**, not your computer, so `SMTP_HOST=localhost` reaches no Mailpit. With Docker Desktop (macOS, Windows), `SMTP_HOST=host.docker.internal` reaches the Mailpit on your computer. On Linux the Compose file gives the container no route to your computer, so use a test inbox such as Mailtrap instead.
+- **`SMTP_TLS=none` works only outside production.** The quick start runs with `APP_ENV=local`. The Compose stack runs with `APP_ENV=production` unless you set it, and then Hardcount refuses to send in plain text.
 
 ## Common mistakes
 

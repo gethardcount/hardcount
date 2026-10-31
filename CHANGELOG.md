@@ -21,6 +21,7 @@ original text.
 
 ### Added
 
+- **Concept pages and guides for integrators.** Nine concept pages (data model, usage events, meters and prices, subscriptions, invoices, credits, payments, test clocks, margin) and three guides (bill AI tokens, connect Stripe, test a billing change). The LiteLLM page now states what LiteLLM retries, and the 1 MB batch limit. ([#1506](https://github.com/gethardcount/hardcount/pull/1506))
 - **The invoice page records or dismisses a refund made in Stripe.** Its notice now offers **Record as credit note**, **Attach to** a note whose refund failed, and **Dismiss** with a note, each asking first. A note recorded from Stripe shows a "Recorded from Stripe" tag. ([#1501](https://github.com/gethardcount/hardcount/pull/1501))
 - **Every pull request now upgrades from the previous release and checks that existing invoices are unchanged.** The new `upgrade` CI job bills a month on the latest tag, starts the pull request's code on that database, and compares every invoice and line through the API. It is not yet required to merge. ([#1499](https://github.com/gethardcount/hardcount/pull/1499))
 - **One page for upgrading: [Upgrade Hardcount](docs/upgrades.md).** Before you upgrade, the upgrade on one VM or on several copies, what to do if it stops, and how to go back. Going back on one VM now has the exact commands to empty the database and restore the backup, tested on Docker from v0.9.1 back to v0.9.0. The one-VM guide, self-host, high-availability and Compose pages link to it, and `hardcount migrate rollback`'s refusal names it.
