@@ -5,93 +5,13 @@ happens, such as an invoice paid, a payment failed or a credit balance
 running low. Your app can then react: send a receipt, pause a service,
 remind a customer to top up.
 
-## Receive your first event
+This page is the reference: the message, the signature, endpoints, modes and
+retries.
 
-You run a small test receiver, register it with Hardcount, make something
-happen, and check the message.
-
-**Before you start:** Hardcount is running, and you have a test API key (see
-[API keys](api-keys.md)). Open a terminal in the `hardcount` folder and set:
-
-```bash
-export HARDCOUNT=http://localhost:8080
-export HARDCOUNT_KEY=hc_secret_test_…   # your test key
-```
-
-1. **Start the test receiver.** It answers every message with `200` and
-   writes each one to a file.
-
-   ```bash
-   python3 scripts/dev/webhook-sink.py /tmp/hardcount-webhooks.jsonl
-   ```
-
-   **You see:** `webhook sink on 127.0.0.1:9099 -> /tmp/hardcount-webhooks.jsonl (paths under /fail return 500)`
-
-2. **Pick the address Hardcount will call.** It depends on how you run Hardcount.
-
-   - **From source** (`make dev`): use `http://localhost:9099/ok`.
-   - **In Docker** (the [quick start](quick-start.md) or a server): inside
-     its container, `localhost` is the container itself, and Hardcount refuses
-     private network addresses, so it cannot reach the receiver directly.
-     In a second terminal, start a tunnel, which gives your computer a
-     public `https://` address. For example:
-     `cloudflared tunnel --url http://localhost:9099`. Use the `https://`
-     address it prints, plus `/ok`.
-
-   ```bash
-   export HOOK_URL=http://localhost:9099/ok   # or https://<tunnel address>/ok
-   ```
-
-   **You see:** nothing yet. The address is saved in `HOOK_URL`.
-
-3. **Register the endpoint.** `"*"` asks for every event.
-
-   ```bash
-   jq -n --arg url "$HOOK_URL" '{url: $url, events: ["*"]}' |
-     curl -s -X POST "$HARDCOUNT/v1/webhook-endpoints/endpoints" \
-       -H "Authorization: Bearer $HARDCOUNT_KEY" \
-       -H "Content-Type: application/json" \
-       -d @-
-   ```
-
-   **You see:** JSON with `endpoint.id` (`hc_whe_…`) and `secret`
-   (`whsec_…`). The secret is shown only this once. Save it:
-   `export WHSEC=whsec_…`.
-
-4. **Make something happen.** Run the demo again. It creates a
-   subscription and a month of usage, then bills it.
-   - Docker quick start: `cd deploy/compose && ./quickstart.sh demo`
-   - From source: `./scripts/demo.sh $HARDCOUNT_KEY`
-
-   Then look at the file:
-
-   ```bash
-   tail -n 3 /tmp/hardcount-webhooks.jsonl
-   ```
-
-   **You see:** one JSON line per message, each with `"path": "/ok"`, a
-   `"sig"` such as `t=…,v1=…`, and a `"body"` whose `event_type` is, for
-   example, `subscription.created` or `invoice.finalized`.
-
-5. **Check the signature.** This proves the message came from Hardcount.
-
-   ```bash
-   head -n 1 /tmp/hardcount-webhooks.jsonl | python3 -c '
-   import hashlib, hmac, json, os, sys
-   r = json.loads(sys.stdin.readline())
-   p = dict(x.split("=", 1) for x in r["sig"].split(","))
-   mac = hmac.new(os.environ["WHSEC"].encode(), (p["t"] + "." + r["body"]).encode(), hashlib.sha256)
-   print(mac.hexdigest() == p["v1"])'
-   ```
-
-   **You see:** `True`
-
-The dashboard shows the same messages: open **Webhooks**, then your
-endpoint, to see each delivery and its result.
-
-To test failures, register an address whose path starts with `/fail`, such
-as `http://localhost:9099/fail`. The receiver answers `500`, so Hardcount
-retries on the schedule below.
+- To build a receiver step by step, with signature checks in Node, Python
+  and Go: [Receive webhooks](guides/receive-webhooks.md).
+- Every event, when it is sent, and an example of each:
+  [Webhook events](api/webhook-events.md).
 
 ## Three rules for your receiver
 
@@ -102,16 +22,19 @@ retries on the schedule below.
 2. **Events can arrive out of order.** Do not work out the current state
    from the order they arrive. Read the event's data, or fetch the
    invoice or subscription from the API.
-3. **Events marked *(always sent)* survive a crash; others may not.** Those
-   events in the [catalog](#event-catalog) are saved together with the
-   change that caused them, so a crash cannot drop them. Other events,
+3. **Events marked *always sent* survive a crash; others may not.** Those
+   events in the [catalog](api/webhook-events.md) are saved together with
+   the change that caused them, so a crash cannot drop them. Other events,
    including `invoice.finalized`, are queued just after the change is
    saved, and a crash or a database error at that moment can drop one.
-   Any event can still go undelivered. To an endpoint that keeps failing,
-   it is marked failed after 6 attempts over about 26.5 hours
-   ([Retries](#retries)). And the queue gives up on an event it could not
-   hand on after 15 tries over about 52 hours. Send either again from the
-   dashboard.
+   Any event can still go undelivered:
+   - To an endpoint that keeps failing, a delivery is marked failed after 6
+     attempts over about 26 hours 36 minutes ([Retries](#retries)). Send it
+     again from the dashboard or the API ([Send a delivery again](#send-a-delivery-again)).
+   - The queue gives up on an event it could not write after 15 tries over
+     about 52 hours. That event was never written, so nothing can resend
+     it; the person who runs your server can queue it again:
+     [Webhook outbox backed up](ops/runbook/webhook-outbox-backed-up.md#send-failed-rows-again).
 
 ## What a message looks like
 
@@ -139,7 +62,10 @@ Every message is an HTTP `POST` to your URL with
   state, read the resource from the API.
 - A few events also carry facts the resource does not hold, such as who
   canceled a subscription. They sit beside the resource in `data`. The
-  [catalog](#event-catalog) lists them for each event.
+  [catalog](api/webhook-events.md) lists them for each event.
+- The message has no field that says whether it is a test or a live event.
+  Each endpoint belongs to one mode; see
+  [Test mode and live mode](#test-mode-and-live-mode).
 - This shape is new in v0.9.0. v0.9.0 installs fresh, so no event in it
   has an older shape ([old key → new key](../CHANGELOG.md)).
 
@@ -158,80 +84,71 @@ The signature is `HMAC-SHA256(secret, "<t>.<raw body>")`, hex-encoded.
   UTF-8 bytes. Do not strip the prefix or decode it.
 - Check against the raw request bytes. Do not parse and re-serialize the
   JSON first.
+- `t` is when this attempt was signed, so it is new on every retry.
+  Refuse a `t` far from your own clock, such as more than 5 minutes.
 - While a secret is being rotated, the header has two `v1=` entries, one
   for the old secret and one for the new. Accept the message if any `v1=`
   matches.
 
-Node:
-
-```js
-const crypto = require("crypto");
-
-function verifyHardcountSignature(rawBody, header, secret, toleranceSec = 300) {
-  const t = header.match(/(?:^|,)t=(\d+)/)?.[1];
-  // Collect every v1= entry: there are two during a secret rotation.
-  const sigs = [...header.matchAll(/v1=([0-9a-f]+)/g)].map(m => m[1]);
-  if (!t || sigs.length === 0) return false;
-  if (Math.abs(Date.now() / 1000 - Number(t)) > toleranceSec) return false;
-  const expected = crypto
-    .createHmac("sha256", secret)
-    .update(`${t}.${rawBody}`)
-    .digest("hex");
-  return sigs.some(s =>
-    s.length === expected.length &&
-    crypto.timingSafeEqual(Buffer.from(s), Buffer.from(expected)),
-  );
-}
-```
-
-Python:
-
-```python
-import hashlib, hmac, re, time
-
-def verify_hardcount_signature(raw_body: bytes, header: str, secret: str, tolerance: int = 300) -> bool:
-    m = re.search(r"(?:^|,)t=(\d+)", header)
-    sigs = re.findall(r"v1=([0-9a-f]+)", header)
-    if not m or not sigs:
-        return False
-    t = int(m.group(1))
-    if abs(time.time() - t) > tolerance:
-        return False
-    expected = hmac.new(secret.encode(), f"{t}.".encode() + raw_body, hashlib.sha256).hexdigest()
-    return any(hmac.compare_digest(s, expected) for s in sigs)
-```
+Code that checks it, in Node, Python and Go:
+[Check the signature in your code](guides/receive-webhooks.md#check-the-signature-in-your-code).
 
 ### Rotating the secret
 
 The secret (`whsec_…`) is shown once when you create the endpoint, and once
-when you rotate it.
+when you rotate it with
+`POST /v1/webhook-endpoints/endpoints/{id}/rotate-secret`.
 
-1. Call `POST /v1/webhook-endpoints/endpoints/{id}/rotate-secret`.
-   **You see:** the new secret. For the next 72 hours, Hardcount signs each
-   message with both the old and the new secret.
-2. Update your receiver to use the new secret within those 72 hours.
-   **You see:** messages keep passing your check.
+- For 72 hours after a rotation, Hardcount signs each message with both the
+  old and the new secret. The answer's `secondary_valid_until` says when
+  the old one stops.
+- Rotating again within those 72 hours drops the older of the two secrets
+  at once.
+- Changing an endpoint with `PATCH` (its URL, events, or whether it is
+  active) never changes the secret.
 
-Changing an endpoint with `PATCH` (its URL, events, or whether it is
-active) never changes the secret.
+Steps: [Rotate the secret](guides/receive-webhooks.md#rotate-the-secret).
+
+## Test mode and live mode
+
+**An endpoint belongs to the mode of the key that registered it.** An
+endpoint registered with a test key gets only test events. One registered
+with a live key gets only live events.
+
+To receive both, register one endpoint with each key. Each has its own
+secret. Give each its own URL, so your receiver knows the mode and the
+secret to check before it reads the body.
 
 ## Managing endpoints
 
 Manage endpoints in the dashboard under **Webhooks**, or with the API (see
-the [API reference](api-surface.md#the-full-reference)):
+the [API reference](api-surface.md#the-full-reference)). Each route works on
+the endpoints of the caller's mode.
 
 | Method | Path | What it does |
 |---|---|---|
-| `POST` | `/v1/webhook-endpoints/endpoints` | Register an endpoint |
+| `POST` | `/v1/webhook-endpoints/endpoints` | Register an endpoint: `url`, `events`, and an optional `description`. The answer has `endpoint` and `secret`. |
 | `GET` | `/v1/webhook-endpoints/endpoints` | List endpoints |
-| `PATCH` | `/v1/webhook-endpoints/endpoints/{id}` | Change the URL, events or active flag |
+| `GET` | `/v1/webhook-endpoints/endpoints/{id}` | Read one endpoint |
+| `PATCH` | `/v1/webhook-endpoints/endpoints/{id}` | Change `url`, `events`, `description` or `active` |
 | `DELETE` | `/v1/webhook-endpoints/endpoints/{id}` | Remove an endpoint |
+| `POST` | `/v1/webhook-endpoints/endpoints/{id}/rotate-secret` | Make a new secret ([Rotating the secret](#rotating-the-secret)) |
+| `GET` | `/v1/webhook-endpoints/endpoints/{id}/deliveries` | The endpoint's deliveries, newest first: `status` (`pending`, `succeeded` or `failed`), `status_code`, `attempt_count`, `next_retry_at`, `error` and the start of your endpoint's `response_body` |
+| `POST` | `/v1/webhook-endpoints/endpoints/{id}/deliveries/{deliveryID}/replay` | Send one delivery's event again, to this endpoint only |
+| `GET` | `/v1/webhook-endpoints/endpoints/stats` | Each endpoint's `total_deliveries`, `succeeded`, `failed` and `success_rate` |
+| `GET` | `/v1/webhook-endpoints/events` | Events, newest first, 50 to a page by default (`limit` up to 100, `offset`, and the `total`). It has no filters. |
+| `GET` | `/v1/webhook_events/{id}/deliveries` | Every delivery of one event, to every endpoint |
+| `POST` | `/v1/webhook_events/{id}/replay` | Send one event again, to every endpoint that matches it now |
 
-- `events` takes event names from the [catalog](#event-catalog). `"*"`
-  means every event, and a prefix such as `"invoice.*"` means every event
-  that starts with it.
+- `events` takes event names from the [catalog](api/webhook-events.md).
+  `"*"` means every event, and a prefix such as `"invoice.*"` means every
+  event that starts with it.
 - An event name Hardcount never sends is refused with `422`, so a typo cannot
   leave you waiting for messages that never come.
+- **`active: false` pauses an endpoint.** It gets no new events. A retry
+  that falls due while it is paused is marked failed, with the error
+  `endpoint disabled`. Resending to a paused endpoint is refused with `409`.
+  Set `active: true` to resume it.
 - The URL must start with `https://` and must not point to a private
   network address, IPv4 or IPv6, such as `10.0.0.1`, `169.254.169.254`,
   `fd00::1` or `fe80::1`. Hardcount checks the address when you save the URL
@@ -254,47 +171,38 @@ status within 10 seconds. Anything else is retried on this schedule:
 | 5 | 2 hours |
 | 6 | 24 hours |
 
-That is six attempts over about 26.5 hours. After the last one, the
-delivery is marked failed.
+Each wait also gets up to 30 seconds added at random. That is six attempts
+over about 26 hours 36 minutes. After the last one, the delivery is marked
+failed.
 
 Hardcount does not follow redirects, so a `3xx` answer is retried like any
 other failure: register the URL that answers with the `2xx` itself.
 
-**If your endpoint was down for longer:** failed deliveries stay visible in
-the dashboard, with each endpoint's success rate and each event's delivery
-history. Send any event again from there with **Resend**, or with
-`POST /v1/webhook_events/{id}/replay`. `GET /v1/webhook-endpoints/events`
-lists events, newest first, 50 to a page by default (`limit` up to 100,
-`offset`, and the `total`); it has no filters.
+### Send a delivery again
+
+Failed deliveries stay visible in the dashboard, with each endpoint's
+success rate and each event's delivery history. Once your endpoint works
+again, send what it missed:
+
+- **To one endpoint:** **Resend** on the delivery in the dashboard, or
+  `POST /v1/webhook-endpoints/endpoints/{id}/deliveries/{deliveryID}/replay`.
+  Only that endpoint gets it.
+- **To every endpoint:** `POST /v1/webhook_events/{id}/replay`. Every active
+  endpoint that matches the event now gets it, including ones that already
+  had it.
+
+A resend carries the event's original `id` and `created_at`, so a receiver
+that skips handled ids handles it once. Each resend is a new delivery, with
+its own attempts and retries. A script that resends every failed delivery
+of an endpoint:
+[Resend what your endpoint missed](guides/receive-webhooks.md#resend-what-your-endpoint-missed).
 
 ## Event catalog
 
-Each family of events carries one resource in `data`, named in the family's
-heading below. The **Also in `data`** column lists the other keys an event
-carries, and `—` means none. Two keys are sent only when they apply, and
-their rows say when: `reason` on `subscription.canceled` and `resumed_at` on
-`subscription.collection_resumed`. Every other key is always sent, even
-when it is empty, such as `applied` on `dunning.escalated`. A full example of each event's `data` is in
-[internal/domain/testdata/webhook_payloads](../internal/domain/testdata/webhook_payloads/).
+Every event Hardcount sends, when it sends it, what its `data` carries, and
+an example message: [Webhook events](api/webhook-events.md).
 
-*(always sent)*: see [rule 3](#three-rules-for-your-receiver). Terms:
-[glossary](glossary.md).
-
-### Invoices: `data.invoice`
-
-`data.invoice` is the invoice as `GET /v1/invoices/{id}` returns it under
-`invoice`. Four fields the API works out when you read it are left out:
-`attention`, `recovery_warning`, `billing_period_display` and
-`test_clock_id`. Line items are not included; `GET /v1/invoices/{id}`
-returns them.
-
-| Event | Sent when | Also in `data` |
-|---|---|---|
-| `invoice.finalized` | An invoice is final and ready to pay. Sent once per invoice, including the invoice for a mid-period upgrade, seat increase or added item. A draft sends it when it is finalized. Its `amount_due_cents` is before credit ([more](#invoicefinalized-shows-the-amount-before-credit)). Under Stripe Tax, `tax_transaction_id` can be recorded after this event; `GET /v1/invoices/{id}` shows it | — |
-| `invoice.paid` | An invoice is fully paid, by card, credit or an offline payment, or a credit note left nothing due. Its `amount_paid_cents` is what was paid at that moment, 0 when credit or a credit note covered the rest *(always sent)* | — |
-| `invoice.payment_recorded` | Someone recorded a payment made outside Hardcount, such as a bank transfer or cheque. `recovered_from` is the status it was paid from: `finalized` or `uncollectible` | `recovered_from` |
-| `invoice.marked_uncollectible` | An invoice was written off as bad debt | — |
-| `invoice.voided` | An invoice was voided. Under Stripe Tax, Hardcount reverses the invoice's tax after it sends this event; `GET /v1/invoices/{id}` shows `tax_reversed_at` once that is done. | — |
+Two things change how you read the amounts in those events.
 
 ### `invoice.finalized` shows the amount before credit
 
@@ -314,161 +222,11 @@ credit pays all of it, `invoice.paid` is sent. To know what is still owed,
 read the invoice with `GET /v1/invoices/{id}`: its `amount_due_cents` and
 `credits_applied_cents` are current.
 
-### Payments: `data.invoice`
-
-`data.invoice` is the invoice the payment was for, in the same shape as for
-the invoice events. Hardcount has no separate payment object. The invoice holds
-the charge's Stripe PaymentIntent (`stripe_payment_intent_id`), its error
-(`last_payment_error`) and whether it was paid outside Hardcount
-(`paid_out_of_band`).
-
-| Event | Sent when | Also in `data` |
-|---|---|---|
-| `payment.succeeded` | A charge was collected. The invoice names its PaymentIntent. *(always sent)* | — |
-| `payment.failed` | A charge the invoice was waiting on failed. Sent once per charge attempt (PaymentIntent). A decline on the hosted payment page does not send it, because the customer saw it there and can try again. *(always sent)* | — |
-| `payment.duplicate_charge` | A second charge succeeded on an invoice that was already paid. Refund it. | `incoming_payment_intent_id`, `captured_cents` |
-| `payment.amount_mismatch` | A charge settled for a different amount than the invoice owed | `incoming_payment_intent_id`, `captured_cents` |
-| `payment.currency_mismatch` | A charge settled in a different currency than the invoice's. `charge_currency` is the charge's currency, in upper case; compare it with the invoice's `currency`. The payment is recorded as usual and nothing is converted. Review it in Stripe. | `incoming_payment_intent_id`, `captured_cents`, `charge_currency` |
-| `payment.received_on_voided_invoice` | Money arrived for a voided invoice. Refund it. | `incoming_payment_intent_id`, `captured_cents` |
-| `payment.dispute_opened` | A customer disputed a card payment with their bank (a chargeback), and Hardcount recorded it against the invoice. Sent once per dispute. *(always sent)* | `dispute` |
-| `payment.dispute_closed` | A recorded dispute closed. Sent again if Stripe turns a loss into a win. *(always sent)* | `dispute` |
-| `payment.refunded_in_stripe` | A payment on the invoice was refunded in Stripe, outside Hardcount (the Stripe dashboard, or Stripe's API called directly), and Hardcount recorded it. Sent once per refund, when Hardcount first sees it. *(always sent)* | `refund` |
-
-For the four anomaly events, `incoming_payment_intent_id` is the charge that
-raised the event and `captured_cents` is what it took. Match the charge by
-`incoming_payment_intent_id`, not by the invoice's `stripe_payment_intent_id`:
-
-- `payment.duplicate_charge`: the invoice's `stripe_payment_intent_id` is
-  the other charge, the one Hardcount recorded on the paid invoice. It is left
-  out when Hardcount recorded none, such as when credit paid the invoice or it
-  was paid outside Hardcount (`paid_out_of_band` is true).
-- `payment.amount_mismatch`: the invoice was just paid by this charge, so
-  its `stripe_payment_intent_id` is this charge and `amount_paid_cents` is
-  what Hardcount booked.
-- `payment.currency_mismatch` and `payment.received_on_voided_invoice`: the
-  invoice is as it was when the charge arrived. Its
-  `stripe_payment_intent_id` may be this charge, an earlier one, or none.
-
-`dispute` is the dispute as `GET /v1/invoices/{id}/disputes` lists it, with
-every field it has there, including `stripe_dispute_id`, `status`, `reason`, `amount_cents`, `currency`,
-`evidence_due_by` (the deadline to respond in Stripe), `opened_at`, and
-`closed_at` once it is closed. On `payment.dispute_closed`, `status` is
-`won`, `lost`, `warning_closed` (an inquiry that never became a chargeback)
-or `prevented`. When the first Stripe event Hardcount receives is already the
-close, both events are sent with the closed status, in either order. What a
-dispute does and how to turn on Stripe's dispute events:
-[Card disputes](ops/runbook/card-disputes.md).
-
-`refund` is the refund as `GET /v1/invoices/{id}/stripe-refunds` lists it,
-with `stripe_refund_id`, `stripe_payment_intent_id`, `amount_cents`,
-`currency`, Stripe's `status` and `outcome`, what Hardcount did with it:
-
-- `credit_note`: Hardcount recorded it as the issued credit note
-  `credit_note_id`, whose card refund is this refund. Hardcount made no refund
-  call for it, and the note reverses its share of the tax.
-- `other_payment`: a refund of a payment that did not pay the invoice (a
-  second charge, or money on a voided invoice). No credit note.
-- `needs_review`: a refund of the invoice's own payment that Hardcount did
-  not record; `review_reason` says why. The invoice shows a notice until the
-  operator records it with a credit note or dismisses it.
-- `not_refunded`: it failed or was canceled before it succeeded. No money
-  moved.
-
-The event is sent when the outcome is decided: at once for most refunds, and
-for a refund first seen pending, when Stripe says it succeeded, failed or was
-canceled.
-
-The invoice is as it was: a refund never changes its status or amounts. A
-later change to the refund, such as a failure, sends nothing more; a
-recorded note's `refund_status` follows it. Refunds Hardcount makes itself
-send no event. Hardcount hears of a refund made in Stripe only with
-`refund.created` on the Stripe webhook endpoint:
-[A refund made in Stripe](ops/runbook/refund-made-in-stripe.md).
-
-### Payment methods: `data.payment_method`
-
-`data.payment_method` is the saved card as
-`GET /v1/customers/{id}/payment-methods` lists it: its brand, last 4 digits,
-expiry and whether it is the default. A Stripe event that arrives after the
-card was removed in Hardcount leaves it removed and sends neither event.
-
-| Event | Sent when | Also in `data` |
-|---|---|---|
-| `payment_method.attached` | A customer saved a payment method. Invoices waiting for one are charged on the next run. `stripe_payment_method_id` is the card's Stripe ID | `stripe_payment_method_id` |
-| `payment_method.updated` | A customer's payment method was set up or replaced through Stripe Checkout. `stripe_customer_id` is the Stripe customer it was saved to | `stripe_customer_id` |
-
-### Subscriptions: `data.subscription`
-
-`data.subscription` is the subscription with its items, as
-`GET /v1/subscriptions/{id}` returns it, without
-`current_billing_period_display` (a date range the API writes out when you
-read it). A cancel's time is the subscription's `canceled_at`, and a
-schedule's is its `cancel_at` and `cancel_effective_at`.
-
-| Event | Sent when | Also in `data` |
-|---|---|---|
-| `subscription.created` | A subscription was created *(always sent)* | — |
-| `subscription.activated` | A draft subscription was activated *(always sent)* | — |
-| `subscription.canceled` | A subscription was canceled. `canceled_by` is `operator`, `customer`, `schedule`, `dunning` or `system`. A cancel by dunning says `dunning`, also when a test-clock advance ran it. A cancel at trial end carries `reason: trial_end_cancel`. *(always sent)* | `canceled_by`, `reason` |
-| `subscription.trial_ended` | A trial ended. `triggered_by` is `operator` or `schedule`, and `ended_at` is when it ended. *(always sent)* | `ended_at`, `triggered_by` |
-| `subscription.trial_extended` | A trial's end date moved later. The new end is the subscription's `trial_end_at`. `triggered_by` is `operator` | `triggered_by` |
-| `subscription.cancel_scheduled` / `.cancel_cleared` | A cancel at period end was scheduled, or the schedule was removed. Clearing when no cancel is scheduled sends nothing | — |
-| `subscription.collection_paused` | Collection was paused: invoices stay drafts. The subscription's `pause_collection` says how and until when. `triggered_by` is `operator` or `dunning` (payment retries ran out and your policy pauses). Dunning's pause is saved with the change, so a crash cannot drop its event ([rule 3](#three-rules-for-your-receiver)). Dunning never resumes collection itself: the pause lasts until that invoice is paid (`subscription.collection_resumed` with `triggered_by: payment`) or you resume it. On a canceled subscription, paying the invoice does not lift the pause; resume it yourself | `triggered_by` |
-| `subscription.collection_resumed` | Collection resumed; a resume call on a subscription that is not paused sends nothing. `triggered_by` is `operator`, `schedule` (its resume date came) or `payment` (a payment ended a pause that dunning set). A payment lifts the pause when it is recorded, and this event follows on the next scheduled billing run, once any period that ended under the pause has closed. A `schedule` or `payment` resume carries `resumed_at` and is saved with the change, so a crash cannot drop it. Each pause that ends sends one, with its own trigger, even when a new pause or a resume call reaches it first; that resume call sends no `operator` resume | `triggered_by`, `resumed_at` |
-| `subscription.item.added` / `.updated` / `.removed` | A plan or quantity on the subscription was added, changed or removed. `item_id` names the item; a removed item is no longer in `items` | `item_id` |
-| `subscription.pending_change.scheduled` / `.canceled` | A plan change for the next billing period was scheduled or canceled. The item's `pending_plan_id` and `pending_plan_effective_at` show it | `item_id` |
-| `subscription.pending_change.applied` | A scheduled plan change was applied at the period end. The item's `plan_id` is the new plan, `old_plan_id` the one it left, and `applied_at` when. The subscription is as it was before the close that starts the next period | `item_id`, `old_plan_id`, `applied_at` |
-| `subscription.threshold_crossed` | Usage crossed a billing threshold, so an invoice was made early ([fields](#what-subscriptionthreshold_crossed-carries)) | `invoice_id`, `running_subtotal`, `crossed_amount`, `crossed_item_id` |
-
-#### What `subscription.threshold_crossed` carries
-
-- `invoice_id`: the invoice made early.
-- `running_subtotal`: the spend compared with the threshold, in cents.
-- `crossed_amount`: whether the amount threshold was crossed.
-- `crossed_item_id`: the item whose usage threshold was crossed, empty if none.
-
-### Customers: `data.customer`
-
-`data.customer` is the customer as `GET /v1/customers/{id}` returns it.
-
-| Event | Sent when | Also in `data` |
-|---|---|---|
-| `customer.email_bounced` | An email to a customer bounced, and Hardcount stopped emailing that address. `reason` is the email provider's | `reason` |
-| `customer.email_complained` | A customer marked an email from Hardcount as spam, and Hardcount stopped emailing that address. `reason` is the email provider's | `reason` |
-
-### Dunning: `data.dunning_run`
-
-Dunning is Hardcount retrying a failed payment on a schedule. `data.dunning_run`
-is the run as `GET /v1/dunning/runs/{id}` returns it under `run`: its
-invoice, state, attempts and how it was resolved.
-
-| Event | Sent when | Also in `data` |
-|---|---|---|
-| `dunning.started` | Payment retries started for an invoice *(always sent)* | — |
-| `dunning.escalated` | Payment retries ran out, and the final action from your policy was taken. `final_subscription_action` and `final_invoice_action` are your policy's; `applied` is what was done to this invoice, such as `subscription_canceled+invoice_marked_uncollectible`, empty when nothing applied | `final_subscription_action`, `final_invoice_action`, `applied` |
-| `dunning.resolved` | Payment retries ended early, for example because the invoice was paid or someone resolved it by hand. The run's `resolution` says why | — |
-
 ### Credit: `data.credit_balance`
 
-`data.credit_balance` is the customer's credit balance in one currency, as
-`GET /v1/credits/balance/{customer_id}` lists it, after the change that sent
-the event.
-
-| Event | Sent when | Also in `data` |
-|---|---|---|
-| `credit.balance_low` | The settled credit balance in one currency fell below your account's threshold, `threshold_cents` *(always sent)* | `threshold_cents` |
-| `credit.balance_depleted` | The settled credit balance in one currency reached zero or less *(always sent)* | — |
-| `credit.balance_recovered` | The settled credit balance in one currency went above zero again *(always sent)* | — |
-| `credit.commit_retired` | A credit note took back prepaid credit ([fields](#what-creditcommit_retired-carries)) *(always sent)* | `grant_id`, `funding_invoice_id`, `credit_note_id`, `retired_cents`, `refunded_gross_cents`, `remaining_after_cents` |
-
-#### What `credit.commit_retired` carries
-
-- `grant_id`: the prepaid credit grant.
-- `funding_invoice_id`: the invoice that bought it.
-- `credit_note_id`: the credit note that took the credit back.
-- `retired_cents`: the credit taken back.
-- `refunded_gross_cents`: the money the credit note returns.
-- `remaining_after_cents`: what is left on the grant.
+The credit events carry the customer's credit balance in one currency. The
+list, with examples:
+[Credit events](api/webhook-events.md#credit-datacredit_balance).
 
 ### The credit events follow the settled balance
 

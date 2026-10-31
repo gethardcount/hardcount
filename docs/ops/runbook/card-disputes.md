@@ -138,4 +138,4 @@ Two log lines matter:
   three days. Upgrade Hardcount to a release that knows the status.
 
 Related: [how Hardcount handles card payment failures](../../payments.md) and
-the [webhook events](../../webhooks.md#event-catalog).
+the [webhook events](../../api/webhook-events.md#paymentdispute_opened).

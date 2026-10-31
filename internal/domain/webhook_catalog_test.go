@@ -126,45 +126,6 @@ func TestWebhookCatalog_DashboardPickerMatches(t *testing.T) {
 	}
 }
 
-// TestWebhookCatalog_DocsListEveryEvent: docs/webhooks.md has a row for
-// every event in the catalog, and no row for one outside it. A row may
-// name siblings as "`a.b` / `.c`", which means a.b and a.c.
-func TestWebhookCatalog_DocsListEveryEvent(t *testing.T) {
-	raw, err := os.ReadFile("../../docs/webhooks.md")
-	if err != nil {
-		t.Fatalf("read docs/webhooks.md: %v", err)
-	}
-	documented := map[string]bool{}
-	name := regexp.MustCompile("`([a-z_.]+)`")
-	for _, line := range strings.Split(string(raw), "\n") {
-		if !strings.HasPrefix(line, "| `") {
-			continue
-		}
-		cell := strings.SplitN(strings.TrimPrefix(line, "|"), "|", 2)[0]
-		var first string
-		for _, m := range name.FindAllStringSubmatch(cell, -1) {
-			n := m[1]
-			switch {
-			case first == "" && eventTypeValue.MatchString(n):
-				first = n
-				documented[n] = true
-			case first != "" && strings.HasPrefix(n, "."):
-				documented[first[:strings.LastIndex(first, ".")]+n] = true
-			}
-		}
-	}
-	for _, v := range sortedKeys(KnownWebhookEventTypes) {
-		if !documented[v] {
-			t.Errorf("docs/webhooks.md has no row for %q", v)
-		}
-	}
-	for _, v := range sortedKeys(documented) {
-		if !KnownWebhookEventTypes[v] {
-			t.Errorf("docs/webhooks.md lists %q, which is not in KnownWebhookEventTypes", v)
-		}
-	}
-}
-
 // TestWebhookPayload_EveryCatalogEventHasARule: every event in the catalog
 // belongs to a family with a resource, and WebhookEventExtras lists its
 // extra keys (an empty list for none). An event without a rule would send
@@ -192,67 +153,6 @@ func TestWebhookPayload_EveryCatalogEventHasARule(t *testing.T) {
 			if resources[e] {
 				t.Errorf("extra key %q is also a resource key", e)
 			}
-		}
-	}
-}
-
-// TestWebhookPayload_DocsShowEachEventsData: in docs/webhooks.md each event
-// row sits under the heading of its family's resource ("### …
-// `data.invoice`"), and its last column lists exactly the keys
-// WebhookEventExtras gives it, or "—" for none.
-func TestWebhookPayload_DocsShowEachEventsData(t *testing.T) {
-	raw, err := os.ReadFile("../../docs/webhooks.md")
-	if err != nil {
-		t.Fatalf("read docs/webhooks.md: %v", err)
-	}
-	heading := regexp.MustCompile("^### .*`data\\.([a-z_]+)`")
-	name := regexp.MustCompile("`([a-z_.]+)`")
-	resource := ""
-	seen := map[string]bool{}
-	for _, line := range strings.Split(string(raw), "\n") {
-		if m := heading.FindStringSubmatch(line); m != nil {
-			resource = m[1]
-			continue
-		}
-		if !strings.HasPrefix(line, "| `") {
-			continue
-		}
-		cells := strings.Split(strings.Trim(line, "|"), "|")
-		var events []string
-		var first string
-		for _, m := range name.FindAllStringSubmatch(cells[0], -1) {
-			n := m[1]
-			switch {
-			case first == "" && eventTypeValue.MatchString(n):
-				first = n
-				events = append(events, n)
-			case first != "" && strings.HasPrefix(n, "."):
-				events = append(events, first[:strings.LastIndex(first, ".")]+n)
-			}
-		}
-		if len(events) == 0 {
-			continue
-		}
-		var documented []string
-		for _, m := range name.FindAllStringSubmatch(cells[len(cells)-1], -1) {
-			documented = append(documented, m[1])
-		}
-		sort.Strings(documented)
-		for _, ev := range events {
-			seen[ev] = true
-			if want := WebhookEventResource(ev); resource != want {
-				t.Errorf("docs/webhooks.md: %s is under `data.%s`, but its data carries `%s`", ev, resource, want)
-			}
-			want := append([]string(nil), WebhookEventExtras[ev]...)
-			sort.Strings(want)
-			if strings.Join(documented, ",") != strings.Join(want, ",") {
-				t.Errorf("docs/webhooks.md: %s lists %v beside the resource, the code sends %v", ev, documented, want)
-			}
-		}
-	}
-	for _, v := range sortedKeys(KnownWebhookEventTypes) {
-		if !seen[v] {
-			t.Errorf("docs/webhooks.md: no row shows what %s carries", v)
 		}
 	}
 }

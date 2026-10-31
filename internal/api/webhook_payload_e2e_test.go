@@ -283,7 +283,7 @@ func TestE2E_WebhookPayloads_InvoicePaymentDunningPaymentMethod(t *testing.T) {
 	if dup.Data["incoming_payment_intent_id"] != "pi_wp_b2" || dup.Data["captured_cents"] != float64(4500) {
 		t.Errorf("payment.duplicate_charge extras = %v / %v, want pi_wp_b2 / 4500", dup.Data["incoming_payment_intent_id"], dup.Data["captured_cents"])
 	}
-	// The invoice names the other charge, the one it recorded (docs/webhooks.md).
+	// The invoice names the other charge, the one it recorded (docs/api/webhook-events.md).
 	if pi := flowStr(dup.Data["invoice"].(map[string]any), "stripe_payment_intent_id"); pi != "pi_wp_b" {
 		t.Errorf("payment.duplicate_charge invoice.stripe_payment_intent_id = %q, want pi_wp_b", pi)
 	}
@@ -419,7 +419,7 @@ func TestE2E_WebhookPayloads_InvoicePaymentDunningPaymentMethod(t *testing.T) {
 		t.Errorf("payment.received_on_voided_invoice extras = %v / %v, want pi_wp_d / 3000", rov.Data["incoming_payment_intent_id"], rov.Data["captured_cents"])
 	}
 	// D was never charged: no PaymentIntent, and not paid outside Hardcount
-	// either. docs/webhooks.md says so.
+	// either. docs/api/webhook-events.md says so.
 	if inv := rov.Data["invoice"].(map[string]any); inv["stripe_payment_intent_id"] != nil || inv["paid_out_of_band"] != false {
 		t.Errorf("payment.received_on_voided_invoice invoice = PI %v, paid_out_of_band %v; want none and false", inv["stripe_payment_intent_id"], inv["paid_out_of_band"])
 	}
