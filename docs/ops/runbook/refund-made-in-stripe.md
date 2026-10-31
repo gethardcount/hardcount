@@ -174,5 +174,5 @@ Two log lines matter:
   days. Upgrade Hardcount to a release that knows the status.
 
 Related: [how Hardcount handles card payments and refunds](../../payments.md),
-the [webhook events](../../webhooks.md#event-catalog), and
+the [webhook events](../../api/webhook-events.md#paymentrefunded_in_stripe), and
 [ADR-134](../../adr/134-refunds-made-in-stripe-are-recorded.md).
