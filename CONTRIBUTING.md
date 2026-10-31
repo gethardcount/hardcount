@@ -300,11 +300,21 @@ time for real work, every pull request meets this bar:
    bumps, are closed.
 4. **Show that you ran it.** Say what you changed, why, and how you checked
    it. A pull request that was not run or understood is closed.
+5. **AI help is fine; say so.** If an AI tool wrote part of the change,
+   say which part in the description. You answer for every line: in review,
+   you can explain what it does and why. A change you cannot explain is
+   closed.
+
+**Never accepted:** links that promote you or a product, batches of tiny
+edits made to collect contributions, and changes to the licence or the
+credits.
 
 **What happens next:** CI on a pull request from outside the project waits
 until a maintainer has read the diff and approved the run. We answer within
 two days. A pull request below the bar gets one short comment and is
 closed; you are welcome to open an issue and try again.
+Repeated pull requests below the bar, or behaviour the
+[code of conduct](CODE_OF_CONDUCT.md) rules out, lead to a block.
 
 ## Pull requests
 

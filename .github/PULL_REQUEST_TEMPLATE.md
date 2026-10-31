@@ -14,6 +14,7 @@ Closes #
 - [ ] It links an issue a maintainer agreed to (not needed for a typo or a broken link)
 - [ ] It is one change, with no unrelated edits
 - [ ] I ran it myself, and the description says how I checked it
+- [ ] I can explain every line; if an AI tool wrote part of it, the description says which part
 - [ ] Tests cover the new behavior (unit; integration too if a store or money path changed)
 - [ ] `go test ./... -race -short -count=1` passes
 - [ ] `make lint` passes (golangci-lint; see CONTRIBUTING's "What CI runs on your PR" for the full gate list)
