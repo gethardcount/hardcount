@@ -28,8 +28,11 @@ live mode first to get a `hc_secret_live_…` key.
 
 You can also create a key with the API: `POST /v1/api-keys` with
 `{"name": "…", "key_type": "secret"}`, or `"key_type": "ingest"` for a
-usage-only key. The response's `raw_key` is the full key, and it is shown
-only this once.
+usage-only key. Add `"expires_at": "2027-01-01T00:00:00Z"` for a key that
+stops working at that time. The response's `raw_key` is the full key, and it
+is shown only this once. `GET /v1/api-keys` lists the keys of your mode,
+without the keys themselves. Every field and answer:
+[Authentication and keys](api/authentication.md#manage-keys-with-the-api).
 
 ## Send it
 
@@ -48,7 +51,11 @@ false` for a test key, and `"key_type": "secret"` (`"ingest"` for a
 usage-only key).
 
 A call with no key gets `401` and the message `missing credentials — sign
-in at /login or send Authorization: Bearer hc_secret_...`.
+in at /login or send Authorization: Bearer hc_secret_...`. A wrong, revoked
+or expired key gets `401` and `invalid or expired API key`. A `503` with code
+`authentication_unavailable` means Hardcount could not check the key just
+then; your key is fine, so retry. More:
+[When a key is refused](api/authentication.md#when-a-key-is-refused).
 
 ## Test mode and live mode
 
@@ -112,3 +119,4 @@ Hardcount stores only a salted SHA-256 hash of each key, never the key itself.
 That is why a key is shown only once, when it is created.
 
 **Next:** [make your first API call](api-surface.md#make-your-first-call).
+The whole key reference: [Authentication and keys](api/authentication.md).

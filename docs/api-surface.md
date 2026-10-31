@@ -18,6 +18,11 @@ Every call needs three things:
   gets a usage-only key. See [API keys](api-keys.md#key-types).
 - **`Content-Type: application/json`** on calls that send a body.
 
+Send an `Idempotency-Key` header on every `POST`, `PUT` and `PATCH` you may
+retry. It is a unique ID, such as a UUID: make it once, and send it again on
+each retry, so a retry cannot do the work twice. Usage events carry their own
+key instead. See [Idempotency](api/idempotency.md).
+
 Create a test customer:
 
 ```bash
@@ -34,6 +39,8 @@ curl -s -X POST "$HARDCOUNT/v1/customers" \
 `hc_cus_…`. The `external_id` is your own ID for the customer.
 
 For a worked sequence of calls, see [first invoice](first-invoice.md#steps).
+The same two calls in curl, Node, Python and Go, with retries:
+[Send usage and read a balance](api/two-calls.md).
 
 ## The full reference
 
@@ -51,45 +58,33 @@ description):
 There is no official SDK (client library) yet. Call the API with any HTTP
 client, or generate a client from the OpenAPI file.
 
+The rules every route shares have their own pages:
+
+| Page | What it covers |
+|---|---|
+| [Authentication and keys](api/authentication.md) | The header, key types and modes, and the answers when a key is refused |
+| [Errors](api/errors.md) | The error body, and every status and code with what to do |
+| [Idempotency](api/idempotency.md) | Retrying a request without doing it twice |
+| [Rate limits](api/rate-limits.md) | How many requests a minute, the headers, and the `429` |
+| [Pagination](api/pagination.md) | `limit`, `offset` and `total` on list routes |
+| [Timing and limits](api/timing-and-limits.md) | Every fixed time and size, such as when invoices are made |
+| [Send usage and read a balance](api/two-calls.md) | Two calls in curl, Node, Python and Go |
+
+The OpenAPI file's `info.version` is a date, not an API version you can pick:
+see [Versioning](versioning.md#the-api-version).
+
 ## Lists
 
-Every list route pages the same way:
+Every list route takes `limit` (1 to 100, default 50) and `offset`, and
+answers `{"data": [...], "total": n}`. There is no cursor. The few lists that
+stop counting or answer in one piece: [Pagination](api/pagination.md).
 
-- Send `limit` (how many rows, 1 to 100, default 50) and `offset` (how
-  many rows to skip, default 0).
-- You get `{"data": [...], "total": n}`. `total` counts every row that
-  matches your filters, not only this page.
-- A `limit` outside 1 to 100, a negative `offset`, or a value that is not a
-  whole number is a 422 with `param` naming it. It is never rounded to a
-  valid value.
-- There is no cursor. A request that sends `after` gets a 422 with
-  `param: after`.
+## Rate limits
 
-To read everything, add 100 to `offset` until `offset` reaches `total`:
-
-```bash
-curl -s "$HARDCOUNT/v1/plans?limit=100&offset=100" -H "Authorization: Bearer $HARDCOUNT_KEY"
-```
-
-Two lists stop counting:
-
-- The audit log's `total` stops at 10,001, so a value above 10,000 means
-  "more than 10,000".
-- The customer list with `search`, or sorted by name or email, looks at
-  5,000 customers at most. Its rows and its `total` stop there.
-
-A few routes answer a set of rows in one response and do not page. They
-have no `total`, and `limit`, `offset` and `after` change nothing:
-
-- `GET /v1/usage-events/held` lists the 200 external customers whose held
-  usage arrived last. `total_customers` and `total_rows` count all of it.
-  Release or discard held usage to see the rest.
-- `GET /v1/subscriptions/{id}/timeline` and
-  `GET /v1/invoices/{id}/payment-timeline` can leave rows out, and then
-  answer `truncated: true`.
-- `GET /v1/webhook_events/{id}/deliveries`, `GET /v1/members`,
-  `GET /v1/credits/balance/{customer_id}` and
-  `GET /v1/credits/grants/{customer_id}` answer every row.
+By default, each API key may send 1,000 requests a minute, and 1,000 usage
+requests a second. A request over the limit gets `429` and a `Retry-After`
+header with the seconds to wait. Every limit and header:
+[Rate limits](api/rate-limits.md).
 
 ## Core routes
 
@@ -105,7 +100,33 @@ have no `total`, and `limit`, `offset` and `after` change nothing:
 | `POST` | `/v1/usage-events/held/discard` | Mark held usage as never to be billed |
 | `GET` | `/v1/customers/{id}/usage` | A customer's usage for the period, grouped by dimension |
 
-Before you send usage, read [the retry rules](#sending-usage-safely).
+One usage event:
+
+```bash
+curl -s -X POST "$HARDCOUNT/v1/usage-events" \
+  -H "Authorization: Bearer $HARDCOUNT_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "event_name": "tokens",
+    "external_customer_id": "acme-1",
+    "quantity": 1000000,
+    "idempotency_key": "acme-1-call-8812:input",
+    "dimensions": {"model": "claude-sonnet-4.5", "token_type": "input"}
+  }'
+```
+
+- `event_name` picks the meter that counts the event.
+- `external_customer_id` is your own ID for the customer, its `external_id`.
+- `idempotency_key` names this one event; see
+  [the retry rules](#sending-usage-safely).
+- `dimensions` are labels; the plan's prices pick events by them.
+- `timestamp` is optional: an RFC 3339 time, such as
+  `2026-10-31T12:00:00Z`. Without it, the event gets the customer's current
+  time.
+
+**You see:** status `201` and the stored event, with an `id` such as
+`hc_evt_…`. The meter and the customer must exist first, or the event is
+refused with `422`.
 
 ### Pricing
 
@@ -151,11 +172,20 @@ A subscription puts a customer on a plan.
 | Method | Path | What it does |
 |---|---|---|
 | `POST` | `/v1/customers` | Create a customer |
+| `GET` | `/v1/customers/{id}` | Read a customer |
+| `GET` | `/v1/customers?external_id=…` | Find a customer by your own ID |
 | `POST` | `/v1/subscriptions` | Create a subscription. It starts now (or starts its trial now). Send `"status": "draft"` to create it without starting it. |
+| `GET` | `/v1/subscriptions/{id}` | Read a subscription, with its items |
 | `POST` | `/v1/subscriptions/{id}/activate` | Start a draft subscription now |
+| `POST` | `/v1/subscriptions/{id}/items` | Add a plan to the subscription |
 | `PATCH` | `/v1/subscriptions/{id}/items/{itemID}` | Change the plan or quantity. A change that takes effect now is prorated (charged or credited for the part of the period left). |
+| `DELETE` | `/v1/subscriptions/{id}/items/{itemID}` | Remove a plan from the subscription |
 | `PUT` | `/v1/subscriptions/{id}/pause-collection` | Keep the billing cycle, but leave new invoices as drafts |
+| `DELETE` | `/v1/subscriptions/{id}/pause-collection` | Resume collection |
 | `POST` | `/v1/subscriptions/{id}/extend-trial` | Move `trial_end_at` later |
+| `POST` | `/v1/subscriptions/{id}/end-trial` | End the trial now |
+| `POST` | `/v1/subscriptions/{id}/schedule-cancel` | Cancel later: send `{"at_period_end": true}`, or a `cancel_at` time |
+| `DELETE` | `/v1/subscriptions/{id}/scheduled-cancel` | Remove a scheduled cancel |
 | `POST` | `/v1/subscriptions/{id}/cancel` | Cancel now |
 | `POST` | `/v1/subscriptions/{id}/retry-billing` | Clear a billing failure and bill now |
 | `GET` | `/v1/subscriptions?billing=failing` | List subscriptions whose billing is failing |
@@ -170,6 +200,7 @@ the call returns `409` with code `unbilled_period`.
 | Method | Path | What it does |
 |---|---|---|
 | `GET` | `/v1/invoices` | List invoices |
+| `GET` | `/v1/invoices/{id}` | Read an invoice (under `invoice`) and its `line_items` |
 | `GET` | `/v1/invoices/{id}/pdf` | Download an invoice as a PDF |
 | `POST` | `/v1/billing/run` | Bill this account's subscriptions that are due now |
 | `POST` | `/v1/invoices/create_preview` | Preview the next invoice without creating it |
@@ -194,12 +225,42 @@ To stop serving a customer when credit runs out, use the live balance. See
 
 ### Test clocks
 
-See [test clock](glossary.md#testing-with-simulated-time).
+A test clock is a pretend clock for test customers: you move it forward to
+see a month of billing in seconds. See
+[test clock](glossary.md#testing-with-simulated-time). Test clocks work only
+with a test key.
 
 | Method | Path | What it does |
 |---|---|---|
-| `POST` | `/v1/test-clocks` | Create a test clock |
-| `POST` | `/v1/test-clocks/{id}/advance` | Move the clock forward, and bill what falls due |
+| `POST` | `/v1/test-clocks` | Create a test clock, with a `name` and its starting `frozen_time` |
+| `GET` | `/v1/test-clocks/{id}` | Read the clock, with its `status` |
+| `POST` | `/v1/test-clocks/{id}/advance` | Move the clock forward to `frozen_time`, at most 1 year at a time, and bill what falls due |
+
+1. Put a customer on the clock: send its ID as `test_clock_id` when you
+   create the customer, with `POST /v1/customers`. Its subscriptions and
+   usage then follow the clock's time.
+2. Move the clock:
+
+   ```bash
+   curl -s -X POST "$HARDCOUNT/v1/test-clocks/$CLOCK_ID/advance" \
+     -H "Authorization: Bearer $HARDCOUNT_KEY" \
+     -H "Content-Type: application/json" \
+     -d '{"frozen_time": "2026-12-01T00:00:00Z"}' | jq -r .status
+   ```
+
+   The call answers at once, while Hardcount bills in the background.
+   **You see:**
+
+   ```text
+   advancing
+   ```
+
+3. Read the clock with `GET /v1/test-clocks/{id}` every second or two until
+   its `status` is `ready`. Then the invoices are built. A `status` of
+   `internal_failure` means the billing stopped;
+   `POST /v1/test-clocks/{id}/retry-advance` tries again.
+
+[First invoice](first-invoice.md#steps) walks through this end to end.
 
 ### Payment retries, webhooks and the audit log
 
@@ -211,33 +272,15 @@ See [test clock](glossary.md#testing-with-simulated-time).
 
 ## Sending usage safely
 
-A response that is not `2xx` means nothing was recorded. Retry the same
-request.
+A response that is not `2xx` means this request recorded nothing. Retry the
+same request, with the same events.
 
-1. **Give every event an `idempotency_key`:** a unique ID for that one
-   event. An event without one, or with an empty one, is refused with `422`
-   and `param: idempotency_key`. In a batch, `errors[]` names each such
-   event and nothing is stored. Without a key, Hardcount cannot tell a retry
-   from new usage.
-2. **Pick the key once, and reuse it on every retry.** A new key on each
-   attempt makes each attempt a new event, so the usage is counted again.
-3. **Keep it to 255 characters or fewer.** A longer key is refused with
-   `422`.
-4. **Never reuse a key for a different event.** Keys are unique per account
-   and mode, forever. Only deleting a test clock frees keys: it deletes its
-   customers' events. When a key was already used, Hardcount keeps the first
-   event and drops the new one without comparing them. A single event gets
-   `200` with the first event and `Idempotent-Replayed: true`; a batch
-   counts it in `deduplicated`. So do not build keys from a batch index or a
-   timestamp that can repeat, or that usage is lost.
-
-Because a batch is stored all-or-nothing and each key is stored once,
-resending events with the same keys never counts them twice. See
-*idempotency key* in the [glossary](glossary.md#pricing-and-usage).
-
-**The usage routes ignore the `Idempotency-Key` header.** The event key is
-their only dedup key. A retried call runs again, and each event already
-stored is answered as a replay (`200`, or counted in `deduplicated`).
+Give every event its own `idempotency_key`. Pick it once, and send the same
+key on every retry of that event. Hardcount stores one event per key, forever,
+so a retry is never counted twice. An event without a key is refused with
+`422`. The usage routes ignore the `Idempotency-Key` header. The full rules,
+and what a repeated key answers:
+[Idempotency](api/idempotency.md#usage-events-the-idempotency_key-field).
 
 **Send `quantity` on every event.** It is a JSON number (`5`) or a string
 holding one (`"5.5"`, for exact decimals), with at most 12 decimal places,
@@ -293,9 +336,11 @@ Where it is sent:
 
 An event counts toward the billing period its `timestamp` falls in.
 
-- Hardcount builds a period's invoice once `INVOICE_GRACE_PERIOD` (default 1
-  hour) has passed after the period ends. An event that arrives within that
-  time is on the invoice.
+- Hardcount builds a period's invoice on the first scheduled billing run
+  after `INVOICE_GRACE_PERIOD` (default 1 hour) has passed since the period
+  ended. The run starts every hour, so the invoice appears 1 to 2 hours after
+  the period ends ([timing](api/timing-and-limits.md#when-invoices-are-made)).
+  An event that arrives before the invoice is built is on it.
 - After that, the invoice does not change. A later event for that period is
   stored, but it is not added to that invoice or to any later one. The
   answer says so: `billing_status: "after_close"` on the event's 201
@@ -340,99 +385,23 @@ event missed an invoice.
 
 ## Errors
 
-Errors return the same JSON body, including an unknown path and a method
-the path does not take. Every response that reaches Hardcount also has a
-`Hardcount-Request-Id` header. Send that ID to support when you report a
-problem.
-
-```json
-{
-  "error": {
-    "type": "invalid_request_error",
-    "code": "validation_error",
-    "message": "external_id is required",
-    "request_id": "req_<id>",
-    "param": "external_id"
-  }
-}
-```
-
-`type`, `code`, `message` and `request_id` are always there. When `param`
-is there, it names the field that failed. Read `code` in your code;
-`message` is meant for people. Some endpoints put a more specific code in
-`code` (for example `unbilled_period`, `not_payable`, `cooldown_active`) in
-place of the default code shown below.
-
-| Status | type | When |
-|---|---|---|
-| 400 | `invalid_request_error` | The request is malformed: the body is not valid JSON, or a required path or query parameter is missing or invalid (`invalid_request`). |
-| 401 | `authentication_error` | The API key, session or public token is missing, invalid or expired. |
-| 403 | `authentication_error` | You are signed in but not allowed to do this, or the request was blocked as cross-site. |
-| 404 | `invalid_request_error` | The resource does not exist (`not_found`, or a specific code such as `invoice_not_found`), or the path does not exist (`route_not_found`). |
-| 405 | `invalid_request_error` | The path exists but does not accept this method (`method_not_allowed`). The `Allow` header lists the methods it does accept. |
-| 409 | `invalid_request_error` | The value already exists (`already_exists`), or the resource is in the wrong state for this action (`invalid_state` or a more specific code). |
-| 413 | `invalid_request_error` | The usage batch (`batch_too_large`) or the Stripe webhook body (`payload_too_large`) is too large. |
-| 422 | `invalid_request_error` | A field or business rule failed (`validation_error`, or a specific code). A bad `limit` or `offset` is a 422 too. |
-| 429 | `rate_limit_error` | Too many requests (`rate_limited`; `cooldown_active` for a repeated setup-link email; `login_throttled` after too many failed sign-ins). Wait for the number of seconds in `Retry-After`. |
-| 500 | `api_error` | Unexpected server error (`internal_error`). The details are logged on the server, not returned. A few operations return a specific code with instructions instead, for example `proration_failed`. |
-| 502 | `api_error` | An upstream call failed. See the 502 codes below. |
-| 503 | `api_error` | A dependency is down for a short time (`authentication_unavailable`, `ingest_unavailable`, `idempotency_unavailable`, `currency_unavailable`), so you can retry. `stripe_unavailable` and `email_unavailable` mean the feature is not set up on this server, and retrying will not help. |
-| 504 | `api_error` | The request ran past its time limit before the server wrote any answer (`timeout`). |
-
-The 502 codes:
-
-- `provider_error`, `stripe_error`: the payment provider rejected the
-  request.
-- `payment_outcome_unknown`: the payment provider never answered. The
-  charge may have gone through, so check before you retry.
-- `email_enqueue_failed`: an email could not be queued.
-- `stripe_key_unusable`: Stripe refused the account's API key, or no key is
-  connected for this mode. Nothing was charged.
-- `smtp_error`: the email server did not accept the test email. The message
-  says what it answered.
-
-A request body may hold only the fields its operation lists in the API
-reference. Any other field is refused with 422, and `param` names it: a
-misspelled field, a field the operation does not take, a field the
-server sets, such as `id`, `tenant_id` or `created_at`, or a name in
-another case, such as `Email` for `email`. Nothing is changed. A usage
-batch names each such event in `errors[]` instead. An operation with no
-request body, such as `POST /v1/subscriptions/{id}/cancel`, lists no
-fields: send no body, `{}` or `null`. A body that is not one JSON value is refused with 400. The Stripe
-and Postmark webhooks and the LiteLLM callback are the exceptions: they
-take their sender's body as it comes.
-
-Request bodies are limited to 1 MB, and Stripe webhook bodies to 64 KB. Only
-the two routes in the 413 row return 413. Other routes do not promise a
-specific status for a body that is too large.
-
-<details>
-<summary><strong>Less common error shapes</strong></summary>
-
-- **Idempotency-Key errors** have `type` `invalid_request_error` and one of these codes:
-  - `idempotency_error` (422): the key was used before with a different method, path or body. This is checked only after the first request has finished. While the first request is still running, a mismatched request gets `conflict_idempotency`.
-  - `conflict_idempotency` (409): another request with this key is still running, or did not finish. Retry later.
-  - `conflict_idempotency_unresolved` (409): an earlier request with this key started more than 5 minutes ago and never recorded an outcome. Check whether the resource exists before you retry with a new key.
-  - `invalid_request` (400): the body could not be read. This includes any body over 1 MB.
-- **A replayed key** (POST, PUT or PATCH under `/v1` with the same key, method, path and body) returns the first response's status and body, plus `Idempotent-Replayed: true`. The body's `request_id` is the first request's; the `Hardcount-Request-Id` header is the new request's. The response's other headers are not sent again. A first response of 409 or 422 is not stored: the key is freed, and a retry with the same key runs the request again. The usage routes (`/v1/usage-events…`, `/v1/integrations/litellm/spend`) ignore the header. So do the routes outside the main `/v1` group: `/v1/auth…`, `/v1/bootstrap`, `/v1/public/…`, `/v1/webhooks…` and `/v1/exports…`. If a database error stops the server from freeing the key or storing the first response, the key stays reserved: a retry gets `conflict_idempotency`, then `conflict_idempotency_unresolved` once 5 minutes have passed. The request does not run twice.
-- **A plain-text error** comes from two places:
-  - The HTTP server itself, before Hardcount sees the request. A request too malformed to parse, such as bad syntax or headers that are too large, gets 400 or 431 with no `Hardcount-Request-Id` header.
-  - `/metrics`, the Prometheus scrape route. If it cannot read the metrics, it answers a plain-text 500.
-- **Other JSON shapes:**
-  - `GET /health/ready` returns 503 with `{"status", "checks"}`.
-  - A rejected usage batch returns 422 with code `batch_rejected`. Next to `error`, the body also has `errors` (one entry per failing event), `ingested: 0` and `total`.
-  - The Postmark webhook accepts a payload that is too large or is not valid JSON with 200 and `{"status": "skipped", "reason": "<reason>"}`.
-
-</details>
+An error answers with a status and a JSON body,
+`{"error": {"type", "code", "message", "request_id", "param"}}`. Read `code`
+in your code; `message` is for people. Every answer has a
+`Hardcount-Request-Id` header: look it up in your Hardcount server's logs to
+see what happened to the request. Every status and code, and what to do about
+each: [Errors](api/errors.md).
 
 ## Routes you do not call yourself
 
 The OpenAPI file lists these too, but your code does not need them:
 
-- `GET /health/ready` and `/metrics`, for load balancers and Prometheus.
-- The data behind the hosted invoice and payment-update pages
-  (`/v1/public/invoices/*`, `/v1/public/payment-updates/*`). Share the page
-  link instead.
+- `GET /health`, `GET /health/ready` and `/metrics`, for load balancers
+  and Prometheus.
+- The data behind the hosted invoice page, the payment-update page and the
+  public cost dashboard (`/v1/public/invoices/*`,
+  `/v1/public/payment-updates/*`, `/v1/public/cost-dashboard/*`). Share the
+  page link instead.
 - The inbound webhooks that Stripe and Postmark call
   (`/v1/webhooks/stripe/{endpoint_id}`, `/v1/webhooks/postmark`).
 

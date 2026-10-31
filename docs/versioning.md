@@ -27,8 +27,23 @@ Hardcount versions look like `0.MINOR.PATCH`, for example `0.8.2`.
   Velox), dropped it: it cannot take over a database Velox made, from
   v0.8.x or from a build of `main`, so you install it fresh.
 
+## The API version
+
 Hardcount has one API version, `/v1`. Before 1.0, a breaking change goes into
-`/v1` itself. There is no older version to stay on.
+`/v1` itself. There is no older version to stay on, and no request header
+picks a version.
+
+- **The OpenAPI file's `info.version` is a date, `2026-04-07`.** It is the
+  day the file was first written. It is not an API version: it does not
+  change when the API changes, and you cannot request it.
+- **Every JSON answer carries a `Hardcount-Version` header:** the release of
+  the server that answered. A release image says its tag, such as `v0.9.1`.
+  An image built from `main` says `dev-` and the commit, such as
+  `dev-9c4a343`. A server built from source says `dev`. A replayed
+  `Idempotency-Key` answer does not carry it.
+
+Use `Hardcount-Version` to tell which release your code is talking to, for
+example in your logs.
 
 ## Write code that survives new values
 
@@ -39,14 +54,27 @@ Hardcount has one API version, `/v1`. Before 1.0, a breaking change goes into
 
 ## Where breaking changes are announced
 
+**There is no notice period before 1.0.** A breaking change can ship in the
+next release, minor or patch. It is written in the CHANGELOG when it merges,
+so you can see it before you upgrade.
+
 Read these before every upgrade:
 
 1. **The [CHANGELOG](../CHANGELOG.md).** Read the entry for every release
    between yours and the new one. Since 0.4.0, a release with steps to take
    lists them under **Before upgrading**: what changed, who it affects, and
    what to do. A release with nothing to do says so at the top, as 0.6.1
-   does. Changes not yet released are under **Unreleased**, where lines for
-   code that calls the API say "API callers:".
+   does. Changes not yet released are under **Unreleased**.
+   Lines written for code that calls the API start with **API callers:**.
+   To list them, run this in a checkout:
+
+   ```bash
+   grep -n 'API callers:' CHANGELOG.md
+   ```
+
+   Not every API change has that prefix, so still read each release's whole
+   entry.
+
 2. **The release notes** on
    [GitHub releases](https://github.com/gethardcount/hardcount/releases). Since
    v0.6.0, a release with steps to take repeats them under **Before you
@@ -60,4 +88,4 @@ Take a backup before you upgrade. To go back, restore that backup: see
 Only the latest release gets security fixes. See
 [Supported versions](../SECURITY.md#supported-versions).
 
-**Next:** [Self-host](self-host.md).
+**Next:** [Errors](api/errors.md), to handle a new value or code safely.
