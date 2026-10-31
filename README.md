@@ -1,9 +1,9 @@
-<h1 align="center">
+<p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme-logo-dark.png">
     <img alt="Hardcount" src="docs/assets/readme-logo-light.png" width="372">
   </picture>
-</h1>
+</p>
 
 <p align="center"><strong>Usage billing for AI products, on your own servers.</strong></p>
 
