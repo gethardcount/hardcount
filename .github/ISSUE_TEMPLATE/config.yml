@@ -1,5 +1,8 @@
 blank_issues_enabled: true
 contact_links:
+  - name: Ask a question
+    url: https://github.com/gethardcount/hardcount/discussions/categories/q-a
+    about: Setting up, choosing prices, or not sure it's a bug? Ask in Discussions.
   - name: Security vulnerability
     url: https://github.com/gethardcount/hardcount/blob/main/SECURITY.md
     about: Please do NOT open a public issue for security problems — see the disclosure policy.
