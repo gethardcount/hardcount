@@ -1,11 +1,18 @@
-# Hardcount
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme-logo-dark.png">
+    <img alt="Hardcount" src="docs/assets/readme-logo-light.png" width="372">
+  </picture>
+</p>
 
-[![CI](https://github.com/gethardcount/hardcount/actions/workflows/ci.yml/badge.svg)](https://github.com/gethardcount/hardcount/actions/workflows/ci.yml)
-[![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go)](https://go.dev)
-[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
-[![Release](https://img.shields.io/github/v/tag/gethardcount/hardcount?label=release)](CHANGELOG.md)
+<p align="center"><strong>Usage billing for AI products, on your own servers.</strong></p>
 
-**Usage billing for AI products, on your own servers.**
+<p align="center">
+  <a href="https://github.com/gethardcount/hardcount/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/gethardcount/hardcount/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://go.dev"><img alt="Go" src="https://img.shields.io/badge/Go-1.26-00ADD8?logo=go"></a>
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/License-MIT-green"></a>
+  <a href="CHANGELOG.md"><img alt="Release" src="https://img.shields.io/github/v/tag/gethardcount/hardcount?label=release"></a>
+</p>
 
 Price tokens per model, sell prepaid credit, and see what each customer costs you. Hardcount makes the invoices, and Stripe charges the card. Your billing data stays in your own Postgres.
 
