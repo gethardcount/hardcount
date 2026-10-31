@@ -98,9 +98,9 @@ var listRoutesNotSeeded = map[string]string{
 }
 
 // unpagedSets are the notListRoutes that answer a set of rows in one
-// response, with no total and no paging. docs/api-surface.md names each in
-// its Lists section, so a caller does not page one expecting a 422 or a
-// next page.
+// response, with no total and no paging. docs/api/pagination.md names each
+// in its "Lists that answer in one piece" section, so a caller does not page
+// one expecting a 422 or a next page.
 var unpagedSets = []string{
 	"/v1/usage-events/held",
 	"/v1/subscriptions/{id}/timeline",
@@ -111,22 +111,22 @@ var unpagedSets = []string{
 	"/v1/credits/grants/{customer_id}",
 }
 
-// TestListsDoc_NamesTheSetsThatDoNotPage: the Lists section says every list
-// pages one way, so it must name the routes that answer a set without
+// TestListsDoc_NamesTheSetsThatDoNotPage: the pagination page says every
+// list pages one way, so it must name the routes that answer a set without
 // paging.
 func TestListsDoc_NamesTheSetsThatDoNotPage(t *testing.T) {
-	doc, err := os.ReadFile("../../docs/api-surface.md")
+	doc, err := os.ReadFile("../../docs/api/pagination.md")
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, lists, ok := strings.Cut(string(doc), "\n## Lists\n")
+	_, lists, ok := strings.Cut(string(doc), "\n## Lists that answer in one piece\n")
 	if !ok {
-		t.Fatal("docs/api-surface.md has no Lists section")
+		t.Fatal("docs/api/pagination.md has no \"Lists that answer in one piece\" section")
 	}
 	lists, _, _ = strings.Cut(lists, "\n## ")
 	for _, route := range unpagedSets {
 		if !strings.Contains(lists, "`GET "+route+"`") {
-			t.Errorf("the Lists section of docs/api-surface.md does not name `GET %s`, which does not page", route)
+			t.Errorf("the \"Lists that answer in one piece\" section of docs/api/pagination.md does not name `GET %s`, which does not page", route)
 		}
 	}
 }
@@ -423,7 +423,7 @@ func TestListRoutes_OnePagingStyle(t *testing.T) {
 	}
 
 	// A set that does not page answers the same with or without the paging
-	// parameters, as docs/api-surface.md says.
+	// parameters, as docs/api/pagination.md says.
 	unpagedPaths := map[string]string{
 		"/v1/usage-events/held":              "/v1/usage-events/held",
 		"/v1/subscriptions/{id}/timeline":    "/v1/subscriptions/" + subA + "/timeline",

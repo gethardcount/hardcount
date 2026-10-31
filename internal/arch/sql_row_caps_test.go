@@ -14,7 +14,7 @@ import (
 )
 
 // A list route pages with limit and offset, and its total counts every row
-// (docs/api-surface.md, "Lists"). A fixed `LIMIT n` in the SQL behind a list
+// (docs/api/pagination.md). A fixed `LIMIT n` in the SQL behind a list
 // cuts it short with no sign: total counts only what was read, and paging
 // never reaches the rest. Plans, meters, test clocks and price overrides
 // stopped at 500 that way; payment methods at 100; a test clock's customers
