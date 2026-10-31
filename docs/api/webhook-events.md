@@ -20,7 +20,9 @@ an example message. How messages are delivered, signed and retried:
   caused it, so a crash cannot drop it. Any other event can be lost in a
   crash just after the change. See
   [Three rules for your receiver](../webhooks.md#three-rules-for-your-receiver).
-- **The examples are the real shape of each message.** A test renders every
+- **The examples are the real shape of each message.** Hardcount sends the
+  body on one line, with its keys in this order; it is indented here. A test
+  renders every
   event's `data` from the code that builds it and compares it with the files
   in [internal/domain/testdata/webhook_payloads](../../internal/domain/testdata/webhook_payloads/);
   another test checks each example here against the same code. The examples
