@@ -139,7 +139,7 @@ func TestStrictBodies_EveryJSONRouteRefusesAnUnknownKey(t *testing.T) {
 				t.Errorf("%s %s with an unknown key: %d %s, want 422 with param %q", k.Method, k.Pattern, res.status, res.raw, probeKey)
 			}
 		}
-		// A body that is not valid JSON is a 400, as docs/api-surface.md says
+		// A body that is not valid JSON is a 400, as docs/api/errors.md says
 		// (TestOpenAPISpec_MalformedBodyIsDocumentedAs400 holds the reference
 		// to it).
 		if res := r.call(k.Method, probePath(k.Pattern), []byte(`{"`+probeKey+`":`)); res.status != http.StatusBadRequest {
