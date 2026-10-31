@@ -3,7 +3,9 @@
 **New to Hardcount?** Start with [Send usage and get your first
 invoice](first-invoice.md). It runs every call in order. This page assumes
 you did it, so `HARDCOUNT`, `HARDCOUNT_KEY` and `CUSTOMER_ID` are set in your
-terminal.
+terminal. For a step-by-step walk from a provider's token counts to the
+invoice, see [Bill for AI tokens by model](guides/bill-for-ai-tokens.md);
+this page is the reference behind it.
 
 ## Words on this page
 
@@ -38,9 +40,15 @@ dimension. A LiteLLM proxy does this for you: Hardcount turns a name such as
 - **A Claude name matches a model only when it is the model's id, or the id
   with a date or version ending,** such as `-20250929`, `-v1:0`,
   `@20250805` or `@default`. Bedrock, Google Cloud and Foundry prefixes are
-  removed first. A name Hardcount does not know, such as `claude-opus-4-9`, is
-  never priced as an older model. It keeps its own name and has no price
-  until you add one ([how](#price-a-claude-model-hardcount-does-not-know)).
+  removed first. A name Hardcount does not know, such as
+  `anthropic/claude-opus-4-9`, is never priced as an older model. It keeps
+  the name LiteLLM sent, prefix included, and has no price until you add one
+  ([how](#price-a-claude-model-hardcount-does-not-know)).
+- **An OpenAI name matches the longest model in the table it starts with,
+  followed by a dash.** So `gpt-4o-audio-preview` and `gpt-4o-2024-05-13`
+  are priced as `gpt-4o`, although OpenAI lists other prices for them.
+  Give such a name its own price with `model_raw`
+  ([how](#price-one-platforms-model-name-differently)).
 - **Claude Haiku 5.5 has two prices.** A call whose prompt is over 100,000
   tokens pays the higher one, for every token of the call, output included.
   The prompt counts input, cache reads and cache writes. Its events carry
@@ -57,8 +65,9 @@ dimension. A LiteLLM proxy does this for you: Hardcount turns a name such as
 The two AI recipes share the `tokens` meter, so you can apply both. Each
 adds its own plan with its own prices, in the plan's currency. One customer
 cannot be on both plans at once: two live subscriptions of one customer
-cannot price the same meter (409 `meter_overlap`), so usage is never billed
-twice. To sell both providers' models to one customer, apply one recipe,
+cannot price the same meter, so usage is never billed twice. The second
+subscription is refused with 409, and a price that would add the meter to
+a plan such a customer is on with 409 `meter_overlap`. To sell both providers' models to one customer, apply one recipe,
 then add the other provider's model prices to its plan.
 
 To see the recipes, and to apply one with your own plan name:
@@ -241,17 +250,20 @@ once a year, on the invoice at the end of the year.
 
 ## Price a Claude model Hardcount does not know
 
-A Claude name Hardcount does not know keeps its own name in `model`, such as
-`claude-opus-4-9`. Price it as in [Price a model a recipe does not
-cover](#price-a-model-a-recipe-does-not-cover), with one price for each kind
-of token. This example adds it to the `anthropic_style` plan "AI API":
+A Claude name from LiteLLM that Hardcount does not know keeps, in `model`,
+the name exactly as LiteLLM sent it. From a proxy that is the `model` of
+its `model_list` entry, such as `anthropic/claude-opus-4-9`; the event's
+`model_raw` shows the same name. Price it as in [Price a model a recipe
+does not cover](#price-a-model-a-recipe-does-not-cover), with one price for
+each kind of token. This example adds it to the `anthropic_style` plan
+"AI API":
 
 ```bash
 # Your 100 newest plans. With more, add &offset=100 to look further.
 CLAUDE_PLAN_ID=$(curl -s "$HARDCOUNT/v1/plans?limit=100" -H "Authorization: Bearer $HARDCOUNT_KEY" \
   | jq -r '.data[] | select(.name == "AI API") | .id')
 jq -n --arg meter "$METER_ID" \
-    '{meter_id: $meter, dimension_match: {model: "claude-opus-4-9", token_type: "input"},
+    '{meter_id: $meter, dimension_match: {model: "anthropic/claude-opus-4-9", token_type: "input"},
       mode: "per_unit", unit_amount_cents: "0.0015"}' \
   | curl -s -X POST "$HARDCOUNT/v1/plans/$CLAUDE_PLAN_ID/prices" \
     -H "Authorization: Bearer $HARDCOUNT_KEY" \
@@ -261,7 +273,7 @@ jq -n --arg meter "$METER_ID" \
 
 **You see,** on a plan a subscription has used (on an unused plan,
 `effective` is `now`):
-`{"dimension_match":{"model":"claude-opus-4-9","token_type":"input"},"effective":"next_period"}`
+`{"dimension_match":{"model":"anthropic/claude-opus-4-9","token_type":"input"},"effective":"next_period"}`
 
 If a later release learns the model and renames it, the price stops
 matching, and the usage shows as not billed until you price the new name.
@@ -361,11 +373,12 @@ the $10,000 of credit pays for about $9,091 of usage and $909 of tax.
 - **You see:** the commit line has tax 0 and `"tax_reason":
   "prepaid_credit_purchase"`. The dashboard marks it "Prepaid credit, not
   taxed", and the PDF says why there is no tax.
-- **Refunds:** refunding unused credit
-  ([ADR-080](adr/080-paid-commit-cn-relief.md)) reverses no tax, because the
-  purchase carried none. A commit whose purchase was taxed (invoiced before
-  [#1288](https://github.com/gethardcount/hardcount/pull/1288)) still reverses that
-  tax when refunded.
+- **Refunds:** refunding unused credit reverses no tax, because the
+  purchase carried none
+  ([how a refund works](adr/080-paid-commit-cn-relief.md)). A commit whose
+  purchase was taxed, because it was invoiced before the purchase stopped
+  being taxed, still reverses that tax when refunded
+  ([the change](https://github.com/gethardcount/hardcount/pull/1288)).
 - **Free (promotional) credit** pays usage invoices the same way, tax
   included.
 
@@ -383,8 +396,8 @@ tax on, check with your tax adviser:
 
 Hardcount has no setting to tax the purchase instead. If your country requires
 it, [open an issue](https://github.com/gethardcount/hardcount/issues) before you
-sell commits with tax on. The decision and its reasons are in
-[ADR-078](adr/078-prepaid-commits-phase-1.md#amendment-2026-10-19--the-purchase-is-not-taxed-the-usage-it-pays-for-is).
+sell commits with tax on.
+[The decision and its reasons](adr/078-prepaid-commits-phase-1.md#amendment-2026-10-19--the-purchase-is-not-taxed-the-usage-it-pays-for-is).
 
 ## See your margin
 
@@ -479,9 +492,11 @@ of those three labels, such as usage on a meter that is not for tokens,
 gets no cost and is not counted. Its price is still in `revenue_cents`, so
 `margin_bps` reads higher than your real margin.
 
-Without `from` and `to`, the margin covers the last 30 days of the
-customer's time. On a test clock, that is the clock's time. The
-**Margin** card on the customer page starts on the current billing period.
+Left out, `to` is the customer's current time and `from` is 30 days
+before that time. On a test clock, that is the clock's time. A window can
+be at most one year; a longer one is refused with `422`. The **Margin**
+card on the customer page starts on the current billing period. What each
+figure means: [Margin](concepts/margin.md).
 
 ## Usage from a LiteLLM proxy
 

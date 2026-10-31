@@ -1,6 +1,8 @@
 # Stop usage when credit runs out
 
-The short version:
+This page is for customers who pay in advance with prepaid credit. It
+shows how your app can stop serving one of them when the credit is used
+up. The short version:
 
 1. Ask Hardcount for the customer's live credit balance on an interval.
 2. Keep the answer in your own cache.
@@ -15,12 +17,36 @@ stop serving a customer is always yours, and it runs in your code.
 This is deliberate. A billing system that goes down, or answers slowly,
 should not take your product down with it.
 
+## Which customers to gate
+
+Gate only the customers you sell prepaid credit to (a prepaid commit or a
+credit grant). A pay-as-you-go customer, billed at the end of each period,
+has no credit, so their figure is always 0: gating on it would refuse them
+from their first request.
+
+Credit pays only invoices in its own currency. So gate each customer on
+the entry in the currency you bill them in. Hardcount writes currencies in
+capitals, such as `USD`.
+
 ## The read
 
 ```
 GET /v1/credits/balance/{customer_id}/live
 Authorization: Bearer <secret key>
 ```
+
+`customer_id` is Hardcount's ID for the customer (`hc_cus_…`), not your
+external ID. Look it up once and keep it:
+
+```bash
+curl -s "$HARDCOUNT/v1/customers?external_id=acme-1" \
+  -H "Authorization: Bearer $HARDCOUNT_KEY" | jq -r '.data[0].id'
+```
+
+**You see:** the customer's ID, such as `hc_cus_…`.
+
+The read needs a secret key. A usage-only key cannot read credit. It
+answers:
 
 ```json
 {
@@ -39,9 +65,7 @@ Authorization: Bearer <secret key>
 
 `balances` has one entry per currency: each currency the customer holds
 credit in, and each currency a live subscription will invoice usage in.
-Credit pays only invoices in its own currency, so gate on the entry in the
-currency the customer is billed in. No entry in that currency means no
-credit in it.
+No entry in the customer's currency means no credit in it.
 
 | Field | Meaning |
 |---|---|
@@ -51,7 +75,10 @@ credit in it.
 | `estimated_remaining_cents` | The first minus the second, never below zero. Gate on this. |
 | `computed_at` | When Hardcount worked the figures out. |
 
-A customer id that is not in your tenant and mode answers `404`.
+Here the customer has $40.00 of credit and $10.00 of usage not invoiced
+yet: 4,000 − 1,000 = 3,000 cents, so $30.00 is left.
+
+A customer ID that is not in your account and mode answers `404`.
 
 `estimated_remaining_cents` stops at zero. To see how far past zero a
 customer has gone, subtract `unbilled_usage_cents` from `balance_cents`
@@ -66,8 +93,8 @@ The read gives up after 30 seconds. Measure your largest customers first.
 
 So treat it as a background read:
 
-- Poll once a minute for each customer who has sent usage since your last
-  poll.
+- Poll once a minute for each prepaid customer who has sent usage since
+  your last poll.
 - Keep polling each customer you are refusing, too. A refused customer sends
   no usage, so a poll that follows usage alone would never look at them
   again.
@@ -85,33 +112,103 @@ Between two polls a customer can spend a little more than they have. With a
 one-minute poll that is at most one minute of usage. Poll faster for a
 customer who is close to zero if that matters to you.
 
-```python
-# Runs on a timer, once a minute.
-for customer_id in customers_active_since_last_poll() | customers_refused():
-    try:
-        live = hardcount.get(f"/v1/credits/balance/{customer_id}/live", timeout=30)
-    except Exception as err:
-        alert(customer_id, err)   # keep the last figure, go on to the next customer
-        continue
-    # The entry in the currency this customer is billed in; none means no credit in it.
-    entry = next((b for b in live["balances"] if b["currency"] == billing_currency(customer_id)), None)
-    cache.set(f"credit:{customer_id}", entry["estimated_remaining_cents"] if entry else 0)   # no expiry
+### The rate limit
 
-# Runs in your request path.
+Each read counts toward the API's general limit: 1,000 requests a minute
+for each API key. A poller that reads 1,000 customers a minute uses all of
+it.
+
+- **Give the poller its own secret key.** Each key has its own limit, so the
+  poller then never slows the rest of your app's API calls.
+- **On a `429`, wait the number of seconds in `Retry-After`**, then read
+  that customer again. That is when the next request passes.
+- **More than about 1,000 customers to poll each minute?** Poll less often,
+  or raise `HARDCOUNT_RATE_LIMIT_GENERAL_PER_MIN` on your Hardcount server
+  ([Settings](settings.md)).
+
+### A poller you can run
+
+This script uses only Python's standard library (Python 3.8 or later). It
+reads each customer once a minute, keeps the last good figure, and prints
+what your request path would decide.
+
+```python
+"""Poll each prepaid customer's live credit balance and keep the last good figure."""
+import json
+import os
+import sys
+import time
+import urllib.error
+import urllib.request
+
+HARDCOUNT = os.environ["HARDCOUNT"]
+KEY = os.environ["HARDCOUNT_POLL_KEY"]   # a key used only by this poller
+CURRENCY = sys.argv[1].upper()           # the currency you bill these customers in
+CUSTOMERS = sys.argv[2:]                 # Hardcount customer IDs: hc_cus_…
+remaining = {}                           # your cache (Redis, memory, a table), no expiry
+
+
+def read_remaining(customer_id):
+    """The customer's estimated_remaining_cents, or None when the read failed."""
+    req = urllib.request.Request(
+        f"{HARDCOUNT}/v1/credits/balance/{customer_id}/live",
+        headers={"Authorization": f"Bearer {KEY}"})
+    for _ in range(3):
+        try:
+            with urllib.request.urlopen(req, timeout=35) as resp:
+                body = json.load(resp)
+        except urllib.error.HTTPError as err:
+            if err.code == 429:   # too many requests: wait as long as Hardcount says
+                time.sleep(int(err.headers.get("Retry-After", "1")))
+                continue
+            print(f"{customer_id}: HTTP {err.code}, kept the last figure", file=sys.stderr)
+            return None
+        except (OSError, ValueError) as err:   # no answer, a timeout, or not JSON
+            print(f"{customer_id}: {err}, kept the last figure", file=sys.stderr)
+            return None
+        entry = next((b for b in body["balances"] if b["currency"] == CURRENCY), None)
+        return entry["estimated_remaining_cents"] if entry else 0   # no entry: no credit
+    return None
+
+
 def may_serve(customer_id):
-    remaining = cache.get(f"credit:{customer_id}")
-    if remaining is None:
-        return True   # never polled yet. Your choice: serve or refuse
-    return remaining > 0
+    """Your request path reads only the cache, never Hardcount."""
+    left = remaining.get(customer_id)
+    return left is None or left > 0   # None: never polled yet. Serve or refuse: your choice.
+
+
+while True:
+    for customer_id in CUSTOMERS:
+        figure = read_remaining(customer_id)
+        if figure is not None:        # store only a read that worked
+            remaining[customer_id] = figure
+        print(f"{customer_id} remaining={remaining.get(customer_id)} serve={may_serve(customer_id)}", flush=True)
+    time.sleep(60)
 ```
 
-`customers_refused()` is every customer whose stored figure is zero.
-`billing_currency()` is the currency you invoice the customer in.
+Save it as `poll_credit.py` and run it with the currency and the customer
+IDs to poll:
+
+```bash
+export HARDCOUNT=http://localhost:8080
+export HARDCOUNT_POLL_KEY=hc_secret_test_…   # a secret key for the poller only
+python3 poll_credit.py USD hc_cus_…
+```
+
+**You see,** once a minute, one line per customer, such as:
+
+```text
+hc_cus_… remaining=3000 serve=True
+```
+
+In your app, keep `remaining` in a shared cache instead of the script's
+dictionary, and call `may_serve()` from the request path.
 
 ## When the read fails
 
 The read answers `500` when Hardcount cannot work the figure out. It never
-returns part of a figure.
+returns part of a figure. A read that takes longer than 30 seconds answers
+`504`, and one over the rate limit answers `429`.
 
 - Keep the last figure you stored for that customer. Do not clear it.
 - Go on to the next customer. One failed read must not stop the loop.
@@ -144,7 +241,9 @@ the balance `GET /v1/credits/balance/{customer_id}` returns.
 The figure is an estimate. It can read higher than what the customer really
 has left, because these are not subtracted:
 
-- **Tax.** The invoice adds tax; the estimate does not.
+- **Tax.** The invoice adds tax; the estimate does not. Credit pays the
+  tax too, so with 10% tax, $30.00 of credit pays for about $27.27 of
+  usage.
 - **A base fee billed at the end of the period.** It appears only when the
   period closes and the invoice is issued.
 - **Unpaid invoices.** An invoice that is issued but not yet settled can
@@ -152,7 +251,7 @@ has left, because these are not subtracted:
 - **Usage sent after a period has ended and before Hardcount has closed it.**
   Hardcount closes a period on the first billing run after
   `INVOICE_GRACE_PERIOD` has passed, so this gap lasts 1 to 2 hours by
-  default ([ADR-120](adr/120-invoice-grace-period-for-late-usage.md)).
+  default ([late usage](concepts/usage-events.md#late-usage)).
 - **Credit that expires before the period ends.** It counts as spendable
   until its expiry date. If the period's invoice is issued after that date,
   the invoice cannot draw on it.
@@ -164,7 +263,7 @@ It can read lower than the truth in one case:
   its next attempt. The estimate subtracts that period's usage but no
   longer counts credit that expired after the period ended. That period's
   invoice still draws on that credit
-  ([ADR-071](adr/071-credit-expiry-retires-the-block.md)).
+  ([why](adr/071-credit-expiry-retires-the-block.md)).
 
 Usage sent for a customer who has no active subscription is recorded but not
 priced, so it does not lower the figure.
@@ -206,4 +305,5 @@ The public cost dashboard, `GET /v1/public/cost-dashboard/{token}`, returns
 the same three numbers for each currency in its `credits` array. Your
 customer sees the figure your backend gates on.
 
-**Next:** remind customers to top up with the [credit webhooks](webhooks.md#credit-datacredit_balance).
+**Next:** how credit is granted, used and expired: [Credits](concepts/credits.md).
+Remind customers to top up with the [credit webhooks](webhooks.md#credit-datacredit_balance).

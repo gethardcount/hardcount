@@ -1,75 +1,45 @@
 # Hardcount documentation
 
-**New here? Read the [README](../README.md), then run the
-[quick start](quick-start.md).**
+Hardcount is a billing system you run yourself. Your app sends usage, and
+Hardcount prices it, makes the invoice and charges the card through Stripe.
 
-## Try it
+**New here?** Read [How Hardcount works](how-hardcount-works.md), then run
+the [quick start](quick-start.md).
 
-1. [Quick start](quick-start.md): start Hardcount on your computer with git,
-   Docker and a bash shell, run the demo, and see one month of token usage
-   become an invoice, its PDF and a margin report.
-2. [What's in the box](features.md): every feature, with what it does for you.
-3. [How Hardcount compares](comparison.md) with four open-source billing
-   engines, with sources, and [why Hardcount exists](why-hardcount.md).
-4. [Roadmap](roadmap.md): what is being built now, next and later, and
-   what Hardcount will not build. Every change, by date:
-   [CHANGELOG](../CHANGELOG.md).
-5. [Versioning before 1.0](versioning.md): what a release can break, and
-   where each breaking change is written down.
+- **Get started:** [How Hardcount works](how-hardcount-works.md) ·
+  [Quick start](quick-start.md) ·
+  [Send usage and get your first invoice](first-invoice.md).
+- **Concepts:** [The data model](concepts/data-model.md) ·
+  [Usage events](concepts/usage-events.md) ·
+  [Meters and prices](concepts/meters-and-prices.md) ·
+  [Subscriptions](concepts/subscriptions.md) ·
+  [Invoices](concepts/invoices.md) · [Credits](concepts/credits.md) ·
+  [Payments](concepts/payments.md) · [Tax](ops/tax-calculation.md) ·
+  [Test clocks](concepts/test-clocks.md) · [Margin](concepts/margin.md) ·
+  [Glossary](glossary.md).
+- **Guides:** [Bill for AI tokens by model](guides/bill-for-ai-tokens.md) ·
+  [AI pricing reference](ai-pricing.md) ·
+  [Stop usage when credit runs out](stop-usage-when-credit-runs-out.md) ·
+  [Send usage from LiteLLM](integrations/litellm.md) ·
+  [Connect Stripe](guides/connect-stripe.md) ·
+  [Test a billing change](guides/test-a-billing-change.md) ·
+  [Set up email](ops/email-setup.md) · [Manage API keys](api-keys.md).
+- **API reference:** [The Hardcount API](api-surface.md) ·
+  [Webhooks](webhooks.md) · [Versioning](versioning.md) ·
+  [Every route: the OpenAPI file](../api/openapi.yaml).
+- **Self-host:** [Overview](self-host.md) ·
+  [Production on one VM](production-one-vm.md) ·
+  [High availability](ops/high-availability.md) ·
+  [Settings](settings.md) · [Postgres](ops/postgres-requirements.md) ·
+  [Backups](ops/backup-considerations.md) · [Upgrades](upgrades.md) ·
+  [How much traffic it handles](scale.md) ·
+  [Card payment failure handling](payments.md) ·
+  [Runbook](ops/runbook/index.md).
+- **Internals:** [Architecture](architecture.md) ·
+  [How we test](testing.md) · [How Hardcount is engineered](ENGINEERING.md) ·
+  [Benchmarks](benchmarks/failure-correctness.md) ·
+  [Design decisions](adr/README.md) · [Records](dev/records/README.md).
 
-## Understand it
-
-1. [How Hardcount works](how-hardcount-works.md): one picture and six steps, from
-   a usage event to a paid invoice.
-2. [Glossary](glossary.md): the words you will meet, plain meaning first.
-3. [How much traffic Hardcount handles](scale.md): what was measured, and
-   where one Postgres stops being enough.
-4. [Card payment failure handling](payments.md): declines, ambiguous
-   results, crashes mid-charge, duplicate webhooks, refunds, and the known
-   gaps.
-
-## Connect your product
-
-1. [Send usage and get your first invoice](first-invoice.md): create a
-   customer, send token usage with curl or LiteLLM, and open the invoice.
-   Start here.
-2. [AI pricing reference](ai-pricing.md): the models each recipe prices,
-   pricing your own model, prepaid credit, and margin.
-3. [API surface](api-surface.md): the core routes. The full reference is
-   [`api/openapi.yaml`](../api/openapi.yaml).
-4. [API keys](api-keys.md): get a key, send it, test and live mode, and
-   rotation.
-5. [Webhooks](webhooks.md): events, signatures, and retries.
-6. [Stop usage when credit runs out](stop-usage-when-credit-runs-out.md):
-   poll a prepaid customer's live credit balance and gate in your own code.
-7. [LiteLLM integration](integrations/litellm.md): send token usage from a
-   LiteLLM proxy with a few lines of proxy config.
-
-## Run it for real
-
-1. [Self-host](self-host.md): what you need and how the pieces fit.
-   Every environment variable, with its default: [Settings reference](settings.md).
-2. [Production on one VM](production-one-vm.md): install with Docker
-   Compose, then HTTPS, email, Stripe, nightly backups and a go-live
-   checklist.
-3. [High availability](ops/high-availability.md): run two or more copies
-   behind a load balancer, with health checks and shutdown.
-4. [Upgrade Hardcount](upgrades.md): before you upgrade, the upgrade on one
-   VM or on several copies, and how to go back.
-5. [Postgres requirements](ops/postgres-requirements.md),
-   [email setup](ops/email-setup.md),
-   [backups](ops/backup-considerations.md) and
-   [tax calculation](ops/tax-calculation.md).
-6. When something breaks: the [operations runbook](ops/runbook/index.md).
-   Find what you see, then follow its steps.
-
-## Engineering
-
-1. [How Hardcount is engineered](ENGINEERING.md): the rules, with the proof
-   for each.
-2. Measured runs: [correctness under failure](benchmarks/failure-correctness.md)
-   and [sustained throughput](benchmarks/sustained-throughput.md).
-
----
-
-Changing Hardcount itself? Contributor docs, design notes and records are in [docs/dev/](dev/README.md).
+The project: [Roadmap](roadmap.md) · [CHANGELOG](../CHANGELOG.md) ·
+[How Hardcount compares](comparison.md). Changing Hardcount itself?
+Contributor docs are in [docs/dev/](dev/README.md).
