@@ -51,18 +51,18 @@ If Stripe Tax fails, the invoice waits; Hardcount never falls back to a guessed 
 
 ## When tax cannot be worked out
 
-This happens only with Stripe Tax. The invoice waits: it is not issued, emailed or charged. The invoice page shows a notice with the reason and a **Retry tax** button.
+This happens only with Stripe Tax. The invoice waits: it is not issued, emailed or charged. The invoice page shows a notice with the reason and a retry button. The button reads **Retry now** when the provider could not be reached, or when Stripe is connected now but was not at the first try. Otherwise it reads **Retry tax**.
 
 | The notice says | What to do | Retried by itself? |
 |---|---|---|
 | The customer's address or tax ID is missing or invalid | Fix the customer's billing profile, then click **Retry tax** | No |
 | The tax provider can't be reached right now | Check [status.stripe.com](https://status.stripe.com). Hardcount retries; click **Retry now** to try at once. | Yes, up to 8 times |
 | The tax provider rejected the API key | Update the Stripe keys under **Settings → Payments**, then retry | No |
-| Stripe isn't connected in this mode | Connect Stripe for this mode (test or live), then retry | Yes, up to 8 times |
+| Stripe isn't connected in this mode | Connect Stripe for this mode (test or live), then click **Retry tax**. Once Stripe is connected, the notice says the calculation is queued; click **Retry now** to run it at once. | Yes, up to 8 times |
 | The tax provider can't calculate tax for this customer's region | Add a tax registration for that region in Stripe, then retry | No |
 | Tax calculation failed for an unknown reason | Retry. If it keeps failing, check the server log. | Yes, up to 8 times |
 
-After 8 automatic tries, Hardcount stops and the notice says so. Click **Retry tax** to try again.
+After 8 automatic tries, Hardcount stops and the notice says so. Click the notice's retry button to try again: **Retry now** when the provider could not be reached or Stripe is now connected, **Retry tax** otherwise.
 
 ## What to watch
 

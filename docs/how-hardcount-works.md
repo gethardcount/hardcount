@@ -51,9 +51,12 @@ flowchart LR
 4. **The period ends, and Hardcount makes the invoice.** By default this
    happens 1 to 2 hours after the period ends. Hardcount waits an hour so that
    usage arriving a little late is still billed, and its billing run is
-   hourly. The invoice has one line for each price, plus the base fee and
-   any tax. Then the invoice is finalized: issued, and no longer a draft.
-   Hardcount tells your app with an `invoice.finalized` [webhook](webhooks.md).
+   hourly (every 5 minutes when `APP_ENV` is `local`). The invoice has a
+   line for each price that has usage, and one for the base fee; tax is
+   added to the total. It is finalized at once: issued, and no longer a
+   draft. It stays a draft only while tax cannot be worked out yet, or while
+   collection is paused. Hardcount tells your app with an
+   `invoice.finalized` [webhook](webhooks.md).
 
    **You see:** the invoice under **Invoices**. Its page shows each line,
    and its **⋯** menu has the PDF.
@@ -66,8 +69,9 @@ flowchart LR
    the customer has a saved card and your Stripe account is connected,
    Hardcount asks Stripe to charge that card for what is left. With no saved
    card, Hardcount starts dunning (step 6) and, once email is set up, emails
-   the customer a link to add one; the next retry after they add it charges
-   the card.
+   the customer: a link to add a card when your Stripe account is
+   connected, or else the invoice itself. Once they add a card, the next
+   billing run charges it.
 
    **You see:** the invoice reads **Paid**, with a "Credits applied" line
    if credit paid part of it. The payment shows in your Stripe dashboard.
@@ -96,3 +100,4 @@ this for a demo customer, up to the invoice: it connects no Stripe account,
 so nothing is charged.
 
 **Next:** see these six steps run on your computer: [quick start](quick-start.md).
+Each step in detail: [Concepts](concepts/data-model.md).

@@ -9,16 +9,18 @@ retries, that usage is lost. Back to the [runbook index](index.md).
 - The `…/litellm/spend` 503 counter rose during a Postgres failover or a
   rolling restart:
   `hardcount_http_requests_total{method="POST",path="/v1/integrations/litellm/spend",status="503"}`.
-- LiteLLM's proxy log shows `Generic API Logger Error sending batch` (its
-  `max_retries` were used up).
-- Or LiteLLM was never configured with retries
-  ([LiteLLM setup](../../integrations/litellm.md)).
+- LiteLLM's proxy log shows `Generic API Logger Error sending batch`.
+  LiteLLM 1.83.9 never sends a batch again after a timeout or an error
+  answer. LiteLLM 1.84.0 and later
+  send it again after a timeout or a 5xx only while `max_retries` lasts,
+  and never after a 4xx, such as a 400 for a body over 1 MB
+  ([what LiteLLM sends again](../../integrations/litellm.md#what-litellm-sends-again-and-what-is-lost)).
 
 ## Why
 
 Hardcount answered 503 to spend batches while its usage store was unreachable,
-so LiteLLM would retry them. A batch whose retries ran out is lost: every
-LLM call LiteLLM sent in that window. Hardcount's spend view is then short
+so LiteLLM could send them again. A batch LiteLLM did not send again, or
+whose retries ran out, is lost: every LLM call in it. Hardcount's spend view is then short
 against LiteLLM's spend page for the period.
 
 ## Check
