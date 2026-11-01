@@ -15,7 +15,7 @@ The settings for each copy are in [Settings](../settings.md). Every copy uses th
 
 ## What runs
 
-- **The server:** the image `ghcr.io/gethardcount/hardcount:<release>`, for example `v0.9.1`. Its entrypoint is `hardcount`; with no arguments it serves the API and runs the background jobs, on port 8080 (`PORT`). Run `hardcount migrate` once before new copies start on a new release: [Upgrades](#upgrades).
+- **The server:** the image `ghcr.io/gethardcount/hardcount:<release>`, for example `v0.9.2`. Its entrypoint is `hardcount`; with no arguments it serves the API and runs the background jobs, on port 8080 (`PORT`). Run `hardcount migrate` once before new copies start on a new release: [Upgrades](#upgrades).
 - **The dashboard:** the image `ghcr.io/gethardcount/hardcount-dashboard:<release>`, static files on port 80. It holds no state, so any number of copies works. It calls the API on its own address, so serve both from one address: send `/v1/` and `/health` to the server copies and everything else to the dashboard. The Compose stack's nginx does exactly this ([`deploy/compose/nginx.conf`](../../deploy/compose/nginx.conf)).
 - **HTTPS at the load balancer.** In `staging` and `production` the sign-in cookie is `Secure`, so the dashboard's sign-in works only over HTTPS.
 

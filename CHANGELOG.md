@@ -19,6 +19,18 @@ original text.
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-11-02
+
+Money and integrator fixes before the public launch. Finalizing a paused subscription's draft no longer charges the card, Stripe Tax prices every base fee by its plan's tax code, a line can no longer be added to a subscription's draft and go out untaxed, and LiteLLM usage is no longer lost to its batch size or log format. The API reference now describes every field with real examples, and new concept pages and guides cover what an integrator needs.
+
+**Before upgrading:**
+
+- Four migrations run on start. If you created a platform API key by hand in the database, delete it first: no route ever issued one, and the upgrade stops at migration 00221 while one exists ([what to do](docs/ops/runbook/migration-failed-midway.md#00221-found-platform-api-keys)).
+- Start-up now refuses an unknown `LOG_LEVEL` or `SMTP_TLS` value, and a database user that can't write a table it needs (the log lists the `GRANT` statements). Check both settings against [the settings page](docs/settings.md).
+- Stripe: add `refund.created` to your Stripe webhook endpoint, so a refund made in the Stripe dashboard is recorded.
+- API callers: an unknown value for the subscription list's `status`, `billing` or `collection`, the dunning run list's `state`, or `sort` or `dir` on the five sortable lists answers 422; `tax_on_failure: fallback_manual` answers 422; adding a line to a draft billing made for a subscription answers 409 `invoice_not_manual`. The platform key type and `/v1/tenants` are removed. Clients generated from the spec: 55 operations have new names.
+- On a Compose install: if you edited `deploy/compose/docker-compose.yml`, move your changes to `docker-compose.override.yml` first ([how](docs/settings.md#your-own-changes-the-override-file)), or `git checkout` refuses. Then check out the `v0.9.2` tag, change the image tags in `.env` to `v0.9.2`, and run `docker compose pull` and `docker compose up -d --no-build`. The tag's `deploy/compose` moves the front proxy to nginx 1.31 and lets LiteLLM batches up to 32 MB through it.
+
 ### Added
 
 - **Concept pages and guides for integrators.** Nine concept pages (data model, usage events, meters and prices, subscriptions, invoices, credits, payments, test clocks, margin) and three guides (bill AI tokens, connect Stripe, test a billing change). The LiteLLM page now states what LiteLLM sends again, what it can lose, and the size limits. ([#1506](https://github.com/gethardcount/hardcount/pull/1506))
@@ -36,7 +48,7 @@ original text.
 - **The setup checklist no longer opens by itself.** On a new account it covered the page (on a phone, all of it) and repeated the welcome card. The welcome card's **Open setup checklist** button and the **Setup** count in the sidebar open it. ([#1565](https://github.com/gethardcount/hardcount/pull/1565))
 - **A usage-only API key for LiteLLM and other gateways.** Create one under **API keys** ("Usage only") or with `key_type: ingest`; it sends usage, and every other call but `/v1/whoami` gets 403. Breaking: the unusable platform key type and `/v1/tenants` are removed, and an install holding a platform key stops at migration 00221. ([#1497](https://github.com/gethardcount/hardcount/pull/1497))
 - **A pull request merges only when the upgrade, pricing and browser checks pass on a branch up to date with `main`.** The `migrations`, `pricing-shapes` and `e2e` jobs are now required, so two pull requests can no longer both merge the same migration number. ([#1495](https://github.com/gethardcount/hardcount/pull/1495))
-- **Dashboard and front-proxy images move from nginx 1.30 to 1.31.** Compose users: pull `nginx:1.31-alpine` on your next upgrade; no config change is needed. The dashboard image stays on Node 22, the version CI builds and tests it on. ([#1494](https://github.com/gethardcount/hardcount/pull/1494))
+- **Dashboard and front-proxy images move from nginx 1.30 to 1.31.** Compose users get it by checking out the release tag, which also brings this release's `nginx.conf` and `docker-compose.yml`; then pull and restart. The dashboard image stays on Node 22, the version CI builds and tests it on. ([#1494](https://github.com/gethardcount/hardcount/pull/1494))
 - **Find a customer's invoices from the Invoices list.** Search matches the customer's name or email as well as the invoice number, and a customer picker filters the list to one customer. `GET /v1/invoices?search=` matches the same way. ([#1483](https://github.com/gethardcount/hardcount/pull/1483))
 - **Invoices and Dunning work on a phone.** At phone width each row reads in two lines: number or customer with the amount, then the status with the due date or next retry, and **Open invoice** on a dunning run. An invoice's lines show quantity and unit price under the item. The amount and status were off the right edge of the screen. ([#1484](https://github.com/gethardcount/hardcount/pull/1484))
 - **Settings asks before unsaved changes are lost.** Leaving the page by a link or Back, or flipping the Test/Live switch, with changes not yet saved now asks "Discard changes?". Moving between Settings tabs and signing out don't ask. A reload or closed tab already showed the browser's own warning. ([#1479](https://github.com/gethardcount/hardcount/pull/1479))
@@ -5481,7 +5493,8 @@ Documentation only: the README heading "Fewer dependencies" uses typographic quo
 
 ---
 
-[Unreleased]: https://github.com/gethardcount/hardcount/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/gethardcount/hardcount/compare/v0.9.2...HEAD
+[0.9.2]: https://github.com/gethardcount/hardcount/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/gethardcount/hardcount/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/gethardcount/hardcount/compare/v0.8.2...v0.9.0
 [0.8.2]: https://github.com/gethardcount/hardcount/compare/v0.8.1...v0.8.2

@@ -16,10 +16,10 @@ You do not need Go, Node, jq or a database. Docker downloads everything else.
 
 ## Part 1: Start Hardcount
 
-1. Download Hardcount at its latest release, v0.9.1, and start it.
+1. Download Hardcount at its latest release, v0.9.2, and start it.
 
    ```bash
-   git clone --branch v0.9.1 https://github.com/gethardcount/hardcount.git
+   git clone --branch v0.9.2 https://github.com/gethardcount/hardcount.git
    cd hardcount/deploy/compose
    ./quickstart.sh
    ```
