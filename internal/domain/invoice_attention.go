@@ -133,7 +133,8 @@ const (
 	// sweeps deliberately skip it. Distinct from payment_scheduled
 	// because the auto-charge is not scheduled. Reached when a subscription
 	// is paused AFTER its invoice was queued, which is what dunning's
-	// `pause` final action does to every invoice already in flight. A
+	// `pause` final action does to every invoice already in flight, and when
+	// an operator finalizes a paused subscription's draft. A
 	// dunning run already open on the invoice keeps retrying it through
 	// the pause, and the message then says so.
 	AttentionReasonCollectionPaused AttentionReason = "collection_paused"

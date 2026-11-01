@@ -2693,6 +2693,15 @@ func (s *PostgresStore) claimChargeHold(ctx context.Context, tenantID, id, eligi
 // charged stale. Since ADR-127 it also refuses while ANY hold is set,
 // including an expired one (chargeHoldFree).
 //
+// It refuses an invoice whose subscription has collection paused, read at the
+// invoice's own now (invoiceClockNowSQL), as the sweeps' lists do. The
+// collect that runs right after a finalize claims here without a list, so
+// without this an operator's Finalize on a paused subscription's draft
+// charged the card, while the finalize dialog said nothing is charged until
+// collection resumes. A refused invoice stays queued; the sweep collects it
+// once the pause ends. Charge now (ClaimChargeForManualCollect) and dunning
+// retries do not read the pause.
+//
 // Two load-bearing choices:
 //   - updated_at is NOT touched. It feeds the attention banner's age
 //     ("since"), the reconciler sweeps' staleness cool-offs, and the past-due
@@ -2710,8 +2719,18 @@ func (s *PostgresStore) claimChargeHold(ctx context.Context, tenantID, id, eligi
 func (s *PostgresStore) ClaimAutoCharge(ctx context.Context, tenantID, id string) (domain.ChargeHold, error) {
 	return s.claimChargeHold(ctx, tenantID, id, `auto_charge_pending = TRUE
 		  AND payment_status = 'pending'
-		  AND status = 'finalized'`)
+		  AND status = 'finalized'
+		  AND `+notPausedForCollection("invoices", invoiceClockNowSQL))
 }
+
+// invoiceClockNowSQL is the invoice's own now, on the database: the frozen
+// time of the test clock its customer is pinned to, else now(). These are the
+// instants the two sweeps' lists read the pause at (ListAutoChargePending and
+// ListAutoChargePendingForClock), so the claim and the lists agree on whether
+// a timed pause still holds.
+const invoiceClockNowSQL = `COALESCE((SELECT tc.frozen_time FROM customers pc
+		JOIN test_clocks tc ON tc.id = pc.test_clock_id
+		WHERE pc.id = invoices.customer_id), now())`
 
 // ReleaseChargeHold clears the hold its owner took, and only that hold: the
 // UPDATE compares the value the owner's claim wrote (ADR-127). An owner that
@@ -3214,20 +3233,22 @@ func (s *PostgresStore) SetTaxTransaction(ctx context.Context, tenantID, id stri
 	return tx.Commit()
 }
 
-// notPausedForCollection is the SQL predicate both auto-charge sweeps use to
-// honour `pause_collection`. A paused subscription means the operator (or
-// dunning's `pause` final action) stopped automatic collection on it, so the
-// sweeps must not charge its invoices — "pause_collection neuters the
-// financial side without touching the cycle".
+// notPausedForCollection is the SQL predicate both auto-charge sweeps and the
+// auto-charge claim (ClaimAutoCharge) use to honour `pause_collection`. A
+// paused subscription means the operator (or dunning's `pause` final action)
+// stopped automatic collection on it, so nothing automatic may charge its
+// invoices — "pause_collection neuters the financial side without touching
+// the cycle".
 //
 // The engine's own finalize sites already skip collection for a paused sub,
 // which used to make this unreachable by accident: nothing set
 // auto_charge_pending on a paused sub's invoice, so the sweeps never saw one.
 // That stopped being true once the tax-retry chain queued the invoices it
 // auto-finalizes — a paused sub's tax-deferred draft finalizes on retry and
-// would otherwise have been charged, contradicting the pause. Enforcing it in
-// the predicate keeps the rule with the collection owner rather than with
-// whichever writer happened to set the flag.
+// would otherwise have been charged, contradicting the pause. An operator's
+// Finalize of a paused sub's draft queues it too, and its collect claims
+// without a list. Enforcing it in the predicate keeps the rule with the
+// collection owner rather than with whichever writer happened to set the flag.
 //
 // One-off invoices (no subscription) are unaffected — NOT EXISTS holds when
 // there is nothing to join to.
