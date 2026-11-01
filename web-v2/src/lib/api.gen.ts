@@ -30805,6 +30805,31 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
+            /**
+             * @description Code `catchup_queue_full`: too many test-clock catch-ups are
+             *     waiting, so this catch-up did not start. The clock is set to
+             *     `internal_failure`. Once the running catch-ups finish, resume it
+             *     with `POST /v1/test-clocks/{id}/retry-advance`; sending the same
+             *     advance again answers 409. The answer has no `Retry-After`.
+             */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "api_error",
+                     *         "code": "catchup_queue_full",
+                     *         "message": "Too many test-clock catch-ups are waiting, so this clock's catch-up did not start and the clock is set to internal_failure. Resume it with POST /v1/test-clocks/hc_tclk_8e1f3a5c7b9d0e2f4a6c8b1d/retry-advance once the running catch-ups finish.",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     retryTestClockAdvance: {
@@ -30954,6 +30979,30 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
+            /**
+             * @description Code `catchup_queue_full`: too many test-clock catch-ups are
+             *     waiting, so this catch-up did not start. The clock is set to
+             *     `internal_failure` again. Send this retry again once the running
+             *     catch-ups finish. The answer has no `Retry-After`.
+             */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "api_error",
+                     *         "code": "catchup_queue_full",
+                     *         "message": "Too many test-clock catch-ups are waiting, so this clock's catch-up did not start and the clock is set to internal_failure. Resume it with POST /v1/test-clocks/hc_tclk_8e1f3a5c7b9d0e2f4a6c8b1d/retry-advance once the running catch-ups finish.",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     listTestClockCustomers: {
