@@ -12,8 +12,15 @@
  */
 import type { APIKey } from './aPIKey';
 
+/**
+ * A new API key and its full value. `raw_key` appears only in this answer.
+ */
 export interface APIKeyCreated {
   key: APIKey;
-  /** The full key. Shown only once; store it now. */
+  /**
+     * The full key: its prefix (`hc_secret_test_`, `hc_ingest_live_`
+     * and so on) and 64 hex characters. Shown only once; store it now.
+     * Hardcount keeps only a salted hash.
+     */
   raw_key: string;
 }

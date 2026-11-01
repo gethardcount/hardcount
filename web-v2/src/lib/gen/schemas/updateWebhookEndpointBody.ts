@@ -12,8 +12,12 @@
  */
 
 export type UpdateWebhookEndpointBody = {
+  /** A new URL, checked as on create. It cannot be empty. */
   url?: string;
+  /** A new note. An empty string clears it. */
   description?: string;
+  /** A new list of event types, replacing the old one. `[]` means every event. */
   events?: string[];
+  /** False pauses the endpoint; true resumes it. */
   active?: boolean;
 };

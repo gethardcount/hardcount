@@ -15,7 +15,9 @@
  * The JSON in each `data:` line of `/v1/webhook_events/stream`.
  */
 export interface WebhookStreamFrame {
+  /** The event's id. For a replay, the replay's own id. */
   event_id: string;
+  /** The event's type, such as `invoice.finalized`. */
   event_type: string;
   /**
      * The customer the event is about: the `customer_id` of the
@@ -30,10 +32,18 @@ export interface WebhookStreamFrame {
      * `delivered` (all deliveries succeeded) or `no_endpoints`.
      */
   status: string;
-  /** @nullable */
+  /**
+     * When the delivery result this frame reports happened. null in the first batch and in a new event's first frame.
+     * @nullable
+     */
   last_attempt_at: string | null;
+  /** When the event was created. */
   created_at: string;
+  /** The event's mode. Live frames are not filtered by mode, so check it. */
   livemode: boolean;
-  /** @nullable */
+  /**
+     * The original event, when this frame is about a replay. null otherwise.
+     * @nullable
+     */
   replay_of_event_id: string | null;
 }

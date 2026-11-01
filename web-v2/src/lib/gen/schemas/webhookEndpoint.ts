@@ -11,20 +11,54 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * A URL that Hardcount sends webhook events to, for one mode. Its
+ * signing secret is never returned here: only creating the endpoint
+ * and rotating its secret show it, once.
+ */
 export interface WebhookEndpoint {
+  /** The endpoint's id (`hc_whe_…`). */
   id: string;
+  /** The account the endpoint belongs to. */
   tenant_id?: string;
+  /** The mode the endpoint gets events from, true for live. It is the caller's mode when the endpoint is created. */
   livemode: boolean;
+  /**
+     * Where Hardcount POSTs each event. It must be `https://` on a
+     * public address. Outside production (`APP_ENV` is not
+     * `production`), `http://localhost` and loopback addresses work
+     * too.
+     */
   url: string;
+  /** Your note about the endpoint. Absent when empty. */
   description?: string;
+  /** Last 4 characters of the current signing secret. */
   secret_last4: string;
-  /** Subscribed event types. `*` means all. */
+  /**
+     * The event types the endpoint gets. `*` means every event, and a
+     * prefix such as `invoice.*` means every event whose type starts
+     * with `invoice.`.
+     */
   events: string[];
-  /** false = paused. */
+  /**
+     * False while the endpoint is paused. A paused endpoint gets no
+     * new events, its pending retries end as `failed`, and its
+     * deliveries cannot be resent.
+     */
   active: boolean;
-  /** The previous signing secret, during a rotation grace period. */
+  /**
+     * Last 4 characters of the previous signing secret, after a
+     * rotation. Absent if the secret was never rotated.
+     */
   secondary_secret_last4?: string;
+  /**
+     * When the previous secret stops signing deliveries, 72 hours
+     * after the rotation. It stays in the answer after that time.
+     * Absent if the secret was never rotated.
+     */
   secondary_secret_expires_at?: string;
+  /** When the endpoint was created. */
   created_at: string;
+  /** When the endpoint last changed. */
   updated_at: string;
 }

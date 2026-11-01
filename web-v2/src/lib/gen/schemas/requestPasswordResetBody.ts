@@ -12,5 +12,6 @@
  */
 
 export type RequestPasswordResetBody = {
+  /** The sign-in email of the account to reset. */
   email: string;
 };

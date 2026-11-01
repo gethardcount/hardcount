@@ -12,5 +12,6 @@
  */
 
 export type InviteMemberBody = {
+  /** The teammate's email, one plain address. It is stored in lower case. */
   email: string;
 };

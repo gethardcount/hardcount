@@ -11,6 +11,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * `processed` when Hardcount handled the event, `skipped` when it is not about a Hardcount object.
+ */
 export type ReceiveStripeWebhook200Status = typeof ReceiveStripeWebhook200Status[keyof typeof ReceiveStripeWebhook200Status];
 
 

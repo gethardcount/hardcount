@@ -12,5 +12,6 @@
  */
 
 export type SwitchSessionModeBody = {
+  /** True for live mode, false for test mode. */
   livemode: boolean;
 };

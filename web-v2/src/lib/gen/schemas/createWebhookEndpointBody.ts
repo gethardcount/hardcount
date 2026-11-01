@@ -12,7 +12,10 @@
  */
 
 export type CreateWebhookEndpointBody = {
+  /** Where to send events. Surrounding spaces are trimmed. */
   url: string;
+  /** Your note about the endpoint, such as what it feeds. */
   description?: string;
+  /** Event types to send. `*` means every event; `invoice.*` means every invoice event. Leave it out or send `[]` for every event. */
   events?: string[];
 };

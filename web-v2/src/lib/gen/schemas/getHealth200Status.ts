@@ -11,6 +11,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * Always `ok`.
+ */
 export type GetHealth200Status = typeof GetHealth200Status[keyof typeof GetHealth200Status];
 
 

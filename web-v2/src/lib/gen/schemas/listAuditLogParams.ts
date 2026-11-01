@@ -19,6 +19,9 @@ export type ListAuditLogParams = {
  * For example `invoice`, `api_key`, `setting`. See `/v1/audit-log/filters`.
  */
 resource_type?: string;
+/**
+ * Only entries about this resource id.
+ */
 resource_id?: string;
 /**
  * For example `create`, `update`, `revoke`. See `/v1/audit-log/filters`.

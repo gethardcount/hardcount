@@ -12,10 +12,23 @@
  */
 import type { TenantStatus } from './tenantStatus';
 
+/**
+ * An account: one business that bills its customers with Hardcount.
+ * It has separate test and live data. `POST /v1/bootstrap` creates
+ * the first one.
+ */
 export interface Tenant {
+  /** The account's id (`hc_ten_…`). Other objects carry it as `tenant_id`. */
   id: string;
+  /** The account's name, given at setup. */
   name: string;
+  /**
+     * The account's state. Setup creates it `active`. Nothing in this
+     * version sets `suspended` or `deleted`.
+     */
   status: TenantStatus;
+  /** When the account was created. */
   created_at: string;
+  /** When the account record last changed. */
   updated_at: string;
 }

@@ -12,25 +12,50 @@
  */
 import type { StripeConnectionLastVerifiedErrorKind } from './stripeConnectionLastVerifiedErrorKind';
 
+/**
+ * The account's own Stripe keys for one mode, without the secrets.
+ * Hardcount uses them to charge customers and to read Stripe's
+ * answers. `GET /v1/settings/stripe` lists one per connected mode.
+ */
 export interface StripeConnection {
-  /** Also the `{id}` in the Stripe webhook URL `/v1/webhooks/stripe/{id}`. */
+  /**
+     * The connection's id (`hc_spc_…`). It is also the
+     * `{endpoint_id}` in the Stripe webhook URL
+     * `/v1/webhooks/stripe/{endpoint_id}`.
+     */
   id: string;
+  /** The account the keys belong to. */
   tenant_id: string;
+  /** True for live-mode keys (`sk_live_…`), false for test-mode keys. */
   livemode: boolean;
-  /** Set after Stripe accepted the key. */
+  /** The Stripe account the key belongs to (`acct_…`). Absent until Stripe first accepts a key for this mode. */
   stripe_account_id?: string;
+  /**
+     * The Stripe account's business name, or its dashboard name or
+     * email when it has none. Absent until Stripe accepts a key.
+     */
   stripe_account_name?: string;
   /** First 12 characters of the secret key. */
   secret_key_prefix?: string;
+  /** Last 4 characters of the secret key. */
   secret_key_last4: string;
+  /** The publishable key, in full. It is not a secret. */
   publishable_key: string;
+  /** Last 4 characters of the webhook signing secret. Absent until one is saved. */
   webhook_secret_last4?: string;
+  /**
+     * Whether a webhook signing secret is saved. Until one is, Stripe
+     * webhooks sent to this connection are refused with 404.
+     */
   has_webhook_secret: boolean;
-  /** Last time Stripe accepted the key. */
+  /**
+     * When Stripe last accepted the key. Absent until it does. Saving
+     * new keys clears it until the next check passes.
+     */
   verified_at?: string;
   /**
      * Why the last Stripe check failed, in Stripe's own words (or the
-     * network error when Stripe was not reached). Empty when it passed.
+     * network error when Stripe was not reached). Absent when it passed.
      */
   last_verified_error?: string;
   /**
@@ -41,8 +66,14 @@ export interface StripeConnection {
      * check passed, and on keys that failed before this field existed.
      */
   last_verified_error_kind?: StripeConnectionLastVerifiedErrorKind;
+  /** When keys were first saved for this mode. */
   created_at: string;
+  /** When the connection last changed. */
   updated_at: string;
-  /** Connect response only. Number of stuck invoices being retried in the background. */
+  /**
+     * Only in the answer to `POST /v1/settings/stripe`, and only when
+     * above 0: how many invoices that were stuck waiting for Stripe
+     * keys are now being retried in the background.
+     */
   retries_queued?: number;
 }

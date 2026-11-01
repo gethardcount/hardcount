@@ -13,7 +13,9 @@
 import type { GetEmailSettings200LinksItemEnv } from './getEmailSettings200LinksItemEnv';
 
 export type GetEmailSettings200LinksItem = {
+  /** The environment variable's name. */
   env: GetEmailSettings200LinksItemEnv;
+  /** Whether the variable is set. */
   set: boolean;
   /** What doesn't work while it is unset. */
   effect: string;

@@ -11,7 +11,11 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * Totals over the whole window.
+ */
 export type GetAnalyticsUsage200Totals = {
+  /** Usage events with a timestamp in the window. */
   events: number;
   /** Summed quantity, as a decimal string. */
   quantity: string;

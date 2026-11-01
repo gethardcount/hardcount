@@ -140,6 +140,9 @@ decodes a body the spec does not declare. When you add one, add its
   body or a 2xx JSON response has no `example`.
 - `TestOpenAPISpec_ExampleTimesAreQuoted` fails on an unquoted date-time in
   an example. JavaScript YAML readers turn one into a date object.
+- `TestOpenAPISpec_EverySchemaFieldDescribed` fails when a component schema
+  or one of its properties has no `description`. A property that is only a
+  `$ref` takes the referenced schema's description.
 
 The first test checks an example against the spec, not against the server.
 A value the schema allows but the handler refuses, such as an unknown

@@ -12,6 +12,13 @@
  */
 import type { ErrorError } from './errorError';
 
+/**
+ * The body of an error answer. `error.type` is the broad class,
+ * `error.code` is the exact reason for your code to branch on, and
+ * `error.message` is a sentence for a person. Quote
+ * `error.request_id` when you ask for help.
+ */
 export interface Error {
+  /** What went wrong. */
   error?: ErrorError;
 }

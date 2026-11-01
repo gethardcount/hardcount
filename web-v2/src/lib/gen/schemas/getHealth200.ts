@@ -13,5 +13,6 @@
 import type { GetHealth200Status } from './getHealth200Status';
 
 export type GetHealth200 = {
+  /** Always `ok`. */
   status: GetHealth200Status;
 };

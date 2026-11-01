@@ -14,8 +14,9 @@
 export type BootstrapBody = {
   /** The value of `HARDCOUNT_BOOTSTRAP_TOKEN`. Or send it as a Bearer token. */
   token?: string;
+  /** The account's name. */
   tenant_name?: string;
-  /** Must contain `@`. */
+  /** The owner's dashboard sign-in email. One plain address whose domain has a dot. */
   owner_email?: string;
   /**
      * 12 or more characters, at most 72 bytes, and not a common password from a leaked-password list. Omit to have Hardcount generate one.

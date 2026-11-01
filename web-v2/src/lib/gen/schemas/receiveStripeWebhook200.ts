@@ -13,7 +13,8 @@
 import type { ReceiveStripeWebhook200Status } from './receiveStripeWebhook200Status';
 
 export type ReceiveStripeWebhook200 = {
+  /** `processed` when Hardcount handled the event, `skipped` when it is not about a Hardcount object. */
   status: ReceiveStripeWebhook200Status;
-  /** Why the event was skipped. */
+  /** Why the event was skipped. Absent when it was processed. */
   reason?: string;
 };

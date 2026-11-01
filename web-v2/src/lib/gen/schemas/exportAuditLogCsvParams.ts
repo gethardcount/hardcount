@@ -20,9 +20,21 @@ date_from?: string;
  * Upper bound on created_at, inclusive. RFC 3339 or `YYYY-MM-DD` (end of that day, UTC).
  */
 date_to?: string;
+/**
+ * Only rows about this kind of resource, such as `invoice` or `api_key`.
+ */
 resource_type?: string;
+/**
+ * Only rows about this resource id.
+ */
 resource_id?: string;
+/**
+ * Only rows with this action, such as `create` or `revoke`.
+ */
 action?: string;
+/**
+ * Only rows by this actor (a user id or an API key id).
+ */
 actor_id?: string;
 /**
  * Only rows from this test clock's simulation.

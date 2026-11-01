@@ -13,7 +13,9 @@
 import type { GetWhoami200KeyType } from './getWhoami200KeyType';
 
 export type GetWhoami200 = {
+  /** The account the credential belongs to. */
   tenant_id: string;
+  /** The mode the credential works in, true for live. */
   livemode: boolean;
   /**
      * Whether this server can email a customer a link to add
@@ -34,8 +36,12 @@ export type GetWhoami200 = {
      * (`GET /v1/settings/email`) has the details.
      */
   smtp_configured: boolean;
+  /** Dashboard session only. The signed-in user's id (`hc_usr_…`). */
   user_id?: string;
+  /** Dashboard session only. The user's sign-in email; absent if it could not be read. */
   email?: string;
+  /** API key only. The key's id (`hc_key_…`). */
   key_id?: string;
+  /** API key only. The key's type. */
   key_type?: GetWhoami200KeyType;
 };

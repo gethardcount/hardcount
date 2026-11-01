@@ -12,11 +12,16 @@
  */
 
 export type AcceptInvitation200 = {
+  /** The member's user id (`hc_usr_…`). */
   user_id: string;
+  /** The member's sign-in email. */
   email: string;
+  /** The account the member joined. */
   tenant_id: string;
+  /** True when this answer signed the new account in and set the session cookie. */
   session_minted: boolean;
+  /** The new session's mode. Always false (test). */
   livemode: boolean;
-  /** Session expiry (RFC 3339) when session_minted; empty string otherwise. */
+  /** Session expiry (RFC 3339) when `session_minted` is true; an empty string otherwise. */
   expires_at: string;
 };

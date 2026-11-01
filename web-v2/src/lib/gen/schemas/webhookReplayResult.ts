@@ -12,10 +12,19 @@
  */
 import type { WebhookReplayResultStatus } from './webhookReplayResultStatus';
 
+/**
+ * What `POST /v1/webhook_events/{id}/replay` returns.
+ */
 export interface WebhookReplayResult {
   /** The new event created by the replay. */
   event_id: string;
   /** The original event. */
   replay_of: string;
+  /**
+     * `queued` when at least one endpoint will get the replay.
+     * `no_matching_endpoints` when no active endpoint in this mode
+     * subscribes to the event's type; the replay event is still
+     * created.
+     */
   status: WebhookReplayResultStatus;
 }

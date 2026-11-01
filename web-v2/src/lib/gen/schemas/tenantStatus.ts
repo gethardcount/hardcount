@@ -11,6 +11,10 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * The account's state. Setup creates it `active`. Nothing in this
+ * version sets `suspended` or `deleted`.
+ */
 export type TenantStatus = typeof TenantStatus[keyof typeof TenantStatus];
 
 

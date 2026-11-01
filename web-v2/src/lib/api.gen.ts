@@ -11,7 +11,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Health check */
+        /**
+         * Check that the server is up
+         * @description Answers 200 whenever the server process can answer. It checks
+         *     nothing else. For a load balancer, use `GET /health/ready`, which
+         *     also checks the database. Not rate limited.
+         */
         get: operations["getHealth"];
         put?: never;
         post?: never;
@@ -29,13 +34,14 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Readiness check for load balancers
+         * Check that the server can take requests
          * @description Tells a load balancer whether this server can take requests. It
          *     returns 503 when the server is shutting down (`draining`) or cannot
          *     reach the database. A late billing scheduler shows as `degraded` in
          *     the body but keeps the status at 200: taking the server out of the
          *     balancer would not restart the scheduler. Alert on the scheduler
-         *     metrics instead (see docs/ops/runbook/monitoring.md).
+         *     metrics instead (see docs/ops/runbook/monitoring.md). The database
+         *     check waits at most 3 seconds. Not rate limited.
          */
         get: operations["getHealthReady"];
         put?: never;
@@ -54,11 +60,11 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Prometheus metrics
+         * Get Prometheus metrics
          * @description Metrics in the Prometheus text format, for a Prometheus scrape.
          *     When `METRICS_TOKEN` is set, send it as a Bearer token. When it is
          *     not set, the route is open, except with `APP_ENV=production`, where
-         *     it answers 401. This is not an API key route.
+         *     it answers 401. This is not an API key route. Not rate limited.
          */
         get: operations["getMetrics"];
         put?: never;
@@ -820,16 +826,28 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List webhook endpoints */
+        /**
+         * List webhook endpoints
+         * @description Returns the endpoints in the caller's mode, newest first. Paused
+         *     endpoints are included; deleted ones are not. Signing secrets are
+         *     never returned.
+         */
         get: operations["listWebhookEndpoints"];
         put?: never;
         /**
-         * Create webhook endpoint
-         * @description Returns the endpoint plus its signing secret (shown once). Event
-         *     names are validated against the emit catalog — subscribing to an
-         *     event Hardcount never emits is a 422, not silence. Omitted/empty
-         *     events = all events ("*"); "invoice.*"-style prefix wildcards are
-         *     supported.
+         * Create a webhook endpoint
+         * @description Registers a URL that Hardcount sends events to, in the caller's mode
+         *     (test or live). The answer holds the endpoint and its signing secret
+         *     (`whsec_…`). The secret is shown only here: store it, and use it to
+         *     check the `Hardcount-Signature` header of each delivery.
+         *
+         *     The URL must be `https://`. Hardcount looks up its host and refuses
+         *     one that points to a private network address. `events` lists the
+         *     event types to send. Leave it out, or send `[]`, for every event
+         *     (`*`). A prefix such as `invoice.*` matches every event whose type
+         *     starts with `invoice.`. An event type Hardcount never sends is
+         *     refused with 422, so a typo cannot leave the endpoint silent. Writes
+         *     an audit row.
          */
         post: operations["createWebhookEndpoint"];
         delete?: never;
@@ -847,21 +865,33 @@ export interface paths {
         };
         /**
          * Get a webhook endpoint
-         * @description One endpoint, without its signing secret.
+         * @description One endpoint in the caller's mode, without its signing secret. A deleted endpoint is a 404.
          */
         get: operations["getWebhookEndpoint"];
         put?: never;
         post?: never;
-        /** Delete (disable) webhook endpoint */
+        /**
+         * Delete a webhook endpoint
+         * @description Deletes the endpoint. It leaves every list and lookup and gets no
+         *     more events, and its pending retries end as `failed`. Its past
+         *     deliveries stay in event timelines and in the stats. There is no
+         *     undo: to stop events for a while, pause the endpoint with `PATCH`
+         *     and `active: false` instead. Writes an audit row.
+         */
         delete: operations["deleteWebhookEndpoint"];
         options?: never;
         head?: never;
         /**
-         * Update webhook endpoint (no secret rotation)
-         * @description Mutates url / description / events / active WITHOUT rotating the
-         *     signing secret — the receiver keeps verifying while the target or
-         *     event set changes. Fields omitted are left unchanged; events are
-         *     validated against the emit catalog.
+         * Update a webhook endpoint
+         * @description Changes the endpoint's `url`, `description`, `events` or `active`.
+         *     The signing secret stays the same, so your receiver keeps checking
+         *     signatures while the target or the event list changes. A field you
+         *     leave out keeps its value. `url` and `events` are checked as on
+         *     create, and `events: []` means every event.
+         *
+         *     Send `active: false` to pause the endpoint: it gets no new events,
+         *     and its pending retries end as `failed`. Send `active: true` to
+         *     resume it. Writes an audit row.
          */
         patch: operations["updateWebhookEndpoint"];
         trace?: never;
@@ -875,7 +905,14 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Rotate signing secret (72h dual-signing grace) */
+        /**
+         * Rotate a webhook endpoint's signing secret
+         * @description Makes a new signing secret and returns it once. For the next 72
+         *     hours each delivery's `Hardcount-Signature` header carries two
+         *     `v1=` signatures, one made with each secret, so your receiver can
+         *     switch to the new secret without rejecting events. After that only
+         *     the new secret signs. Writes an audit row, without the secret.
+         */
         post: operations["rotateWebhookEndpointSecret"];
         delete?: never;
         options?: never;
@@ -891,7 +928,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List an endpoint's recent deliveries
+         * List an endpoint's deliveries
          * @description The endpoint's deliveries, newest first. Each row names the event
          *     it carried. A deleted or unknown endpoint returns 404. The endpoint
          *     itself is `GET /v1/webhook-endpoints/endpoints/{id}`.
@@ -917,12 +954,12 @@ export interface paths {
         /**
          * Resend one delivery to its endpoint
          * @description Sends the delivery's event again to this one endpoint only. Other
-         *     endpoints are not contacted. Hardcount copies the event to a new event
-         *     (`replay_of` points to the original) and queues a new delivery.
-         *     The message sent carries the original event's `id` and
-         *     `created_at`. The original delivery is not changed. Sending happens in the
-         *     background, so `status` is always `queued`.
-         *     Writes an audit row.
+         *     endpoints are not contacted. Hardcount copies the event to a new
+         *     event (`replay_of` points to the original) and queues a new
+         *     delivery. The message sent carries the original event's `id` and
+         *     `created_at`. The original delivery is not changed. Sending happens
+         *     in the background, so `status` is always `queued`. Writes an audit
+         *     row.
          */
         post: operations["replayWebhookDelivery"];
         delete?: never;
@@ -939,10 +976,10 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Delivery counts per webhook endpoint
+         * Get delivery counts per webhook endpoint
          * @description All-time delivery counts for each endpoint that has deliveries, in
-         *     the caller's mode. Endpoints with no deliveries are not listed.
-         *     Deleted endpoints can appear.
+         *     the caller's mode, ordered by endpoint id. Endpoints with no
+         *     deliveries are not listed. Deleted endpoints can appear.
          */
         get: operations["getWebhookEndpointStats"];
         put?: never;
@@ -960,7 +997,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List outbound events, newest first */
+        /**
+         * List webhook events
+         * @description Returns the outbound events in the caller's mode, newest first,
+         *     replays included, each with its full `payload`. An event is listed
+         *     even when no endpoint subscribed to it.
+         */
         get: operations["listWebhookEvents"];
         put?: never;
         post?: never;
@@ -978,12 +1020,13 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List all delivery attempts for an event
+         * List all deliveries of an event and its replays
          * @description Returns one timeline, oldest first, of every delivery for the
          *     original event and for all of its replays. If `id` is a replay,
          *     the timeline starts from its original event (`root_event_id`).
          *     Rows keep the endpoint's URL and description even after the
-         *     endpoint is deleted.
+         *     endpoint is deleted. The whole timeline comes in one answer, with
+         *     no paging. Needs the `apikey:read` permission.
          */
         get: operations["listWebhookEventDeliveries"];
         put?: never;
@@ -1031,8 +1074,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Stream webhook events live (Server-Sent Events)
-         * @description A long-lived Server-Sent Events stream of the tenant's outbound
+         * Stream webhook events as they happen
+         * @description A long-lived Server-Sent Events stream of the account's outbound
          *     webhook events. Accepts the dashboard session cookie or a Bearer
          *     key with `apikey:read`. It has no 30-second request timeout.
          *
@@ -1073,11 +1116,14 @@ export interface paths {
          *     Stripe dashboard at it for each connected mode. `endpoint_id` is the
          *     `id` of that mode's Stripe connection (`GET /v1/settings/stripe`).
          *     The request is checked against the `Stripe-Signature` header and
-         *     that mode's signing secret. The body can be at most 64 KB.
+         *     that mode's signing secret, so save the secret first
+         *     (`PATCH /v1/settings/stripe/{mode}/webhook`). The body can be at
+         *     most 64 KB.
          *
-         *     Events for objects Hardcount did not create are answered 200 with
-         *     `status: skipped`. A 500 means a temporary failure, and Stripe
-         *     sends the event again.
+         *     An event whose object carries no Hardcount metadata is answered 200
+         *     with `status: skipped`, except setup, refund and dispute events,
+         *     which are matched through the connection. A 500 means a temporary
+         *     failure, and Stripe sends the event again.
          */
         post: operations["receiveStripeWebhook"];
         delete?: never;
@@ -1104,10 +1150,15 @@ export interface paths {
          *     `POSTMARK_WEBHOOK_PASS` set, every request gets 401. See
          *     docs/ops/email-setup.md.
          *
-         *     Error bodies are `{"error": "<reason>"}`, not the usual error
-         *     object. A body that a retry cannot fix is answered 200, so Postmark
-         *     stops retrying: over 64 KB, invalid JSON, or no known Hardcount email
-         *     id in its metadata.
+         *     Each record is matched to the email Hardcount sent through the
+         *     `hc-outbox-id` key in its `Metadata`. A delivery, hard bounce or
+         *     spam complaint updates that email's delivery state. A bounce or
+         *     complaint also marks the customers who use that address as bounced
+         *     or complained.
+         *
+         *     A body that a retry cannot fix is answered 200, so Postmark stops
+         *     retrying: over 64 KB, invalid JSON, or no known Hardcount email id
+         *     in its metadata. Errors use the usual error body.
          */
         post: operations["receivePostmarkWebhook"];
         delete?: never;
@@ -2863,19 +2914,23 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Sign in with email and password; mint an httpOnly session cookie
+         * Sign in to the dashboard with email and password
          * @description Used by the dashboard; not part of the integration API.
          *
-         *     Validates email + password, mints a server-side session row, and
-         *     sets `Set-Cookie: hardcount_session=...; HttpOnly; SameSite=Lax; Path=/`.
-         *     Subsequent dashboard requests authenticate via the cookie; sessions
-         *     are bound to `users.id` and are independent of API key lifecycle.
-         *     See ADR-011.
+         *     Checks the email and password. On success it starts a dashboard
+         *     session in test mode and puts it in the `hardcount_session` cookie
+         *     (`HttpOnly`, `SameSite=Lax`, `Path=/`, and `Secure` in staging and
+         *     production). The session lasts 7 days. It belongs to the user, not
+         *     to an API key, so revoking API keys does not sign anyone out. Switch
+         *     the session to live mode with `POST /v1/auth/mode`.
          *
          *     A successful sign-in also sets `hardcount_device` (HttpOnly,
          *     `Path=/v1/auth`, 180 days). It marks the browser as one that signed
          *     in to this email, so the sign-in throttle counts its attempts on
          *     their own. It never replaces the password.
+         *
+         *     A wrong password and an unknown email get the same 401, so the
+         *     answer does not reveal which emails have accounts.
          */
         post: operations["login"];
         delete?: never;
@@ -2894,12 +2949,16 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Revoke the current session and clear the cookie
+         * Sign out of the dashboard
          * @description Used by the dashboard; not part of the integration API.
          *
-         *     Marks the session row as revoked server-side and clears the
-         *     cookie on the response. Idempotent — a missing or stale cookie
-         *     is treated as already-logged-out.
+         *     Ends the session named by the `hardcount_session` cookie on the
+         *     server, then clears the cookie. A cookie for a session that already
+         *     ended also gets 204. A request with no cookie gets 204 and changes
+         *     nothing, not even a cookie. If the session cannot be ended, the
+         *     answer is 500 and the cookie stays, so a browser is never told it
+         *     signed out while its session still works. Writes an audit row when
+         *     a session ended.
          */
         post: operations["logout"];
         delete?: never;
@@ -2921,11 +2980,12 @@ export interface paths {
          * Switch the dashboard session between test and live mode
          * @description Used by the dashboard; not part of the integration API.
          *
-         *     Updates `dashboard_sessions.livemode` for the cookie session.
-         *     All subsequent requests inherit the new mode via session middleware,
-         *     so customers / invoices / subscriptions / API keys reads filter to
-         *     the active mode without per-call mode parameters. The same operator
-         *     flips back and forth without re-authenticating.
+         *     Sets the mode of the signed-in dashboard session. Every later
+         *     request with this session reads and writes that mode's data:
+         *     customers, invoices, subscriptions, API keys and the rest. No
+         *     request needs its own mode parameter, and the user does not sign
+         *     in again. Writes an audit row, filed in test mode whichever mode
+         *     is chosen.
          */
         post: operations["switchSessionMode"];
         delete?: never;
@@ -2947,14 +3007,18 @@ export interface paths {
          * Request a password reset link
          * @description Used by the dashboard; not part of the integration API.
          *
-         *     Always returns the same 200 body regardless of whether the email
-         *     exists, to avoid account enumeration. If a user matches, a
-         *     single-use 1-hour token is generated and the reset link is
-         *     emailed via SMTP (requires `SMTP_HOST` and `DASHBOARD_BASE_URL`;
-         *     there is no stdout fallback). `email_delivery` reports whether
-         *     this deployment can deliver reset emails at all — deployment
-         *     posture, computed independently of any match, so it leaks no
-         *     account existence.
+         *     Always returns the same 200 body, whether or not an account has the
+         *     email, so the answer does not reveal which emails have accounts. If
+         *     an account matches, Hardcount creates a single-use reset token that
+         *     works for 1 hour and emails a reset link built from
+         *     `DASHBOARD_BASE_URL`. Sending needs SMTP (`SMTP_HOST`) and
+         *     `DASHBOARD_BASE_URL`; there is no other way to deliver the link. One
+         *     account is sent at most 3 reset emails an hour; later requests in
+         *     that hour send nothing.
+         *
+         *     `email_delivery` says whether this server can deliver reset emails
+         *     at all. It describes the server's setup and does not depend on the
+         *     email sent.
          */
         post: operations["requestPasswordReset"];
         delete?: never;
@@ -2976,8 +3040,12 @@ export interface paths {
          * Set a new password using a reset token
          * @description Used by the dashboard; not part of the integration API.
          *
-         *     Consumes a single-use reset token and updates the user's password.
-         *     The token is invalidated on use; reuse or expired tokens return 422.
+         *     Uses up a reset token and sets the user's new password. Every
+         *     session the user had is then signed out, so a stolen session cookie
+         *     stops working too. The new password is checked before the token, so
+         *     a password that fails the check does not use the token up. An
+         *     unknown, expired or already used token is a 422 with
+         *     `param: token`. Writes an audit row.
          */
         post: operations["confirmPasswordReset"];
         delete?: never;
@@ -3020,14 +3088,15 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Preview a team invitation (accept-page context)
+         * Preview a team invitation
          * @description Used by the dashboard; not part of the integration API.
          *
-         *     Unauthenticated — the token IS the credential (mirrors password
-         *     reset). Returns the invited email, workspace name, and whether
-         *     the invitee needs to create an account. Invalid, expired,
-         *     revoked, and already-used tokens all return the same generic
-         *     422 (no state oracle for token guessing). ADR-081.
+         *     The accept page calls it first. No sign-in is needed: the token from
+         *     the invite link is the credential, as with a password reset link.
+         *     Returns the invited email, the account's name, and whether the
+         *     invitee has to create an account. An unknown, expired, revoked or
+         *     used token gets the same 422, so the answer does not tell a
+         *     guesser which tokens exist.
          */
         get: operations["getInvitation"];
         put?: never;
@@ -3051,14 +3120,23 @@ export interface paths {
          * Accept a team invitation
          * @description Used by the dashboard; not part of the integration API.
          *
-         *     Consumes the single-use invite token (CAS — a replay or a race
-         *     loses) and attaches the membership. If no account exists for the
-         *     invited email, `password` is required (min 12 chars), the account
-         *     is created, and a session cookie is minted (`session_minted:
-         *     true`). An EXISTING account is attached WITHOUT a session —
-         *     possession of the email alone must not log into an
-         *     already-privileged account; the user signs in with their own
-         *     password afterwards. ADR-081.
+         *     Uses up the invite token and adds the invitee to the account as a
+         *     member. The token works once: of two requests that race, or an
+         *     accept racing a revoke, only one wins.
+         *
+         *     - No account has the invited email: `password` is required.
+         *       Hardcount creates the account, signs it in with a new session
+         *       cookie, and answers `session_minted: true`.
+         *     - An account has the email: Hardcount adds the membership but does
+         *       not sign the user in, because holding the email alone must not
+         *       open an existing account. The user signs in with their own
+         *       password afterwards, and `password` is ignored.
+         *
+         *     The token is used up before the new account is created. If the new
+         *     account's password fails the check (422, `param: password`), the
+         *     invitation stays used and the inviter has to send a new one. If
+         *     only the session cannot be started, the membership still stands and
+         *     `session_minted` is false. Writes an audit row.
          */
         post: operations["acceptInvitation"];
         delete?: never;
@@ -3075,14 +3153,14 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List workspace members and invitations
+         * List team members and invitations
          * @description Used by the dashboard; not part of the integration API.
          *
-         *     Dashboard-session only (403 for API keys — membership is a human
-         *     act with a human actor). Members are every user attached to the
-         *     tenant; invitations carry a server-derived status
-         *     (pending/accepted/revoked/expired). No RBAC yet: `role` is
-         *     recorded but every member holds the full permission set. ADR-081.
+         *     Lists the account's members, oldest user first, and every
+         *     invitation the account has sent, newest first. Only a dashboard
+         *     session can call it: an API key gets 403, because a team change is
+         *     made by a person. Roles are recorded but not enforced yet: every
+         *     member can do everything in the dashboard.
          */
         get: operations["listMembers"];
         put?: never;
@@ -3106,11 +3184,16 @@ export interface paths {
          * Invite a teammate by email
          * @description Used by the dashboard; not part of the integration API.
          *
-         *     Creates a pending invitation (7-day expiry, one pending per
-         *     email) and sends the accept link via the transactional email
-         *     outbox. Requires `DASHBOARD_BASE_URL` — accept links are never
-         *     derived from request headers. 409 when the email is already a
-         *     member or already has a pending invite. ADR-081.
+         *     Creates an invitation that works for 7 days and queues an email
+         *     with the accept link. The link is built from `DASHBOARD_BASE_URL`,
+         *     never from the request's headers. An email can have only one
+         *     invitation that is not accepted or revoked, even an expired one:
+         *     revoke it to send a new one. Writes an audit row.
+         *
+         *     Nothing is created when the server cannot deliver the link: the
+         *     answer is 409 with code `invalid_state` when `DASHBOARD_BASE_URL`
+         *     is not set, or `email_not_configured` when this server has no SMTP.
+         *     `can_send_invites` on `GET /v1/whoami` tells you in advance.
          */
         post: operations["inviteMember"];
         delete?: never;
@@ -3130,12 +3213,13 @@ export interface paths {
         put?: never;
         post?: never;
         /**
-         * Revoke a pending invitation
+         * Revoke an invitation
          * @description Used by the dashboard; not part of the integration API.
          *
-         *     Stamps the invitation revoked; its accept link stops working
-         *     immediately (revoke racing an accept: exactly one wins). Only
-         *     pending invitations can be revoked — accepted/revoked ones 404.
+         *     Revokes an invitation that is not accepted or revoked yet, an
+         *     expired one included. Its accept link stops working at once; if an
+         *     accept races the revoke, only one of them wins. An accepted or
+         *     already revoked invitation is a 404. Writes an audit row.
          */
         delete: operations["revokeMemberInvitation"];
         options?: never;
@@ -3154,14 +3238,14 @@ export interface paths {
         put?: never;
         post?: never;
         /**
-         * Remove a member from the workspace
+         * Remove a member from the account
          * @description Used by the dashboard; not part of the integration API.
          *
-         *     Deletes the membership AND revokes all of the user's sessions
-         *     (sessions pin the tenant — without revocation an active session
-         *     would keep full access). Guards: self-removal is blocked
-         *     (another member must remove you) and the last member cannot be
-         *     removed. ADR-081.
+         *     Removes the user from the account and ends all of their sessions,
+         *     so a browser they are signed in on loses access at once. You
+         *     cannot remove yourself (another member must do it), and the
+         *     account's last member cannot be removed. The user's sign-in
+         *     account itself is kept. Writes an audit row.
          */
         delete: operations["removeMember"];
         options?: never;
@@ -3177,13 +3261,13 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Resolve the current credential to its tenant context
-         * @description Returns the resolved auth context for whichever credential the
-         *     request carries — `hardcount_session` cookie (dashboard) or
-         *     `Authorization: Bearer` (SDK / curl). Cookie path returns
-         *     `user_id` + `email`; Bearer path returns `key_id` + `key_type`.
-         *     All callers get `tenant_id`, `livemode`,
-         *     `can_email_setup_links`, `can_send_invites` and `smtp_configured`.
+         * Get the account and mode of the current credential
+         * @description Tells you which account and mode the request's credential works
+         *     in. Any valid credential can call it, an ingest key included. With
+         *     an API key the answer has `key_id` and `key_type`; with a dashboard
+         *     session it has `user_id` and `email` instead. Every answer has
+         *     `tenant_id`, `livemode`, `can_email_setup_links`,
+         *     `can_send_invites` and `smtp_configured`.
          */
         get: operations["getWhoami"];
         put?: never;
@@ -3716,16 +3800,18 @@ export interface paths {
          * Export customers as CSV
          * @description Used by the dashboard; not part of the integration API.
          *
-         *     Streams every customer, newest first, from one consistent
-         *     snapshot. Columns: id, external_id, display_name, email, status,
+         *     Streams every customer in the caller's mode, newest first, from
+         *     one consistent snapshot. Columns: id, external_id, display_name, email, status,
          *     email_status, created_at, updated_at.
          *
          *     Each export writes an `export` row to the audit log before any
          *     data is sent. If that row cannot be written, the call returns 500
          *     and sends nothing. If the export fails after it started, the last
          *     row's first cell is `EXPORT_INCOMPLETE`: discard the file and
-         *     retry. Text cells that start with `= + - @` get a leading `'`
-         *     so spreadsheets do not run them as formulas.
+         *     retry. Text cells that start with `=`, `+`, `-`, `@`, a tab or a
+         *     carriage return get a leading `'`, so spreadsheets do not run them
+         *     as formulas. The file comes as an attachment named like
+         *     `customers-20261101-090000.csv` (the time is UTC).
          */
         get: operations["exportCustomersCsv"];
         put?: never;
@@ -3747,8 +3833,9 @@ export interface paths {
          * Export invoices as CSV
          * @description Used by the dashboard; not part of the integration API.
          *
-         *     Streams every invoice, newest first, from one consistent
-         *     snapshot. Amounts are in cents. Columns: id, invoice_number,
+         *     Streams every invoice in the caller's mode, newest first, from
+         *     one consistent snapshot. Amount columns are whole numbers in the currency's minor
+         *     unit (cents for USD). Columns: id, invoice_number,
          *     customer_id, subscription_id, status, payment_status, currency,
          *     subtotal_cents, tax_amount_cents, discount_cents,
          *     total_amount_cents, amount_due_cents, amount_paid_cents,
@@ -3779,8 +3866,8 @@ export interface paths {
          * Export subscriptions as CSV
          * @description Used by the dashboard; not part of the integration API.
          *
-         *     Streams every subscription, newest first, from one consistent
-         *     snapshot. Columns: id, code, display_name, customer_id, status,
+         *     Streams every subscription in the caller's mode, newest first,
+         *     from one consistent snapshot. Columns: id, code, display_name, customer_id, status,
          *     billing_time, trial_start_at, trial_end_at, started_at,
          *     activated_at, canceled_at, current_billing_period_start,
          *     current_billing_period_end, next_billing_at, plan_ids (plan IDs
@@ -3809,13 +3896,14 @@ export interface paths {
          * Export usage events as CSV
          * @description Used by the dashboard; not part of the integration API.
          *
-         *     Streams usage events whose `timestamp` falls in the window,
-         *     newest first, from one consistent snapshot. `from` and `to` are
-         *     both required and may span at most 366 days. `customer_id`,
-         *     `meter_id` and `dimensions` narrow it like the event list. Columns: id,
-         *     customer_id, meter_id, quantity, timestamp, idempotency_key,
-         *     origin, dimensions_json, provider_cost_cents (US cents, a decimal),
-         *     provider_cost_source.
+         *     Streams the usage events in the caller's mode whose `timestamp`
+         *     falls in the window, newest first, from one consistent snapshot.
+         *     `from` and `to` are both required and may span at most 366 days.
+         *     `customer_id`, `meter_id` and `dimensions` narrow it like the event
+         *     list. Columns: id, customer_id, meter_id, quantity, timestamp,
+         *     idempotency_key, origin, dimensions_json, provider_cost_cents
+         *     (what the event cost you at your provider, in US cents as a
+         *     decimal; empty when unknown), provider_cost_source.
          *
          *     Audit row, `EXPORT_INCOMPLETE` marker and formula escaping work
          *     as in the customers export.
@@ -3881,9 +3969,11 @@ export interface paths {
          *     ends now, with values for the window before it where a comparison
          *     makes sense.
          *
-         *     Money is in cents of the tenant's default currency (USD when none
-         *     is set), named in `currency`. Invoices and plans in other
-         *     currencies are left out. MRR (monthly recurring revenue) counts
+         *     Money is in the minor unit (cents for USD) of the account's default
+         *     currency, named in `currency` (USD when none is set). Invoices and
+         *     plans in other currencies are left out, except in
+         *     `outstanding_by_currency` and `credit_balance_by_currency`, which
+         *     list each currency. MRR (monthly recurring revenue) counts
          *     plan base fees only: base amount times quantity, with yearly
          *     plans divided by 12. Usage charges are not included. Data from
          *     test clocks is left out.
@@ -3909,7 +3999,7 @@ export interface paths {
          * @description Used by the dashboard; not part of the integration API.
          *
          *     Returns paid-invoice revenue per day, or per month for `12m`.
-         *     Only invoices in the tenant's default currency are counted; the
+         *     Only invoices in the account's default currency are counted; the
          *     currency is the `currency` of `GET /v1/analytics/overview`.
          *     Buckets with no paid invoices are left out. Data from test clocks
          *     is left out.
@@ -3943,7 +4033,7 @@ export interface paths {
          *       quantity changes on subscriptions that were active for the whole
          *       window.
          *
-         *     Only plans in the tenant's default currency are counted; the
+         *     Only plans in the account's default currency are counted; the
          *     currency is the `currency` of `GET /v1/analytics/overview`.
          *     Buckets with no movement are left out. Data from test clocks is
          *     left out.
@@ -4310,10 +4400,9 @@ export interface paths {
         };
         /**
          * List API keys
-         * @description Returns the newest 50 keys in the caller's mode (test or live),
-         *     newest first. Revoked and expired keys are included; check
-         *     `revoked_at` and `expires_at`. Key values are never returned.
-         *     There are no paging parameters and no `total`.
+         * @description Returns the keys in the caller's mode (test or live), newest first.
+         *     Revoked and expired keys are included; check `revoked_at` and
+         *     `expires_at`. Key values are never returned.
          */
         get: operations["listApiKeys"];
         put?: never;
@@ -4391,20 +4480,21 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get workspace settings
+         * Get account settings
          * @description Used by the dashboard; not part of the integration API.
          *
-         *     Returns the tenant's billing settings: currency, timezone, invoice
+         *     Returns the account's billing settings: currency, timezone, invoice
          *     numbering, payment terms, tax setup and the company details printed
-         *     on invoices. Settings are shared by test and live mode. A tenant
-         *     that never saved settings gets the defaults (USD, UTC, prefix
-         *     `HC`, net 30, tax provider `manual`).
+         *     on invoices. Settings are shared by test and live mode, except
+         *     `next_invoice_sequence`, which counts the caller's mode. An account with no
+         *     stored settings gets the defaults (USD, UTC, invoice prefix `HC`,
+         *     credit note prefix `CN`, net 30, tax provider `manual`).
          *     Requires the `apikey:write` permission (secret keys and dashboard
          *     sessions).
          */
         get: operations["getTenantSettings"];
         /**
-         * Update workspace settings
+         * Update account settings
          * @description Used by the dashboard; not part of the integration API.
          *
          *     Merges the body into the current settings. A field you leave out
@@ -4419,10 +4509,12 @@ export interface paths {
          *     `credit_note_prefix` are stored in upper case, and `brand_color` in
          *     lower case. Choosing `stripe_tax` with no
          *     `default_product_tax_code` sets it to `txcd_10103001` (SaaS,
-         *     business use).
+         *     business use). The server sets `tenant_id`, `created_at`,
+         *     `updated_at` and `next_invoice_sequence`: a body that sends one is
+         *     refused with 422.
          *
          *     A save that changes a field writes one audit row listing each
-         *     change.
+         *     change. The row is filed in test mode, whichever mode you save from.
          */
         put: operations["updateTenantSettings"];
         post?: never;
@@ -4440,11 +4532,11 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Email setup status
+         * Get the email setup status
          * @description Used by the dashboard; not part of the integration API.
          *
          *     Read-only. Email is configured in the server environment, not per
-         *     workspace: `SMTP_HOST` and friends, plus the base URLs email links
+         *     account: `SMTP_HOST` and friends, plus the base URLs email links
          *     are built from. Never returns credentials.
          */
         get: operations["getEmailSettings"];
@@ -4471,7 +4563,8 @@ export interface paths {
          *
          *     Dashboard sessions only. Sends one plain-text email to the signed-in
          *     member's own address, directly over SMTP (not queued), and returns
-         *     the server's answer. Writes an audit row on success.
+         *     the server's answer. It waits up to 20 seconds for the SMTP server.
+         *     Writes an audit row on success.
          */
         post: operations["sendTestEmail"];
         delete?: never;
@@ -4491,7 +4584,7 @@ export interface paths {
          * List Stripe connections
          * @description Used by the dashboard; not part of the integration API.
          *
-         *     Returns the tenant's Stripe connections for both modes in one list
+         *     Returns the account's Stripe connections for both modes in one list
          *     (at most two rows, live first), whatever the caller's mode. No
          *     secret values are returned, only prefixes and last four characters.
          */
@@ -4503,7 +4596,8 @@ export interface paths {
          *
          *     Saves your own Stripe keys for one mode (`livemode` in the body
          *     picks the mode, not the caller's mode). Calling it again for the
-         *     same mode replaces the keys. Key prefixes must match the mode:
+         *     same mode replaces the keys; a webhook secret saved before is kept
+         *     when the body sends none. Key prefixes must match the mode:
          *     `sk_test_`/`rk_test_` and `pk_test_` for test, `sk_live_`/`rk_live_`
          *     and `pk_live_` for live. Secrets are stored encrypted and are never
          *     returned.
@@ -4514,8 +4608,8 @@ export interface paths {
          *     are set, and invoices that were stuck waiting for Stripe keys are
          *     retried in the background (`retries_queued` gives the count).
          *
-         *     Stripe sends payment webhooks to `/v1/webhooks/stripe/{id}`, where
-         *     `{id}` is the returned `id`. Writes an audit row.
+         *     Stripe sends payment webhooks to `/v1/webhooks/stripe/{endpoint_id}`,
+         *     where `{endpoint_id}` is the returned `id`. Writes an audit row.
          */
         post: operations["connectStripe"];
         delete?: never;
@@ -4544,6 +4638,7 @@ export interface paths {
          *     Saves the `whsec_` signing secret for a mode that is already
          *     connected, without entering the API keys again. Hardcount does not call
          *     Stripe here; the secret is checked on each incoming webhook.
+         *     Until a secret is saved, Stripe webhooks for the mode are refused.
          *     Writes an audit row (never the secret).
          */
         patch: operations["setStripeWebhookSecret"];
@@ -4563,8 +4658,11 @@ export interface paths {
          * Disconnect Stripe for one mode
          * @description Used by the dashboard; not part of the integration API.
          *
-         *     Deletes the saved Stripe keys for the mode. Hardcount cannot reach
-         *     Stripe in that mode until you connect again. Writes an audit row.
+         *     Deletes the saved Stripe keys and webhook secret for the mode.
+         *     Hardcount cannot reach Stripe in that mode until you connect again,
+         *     and Stripe webhooks for it are refused. Connecting again creates a
+         *     connection with a new `id`, so the webhook URL in Stripe must change
+         *     too. Writes an audit row.
          */
         delete: operations["disconnectStripe"];
         options?: never;
@@ -4586,16 +4684,18 @@ export interface paths {
          * @description Run once, by hand, to create the first account on a new install; not part of the integration API.
          *
          *     One-time setup for a new installation. It works only while no
-         *     tenant exists and only when the server has `HARDCOUNT_BOOTSTRAP_TOKEN`
-         *     set. Send that token as `token` in the body or as
-         *     `Authorization: Bearer <token>`. Never send it in the query string.
+         *     account exists and only when the server has
+         *     `HARDCOUNT_BOOTSTRAP_TOKEN` set. Send that token as `token` in the
+         *     body or as `Authorization: Bearer <token>`. Never send it in the
+         *     query string.
          *
-         *     In one transaction it creates the first tenant, its owner user, a
-         *     test secret key and a live secret key. The
-         *     response is the only place the keys appear, and the password too
-         *     when Hardcount generated it. The response has `Cache-Control: no-store`.
+         *     In one transaction it creates the first account with its default
+         *     settings and default dunning policies, its owner user, a test secret
+         *     key and a live secret key. The response is the only place the keys
+         *     appear, and the password too when Hardcount generated it. The
+         *     response has `Cache-Control: no-store`.
          *
-         *     Defaults: tenant name "Demo Tenant", owner email
+         *     Defaults: account name "Demo Tenant", owner email
          *     `admin@hardcount.local`, and a generated password when
          *     `owner_password` is empty. The `hardcount-bootstrap` command does the
          *     same setup from the shell.
@@ -4618,7 +4718,7 @@ export interface paths {
          * List audit log entries
          * @description Used by the dashboard; not part of the integration API.
          *
-         *     Returns the tenant's audit entries in the caller's mode, newest
+         *     Returns the account's audit entries in the caller's mode, newest
          *     first (by `created_at`, then `id`). All filters are exact matches
          *     and can be combined.
          *
@@ -4626,8 +4726,8 @@ export interface paths {
          *     stops counting at 10,001, so a value above 10,000 means "more than
          *     10,000".
          *
-         *     Settings changes are always recorded in test mode, so they do not
-         *     appear when you read the log in live mode.
+         *     Settings changes, sign-ins and team changes are always recorded in
+         *     test mode, so they do not appear when you read the log in live mode.
          */
         get: operations["listAuditLog"];
         put?: never;
@@ -4650,7 +4750,7 @@ export interface paths {
          * @description Used by the dashboard; not part of the integration API.
          *
          *     Returns the distinct `action` and `resource_type` values recorded
-         *     for the tenant in the caller's mode, plus the test clocks that
+         *     for the account in the caller's mode, plus the test clocks that
          *     appear in the log. Deleted test clocks are included, named from
          *     their audit entries. Use these to fill filter menus.
          */
@@ -4673,7 +4773,23 @@ export interface components {
          *     email sort say where they stop counting.
          */
         ListTotal: number;
+        /**
+         * @description The body of an error answer. `error.type` is the broad class,
+         *     `error.code` is the exact reason for your code to branch on, and
+         *     `error.message` is a sentence for a person. Quote
+         *     `error.request_id` when you ask for help.
+         * @example {
+         *       "error": {
+         *         "type": "invalid_request_error",
+         *         "code": "validation_error",
+         *         "message": "must start with https://",
+         *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+         *         "param": "url"
+         *       }
+         *     }
+         */
         Error: {
+            /** @description What went wrong. */
             error?: {
                 /**
                  * @description One of `invalid_request_error`, `authentication_error`,
@@ -4681,44 +4797,94 @@ export interface components {
                  *     answers has this shape, including an unknown path (404,
                  *     code `route_not_found`) and a method the path does not take
                  *     (405, code `method_not_allowed`, with an `Allow` header).
-                 *     The few exceptions are listed in docs/api-surface.md.
+                 *     The few exceptions are listed in docs/api/errors.md.
                  * @example invalid_request_error
                  */
-                type?: string;
-                code?: string;
-                message?: string;
-                request_id?: string;
+                type: string;
                 /**
-                 * @description The request field the error is about. Sent only when the error
-                 *     names one. A request body may hold only the fields its
-                 *     operation lists, spelled and cased as listed: any other
-                 *     field, or one the server sets (such as `id`), is refused
-                 *     with 422 and `param` naming it. An operation with no request body lists no fields: send
-                 *     no body, `{}` or `null`. The Stripe and Postmark webhooks and
-                 *     the LiteLLM callback take their sender's body as it comes.
+                 * @description The exact reason, such as `validation_error`, `not_found`,
+                 *     `already_exists`, `invalid_state` or a more specific code
+                 *     the operation lists. Branch on this, not on `message`.
+                 */
+                code: string;
+                /** @description What went wrong, written for a person to read. */
+                message: string;
+                /**
+                 * @description This request's id (`req_…`), the same value as the
+                 *     `Hardcount-Request-Id` response header. On a replayed
+                 *     `Idempotency-Key` answer it is the first request's id.
+                 */
+                request_id: string;
+                /**
+                 * @description The request field or query parameter the error is about.
+                 *     Sent only when the error names one.
+                 *
+                 *     A request body may hold only the fields its operation
+                 *     lists, spelled and cased as listed. Any other field, or one
+                 *     the server sets (such as `id`), is refused with 422 and
+                 *     `param` naming it. An operation with no request body lists
+                 *     no fields: send no body, `{}` or `null`. The Stripe and
+                 *     Postmark webhooks and the LiteLLM callback take their
+                 *     sender's body as it comes.
                  */
                 param?: string;
             };
         };
+        /**
+         * @description An invitation for a teammate to join this account's dashboard.
+         *     `POST /v1/members/invite` returns it, and `GET /v1/members` lists
+         *     every invitation the account has sent, newest first.
+         * @example {
+         *       "id": "hc_minv_davn542q3gpgqfoq5ccg",
+         *       "email": "sam@northwind.example",
+         *       "role": "member",
+         *       "status": "pending",
+         *       "invited_by_email": "maya@northwind.example",
+         *       "expires_at": "2026-11-04T15:00:00Z",
+         *       "created_at": "2026-10-28T15:00:00Z"
+         *     }
+         */
         MemberInvitation: {
-            /** @example hc_minv_1a2b3c4d5e6f7890 */
+            /**
+             * @description The invitation's id (`hc_minv_…`).
+             * @example hc_minv_davn542q3gpgqfoq5ccg
+             */
             id: string;
+            /** @description The invited address, in lower case. It becomes the new member's sign-in email. */
             email: string;
-            /** @description Recorded for the future role split; not enforced (every member holds the full permission set). */
+            /**
+             * @description Always `member` for an invitation. Roles are recorded but not
+             *     enforced yet: every member can do everything in the dashboard.
+             */
             role: string;
             /**
-             * @description Server-derived; treat as authoritative.
+             * @description `pending` until the invitation is accepted or revoked, or until
+             *     `expires_at` passes (`expired`). The server works it out each
+             *     time it answers.
              * @enum {string}
              */
             status: "pending" | "accepted" | "revoked" | "expired";
+            /** @description The sign-in email of the member who sent the invitation. Absent when that user no longer exists. */
             invited_by_email?: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the accept link stops working, 7 days after `created_at`.
+             */
             expires_at: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the invitation was created and its email queued.
+             */
             created_at: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the invitee accepted. Absent until then.
+             */
             accepted_at?: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When a member revoked the invitation. Absent unless it was revoked.
+             */
             revoked_at?: string;
         };
         /**
@@ -9055,75 +9221,224 @@ export interface components {
             line: components["schemas"]["ActivityLine"];
         };
         /**
+         * @description The window an analytics call covers, ending now: the last 7, 30 or
+         *     90 days, or `12m` for the last 365 days in monthly buckets. The
+         *     other periods use daily buckets.
          * @default 30d
          * @enum {string}
          */
         AnalyticsPeriod: "7d" | "30d" | "90d" | "12m";
         /**
-         * @description MRR change in cents. `churned` and `contraction` are positive
+         * @description How MRR (monthly recurring revenue from plan base fees) changed over
+         *     the whole window, in the minor unit of the account's default
+         *     currency (cents for USD). `churned` and `contraction` are positive
          *     amounts. `net` = `new` + `expansion` - `contraction` - `churned`.
+         * @example {
+         *       "new": 4900,
+         *       "expansion": 2000,
+         *       "contraction": 0,
+         *       "churned": 1900,
+         *       "net": 5000
+         *     }
          */
         AnalyticsMrrMovementTotals: {
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description MRR of subscriptions activated in the window, in the currency's minor unit.
+             */
             new: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description MRR added by item adds and plan or quantity increases, in the currency's minor unit.
+             */
             expansion: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description MRR removed by item removals and plan or quantity decreases, as a positive amount in the currency's minor unit.
+             */
             contraction: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description MRR of subscriptions canceled in the window, as a positive amount in the currency's minor unit.
+             */
             churned: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description The overall change, `new` + `expansion` - `contraction` - `churned`, in the currency's minor unit. Can be negative.
+             */
             net: number;
         };
+        /**
+         * @description MRR movement in one bucket of `GET /v1/analytics/mrr-movement`: a
+         *     UTC day, or a UTC month for `12m`. Amounts are in the minor unit of
+         *     the account's default currency (cents for USD).
+         * @example {
+         *       "date": "2026-10-01",
+         *       "new": 4900,
+         *       "expansion": 0,
+         *       "contraction": 0,
+         *       "churned": 0,
+         *       "net": 4900
+         *     }
+         */
         AnalyticsMrrMovementPoint: {
             /** @description Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in UTC. */
             date: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description MRR of subscriptions activated in the bucket, in the currency's minor unit.
+             */
             new: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description MRR added in the bucket by item adds and plan or quantity increases, in the currency's minor unit.
+             */
             expansion: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description MRR removed in the bucket by item removals and plan or quantity decreases, as a positive amount in the currency's minor unit.
+             */
             contraction: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description MRR of subscriptions canceled in the bucket, as a positive amount in the currency's minor unit.
+             */
             churned: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description `new` + `expansion` - `contraction` - `churned` for the bucket, in the currency's minor unit.
+             */
             net: number;
         };
+        /**
+         * @description Paid-invoice revenue in one bucket of `GET /v1/analytics/revenue-chart`:
+         *     a UTC day, or a UTC month for `12m`. Only invoices in the account's
+         *     default currency are counted.
+         * @example {
+         *       "date": "2026-11-01",
+         *       "revenue_cents": 8650,
+         *       "invoice_count": 1
+         *     }
+         */
         AnalyticsRevenuePoint: {
             /** @description Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in UTC. */
             date: string;
             /**
              * Format: int64
-             * @description What paid the invoices paid in the bucket (payment plus customer credit applied). A credit note that lowered an invoice before it was paid is not counted.
+             * @description What paid the invoices paid in the bucket (payment plus customer
+             *     credit applied), in the minor unit of the default currency
+             *     (cents for USD). A credit note that lowered an invoice before it
+             *     was paid is not counted.
              */
             revenue_cents: number;
+            /** @description Invoices paid in the bucket. */
             invoice_count: number;
         };
+        /**
+         * @description Usage in one bucket of `GET /v1/analytics/usage`: a UTC day, or a
+         *     UTC month for `12m`. Events of customers on a test clock are left
+         *     out.
+         * @example {
+         *       "date": "2026-10-12",
+         *       "events": 1840,
+         *       "quantity": "412500"
+         *     }
+         */
         AnalyticsUsagePoint: {
             /** @description Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in UTC. */
             date: string;
-            /** Format: int64 */
-            events: number;
-            /** @description Summed quantity, as a decimal string. */
-            quantity: string;
-        };
-        AnalyticsTopMeter: {
-            meter_id: string;
-            meter_name: string;
-            event_name: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Usage events with a timestamp in the bucket, over all meters.
+             */
             events: number;
             /** @description Summed quantity, as a decimal string. */
             quantity: string;
         };
         /**
-         * @description "The window" is the requested period, ending now. "The previous
-         *     window" is the one of equal length before it. Money is in cents of
-         *     `currency`.
+         * @description One of the meters with the most usage events in the window, in
+         *     `GET /v1/analytics/usage`.
+         * @example {
+         *       "meter_id": "hc_mtr_dajr122q3gpgqfoq5c10",
+         *       "meter_name": "Tokens",
+         *       "event_name": "tokens",
+         *       "events": 48210,
+         *       "quantity": "12500000"
+         *     }
+         */
+        AnalyticsTopMeter: {
+            /** @description The meter's id (`hc_mtr_…`). */
+            meter_id: string;
+            /** @description The meter's display name. */
+            meter_name: string;
+            /** @description The event name usage events send to reach this meter. */
+            event_name: string;
+            /**
+             * Format: int64
+             * @description Usage events on this meter with a timestamp in the window.
+             */
+            events: number;
+            /** @description Summed quantity, as a decimal string. */
+            quantity: string;
+        };
+        /**
+         * @description The dashboard's headline metrics, from `GET /v1/analytics/overview`.
+         *     "The window" is the requested period, ending now. "The previous
+         *     window" is the one of equal length before it. Money is in the minor
+         *     unit of `currency` (cents for USD). Rates are fractions, so 0.05
+         *     means 5%.
+         * @example {
+         *       "period": "30d",
+         *       "currency": "USD",
+         *       "mrr": 24500,
+         *       "mrr_prev": 19600,
+         *       "arr": 294000,
+         *       "arr_prev": 235200,
+         *       "revenue": 61850,
+         *       "revenue_prev": 48200,
+         *       "outstanding_ar": 8650,
+         *       "outstanding_by_currency": [
+         *         {
+         *           "currency": "USD",
+         *           "amount_cents": 8650
+         *         }
+         *       ],
+         *       "avg_invoice_value": 8836,
+         *       "credit_balance_by_currency": [
+         *         {
+         *           "currency": "USD",
+         *           "amount_cents": 12000
+         *         }
+         *       ],
+         *       "active_customers": 6,
+         *       "new_customers": 1,
+         *       "live_customers": 5,
+         *       "live_customers_prev": 4,
+         *       "active_subscriptions": 5,
+         *       "trialing_subscriptions": 0,
+         *       "paid_invoices": 7,
+         *       "failed_payments": 1,
+         *       "failed_payments_prev": 0,
+         *       "open_invoices": 1,
+         *       "dunning_active": 1,
+         *       "refunds_needing_attention": 0,
+         *       "usage_events": 48210,
+         *       "logo_churn_rate": 0,
+         *       "revenue_churn_rate": 0,
+         *       "nrr": 1,
+         *       "dunning_recovery_rate": 0.5,
+         *       "mrr_movement": {
+         *         "new": 4900,
+         *         "expansion": 0,
+         *         "contraction": 0,
+         *         "churned": 0,
+         *         "net": 4900
+         *       }
+         *     }
          */
         AnalyticsOverview: {
             period: components["schemas"]["AnalyticsPeriod"];
-            /** @description The tenant's default currency. Every money field uses it, except `credit_balance_by_currency` and `outstanding_by_currency`, which carry their own. */
+            /** @description The account's default currency (USD when none is set). Every money field uses it, except `credit_balance_by_currency` and `outstanding_by_currency`, which carry their own. */
             currency: string;
             /**
              * Format: int64
@@ -9166,8 +9481,12 @@ export interface components {
              *     when nothing is owed.
              */
             outstanding_by_currency: {
+                /** @description Three-letter currency code, in upper case. */
                 currency: string;
-                /** Format: int64 */
+                /**
+                 * Format: int64
+                 * @description Amount due in this currency, in its minor unit (cents for USD).
+                 */
                 amount_cents: number;
             }[];
             /**
@@ -9177,8 +9496,12 @@ export interface components {
             avg_invoice_value: number;
             /** @description Customers' credit balances added up per currency, `currency` first, then largest. A currency whose balance is zero is left out. Customers on a test clock are not counted. */
             credit_balance_by_currency: {
+                /** @description Three-letter currency code, in upper case. */
                 currency: string;
-                /** Format: int64 */
+                /**
+                 * Format: int64
+                 * @description Credit customers hold in this currency, in its minor unit (cents for USD).
+                 */
                 amount_cents: number;
             }[];
             /**
@@ -11480,57 +11803,164 @@ export interface components {
                 error: string;
             }[];
         };
+        /**
+         * @description An API key's details. The key's value is never returned here: only
+         *     `POST /v1/api-keys` and `POST /v1/api-keys/{id}/rotate` show it,
+         *     once, as `raw_key`.
+         * @example {
+         *       "id": "hc_key_dajqj1iq3gpgqfoq5ca0",
+         *       "key_prefix": "hc_secret_test_4f9c2a7e1b3d",
+         *       "key_type": "secret",
+         *       "livemode": false,
+         *       "name": "Backend (test)",
+         *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *       "created_at": "2026-10-01T08:15:00Z",
+         *       "last_used_at": "2026-11-01T00:04:12Z"
+         *     }
+         */
         APIKey: {
-            /** @example hc_key_1a2b3c4d5e6f7890 */
+            /**
+             * @description The key's id (`hc_key_…`). Use it to revoke or rotate the key.
+             * @example hc_key_dajqj1iq3gpgqfoq5ca0
+             */
             id: string;
             /**
-             * @description The start of the key (type, mode and a few characters), enough to tell keys apart. Never the full key.
-             * @example hc_secret_test_1a2b3c4d
+             * @description The key's type and mode prefix plus the first 12 characters of
+             *     its secret part. Enough to tell keys apart; never the full key.
+             * @example hc_secret_test_4f9c2a7e1b3d
              */
             key_prefix: string;
             /**
              * @description `secret` can read and change everything in the account.
              *     `ingest` can only send usage events, for LiteLLM or another
-             *     gateway (ADR-133).
+             *     gateway.
              * @enum {string}
              */
             key_type: "secret" | "ingest";
+            /** @description True for a live-mode key (`…_live_…`), false for a test-mode key. A key reaches only its own mode's data. */
             livemode: boolean;
+            /** @description The label shown in the key list. */
             name: string;
+            /** @description The account the key belongs to. */
             tenant_id: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the key was created.
+             */
             created_at: string;
             /**
              * Format: date-time
-             * @description When the key stops working. Also set on the old key during a rotation grace period.
+             * @description When the key stops working. Also set on the old key during a
+             *     rotation grace period. Absent for a key that does not expire.
              */
             expires_at?: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the key was revoked. Absent unless it was revoked. A revoked key gets 401.
+             */
             revoked_at?: string;
             /**
              * Format: date-time
-             * @description Updated at most about once per interval, so it can lag a little.
+             * @description When the key last authenticated a request. Each server updates
+             *     it at most once a minute, so it can lag a little. Absent until
+             *     the key is first used.
              */
             last_used_at?: string;
         };
+        /**
+         * @description A new API key and its full value. `raw_key` appears only in this answer.
+         * @example {
+         *       "key": {
+         *         "id": "hc_key_dajqj1iq3gpgqfoq5ca0",
+         *         "key_prefix": "hc_secret_test_4f9c2a7e1b3d",
+         *         "key_type": "secret",
+         *         "livemode": false,
+         *         "name": "Backend (test)",
+         *         "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *         "created_at": "2026-10-01T08:15:00Z"
+         *       },
+         *       "raw_key": "hc_secret_test_4f9c2a7e1b3d5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8"
+         *     }
+         */
         APIKeyCreated: {
             key: components["schemas"]["APIKey"];
             /**
-             * @description The full key. Shown only once; store it now.
-             * @example hc_secret_test_4f9c...
+             * @description The full key: its prefix (`hc_secret_test_`, `hc_ingest_live_`
+             *     and so on) and 64 hex characters. Shown only once; store it now.
+             *     Hardcount keeps only a salted hash.
+             * @example hc_secret_test_4f9c2a7e1b3d5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8
              */
             raw_key: string;
         };
+        /**
+         * @description The result of rotating a key: the old key as it now stands (revoked,
+         *     or expiring at the end of the grace period), the new key, and the
+         *     new key's full value.
+         * @example {
+         *       "old_key": {
+         *         "id": "hc_key_dajqj1iq3gpgqfoq5ca0",
+         *         "key_prefix": "hc_secret_test_4f9c2a7e1b3d",
+         *         "key_type": "secret",
+         *         "livemode": false,
+         *         "name": "Backend (test)",
+         *         "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *         "created_at": "2026-10-01T08:15:00Z",
+         *         "expires_at": "2026-11-02T10:00:00Z",
+         *         "last_used_at": "2026-11-01T09:58:40Z"
+         *       },
+         *       "new_key": {
+         *         "id": "hc_key_dajqj1iq3gpgqfoq5cak",
+         *         "key_prefix": "hc_secret_test_a81c4e7f02d9",
+         *         "key_type": "secret",
+         *         "livemode": false,
+         *         "name": "Backend (test)",
+         *         "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *         "created_at": "2026-11-01T10:00:00Z"
+         *       },
+         *       "raw_key": "hc_secret_test_a81c4e7f02d95b3e6c1f8a04d7b2e9c3516f0a8d2c4b7e91f3a6d05c8b2e4f71"
+         *     }
+         */
         APIKeyRotation: {
             old_key: components["schemas"]["APIKey"];
             new_key: components["schemas"]["APIKey"];
-            /** @description The new key's full value. Shown only once. */
+            /** @description The new key's full value. Shown only once; store it now. */
             raw_key: string;
         };
-        /** @description Every field is optional. Fields you leave out keep their stored value. */
+        /**
+         * @description The account's billing settings, as `PUT /v1/settings` takes them.
+         *     Every field is optional. Fields you leave out keep their stored
+         *     value. Settings are shared by test and live mode.
+         * @example {
+         *       "default_currency": "USD",
+         *       "timezone": "America/Los_Angeles",
+         *       "invoice_prefix": "NW",
+         *       "credit_note_prefix": "NWCN",
+         *       "net_payment_terms": 30,
+         *       "credit_balance_low_threshold_cents": 1000,
+         *       "tax_provider": "manual",
+         *       "tax_rate": 8.625,
+         *       "tax_name": "Sales tax",
+         *       "tax_inclusive": false,
+         *       "tax_on_failure": "block",
+         *       "company_name": "Northwind AI, Inc.",
+         *       "company_address_line1": "500 Market Street",
+         *       "company_address_line2": "Suite 400",
+         *       "company_city": "San Francisco",
+         *       "company_state": "CA",
+         *       "company_postal_code": "94105",
+         *       "company_country": "US",
+         *       "company_email": "billing@northwind.example",
+         *       "company_phone": "+1 415 555 0132",
+         *       "logo_url": "https://northwind.example/logo.png",
+         *       "brand_color": "#1f6feb",
+         *       "tax_id": "12-3456789",
+         *       "support_url": "https://northwind.example/support",
+         *       "invoice_footer": "Thank you for your business."
+         *     }
+         */
         TenantSettingsInput: {
             /**
-             * @description ISO 4217 code. Zero-decimal currencies (such as JPY) are not supported yet.
+             * @description ISO 4217 code, stored in upper case. Zero-decimal currencies (such as JPY) are not supported yet.
              * @example USD
              */
             default_currency?: string;
@@ -11539,11 +11969,11 @@ export interface components {
              * @example UTC
              */
             timezone?: string;
-            /** @description Starts every invoice number, such as `HC-000001`. */
+            /** @description Starts every invoice number, such as `HC-000001`. Stored in upper case. */
             invoice_prefix?: string;
             /**
-             * @description Starts every credit note number, such as `CN-000001`. A change
-             *     applies to new credit notes only. Issued notes keep their
+             * @description Starts every credit note number, such as `CN-000001`. Stored in
+             *     upper case. A change applies to new credit notes only. Issued notes keep their
              *     numbers. It must differ from `invoice_prefix`, or an invoice and
              *     a credit note would get the same number.
              */
@@ -11555,7 +11985,8 @@ export interface components {
              * @description When a customer's credit in one currency drops below this
              *     amount, in that currency's minor units, the `credit.balance_low`
              *     webhook fires: 1000 means $10.00 of USD credit and €10.00 of EUR
-             *     credit. null turns it off.
+             *     credit. Send null to turn it off. Answers leave it out while it
+             *     is off.
              */
             credit_balance_low_threshold_cents?: number | null;
             /**
@@ -11582,10 +12013,15 @@ export interface components {
             default_product_tax_code?: string;
             /** @description Shown on invoices and as the sender name on emails. No line breaks. */
             company_name?: string;
+            /** @description First line of your business address, printed as the seller on invoices and credit notes. */
             company_address_line1?: string;
+            /** @description Second line of your business address, such as a suite number. */
             company_address_line2?: string;
+            /** @description City of your business address. */
             company_city?: string;
+            /** @description State, province or region of your business address. */
             company_state?: string;
+            /** @description Postal code of your business address. */
             company_postal_code?: string;
             /**
              * @description ISO 3166 alpha-2 code, such as `US`. Empty is allowed.
@@ -11593,6 +12029,11 @@ export interface components {
              *     checked and stored.
              */
             company_country?: string;
+            /**
+             * @description Your billing contact address, printed as the seller on invoices
+             *     and credit notes and shown on the hosted pages. One plain
+             *     address, such as `billing@example.com`, with no display name.
+             */
             company_email?: string;
             /** @description 7 to 20 characters of digits, spaces, `+`, `-`, `(` and `)`. */
             company_phone?: string;
@@ -11616,46 +12057,124 @@ export interface components {
              */
             invoice_footer?: string;
         };
+        /**
+         * @description The account's billing settings, as `GET /v1/settings` and
+         *     `PUT /v1/settings` return them: every stored setting, plus the
+         *     number the next invoice in the caller's mode gets.
+         * @example {
+         *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *       "default_currency": "USD",
+         *       "timezone": "America/Los_Angeles",
+         *       "invoice_prefix": "NW",
+         *       "credit_note_prefix": "NWCN",
+         *       "net_payment_terms": 30,
+         *       "credit_balance_low_threshold_cents": 1000,
+         *       "tax_provider": "manual",
+         *       "tax_rate": 8.625,
+         *       "tax_name": "Sales tax",
+         *       "tax_inclusive": false,
+         *       "tax_on_failure": "block",
+         *       "company_name": "Northwind AI, Inc.",
+         *       "company_address_line1": "500 Market Street",
+         *       "company_address_line2": "Suite 400",
+         *       "company_city": "San Francisco",
+         *       "company_state": "CA",
+         *       "company_postal_code": "94105",
+         *       "company_country": "US",
+         *       "company_email": "billing@northwind.example",
+         *       "company_phone": "+1 415 555 0132",
+         *       "logo_url": "https://northwind.example/logo.png",
+         *       "brand_color": "#1f6feb",
+         *       "tax_id": "12-3456789",
+         *       "support_url": "https://northwind.example/support",
+         *       "invoice_footer": "Thank you for your business.",
+         *       "next_invoice_sequence": 43,
+         *       "created_at": "2026-10-01T08:00:00Z",
+         *       "updated_at": "2026-10-20T16:45:10Z"
+         *     }
+         */
         TenantSettings: components["schemas"]["TenantSettingsInput"] & {
+            /** @description The account these settings belong to. `PUT` refuses it (422). */
             tenant_id: string;
             /**
              * @description The number the next invoice in this mode (test or live) gets,
              *     before the prefix: 43 means the next invoice is
              *     `<invoice_prefix>-000043`. Test and live count separately, and
              *     changing `invoice_prefix` keeps the count. Not a setting:
-             *     sending it on `PUT` does nothing.
+             *     `PUT` refuses it as an unknown field (422).
              */
             next_invoice_sequence: number;
             /**
              * Format: date-time
-             * @description Zero time when the tenant has never saved settings.
+             * @description When the account's settings were first stored. Zero time (`0001-01-01T00:00:00Z`) when none are stored yet, and the answer shows the defaults.
              */
             created_at: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the settings were last saved. Zero time (`0001-01-01T00:00:00Z`) when none are stored yet.
+             */
             updated_at: string;
         };
+        /**
+         * @description The account's own Stripe keys for one mode, without the secrets.
+         *     Hardcount uses them to charge customers and to read Stripe's
+         *     answers. `GET /v1/settings/stripe` lists one per connected mode.
+         * @example {
+         *       "id": "hc_spc_5e2a9c7f1b4d8e3a6c0f2b9d",
+         *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *       "livemode": false,
+         *       "stripe_account_id": "acct_1Q2w3E4r5T6y7U8i",
+         *       "stripe_account_name": "Northwind AI",
+         *       "secret_key_prefix": "sk_test_51Q2",
+         *       "secret_key_last4": "7fQa",
+         *       "publishable_key": "pk_test_51Q2w3E4r5T6y7U8iN0rthw1ndAIpub11shab1eK3yExamp1e00aBcDeF",
+         *       "webhook_secret_last4": "c41d",
+         *       "has_webhook_secret": true,
+         *       "verified_at": "2026-10-01T08:30:02Z",
+         *       "created_at": "2026-10-01T08:30:00Z",
+         *       "updated_at": "2026-10-01T08:30:02Z"
+         *     }
+         */
         StripeConnection: {
-            /** @description Also the `{id}` in the Stripe webhook URL `/v1/webhooks/stripe/{id}`. */
+            /**
+             * @description The connection's id (`hc_spc_…`). It is also the
+             *     `{endpoint_id}` in the Stripe webhook URL
+             *     `/v1/webhooks/stripe/{endpoint_id}`.
+             */
             id: string;
+            /** @description The account the keys belong to. */
             tenant_id: string;
+            /** @description True for live-mode keys (`sk_live_…`), false for test-mode keys. */
             livemode: boolean;
-            /** @description Set after Stripe accepted the key. */
+            /** @description The Stripe account the key belongs to (`acct_…`). Absent until Stripe first accepts a key for this mode. */
             stripe_account_id?: string;
+            /**
+             * @description The Stripe account's business name, or its dashboard name or
+             *     email when it has none. Absent until Stripe accepts a key.
+             */
             stripe_account_name?: string;
             /** @description First 12 characters of the secret key. */
             secret_key_prefix?: string;
+            /** @description Last 4 characters of the secret key. */
             secret_key_last4: string;
+            /** @description The publishable key, in full. It is not a secret. */
             publishable_key: string;
+            /** @description Last 4 characters of the webhook signing secret. Absent until one is saved. */
             webhook_secret_last4?: string;
+            /**
+             * @description Whether a webhook signing secret is saved. Until one is, Stripe
+             *     webhooks sent to this connection are refused with 404.
+             */
             has_webhook_secret: boolean;
             /**
              * Format: date-time
-             * @description Last time Stripe accepted the key.
+             * @description When Stripe last accepted the key. Absent until it does. Saving
+             *     new keys clears it until the next check passes.
              */
             verified_at?: string;
             /**
              * @description Why the last Stripe check failed, in Stripe's own words (or the
-             *     network error when Stripe was not reached). Empty when it passed.
+             *     network error when Stripe was not reached). Absent when it passed.
              */
             last_verified_error?: string;
             /**
@@ -11667,165 +12186,491 @@ export interface components {
              * @enum {string}
              */
             last_verified_error_kind?: "rejected" | "unavailable";
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When keys were first saved for this mode.
+             */
             created_at: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the connection last changed.
+             */
             updated_at: string;
-            /** @description Connect response only. Number of stuck invoices being retried in the background. */
+            /**
+             * @description Only in the answer to `POST /v1/settings/stripe`, and only when
+             *     above 0: how many invoices that were stuck waiting for Stripe
+             *     keys are now being retried in the background.
+             */
             retries_queued?: number;
         };
+        /**
+         * @description An account: one business that bills its customers with Hardcount.
+         *     It has separate test and live data. `POST /v1/bootstrap` creates
+         *     the first one.
+         * @example {
+         *       "id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *       "name": "Northwind AI",
+         *       "status": "active",
+         *       "created_at": "2026-10-01T08:00:00Z",
+         *       "updated_at": "2026-10-01T08:00:00Z"
+         *     }
+         */
         Tenant: {
-            /** @example hc_ten_1a2b3c4d5e6f7890 */
+            /**
+             * @description The account's id (`hc_ten_…`). Other objects carry it as `tenant_id`.
+             * @example hc_ten_dajqj02q3gpgqfoq5c00
+             */
             id: string;
+            /** @description The account's name, given at setup. */
             name: string;
-            /** @enum {string} */
+            /**
+             * @description The account's state. Setup creates it `active`. Nothing in this
+             *     version sets `suspended` or `deleted`.
+             * @enum {string}
+             */
             status: "active" | "suspended" | "deleted";
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the account was created.
+             */
             created_at: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the account record last changed.
+             */
             updated_at: string;
         };
+        /**
+         * @description What `POST /v1/bootstrap` returns: the new account, its owner's
+         *     dashboard sign-in, and one test and one live secret key. This
+         *     answer is the only place the keys appear.
+         * @example {
+         *       "tenant": {
+         *         "id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *         "name": "Northwind AI",
+         *         "status": "active",
+         *         "created_at": "2026-10-01T08:00:00Z",
+         *         "updated_at": "2026-10-01T08:00:00Z"
+         *       },
+         *       "owner_email": "maya@northwind.example",
+         *       "owner_password": "7f3a9c1e5b2d8f4a6c0e3b1d",
+         *       "password_generated": true,
+         *       "secret_key_test": "hc_secret_test_4f9c2a7e1b3d5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8",
+         *       "secret_key_live": "hc_secret_live_6d2b8f4a1c9e3d7b5f0a2c8e4b6d1f9a3c7e5b0d2f8a4c6e1b9d3f7a5c0e2b84",
+         *       "message": "Bootstrap complete. Save these credentials — they will not be shown again."
+         *     }
+         */
         BootstrapResult: {
             tenant: components["schemas"]["Tenant"];
-            /** @description Dashboard login email. */
+            /** @description The owner's dashboard sign-in email. */
             owner_email: string;
-            /** @description Dashboard login password (the one you sent, or the generated one). */
+            /**
+             * @description The owner's dashboard password: the one you sent, or the
+             *     generated one (24 hex characters).
+             */
             owner_password: string;
+            /** @description True when Hardcount generated `owner_password` because the request sent none. */
             password_generated: boolean;
             /** @description Test-mode secret key (`hc_secret_test_...`). */
             secret_key_test: string;
             /** @description Live-mode secret key (`hc_secret_live_...`). */
             secret_key_live: string;
+            /** @description A reminder to save the credentials now. */
             message: string;
         };
+        /**
+         * @description One audit log row: who did what to which resource, and when.
+         *     `GET /v1/audit-log` lists them.
+         * @example {
+         *       "id": "hc_aud_dbj84c2q3gpgqfoq5cb0",
+         *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *       "actor_type": "user",
+         *       "actor_id": "hc_usr_8d3f1a6c2e9b4d7f0a5c3e1b",
+         *       "actor_name": "maya@northwind.example",
+         *       "action": "revoke",
+         *       "resource_type": "api_key",
+         *       "resource_id": "hc_key_dajqj1iq3gpgqfoq5ca0",
+         *       "resource_label": "Backend (test)",
+         *       "metadata": {
+         *         "key_type": "secret"
+         *       },
+         *       "ip_address": "203.0.113.24",
+         *       "request_id": "req_dbjg652q3gpgqfoq5cd0",
+         *       "created_at": "2026-11-01T09:12:30Z"
+         *     }
+         */
         AuditLogEntry: {
+            /** @description The entry's id (`hc_aud_…`). */
             id: string;
+            /** @description The account the entry belongs to. */
             tenant_id?: string;
-            /** @enum {string} */
-            actor_type: "user" | "api_key" | "system";
-            /** @description User id, API key id, or `system`. */
+            /**
+             * @description Who did it. `user`: a dashboard member. `api_key`: a request
+             *     made with an API key. `customer`: a customer acting on a hosted
+             *     page. `system`: Hardcount itself, such as a background job or a
+             *     Stripe webhook.
+             * @enum {string}
+             */
+            actor_type: "user" | "api_key" | "customer" | "system";
+            /** @description The user id, API key id or customer id, or `system`. */
             actor_id: string;
-            /** @description Name of the API key, when the actor is a key. */
+            /**
+             * @description A readable name for the actor: the API key's name, the user's
+             *     email or the customer's display name. Absent when none is known.
+             */
             actor_name?: string;
-            /** @description For example `create`, `update`, `revoke`, `finalize`. */
+            /**
+             * @description What was done, such as `create`, `update`, `revoke`, `finalize`
+             *     or `export`. `GET /v1/audit-log/filters` lists the values in use.
+             */
             action: string;
+            /** @description The kind of resource, such as `invoice`, `api_key`, `setting` or `user`. */
             resource_type: string;
-            /** @description Can be empty for tenant-wide resources such as settings. */
+            /** @description The resource's id. Empty for account-wide resources such as settings, and for exports. */
             resource_id: string;
+            /**
+             * @description A readable label for the resource, such as an invoice number or
+             *     a key's name. For a `user` resource, the user's or invitee's
+             *     email. Absent when there is none.
+             */
             resource_label?: string;
-            /** @description Action details. A settings change lists each changed field with `from` and `to`. */
+            /** @description Action details. A settings change lists each changed field with `from` and `to`. Absent when the action has none. */
             metadata?: {
                 [key: string]: unknown;
             };
+            /** @description The client address of the request that made the change. Absent for work with no request. */
             ip_address?: string;
-            /** @description Matches the `Hardcount-Request-Id` header of the request that made the change. */
+            /** @description Matches the `Hardcount-Request-Id` header of the request that made the change. Absent for work with no request. */
             request_id?: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the entry was written, in real time.
+             */
             created_at: string;
             /**
              * Format: date-time
-             * @description Simulated time, for entries made inside a test clock.
+             * @description Simulated time, for entries made inside a test clock. Absent otherwise.
              */
             sim_effective_at?: string;
+            /** @description The test clock whose simulation the entry was made in. Absent otherwise. */
             test_clock_id?: string;
-            /** @description The resource no longer exists because its test clock was deleted. The entry is kept. */
+            /**
+             * @description True when the resource no longer exists because its test clock
+             *     was deleted. The entry is kept. Absent otherwise.
+             */
             subject_deleted?: boolean;
         };
+        /**
+         * @description The values `GET /v1/audit-log` can filter on, from
+         *     `GET /v1/audit-log/filters`, for filter menus. Only entries in the
+         *     caller's mode count.
+         * @example {
+         *       "actions": [
+         *         "create",
+         *         "export",
+         *         "finalize",
+         *         "revoke",
+         *         "rotate",
+         *         "update"
+         *       ],
+         *       "resource_types": [
+         *         "api_key",
+         *         "customer",
+         *         "invoice",
+         *         "setting",
+         *         "subscription",
+         *         "test_clock"
+         *       ],
+         *       "test_clocks": [
+         *         {
+         *           "id": "hc_tclk_dauj402q3gpgqfoq5c9g",
+         *           "name": "October renewal test"
+         *         }
+         *       ]
+         *     }
+         */
         AuditLogFilters: {
+            /** @description Every `action` value recorded in this mode. */
             actions: string[];
+            /** @description Every `resource_type` value recorded in this mode. */
             resource_types: string[];
-            /** @description Test clocks seen in the log, most recent activity first. */
+            /** @description Test clocks seen in the log, most recent activity first, at most 100. Deleted clocks are included. */
             test_clocks: {
+                /** @description The test clock's id (`hc_tclk_…`). */
                 id: string;
+                /** @description The clock's name, taken from its own audit entries. Empty when the log has none. */
                 name: string;
             }[];
         };
+        /**
+         * @description A URL that Hardcount sends webhook events to, for one mode. Its
+         *     signing secret is never returned here: only creating the endpoint
+         *     and rotating its secret show it, once.
+         * @example {
+         *       "id": "hc_whe_danslg2q3gpgqfoq5c80",
+         *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *       "livemode": false,
+         *       "url": "https://example.com/hardcount/webhooks",
+         *       "description": "Billing sync",
+         *       "secret_last4": "4e9f",
+         *       "events": [
+         *         "invoice.*",
+         *         "payment.failed",
+         *         "credit.balance_depleted"
+         *       ],
+         *       "active": true,
+         *       "created_at": "2026-10-02T10:00:00Z",
+         *       "updated_at": "2026-10-02T10:00:00Z"
+         *     }
+         */
         WebhookEndpoint: {
+            /** @description The endpoint's id (`hc_whe_…`). */
             id: string;
+            /** @description The account the endpoint belongs to. */
             tenant_id?: string;
+            /** @description The mode the endpoint gets events from, true for live. It is the caller's mode when the endpoint is created. */
             livemode: boolean;
+            /**
+             * @description Where Hardcount POSTs each event. It must be `https://` on a
+             *     public address. Outside production (`APP_ENV` is not
+             *     `production`), `http://localhost` and loopback addresses work
+             *     too.
+             */
             url: string;
+            /** @description Your note about the endpoint. Absent when empty. */
             description?: string;
+            /** @description Last 4 characters of the current signing secret. */
             secret_last4: string;
-            /** @description Subscribed event types. `*` means all. */
+            /**
+             * @description The event types the endpoint gets. `*` means every event, and a
+             *     prefix such as `invoice.*` means every event whose type starts
+             *     with `invoice.`.
+             */
             events: string[];
-            /** @description false = paused. */
+            /**
+             * @description False while the endpoint is paused. A paused endpoint gets no
+             *     new events, its pending retries end as `failed`, and its
+             *     deliveries cannot be resent.
+             */
             active: boolean;
-            /** @description The previous signing secret, during a rotation grace period. */
+            /**
+             * @description Last 4 characters of the previous signing secret, after a
+             *     rotation. Absent if the secret was never rotated.
+             */
             secondary_secret_last4?: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the previous secret stops signing deliveries, 72 hours
+             *     after the rotation. It stays in the answer after that time.
+             *     Absent if the secret was never rotated.
+             */
             secondary_secret_expires_at?: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the endpoint was created.
+             */
             created_at: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the endpoint last changed.
+             */
             updated_at: string;
         };
+        /**
+         * @description All-time delivery counts for one endpoint in the caller's mode, from
+         *     `GET /v1/webhook-endpoints/endpoints/stats`.
+         * @example {
+         *       "endpoint_id": "hc_whe_danslg2q3gpgqfoq5c80",
+         *       "total_deliveries": 120,
+         *       "succeeded": 117,
+         *       "failed": 1,
+         *       "success_rate": 99.15254237288136
+         *     }
+         */
         WebhookEndpointStats: {
+            /** @description The endpoint's id. It can name a deleted endpoint. */
             endpoint_id: string;
             /** @description All deliveries, including pending ones. */
             total_deliveries: number;
+            /** @description Deliveries that got a 2xx answer. */
             succeeded: number;
+            /** @description Deliveries that failed for good. */
             failed: number;
             /** @description Percent (0-100) of finished deliveries that succeeded. Pending deliveries are not counted. 0 when none finished. */
             success_rate: number;
         };
+        /**
+         * @description One delivery of one event to one endpoint, with the result of its
+         *     latest attempt. A failed attempt is tried again after about 1
+         *     minute, 5 minutes, 30 minutes, 2 hours and 24 hours. After the
+         *     sixth failed attempt the delivery is `failed`. A redirect counts as
+         *     a failure.
+         * @example {
+         *       "id": "hc_whd_dbj84bqq3gpgqfoq5c90",
+         *       "event_id": "hc_whevt_dbj84biq3gpgqfoq5c8g",
+         *       "event_type": "credit.balance_depleted",
+         *       "is_replay": false,
+         *       "status": "succeeded",
+         *       "status_code": 200,
+         *       "attempt_count": 1,
+         *       "response_body": "{\"received\":true}",
+         *       "error": "",
+         *       "created_at": "2026-11-01T00:05:00Z",
+         *       "completed_at": "2026-11-01T00:05:01Z",
+         *       "next_retry_at": null
+         *     }
+         */
         WebhookEndpointDelivery: {
+            /** @description The delivery's id (`hc_whd_…`). */
             id: string;
+            /** @description The event this delivery sent. For a replay, the replay's own id; the message itself carried the original event's `id`. */
             event_id: string;
+            /** @description The event's type, such as `invoice.finalized`. */
             event_type: string;
             /** @description The delivery came from a replay. */
             is_replay: boolean;
+            /** @description The original event, when `is_replay` is true. Absent otherwise. */
             replay_of_event_id?: string;
-            /** @enum {string} */
+            /**
+             * @description `pending` while an attempt is running or due, `succeeded` after
+             *     a 2xx answer, `failed` once no attempt is left or the endpoint
+             *     was paused or deleted.
+             * @enum {string}
+             */
             status: "pending" | "succeeded" | "failed";
-            /** @description HTTP status from the receiver. 0 when there was no response. */
+            /** @description HTTP status from the receiver's latest answer. 0 when no attempt got an answer. */
             status_code: number;
+            /** @description Attempts made so far, at most 6. */
             attempt_count: number;
-            /** @description First 4 KB of the receiver's response. */
+            /** @description Up to the first 1 KB of the receiver's latest answer. */
             response_body: string;
+            /**
+             * @description Why an attempt failed, such as `HTTP 500`, a connection error,
+             *     `endpoint disabled` or `endpoint deleted`. Empty when no attempt
+             *     failed. A delivery that succeeded on a retry keeps the earlier
+             *     failure's text.
+             */
             error: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the delivery was queued.
+             */
             created_at: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the delivery succeeded or failed for good. null while pending.
+             */
             completed_at: string | null;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the next attempt is due, while pending. null once the delivery is finished.
+             */
             next_retry_at: string | null;
         };
+        /**
+         * @description One row of an event's delivery timeline, from
+         *     `GET /v1/webhook_events/{id}/deliveries`. Each row is one
+         *     endpoint's delivery of the event or of one of its replays, with the
+         *     result of its latest attempt.
+         * @example {
+         *       "id": "hc_whd_dbj84bqq3gpgqfoq5c90",
+         *       "event_id": "hc_whevt_dbj84biq3gpgqfoq5c8g",
+         *       "endpoint_id": "hc_whe_danslg2q3gpgqfoq5c80",
+         *       "endpoint_url": "https://example.com/hardcount/webhooks",
+         *       "endpoint_description": "Billing sync",
+         *       "attempt_no": 1,
+         *       "status": "succeeded",
+         *       "status_code": 200,
+         *       "response_body": "{\"received\":true}",
+         *       "error": "",
+         *       "request_payload_sha256": "2729692ed25262f63668409fe4ef3b8a010360397231ebf671f77bac8956322e",
+         *       "attempted_at": "2026-11-01T00:05:00Z",
+         *       "completed_at": "2026-11-01T00:05:01Z",
+         *       "next_retry_at": null,
+         *       "is_replay": false,
+         *       "replay_event_id": ""
+         *     }
+         */
         WebhookEventDeliveryAttempt: {
+            /** @description The delivery's id (`hc_whd_…`). */
             id: string;
             /** @description The event this delivery belongs to. When `is_replay` is true, the replay's own id; the message it sent carries the original event's `id` (`root_event_id`). */
             event_id: string;
+            /** @description The endpoint the delivery went to. */
             endpoint_id: string;
+            /** @description The endpoint's URL. It is kept after the endpoint is deleted. */
             endpoint_url: string;
+            /** @description The endpoint's description, or empty. */
             endpoint_description: string;
-            /** @description Position in the timeline, starting at 1. */
+            /** @description Position in the timeline, starting at 1. It is not the number of attempts. */
             attempt_no: number;
-            /** @enum {string} */
+            /**
+             * @description `pending` while an attempt is running or due, `succeeded` after a 2xx answer, `failed` once the delivery failed for good.
+             * @enum {string}
+             */
             status: "pending" | "succeeded" | "failed";
+            /** @description HTTP status from the receiver's latest answer. 0 when no attempt got an answer. */
             status_code: number;
-            /** @description First 4 KB of the receiver's response. */
+            /** @description Up to the first 1 KB of the receiver's latest answer. */
             response_body: string;
+            /** @description Why an attempt failed, such as `HTTP 500` or a connection error. Empty when no attempt failed. */
             error: string;
-            /** @description SHA-256 of the event payload. Equal values mean the same payload was sent. */
+            /**
+             * @description SHA-256, in hex, of the event's data. Two rows with the same
+             *     value sent the same data.
+             */
             request_payload_sha256: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the delivery was queued.
+             */
             attempted_at: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the delivery succeeded or failed for good. null while pending.
+             */
             completed_at: string | null;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the next attempt is due, while pending. null once the delivery is finished.
+             */
             next_retry_at: string | null;
+            /** @description True when the row belongs to a replay of the event. */
             is_replay: boolean;
             /** @description The replay's event id when `is_replay` is true; otherwise empty. */
             replay_event_id: string;
         };
+        /**
+         * @description What `POST /v1/webhook_events/{id}/replay` returns.
+         * @example {
+         *       "event_id": "hc_whevt_dbj84biq3gpgqfoq5c9r",
+         *       "replay_of": "hc_whevt_dbj84biq3gpgqfoq5c8g",
+         *       "status": "queued"
+         *     }
+         */
         WebhookReplayResult: {
             /** @description The new event created by the replay. */
             event_id: string;
             /** @description The original event. */
             replay_of: string;
-            /** @enum {string} */
+            /**
+             * @description `queued` when at least one endpoint will get the replay.
+             *     `no_matching_endpoints` when no active endpoint in this mode
+             *     subscribes to the event's type; the replay event is still
+             *     created.
+             * @enum {string}
+             */
             status: "queued" | "no_matching_endpoints";
         };
+        /**
+         * @description What `POST /v1/webhook-endpoints/endpoints/{id}/deliveries/{deliveryID}/replay` returns.
+         * @example {
+         *       "event_id": "hc_whevt_dbj84biq3gpgqfoq5c9r",
+         *       "replay_of": "hc_whevt_dbj84biq3gpgqfoq5c8g",
+         *       "delivery_id": "hc_whd_dbj84bqq3gpgqfoq5c9k",
+         *       "status": "queued"
+         *     }
+         */
         WebhookDeliveryReplayResult: {
             /** @description The new event created by the replay. */
             event_id: string;
@@ -11833,12 +12678,29 @@ export interface components {
             replay_of: string;
             /** @description The new delivery to this endpoint. */
             delivery_id: string;
-            /** @enum {string} */
+            /**
+             * @description Always `queued`. The send happens in the background.
+             * @enum {string}
+             */
             status: "queued";
         };
-        /** @description The JSON in each `data:` line of `/v1/webhook_events/stream`. */
+        /**
+         * @description The JSON in each `data:` line of `/v1/webhook_events/stream`.
+         * @example {
+         *       "event_id": "hc_whevt_dbj84biq3gpgqfoq5c8g",
+         *       "event_type": "credit.balance_depleted",
+         *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+         *       "status": "succeeded",
+         *       "last_attempt_at": "2026-11-01T00:05:01Z",
+         *       "created_at": "2026-11-01T00:05:00Z",
+         *       "livemode": false,
+         *       "replay_of_event_id": null
+         *     }
+         */
         WebhookStreamFrame: {
+            /** @description The event's id. For a replay, the replay's own id. */
             event_id: string;
+            /** @description The event's type, such as `invoice.finalized`. */
             event_type: string;
             /**
              * @description The customer the event is about: the `customer_id` of the
@@ -11853,11 +12715,19 @@ export interface components {
              *     `delivered` (all deliveries succeeded) or `no_endpoints`.
              */
             status: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the delivery result this frame reports happened. null in the first batch and in a new event's first frame.
+             */
             last_attempt_at: string | null;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the event was created.
+             */
             created_at: string;
+            /** @description The event's mode. Live frames are not filtered by mode, so check it. */
             livemode: boolean;
+            /** @description The original event, when this frame is about a replay. null otherwise. */
             replay_of_event_id: string | null;
         };
         /**
@@ -12193,8 +13063,24 @@ export interface components {
                 support_url?: string;
             };
         };
+        /**
+         * @description The body of `GET /health/ready`, on both 200 and 503.
+         * @example {
+         *       "status": "ok",
+         *       "checks": {
+         *         "api": "ok",
+         *         "database": "ok",
+         *         "scheduler": "ok: last run 12s ago"
+         *       }
+         *     }
+         */
         ReadinessReport: {
-            /** @enum {string} */
+            /**
+             * @description `ok` when every check passed. `degraded` when the database
+             *     cannot be reached (503) or the billing scheduler is late (still
+             *     200). `draining` while the server shuts down (503).
+             * @enum {string}
+             */
             status: "ok" | "degraded" | "draining";
             /**
              * @description One entry per check. `api` is `ok` or `draining`. `database` is
@@ -12348,34 +13234,94 @@ export interface components {
                 other_remaining_cents: number;
             }[];
         };
-        /** @description A new webhook endpoint and its signing secret. The secret is shown only here. */
+        /**
+         * @description A new webhook endpoint and its signing secret. The secret is shown only here.
+         * @example {
+         *       "endpoint": {
+         *         "id": "hc_whe_danslg2q3gpgqfoq5c80",
+         *         "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *         "livemode": false,
+         *         "url": "https://example.com/hardcount/webhooks",
+         *         "description": "Billing sync",
+         *         "secret_last4": "4e9f",
+         *         "events": [
+         *           "invoice.*",
+         *           "payment.failed",
+         *           "credit.balance_depleted"
+         *         ],
+         *         "active": true,
+         *         "created_at": "2026-10-02T10:00:00Z",
+         *         "updated_at": "2026-10-02T10:00:00Z"
+         *       },
+         *       "secret": "whsec_9b4e2c7a1f5d8e3b6c0a4f2d7e1b9c5a3f8d6e2b1a7c4e9f"
+         *     }
+         */
         WebhookEndpointCreated: {
             endpoint: components["schemas"]["WebhookEndpoint"];
             /** @description The signing secret (`whsec_…`). Store it now; Hardcount does not show it again. */
             secret: string;
         };
-        /** @description The endpoint's new signing secret. It is shown only here. */
+        /**
+         * @description The endpoint's new signing secret. It is shown only here.
+         * @example {
+         *       "secret": "whsec_1f8a3c6e9b2d5f7a0c4e8b1d3f6a9c2e5b7d0f4a8c1e3b6d",
+         *       "secondary_valid_until": "2026-11-04T10:00:00Z"
+         *     }
+         */
         WebhookSecretRotation: {
+            /** @description The new signing secret (`whsec_…`). Store it now; Hardcount does not show it again. */
             secret: string;
             /**
              * Format: date-time
-             * @description Until this time, deliveries are also signed with the old secret.
+             * @description Until this time, 72 hours after the rotation, each delivery is
+             *     signed with the old secret too, so your receiver can switch
+             *     without rejecting events.
              */
             secondary_valid_until?: string;
         };
-        /** @description One outbound webhook event, as Hardcount created it. */
+        /**
+         * @description One outbound webhook event, as Hardcount created it.
+         *     `GET /v1/webhook-endpoints/events` lists them. Each delivery POSTs
+         *     `{"id", "event_type", "created_at", "data"}` to the endpoint, where
+         *     `data` is this event's `payload`.
+         * @example {
+         *       "id": "hc_whevt_dbj84biq3gpgqfoq5c8g",
+         *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *       "livemode": false,
+         *       "event_type": "credit.balance_depleted",
+         *       "payload": {
+         *         "credit_balance": {
+         *           "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+         *           "currency": "USD",
+         *           "balance_cents": 0,
+         *           "total_granted": 5000,
+         *           "total_used": 5000,
+         *           "total_expired": 0,
+         *           "total_retired": 0,
+         *           "total_deducted": 0
+         *         }
+         *       },
+         *       "created_at": "2026-11-01T00:05:00Z"
+         *     }
+         */
         WebhookEvent: {
+            /** @description The event's id (`hc_whevt_…`). A replay has its own id but is sent with the original event's `id` and `created_at`. */
             id: string;
+            /** @description The account the event belongs to. */
             tenant_id?: string;
+            /** @description The mode the event happened in. Only endpoints of the same mode get it. */
             livemode: boolean;
-            /** @example invoice.finalized */
+            /**
+             * @description What happened, such as `invoice.finalized`. docs/api/webhook-events.md lists every type.
+             * @example invoice.finalized
+             */
             event_type: string;
             /**
              * @description The event's data: the resource the event is about, under the
              *     resource's name (`invoice`, `subscription`, `customer`,
              *     `payment_method`, `dunning_run` or `credit_balance`), as the
              *     API returns it, and the few keys the event adds beside it.
-             *     docs/webhooks.md lists what each event carries;
+             *     docs/api/webhook-events.md lists what each event carries;
              *     `payment.dispute_opened` and `payment.dispute_closed` carry a
              *     `DisputeWebhookEventData`; `payment.refunded_in_stripe` carries a
              *     `StripeRefundWebhookEventData`.
@@ -12383,9 +13329,12 @@ export interface components {
             payload: {
                 [key: string]: unknown;
             };
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the event was created.
+             */
             created_at: string;
-            /** @description Set on a replay. The event the replay was made from. */
+            /** @description Set on a replay. The event the replay was made from. Absent on an original event. */
             replay_of_event_id?: string;
         };
         /**
@@ -12654,7 +13603,7 @@ export interface components {
         };
     };
     responses: {
-        /** @description `limit` or `offset` is out of range or not a whole number, or the request sends the removed `after` cursor (`param` names it) */
+        /** @description `limit` or `offset` is out of range, not a whole number or sent twice, or the request sends the removed `after` cursor (`param` names it) */
         InvalidPage: {
             headers: {
                 [name: string]: unknown;
@@ -12724,10 +13673,11 @@ export interface components {
             };
         };
         /**
-         * @description The body is not one valid JSON value, or a field has the wrong JSON
-         *     type (such as a string where a number belongs). On a route that
-         *     takes `Idempotency-Key`, a 400 is kept for the key: send the
-         *     corrected request with a new key.
+         * @description The body is not one valid JSON value, it is empty where the
+         *     operation needs one, or a field has the wrong JSON type (such as a
+         *     string where a number belongs). On a route that takes
+         *     `Idempotency-Key`, a 400 is kept for the key: send the corrected
+         *     request with a new key.
          */
         InvalidBody: {
             headers: {
@@ -12753,9 +13703,13 @@ export interface components {
          * @description Makes the call safe to retry. Send a unique value (a UUID works) and
          *     the same value on every retry. For 24 hours, a repeat with the same
          *     key, method, path and body gets the first response again, with an
-         *     `Idempotent-Replayed: true` header, instead of running again. The
-         *     error cases are in docs/api-surface.md. The usage routes do not take
-         *     it: each usage event carries its own `idempotency_key`.
+         *     `Idempotent-Replayed: true` header, instead of running again. A
+         *     first answer of 409 or 422 is not kept, so a retry with the same
+         *     key runs again. The same key with a different method, path or body
+         *     is a 422 with code `idempotency_error`. The other error cases are in
+         *     docs/api/idempotency.md. The usage routes do not take it: each usage
+         *     event carries its own `idempotency_key`.
+         * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
          */
         IdempotencyKey: string;
         /**
@@ -12793,14 +13747,22 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Service is healthy */
+            /** @description The server is up. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "status": "ok"
+                     *     }
+                     */
                     "application/json": {
-                        /** @enum {string} */
+                        /**
+                         * @description Always `ok`.
+                         * @enum {string}
+                         */
                         status: "ok";
                     };
                 };
@@ -12822,6 +13784,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "status": "ok",
+                     *       "checks": {
+                     *         "api": "ok",
+                     *         "database": "ok",
+                     *         "scheduler": "ok: last run 12s ago"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["ReadinessReport"];
                 };
             };
@@ -12831,6 +13803,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "status": "degraded",
+                     *       "checks": {
+                     *         "api": "ok",
+                     *         "database": "error",
+                     *         "scheduler": "ok: last run 12s ago"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["ReadinessReport"];
                 };
             };
@@ -12854,13 +13836,26 @@ export interface operations {
                     "text/plain": string;
                 };
             };
-            /** @description The token is missing or wrong, or `METRICS_TOKEN` is not set in production. The body is the plain text `unauthorized`. */
+            /**
+             * @description The token is missing or wrong, or `METRICS_TOKEN` is not set in
+             *     production. The answer carries `WWW-Authenticate: Bearer`.
+             */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "text/plain": string;
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "authentication_error",
+                     *         "code": "unauthorized",
+                     *         "message": "metrics need the METRICS_TOKEN bearer token",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
@@ -12959,9 +13954,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -13105,9 +14104,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -13262,9 +14265,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -13506,9 +14513,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -14111,9 +15122,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -14325,9 +15340,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -14537,9 +15556,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -15495,9 +16518,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -15679,9 +16706,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -15919,9 +16950,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -16219,9 +17254,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -16530,12 +17569,35 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Endpoint list */
+            /** @description One page of endpoints. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "data": [
+                     *         {
+                     *           "id": "hc_whe_danslg2q3gpgqfoq5c80",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "livemode": false,
+                     *           "url": "https://example.com/hardcount/webhooks",
+                     *           "description": "Billing sync",
+                     *           "secret_last4": "4e9f",
+                     *           "events": [
+                     *             "invoice.*",
+                     *             "payment.failed",
+                     *             "credit.balance_depleted"
+                     *           ],
+                     *           "active": true,
+                     *           "created_at": "2026-10-02T10:00:00Z",
+                     *           "updated_at": "2026-10-02T10:00:00Z"
+                     *         }
+                     *       ],
+                     *       "total": 1
+                     *     }
+                     */
                     "application/json": {
                         data: components["schemas"]["WebhookEndpoint"][];
                         total: components["schemas"]["ListTotal"];
@@ -16555,9 +17617,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -16566,31 +17632,83 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "url": "https://example.com/hardcount/webhooks",
+                 *       "description": "Billing sync",
+                 *       "events": [
+                 *         "invoice.*",
+                 *         "payment.failed",
+                 *         "credit.balance_depleted"
+                 *       ]
+                 *     }
+                 */
                 "application/json": {
+                    /** @description Where to send events. Surrounding spaces are trimmed. */
                     url: string;
+                    /** @description Your note about the endpoint, such as what it feeds. */
                     description?: string;
+                    /** @description Event types to send. `*` means every event; `invoice.*` means every invoice event. Leave it out or send `[]` for every event. */
                     events?: string[];
                 };
             };
         };
         responses: {
-            /** @description Endpoint created (response carries the one-time signing secret) */
+            /** @description Endpoint created. The answer carries the signing secret, shown only once. */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "endpoint": {
+                     *         "id": "hc_whe_danslg2q3gpgqfoq5c80",
+                     *         "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *         "livemode": false,
+                     *         "url": "https://example.com/hardcount/webhooks",
+                     *         "description": "Billing sync",
+                     *         "secret_last4": "4e9f",
+                     *         "events": [
+                     *           "invoice.*",
+                     *           "payment.failed",
+                     *           "credit.balance_depleted"
+                     *         ],
+                     *         "active": true,
+                     *         "created_at": "2026-10-02T10:00:00Z",
+                     *         "updated_at": "2026-10-02T10:00:00Z"
+                     *       },
+                     *       "secret": "whsec_9b4e2c7a1f5d8e3b6c0a4f2d7e1b9c5a3f8d6e2b1a7c4e9f"
+                     *     }
+                     */
                     "application/json": components["schemas"]["WebhookEndpointCreated"];
                 };
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
-            /** @description Invalid URL or unknown event type */
+            /**
+             * @description `url` is missing, is not `https://`, cannot be looked up, or
+             *     points to a private address; an event type is unknown; or the
+             *     body has an unknown field. `param` names the field.
+             */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "unknown event type \"invoice.payment_failed\" — Hardcount never emits it, so this subscription would receive silence; see the event catalog in docs/webhooks.md",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "events"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
             };
             429: components["responses"]["RateLimited"];
         };
@@ -16600,6 +17718,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description The endpoint's id (`hc_whe_…`). */
                 id: string;
             };
             cookie?: never;
@@ -16612,16 +17731,44 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_whe_danslg2q3gpgqfoq5c80",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "livemode": false,
+                     *       "url": "https://example.com/hardcount/webhooks",
+                     *       "description": "Billing sync",
+                     *       "secret_last4": "4e9f",
+                     *       "events": [
+                     *         "invoice.*",
+                     *         "payment.failed",
+                     *         "credit.balance_depleted"
+                     *       ],
+                     *       "active": true,
+                     *       "created_at": "2026-10-02T10:00:00Z",
+                     *       "updated_at": "2026-10-02T10:00:00Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["WebhookEndpoint"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description No such endpoint in the caller's mode */
+            /** @description No endpoint with this id in this mode, or it was deleted. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "webhook endpoint not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -16633,25 +17780,53 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description The endpoint's id (`hc_whe_…`). */
                 id: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Endpoint disabled */
+            /** @description Endpoint deleted */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "status": "deleted"
+                     *     }
+                     */
                     "application/json": {
-                        /** @enum {string} */
+                        /**
+                         * @description Always `deleted`.
+                         * @enum {string}
+                         */
                         status: "deleted";
                     };
                 };
             };
             401: components["responses"]["Unauthorized"];
+            /** @description No endpoint with this id in this mode, or it was already deleted. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "endpoint not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             429: components["responses"]["RateLimited"];
         };
     };
@@ -16663,52 +17838,116 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description The endpoint's id (`hc_whe_…`). */
                 id: string;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "description": "Billing sync (v2)",
+                 *       "events": [
+                 *         "invoice.*",
+                 *         "payment.*"
+                 *       ]
+                 *     }
+                 */
                 "application/json": {
+                    /** @description A new URL, checked as on create. It cannot be empty. */
                     url?: string;
+                    /** @description A new note. An empty string clears it. */
                     description?: string;
+                    /** @description A new list of event types, replacing the old one. `[]` means every event. */
                     events?: string[];
+                    /** @description False pauses the endpoint; true resumes it. */
                     active?: boolean;
                 };
             };
         };
         responses: {
-            /** @description Updated endpoint */
+            /** @description The updated endpoint */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_whe_danslg2q3gpgqfoq5c80",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "livemode": false,
+                     *       "url": "https://example.com/hardcount/webhooks",
+                     *       "description": "Billing sync (v2)",
+                     *       "secret_last4": "4e9f",
+                     *       "events": [
+                     *         "invoice.*",
+                     *         "payment.*"
+                     *       ],
+                     *       "active": true,
+                     *       "created_at": "2026-10-02T10:00:00Z",
+                     *       "updated_at": "2026-11-01T11:20:00Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["WebhookEndpoint"];
                 };
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
-            /** @description Endpoint not found */
+            /** @description No endpoint with this id in this mode, or it was deleted. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "webhook endpoint not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
             };
-            /** @description Invalid URL or unknown event type */
+            /**
+             * @description `url` is empty, is not `https://`, cannot be looked up, or points
+             *     to a private address; an event type is unknown; or the body has
+             *     an unknown field. `param` names the field.
+             */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "must start with https://",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "url"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
             };
             429: components["responses"]["RateLimited"];
         };
@@ -16721,29 +17960,59 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description The endpoint's id (`hc_whe_…`). */
                 id: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description New secret (old secret keeps verifying during the grace window) */
+            /** @description The new secret. The old one keeps signing until `secondary_valid_until`. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "secret": "whsec_1f8a3c6e9b2d5f7a0c4e8b1d3f6a9c2e5b7d0f4a8c1e3b6d",
+                     *       "secondary_valid_until": "2026-11-04T10:00:00Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["WebhookSecretRotation"];
                 };
             };
             401: components["responses"]["Unauthorized"];
+            /** @description No endpoint with this id in this mode. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "webhook endpoint not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             429: components["responses"]["RateLimited"];
         };
     };
@@ -16763,18 +18032,40 @@ export interface operations {
             };
             header?: never;
             path: {
+                /** @description The endpoint's id (`hc_whe_…`). */
                 id: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Endpoint and its deliveries */
+            /** @description One page of the endpoint's deliveries. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "data": [
+                     *         {
+                     *           "id": "hc_whd_dbj84bqq3gpgqfoq5c90",
+                     *           "event_id": "hc_whevt_dbj84biq3gpgqfoq5c8g",
+                     *           "event_type": "credit.balance_depleted",
+                     *           "is_replay": false,
+                     *           "status": "succeeded",
+                     *           "status_code": 200,
+                     *           "attempt_count": 1,
+                     *           "response_body": "{\"received\":true}",
+                     *           "error": "",
+                     *           "created_at": "2026-11-01T00:05:00Z",
+                     *           "completed_at": "2026-11-01T00:05:01Z",
+                     *           "next_retry_at": null
+                     *         }
+                     *       ],
+                     *       "total": 1
+                     *     }
+                     */
                     "application/json": {
                         data: components["schemas"]["WebhookEndpointDelivery"][];
                         total: components["schemas"]["ListTotal"];
@@ -16782,12 +18073,22 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description No such endpoint, or it was deleted */
+            /** @description No endpoint with this id in this mode, or it was deleted. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "webhook endpoint not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -16803,9 +18104,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -16825,16 +18130,34 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "event_id": "hc_whevt_dbj84biq3gpgqfoq5c9r",
+                     *       "replay_of": "hc_whevt_dbj84biq3gpgqfoq5c8g",
+                     *       "delivery_id": "hc_whd_dbj84bqq3gpgqfoq5c9k",
+                     *       "status": "queued"
+                     *     }
+                     */
                     "application/json": components["schemas"]["WebhookDeliveryReplayResult"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description No such delivery, the delivery belongs to another endpoint, or the endpoint was deleted */
+            /** @description No such delivery in this mode, the delivery belongs to another endpoint, or the endpoint was deleted. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "webhook_delivery not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -16844,6 +18167,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_state",
+                     *         "message": "endpoint is paused — resume it before replaying deliveries",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -16876,6 +18209,20 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "data": [
+                     *         {
+                     *           "endpoint_id": "hc_whe_danslg2q3gpgqfoq5c80",
+                     *           "total_deliveries": 120,
+                     *           "succeeded": 117,
+                     *           "failed": 1,
+                     *           "success_rate": 99.15254237288136
+                     *         }
+                     *       ],
+                     *       "total": 1
+                     *     }
+                     */
                     "application/json": {
                         data: components["schemas"]["WebhookEndpointStats"][];
                         total: components["schemas"]["ListTotal"];
@@ -16907,12 +18254,38 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Event list */
+            /** @description One page of events. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "data": [
+                     *         {
+                     *           "id": "hc_whevt_dbj84biq3gpgqfoq5c8g",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "livemode": false,
+                     *           "event_type": "credit.balance_depleted",
+                     *           "payload": {
+                     *             "credit_balance": {
+                     *               "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *               "currency": "USD",
+                     *               "balance_cents": 0,
+                     *               "total_granted": 5000,
+                     *               "total_used": 5000,
+                     *               "total_expired": 0,
+                     *               "total_retired": 0,
+                     *               "total_deducted": 0
+                     *             }
+                     *           },
+                     *           "created_at": "2026-11-01T00:05:00Z"
+                     *         }
+                     *       ],
+                     *       "total": 1
+                     *     }
+                     */
                     "application/json": {
                         data: components["schemas"]["WebhookEvent"][];
                         total: components["schemas"]["ListTotal"];
@@ -16942,6 +18315,49 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "root_event_id": "hc_whevt_dbj84biq3gpgqfoq5c8g",
+                     *       "deliveries": [
+                     *         {
+                     *           "id": "hc_whd_dbj84bqq3gpgqfoq5c90",
+                     *           "event_id": "hc_whevt_dbj84biq3gpgqfoq5c8g",
+                     *           "endpoint_id": "hc_whe_danslg2q3gpgqfoq5c80",
+                     *           "endpoint_url": "https://example.com/hardcount/webhooks",
+                     *           "endpoint_description": "Billing sync",
+                     *           "attempt_no": 1,
+                     *           "status": "succeeded",
+                     *           "status_code": 200,
+                     *           "response_body": "{\"received\":true}",
+                     *           "error": "",
+                     *           "request_payload_sha256": "2729692ed25262f63668409fe4ef3b8a010360397231ebf671f77bac8956322e",
+                     *           "attempted_at": "2026-11-01T00:05:00Z",
+                     *           "completed_at": "2026-11-01T00:05:01Z",
+                     *           "next_retry_at": null,
+                     *           "is_replay": false,
+                     *           "replay_event_id": ""
+                     *         },
+                     *         {
+                     *           "id": "hc_whd_dbj84bqq3gpgqfoq5c9k",
+                     *           "event_id": "hc_whevt_dbj84biq3gpgqfoq5c9r",
+                     *           "endpoint_id": "hc_whe_danslg2q3gpgqfoq5c80",
+                     *           "endpoint_url": "https://example.com/hardcount/webhooks",
+                     *           "endpoint_description": "Billing sync",
+                     *           "attempt_no": 2,
+                     *           "status": "pending",
+                     *           "status_code": 503,
+                     *           "response_body": "Service Unavailable",
+                     *           "error": "HTTP 503",
+                     *           "request_payload_sha256": "2729692ed25262f63668409fe4ef3b8a010360397231ebf671f77bac8956322e",
+                     *           "attempted_at": "2026-11-01T10:30:00Z",
+                     *           "completed_at": null,
+                     *           "next_retry_at": "2026-11-01T10:31:12Z",
+                     *           "is_replay": true,
+                     *           "replay_event_id": "hc_whevt_dbj84biq3gpgqfoq5c9r"
+                     *         }
+                     *       ]
+                     *     }
+                     */
                     "application/json": {
                         /** @description The original event the timeline is built from. */
                         root_event_id: string;
@@ -16950,21 +18366,41 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Caller lacks the `apikey:read` permission */
+            /** @description The caller lacks the `apikey:read` permission (an ingest key). */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "authentication_error",
+                     *         "code": "forbidden",
+                     *         "message": "insufficient permissions: this key type does not have apikey:read access",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description No such event in this mode */
+            /** @description No event with this id in this mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "webhook event not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -16979,13 +18415,18 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description An event id, either the original or a replay. */
                 id: string;
             };
             cookie?: never;
@@ -16998,25 +18439,52 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "event_id": "hc_whevt_dbj84biq3gpgqfoq5c9r",
+                     *       "replay_of": "hc_whevt_dbj84biq3gpgqfoq5c8g",
+                     *       "status": "queued"
+                     *     }
+                     */
                     "application/json": components["schemas"]["WebhookReplayResult"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Caller lacks the `apikey:read` permission */
+            /** @description The caller lacks the `apikey:read` permission (an ingest key). */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "authentication_error",
+                     *         "code": "forbidden",
+                     *         "message": "insufficient permissions: this key type does not have apikey:read access",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description No such event in this mode */
+            /** @description No event with this id in this mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "webhook event not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -17044,21 +18512,23 @@ export interface operations {
                     "text/event-stream": string;
                 };
             };
-            /** @description Missing or invalid credential */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Caller lacks the `apikey:read` permission */
+            401: components["responses"]["Unauthorized"];
+            /** @description The caller lacks the `apikey:read` permission (an ingest key). */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "authentication_error",
+                     *         "code": "forbidden",
+                     *         "message": "insufficient permissions: this key type does not have apikey:read access",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -17069,15 +18539,40 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
+                /** @description Stripe's signature of the body. Hardcount checks it with the connection's webhook signing secret. */
                 "Stripe-Signature": string;
             };
             path: {
+                /** @description The `id` of the mode's Stripe connection (`hc_spc_…`). */
                 endpoint_id: string;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "id": "evt_3Q2w3E4r5T6y7U8i0a1b2c3d",
+                 *       "object": "event",
+                 *       "type": "payment_intent.succeeded",
+                 *       "created": 1793491505,
+                 *       "livemode": false,
+                 *       "data": {
+                 *         "object": {
+                 *           "id": "pi_3Q2w3E4r5T6y7U8i1x2y3z4w",
+                 *           "object": "payment_intent",
+                 *           "amount": 3650,
+                 *           "currency": "usd",
+                 *           "status": "succeeded",
+                 *           "customer": "cus_R2w3E4r5T6y7U8",
+                 *           "metadata": {
+                 *             "hardcount_tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                 *             "hardcount_invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c40"
+                 *           }
+                 *         }
+                 *       }
+                 *     }
+                 */
                 "application/json": {
                     [key: string]: unknown;
                 };
@@ -17090,29 +18585,61 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "status": "processed"
+                     *     }
+                     */
                     "application/json": {
-                        /** @enum {string} */
+                        /**
+                         * @description `processed` when Hardcount handled the event, `skipped` when it is not about a Hardcount object.
+                         * @enum {string}
+                         */
                         status: "processed" | "skipped";
-                        /** @description Why the event was skipped. */
+                        /** @description Why the event was skipped. Absent when it was processed. */
                         reason?: string;
                     };
                 };
             };
-            /** @description Bad signature, an unreadable body or invalid JSON, or the event's mode or Hardcount account does not match the endpoint. */
+            /**
+             * @description The `Stripe-Signature` check failed, the body could not be read
+             *     or is not valid JSON, or the event's mode or Hardcount account
+             *     does not match the connection. Code `invalid_request`.
+             */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_request",
+                     *         "message": "invalid signature",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description No Stripe connection has this `endpoint_id`. */
+            /** @description No Stripe connection has this `endpoint_id`, or the connection has no webhook signing secret yet. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "webhook_endpoint not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -17122,6 +18649,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "payload_too_large",
+                     *         "message": "webhook body exceeds the size cap",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -17131,6 +18668,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "api_error",
+                     *         "code": "internal_error",
+                     *         "message": "an internal error occurred",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -17145,6 +18692,20 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "RecordType": "Bounce",
+                 *       "MessageID": "883953f4-6105-42a2-a16a-77a8eac79483",
+                 *       "Type": "HardBounce",
+                 *       "TypeCode": 1,
+                 *       "Email": "billing@acme.example",
+                 *       "Inactive": true,
+                 *       "Description": "The server was unable to deliver your message (ex. unknown user, mailbox not found).",
+                 *       "Metadata": {
+                 *         "hc-outbox-id": "hc_emob_dbj84cqq3gpgqfoq5cbg"
+                 *       }
+                 *     }
+                 */
                 "application/json": {
                     [key: string]: unknown;
                 };
@@ -17157,22 +18718,50 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "status": "processed"
+                     *     }
+                     */
                     "application/json": {
-                        /** @enum {string} */
+                        /**
+                         * @description `processed`: the record was applied. `skipped`: it
+                         *     could not be used (too large, invalid JSON, or no
+                         *     known email id). `ignored`: Hardcount does not read
+                         *     this record type, or it is a soft bounce.
+                         * @enum {string}
+                         */
                         status: "processed" | "skipped" | "ignored";
+                        /**
+                         * @description Why the record was skipped or ignored, such as
+                         *     `invalid json`, `no correlation metadata` or
+                         *     `transient bounce`. Absent when it was processed.
+                         */
                         reason?: string;
                     };
                 };
             };
-            /** @description Wrong or missing Basic auth, or the credentials are not set on the server. */
+            /**
+             * @description Wrong or missing Basic auth, or the credentials are not set on
+             *     the server. The answer carries a `WWW-Authenticate: Basic`
+             *     header.
+             */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        error?: string;
-                    };
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "authentication_error",
+                     *         "code": "unauthorized",
+                     *         "message": "unauthorized",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
                 };
             };
             /** @description Temporary failure. Postmark retries. */
@@ -17181,9 +18770,17 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        error?: string;
-                    };
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "api_error",
+                     *         "code": "internal_error",
+                     *         "message": "an internal error occurred",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
@@ -17270,9 +18867,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -17545,9 +19146,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -17858,9 +19463,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -18113,9 +19722,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -18364,9 +19977,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -18573,9 +20190,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -18704,9 +20325,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -18939,9 +20564,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -19071,9 +20700,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -19363,9 +20996,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -19661,9 +21298,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -19793,9 +21434,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -19961,9 +21606,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -20252,9 +21901,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -20505,9 +22158,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -22040,9 +23697,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -22218,9 +23879,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -22562,9 +24227,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -22692,9 +24361,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -22801,9 +24474,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -22956,9 +24633,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -23066,9 +24747,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -23220,9 +24905,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -23385,9 +25074,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -23520,9 +25213,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -23722,9 +25419,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -24194,9 +25895,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -24363,9 +26068,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -24578,9 +26287,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -24717,9 +26430,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -24870,9 +26587,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -25045,9 +26766,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -25212,9 +26937,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -25369,9 +27098,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -25543,37 +27276,112 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "email": "maya@northwind.example",
+                 *       "password": "violet-harbor-lantern-42"
+                 *     }
+                 */
                 "application/json": {
-                    /** Format: email */
+                    /**
+                     * Format: email
+                     * @description The user's sign-in email.
+                     */
                     email: string;
+                    /** @description The user's password. */
                     password: string;
                 };
             };
         };
         responses: {
-            /** @description Session minted; cookie set on response */
+            /** @description Signed in. The answer sets the session cookie. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "user_id": "hc_usr_8d3f1a6c2e9b4d7f0a5c3e1b",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "email": "maya@northwind.example",
+                     *       "livemode": false,
+                     *       "expires_at": "2026-11-08T09:00:00Z"
+                     *     }
+                     */
                     "application/json": {
+                        /** @description The signed-in user's id (`hc_usr_…`). */
                         user_id: string;
+                        /** @description The account the session works in. */
                         tenant_id: string;
+                        /** @description The user's sign-in email. */
                         email: string;
+                        /** @description The session's mode. Always false (test) at sign-in. */
                         livemode: boolean;
-                        /** Format: date-time */
+                        /**
+                         * Format: date-time
+                         * @description When the session ends, 7 days after sign-in.
+                         */
                         expires_at: string;
                     };
                 };
             };
             400: components["responses"]["InvalidBody"];
-            /** @description Invalid email or password */
+            /** @description The email and password do not match an account. */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "authentication_error",
+                     *         "code": "unauthorized",
+                     *         "message": "invalid email or password",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The password is right, but the user belongs to no account (a removed member). Code `invalid_state`. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_state",
+                     *         "message": "user has no tenant membership; contact your administrator",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `email` or `password` is empty, or the body has an unknown field. `param` names it. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "email is required",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "email"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -25597,6 +27405,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "rate_limit_error",
+                     *         "code": "login_throttled",
+                     *         "message": "Too many sign-in attempts. Try again in 2 minutes.",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -25610,6 +27428,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "api_error",
+                     *         "code": "authentication_unavailable",
+                     *         "message": "Sign-in is unavailable right now. Try again in a minute.",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -25624,7 +27452,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Session revoked */
+            /** @description Signed out, or there was nothing to sign out. */
             204: {
                 headers: {
                     [name: string]: unknown;
@@ -25632,6 +27460,25 @@ export interface operations {
                 content?: never;
             };
             429: components["responses"]["RateLimited"];
+            /** @description The session could not be ended. It still works, and the cookie was not cleared. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "api_error",
+                     *         "code": "internal_error",
+                     *         "message": "an internal error occurred",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     switchSessionMode: {
@@ -25643,7 +27490,13 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "livemode": true
+                 *     }
+                 */
                 "application/json": {
+                    /** @description True for live mode, false for test mode. */
                     livemode: boolean;
                 };
             };
@@ -25655,18 +27508,34 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "livemode": true
+                     *     }
+                     */
                     "application/json": {
+                        /** @description The mode the session is now in. */
                         livemode: boolean;
                     };
                 };
             };
             400: components["responses"]["InvalidBody"];
-            /** @description Missing or expired session */
+            /** @description The request has no session cookie, or its session has ended. */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "authentication_error",
+                     *         "code": "unauthorized",
+                     *         "message": "invalid or expired session",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -25682,8 +27551,16 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "email": "maya@northwind.example"
+                 *     }
+                 */
                 "application/json": {
-                    /** Format: email */
+                    /**
+                     * Format: email
+                     * @description The sign-in email of the account to reset.
+                     */
                     email: string;
                 };
             };
@@ -25695,12 +27572,19 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "message": "if an account exists for that email, a password-reset link has been sent",
+                     *       "email_delivery": "ok"
+                     *     }
+                     */
                     "application/json": {
+                        /** @description The same sentence for every request. */
                         message: string;
                         /**
-                         * @description Whether this deployment can deliver reset emails
-                         *     (SMTP configured AND `DASHBOARD_BASE_URL` set).
-                         *     Deployment posture, never account state.
+                         * @description Whether this server can deliver reset emails: `ok`
+                         *     when SMTP is set up and `DASHBOARD_BASE_URL` is set,
+                         *     otherwise `not_configured`.
                          * @enum {string}
                          */
                         email_delivery: "ok" | "not_configured";
@@ -25708,6 +27592,26 @@ export interface operations {
                 };
             };
             400: components["responses"]["InvalidBody"];
+            /** @description `email` is empty, or the body has an unknown field. `param` names it. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "email is required",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "email"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             429: components["responses"]["RateLimited"];
         };
     };
@@ -25720,8 +27624,19 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "token": "9f2c4e7a1b3d5f6081a2c3e4f5a6b7c8d9e0f1a2b3c4d5e6f708192a3b4c5d6e",
+                 *       "password": "violet-harbor-lantern-42"
+                 *     }
+                 */
                 "application/json": {
+                    /** @description The token from the reset link. */
                     token: string;
+                    /**
+                     * @description The new password: at least 12 characters, at most 72
+                     *     bytes, and not one of the most common passwords.
+                     */
                     password: string;
                 };
             };
@@ -25733,19 +27648,42 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "message": "password updated — sign in with your new password"
+                     *     }
+                     */
                     "application/json": {
-                        /** @example password updated — sign in with your new password */
+                        /**
+                         * @description The same sentence for every successful reset.
+                         * @example password updated — sign in with your new password
+                         */
                         message: string;
                     };
                 };
             };
             400: components["responses"]["InvalidBody"];
-            /** @description Token invalid/expired or password does not meet policy */
+            /**
+             * @description `token` or `password` is empty, the password fails the check
+             *     (`param: password`), the token is unknown, expired or already
+             *     used (`param: token`), or the body has an unknown field.
+             */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "reset token is invalid, expired, or already used",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "token"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -25770,30 +27708,41 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "valid": true
+                     *     }
+                     */
                     "application/json": {
-                        /** @enum {boolean} */
+                        /**
+                         * @description Always true. A token that cannot be used gets 422.
+                         * @enum {boolean}
+                         */
                         valid: true;
                     };
                 };
             };
-            /** @description `invalid_or_expired` (param `token`): the token is unknown, expired or already used */
+            /** @description `invalid_or_expired` (param `token`): the token is missing, unknown, expired or already used */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_or_expired",
+                     *         "message": "the reset link is unknown, expired or already used",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "token"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Rate limited (shared per-IP limit on `/v1/auth`) */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+            429: components["responses"]["RateLimited"];
         };
     };
     getInvitation: {
@@ -25801,6 +27750,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description The token from the invite link. */
                 token: string;
             };
             cookie?: never;
@@ -25813,23 +27763,52 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "email": "sam@northwind.example",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "tenant_name": "Northwind AI",
+                     *       "needs_new_account": true,
+                     *       "invited_by_email": "maya@northwind.example",
+                     *       "expires_at": "2026-11-04T15:00:00Z"
+                     *     }
+                     */
                     "application/json": {
+                        /** @description The invited address. */
                         email: string;
+                        /** @description The account the invitation is for. */
                         tenant_id: string;
+                        /** @description The account's name. Empty if it could not be read. */
                         tenant_name: string;
+                        /** @description True when no account has this email, so accepting needs a password. */
                         needs_new_account: boolean;
+                        /** @description The email of the member who sent the invitation. Empty when that user no longer exists. */
                         invited_by_email: string;
-                        /** Format: date-time */
+                        /**
+                         * Format: date-time
+                         * @description When the invite link stops working.
+                         */
                         expires_at: string;
                     };
                 };
             };
-            /** @description Token invalid, expired, revoked, or already used */
+            /** @description The token is unknown, expired, revoked or already used (`param: token`). */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "this invitation link is invalid, expired, revoked, or already used",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "token"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -25845,38 +27824,79 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "token": "4b8e1d6a9c2f5e7b0d3a6c9f2e5b8d1a4c7f0e3b6d9a2c5f8e1b4d7a0c3f6e9b",
+                 *       "password": "violet-harbor-lantern-42"
+                 *     }
+                 */
                 "application/json": {
+                    /** @description The token from the invite link. */
                     token: string;
-                    /** @description Required (and validated) only when no account exists for the invited email; ignored otherwise. */
+                    /**
+                     * @description Required when no account has the invited email: at least
+                     *     12 characters, at most 72 bytes, and not one of the most
+                     *     common passwords. Ignored otherwise.
+                     */
                     password?: string;
                 };
             };
         };
         responses: {
-            /** @description Membership attached; cookie set when session_minted is true */
+            /** @description Membership added. The answer sets the session cookie when `session_minted` is true. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "user_id": "hc_usr_2b7e9c4a1f6d3b8e5c0a7f2d",
+                     *       "email": "sam@northwind.example",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "session_minted": true,
+                     *       "livemode": false,
+                     *       "expires_at": "2026-11-08T15:30:00Z"
+                     *     }
+                     */
                     "application/json": {
+                        /** @description The member's user id (`hc_usr_…`). */
                         user_id: string;
+                        /** @description The member's sign-in email. */
                         email: string;
+                        /** @description The account the member joined. */
                         tenant_id: string;
+                        /** @description True when this answer signed the new account in and set the session cookie. */
                         session_minted: boolean;
+                        /** @description The new session's mode. Always false (test). */
                         livemode: boolean;
-                        /** @description Session expiry (RFC 3339) when session_minted; empty string otherwise. */
+                        /** @description Session expiry (RFC 3339) when `session_minted` is true; an empty string otherwise. */
                         expires_at: string;
                     };
                 };
             };
             400: components["responses"]["InvalidBody"];
-            /** @description Token invalid/expired/revoked/used, or password does not meet policy */
+            /**
+             * @description The token is unknown, expired, revoked or already used
+             *     (`param: token`), a new account's password fails the check
+             *     (`param: password`), or the body has an unknown field.
+             */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "this invitation link is invalid, expired, revoked, or already used",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "token"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -25892,18 +27912,49 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Members + invitations */
+            /** @description Members and invitations */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "members": [
+                     *         {
+                     *           "user_id": "hc_usr_8d3f1a6c2e9b4d7f0a5c3e1b",
+                     *           "email": "maya@northwind.example",
+                     *           "role": "owner",
+                     *           "joined_at": "2026-10-01T08:00:00Z"
+                     *         }
+                     *       ],
+                     *       "invitations": [
+                     *         {
+                     *           "id": "hc_minv_davn542q3gpgqfoq5ccg",
+                     *           "email": "sam@northwind.example",
+                     *           "role": "member",
+                     *           "status": "pending",
+                     *           "invited_by_email": "maya@northwind.example",
+                     *           "expires_at": "2026-11-04T15:00:00Z",
+                     *           "created_at": "2026-10-28T15:00:00Z"
+                     *         }
+                     *       ]
+                     *     }
+                     */
                     "application/json": {
                         members: {
+                            /** @description The member's user id (`hc_usr_…`). */
                             user_id: string;
+                            /** @description The member's sign-in email. */
                             email: string;
+                            /** @description `owner` for the user created at setup, `member` for an invited one. Not enforced yet. */
                             role: string;
-                            /** Format: date-time */
+                            /**
+                             * Format: date-time
+                             * @description When the user's sign-in account was created. For
+                             *     someone who already had an account when invited,
+                             *     this is earlier than the day they joined.
+                             */
                             joined_at: string;
                         }[];
                         invitations: components["schemas"]["MemberInvitation"][];
@@ -25911,12 +27962,22 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Caller is not a dashboard session */
+            /** @description The caller is not a dashboard session (an API key). */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "authentication_error",
+                     *         "code": "forbidden",
+                     *         "message": "this endpoint requires a dashboard session — sign in to the dashboard to manage team membership",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -25931,9 +27992,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -25942,45 +28007,106 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "email": "sam@northwind.example"
+                 *     }
+                 */
                 "application/json": {
-                    /** Format: email */
+                    /**
+                     * Format: email
+                     * @description The teammate's email, one plain address. It is stored in lower case.
+                     */
                     email: string;
                 };
             };
         };
         responses: {
-            /** @description Invitation created and email enqueued */
+            /** @description Invitation created and its email queued */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_minv_davn542q3gpgqfoq5ccg",
+                     *       "email": "sam@northwind.example",
+                     *       "role": "member",
+                     *       "status": "pending",
+                     *       "invited_by_email": "maya@northwind.example",
+                     *       "expires_at": "2026-11-04T15:00:00Z",
+                     *       "created_at": "2026-10-28T15:00:00Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["MemberInvitation"];
                 };
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            /** @description The caller is not a dashboard session (an API key). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "authentication_error",
+                     *         "code": "forbidden",
+                     *         "message": "this endpoint requires a dashboard session — sign in to the dashboard to manage team membership",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /**
-             * @description No invitation was created when the code is
-             *     `email_not_configured` (this server has no SMTP set up, so the
-             *     accept link could not be delivered) or `invalid_state`
-             *     (`DASHBOARD_BASE_URL` is not set). Also returned when the email
-             *     is already a member or already has a pending invitation.
+             * @description No invitation was created. Codes: `invalid_state`
+             *     (`DASHBOARD_BASE_URL` is not set), `email_not_configured` (this
+             *     server has no SMTP, so the link could not be delivered), or
+             *     `already_exists` with `param: email` (the email is already a
+             *     member, or already has an invitation that is not accepted or
+             *     revoked).
              */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "already_exists",
+                     *         "message": "a pending invitation for this email already exists — revoke it first to re-send",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "email"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Invalid email */
+            /** @description `email` is empty or not one plain address, or the body has an unknown field. `param` names it. */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "invalid email",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "email"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -25992,6 +28118,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description The invitation's id (`hc_minv_…`). */
                 id: string;
             };
             cookie?: never;
@@ -26006,12 +28133,41 @@ export interface operations {
                 content?: never;
             };
             401: components["responses"]["Unauthorized"];
-            /** @description No pending invitation with this id (code `not_found`). */
+            /** @description The caller is not a dashboard session (an API key). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "authentication_error",
+                     *         "code": "forbidden",
+                     *         "message": "this endpoint requires a dashboard session — sign in to the dashboard to manage team membership",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No invitation with this id that can still be revoked (code `not_found`). */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "invitation not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -26023,13 +28179,14 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description The member's user id (`hc_usr_…`). */
                 userID: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Member removed and sessions revoked */
+            /** @description Member removed and their sessions ended */
             204: {
                 headers: {
                     [name: string]: unknown;
@@ -26037,21 +28194,60 @@ export interface operations {
                 content?: never;
             };
             401: components["responses"]["Unauthorized"];
-            /** @description User is not a member of this workspace (code `not_found`). */
+            /** @description The caller is not a dashboard session (an API key). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "authentication_error",
+                     *         "code": "forbidden",
+                     *         "message": "this endpoint requires a dashboard session — sign in to the dashboard to manage team membership",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The user is not a member of this account (code `not_found`). */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "member not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Self-removal or last-member removal blocked */
+            /** @description You tried to remove yourself, or the account's last member. Code `invalid_state`. */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_state",
+                     *         "message": "you cannot remove yourself — another member must remove you",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -26067,14 +28263,27 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Resolved auth context */
+            /** @description The credential's account, mode and server email setup */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "livemode": false,
+                     *       "can_email_setup_links": true,
+                     *       "can_send_invites": true,
+                     *       "smtp_configured": true,
+                     *       "key_id": "hc_key_dajqj1iq3gpgqfoq5ca0",
+                     *       "key_type": "secret"
+                     *     }
+                     */
                     "application/json": {
+                        /** @description The account the credential belongs to. */
                         tenant_id: string;
+                        /** @description The mode the credential works in, true for live. */
                         livemode: boolean;
                         /**
                          * @description Whether this server can email a customer a link to add
@@ -26095,23 +28304,21 @@ export interface operations {
                          *     (`GET /v1/settings/email`) has the details.
                          */
                         smtp_configured: boolean;
+                        /** @description Dashboard session only. The signed-in user's id (`hc_usr_…`). */
                         user_id?: string;
+                        /** @description Dashboard session only. The user's sign-in email; absent if it could not be read. */
                         email?: string;
+                        /** @description API key only. The key's id (`hc_key_…`). */
                         key_id?: string;
-                        /** @enum {string} */
+                        /**
+                         * @description API key only. The key's type.
+                         * @enum {string}
+                         */
                         key_type?: "secret" | "ingest";
                     };
                 };
             };
-            /** @description Missing, revoked, or expired credential */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+            401: components["responses"]["Unauthorized"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -26123,9 +28330,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -26289,9 +28500,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -26590,9 +28805,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -26945,9 +29164,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -27350,9 +29573,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -27498,9 +29725,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -28141,9 +30372,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -28323,9 +30558,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -28501,6 +30740,17 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "must be RFC3339 (e.g. 2026-01-01T00:00:00Z) or YYYY-MM-DD",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "from"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -28511,6 +30761,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "api_error",
+                     *         "code": "internal_error",
+                     *         "message": "an internal error occurred",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -28546,6 +30806,17 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "must be RFC3339 (e.g. 2026-01-01T00:00:00Z) or YYYY-MM-DD",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "from"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -28556,6 +30827,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "api_error",
+                     *         "code": "internal_error",
+                     *         "message": "an internal error occurred",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -28591,6 +30872,17 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "must be RFC3339 (e.g. 2026-01-01T00:00:00Z) or YYYY-MM-DD",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "from"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -28601,6 +30893,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "api_error",
+                     *         "code": "internal_error",
+                     *         "message": "an internal error occurred",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -28641,6 +30943,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_request",
+                     *         "message": "usage-events export requires `from` and `to` query params (RFC3339)",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -28651,6 +30963,17 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "must be RFC3339 (e.g. 2026-01-01T00:00:00Z) or YYYY-MM-DD",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "from"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -28661,6 +30984,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "api_error",
+                     *         "code": "internal_error",
+                     *         "message": "an internal error occurred",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -28673,9 +31006,13 @@ export interface operations {
                 date_from?: string;
                 /** @description Upper bound on created_at, inclusive. RFC 3339 or `YYYY-MM-DD` (end of that day, UTC). */
                 date_to?: string;
+                /** @description Only rows about this kind of resource, such as `invoice` or `api_key`. */
                 resource_type?: string;
+                /** @description Only rows about this resource id. */
                 resource_id?: string;
+                /** @description Only rows with this action, such as `create` or `revoke`. */
                 action?: string;
+                /** @description Only rows by this actor (a user id or an API key id). */
                 actor_id?: string;
                 /** @description Only rows from this test clock's simulation. */
                 test_clock_id?: string;
@@ -28706,6 +31043,17 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "must be RFC3339 (e.g. 2026-01-01T00:00:00Z) or YYYY-MM-DD",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "date_from"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -28716,6 +31064,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "api_error",
+                     *         "code": "internal_error",
+                     *         "message": "an internal error occurred",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -28739,6 +31097,56 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "period": "30d",
+                     *       "currency": "USD",
+                     *       "mrr": 24500,
+                     *       "mrr_prev": 19600,
+                     *       "arr": 294000,
+                     *       "arr_prev": 235200,
+                     *       "revenue": 61850,
+                     *       "revenue_prev": 48200,
+                     *       "outstanding_ar": 8650,
+                     *       "outstanding_by_currency": [
+                     *         {
+                     *           "currency": "USD",
+                     *           "amount_cents": 8650
+                     *         }
+                     *       ],
+                     *       "avg_invoice_value": 8836,
+                     *       "credit_balance_by_currency": [
+                     *         {
+                     *           "currency": "USD",
+                     *           "amount_cents": 12000
+                     *         }
+                     *       ],
+                     *       "active_customers": 6,
+                     *       "new_customers": 1,
+                     *       "live_customers": 5,
+                     *       "live_customers_prev": 4,
+                     *       "active_subscriptions": 5,
+                     *       "trialing_subscriptions": 0,
+                     *       "paid_invoices": 7,
+                     *       "failed_payments": 1,
+                     *       "failed_payments_prev": 0,
+                     *       "open_invoices": 1,
+                     *       "dunning_active": 1,
+                     *       "refunds_needing_attention": 0,
+                     *       "usage_events": 48210,
+                     *       "logo_churn_rate": 0,
+                     *       "revenue_churn_rate": 0,
+                     *       "nrr": 1,
+                     *       "dunning_recovery_rate": 0.5,
+                     *       "mrr_movement": {
+                     *         "new": 4900,
+                     *         "expansion": 0,
+                     *         "contraction": 0,
+                     *         "churned": 0,
+                     *         "net": 4900
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["AnalyticsOverview"];
                 };
             };
@@ -28764,6 +31172,23 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "period": "30d",
+                     *       "data": [
+                     *         {
+                     *           "date": "2026-10-15",
+                     *           "revenue_cents": 4900,
+                     *           "invoice_count": 1
+                     *         },
+                     *         {
+                     *           "date": "2026-11-01",
+                     *           "revenue_cents": 8650,
+                     *           "invoice_count": 1
+                     *         }
+                     *       ]
+                     *     }
+                     */
                     "application/json": {
                         period: components["schemas"]["AnalyticsPeriod"];
                         data: components["schemas"]["AnalyticsRevenuePoint"][];
@@ -28792,6 +31217,36 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "period": "30d",
+                     *       "data": [
+                     *         {
+                     *           "date": "2026-10-14",
+                     *           "new": 4900,
+                     *           "expansion": 0,
+                     *           "contraction": 0,
+                     *           "churned": 0,
+                     *           "net": 4900
+                     *         },
+                     *         {
+                     *           "date": "2026-10-22",
+                     *           "new": 0,
+                     *           "expansion": 2000,
+                     *           "contraction": 0,
+                     *           "churned": 1900,
+                     *           "net": 100
+                     *         }
+                     *       ],
+                     *       "totals": {
+                     *         "new": 4900,
+                     *         "expansion": 2000,
+                     *         "contraction": 0,
+                     *         "churned": 1900,
+                     *         "net": 5000
+                     *       }
+                     *     }
+                     */
                     "application/json": {
                         period: components["schemas"]["AnalyticsPeriod"];
                         data: components["schemas"]["AnalyticsMrrMovementPoint"][];
@@ -28821,12 +31276,46 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "period": "30d",
+                     *       "data": [
+                     *         {
+                     *           "date": "2026-10-12",
+                     *           "events": 1840,
+                     *           "quantity": "412500"
+                     *         },
+                     *         {
+                     *           "date": "2026-10-13",
+                     *           "events": 2210,
+                     *           "quantity": "530000"
+                     *         }
+                     *       ],
+                     *       "top_meters": [
+                     *         {
+                     *           "meter_id": "hc_mtr_dajr122q3gpgqfoq5c10",
+                     *           "meter_name": "Tokens",
+                     *           "event_name": "tokens",
+                     *           "events": 48210,
+                     *           "quantity": "12500000"
+                     *         }
+                     *       ],
+                     *       "totals": {
+                     *         "events": 48210,
+                     *         "quantity": "12500000"
+                     *       }
+                     *     }
+                     */
                     "application/json": {
                         period: components["schemas"]["AnalyticsPeriod"];
                         data: components["schemas"]["AnalyticsUsagePoint"][];
                         top_meters: components["schemas"]["AnalyticsTopMeter"][];
+                        /** @description Totals over the whole window. */
                         totals: {
-                            /** Format: int64 */
+                            /**
+                             * Format: int64
+                             * @description Usage events with a timestamp in the window.
+                             */
                             events: number;
                             /** @description Summed quantity, as a decimal string. */
                             quantity: string;
@@ -29052,9 +31541,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -29289,9 +31782,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -29546,9 +32043,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -29657,9 +32158,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -29805,9 +32310,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -30204,12 +32713,29 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Key list */
+            /** @description One page of keys. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "data": [
+                     *         {
+                     *           "id": "hc_key_dajqj1iq3gpgqfoq5ca0",
+                     *           "key_prefix": "hc_secret_test_4f9c2a7e1b3d",
+                     *           "key_type": "secret",
+                     *           "livemode": false,
+                     *           "name": "Backend (test)",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "created_at": "2026-10-01T08:15:00Z",
+                     *           "last_used_at": "2026-11-01T00:04:12Z"
+                     *         }
+                     *       ],
+                     *       "total": 1
+                     *     }
+                     */
                     "application/json": {
                         data: components["schemas"]["APIKey"][];
                         total: components["schemas"]["ListTotal"];
@@ -30217,12 +32743,22 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Caller lacks the `apikey:write` permission */
+            /** @description The caller lacks the `apikey:write` permission (an ingest key). */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "authentication_error",
+                     *         "code": "forbidden",
+                     *         "message": "insufficient permissions: this key type does not have apikey:write access",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -30238,9 +32774,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -30249,10 +32789,17 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "name": "Backend (test)",
+                 *       "key_type": "secret"
+                 *     }
+                 */
                 "application/json": {
                     /** @description Label shown in the key list. Must not be blank. */
                     name: string;
                     /**
+                     * @description `secret` for full access, or `ingest` for a key that can only send usage events.
                      * @default secret
                      * @enum {string}
                      */
@@ -30272,34 +32819,61 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "key": {
+                     *         "id": "hc_key_dajqj1iq3gpgqfoq5ca0",
+                     *         "key_prefix": "hc_secret_test_4f9c2a7e1b3d",
+                     *         "key_type": "secret",
+                     *         "livemode": false,
+                     *         "name": "Backend (test)",
+                     *         "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *         "created_at": "2026-10-01T08:15:00Z"
+                     *       },
+                     *       "raw_key": "hc_secret_test_4f9c2a7e1b3d5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8"
+                     *     }
+                     */
                     "application/json": components["schemas"]["APIKeyCreated"];
                 };
             };
-            /** @description Body is not valid JSON */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
-            /** @description Caller lacks the `apikey:write` permission */
+            /** @description The caller lacks the `apikey:write` permission (an ingest key). */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "authentication_error",
+                     *         "code": "forbidden",
+                     *         "message": "insufficient permissions: this key type does not have apikey:write access",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description `name` missing, unknown `key_type`, or `expires_at` not in the future */
+            /** @description `name` is blank, `key_type` is not `secret` or `ingest`, `expires_at` is not in the future, or the body has an unknown field. `param` names it. */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "name is required",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "name"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -30311,7 +32885,10 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @example hc_key_1a2b3c4d5e6f7890 */
+                /**
+                 * @description The key's id (`hc_key_…`).
+                 * @example hc_key_dajqj1iq3gpgqfoq5ca0
+                 */
                 id: string;
             };
             cookie?: never;
@@ -30324,16 +32901,58 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_key_dajqj1iq3gpgqfoq5ca0",
+                     *       "key_prefix": "hc_secret_test_4f9c2a7e1b3d",
+                     *       "key_type": "secret",
+                     *       "livemode": false,
+                     *       "name": "Backend (test)",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "created_at": "2026-10-01T08:15:00Z",
+                     *       "revoked_at": "2026-11-01T09:12:30Z",
+                     *       "last_used_at": "2026-11-01T09:10:05Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["APIKey"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description No such key in this mode, or it is already revoked */
+            /** @description The caller lacks the `apikey:write` permission (an ingest key). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "authentication_error",
+                     *         "code": "forbidden",
+                     *         "message": "insufficient permissions: this key type does not have apikey:write access",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No key with this id in this mode, or it is already revoked. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "api key not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -30348,19 +32967,29 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description The key's id (`hc_key_…`). */
                 id: string;
             };
             cookie?: never;
         };
         requestBody?: {
             content: {
+                /**
+                 * @example {
+                 *       "expires_in_seconds": 86400
+                 *     }
+                 */
                 "application/json": {
                     /**
                      * Format: int64
@@ -30378,52 +33007,110 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "old_key": {
+                     *         "id": "hc_key_dajqj1iq3gpgqfoq5ca0",
+                     *         "key_prefix": "hc_secret_test_4f9c2a7e1b3d",
+                     *         "key_type": "secret",
+                     *         "livemode": false,
+                     *         "name": "Backend (test)",
+                     *         "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *         "created_at": "2026-10-01T08:15:00Z",
+                     *         "expires_at": "2026-11-02T10:00:00Z",
+                     *         "last_used_at": "2026-11-01T09:58:40Z"
+                     *       },
+                     *       "new_key": {
+                     *         "id": "hc_key_dajqj1iq3gpgqfoq5cak",
+                     *         "key_prefix": "hc_secret_test_a81c4e7f02d9",
+                     *         "key_type": "secret",
+                     *         "livemode": false,
+                     *         "name": "Backend (test)",
+                     *         "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *         "created_at": "2026-11-01T10:00:00Z"
+                     *       },
+                     *       "raw_key": "hc_secret_test_a81c4e7f02d95b3e6c1f8a04d7b2e9c3516f0a8d2c4b7e91f3a6d05c8b2e4f71"
+                     *     }
+                     */
                     "application/json": components["schemas"]["APIKeyRotation"];
                 };
             };
-            /** @description Body is present but not valid JSON */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
-            /** @description Caller lacks the `apikey:write` permission */
+            /** @description The caller lacks the `apikey:write` permission (an ingest key). */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "authentication_error",
+                     *         "code": "forbidden",
+                     *         "message": "insufficient permissions: this key type does not have apikey:write access",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description No such key in this mode */
+            /** @description No key with this id in this mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "api_key not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The key is already revoked (code `invalid_state`) */
+            /** @description The key is already revoked (code `invalid_state`). */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_state",
+                     *         "message": "cannot rotate a revoked key",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description `expires_in_seconds` is negative or over 604800, or the old key's `expires_at` has passed (the new key would copy it) */
+            /** @description `expires_in_seconds` is negative or over 604800 (`param: expires_in_seconds`), the old key's `expires_at` has passed so the new key would copy it (`param: expires_at`), or the body has an unknown field. */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "must be <= 604800 (7 days)",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "expires_in_seconds"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -30445,16 +33132,59 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "default_currency": "USD",
+                     *       "timezone": "America/Los_Angeles",
+                     *       "invoice_prefix": "NW",
+                     *       "credit_note_prefix": "NWCN",
+                     *       "net_payment_terms": 30,
+                     *       "credit_balance_low_threshold_cents": 1000,
+                     *       "tax_provider": "manual",
+                     *       "tax_rate": 8.625,
+                     *       "tax_name": "Sales tax",
+                     *       "tax_inclusive": false,
+                     *       "tax_on_failure": "block",
+                     *       "company_name": "Northwind AI, Inc.",
+                     *       "company_address_line1": "500 Market Street",
+                     *       "company_address_line2": "Suite 400",
+                     *       "company_city": "San Francisco",
+                     *       "company_state": "CA",
+                     *       "company_postal_code": "94105",
+                     *       "company_country": "US",
+                     *       "company_email": "billing@northwind.example",
+                     *       "company_phone": "+1 415 555 0132",
+                     *       "logo_url": "https://northwind.example/logo.png",
+                     *       "brand_color": "#1f6feb",
+                     *       "tax_id": "12-3456789",
+                     *       "support_url": "https://northwind.example/support",
+                     *       "invoice_footer": "Thank you for your business.",
+                     *       "next_invoice_sequence": 43,
+                     *       "created_at": "2026-10-01T08:00:00Z",
+                     *       "updated_at": "2026-10-20T16:45:10Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["TenantSettings"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Caller lacks the `apikey:write` permission */
+            /** @description The caller lacks the `apikey:write` permission (an ingest key). */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "authentication_error",
+                     *         "code": "forbidden",
+                     *         "message": "insufficient permissions: this key type does not have apikey:write access",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -30469,9 +33199,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -30480,6 +33214,12 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "net_payment_terms": 15,
+                 *       "invoice_footer": "Thank you for your business."
+                 *     }
+                 */
                 "application/json": components["schemas"]["TenantSettingsInput"];
             };
         };
@@ -30490,34 +33230,80 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "default_currency": "USD",
+                     *       "timezone": "America/Los_Angeles",
+                     *       "invoice_prefix": "NW",
+                     *       "credit_note_prefix": "NWCN",
+                     *       "net_payment_terms": 15,
+                     *       "credit_balance_low_threshold_cents": 1000,
+                     *       "tax_provider": "manual",
+                     *       "tax_rate": 8.625,
+                     *       "tax_name": "Sales tax",
+                     *       "tax_inclusive": false,
+                     *       "tax_on_failure": "block",
+                     *       "company_name": "Northwind AI, Inc.",
+                     *       "company_address_line1": "500 Market Street",
+                     *       "company_address_line2": "Suite 400",
+                     *       "company_city": "San Francisco",
+                     *       "company_state": "CA",
+                     *       "company_postal_code": "94105",
+                     *       "company_country": "US",
+                     *       "company_email": "billing@northwind.example",
+                     *       "company_phone": "+1 415 555 0132",
+                     *       "logo_url": "https://northwind.example/logo.png",
+                     *       "brand_color": "#1f6feb",
+                     *       "tax_id": "12-3456789",
+                     *       "support_url": "https://northwind.example/support",
+                     *       "invoice_footer": "Thank you for your business.",
+                     *       "next_invoice_sequence": 43,
+                     *       "created_at": "2026-10-01T08:00:00Z",
+                     *       "updated_at": "2026-11-01T11:00:00Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["TenantSettings"];
                 };
             };
-            /** @description Body is not valid JSON */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
-            /** @description Caller lacks the `apikey:write` permission */
+            /** @description The caller lacks the `apikey:write` permission (an ingest key). */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "authentication_error",
+                     *         "code": "forbidden",
+                     *         "message": "insufficient permissions: this key type does not have apikey:write access",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description A field failed validation. `error.param` names the field. */
+            /** @description A field failed validation, the body sends a field the server sets, or it has an unknown field. `error.param` names the field. */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "must differ from the invoice prefix",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "credit_note_prefix"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -30539,24 +33325,60 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "smtp_configured": true,
+                     *       "smtp_host": "smtp.postmarkapp.com",
+                     *       "from_address": "billing@northwind.example",
+                     *       "tls_mode": "starttls",
+                     *       "links": [
+                     *         {
+                     *           "env": "HOSTED_INVOICE_BASE_URL",
+                     *           "set": true,
+                     *           "effect": "Invoice, receipt and reminder emails go out without a link to view and pay the invoice."
+                     *         },
+                     *         {
+                     *           "env": "PAYMENT_UPDATE_URL",
+                     *           "set": true,
+                     *           "effect": "Emails asking a customer to add a payment method can't be sent."
+                     *         },
+                     *         {
+                     *           "env": "DASHBOARD_BASE_URL",
+                     *           "set": true,
+                     *           "effect": "Password reset and team invite emails can't be sent."
+                     *         }
+                     *       ],
+                     *       "can_email_setup_links": true,
+                     *       "can_send_invites": true
+                     *     }
+                     */
                     "application/json": {
                         /** @description False when `SMTP_HOST` is unset; every email then fails. */
                         smtp_configured: boolean;
-                        /** @description The SMTP relay host name, without port or credentials. Empty when not configured. */
+                        /** @description The SMTP relay host (`SMTP_HOST`), without credentials. Empty when not configured. */
                         smtp_host: string;
-                        /** @description The envelope sender (`SMTP_FROM`). */
+                        /** @description The envelope sender (`SMTP_FROM`, default `billing@hardcount.local`). */
                         from_address: string;
-                        /** @enum {string} */
+                        /**
+                         * @description How Hardcount connects to the SMTP server (`SMTP_TLS`). `starttls` is the default.
+                         * @enum {string}
+                         */
                         tls_mode: "starttls" | "implicit" | "none";
                         /** @description Every environment variable an email link is built from, set or not. */
                         links: {
-                            /** @enum {string} */
+                            /**
+                             * @description The environment variable's name.
+                             * @enum {string}
+                             */
                             env: "HOSTED_INVOICE_BASE_URL" | "PAYMENT_UPDATE_URL" | "DASHBOARD_BASE_URL";
+                            /** @description Whether the variable is set. */
                             set: boolean;
                             /** @description What doesn't work while it is unset. */
                             effect: string;
                         }[];
+                        /** @description Whether this server can email a customer a link to add a payment method (SMTP and `PAYMENT_UPDATE_URL` are set up). */
                         can_email_setup_links: boolean;
+                        /** @description Whether this server can invite a teammate (SMTP and `DASHBOARD_BASE_URL` are set up). */
                         can_send_invites: boolean;
                     };
                 };
@@ -30573,9 +33395,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -30590,18 +33416,53 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "sent_to": "maya@northwind.example"
+                     *     }
+                     */
                     "application/json": {
+                        /** @description The address the test email went to, the signed-in member's own. */
                         sent_to: string;
                     };
                 };
             };
             401: components["responses"]["Unauthorized"];
+            /** @description The caller is an API key, not a dashboard session. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "authentication_error",
+                     *         "code": "forbidden",
+                     *         "message": "Sign in to the dashboard to send a test email. It goes to your own address.",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description `email_not_configured`: SMTP_HOST is not set. */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "email_not_configured",
+                     *         "message": "This server can't send email: SMTP_HOST is not set. Set the SMTP_* variables and restart the server.",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -30612,6 +33473,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "api_error",
+                     *         "code": "smtp_error",
+                     *         "message": "The email server didn't accept the test email: 535 5.7.8 Authentication failed",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -30632,7 +33503,29 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "data": [
+                     *         {
+                     *           "id": "hc_spc_5e2a9c7f1b4d8e3a6c0f2b9d",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "livemode": false,
+                     *           "stripe_account_id": "acct_1Q2w3E4r5T6y7U8i",
+                     *           "stripe_account_name": "Northwind AI",
+                     *           "secret_key_prefix": "sk_test_51Q2",
+                     *           "secret_key_last4": "7fQa",
+                     *           "publishable_key": "pk_test_51Q2w3E4r5T6y7U8iN0rthw1ndAIpub11shab1eK3yExamp1e00aBcDeF",
+                     *           "webhook_secret_last4": "c41d",
+                     *           "has_webhook_secret": true,
+                     *           "verified_at": "2026-10-01T08:30:02Z",
+                     *           "created_at": "2026-10-01T08:30:00Z",
+                     *           "updated_at": "2026-10-01T08:30:02Z"
+                     *         }
+                     *       ]
+                     *     }
+                     */
                     "application/json": {
+                        /** @description One connection per connected mode, live first. Empty when Stripe is not connected. */
                         data: components["schemas"]["StripeConnection"][];
                     };
                 };
@@ -30649,9 +33542,13 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -30660,6 +33557,14 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "livemode": false,
+                 *       "secret_key": "sk_test_51Q2w3E4r5T6y7U8iN0rthw1ndS3cr3tK3yExamp1e000000007fQa",
+                 *       "publishable_key": "pk_test_51Q2w3E4r5T6y7U8iN0rthw1ndAIpub11shab1eK3yExamp1e00aBcDeF",
+                 *       "webhook_secret": "whsec_5d8b2e7f1a4c9e3b6d0f2a8c5e1b7d4f9a3c6e0bc41d"
+                 *     }
+                 */
                 "application/json": {
                     /** @description false = test-mode keys, true = live-mode keys. */
                     livemode: boolean;
@@ -30679,25 +33584,46 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_spc_5e2a9c7f1b4d8e3a6c0f2b9d",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "livemode": false,
+                     *       "stripe_account_id": "acct_1Q2w3E4r5T6y7U8i",
+                     *       "stripe_account_name": "Northwind AI",
+                     *       "secret_key_prefix": "sk_test_51Q2",
+                     *       "secret_key_last4": "7fQa",
+                     *       "publishable_key": "pk_test_51Q2w3E4r5T6y7U8iN0rthw1ndAIpub11shab1eK3yExamp1e00aBcDeF",
+                     *       "webhook_secret_last4": "c41d",
+                     *       "has_webhook_secret": true,
+                     *       "verified_at": "2026-10-01T08:30:02Z",
+                     *       "created_at": "2026-10-01T08:30:00Z",
+                     *       "updated_at": "2026-10-01T08:30:00Z",
+                     *       "retries_queued": 1
+                     *     }
+                     */
                     "application/json": components["schemas"]["StripeConnection"];
                 };
             };
-            /** @description Body is not valid JSON */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
-            /** @description A key has the wrong prefix for the mode. `error.param` names the field. */
+            /** @description A key is missing or has the wrong prefix for the mode, or the body has an unknown field. `error.param` names the field. */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "must start with \"sk_test_\" for this mode",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "secret_key"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -30712,19 +33638,29 @@ export interface operations {
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md. The usage routes do not take
-                 *     it: each usage event carries its own `idempotency_key`.
+                 *     `Idempotent-Replayed: true` header, instead of running again. A
+                 *     first answer of 409 or 422 is not kept, so a retry with the same
+                 *     key runs again. The same key with a different method, path or body
+                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
+                 *     event carries its own `idempotency_key`.
+                 * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description The connection's mode. */
                 mode: "test" | "live";
             };
             cookie?: never;
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "webhook_secret": "whsec_5d8b2e7f1a4c9e3b6d0f2a8c5e1b7d4f9a3c6e0bc41d"
+                 *     }
+                 */
                 "application/json": {
                     /** @description Must start with `whsec_`. */
                     webhook_secret: string;
@@ -30738,15 +33674,42 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_spc_5e2a9c7f1b4d8e3a6c0f2b9d",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "livemode": false,
+                     *       "stripe_account_id": "acct_1Q2w3E4r5T6y7U8i",
+                     *       "stripe_account_name": "Northwind AI",
+                     *       "secret_key_prefix": "sk_test_51Q2",
+                     *       "secret_key_last4": "7fQa",
+                     *       "publishable_key": "pk_test_51Q2w3E4r5T6y7U8iN0rthw1ndAIpub11shab1eK3yExamp1e00aBcDeF",
+                     *       "webhook_secret_last4": "c41d",
+                     *       "has_webhook_secret": true,
+                     *       "verified_at": "2026-10-01T08:30:02Z",
+                     *       "created_at": "2026-10-01T08:30:00Z",
+                     *       "updated_at": "2026-10-01T08:42:17Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["StripeConnection"];
                 };
             };
-            /** @description `mode` is not `test` or `live`, or the body is not valid JSON */
+            /** @description `mode` is not `test` or `live` (code `invalid_request`), or the body is not valid JSON */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_request",
+                     *         "message": "mode must be \"test\" or \"live\"",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -30757,15 +33720,36 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "stripe_credentials not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description `webhook_secret` is missing or does not start with `whsec_` */
+            /** @description `webhook_secret` is missing or does not start with `whsec_`, or the body has an unknown field */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "must start with \"whsec_\"",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "webhook_secret"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -30777,6 +33761,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description The mode to disconnect. */
                 mode: "test" | "live";
             };
             cookie?: never;
@@ -30796,6 +33781,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_request",
+                     *         "message": "mode must be \"test\" or \"live\"",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -30806,6 +33801,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "stripe_credentials not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -30821,13 +33826,23 @@ export interface operations {
         };
         requestBody?: {
             content: {
+                /**
+                 * @example {
+                 *       "token": "3f9d2a7c5e1b8d4f6a0c2e9b7d5f1a3c",
+                 *       "tenant_name": "Northwind AI",
+                 *       "owner_email": "maya@northwind.example"
+                 *     }
+                 */
                 "application/json": {
                     /** @description The value of `HARDCOUNT_BOOTSTRAP_TOKEN`. Or send it as a Bearer token. */
                     token?: string;
-                    /** @default Demo Tenant */
+                    /**
+                     * @description The account's name.
+                     * @default Demo Tenant
+                     */
                     tenant_name?: string;
                     /**
-                     * @description Must contain `@`.
+                     * @description The owner's dashboard sign-in email. One plain address whose domain has a dot.
                      * @default admin@hardcount.local
                      */
                     owner_email?: string;
@@ -30843,49 +33858,90 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "tenant": {
+                     *         "id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *         "name": "Northwind AI",
+                     *         "status": "active",
+                     *         "created_at": "2026-10-01T08:00:00Z",
+                     *         "updated_at": "2026-10-01T08:00:00Z"
+                     *       },
+                     *       "owner_email": "maya@northwind.example",
+                     *       "owner_password": "7f3a9c1e5b2d8f4a6c0e3b1d",
+                     *       "password_generated": true,
+                     *       "secret_key_test": "hc_secret_test_4f9c2a7e1b3d5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8",
+                     *       "secret_key_live": "hc_secret_live_6d2b8f4a1c9e3d7b5f0a2c8e4b6d1f9a3c7e5b0d2f8a4c6e1b9d3f7a5c0e2b84",
+                     *       "message": "Bootstrap complete. Save these credentials — they will not be shown again."
+                     *     }
+                     */
                     "application/json": components["schemas"]["BootstrapResult"];
                 };
             };
             400: components["responses"]["InvalidBody"];
-            /** @description Bootstrap is disabled (`HARDCOUNT_BOOTSTRAP_TOKEN` not set) or the token is wrong */
+            /** @description Bootstrap is disabled (`HARDCOUNT_BOOTSTRAP_TOKEN` not set) or the token is wrong. Code `forbidden`. */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "authentication_error",
+                     *         "code": "forbidden",
+                     *         "message": "invalid bootstrap token",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
             /**
-             * @description A tenant already exists (code `already_bootstrapped`), or a user
-             *     with `owner_email` already exists (code `already_exists`).
+             * @description An account already exists (code `already_bootstrapped`; this is
+             *     checked before the token), or a user with `owner_email` already
+             *     exists (code `already_exists`).
              */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "already_bootstrapped",
+                     *         "message": "bootstrap already completed — tenants exist",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description `owner_email` is not an email, or `owner_password` is too short or too long. Nothing was written. */
+            /** @description `owner_email` is not one plain email address (`param: owner_email`), `owner_password` fails the check (`param: password`), or the body has an unknown field. Nothing was written. */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "must be at least 12 characters",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "password"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Rate limited */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+            429: components["responses"]["RateLimited"];
         };
     };
     listAuditLog: {
@@ -30893,6 +33949,7 @@ export interface operations {
             query?: {
                 /** @description For example `invoice`, `api_key`, `setting`. See `/v1/audit-log/filters`. */
                 resource_type?: string;
+                /** @description Only entries about this resource id. */
                 resource_id?: string;
                 /** @description For example `create`, `update`, `revoke`. See `/v1/audit-log/filters`. */
                 action?: string;
@@ -30933,37 +33990,92 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "data": [
+                     *         {
+                     *           "id": "hc_aud_dbj84c2q3gpgqfoq5cb0",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "actor_type": "user",
+                     *           "actor_id": "hc_usr_8d3f1a6c2e9b4d7f0a5c3e1b",
+                     *           "actor_name": "maya@northwind.example",
+                     *           "action": "revoke",
+                     *           "resource_type": "api_key",
+                     *           "resource_id": "hc_key_dajqj1iq3gpgqfoq5ca0",
+                     *           "resource_label": "Backend (test)",
+                     *           "metadata": {
+                     *             "key_type": "secret"
+                     *           },
+                     *           "ip_address": "203.0.113.24",
+                     *           "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *           "created_at": "2026-11-01T09:12:30Z"
+                     *         }
+                     *       ],
+                     *       "total": 1
+                     *     }
+                     */
                     "application/json": {
                         data: components["schemas"]["AuditLogEntry"][];
                         total: components["schemas"]["ListTotal"];
                     };
                 };
             };
-            /** @description Unsupported `order` */
+            /** @description Unsupported `order` (code `invalid_request`) */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_request",
+                     *         "message": "invalid `order` — audit rows are ordered by created_at",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Caller lacks the `apikey:read` permission */
+            /** @description The caller lacks the `apikey:read` permission (an ingest key). */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "authentication_error",
+                     *         "code": "forbidden",
+                     *         "message": "insufficient permissions: this key type does not have apikey:read access",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description A date is not RFC3339 or YYYY-MM-DD, a range ends before it starts, or `limit` or `offset` is out of range */
+            /** @description A date is not RFC3339 or YYYY-MM-DD, a range ends before it starts, or `limit` or `offset` is out of range. `param` names the parameter. */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "must be RFC3339 (e.g. 2026-01-01T00:00:00Z) or YYYY-MM-DD",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "date_from"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -30985,16 +34097,52 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "actions": [
+                     *         "create",
+                     *         "export",
+                     *         "finalize",
+                     *         "revoke",
+                     *         "rotate",
+                     *         "update"
+                     *       ],
+                     *       "resource_types": [
+                     *         "api_key",
+                     *         "customer",
+                     *         "invoice",
+                     *         "setting",
+                     *         "subscription",
+                     *         "test_clock"
+                     *       ],
+                     *       "test_clocks": [
+                     *         {
+                     *           "id": "hc_tclk_dauj402q3gpgqfoq5c9g",
+                     *           "name": "October renewal test"
+                     *         }
+                     *       ]
+                     *     }
+                     */
                     "application/json": components["schemas"]["AuditLogFilters"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Caller lacks the `apikey:read` permission */
+            /** @description The caller lacks the `apikey:read` permission (an ingest key). */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "authentication_error",
+                     *         "code": "forbidden",
+                     *         "message": "insufficient permissions: this key type does not have apikey:read access",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };

@@ -12,5 +12,6 @@
  */
 
 export type ConfirmPasswordReset200 = {
+  /** The same sentence for every successful reset. */
   message: string;
 };

@@ -14,24 +14,32 @@ import type { WebhookEventPayload } from './webhookEventPayload';
 
 /**
  * One outbound webhook event, as Hardcount created it.
+ * `GET /v1/webhook-endpoints/events` lists them. Each delivery POSTs
+ * `{"id", "event_type", "created_at", "data"}` to the endpoint, where
+ * `data` is this event's `payload`.
  */
 export interface WebhookEvent {
+  /** The event's id (`hc_whevt_…`). A replay has its own id but is sent with the original event's `id` and `created_at`. */
   id: string;
+  /** The account the event belongs to. */
   tenant_id?: string;
+  /** The mode the event happened in. Only endpoints of the same mode get it. */
   livemode: boolean;
+  /** What happened, such as `invoice.finalized`. docs/api/webhook-events.md lists every type. */
   event_type: string;
   /**
      * The event's data: the resource the event is about, under the
      * resource's name (`invoice`, `subscription`, `customer`,
      * `payment_method`, `dunning_run` or `credit_balance`), as the
      * API returns it, and the few keys the event adds beside it.
-     * docs/webhooks.md lists what each event carries;
+     * docs/api/webhook-events.md lists what each event carries;
      * `payment.dispute_opened` and `payment.dispute_closed` carry a
      * `DisputeWebhookEventData`; `payment.refunded_in_stripe` carries a
      * `StripeRefundWebhookEventData`.
      */
   payload: WebhookEventPayload;
+  /** When the event was created. */
   created_at: string;
-  /** Set on a replay. The event the replay was made from. */
+  /** Set on a replay. The event the replay was made from. Absent on an original event. */
   replay_of_event_id?: string;
 }

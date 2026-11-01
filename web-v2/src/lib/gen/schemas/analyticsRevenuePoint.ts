@@ -11,10 +11,21 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * Paid-invoice revenue in one bucket of `GET /v1/analytics/revenue-chart`:
+ * a UTC day, or a UTC month for `12m`. Only invoices in the account's
+ * default currency are counted.
+ */
 export interface AnalyticsRevenuePoint {
   /** Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in UTC. */
   date: string;
-  /** What paid the invoices paid in the bucket (payment plus customer credit applied). A credit note that lowered an invoice before it was paid is not counted. */
+  /**
+     * What paid the invoices paid in the bucket (payment plus customer
+     * credit applied), in the minor unit of the default currency
+     * (cents for USD). A credit note that lowered an invoice before it
+     * was paid is not counted.
+     */
   revenue_cents: number;
+  /** Invoices paid in the bucket. */
   invoice_count: number;
 }

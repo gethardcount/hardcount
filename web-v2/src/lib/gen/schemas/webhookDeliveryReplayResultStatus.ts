@@ -11,6 +11,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * Always `queued`. The send happens in the background.
+ */
 export type WebhookDeliveryReplayResultStatus = typeof WebhookDeliveryReplayResultStatus[keyof typeof WebhookDeliveryReplayResultStatus];
 
 

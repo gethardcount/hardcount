@@ -11,6 +11,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * API key only. The key's type.
+ */
 export type GetWhoami200KeyType = typeof GetWhoami200KeyType[keyof typeof GetWhoami200KeyType];
 
 

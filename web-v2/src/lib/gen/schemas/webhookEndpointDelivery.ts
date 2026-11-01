@@ -12,23 +12,53 @@
  */
 import type { WebhookEndpointDeliveryStatus } from './webhookEndpointDeliveryStatus';
 
+/**
+ * One delivery of one event to one endpoint, with the result of its
+ * latest attempt. A failed attempt is tried again after about 1
+ * minute, 5 minutes, 30 minutes, 2 hours and 24 hours. After the
+ * sixth failed attempt the delivery is `failed`. A redirect counts as
+ * a failure.
+ */
 export interface WebhookEndpointDelivery {
+  /** The delivery's id (`hc_whd_…`). */
   id: string;
+  /** The event this delivery sent. For a replay, the replay's own id; the message itself carried the original event's `id`. */
   event_id: string;
+  /** The event's type, such as `invoice.finalized`. */
   event_type: string;
   /** The delivery came from a replay. */
   is_replay: boolean;
+  /** The original event, when `is_replay` is true. Absent otherwise. */
   replay_of_event_id?: string;
+  /**
+     * `pending` while an attempt is running or due, `succeeded` after
+     * a 2xx answer, `failed` once no attempt is left or the endpoint
+     * was paused or deleted.
+     */
   status: WebhookEndpointDeliveryStatus;
-  /** HTTP status from the receiver. 0 when there was no response. */
+  /** HTTP status from the receiver's latest answer. 0 when no attempt got an answer. */
   status_code: number;
+  /** Attempts made so far, at most 6. */
   attempt_count: number;
-  /** First 4 KB of the receiver's response. */
+  /** Up to the first 1 KB of the receiver's latest answer. */
   response_body: string;
+  /**
+     * Why an attempt failed, such as `HTTP 500`, a connection error,
+     * `endpoint disabled` or `endpoint deleted`. Empty when no attempt
+     * failed. A delivery that succeeded on a retry keeps the earlier
+     * failure's text.
+     */
   error: string;
+  /** When the delivery was queued. */
   created_at: string;
-  /** @nullable */
+  /**
+     * When the delivery succeeded or failed for good. null while pending.
+     * @nullable
+     */
   completed_at: string | null;
-  /** @nullable */
+  /**
+     * When the next attempt is due, while pending. null once the delivery is finished.
+     * @nullable
+     */
   next_retry_at: string | null;
 }

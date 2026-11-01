@@ -12,7 +12,12 @@
  */
 
 export type ConfirmPasswordResetBody = {
+  /** The token from the reset link. */
   token: string;
-  /** @minLength 12 */
+  /**
+     * The new password: at least 12 characters, at most 72
+     * bytes, and not one of the most common passwords.
+     * @minLength 12
+     */
   password: string;
 };

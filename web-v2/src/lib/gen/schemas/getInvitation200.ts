@@ -12,10 +12,16 @@
  */
 
 export type GetInvitation200 = {
+  /** The invited address. */
   email: string;
+  /** The account the invitation is for. */
   tenant_id: string;
+  /** The account's name. Empty if it could not be read. */
   tenant_name: string;
+  /** True when no account has this email, so accepting needs a password. */
   needs_new_account: boolean;
+  /** The email of the member who sent the invitation. Empty when that user no longer exists. */
   invited_by_email: string;
+  /** When the invite link stops working. */
   expires_at: string;
 };

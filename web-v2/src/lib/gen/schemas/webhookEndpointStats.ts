@@ -11,11 +11,18 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * All-time delivery counts for one endpoint in the caller's mode, from
+ * `GET /v1/webhook-endpoints/endpoints/stats`.
+ */
 export interface WebhookEndpointStats {
+  /** The endpoint's id. It can name a deleted endpoint. */
   endpoint_id: string;
   /** All deliveries, including pending ones. */
   total_deliveries: number;
+  /** Deliveries that got a 2xx answer. */
   succeeded: number;
+  /** Deliveries that failed for good. */
   failed: number;
   /** Percent (0-100) of finished deliveries that succeeded. Pending deliveries are not counted. 0 when none finished. */
   success_rate: number;

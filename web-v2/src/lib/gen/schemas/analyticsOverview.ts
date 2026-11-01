@@ -16,13 +16,15 @@ import type { AnalyticsOverviewOutstandingByCurrencyItem } from './analyticsOver
 import type { AnalyticsPeriod } from './analyticsPeriod';
 
 /**
+ * The dashboard's headline metrics, from `GET /v1/analytics/overview`.
  * "The window" is the requested period, ending now. "The previous
- * window" is the one of equal length before it. Money is in cents of
- * `currency`.
+ * window" is the one of equal length before it. Money is in the minor
+ * unit of `currency` (cents for USD). Rates are fractions, so 0.05
+ * means 5%.
  */
 export interface AnalyticsOverview {
   period: AnalyticsPeriod;
-  /** The tenant's default currency. Every money field uses it, except `credit_balance_by_currency` and `outstanding_by_currency`, which carry their own. */
+  /** The account's default currency (USD when none is set). Every money field uses it, except `credit_balance_by_currency` and `outstanding_by_currency`, which carry their own. */
   currency: string;
   /** MRR of active subscriptions now. */
   mrr: number;

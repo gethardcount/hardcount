@@ -12,30 +12,39 @@
  */
 import type { TenantSettingsInput } from './tenantSettingsInput';
 
+/**
+ * The account's billing settings, as `GET /v1/settings` and
+ * `PUT /v1/settings` return them: every stored setting, plus the
+ * number the next invoice in the caller's mode gets.
+ */
 export type TenantSettings = TenantSettingsInput & {
+  /** The account these settings belong to. `PUT` refuses it (422). */
   tenant_id: string;
   /**
      * The number the next invoice in this mode (test or live) gets,
      * before the prefix: 43 means the next invoice is
      * `<invoice_prefix>-000043`. Test and live count separately, and
      * changing `invoice_prefix` keeps the count. Not a setting:
-     * sending it on `PUT` does nothing.
+     * `PUT` refuses it as an unknown field (422).
      */
   next_invoice_sequence: number;
-  /** Zero time when the tenant has never saved settings. */
+  /** When the account's settings were first stored. Zero time (`0001-01-01T00:00:00Z`) when none are stored yet, and the answer shows the defaults. */
   created_at: string;
+  /** When the settings were last saved. Zero time (`0001-01-01T00:00:00Z`) when none are stored yet. */
   updated_at: string;
 } & Required<Pick<TenantSettingsInput & {
+  /** The account these settings belong to. `PUT` refuses it (422). */
   tenant_id: string;
   /**
      * The number the next invoice in this mode (test or live) gets,
      * before the prefix: 43 means the next invoice is
      * `<invoice_prefix>-000043`. Test and live count separately, and
      * changing `invoice_prefix` keeps the count. Not a setting:
-     * sending it on `PUT` does nothing.
+     * `PUT` refuses it as an unknown field (422).
      */
   next_invoice_sequence: number;
-  /** Zero time when the tenant has never saved settings. */
+  /** When the account's settings were first stored. Zero time (`0001-01-01T00:00:00Z`) when none are stored yet, and the answer shows the defaults. */
   created_at: string;
+  /** When the settings were last saved. Zero time (`0001-01-01T00:00:00Z`) when none are stored yet. */
   updated_at: string;
 }, 'default_currency' | 'timezone' | 'invoice_prefix' | 'credit_note_prefix' | 'net_payment_terms' | 'tax_provider' | 'tax_rate' | 'tax_inclusive'>>;

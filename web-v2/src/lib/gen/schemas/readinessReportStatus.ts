@@ -11,6 +11,11 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * `ok` when every check passed. `degraded` when the database
+ * cannot be reached (503) or the billing scheduler is late (still
+ * 200). `draining` while the server shuts down (503).
+ */
 export type ReadinessReportStatus = typeof ReadinessReportStatus[keyof typeof ReadinessReportStatus];
 
 

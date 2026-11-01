@@ -12,23 +12,44 @@
  */
 import type { APIKeyKeyType } from './aPIKeyKeyType';
 
+/**
+ * An API key's details. The key's value is never returned here: only
+ * `POST /v1/api-keys` and `POST /v1/api-keys/{id}/rotate` show it,
+ * once, as `raw_key`.
+ */
 export interface APIKey {
+  /** The key's id (`hc_key_…`). Use it to revoke or rotate the key. */
   id: string;
-  /** The start of the key (type, mode and a few characters), enough to tell keys apart. Never the full key. */
+  /**
+     * The key's type and mode prefix plus the first 12 characters of
+     * its secret part. Enough to tell keys apart; never the full key.
+     */
   key_prefix: string;
   /**
      * `secret` can read and change everything in the account.
      * `ingest` can only send usage events, for LiteLLM or another
-     * gateway (ADR-133).
+     * gateway.
      */
   key_type: APIKeyKeyType;
+  /** True for a live-mode key (`…_live_…`), false for a test-mode key. A key reaches only its own mode's data. */
   livemode: boolean;
+  /** The label shown in the key list. */
   name: string;
+  /** The account the key belongs to. */
   tenant_id: string;
+  /** When the key was created. */
   created_at: string;
-  /** When the key stops working. Also set on the old key during a rotation grace period. */
+  /**
+     * When the key stops working. Also set on the old key during a
+     * rotation grace period. Absent for a key that does not expire.
+     */
   expires_at?: string;
+  /** When the key was revoked. Absent unless it was revoked. A revoked key gets 401. */
   revoked_at?: string;
-  /** Updated at most about once per interval, so it can lag a little. */
+  /**
+     * When the key last authenticated a request. Each server updates
+     * it at most once a minute, so it can lag a little. Absent until
+     * the key is first used.
+     */
   last_used_at?: string;
 }

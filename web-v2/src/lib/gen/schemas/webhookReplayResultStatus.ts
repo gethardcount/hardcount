@@ -11,6 +11,12 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * `queued` when at least one endpoint will get the replay.
+ * `no_matching_endpoints` when no active endpoint in this mode
+ * subscribes to the event's type; the replay event is still
+ * created.
+ */
 export type WebhookReplayResultStatus = typeof WebhookReplayResultStatus[keyof typeof WebhookReplayResultStatus];
 
 

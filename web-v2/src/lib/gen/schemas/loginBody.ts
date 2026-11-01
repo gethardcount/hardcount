@@ -12,6 +12,8 @@
  */
 
 export type LoginBody = {
+  /** The user's sign-in email. */
   email: string;
+  /** The user's password. */
   password: string;
 };

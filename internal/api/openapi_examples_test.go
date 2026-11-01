@@ -505,3 +505,51 @@ func TestExampleChecker_FindsMistakes(t *testing.T) {
 		}
 	}
 }
+
+// TestOpenAPISpec_EverySchemaFieldDescribed: every component schema and every
+// property in one says what it is. The website's object pages list each
+// field with its description; a field without one shows as a blank row. A
+// property that is only a $ref takes the referenced schema's description
+// (OpenAPI 3.0 ignores a description beside a $ref).
+func TestOpenAPISpec_EverySchemaFieldDescribed(t *testing.T) {
+	doc := specDoc(t)
+	c := &exampleChecker{doc: doc}
+	schemas := mapAt(doc, "components", "schemas")
+	described := func(p map[string]any) bool {
+		if d, _ := p["description"].(string); strings.TrimSpace(d) != "" {
+			return true
+		}
+		if _, ok := p["$ref"]; ok {
+			d, _ := c.deref(p)["description"].(string)
+			return strings.TrimSpace(d) != ""
+		}
+		return false
+	}
+	var names []string
+	for name := range schemas {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		s, _ := schemas[name].(map[string]any)
+		if !described(s) {
+			t.Errorf("schema %s has no description", name)
+		}
+		props := mapAt(s, "properties")
+		for _, part := range asList(s["allOf"]) {
+			pm, _ := part.(map[string]any)
+			for k, v := range mapAt(pm, "properties") {
+				if props == nil {
+					props = map[string]any{}
+				}
+				props[k] = v
+			}
+		}
+		for k, p := range props {
+			pm, _ := p.(map[string]any)
+			if !described(pm) {
+				t.Errorf("schema %s: property %s has no description", name, k)
+			}
+		}
+	}
+}

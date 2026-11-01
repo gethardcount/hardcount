@@ -14,21 +14,23 @@ import type { TenantSettingsInputTaxOnFailure } from './tenantSettingsInputTaxOn
 import type { TenantSettingsInputTaxProvider } from './tenantSettingsInputTaxProvider';
 
 /**
- * Every field is optional. Fields you leave out keep their stored value.
+ * The account's billing settings, as `PUT /v1/settings` takes them.
+ * Every field is optional. Fields you leave out keep their stored
+ * value. Settings are shared by test and live mode.
  */
 export interface TenantSettingsInput {
-  /** ISO 4217 code. Zero-decimal currencies (such as JPY) are not supported yet. */
+  /** ISO 4217 code, stored in upper case. Zero-decimal currencies (such as JPY) are not supported yet. */
   default_currency?: string;
   /** IANA zone name, such as `America/New_York`. `Local` is rejected. All billing date math uses this zone. */
   timezone?: string;
   /**
-     * Starts every invoice number, such as `HC-000001`.
+     * Starts every invoice number, such as `HC-000001`. Stored in upper case.
      * @pattern ^[A-Za-z0-9-]{1,20}$
      */
   invoice_prefix?: string;
   /**
-     * Starts every credit note number, such as `CN-000001`. A change
-     * applies to new credit notes only. Issued notes keep their
+     * Starts every credit note number, such as `CN-000001`. Stored in
+     * upper case. A change applies to new credit notes only. Issued notes keep their
      * numbers. It must differ from `invoice_prefix`, or an invoice and
      * a credit note would get the same number.
      * @pattern ^[A-Za-z0-9-]{1,20}$
@@ -44,7 +46,8 @@ export interface TenantSettingsInput {
      * When a customer's credit in one currency drops below this
      * amount, in that currency's minor units, the `credit.balance_low`
      * webhook fires: 1000 means $10.00 of USD credit and €10.00 of EUR
-     * credit. null turns it off.
+     * credit. Send null to turn it off. Answers leave it out while it
+     * is off.
      * @minimum 1
      * @nullable
      */
@@ -75,15 +78,30 @@ export interface TenantSettingsInput {
      * @maxLength 255
      */
   company_name?: string;
-  /** @maxLength 200 */
+  /**
+     * First line of your business address, printed as the seller on invoices and credit notes.
+     * @maxLength 200
+     */
   company_address_line1?: string;
-  /** @maxLength 200 */
+  /**
+     * Second line of your business address, such as a suite number.
+     * @maxLength 200
+     */
   company_address_line2?: string;
-  /** @maxLength 100 */
+  /**
+     * City of your business address.
+     * @maxLength 100
+     */
   company_city?: string;
-  /** @maxLength 100 */
+  /**
+     * State, province or region of your business address.
+     * @maxLength 100
+     */
   company_state?: string;
-  /** @maxLength 20 */
+  /**
+     * Postal code of your business address.
+     * @maxLength 20
+     */
   company_postal_code?: string;
   /**
      * ISO 3166 alpha-2 code, such as `US`. Empty is allowed.
@@ -93,6 +111,11 @@ export interface TenantSettingsInput {
      * @pattern ^([A-Za-z]{2})?$
      */
   company_country?: string;
+  /**
+     * Your billing contact address, printed as the seller on invoices
+     * and credit notes and shown on the hosted pages. One plain
+     * address, such as `billing@example.com`, with no display name.
+     */
   company_email?: string;
   /** 7 to 20 characters of digits, spaces, `+`, `-`, `(` and `)`. */
   company_phone?: string;

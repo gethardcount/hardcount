@@ -12,9 +12,16 @@
  */
 import type { AuditLogFiltersTestClocksItem } from './auditLogFiltersTestClocksItem';
 
+/**
+ * The values `GET /v1/audit-log` can filter on, from
+ * `GET /v1/audit-log/filters`, for filter menus. Only entries in the
+ * caller's mode count.
+ */
 export interface AuditLogFilters {
+  /** Every `action` value recorded in this mode. */
   actions: string[];
+  /** Every `resource_type` value recorded in this mode. */
   resource_types: string[];
-  /** Test clocks seen in the log, most recent activity first. */
+  /** Test clocks seen in the log, most recent activity first, at most 100. Deleted clocks are included. */
   test_clocks: AuditLogFiltersTestClocksItem[];
 }

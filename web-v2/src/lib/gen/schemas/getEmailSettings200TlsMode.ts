@@ -11,6 +11,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * How Hardcount connects to the SMTP server (`SMTP_TLS`). `starttls` is the default.
+ */
 export type GetEmailSettings200TlsMode = typeof GetEmailSettings200TlsMode[keyof typeof GetEmailSettings200TlsMode];
 
 

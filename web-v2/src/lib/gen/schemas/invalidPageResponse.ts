@@ -13,6 +13,6 @@
 import type { Error } from './error';
 
 /**
- * `limit` or `offset` is out of range or not a whole number, or the request sends the removed `after` cursor (`param` names it)
+ * `limit` or `offset` is out of range, not a whole number or sent twice, or the request sends the removed `after` cursor (`param` names it)
  */
 export type InvalidPageResponse = Error;

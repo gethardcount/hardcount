@@ -12,9 +12,9 @@
  */
 
 /**
- * Whether this deployment can deliver reset emails
- * (SMTP configured AND `DASHBOARD_BASE_URL` set).
- * Deployment posture, never account state.
+ * Whether this server can deliver reset emails: `ok`
+ * when SMTP is set up and `DASHBOARD_BASE_URL` is set,
+ * otherwise `not_configured`.
  */
 export type RequestPasswordReset200EmailDelivery = typeof RequestPasswordReset200EmailDelivery[keyof typeof RequestPasswordReset200EmailDelivery];
 

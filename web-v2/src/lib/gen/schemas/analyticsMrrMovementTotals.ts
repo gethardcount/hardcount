@@ -12,13 +12,20 @@
  */
 
 /**
- * MRR change in cents. `churned` and `contraction` are positive
+ * How MRR (monthly recurring revenue from plan base fees) changed over
+ * the whole window, in the minor unit of the account's default
+ * currency (cents for USD). `churned` and `contraction` are positive
  * amounts. `net` = `new` + `expansion` - `contraction` - `churned`.
  */
 export interface AnalyticsMrrMovementTotals {
+  /** MRR of subscriptions activated in the window, in the currency's minor unit. */
   new: number;
+  /** MRR added by item adds and plan or quantity increases, in the currency's minor unit. */
   expansion: number;
+  /** MRR removed by item removals and plan or quantity decreases, as a positive amount in the currency's minor unit. */
   contraction: number;
+  /** MRR of subscriptions canceled in the window, as a positive amount in the currency's minor unit. */
   churned: number;
+  /** The overall change, `new` + `expansion` - `contraction` - `churned`, in the currency's minor unit. Can be negative. */
   net: number;
 }

@@ -11,6 +11,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * The environment variable's name.
+ */
 export type GetEmailSettings200LinksItemEnv = typeof GetEmailSettings200LinksItemEnv[keyof typeof GetEmailSettings200LinksItemEnv];
 
 

@@ -379,8 +379,6 @@ export * from './readinessReportChecks';
 export * from './readinessReportStatus';
 export * from './receivePostmarkWebhook200';
 export * from './receivePostmarkWebhook200Status';
-export * from './receivePostmarkWebhook401';
-export * from './receivePostmarkWebhook500';
 export * from './receivePostmarkWebhookBody';
 export * from './receiveStripeWebhook200';
 export * from './receiveStripeWebhook200Status';

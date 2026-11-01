@@ -11,10 +11,18 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * One of the meters with the most usage events in the window, in
+ * `GET /v1/analytics/usage`.
+ */
 export interface AnalyticsTopMeter {
+  /** The meter's id (`hc_mtr_…`). */
   meter_id: string;
+  /** The meter's display name. */
   meter_name: string;
+  /** The event name usage events send to reach this meter. */
   event_name: string;
+  /** Usage events on this meter with a timestamp in the window. */
   events: number;
   /** Summed quantity, as a decimal string. */
   quantity: string;

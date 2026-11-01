@@ -20,5 +20,6 @@ export type GetAnalyticsUsage200 = {
   data: AnalyticsUsagePoint[];
   /** @maxItems 10 */
   top_meters: AnalyticsTopMeter[];
+  /** Totals over the whole window. */
   totals: GetAnalyticsUsage200Totals;
 };

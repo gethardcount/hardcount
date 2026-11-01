@@ -12,9 +12,14 @@
  */
 import type { APIKey } from './aPIKey';
 
+/**
+ * The result of rotating a key: the old key as it now stands (revoked,
+ * or expiring at the end of the grace period), the new key, and the
+ * new key's full value.
+ */
 export interface APIKeyRotation {
   old_key: APIKey;
   new_key: APIKey;
-  /** The new key's full value. Shown only once. */
+  /** The new key's full value. Shown only once; store it now. */
   raw_key: string;
 }

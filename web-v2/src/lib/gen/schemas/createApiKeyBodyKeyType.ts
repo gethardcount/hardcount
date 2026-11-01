@@ -11,6 +11,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * `secret` for full access, or `ingest` for a key that can only send usage events.
+ */
 export type CreateApiKeyBodyKeyType = typeof CreateApiKeyBodyKeyType[keyof typeof CreateApiKeyBodyKeyType];
 
 

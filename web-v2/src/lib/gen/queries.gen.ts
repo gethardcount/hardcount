@@ -209,8 +209,6 @@ import type {
   RateLimitedResponse,
   ReadinessReport,
   ReceivePostmarkWebhook200,
-  ReceivePostmarkWebhook401,
-  ReceivePostmarkWebhook500,
   ReceivePostmarkWebhookBody,
   ReceiveStripeWebhook200,
   ReceiveStripeWebhookBody,
@@ -295,7 +293,10 @@ export const getGetHealthUrl = () => {
 }
 
 /**
- * @summary Health check
+ * Answers 200 whenever the server process can answer. It checks
+ * nothing else. For a load balancer, use `GET /health/ready`, which
+ * also checks the database. Not rate limited.
+ * @summary Check that the server is up
  */
 export const getHealth = async ( options?: RequestInit): Promise<GetHealth200> => {
 
@@ -366,7 +367,7 @@ export function useGetHealth<TData = Awaited<ReturnType<typeof getHealth>>, TErr
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Health check
+ * @summary Check that the server is up
  */
 
 export function useGetHealth<TData = Awaited<ReturnType<typeof getHealth>>, TError = unknown>(
@@ -401,8 +402,9 @@ export const getGetHealthReadyUrl = () => {
  * reach the database. A late billing scheduler shows as `degraded` in
  * the body but keeps the status at 200: taking the server out of the
  * balancer would not restart the scheduler. Alert on the scheduler
- * metrics instead (see docs/ops/runbook/monitoring.md).
- * @summary Readiness check for load balancers
+ * metrics instead (see docs/ops/runbook/monitoring.md). The database
+ * check waits at most 3 seconds. Not rate limited.
+ * @summary Check that the server can take requests
  */
 export const getHealthReady = async ( options?: RequestInit): Promise<ReadinessReport> => {
 
@@ -473,7 +475,7 @@ export function useGetHealthReady<TData = Awaited<ReturnType<typeof getHealthRea
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Readiness check for load balancers
+ * @summary Check that the server can take requests
  */
 
 export function useGetHealthReady<TData = Awaited<ReturnType<typeof getHealthReady>>, TError = ReadinessReport>(
@@ -506,8 +508,8 @@ export const getGetMetricsUrl = () => {
  * Metrics in the Prometheus text format, for a Prometheus scrape.
  * When `METRICS_TOKEN` is set, send it as a Bearer token. When it is
  * not set, the route is open, except with `APP_ENV=production`, where
- * it answers 401. This is not an API key route.
- * @summary Prometheus metrics
+ * it answers 401. This is not an API key route. Not rate limited.
+ * @summary Get Prometheus metrics
  */
 export const getMetrics = async ( options?: RequestInit): Promise<string> => {
 
@@ -531,7 +533,7 @@ export const getGetMetricsQueryKey = () => {
     }
 
 
-export const getGetMetricsQueryOptions = <TData = Awaited<ReturnType<typeof getMetrics>>, TError = string>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMetrics>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetMetricsQueryOptions = <TData = Awaited<ReturnType<typeof getMetrics>>, TError = Error>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMetrics>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -550,10 +552,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetMetricsQueryResult = NonNullable<Awaited<ReturnType<typeof getMetrics>>>
-export type GetMetricsQueryError = string
+export type GetMetricsQueryError = Error
 
 
-export function useGetMetrics<TData = Awaited<ReturnType<typeof getMetrics>>, TError = string>(
+export function useGetMetrics<TData = Awaited<ReturnType<typeof getMetrics>>, TError = Error>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMetrics>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getMetrics>>,
@@ -563,7 +565,7 @@ export function useGetMetrics<TData = Awaited<ReturnType<typeof getMetrics>>, TE
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetMetrics<TData = Awaited<ReturnType<typeof getMetrics>>, TError = string>(
+export function useGetMetrics<TData = Awaited<ReturnType<typeof getMetrics>>, TError = Error>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMetrics>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getMetrics>>,
@@ -573,15 +575,15 @@ export function useGetMetrics<TData = Awaited<ReturnType<typeof getMetrics>>, TE
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetMetrics<TData = Awaited<ReturnType<typeof getMetrics>>, TError = string>(
+export function useGetMetrics<TData = Awaited<ReturnType<typeof getMetrics>>, TError = Error>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMetrics>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Prometheus metrics
+ * @summary Get Prometheus metrics
  */
 
-export function useGetMetrics<TData = Awaited<ReturnType<typeof getMetrics>>, TError = string>(
+export function useGetMetrics<TData = Awaited<ReturnType<typeof getMetrics>>, TError = Error>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMetrics>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -3686,12 +3688,19 @@ export const getCreateWebhookEndpointUrl = () => {
 }
 
 /**
- * Returns the endpoint plus its signing secret (shown once). Event
- * names are validated against the emit catalog — subscribing to an
- * event Hardcount never emits is a 422, not silence. Omitted/empty
- * events = all events ("*"); "invoice.*"-style prefix wildcards are
- * supported.
- * @summary Create webhook endpoint
+ * Registers a URL that Hardcount sends events to, in the caller's mode
+ * (test or live). The answer holds the endpoint and its signing secret
+ * (`whsec_…`). The secret is shown only here: store it, and use it to
+ * check the `Hardcount-Signature` header of each delivery.
+ *
+ * The URL must be `https://`. Hardcount looks up its host and refuses
+ * one that points to a private network address. `events` lists the
+ * event types to send. Leave it out, or send `[]`, for every event
+ * (`*`). A prefix such as `invoice.*` matches every event whose type
+ * starts with `invoice.`. An event type Hardcount never sends is
+ * refused with 422, so a typo cannot leave the endpoint silent. Writes
+ * an audit row.
+ * @summary Create a webhook endpoint
  */
 export const createWebhookEndpoint = async (createWebhookEndpointBody: CreateWebhookEndpointBody, options?: RequestInit): Promise<WebhookEndpointCreated> => {
 
@@ -3708,7 +3717,7 @@ export const createWebhookEndpoint = async (createWebhookEndpointBody: CreateWeb
 
 
 
-export const getCreateWebhookEndpointMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | void | RateLimitedResponse,
+export const getCreateWebhookEndpointMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createWebhookEndpoint>>, TError,{data: CreateWebhookEndpointBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createWebhookEndpoint>>, TError,{data: CreateWebhookEndpointBody}, TContext> => {
 
@@ -3737,12 +3746,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateWebhookEndpointMutationResult = NonNullable<Awaited<ReturnType<typeof createWebhookEndpoint>>>
     export type CreateWebhookEndpointMutationBody = CreateWebhookEndpointBody
-    export type CreateWebhookEndpointMutationError = InvalidBodyResponse | UnauthorizedResponse | void | RateLimitedResponse
+    export type CreateWebhookEndpointMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
- * @summary Create webhook endpoint
+ * @summary Create a webhook endpoint
  */
-export const useCreateWebhookEndpoint = <TError = InvalidBodyResponse | UnauthorizedResponse | void | RateLimitedResponse,
+export const useCreateWebhookEndpoint = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createWebhookEndpoint>>, TError,{data: CreateWebhookEndpointBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createWebhookEndpoint>>,
@@ -3769,6 +3778,9 @@ export const getListWebhookEndpointsUrl = (params?: ListWebhookEndpointsParams,)
 }
 
 /**
+ * Returns the endpoints in the caller's mode, newest first. Paused
+ * endpoints are included; deleted ones are not. Signing secrets are
+ * never returned.
  * @summary List webhook endpoints
  */
 export const listWebhookEndpoints = async (params?: ListWebhookEndpointsParams, options?: RequestInit): Promise<ListWebhookEndpoints200> => {
@@ -3870,7 +3882,7 @@ export const getGetWebhookEndpointUrl = (id: string,) => {
 }
 
 /**
- * One endpoint, without its signing secret.
+ * One endpoint in the caller's mode, without its signing secret. A deleted endpoint is a 404.
  * @summary Get a webhook endpoint
  */
 export const getWebhookEndpoint = async (id: string, options?: RequestInit): Promise<WebhookEndpoint> => {
@@ -3972,11 +3984,16 @@ export const getUpdateWebhookEndpointUrl = (id: string,) => {
 }
 
 /**
- * Mutates url / description / events / active WITHOUT rotating the
- * signing secret — the receiver keeps verifying while the target or
- * event set changes. Fields omitted are left unchanged; events are
- * validated against the emit catalog.
- * @summary Update webhook endpoint (no secret rotation)
+ * Changes the endpoint's `url`, `description`, `events` or `active`.
+ * The signing secret stays the same, so your receiver keeps checking
+ * signatures while the target or the event list changes. A field you
+ * leave out keeps its value. `url` and `events` are checked as on
+ * create, and `events: []` means every event.
+ *
+ * Send `active: false` to pause the endpoint: it gets no new events,
+ * and its pending retries end as `failed`. Send `active: true` to
+ * resume it. Writes an audit row.
+ * @summary Update a webhook endpoint
  */
 export const updateWebhookEndpoint = async (id: string,
     updateWebhookEndpointBody: UpdateWebhookEndpointBody, options?: RequestInit): Promise<WebhookEndpoint> => {
@@ -3994,7 +4011,7 @@ export const updateWebhookEndpoint = async (id: string,
 
 
 
-export const getUpdateWebhookEndpointMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | void | RateLimitedResponse,
+export const getUpdateWebhookEndpointMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateWebhookEndpoint>>, TError,{id: string;data: UpdateWebhookEndpointBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateWebhookEndpoint>>, TError,{id: string;data: UpdateWebhookEndpointBody}, TContext> => {
 
@@ -4023,12 +4040,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type UpdateWebhookEndpointMutationResult = NonNullable<Awaited<ReturnType<typeof updateWebhookEndpoint>>>
     export type UpdateWebhookEndpointMutationBody = UpdateWebhookEndpointBody
-    export type UpdateWebhookEndpointMutationError = InvalidBodyResponse | UnauthorizedResponse | void | RateLimitedResponse
+    export type UpdateWebhookEndpointMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
- * @summary Update webhook endpoint (no secret rotation)
+ * @summary Update a webhook endpoint
  */
-export const useUpdateWebhookEndpoint = <TError = InvalidBodyResponse | UnauthorizedResponse | void | RateLimitedResponse,
+export const useUpdateWebhookEndpoint = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateWebhookEndpoint>>, TError,{id: string;data: UpdateWebhookEndpointBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof updateWebhookEndpoint>>,
@@ -4048,7 +4065,12 @@ export const getDeleteWebhookEndpointUrl = (id: string,) => {
 }
 
 /**
- * @summary Delete (disable) webhook endpoint
+ * Deletes the endpoint. It leaves every list and lookup and gets no
+ * more events, and its pending retries end as `failed`. Its past
+ * deliveries stay in event timelines and in the stats. There is no
+ * undo: to stop events for a while, pause the endpoint with `PATCH`
+ * and `active: false` instead. Writes an audit row.
+ * @summary Delete a webhook endpoint
  */
 export const deleteWebhookEndpoint = async (id: string, options?: RequestInit): Promise<DeleteWebhookEndpoint200> => {
 
@@ -4065,7 +4087,7 @@ export const deleteWebhookEndpoint = async (id: string, options?: RequestInit): 
 
 
 
-export const getDeleteWebhookEndpointMutationOptions = <TError = UnauthorizedResponse | RateLimitedResponse,
+export const getDeleteWebhookEndpointMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteWebhookEndpoint>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteWebhookEndpoint>>, TError,{id: string}, TContext> => {
 
@@ -4094,12 +4116,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type DeleteWebhookEndpointMutationResult = NonNullable<Awaited<ReturnType<typeof deleteWebhookEndpoint>>>
 
-    export type DeleteWebhookEndpointMutationError = UnauthorizedResponse | RateLimitedResponse
+    export type DeleteWebhookEndpointMutationError = UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
- * @summary Delete (disable) webhook endpoint
+ * @summary Delete a webhook endpoint
  */
-export const useDeleteWebhookEndpoint = <TError = UnauthorizedResponse | RateLimitedResponse,
+export const useDeleteWebhookEndpoint = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteWebhookEndpoint>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof deleteWebhookEndpoint>>,
@@ -4119,7 +4141,12 @@ export const getRotateWebhookEndpointSecretUrl = (id: string,) => {
 }
 
 /**
- * @summary Rotate signing secret (72h dual-signing grace)
+ * Makes a new signing secret and returns it once. For the next 72
+ * hours each delivery's `Hardcount-Signature` header carries two
+ * `v1=` signatures, one made with each secret, so your receiver can
+ * switch to the new secret without rejecting events. After that only
+ * the new secret signs. Writes an audit row, without the secret.
+ * @summary Rotate a webhook endpoint's signing secret
  */
 export const rotateWebhookEndpointSecret = async (id: string, options?: RequestInit): Promise<WebhookSecretRotation> => {
 
@@ -4136,7 +4163,7 @@ export const rotateWebhookEndpointSecret = async (id: string, options?: RequestI
 
 
 
-export const getRotateWebhookEndpointSecretMutationOptions = <TError = UnauthorizedResponse | RateLimitedResponse,
+export const getRotateWebhookEndpointSecretMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rotateWebhookEndpointSecret>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof rotateWebhookEndpointSecret>>, TError,{id: string}, TContext> => {
 
@@ -4165,12 +4192,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RotateWebhookEndpointSecretMutationResult = NonNullable<Awaited<ReturnType<typeof rotateWebhookEndpointSecret>>>
 
-    export type RotateWebhookEndpointSecretMutationError = UnauthorizedResponse | RateLimitedResponse
+    export type RotateWebhookEndpointSecretMutationError = UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
- * @summary Rotate signing secret (72h dual-signing grace)
+ * @summary Rotate a webhook endpoint's signing secret
  */
-export const useRotateWebhookEndpointSecret = <TError = UnauthorizedResponse | RateLimitedResponse,
+export const useRotateWebhookEndpointSecret = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rotateWebhookEndpointSecret>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof rotateWebhookEndpointSecret>>,
@@ -4201,7 +4228,7 @@ export const getListWebhookEndpointDeliveriesUrl = (id: string,
  * The endpoint's deliveries, newest first. Each row names the event
  * it carried. A deleted or unknown endpoint returns 404. The endpoint
  * itself is `GET /v1/webhook-endpoints/endpoints/{id}`.
- * @summary List an endpoint's recent deliveries
+ * @summary List an endpoint's deliveries
  */
 export const listWebhookEndpointDeliveries = async (id: string,
     params?: ListWebhookEndpointDeliveriesParams, options?: RequestInit): Promise<ListWebhookEndpointDeliveries200> => {
@@ -4278,7 +4305,7 @@ export function useListWebhookEndpointDeliveries<TData = Awaited<ReturnType<type
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary List an endpoint's recent deliveries
+ * @summary List an endpoint's deliveries
  */
 
 export function useListWebhookEndpointDeliveries<TData = Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
@@ -4311,12 +4338,12 @@ export const getReplayWebhookDeliveryUrl = (id: string,
 
 /**
  * Sends the delivery's event again to this one endpoint only. Other
- * endpoints are not contacted. Hardcount copies the event to a new event
- * (`replay_of` points to the original) and queues a new delivery.
- * The message sent carries the original event's `id` and
- * `created_at`. The original delivery is not changed. Sending happens in the
- * background, so `status` is always `queued`.
- * Writes an audit row.
+ * endpoints are not contacted. Hardcount copies the event to a new
+ * event (`replay_of` points to the original) and queues a new
+ * delivery. The message sent carries the original event's `id` and
+ * `created_at`. The original delivery is not changed. Sending happens
+ * in the background, so `status` is always `queued`. Writes an audit
+ * row.
  * @summary Resend one delivery to its endpoint
  */
 export const replayWebhookDelivery = async (id: string,
@@ -4397,9 +4424,9 @@ export const getGetWebhookEndpointStatsUrl = (params?: GetWebhookEndpointStatsPa
 
 /**
  * All-time delivery counts for each endpoint that has deliveries, in
- * the caller's mode. Endpoints with no deliveries are not listed.
- * Deleted endpoints can appear.
- * @summary Delivery counts per webhook endpoint
+ * the caller's mode, ordered by endpoint id. Endpoints with no
+ * deliveries are not listed. Deleted endpoints can appear.
+ * @summary Get delivery counts per webhook endpoint
  */
 export const getWebhookEndpointStats = async (params?: GetWebhookEndpointStatsParams, options?: RequestInit): Promise<GetWebhookEndpointStats200> => {
 
@@ -4470,7 +4497,7 @@ export function useGetWebhookEndpointStats<TData = Awaited<ReturnType<typeof get
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Delivery counts per webhook endpoint
+ * @summary Get delivery counts per webhook endpoint
  */
 
 export function useGetWebhookEndpointStats<TData = Awaited<ReturnType<typeof getWebhookEndpointStats>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
@@ -4507,7 +4534,10 @@ export const getListWebhookEventsUrl = (params?: ListWebhookEventsParams,) => {
 }
 
 /**
- * @summary List outbound events, newest first
+ * Returns the outbound events in the caller's mode, newest first,
+ * replays included, each with its full `payload`. An event is listed
+ * even when no endpoint subscribed to it.
+ * @summary List webhook events
  */
 export const listWebhookEvents = async (params?: ListWebhookEventsParams, options?: RequestInit): Promise<ListWebhookEvents200> => {
 
@@ -4578,7 +4608,7 @@ export function useListWebhookEvents<TData = Awaited<ReturnType<typeof listWebho
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary List outbound events, newest first
+ * @summary List webhook events
  */
 
 export function useListWebhookEvents<TData = Awaited<ReturnType<typeof listWebhookEvents>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
@@ -4612,8 +4642,9 @@ export const getListWebhookEventDeliveriesUrl = (id: string,) => {
  * original event and for all of its replays. If `id` is a replay,
  * the timeline starts from its original event (`root_event_id`).
  * Rows keep the endpoint's URL and description even after the
- * endpoint is deleted.
- * @summary List all delivery attempts for an event
+ * endpoint is deleted. The whole timeline comes in one answer, with
+ * no paging. Needs the `apikey:read` permission.
+ * @summary List all deliveries of an event and its replays
  */
 export const listWebhookEventDeliveries = async (id: string, options?: RequestInit): Promise<ListWebhookEventDeliveries200> => {
 
@@ -4684,7 +4715,7 @@ export function useListWebhookEventDeliveries<TData = Awaited<ReturnType<typeof 
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary List all delivery attempts for an event
+ * @summary List all deliveries of an event and its replays
  */
 
 export function useListWebhookEventDeliveries<TData = Awaited<ReturnType<typeof listWebhookEventDeliveries>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
@@ -4795,7 +4826,7 @@ export const getStreamWebhookEventsUrl = () => {
 }
 
 /**
- * A long-lived Server-Sent Events stream of the tenant's outbound
+ * A long-lived Server-Sent Events stream of the account's outbound
  * webhook events. Accepts the dashboard session cookie or a Bearer
  * key with `apikey:read`. It has no 30-second request timeout.
  *
@@ -4810,7 +4841,7 @@ export const getStreamWebhookEventsUrl = () => {
  * frame. The first batch holds only the caller's mode. Live frames
  * come from the server instance that handled the event, so with
  * several replicas a client sees only that replica's events.
- * @summary Stream webhook events live (Server-Sent Events)
+ * @summary Stream webhook events as they happen
  */
 export const streamWebhookEvents = async ( options?: RequestInit): Promise<string> => {
 
@@ -4834,7 +4865,7 @@ export const getStreamWebhookEventsQueryKey = () => {
     }
 
 
-export const getStreamWebhookEventsQueryOptions = <TData = Awaited<ReturnType<typeof streamWebhookEvents>>, TError = Error | RateLimitedResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof streamWebhookEvents>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getStreamWebhookEventsQueryOptions = <TData = Awaited<ReturnType<typeof streamWebhookEvents>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof streamWebhookEvents>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -4853,10 +4884,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type StreamWebhookEventsQueryResult = NonNullable<Awaited<ReturnType<typeof streamWebhookEvents>>>
-export type StreamWebhookEventsQueryError = Error | RateLimitedResponse
+export type StreamWebhookEventsQueryError = UnauthorizedResponse | Error | RateLimitedResponse
 
 
-export function useStreamWebhookEvents<TData = Awaited<ReturnType<typeof streamWebhookEvents>>, TError = Error | RateLimitedResponse>(
+export function useStreamWebhookEvents<TData = Awaited<ReturnType<typeof streamWebhookEvents>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof streamWebhookEvents>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof streamWebhookEvents>>,
@@ -4866,7 +4897,7 @@ export function useStreamWebhookEvents<TData = Awaited<ReturnType<typeof streamW
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useStreamWebhookEvents<TData = Awaited<ReturnType<typeof streamWebhookEvents>>, TError = Error | RateLimitedResponse>(
+export function useStreamWebhookEvents<TData = Awaited<ReturnType<typeof streamWebhookEvents>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof streamWebhookEvents>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof streamWebhookEvents>>,
@@ -4876,15 +4907,15 @@ export function useStreamWebhookEvents<TData = Awaited<ReturnType<typeof streamW
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useStreamWebhookEvents<TData = Awaited<ReturnType<typeof streamWebhookEvents>>, TError = Error | RateLimitedResponse>(
+export function useStreamWebhookEvents<TData = Awaited<ReturnType<typeof streamWebhookEvents>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof streamWebhookEvents>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Stream webhook events live (Server-Sent Events)
+ * @summary Stream webhook events as they happen
  */
 
-export function useStreamWebhookEvents<TData = Awaited<ReturnType<typeof streamWebhookEvents>>, TError = Error | RateLimitedResponse>(
+export function useStreamWebhookEvents<TData = Awaited<ReturnType<typeof streamWebhookEvents>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof streamWebhookEvents>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -4916,11 +4947,14 @@ export const getReceiveStripeWebhookUrl = (endpointId: string,) => {
  * Stripe dashboard at it for each connected mode. `endpoint_id` is the
  * `id` of that mode's Stripe connection (`GET /v1/settings/stripe`).
  * The request is checked against the `Stripe-Signature` header and
- * that mode's signing secret. The body can be at most 64 KB.
+ * that mode's signing secret, so save the secret first
+ * (`PATCH /v1/settings/stripe/{mode}/webhook`). The body can be at
+ * most 64 KB.
  *
- * Events for objects Hardcount did not create are answered 200 with
- * `status: skipped`. A 500 means a temporary failure, and Stripe
- * sends the event again.
+ * An event whose object carries no Hardcount metadata is answered 200
+ * with `status: skipped`, except setup, refund and dispute events,
+ * which are matched through the connection. A 500 means a temporary
+ * failure, and Stripe sends the event again.
  * @summary Receive a Stripe webhook
  */
 export const receiveStripeWebhook = async (endpointId: string,
@@ -5000,10 +5034,15 @@ export const getReceivePostmarkWebhookUrl = () => {
  * `POSTMARK_WEBHOOK_PASS` set, every request gets 401. See
  * docs/ops/email-setup.md.
  *
- * Error bodies are `{"error": "<reason>"}`, not the usual error
- * object. A body that a retry cannot fix is answered 200, so Postmark
- * stops retrying: over 64 KB, invalid JSON, or no known Hardcount email
- * id in its metadata.
+ * Each record is matched to the email Hardcount sent through the
+ * `hc-outbox-id` key in its `Metadata`. A delivery, hard bounce or
+ * spam complaint updates that email's delivery state. A bounce or
+ * complaint also marks the customers who use that address as bounced
+ * or complained.
+ *
+ * A body that a retry cannot fix is answered 200, so Postmark stops
+ * retrying: over 64 KB, invalid JSON, or no known Hardcount email id
+ * in its metadata. Errors use the usual error body.
  * @summary Receive a Postmark delivery webhook
  */
 export const receivePostmarkWebhook = async (receivePostmarkWebhookBody: ReceivePostmarkWebhookBody, options?: RequestInit): Promise<ReceivePostmarkWebhook200> => {
@@ -5021,7 +5060,7 @@ export const receivePostmarkWebhook = async (receivePostmarkWebhookBody: Receive
 
 
 
-export const getReceivePostmarkWebhookMutationOptions = <TError = ReceivePostmarkWebhook401 | ReceivePostmarkWebhook500,
+export const getReceivePostmarkWebhookMutationOptions = <TError = Error,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof receivePostmarkWebhook>>, TError,{data: ReceivePostmarkWebhookBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof receivePostmarkWebhook>>, TError,{data: ReceivePostmarkWebhookBody}, TContext> => {
 
@@ -5050,12 +5089,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type ReceivePostmarkWebhookMutationResult = NonNullable<Awaited<ReturnType<typeof receivePostmarkWebhook>>>
     export type ReceivePostmarkWebhookMutationBody = ReceivePostmarkWebhookBody
-    export type ReceivePostmarkWebhookMutationError = ReceivePostmarkWebhook401 | ReceivePostmarkWebhook500
+    export type ReceivePostmarkWebhookMutationError = Error
 
     /**
  * @summary Receive a Postmark delivery webhook
  */
-export const useReceivePostmarkWebhook = <TError = ReceivePostmarkWebhook401 | ReceivePostmarkWebhook500,
+export const useReceivePostmarkWebhook = <TError = Error,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof receivePostmarkWebhook>>, TError,{data: ReceivePostmarkWebhookBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof receivePostmarkWebhook>>,
@@ -10900,17 +10939,21 @@ export const getLoginUrl = () => {
 /**
  * Used by the dashboard; not part of the integration API.
  *
- * Validates email + password, mints a server-side session row, and
- * sets `Set-Cookie: hardcount_session=...; HttpOnly; SameSite=Lax; Path=/`.
- * Subsequent dashboard requests authenticate via the cookie; sessions
- * are bound to `users.id` and are independent of API key lifecycle.
- * See ADR-011.
+ * Checks the email and password. On success it starts a dashboard
+ * session in test mode and puts it in the `hardcount_session` cookie
+ * (`HttpOnly`, `SameSite=Lax`, `Path=/`, and `Secure` in staging and
+ * production). The session lasts 7 days. It belongs to the user, not
+ * to an API key, so revoking API keys does not sign anyone out. Switch
+ * the session to live mode with `POST /v1/auth/mode`.
  *
  * A successful sign-in also sets `hardcount_device` (HttpOnly,
  * `Path=/v1/auth`, 180 days). It marks the browser as one that signed
  * in to this email, so the sign-in throttle counts its attempts on
  * their own. It never replaces the password.
- * @summary Sign in with email and password; mint an httpOnly session cookie
+ *
+ * A wrong password and an unknown email get the same 401, so the
+ * answer does not reveal which emails have accounts.
+ * @summary Sign in to the dashboard with email and password
  */
 export const login = async (loginBody: LoginBody, options?: RequestInit): Promise<Login200> => {
 
@@ -10959,7 +11002,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type LoginMutationError = InvalidBodyResponse | Error
 
     /**
- * @summary Sign in with email and password; mint an httpOnly session cookie
+ * @summary Sign in to the dashboard with email and password
  */
 export const useLogin = <TError = InvalidBodyResponse | Error,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof login>>, TError,{data: LoginBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
@@ -10983,10 +11026,14 @@ export const getLogoutUrl = () => {
 /**
  * Used by the dashboard; not part of the integration API.
  *
- * Marks the session row as revoked server-side and clears the
- * cookie on the response. Idempotent — a missing or stale cookie
- * is treated as already-logged-out.
- * @summary Revoke the current session and clear the cookie
+ * Ends the session named by the `hardcount_session` cookie on the
+ * server, then clears the cookie. A cookie for a session that already
+ * ended also gets 204. A request with no cookie gets 204 and changes
+ * nothing, not even a cookie. If the session cannot be ended, the
+ * answer is 500 and the cookie stays, so a browser is never told it
+ * signed out while its session still works. Writes an audit row when
+ * a session ended.
+ * @summary Sign out of the dashboard
  */
 export const logout = async ( options?: RequestInit): Promise<void> => {
 
@@ -11003,7 +11050,7 @@ export const logout = async ( options?: RequestInit): Promise<void> => {
 
 
 
-export const getLogoutMutationOptions = <TError = RateLimitedResponse,
+export const getLogoutMutationOptions = <TError = RateLimitedResponse | Error,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof logout>>, TError,void, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof logout>>, TError,void, TContext> => {
 
@@ -11032,12 +11079,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type LogoutMutationResult = NonNullable<Awaited<ReturnType<typeof logout>>>
 
-    export type LogoutMutationError = RateLimitedResponse
+    export type LogoutMutationError = RateLimitedResponse | Error
 
     /**
- * @summary Revoke the current session and clear the cookie
+ * @summary Sign out of the dashboard
  */
-export const useLogout = <TError = RateLimitedResponse,
+export const useLogout = <TError = RateLimitedResponse | Error,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof logout>>, TError,void, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof logout>>,
@@ -11059,11 +11106,12 @@ export const getSwitchSessionModeUrl = () => {
 /**
  * Used by the dashboard; not part of the integration API.
  *
- * Updates `dashboard_sessions.livemode` for the cookie session.
- * All subsequent requests inherit the new mode via session middleware,
- * so customers / invoices / subscriptions / API keys reads filter to
- * the active mode without per-call mode parameters. The same operator
- * flips back and forth without re-authenticating.
+ * Sets the mode of the signed-in dashboard session. Every later
+ * request with this session reads and writes that mode's data:
+ * customers, invoices, subscriptions, API keys and the rest. No
+ * request needs its own mode parameter, and the user does not sign
+ * in again. Writes an audit row, filed in test mode whichever mode
+ * is chosen.
  * @summary Switch the dashboard session between test and live mode
  */
 export const switchSessionMode = async (switchSessionModeBody: SwitchSessionModeBody, options?: RequestInit): Promise<SwitchSessionMode200> => {
@@ -11137,14 +11185,18 @@ export const getRequestPasswordResetUrl = () => {
 /**
  * Used by the dashboard; not part of the integration API.
  *
- * Always returns the same 200 body regardless of whether the email
- * exists, to avoid account enumeration. If a user matches, a
- * single-use 1-hour token is generated and the reset link is
- * emailed via SMTP (requires `SMTP_HOST` and `DASHBOARD_BASE_URL`;
- * there is no stdout fallback). `email_delivery` reports whether
- * this deployment can deliver reset emails at all — deployment
- * posture, computed independently of any match, so it leaks no
- * account existence.
+ * Always returns the same 200 body, whether or not an account has the
+ * email, so the answer does not reveal which emails have accounts. If
+ * an account matches, Hardcount creates a single-use reset token that
+ * works for 1 hour and emails a reset link built from
+ * `DASHBOARD_BASE_URL`. Sending needs SMTP (`SMTP_HOST`) and
+ * `DASHBOARD_BASE_URL`; there is no other way to deliver the link. One
+ * account is sent at most 3 reset emails an hour; later requests in
+ * that hour send nothing.
+ *
+ * `email_delivery` says whether this server can deliver reset emails
+ * at all. It describes the server's setup and does not depend on the
+ * email sent.
  * @summary Request a password reset link
  */
 export const requestPasswordReset = async (requestPasswordResetBody: RequestPasswordResetBody, options?: RequestInit): Promise<RequestPasswordReset200> => {
@@ -11162,7 +11214,7 @@ export const requestPasswordReset = async (requestPasswordResetBody: RequestPass
 
 
 
-export const getRequestPasswordResetMutationOptions = <TError = InvalidBodyResponse | RateLimitedResponse,
+export const getRequestPasswordResetMutationOptions = <TError = InvalidBodyResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestPasswordReset>>, TError,{data: RequestPasswordResetBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof requestPasswordReset>>, TError,{data: RequestPasswordResetBody}, TContext> => {
 
@@ -11191,12 +11243,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RequestPasswordResetMutationResult = NonNullable<Awaited<ReturnType<typeof requestPasswordReset>>>
     export type RequestPasswordResetMutationBody = RequestPasswordResetBody
-    export type RequestPasswordResetMutationError = InvalidBodyResponse | RateLimitedResponse
+    export type RequestPasswordResetMutationError = InvalidBodyResponse | Error | RateLimitedResponse
 
     /**
  * @summary Request a password reset link
  */
-export const useRequestPasswordReset = <TError = InvalidBodyResponse | RateLimitedResponse,
+export const useRequestPasswordReset = <TError = InvalidBodyResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestPasswordReset>>, TError,{data: RequestPasswordResetBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof requestPasswordReset>>,
@@ -11218,8 +11270,12 @@ export const getConfirmPasswordResetUrl = () => {
 /**
  * Used by the dashboard; not part of the integration API.
  *
- * Consumes a single-use reset token and updates the user's password.
- * The token is invalidated on use; reuse or expired tokens return 422.
+ * Uses up a reset token and sets the user's new password. Every
+ * session the user had is then signed out, so a stolen session cookie
+ * stops working too. The new password is checked before the token, so
+ * a password that fails the check does not use the token up. An
+ * unknown, expired or already used token is a 422 with
+ * `param: token`. Writes an audit row.
  * @summary Set a new password using a reset token
  */
 export const confirmPasswordReset = async (confirmPasswordResetBody: ConfirmPasswordResetBody, options?: RequestInit): Promise<ConfirmPasswordReset200> => {
@@ -11329,7 +11385,7 @@ export const getCheckPasswordResetTokenQueryKey = (params?: CheckPasswordResetTo
     }
 
 
-export const getCheckPasswordResetTokenQueryOptions = <TData = Awaited<ReturnType<typeof checkPasswordResetToken>>, TError = Error>(params: CheckPasswordResetTokenParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof checkPasswordResetToken>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getCheckPasswordResetTokenQueryOptions = <TData = Awaited<ReturnType<typeof checkPasswordResetToken>>, TError = Error | RateLimitedResponse>(params: CheckPasswordResetTokenParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof checkPasswordResetToken>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -11348,10 +11404,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type CheckPasswordResetTokenQueryResult = NonNullable<Awaited<ReturnType<typeof checkPasswordResetToken>>>
-export type CheckPasswordResetTokenQueryError = Error
+export type CheckPasswordResetTokenQueryError = Error | RateLimitedResponse
 
 
-export function useCheckPasswordResetToken<TData = Awaited<ReturnType<typeof checkPasswordResetToken>>, TError = Error>(
+export function useCheckPasswordResetToken<TData = Awaited<ReturnType<typeof checkPasswordResetToken>>, TError = Error | RateLimitedResponse>(
  params: CheckPasswordResetTokenParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof checkPasswordResetToken>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof checkPasswordResetToken>>,
@@ -11361,7 +11417,7 @@ export function useCheckPasswordResetToken<TData = Awaited<ReturnType<typeof che
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useCheckPasswordResetToken<TData = Awaited<ReturnType<typeof checkPasswordResetToken>>, TError = Error>(
+export function useCheckPasswordResetToken<TData = Awaited<ReturnType<typeof checkPasswordResetToken>>, TError = Error | RateLimitedResponse>(
  params: CheckPasswordResetTokenParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof checkPasswordResetToken>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof checkPasswordResetToken>>,
@@ -11371,7 +11427,7 @@ export function useCheckPasswordResetToken<TData = Awaited<ReturnType<typeof che
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useCheckPasswordResetToken<TData = Awaited<ReturnType<typeof checkPasswordResetToken>>, TError = Error>(
+export function useCheckPasswordResetToken<TData = Awaited<ReturnType<typeof checkPasswordResetToken>>, TError = Error | RateLimitedResponse>(
  params: CheckPasswordResetTokenParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof checkPasswordResetToken>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -11379,7 +11435,7 @@ export function useCheckPasswordResetToken<TData = Awaited<ReturnType<typeof che
  * @summary Check a password reset token
  */
 
-export function useCheckPasswordResetToken<TData = Awaited<ReturnType<typeof checkPasswordResetToken>>, TError = Error>(
+export function useCheckPasswordResetToken<TData = Awaited<ReturnType<typeof checkPasswordResetToken>>, TError = Error | RateLimitedResponse>(
  params: CheckPasswordResetTokenParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof checkPasswordResetToken>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -11408,12 +11464,13 @@ export const getGetInvitationUrl = (token: string,) => {
 /**
  * Used by the dashboard; not part of the integration API.
  *
- * Unauthenticated — the token IS the credential (mirrors password
- * reset). Returns the invited email, workspace name, and whether
- * the invitee needs to create an account. Invalid, expired,
- * revoked, and already-used tokens all return the same generic
- * 422 (no state oracle for token guessing). ADR-081.
- * @summary Preview a team invitation (accept-page context)
+ * The accept page calls it first. No sign-in is needed: the token from
+ * the invite link is the credential, as with a password reset link.
+ * Returns the invited email, the account's name, and whether the
+ * invitee has to create an account. An unknown, expired, revoked or
+ * used token gets the same 422, so the answer does not tell a
+ * guesser which tokens exist.
+ * @summary Preview a team invitation
  */
 export const getInvitation = async (token: string, options?: RequestInit): Promise<GetInvitation200> => {
 
@@ -11484,7 +11541,7 @@ export function useGetInvitation<TData = Awaited<ReturnType<typeof getInvitation
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Preview a team invitation (accept-page context)
+ * @summary Preview a team invitation
  */
 
 export function useGetInvitation<TData = Awaited<ReturnType<typeof getInvitation>>, TError = Error | RateLimitedResponse>(
@@ -11516,14 +11573,23 @@ export const getAcceptInvitationUrl = () => {
 /**
  * Used by the dashboard; not part of the integration API.
  *
- * Consumes the single-use invite token (CAS — a replay or a race
- * loses) and attaches the membership. If no account exists for the
- * invited email, `password` is required (min 12 chars), the account
- * is created, and a session cookie is minted (`session_minted:
- * true`). An EXISTING account is attached WITHOUT a session —
- * possession of the email alone must not log into an
- * already-privileged account; the user signs in with their own
- * password afterwards. ADR-081.
+ * Uses up the invite token and adds the invitee to the account as a
+ * member. The token works once: of two requests that race, or an
+ * accept racing a revoke, only one wins.
+ *
+ * - No account has the invited email: `password` is required.
+ *   Hardcount creates the account, signs it in with a new session
+ *   cookie, and answers `session_minted: true`.
+ * - An account has the email: Hardcount adds the membership but does
+ *   not sign the user in, because holding the email alone must not
+ *   open an existing account. The user signs in with their own
+ *   password afterwards, and `password` is ignored.
+ *
+ * The token is used up before the new account is created. If the new
+ * account's password fails the check (422, `param: password`), the
+ * invitation stays used and the inviter has to send a new one. If
+ * only the session cannot be started, the membership still stands and
+ * `session_minted` is false. Writes an audit row.
  * @summary Accept a team invitation
  */
 export const acceptInvitation = async (acceptInvitationBody: AcceptInvitationBody, options?: RequestInit): Promise<AcceptInvitation200> => {
@@ -11597,12 +11663,12 @@ export const getListMembersUrl = () => {
 /**
  * Used by the dashboard; not part of the integration API.
  *
- * Dashboard-session only (403 for API keys — membership is a human
- * act with a human actor). Members are every user attached to the
- * tenant; invitations carry a server-derived status
- * (pending/accepted/revoked/expired). No RBAC yet: `role` is
- * recorded but every member holds the full permission set. ADR-081.
- * @summary List workspace members and invitations
+ * Lists the account's members, oldest user first, and every
+ * invitation the account has sent, newest first. Only a dashboard
+ * session can call it: an API key gets 403, because a team change is
+ * made by a person. Roles are recorded but not enforced yet: every
+ * member can do everything in the dashboard.
+ * @summary List team members and invitations
  */
 export const listMembers = async ( options?: RequestInit): Promise<ListMembers200> => {
 
@@ -11673,7 +11739,7 @@ export function useListMembers<TData = Awaited<ReturnType<typeof listMembers>>, 
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary List workspace members and invitations
+ * @summary List team members and invitations
  */
 
 export function useListMembers<TData = Awaited<ReturnType<typeof listMembers>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
@@ -11705,11 +11771,16 @@ export const getInviteMemberUrl = () => {
 /**
  * Used by the dashboard; not part of the integration API.
  *
- * Creates a pending invitation (7-day expiry, one pending per
- * email) and sends the accept link via the transactional email
- * outbox. Requires `DASHBOARD_BASE_URL` — accept links are never
- * derived from request headers. 409 when the email is already a
- * member or already has a pending invite. ADR-081.
+ * Creates an invitation that works for 7 days and queues an email
+ * with the accept link. The link is built from `DASHBOARD_BASE_URL`,
+ * never from the request's headers. An email can have only one
+ * invitation that is not accepted or revoked, even an expired one:
+ * revoke it to send a new one. Writes an audit row.
+ *
+ * Nothing is created when the server cannot deliver the link: the
+ * answer is 409 with code `invalid_state` when `DASHBOARD_BASE_URL`
+ * is not set, or `email_not_configured` when this server has no SMTP.
+ * `can_send_invites` on `GET /v1/whoami` tells you in advance.
  * @summary Invite a teammate by email
  */
 export const inviteMember = async (inviteMemberBody: InviteMemberBody, options?: RequestInit): Promise<MemberInvitation> => {
@@ -11783,10 +11854,11 @@ export const getRevokeMemberInvitationUrl = (id: string,) => {
 /**
  * Used by the dashboard; not part of the integration API.
  *
- * Stamps the invitation revoked; its accept link stops working
- * immediately (revoke racing an accept: exactly one wins). Only
- * pending invitations can be revoked — accepted/revoked ones 404.
- * @summary Revoke a pending invitation
+ * Revokes an invitation that is not accepted or revoked yet, an
+ * expired one included. Its accept link stops working at once; if an
+ * accept races the revoke, only one of them wins. An accepted or
+ * already revoked invitation is a 404. Writes an audit row.
+ * @summary Revoke an invitation
  */
 export const revokeMemberInvitation = async (id: string, options?: RequestInit): Promise<void> => {
 
@@ -11835,7 +11907,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type RevokeMemberInvitationMutationError = UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
- * @summary Revoke a pending invitation
+ * @summary Revoke an invitation
  */
 export const useRevokeMemberInvitation = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeMemberInvitation>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
@@ -11859,12 +11931,12 @@ export const getRemoveMemberUrl = (userID: string,) => {
 /**
  * Used by the dashboard; not part of the integration API.
  *
- * Deletes the membership AND revokes all of the user's sessions
- * (sessions pin the tenant — without revocation an active session
- * would keep full access). Guards: self-removal is blocked
- * (another member must remove you) and the last member cannot be
- * removed. ADR-081.
- * @summary Remove a member from the workspace
+ * Removes the user from the account and ends all of their sessions,
+ * so a browser they are signed in on loses access at once. You
+ * cannot remove yourself (another member must do it), and the
+ * account's last member cannot be removed. The user's sign-in
+ * account itself is kept. Writes an audit row.
+ * @summary Remove a member from the account
  */
 export const removeMember = async (userID: string, options?: RequestInit): Promise<void> => {
 
@@ -11913,7 +11985,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type RemoveMemberMutationError = UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
- * @summary Remove a member from the workspace
+ * @summary Remove a member from the account
  */
 export const useRemoveMember = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeMember>>, TError,{userID: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
@@ -11935,13 +12007,13 @@ export const getGetWhoamiUrl = () => {
 }
 
 /**
- * Returns the resolved auth context for whichever credential the
- * request carries — `hardcount_session` cookie (dashboard) or
- * `Authorization: Bearer` (SDK / curl). Cookie path returns
- * `user_id` + `email`; Bearer path returns `key_id` + `key_type`.
- * All callers get `tenant_id`, `livemode`,
- * `can_email_setup_links`, `can_send_invites` and `smtp_configured`.
- * @summary Resolve the current credential to its tenant context
+ * Tells you which account and mode the request's credential works
+ * in. Any valid credential can call it, an ingest key included. With
+ * an API key the answer has `key_id` and `key_type`; with a dashboard
+ * session it has `user_id` and `email` instead. Every answer has
+ * `tenant_id`, `livemode`, `can_email_setup_links`,
+ * `can_send_invites` and `smtp_configured`.
+ * @summary Get the account and mode of the current credential
  */
 export const getWhoami = async ( options?: RequestInit): Promise<GetWhoami200> => {
 
@@ -11965,7 +12037,7 @@ export const getGetWhoamiQueryKey = () => {
     }
 
 
-export const getGetWhoamiQueryOptions = <TData = Awaited<ReturnType<typeof getWhoami>>, TError = Error | RateLimitedResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWhoami>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetWhoamiQueryOptions = <TData = Awaited<ReturnType<typeof getWhoami>>, TError = UnauthorizedResponse | RateLimitedResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWhoami>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -11984,10 +12056,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetWhoamiQueryResult = NonNullable<Awaited<ReturnType<typeof getWhoami>>>
-export type GetWhoamiQueryError = Error | RateLimitedResponse
+export type GetWhoamiQueryError = UnauthorizedResponse | RateLimitedResponse
 
 
-export function useGetWhoami<TData = Awaited<ReturnType<typeof getWhoami>>, TError = Error | RateLimitedResponse>(
+export function useGetWhoami<TData = Awaited<ReturnType<typeof getWhoami>>, TError = UnauthorizedResponse | RateLimitedResponse>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWhoami>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getWhoami>>,
@@ -11997,7 +12069,7 @@ export function useGetWhoami<TData = Awaited<ReturnType<typeof getWhoami>>, TErr
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetWhoami<TData = Awaited<ReturnType<typeof getWhoami>>, TError = Error | RateLimitedResponse>(
+export function useGetWhoami<TData = Awaited<ReturnType<typeof getWhoami>>, TError = UnauthorizedResponse | RateLimitedResponse>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWhoami>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getWhoami>>,
@@ -12007,15 +12079,15 @@ export function useGetWhoami<TData = Awaited<ReturnType<typeof getWhoami>>, TErr
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetWhoami<TData = Awaited<ReturnType<typeof getWhoami>>, TError = Error | RateLimitedResponse>(
+export function useGetWhoami<TData = Awaited<ReturnType<typeof getWhoami>>, TError = UnauthorizedResponse | RateLimitedResponse>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWhoami>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Resolve the current credential to its tenant context
+ * @summary Get the account and mode of the current credential
  */
 
-export function useGetWhoami<TData = Awaited<ReturnType<typeof getWhoami>>, TError = Error | RateLimitedResponse>(
+export function useGetWhoami<TData = Awaited<ReturnType<typeof getWhoami>>, TError = UnauthorizedResponse | RateLimitedResponse>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWhoami>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -14108,16 +14180,18 @@ export const getExportCustomersCsvUrl = (params?: ExportCustomersCsvParams,) => 
 /**
  * Used by the dashboard; not part of the integration API.
  *
- * Streams every customer, newest first, from one consistent
- * snapshot. Columns: id, external_id, display_name, email, status,
+ * Streams every customer in the caller's mode, newest first, from
+ * one consistent snapshot. Columns: id, external_id, display_name, email, status,
  * email_status, created_at, updated_at.
  *
  * Each export writes an `export` row to the audit log before any
  * data is sent. If that row cannot be written, the call returns 500
  * and sends nothing. If the export fails after it started, the last
  * row's first cell is `EXPORT_INCOMPLETE`: discard the file and
- * retry. Text cells that start with `= + - @` get a leading `'`
- * so spreadsheets do not run them as formulas.
+ * retry. Text cells that start with `=`, `+`, `-`, `@`, a tab or a
+ * carriage return get a leading `'`, so spreadsheets do not run them
+ * as formulas. The file comes as an attachment named like
+ * `customers-20261101-090000.csv` (the time is UTC).
  * @summary Export customers as CSV
  */
 export const exportCustomersCsv = async (params?: ExportCustomersCsvParams, options?: RequestInit): Promise<string> => {
@@ -14228,8 +14302,9 @@ export const getExportInvoicesCsvUrl = (params?: ExportInvoicesCsvParams,) => {
 /**
  * Used by the dashboard; not part of the integration API.
  *
- * Streams every invoice, newest first, from one consistent
- * snapshot. Amounts are in cents. Columns: id, invoice_number,
+ * Streams every invoice in the caller's mode, newest first, from
+ * one consistent snapshot. Amount columns are whole numbers in the currency's minor
+ * unit (cents for USD). Columns: id, invoice_number,
  * customer_id, subscription_id, status, payment_status, currency,
  * subtotal_cents, tax_amount_cents, discount_cents,
  * total_amount_cents, amount_due_cents, amount_paid_cents,
@@ -14349,8 +14424,8 @@ export const getExportSubscriptionsCsvUrl = (params?: ExportSubscriptionsCsvPara
 /**
  * Used by the dashboard; not part of the integration API.
  *
- * Streams every subscription, newest first, from one consistent
- * snapshot. Columns: id, code, display_name, customer_id, status,
+ * Streams every subscription in the caller's mode, newest first,
+ * from one consistent snapshot. Columns: id, code, display_name, customer_id, status,
  * billing_time, trial_start_at, trial_end_at, started_at,
  * activated_at, canceled_at, current_billing_period_start,
  * current_billing_period_end, next_billing_at, plan_ids (plan IDs
@@ -14468,13 +14543,14 @@ export const getExportUsageEventsCsvUrl = (params: ExportUsageEventsCsvParams,) 
 /**
  * Used by the dashboard; not part of the integration API.
  *
- * Streams usage events whose `timestamp` falls in the window,
- * newest first, from one consistent snapshot. `from` and `to` are
- * both required and may span at most 366 days. `customer_id`,
- * `meter_id` and `dimensions` narrow it like the event list. Columns: id,
- * customer_id, meter_id, quantity, timestamp, idempotency_key,
- * origin, dimensions_json, provider_cost_cents (US cents, a decimal),
- * provider_cost_source.
+ * Streams the usage events in the caller's mode whose `timestamp`
+ * falls in the window, newest first, from one consistent snapshot.
+ * `from` and `to` are both required and may span at most 366 days.
+ * `customer_id`, `meter_id` and `dimensions` narrow it like the event
+ * list. Columns: id, customer_id, meter_id, quantity, timestamp,
+ * idempotency_key, origin, dimensions_json, provider_cost_cents
+ * (what the event cost you at your provider, in US cents as a
+ * decimal; empty when unknown), provider_cost_source.
  *
  * Audit row, `EXPORT_INCOMPLETE` marker and formula escaping work
  * as in the customers export.
@@ -14718,9 +14794,11 @@ export const getGetAnalyticsOverviewUrl = (params?: GetAnalyticsOverviewParams,)
  * ends now, with values for the window before it where a comparison
  * makes sense.
  *
- * Money is in cents of the tenant's default currency (USD when none
- * is set), named in `currency`. Invoices and plans in other
- * currencies are left out. MRR (monthly recurring revenue) counts
+ * Money is in the minor unit (cents for USD) of the account's default
+ * currency, named in `currency` (USD when none is set). Invoices and
+ * plans in other currencies are left out, except in
+ * `outstanding_by_currency` and `credit_balance_by_currency`, which
+ * list each currency. MRR (monthly recurring revenue) counts
  * plan base fees only: base amount times quantity, with yearly
  * plans divided by 12. Usage charges are not included. Data from
  * test clocks is left out.
@@ -14835,7 +14913,7 @@ export const getGetAnalyticsRevenueChartUrl = (params?: GetAnalyticsRevenueChart
  * Used by the dashboard; not part of the integration API.
  *
  * Returns paid-invoice revenue per day, or per month for `12m`.
- * Only invoices in the tenant's default currency are counted; the
+ * Only invoices in the account's default currency are counted; the
  * currency is the `currency` of `GET /v1/analytics/overview`.
  * Buckets with no paid invoices are left out. Data from test clocks
  * is left out.
@@ -14958,7 +15036,7 @@ export const getGetAnalyticsMrrMovementUrl = (params?: GetAnalyticsMrrMovementPa
  *   quantity changes on subscriptions that were active for the whole
  *   window.
  *
- * Only plans in the tenant's default currency are counted; the
+ * Only plans in the account's default currency are counted; the
  * currency is the `currency` of `GET /v1/analytics/overview`.
  * Buckets with no movement are left out. Data from test clocks is
  * left out.
@@ -16517,7 +16595,7 @@ export const createApiKey = async (createApiKeyBody: CreateApiKeyBody, options?:
 
 
 
-export const getCreateApiKeyMutationOptions = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const getCreateApiKeyMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createApiKey>>, TError,{data: CreateApiKeyBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createApiKey>>, TError,{data: CreateApiKeyBody}, TContext> => {
 
@@ -16546,12 +16624,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateApiKeyMutationResult = NonNullable<Awaited<ReturnType<typeof createApiKey>>>
     export type CreateApiKeyMutationBody = CreateApiKeyBody
-    export type CreateApiKeyMutationError = Error | UnauthorizedResponse | RateLimitedResponse
+    export type CreateApiKeyMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
  * @summary Create an API key
  */
-export const useCreateApiKey = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const useCreateApiKey = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createApiKey>>, TError,{data: CreateApiKeyBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createApiKey>>,
@@ -16578,10 +16656,9 @@ export const getListApiKeysUrl = (params?: ListApiKeysParams,) => {
 }
 
 /**
- * Returns the newest 50 keys in the caller's mode (test or live),
- * newest first. Revoked and expired keys are included; check
- * `revoked_at` and `expires_at`. Key values are never returned.
- * There are no paging parameters and no `total`.
+ * Returns the keys in the caller's mode (test or live), newest first.
+ * Revoked and expired keys are included; check `revoked_at` and
+ * `expires_at`. Key values are never returned.
  * @summary List API keys
  */
 export const listApiKeys = async (params?: ListApiKeysParams, options?: RequestInit): Promise<ListApiKeys200> => {
@@ -16783,7 +16860,7 @@ export const rotateApiKey = async (id: string,
 
 
 
-export const getRotateApiKeyMutationOptions = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const getRotateApiKeyMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rotateApiKey>>, TError,{id: string;data?: RotateApiKeyBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof rotateApiKey>>, TError,{id: string;data?: RotateApiKeyBody}, TContext> => {
 
@@ -16812,12 +16889,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RotateApiKeyMutationResult = NonNullable<Awaited<ReturnType<typeof rotateApiKey>>>
     export type RotateApiKeyMutationBody = RotateApiKeyBody | undefined
-    export type RotateApiKeyMutationError = Error | UnauthorizedResponse | RateLimitedResponse
+    export type RotateApiKeyMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
  * @summary Rotate an API key
  */
-export const useRotateApiKey = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const useRotateApiKey = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rotateApiKey>>, TError,{id: string;data?: RotateApiKeyBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof rotateApiKey>>,
@@ -16839,14 +16916,15 @@ export const getGetTenantSettingsUrl = () => {
 /**
  * Used by the dashboard; not part of the integration API.
  *
- * Returns the tenant's billing settings: currency, timezone, invoice
+ * Returns the account's billing settings: currency, timezone, invoice
  * numbering, payment terms, tax setup and the company details printed
- * on invoices. Settings are shared by test and live mode. A tenant
- * that never saved settings gets the defaults (USD, UTC, prefix
- * `HC`, net 30, tax provider `manual`).
+ * on invoices. Settings are shared by test and live mode, except
+ * `next_invoice_sequence`, which counts the caller's mode. An account with no
+ * stored settings gets the defaults (USD, UTC, invoice prefix `HC`,
+ * credit note prefix `CN`, net 30, tax provider `manual`).
  * Requires the `apikey:write` permission (secret keys and dashboard
  * sessions).
- * @summary Get workspace settings
+ * @summary Get account settings
  */
 export const getTenantSettings = async ( options?: RequestInit): Promise<TenantSettings> => {
 
@@ -16917,7 +16995,7 @@ export function useGetTenantSettings<TData = Awaited<ReturnType<typeof getTenant
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Get workspace settings
+ * @summary Get account settings
  */
 
 export function useGetTenantSettings<TData = Awaited<ReturnType<typeof getTenantSettings>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
@@ -16961,11 +17039,13 @@ export const getUpdateTenantSettingsUrl = () => {
  * `credit_note_prefix` are stored in upper case, and `brand_color` in
  * lower case. Choosing `stripe_tax` with no
  * `default_product_tax_code` sets it to `txcd_10103001` (SaaS,
- * business use).
+ * business use). The server sets `tenant_id`, `created_at`,
+ * `updated_at` and `next_invoice_sequence`: a body that sends one is
+ * refused with 422.
  *
  * A save that changes a field writes one audit row listing each
- * change.
- * @summary Update workspace settings
+ * change. The row is filed in test mode, whichever mode you save from.
+ * @summary Update account settings
  */
 export const updateTenantSettings = async (tenantSettingsInput: TenantSettingsInput, options?: RequestInit): Promise<TenantSettings> => {
 
@@ -16982,7 +17062,7 @@ export const updateTenantSettings = async (tenantSettingsInput: TenantSettingsIn
 
 
 
-export const getUpdateTenantSettingsMutationOptions = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const getUpdateTenantSettingsMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateTenantSettings>>, TError,{data: TenantSettingsInput}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateTenantSettings>>, TError,{data: TenantSettingsInput}, TContext> => {
 
@@ -17011,12 +17091,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type UpdateTenantSettingsMutationResult = NonNullable<Awaited<ReturnType<typeof updateTenantSettings>>>
     export type UpdateTenantSettingsMutationBody = TenantSettingsInput
-    export type UpdateTenantSettingsMutationError = Error | UnauthorizedResponse | RateLimitedResponse
+    export type UpdateTenantSettingsMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
- * @summary Update workspace settings
+ * @summary Update account settings
  */
-export const useUpdateTenantSettings = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const useUpdateTenantSettings = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateTenantSettings>>, TError,{data: TenantSettingsInput}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof updateTenantSettings>>,
@@ -17039,9 +17119,9 @@ export const getGetEmailSettingsUrl = () => {
  * Used by the dashboard; not part of the integration API.
  *
  * Read-only. Email is configured in the server environment, not per
- * workspace: `SMTP_HOST` and friends, plus the base URLs email links
+ * account: `SMTP_HOST` and friends, plus the base URLs email links
  * are built from. Never returns credentials.
- * @summary Email setup status
+ * @summary Get the email setup status
  */
 export const getEmailSettings = async ( options?: RequestInit): Promise<GetEmailSettings200> => {
 
@@ -17112,7 +17192,7 @@ export function useGetEmailSettings<TData = Awaited<ReturnType<typeof getEmailSe
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Email setup status
+ * @summary Get the email setup status
  */
 
 export function useGetEmailSettings<TData = Awaited<ReturnType<typeof getEmailSettings>>, TError = UnauthorizedResponse | RateLimitedResponse>(
@@ -17146,7 +17226,8 @@ export const getSendTestEmailUrl = () => {
  *
  * Dashboard sessions only. Sends one plain-text email to the signed-in
  * member's own address, directly over SMTP (not queued), and returns
- * the server's answer. Writes an audit row on success.
+ * the server's answer. It waits up to 20 seconds for the SMTP server.
+ * Writes an audit row on success.
  * @summary Send a test email
  */
 export const sendTestEmail = async ( options?: RequestInit): Promise<SendTestEmail200> => {
@@ -17222,7 +17303,8 @@ export const getConnectStripeUrl = () => {
  *
  * Saves your own Stripe keys for one mode (`livemode` in the body
  * picks the mode, not the caller's mode). Calling it again for the
- * same mode replaces the keys. Key prefixes must match the mode:
+ * same mode replaces the keys; a webhook secret saved before is kept
+ * when the body sends none. Key prefixes must match the mode:
  * `sk_test_`/`rk_test_` and `pk_test_` for test, `sk_live_`/`rk_live_`
  * and `pk_live_` for live. Secrets are stored encrypted and are never
  * returned.
@@ -17233,8 +17315,8 @@ export const getConnectStripeUrl = () => {
  * are set, and invoices that were stuck waiting for Stripe keys are
  * retried in the background (`retries_queued` gives the count).
  *
- * Stripe sends payment webhooks to `/v1/webhooks/stripe/{id}`, where
- * `{id}` is the returned `id`. Writes an audit row.
+ * Stripe sends payment webhooks to `/v1/webhooks/stripe/{endpoint_id}`,
+ * where `{endpoint_id}` is the returned `id`. Writes an audit row.
  * @summary Connect a Stripe account
  */
 export const connectStripe = async (connectStripeBody: ConnectStripeBody, options?: RequestInit): Promise<StripeConnection> => {
@@ -17252,7 +17334,7 @@ export const connectStripe = async (connectStripeBody: ConnectStripeBody, option
 
 
 
-export const getConnectStripeMutationOptions = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const getConnectStripeMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof connectStripe>>, TError,{data: ConnectStripeBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof connectStripe>>, TError,{data: ConnectStripeBody}, TContext> => {
 
@@ -17281,12 +17363,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type ConnectStripeMutationResult = NonNullable<Awaited<ReturnType<typeof connectStripe>>>
     export type ConnectStripeMutationBody = ConnectStripeBody
-    export type ConnectStripeMutationError = Error | UnauthorizedResponse | RateLimitedResponse
+    export type ConnectStripeMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
  * @summary Connect a Stripe account
  */
-export const useConnectStripe = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const useConnectStripe = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof connectStripe>>, TError,{data: ConnectStripeBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof connectStripe>>,
@@ -17308,7 +17390,7 @@ export const getListStripeConnectionsUrl = () => {
 /**
  * Used by the dashboard; not part of the integration API.
  *
- * Returns the tenant's Stripe connections for both modes in one list
+ * Returns the account's Stripe connections for both modes in one list
  * (at most two rows, live first), whatever the caller's mode. No
  * secret values are returned, only prefixes and last four characters.
  * @summary List Stripe connections
@@ -17417,6 +17499,7 @@ export const getSetStripeWebhookSecretUrl = (mode: 'test' | 'live',) => {
  * Saves the `whsec_` signing secret for a mode that is already
  * connected, without entering the API keys again. Hardcount does not call
  * Stripe here; the secret is checked on each incoming webhook.
+ * Until a secret is saved, Stripe webhooks for the mode are refused.
  * Writes an audit row (never the secret).
  * @summary Set the Stripe webhook signing secret
  */
@@ -17492,8 +17575,11 @@ export const getDisconnectStripeUrl = (mode: 'test' | 'live',) => {
 /**
  * Used by the dashboard; not part of the integration API.
  *
- * Deletes the saved Stripe keys for the mode. Hardcount cannot reach
- * Stripe in that mode until you connect again. Writes an audit row.
+ * Deletes the saved Stripe keys and webhook secret for the mode.
+ * Hardcount cannot reach Stripe in that mode until you connect again,
+ * and Stripe webhooks for it are refused. Connecting again creates a
+ * connection with a new `id`, so the webhook URL in Stripe must change
+ * too. Writes an audit row.
  * @summary Disconnect Stripe for one mode
  */
 export const disconnectStripe = async (mode: 'test' | 'live', options?: RequestInit): Promise<void> => {
@@ -17568,16 +17654,18 @@ export const getBootstrapUrl = () => {
  * Run once, by hand, to create the first account on a new install; not part of the integration API.
  *
  * One-time setup for a new installation. It works only while no
- * tenant exists and only when the server has `HARDCOUNT_BOOTSTRAP_TOKEN`
- * set. Send that token as `token` in the body or as
- * `Authorization: Bearer <token>`. Never send it in the query string.
+ * account exists and only when the server has
+ * `HARDCOUNT_BOOTSTRAP_TOKEN` set. Send that token as `token` in the
+ * body or as `Authorization: Bearer <token>`. Never send it in the
+ * query string.
  *
- * In one transaction it creates the first tenant, its owner user, a
- * test secret key and a live secret key. The
- * response is the only place the keys appear, and the password too
- * when Hardcount generated it. The response has `Cache-Control: no-store`.
+ * In one transaction it creates the first account with its default
+ * settings and default dunning policies, its owner user, a test secret
+ * key and a live secret key. The response is the only place the keys
+ * appear, and the password too when Hardcount generated it. The
+ * response has `Cache-Control: no-store`.
  *
- * Defaults: tenant name "Demo Tenant", owner email
+ * Defaults: account name "Demo Tenant", owner email
  * `admin@hardcount.local`, and a generated password when
  * `owner_password` is empty. The `hardcount-bootstrap` command does the
  * same setup from the shell.
@@ -17598,7 +17686,7 @@ export const bootstrap = async (bootstrapBody?: BootstrapBody, options?: Request
 
 
 
-export const getBootstrapMutationOptions = <TError = InvalidBodyResponse | Error,
+export const getBootstrapMutationOptions = <TError = InvalidBodyResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof bootstrap>>, TError,{data?: BootstrapBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof bootstrap>>, TError,{data?: BootstrapBody}, TContext> => {
 
@@ -17627,12 +17715,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type BootstrapMutationResult = NonNullable<Awaited<ReturnType<typeof bootstrap>>>
     export type BootstrapMutationBody = BootstrapBody | undefined
-    export type BootstrapMutationError = InvalidBodyResponse | Error
+    export type BootstrapMutationError = InvalidBodyResponse | Error | RateLimitedResponse
 
     /**
  * @summary Set up a new installation
  */
-export const useBootstrap = <TError = InvalidBodyResponse | Error,
+export const useBootstrap = <TError = InvalidBodyResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof bootstrap>>, TError,{data?: BootstrapBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof bootstrap>>,
@@ -17661,7 +17749,7 @@ export const getListAuditLogUrl = (params?: ListAuditLogParams,) => {
 /**
  * Used by the dashboard; not part of the integration API.
  *
- * Returns the tenant's audit entries in the caller's mode, newest
+ * Returns the account's audit entries in the caller's mode, newest
  * first (by `created_at`, then `id`). All filters are exact matches
  * and can be combined.
  *
@@ -17669,8 +17757,8 @@ export const getListAuditLogUrl = (params?: ListAuditLogParams,) => {
  * stops counting at 10,001, so a value above 10,000 means "more than
  * 10,000".
  *
- * Settings changes are always recorded in test mode, so they do not
- * appear when you read the log in live mode.
+ * Settings changes, sign-ins and team changes are always recorded in
+ * test mode, so they do not appear when you read the log in live mode.
  * @summary List audit log entries
  */
 export const listAuditLog = async (params?: ListAuditLogParams, options?: RequestInit): Promise<ListAuditLog200> => {
@@ -17775,7 +17863,7 @@ export const getGetAuditLogFiltersUrl = () => {
  * Used by the dashboard; not part of the integration API.
  *
  * Returns the distinct `action` and `resource_type` values recorded
- * for the tenant in the caller's mode, plus the test clocks that
+ * for the account in the caller's mode, plus the test clocks that
  * appear in the log. Deleted test clocks are included, named from
  * their audit entries. Use these to fill filter menus.
  * @summary List audit log filter values

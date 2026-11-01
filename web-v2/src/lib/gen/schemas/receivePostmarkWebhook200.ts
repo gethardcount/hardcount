@@ -13,6 +13,17 @@
 import type { ReceivePostmarkWebhook200Status } from './receivePostmarkWebhook200Status';
 
 export type ReceivePostmarkWebhook200 = {
+  /**
+     * `processed`: the record was applied. `skipped`: it
+     * could not be used (too large, invalid JSON, or no
+     * known email id). `ignored`: Hardcount does not read
+     * this record type, or it is a soft bounce.
+     */
   status: ReceivePostmarkWebhook200Status;
+  /**
+     * Why the record was skipped or ignored, such as
+     * `invalid json`, `no correlation metadata` or
+     * `transient bounce`. Absent when it was processed.
+     */
   reason?: string;
 };

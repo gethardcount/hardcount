@@ -11,9 +11,15 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * Usage in one bucket of `GET /v1/analytics/usage`: a UTC day, or a
+ * UTC month for `12m`. Events of customers on a test clock are left
+ * out.
+ */
 export interface AnalyticsUsagePoint {
   /** Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in UTC. */
   date: string;
+  /** Usage events with a timestamp in the bucket, over all meters. */
   events: number;
   /** Summed quantity, as a decimal string. */
   quantity: string;

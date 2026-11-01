@@ -13,7 +13,15 @@
 import type { ReadinessReportChecks } from './readinessReportChecks';
 import type { ReadinessReportStatus } from './readinessReportStatus';
 
+/**
+ * The body of `GET /health/ready`, on both 200 and 503.
+ */
 export interface ReadinessReport {
+  /**
+     * `ok` when every check passed. `degraded` when the database
+     * cannot be reached (503) or the billing scheduler is late (still
+     * 200). `draining` while the server shuts down (503).
+     */
   status: ReadinessReportStatus;
   /**
      * One entry per check. `api` is `ok` or `draining`. `database` is

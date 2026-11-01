@@ -12,6 +12,9 @@
  */
 import type { WebhookDeliveryReplayResultStatus } from './webhookDeliveryReplayResultStatus';
 
+/**
+ * What `POST /v1/webhook-endpoints/endpoints/{id}/deliveries/{deliveryID}/replay` returns.
+ */
 export interface WebhookDeliveryReplayResult {
   /** The new event created by the replay. */
   event_id: string;
@@ -19,5 +22,6 @@ export interface WebhookDeliveryReplayResult {
   replay_of: string;
   /** The new delivery to this endpoint. */
   delivery_id: string;
+  /** Always `queued`. The send happens in the background. */
   status: WebhookDeliveryReplayResultStatus;
 }

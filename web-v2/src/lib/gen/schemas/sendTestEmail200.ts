@@ -12,5 +12,6 @@
  */
 
 export type SendTestEmail200 = {
+  /** The address the test email went to, the signed-in member's own. */
   sent_to: string;
 };

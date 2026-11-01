@@ -15,7 +15,12 @@
  * The endpoint's new signing secret. It is shown only here.
  */
 export interface WebhookSecretRotation {
+  /** The new signing secret (`whsec_…`). Store it now; Hardcount does not show it again. */
   secret: string;
-  /** Until this time, deliveries are also signed with the old secret. */
+  /**
+     * Until this time, 72 hours after the rotation, each delivery is
+     * signed with the old secret too, so your receiver can switch
+     * without rejecting events.
+     */
   secondary_valid_until?: string;
 }

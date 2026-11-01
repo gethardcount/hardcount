@@ -11,6 +11,12 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * `processed`: the record was applied. `skipped`: it
+ * could not be used (too large, invalid JSON, or no
+ * known email id). `ignored`: Hardcount does not read
+ * this record type, or it is a soft bounce.
+ */
 export type ReceivePostmarkWebhook200Status = typeof ReceivePostmarkWebhook200Status[keyof typeof ReceivePostmarkWebhook200Status];
 
 

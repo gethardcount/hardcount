@@ -11,12 +11,22 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * MRR movement in one bucket of `GET /v1/analytics/mrr-movement`: a
+ * UTC day, or a UTC month for `12m`. Amounts are in the minor unit of
+ * the account's default currency (cents for USD).
+ */
 export interface AnalyticsMrrMovementPoint {
   /** Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in UTC. */
   date: string;
+  /** MRR of subscriptions activated in the bucket, in the currency's minor unit. */
   new: number;
+  /** MRR added in the bucket by item adds and plan or quantity increases, in the currency's minor unit. */
   expansion: number;
+  /** MRR removed in the bucket by item removals and plan or quantity decreases, as a positive amount in the currency's minor unit. */
   contraction: number;
+  /** MRR of subscriptions canceled in the bucket, as a positive amount in the currency's minor unit. */
   churned: number;
+  /** `new` + `expansion` - `contraction` - `churned` for the bucket, in the currency's minor unit. */
   net: number;
 }

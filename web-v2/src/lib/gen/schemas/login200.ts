@@ -12,9 +12,14 @@
  */
 
 export type Login200 = {
+  /** The signed-in user's id (`hc_usr_…`). */
   user_id: string;
+  /** The account the session works in. */
   tenant_id: string;
+  /** The user's sign-in email. */
   email: string;
+  /** The session's mode. Always false (test) at sign-in. */
   livemode: boolean;
+  /** When the session ends, 7 days after sign-in. */
   expires_at: string;
 };

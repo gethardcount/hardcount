@@ -286,15 +286,18 @@ func (e AttentionSeverity) Valid() bool {
 
 // Defines values for AuditLogEntryActorType.
 const (
-	AuditLogEntryActorTypeApiKey AuditLogEntryActorType = "api_key"
-	AuditLogEntryActorTypeSystem AuditLogEntryActorType = "system"
-	AuditLogEntryActorTypeUser   AuditLogEntryActorType = "user"
+	AuditLogEntryActorTypeApiKey   AuditLogEntryActorType = "api_key"
+	AuditLogEntryActorTypeCustomer AuditLogEntryActorType = "customer"
+	AuditLogEntryActorTypeSystem   AuditLogEntryActorType = "system"
+	AuditLogEntryActorTypeUser     AuditLogEntryActorType = "user"
 )
 
 // Valid indicates whether the value is a known member of the AuditLogEntryActorType enum.
 func (e AuditLogEntryActorType) Valid() bool {
 	switch e {
 	case AuditLogEntryActorTypeApiKey:
+		return true
+	case AuditLogEntryActorTypeCustomer:
 		return true
 	case AuditLogEntryActorTypeSystem:
 		return true
@@ -3086,49 +3089,80 @@ func (e GetWhoami200JSONResponseBodyKeyType) Valid() bool {
 	}
 }
 
-// APIKey defines model for APIKey.
+// APIKey An API key's details. The key's value is never returned here: only
+// `POST /v1/api-keys` and `POST /v1/api-keys/{id}/rotate` show it,
+// once, as `raw_key`.
 type APIKey struct {
+	// CreatedAt When the key was created.
 	CreatedAt time.Time `json:"created_at"`
 
-	// ExpiresAt When the key stops working. Also set on the old key during a rotation grace period.
+	// ExpiresAt When the key stops working. Also set on the old key during a
+	// rotation grace period. Absent for a key that does not expire.
 	ExpiresAt time.Time `json:"expires_at,omitempty"`
-	Id        string    `json:"id"`
 
-	// KeyPrefix The start of the key (type, mode and a few characters), enough to tell keys apart. Never the full key.
+	// Id The key's id (`hc_key_…`). Use it to revoke or rotate the key.
+	Id string `json:"id"`
+
+	// KeyPrefix The key's type and mode prefix plus the first 12 characters of
+	// its secret part. Enough to tell keys apart; never the full key.
 	KeyPrefix string `json:"key_prefix"`
 
 	// KeyType `secret` can read and change everything in the account.
 	// `ingest` can only send usage events, for LiteLLM or another
-	// gateway (ADR-133).
+	// gateway.
 	KeyType APIKeyKeyType `json:"key_type"`
 
-	// LastUsedAt Updated at most about once per interval, so it can lag a little.
+	// LastUsedAt When the key last authenticated a request. Each server updates
+	// it at most once a minute, so it can lag a little. Absent until
+	// the key is first used.
 	LastUsedAt time.Time `json:"last_used_at,omitempty"`
-	Livemode   bool      `json:"livemode"`
-	Name       string    `json:"name"`
-	RevokedAt  time.Time `json:"revoked_at,omitempty"`
-	TenantId   string    `json:"tenant_id"`
+
+	// Livemode True for a live-mode key (`…_live_…`), false for a test-mode key. A key reaches only its own mode's data.
+	Livemode bool `json:"livemode"`
+
+	// Name The label shown in the key list.
+	Name string `json:"name"`
+
+	// RevokedAt When the key was revoked. Absent unless it was revoked. A revoked key gets 401.
+	RevokedAt time.Time `json:"revoked_at,omitempty"`
+
+	// TenantId The account the key belongs to.
+	TenantId string `json:"tenant_id"`
 }
 
 // APIKeyKeyType `secret` can read and change everything in the account.
 // `ingest` can only send usage events, for LiteLLM or another
-// gateway (ADR-133).
+// gateway.
 type APIKeyKeyType string
 
-// APIKeyCreated defines model for APIKeyCreated.
+// APIKeyCreated A new API key and its full value. `raw_key` appears only in this answer.
 type APIKeyCreated struct {
+	// Key An API key's details. The key's value is never returned here: only
+	// `POST /v1/api-keys` and `POST /v1/api-keys/{id}/rotate` show it,
+	// once, as `raw_key`.
 	Key APIKey `json:"key"`
 
-	// RawKey The full key. Shown only once; store it now.
+	// RawKey The full key: its prefix (`hc_secret_test_`, `hc_ingest_live_`
+	// and so on) and 64 hex characters. Shown only once; store it now.
+	// Hardcount keeps only a salted hash.
 	RawKey string `json:"raw_key"`
 }
 
-// APIKeyRotation defines model for APIKeyRotation.
+// APIKeyRotation The result of rotating a key: the old key as it now stands (revoked,
+// or expiring at the end of the grace period), the new key, and the
+// new key's full value.
 type APIKeyRotation struct {
+	// NewKey An API key's details. The key's value is never returned here: only
+	// `POST /v1/api-keys` and `POST /v1/api-keys/{id}/rotate` show it,
+	// once, as `raw_key`.
 	NewKey APIKey `json:"new_key"`
+
+	// OldKey An API key's details. The key's value is never returned here: only
+	// `POST /v1/api-keys` and `POST /v1/api-keys/{id}/rotate` show it,
+	// once, as `raw_key`.
 	OldKey APIKey `json:"old_key"`
 
-	// RawKey The new key's full value. Shown only once.
+	// RawKey The new key's full value. Shown only once; store it now.
 	RawKey string `json:"raw_key"`
 }
 
@@ -3248,31 +3282,55 @@ type ActivityPart struct {
 	Time time.Time `json:"time,omitempty"`
 }
 
-// AnalyticsMrrMovementPoint defines model for AnalyticsMrrMovementPoint.
+// AnalyticsMrrMovementPoint MRR movement in one bucket of `GET /v1/analytics/mrr-movement`: a
+// UTC day, or a UTC month for `12m`. Amounts are in the minor unit of
+// the account's default currency (cents for USD).
 type AnalyticsMrrMovementPoint struct {
-	Churned     int64 `json:"churned"`
+	// Churned MRR of subscriptions canceled in the bucket, as a positive amount in the currency's minor unit.
+	Churned int64 `json:"churned"`
+
+	// Contraction MRR removed in the bucket by item removals and plan or quantity decreases, as a positive amount in the currency's minor unit.
 	Contraction int64 `json:"contraction"`
 
 	// Date Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in UTC.
-	Date      string `json:"date"`
-	Expansion int64  `json:"expansion"`
-	Net       int64  `json:"net"`
-	New       int64  `json:"new"`
+	Date string `json:"date"`
+
+	// Expansion MRR added in the bucket by item adds and plan or quantity increases, in the currency's minor unit.
+	Expansion int64 `json:"expansion"`
+
+	// Net `new` + `expansion` - `contraction` - `churned` for the bucket, in the currency's minor unit.
+	Net int64 `json:"net"`
+
+	// New MRR of subscriptions activated in the bucket, in the currency's minor unit.
+	New int64 `json:"new"`
 }
 
-// AnalyticsMrrMovementTotals MRR change in cents. `churned` and `contraction` are positive
+// AnalyticsMrrMovementTotals How MRR (monthly recurring revenue from plan base fees) changed over
+// the whole window, in the minor unit of the account's default
+// currency (cents for USD). `churned` and `contraction` are positive
 // amounts. `net` = `new` + `expansion` - `contraction` - `churned`.
 type AnalyticsMrrMovementTotals struct {
-	Churned     int64 `json:"churned"`
+	// Churned MRR of subscriptions canceled in the window, as a positive amount in the currency's minor unit.
+	Churned int64 `json:"churned"`
+
+	// Contraction MRR removed by item removals and plan or quantity decreases, as a positive amount in the currency's minor unit.
 	Contraction int64 `json:"contraction"`
-	Expansion   int64 `json:"expansion"`
-	Net         int64 `json:"net"`
-	New         int64 `json:"new"`
+
+	// Expansion MRR added by item adds and plan or quantity increases, in the currency's minor unit.
+	Expansion int64 `json:"expansion"`
+
+	// Net The overall change, `new` + `expansion` - `contraction` - `churned`, in the currency's minor unit. Can be negative.
+	Net int64 `json:"net"`
+
+	// New MRR of subscriptions activated in the window, in the currency's minor unit.
+	New int64 `json:"new"`
 }
 
-// AnalyticsOverview "The window" is the requested period, ending now. "The previous
-// window" is the one of equal length before it. Money is in cents of
-// `currency`.
+// AnalyticsOverview The dashboard's headline metrics, from `GET /v1/analytics/overview`.
+// "The window" is the requested period, ending now. "The previous
+// window" is the one of equal length before it. Money is in the minor
+// unit of `currency` (cents for USD). Rates are fractions, so 0.05
+// means 5%.
 type AnalyticsOverview struct {
 	// ActiveCustomers Customer records with status `active`. Includes customers with
 	// no subscription or only canceled ones; `live_customers` counts
@@ -3293,11 +3351,14 @@ type AnalyticsOverview struct {
 
 	// CreditBalanceByCurrency Customers' credit balances added up per currency, `currency` first, then largest. A currency whose balance is zero is left out. Customers on a test clock are not counted.
 	CreditBalanceByCurrency []struct {
-		AmountCents int64  `json:"amount_cents"`
-		Currency    string `json:"currency"`
+		// AmountCents Credit customers hold in this currency, in its minor unit (cents for USD).
+		AmountCents int64 `json:"amount_cents"`
+
+		// Currency Three-letter currency code, in upper case.
+		Currency string `json:"currency"`
 	} `json:"credit_balance_by_currency"`
 
-	// Currency The tenant's default currency. Every money field uses it, except `credit_balance_by_currency` and `outstanding_by_currency`, which carry their own.
+	// Currency The account's default currency (USD when none is set). Every money field uses it, except `credit_balance_by_currency` and `outstanding_by_currency`, which carry their own.
 	Currency string `json:"currency"`
 
 	// DunningActive Dunning runs (automatic payment retries) still in progress.
@@ -3325,7 +3386,9 @@ type AnalyticsOverview struct {
 	// Mrr MRR of active subscriptions now.
 	Mrr int64 `json:"mrr"`
 
-	// MrrMovement MRR change in cents. `churned` and `contraction` are positive
+	// MrrMovement How MRR (monthly recurring revenue from plan base fees) changed over
+	// the whole window, in the minor unit of the account's default
+	// currency (cents for USD). `churned` and `contraction` are positive
 	// amounts. `net` = `new` + `expansion` - `contraction` - `churned`.
 	MrrMovement AnalyticsMrrMovementTotals `json:"mrr_movement"`
 
@@ -3350,13 +3413,20 @@ type AnalyticsOverview struct {
 	// currency. `currency` comes first, then the largest amount. Empty
 	// when nothing is owed.
 	OutstandingByCurrency []struct {
-		AmountCents int64  `json:"amount_cents"`
-		Currency    string `json:"currency"`
+		// AmountCents Amount due in this currency, in its minor unit (cents for USD).
+		AmountCents int64 `json:"amount_cents"`
+
+		// Currency Three-letter currency code, in upper case.
+		Currency string `json:"currency"`
 	} `json:"outstanding_by_currency"`
 
 	// PaidInvoices Invoices paid in the window.
-	PaidInvoices int             `json:"paid_invoices"`
-	Period       AnalyticsPeriod `json:"period"`
+	PaidInvoices int `json:"paid_invoices"`
+
+	// Period The window an analytics call covers, ending now: the last 7, 30 or
+	// 90 days, or `12m` for the last 365 days in monthly buckets. The
+	// other periods use daily buckets.
+	Period AnalyticsPeriod `json:"period"`
 
 	// RefundsNeedingAttention Issued credit notes whose refund failed, has an unknown result,
 	// has been pending for more than 72 hours, or has not started an
@@ -3379,35 +3449,56 @@ type AnalyticsOverview struct {
 	UsageEvents int64 `json:"usage_events"`
 }
 
-// AnalyticsPeriod defines model for AnalyticsPeriod.
+// AnalyticsPeriod The window an analytics call covers, ending now: the last 7, 30 or
+// 90 days, or `12m` for the last 365 days in monthly buckets. The
+// other periods use daily buckets.
 type AnalyticsPeriod string
 
-// AnalyticsRevenuePoint defines model for AnalyticsRevenuePoint.
+// AnalyticsRevenuePoint Paid-invoice revenue in one bucket of `GET /v1/analytics/revenue-chart`:
+// a UTC day, or a UTC month for `12m`. Only invoices in the account's
+// default currency are counted.
 type AnalyticsRevenuePoint struct {
 	// Date Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in UTC.
-	Date         string `json:"date"`
-	InvoiceCount int    `json:"invoice_count"`
+	Date string `json:"date"`
 
-	// RevenueCents What paid the invoices paid in the bucket (payment plus customer credit applied). A credit note that lowered an invoice before it was paid is not counted.
+	// InvoiceCount Invoices paid in the bucket.
+	InvoiceCount int `json:"invoice_count"`
+
+	// RevenueCents What paid the invoices paid in the bucket (payment plus customer
+	// credit applied), in the minor unit of the default currency
+	// (cents for USD). A credit note that lowered an invoice before it
+	// was paid is not counted.
 	RevenueCents int64 `json:"revenue_cents"`
 }
 
-// AnalyticsTopMeter defines model for AnalyticsTopMeter.
+// AnalyticsTopMeter One of the meters with the most usage events in the window, in
+// `GET /v1/analytics/usage`.
 type AnalyticsTopMeter struct {
+	// EventName The event name usage events send to reach this meter.
 	EventName string `json:"event_name"`
-	Events    int64  `json:"events"`
-	MeterId   string `json:"meter_id"`
+
+	// Events Usage events on this meter with a timestamp in the window.
+	Events int64 `json:"events"`
+
+	// MeterId The meter's id (`hc_mtr_…`).
+	MeterId string `json:"meter_id"`
+
+	// MeterName The meter's display name.
 	MeterName string `json:"meter_name"`
 
 	// Quantity Summed quantity, as a decimal string.
 	Quantity string `json:"quantity"`
 }
 
-// AnalyticsUsagePoint defines model for AnalyticsUsagePoint.
+// AnalyticsUsagePoint Usage in one bucket of `GET /v1/analytics/usage`: a UTC day, or a
+// UTC month for `12m`. Events of customers on a test clock are left
+// out.
 type AnalyticsUsagePoint struct {
 	// Date Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in UTC.
-	Date   string `json:"date"`
-	Events int64  `json:"events"`
+	Date string `json:"date"`
+
+	// Events Usage events with a timestamp in the bucket, over all meters.
+	Events int64 `json:"events"`
 
 	// Quantity Summed quantity, as a decimal string.
 	Quantity string `json:"quantity"`
@@ -3721,52 +3812,88 @@ type AttentionReason string
 // colour per level.
 type AttentionSeverity string
 
-// AuditLogEntry defines model for AuditLogEntry.
+// AuditLogEntry One audit log row: who did what to which resource, and when.
+// `GET /v1/audit-log` lists them.
 type AuditLogEntry struct {
-	// Action For example `create`, `update`, `revoke`, `finalize`.
+	// Action What was done, such as `create`, `update`, `revoke`, `finalize`
+	// or `export`. `GET /v1/audit-log/filters` lists the values in use.
 	Action string `json:"action"`
 
-	// ActorId User id, API key id, or `system`.
+	// ActorId The user id, API key id or customer id, or `system`.
 	ActorId string `json:"actor_id"`
 
-	// ActorName Name of the API key, when the actor is a key.
-	ActorName string                 `json:"actor_name,omitempty"`
-	ActorType AuditLogEntryActorType `json:"actor_type"`
-	CreatedAt time.Time              `json:"created_at"`
-	Id        string                 `json:"id"`
-	IpAddress string                 `json:"ip_address,omitempty"`
+	// ActorName A readable name for the actor: the API key's name, the user's
+	// email or the customer's display name. Absent when none is known.
+	ActorName string `json:"actor_name,omitempty"`
 
-	// Metadata Action details. A settings change lists each changed field with `from` and `to`.
+	// ActorType Who did it. `user`: a dashboard member. `api_key`: a request
+	// made with an API key. `customer`: a customer acting on a hosted
+	// page. `system`: Hardcount itself, such as a background job or a
+	// Stripe webhook.
+	ActorType AuditLogEntryActorType `json:"actor_type"`
+
+	// CreatedAt When the entry was written, in real time.
+	CreatedAt time.Time `json:"created_at"`
+
+	// Id The entry's id (`hc_aud_…`).
+	Id string `json:"id"`
+
+	// IpAddress The client address of the request that made the change. Absent for work with no request.
+	IpAddress string `json:"ip_address,omitempty"`
+
+	// Metadata Action details. A settings change lists each changed field with `from` and `to`. Absent when the action has none.
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
 
-	// RequestId Matches the `Hardcount-Request-Id` header of the request that made the change.
+	// RequestId Matches the `Hardcount-Request-Id` header of the request that made the change. Absent for work with no request.
 	RequestId string `json:"request_id,omitempty"`
 
-	// ResourceId Can be empty for tenant-wide resources such as settings.
-	ResourceId    string `json:"resource_id"`
-	ResourceLabel string `json:"resource_label,omitempty"`
-	ResourceType  string `json:"resource_type"`
+	// ResourceId The resource's id. Empty for account-wide resources such as settings, and for exports.
+	ResourceId string `json:"resource_id"`
 
-	// SimEffectiveAt Simulated time, for entries made inside a test clock.
+	// ResourceLabel A readable label for the resource, such as an invoice number or
+	// a key's name. For a `user` resource, the user's or invitee's
+	// email. Absent when there is none.
+	ResourceLabel string `json:"resource_label,omitempty"`
+
+	// ResourceType The kind of resource, such as `invoice`, `api_key`, `setting` or `user`.
+	ResourceType string `json:"resource_type"`
+
+	// SimEffectiveAt Simulated time, for entries made inside a test clock. Absent otherwise.
 	SimEffectiveAt time.Time `json:"sim_effective_at,omitempty"`
 
-	// SubjectDeleted The resource no longer exists because its test clock was deleted. The entry is kept.
-	SubjectDeleted bool   `json:"subject_deleted,omitempty"`
-	TenantId       string `json:"tenant_id,omitempty"`
-	TestClockId    string `json:"test_clock_id,omitempty"`
+	// SubjectDeleted True when the resource no longer exists because its test clock
+	// was deleted. The entry is kept. Absent otherwise.
+	SubjectDeleted bool `json:"subject_deleted,omitempty"`
+
+	// TenantId The account the entry belongs to.
+	TenantId string `json:"tenant_id,omitempty"`
+
+	// TestClockId The test clock whose simulation the entry was made in. Absent otherwise.
+	TestClockId string `json:"test_clock_id,omitempty"`
 }
 
-// AuditLogEntryActorType defines model for AuditLogEntry.ActorType.
+// AuditLogEntryActorType Who did it. `user`: a dashboard member. `api_key`: a request
+// made with an API key. `customer`: a customer acting on a hosted
+// page. `system`: Hardcount itself, such as a background job or a
+// Stripe webhook.
 type AuditLogEntryActorType string
 
-// AuditLogFilters defines model for AuditLogFilters.
+// AuditLogFilters The values `GET /v1/audit-log` can filter on, from
+// `GET /v1/audit-log/filters`, for filter menus. Only entries in the
+// caller's mode count.
 type AuditLogFilters struct {
-	Actions       []string `json:"actions"`
+	// Actions Every `action` value recorded in this mode.
+	Actions []string `json:"actions"`
+
+	// ResourceTypes Every `resource_type` value recorded in this mode.
 	ResourceTypes []string `json:"resource_types"`
 
-	// TestClocks Test clocks seen in the log, most recent activity first.
+	// TestClocks Test clocks seen in the log, most recent activity first, at most 100. Deleted clocks are included.
 	TestClocks []struct {
-		Id   string `json:"id"`
+		// Id The test clock's id (`hc_tclk_…`).
+		Id string `json:"id"`
+
+		// Name The clock's name, taken from its own audit entries. Empty when the log has none.
 		Name string `json:"name"`
 	} `json:"test_clocks"`
 }
@@ -3808,23 +3935,33 @@ type BillingFailure struct {
 	Parked bool `json:"parked"`
 }
 
-// BootstrapResult defines model for BootstrapResult.
+// BootstrapResult What `POST /v1/bootstrap` returns: the new account, its owner's
+// dashboard sign-in, and one test and one live secret key. This
+// answer is the only place the keys appear.
 type BootstrapResult struct {
+	// Message A reminder to save the credentials now.
 	Message string `json:"message"`
 
-	// OwnerEmail Dashboard login email.
+	// OwnerEmail The owner's dashboard sign-in email.
 	OwnerEmail string `json:"owner_email"`
 
-	// OwnerPassword Dashboard login password (the one you sent, or the generated one).
-	OwnerPassword     string `json:"owner_password"`
-	PasswordGenerated bool   `json:"password_generated"`
+	// OwnerPassword The owner's dashboard password: the one you sent, or the
+	// generated one (24 hex characters).
+	OwnerPassword string `json:"owner_password"`
+
+	// PasswordGenerated True when Hardcount generated `owner_password` because the request sent none.
+	PasswordGenerated bool `json:"password_generated"`
 
 	// SecretKeyLive Live-mode secret key (`hc_secret_live_...`).
 	SecretKeyLive string `json:"secret_key_live"`
 
 	// SecretKeyTest Test-mode secret key (`hc_secret_test_...`).
 	SecretKeyTest string `json:"secret_key_test"`
-	Tenant        Tenant `json:"tenant"`
+
+	// Tenant An account: one business that bills its customers with Hardcount.
+	// It has separate test and live data. `POST /v1/bootstrap` creates
+	// the first one.
+	Tenant Tenant `json:"tenant"`
 }
 
 // CreditBalance A customer's credit balance in one currency and where that credit went. Every cent granted is either still in the balance or in one of the totals: total_granted = total_used + total_expired + total_retired + total_deducted + balance_cents. All amounts are in the currency's minor unit (cents for USD).
@@ -5248,29 +5385,45 @@ type DunningStats struct {
 	ResolvedCount int `json:"resolved_count"`
 }
 
-// Error defines model for Error.
+// Error The body of an error answer. `error.type` is the broad class,
+// `error.code` is the exact reason for your code to branch on, and
+// `error.message` is a sentence for a person. Quote
+// `error.request_id` when you ask for help.
 type Error struct {
+	// Error What went wrong.
 	Error struct {
-		Code    string `json:"code,omitempty"`
-		Message string `json:"message,omitempty"`
+		// Code The exact reason, such as `validation_error`, `not_found`,
+		// `already_exists`, `invalid_state` or a more specific code
+		// the operation lists. Branch on this, not on `message`.
+		Code string `json:"code"`
 
-		// Param The request field the error is about. Sent only when the error
-		// names one. A request body may hold only the fields its
-		// operation lists, spelled and cased as listed: any other
-		// field, or one the server sets (such as `id`), is refused
-		// with 422 and `param` naming it. An operation with no request body lists no fields: send
-		// no body, `{}` or `null`. The Stripe and Postmark webhooks and
-		// the LiteLLM callback take their sender's body as it comes.
-		Param     string `json:"param,omitempty"`
-		RequestId string `json:"request_id,omitempty"`
+		// Message What went wrong, written for a person to read.
+		Message string `json:"message"`
+
+		// Param The request field or query parameter the error is about.
+		// Sent only when the error names one.
+		//
+		// A request body may hold only the fields its operation
+		// lists, spelled and cased as listed. Any other field, or one
+		// the server sets (such as `id`), is refused with 422 and
+		// `param` naming it. An operation with no request body lists
+		// no fields: send no body, `{}` or `null`. The Stripe and
+		// Postmark webhooks and the LiteLLM callback take their
+		// sender's body as it comes.
+		Param string `json:"param,omitempty"`
+
+		// RequestId This request's id (`req_…`), the same value as the
+		// `Hardcount-Request-Id` response header. On a replayed
+		// `Idempotency-Key` answer it is the first request's id.
+		RequestId string `json:"request_id"`
 
 		// Type One of `invalid_request_error`, `authentication_error`,
 		// `rate_limit_error` or `api_error`. Every error the API
 		// answers has this shape, including an unknown path (404,
 		// code `route_not_found`) and a method the path does not take
 		// (405, code `method_not_allowed`, with an `Allow` header).
-		// The few exceptions are listed in docs/api-surface.md.
-		Type string `json:"type,omitempty"`
+		// The few exceptions are listed in docs/api/errors.md.
+		Type string `json:"type"`
 	} `json:"error,omitempty"`
 }
 
@@ -6907,24 +7060,44 @@ type MarginReport struct {
 	UnresolvedEvents int64 `json:"unresolved_events"`
 }
 
-// MemberInvitation defines model for MemberInvitation.
+// MemberInvitation An invitation for a teammate to join this account's dashboard.
+// `POST /v1/members/invite` returns it, and `GET /v1/members` lists
+// every invitation the account has sent, newest first.
 type MemberInvitation struct {
-	AcceptedAt     time.Time `json:"accepted_at,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
-	Email          string    `json:"email"`
-	ExpiresAt      time.Time `json:"expires_at"`
-	Id             string    `json:"id"`
-	InvitedByEmail string    `json:"invited_by_email,omitempty"`
-	RevokedAt      time.Time `json:"revoked_at,omitempty"`
+	// AcceptedAt When the invitee accepted. Absent until then.
+	AcceptedAt time.Time `json:"accepted_at,omitempty"`
 
-	// Role Recorded for the future role split; not enforced (every member holds the full permission set).
+	// CreatedAt When the invitation was created and its email queued.
+	CreatedAt time.Time `json:"created_at"`
+
+	// Email The invited address, in lower case. It becomes the new member's sign-in email.
+	Email string `json:"email"`
+
+	// ExpiresAt When the accept link stops working, 7 days after `created_at`.
+	ExpiresAt time.Time `json:"expires_at"`
+
+	// Id The invitation's id (`hc_minv_…`).
+	Id string `json:"id"`
+
+	// InvitedByEmail The sign-in email of the member who sent the invitation. Absent when that user no longer exists.
+	InvitedByEmail string `json:"invited_by_email,omitempty"`
+
+	// RevokedAt When a member revoked the invitation. Absent unless it was revoked.
+	RevokedAt time.Time `json:"revoked_at,omitempty"`
+
+	// Role Always `member` for an invitation. Roles are recorded but not
+	// enforced yet: every member can do everything in the dashboard.
 	Role string `json:"role"`
 
-	// Status Server-derived; treat as authoritative.
+	// Status `pending` until the invitation is accepted or revoked, or until
+	// `expires_at` passes (`expired`). The server works it out each
+	// time it answers.
 	Status MemberInvitationStatus `json:"status"`
 }
 
-// MemberInvitationStatus Server-derived; treat as authoritative.
+// MemberInvitationStatus `pending` until the invitation is accepted or revoked, or until
+// `expires_at` passes (`expired`). The server works it out each
+// time it answers.
 type MemberInvitationStatus string
 
 // Meter A meter counts one kind of usage: every usage event that sends its
@@ -7464,17 +7637,23 @@ type PublicPaymentUpdate struct {
 	InvoiceStatus InvoiceStatus `json:"invoice_status"`
 }
 
-// ReadinessReport defines model for ReadinessReport.
+// ReadinessReport The body of `GET /health/ready`, on both 200 and 503.
 type ReadinessReport struct {
 	// Checks One entry per check. `api` is `ok` or `draining`. `database` is
 	// `ok` or `error`. `scheduler` starts with `ok` or `degraded`,
 	// followed by detail such as `ok: last run 12s ago`. While
 	// draining, only `api` is sent.
-	Checks map[string]string     `json:"checks"`
+	Checks map[string]string `json:"checks"`
+
+	// Status `ok` when every check passed. `degraded` when the database
+	// cannot be reached (503) or the billing scheduler is late (still
+	// 200). `draining` while the server shuts down (503).
 	Status ReadinessReportStatus `json:"status"`
 }
 
-// ReadinessReportStatus defines model for ReadinessReport.Status.
+// ReadinessReportStatus `ok` when every check passed. `degraded` when the database
+// cannot be reached (503) or the billing scheduler is late (still
+// 200). `draining` while the server shuts down (503).
 type ReadinessReportStatus string
 
 // Recipe A ready-made pricing setup built into Hardcount: its meters, and its plans with their prices, with every overridable value at its default. Installing it creates those objects. A recipe creates nothing else.
@@ -7852,16 +8031,24 @@ type SentEmailEmailType string
 // already paid, voided or uncollectible, or no longer exists.
 type SentEmailStatus string
 
-// StripeConnection defines model for StripeConnection.
+// StripeConnection The account's own Stripe keys for one mode, without the secrets.
+// Hardcount uses them to charge customers and to read Stripe's
+// answers. `GET /v1/settings/stripe` lists one per connected mode.
 type StripeConnection struct {
-	CreatedAt        time.Time `json:"created_at"`
-	HasWebhookSecret bool      `json:"has_webhook_secret"`
+	// CreatedAt When keys were first saved for this mode.
+	CreatedAt time.Time `json:"created_at"`
 
-	// Id Also the `{id}` in the Stripe webhook URL `/v1/webhooks/stripe/{id}`.
+	// HasWebhookSecret Whether a webhook signing secret is saved. Until one is, Stripe
+	// webhooks sent to this connection are refused with 404.
+	HasWebhookSecret bool `json:"has_webhook_secret"`
+
+	// Id The connection's id (`hc_spc_…`). It is also the
+	// `{endpoint_id}` in the Stripe webhook URL
+	// `/v1/webhooks/stripe/{endpoint_id}`.
 	Id string `json:"id"`
 
 	// LastVerifiedError Why the last Stripe check failed, in Stripe's own words (or the
-	// network error when Stripe was not reached). Empty when it passed.
+	// network error when Stripe was not reached). Absent when it passed.
 	LastVerifiedError string `json:"last_verified_error,omitempty"`
 
 	// LastVerifiedErrorKind What kind of failure `last_verified_error` is. `rejected`: Stripe
@@ -7870,25 +8057,43 @@ type StripeConnection struct {
 	// key was not checked; connecting again may work. Absent when the
 	// check passed, and on keys that failed before this field existed.
 	LastVerifiedErrorKind StripeConnectionLastVerifiedErrorKind `json:"last_verified_error_kind,omitempty"`
-	Livemode              bool                                  `json:"livemode"`
-	PublishableKey        string                                `json:"publishable_key"`
 
-	// RetriesQueued Connect response only. Number of stuck invoices being retried in the background.
-	RetriesQueued  int    `json:"retries_queued,omitempty"`
+	// Livemode True for live-mode keys (`sk_live_…`), false for test-mode keys.
+	Livemode bool `json:"livemode"`
+
+	// PublishableKey The publishable key, in full. It is not a secret.
+	PublishableKey string `json:"publishable_key"`
+
+	// RetriesQueued Only in the answer to `POST /v1/settings/stripe`, and only when
+	// above 0: how many invoices that were stuck waiting for Stripe
+	// keys are now being retried in the background.
+	RetriesQueued int `json:"retries_queued,omitempty"`
+
+	// SecretKeyLast4 Last 4 characters of the secret key.
 	SecretKeyLast4 string `json:"secret_key_last4"`
 
 	// SecretKeyPrefix First 12 characters of the secret key.
 	SecretKeyPrefix string `json:"secret_key_prefix,omitempty"`
 
-	// StripeAccountId Set after Stripe accepted the key.
-	StripeAccountId   string    `json:"stripe_account_id,omitempty"`
-	StripeAccountName string    `json:"stripe_account_name,omitempty"`
-	TenantId          string    `json:"tenant_id"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	// StripeAccountId The Stripe account the key belongs to (`acct_…`). Absent until Stripe first accepts a key for this mode.
+	StripeAccountId string `json:"stripe_account_id,omitempty"`
 
-	// VerifiedAt Last time Stripe accepted the key.
-	VerifiedAt         time.Time `json:"verified_at,omitempty"`
-	WebhookSecretLast4 string    `json:"webhook_secret_last4,omitempty"`
+	// StripeAccountName The Stripe account's business name, or its dashboard name or
+	// email when it has none. Absent until Stripe accepts a key.
+	StripeAccountName string `json:"stripe_account_name,omitempty"`
+
+	// TenantId The account the keys belong to.
+	TenantId string `json:"tenant_id"`
+
+	// UpdatedAt When the connection last changed.
+	UpdatedAt time.Time `json:"updated_at"`
+
+	// VerifiedAt When Stripe last accepted the key. Absent until it does. Saving
+	// new keys clears it until the next check passes.
+	VerifiedAt time.Time `json:"verified_at,omitempty"`
+
+	// WebhookSecretLast4 Last 4 characters of the webhook signing secret. Absent until one is saved.
+	WebhookSecretLast4 string `json:"webhook_secret_last4,omitempty"`
 }
 
 // StripeConnectionLastVerifiedErrorKind What kind of failure `last_verified_error` is. `rejected`: Stripe
@@ -8383,56 +8588,84 @@ type SubscriptionTimelineEventSource string
 // SubscriptionTimelineEventStatus The line's tone in older words, read by the dashboard's dot.
 type SubscriptionTimelineEventStatus string
 
-// Tenant defines model for Tenant.
+// Tenant An account: one business that bills its customers with Hardcount.
+// It has separate test and live data. `POST /v1/bootstrap` creates
+// the first one.
 type Tenant struct {
-	CreatedAt time.Time    `json:"created_at"`
-	Id        string       `json:"id"`
-	Name      string       `json:"name"`
-	Status    TenantStatus `json:"status"`
-	UpdatedAt time.Time    `json:"updated_at"`
+	// CreatedAt When the account was created.
+	CreatedAt time.Time `json:"created_at"`
+
+	// Id The account's id (`hc_ten_…`). Other objects carry it as `tenant_id`.
+	Id string `json:"id"`
+
+	// Name The account's name, given at setup.
+	Name string `json:"name"`
+
+	// Status The account's state. Setup creates it `active`. Nothing in this
+	// version sets `suspended` or `deleted`.
+	Status TenantStatus `json:"status"`
+
+	// UpdatedAt When the account record last changed.
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// TenantStatus defines model for Tenant.Status.
+// TenantStatus The account's state. Setup creates it `active`. Nothing in this
+// version sets `suspended` or `deleted`.
 type TenantStatus string
 
 // TenantSettings defines model for TenantSettings.
 type TenantSettings struct {
 	// BrandColor Accent color on invoice PDFs, as `#rrggbb`.
-	BrandColor          string `json:"brand_color,omitempty"`
+	BrandColor string `json:"brand_color,omitempty"`
+
+	// CompanyAddressLine1 First line of your business address, printed as the seller on invoices and credit notes.
 	CompanyAddressLine1 string `json:"company_address_line1,omitempty"`
+
+	// CompanyAddressLine2 Second line of your business address, such as a suite number.
 	CompanyAddressLine2 string `json:"company_address_line2,omitempty"`
-	CompanyCity         string `json:"company_city,omitempty"`
+
+	// CompanyCity City of your business address.
+	CompanyCity string `json:"company_city,omitempty"`
 
 	// CompanyCountry ISO 3166 alpha-2 code, such as `US`. Empty is allowed.
 	// Whitespace is trimmed and the code is upper-cased before it is
 	// checked and stored.
 	CompanyCountry string `json:"company_country,omitempty"`
-	CompanyEmail   string `json:"company_email,omitempty"`
+
+	// CompanyEmail Your billing contact address, printed as the seller on invoices
+	// and credit notes and shown on the hosted pages. One plain
+	// address, such as `billing@example.com`, with no display name.
+	CompanyEmail string `json:"company_email,omitempty"`
 
 	// CompanyName Shown on invoices and as the sender name on emails. No line breaks.
 	CompanyName string `json:"company_name,omitempty"`
 
 	// CompanyPhone 7 to 20 characters of digits, spaces, `+`, `-`, `(` and `)`.
-	CompanyPhone      string `json:"company_phone,omitempty"`
-	CompanyPostalCode string `json:"company_postal_code,omitempty"`
-	CompanyState      string `json:"company_state,omitempty"`
+	CompanyPhone string `json:"company_phone,omitempty"`
 
-	// CreatedAt Zero time when the tenant has never saved settings.
+	// CompanyPostalCode Postal code of your business address.
+	CompanyPostalCode string `json:"company_postal_code,omitempty"`
+
+	// CompanyState State, province or region of your business address.
+	CompanyState string `json:"company_state,omitempty"`
+
+	// CreatedAt When the account's settings were first stored. Zero time (`0001-01-01T00:00:00Z`) when none are stored yet, and the answer shows the defaults.
 	CreatedAt time.Time `json:"created_at"`
 
 	// CreditBalanceLowThresholdCents When a customer's credit in one currency drops below this
 	// amount, in that currency's minor units, the `credit.balance_low`
 	// webhook fires: 1000 means $10.00 of USD credit and €10.00 of EUR
-	// credit. null turns it off.
+	// credit. Send null to turn it off. Answers leave it out while it
+	// is off.
 	CreditBalanceLowThresholdCents int64 `json:"credit_balance_low_threshold_cents,omitempty"`
 
-	// CreditNotePrefix Starts every credit note number, such as `CN-000001`. A change
-	// applies to new credit notes only. Issued notes keep their
+	// CreditNotePrefix Starts every credit note number, such as `CN-000001`. Stored in
+	// upper case. A change applies to new credit notes only. Issued notes keep their
 	// numbers. It must differ from `invoice_prefix`, or an invoice and
 	// a credit note would get the same number.
 	CreditNotePrefix string `json:"credit_note_prefix"`
 
-	// DefaultCurrency ISO 4217 code. Zero-decimal currencies (such as JPY) are not supported yet.
+	// DefaultCurrency ISO 4217 code, stored in upper case. Zero-decimal currencies (such as JPY) are not supported yet.
 	DefaultCurrency string `json:"default_currency"`
 
 	// DefaultProductTaxCode Stripe product tax code used when a plan has none, such as
@@ -8446,7 +8679,7 @@ type TenantSettings struct {
 	// the current text.
 	InvoiceFooter string `json:"invoice_footer,omitempty"`
 
-	// InvoicePrefix Starts every invoice number, such as `HC-000001`.
+	// InvoicePrefix Starts every invoice number, such as `HC-000001`. Stored in upper case.
 	InvoicePrefix string `json:"invoice_prefix"`
 
 	// LogoUrl Shown in emails and on the hosted invoice page. PDFs do not print it.
@@ -8459,7 +8692,7 @@ type TenantSettings struct {
 	// before the prefix: 43 means the next invoice is
 	// `<invoice_prefix>-000043`. Test and live count separately, and
 	// changing `invoice_prefix` keeps the count. Not a setting:
-	// sending it on `PUT` does nothing.
+	// `PUT` refuses it as an unknown field (422).
 	NextInvoiceSequence int `json:"next_invoice_sequence"`
 
 	// SupportUrl Must start with `http://` or `https://`. Linked in emails and on
@@ -8483,11 +8716,15 @@ type TenantSettings struct {
 	TaxProvider TenantSettingsTaxProvider `json:"tax_provider"`
 
 	// TaxRate Percent, up to 4 decimal places (18.5 = 18.5%). Used by the `manual` provider.
-	TaxRate  float32 `json:"tax_rate"`
-	TenantId string  `json:"tenant_id"`
+	TaxRate float32 `json:"tax_rate"`
+
+	// TenantId The account these settings belong to. `PUT` refuses it (422).
+	TenantId string `json:"tenant_id"`
 
 	// Timezone IANA zone name, such as `America/New_York`. `Local` is rejected. All billing date math uses this zone.
-	Timezone  string    `json:"timezone"`
+	Timezone string `json:"timezone"`
+
+	// UpdatedAt When the settings were last saved. Zero time (`0001-01-01T00:00:00Z`) when none are stored yet.
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
@@ -8497,41 +8734,58 @@ type TenantSettingsTaxOnFailure string
 // TenantSettingsTaxProvider `none` = no tax, `manual` = the flat `tax_rate`, `stripe_tax` = Stripe Tax.
 type TenantSettingsTaxProvider string
 
-// TenantSettingsInput Every field is optional. Fields you leave out keep their stored value.
+// TenantSettingsInput The account's billing settings, as `PUT /v1/settings` takes them.
+// Every field is optional. Fields you leave out keep their stored
+// value. Settings are shared by test and live mode.
 type TenantSettingsInput struct {
 	// BrandColor Accent color on invoice PDFs, as `#rrggbb`.
-	BrandColor          string `json:"brand_color,omitempty"`
+	BrandColor string `json:"brand_color,omitempty"`
+
+	// CompanyAddressLine1 First line of your business address, printed as the seller on invoices and credit notes.
 	CompanyAddressLine1 string `json:"company_address_line1,omitempty"`
+
+	// CompanyAddressLine2 Second line of your business address, such as a suite number.
 	CompanyAddressLine2 string `json:"company_address_line2,omitempty"`
-	CompanyCity         string `json:"company_city,omitempty"`
+
+	// CompanyCity City of your business address.
+	CompanyCity string `json:"company_city,omitempty"`
 
 	// CompanyCountry ISO 3166 alpha-2 code, such as `US`. Empty is allowed.
 	// Whitespace is trimmed and the code is upper-cased before it is
 	// checked and stored.
 	CompanyCountry string `json:"company_country,omitempty"`
-	CompanyEmail   string `json:"company_email,omitempty"`
+
+	// CompanyEmail Your billing contact address, printed as the seller on invoices
+	// and credit notes and shown on the hosted pages. One plain
+	// address, such as `billing@example.com`, with no display name.
+	CompanyEmail string `json:"company_email,omitempty"`
 
 	// CompanyName Shown on invoices and as the sender name on emails. No line breaks.
 	CompanyName string `json:"company_name,omitempty"`
 
 	// CompanyPhone 7 to 20 characters of digits, spaces, `+`, `-`, `(` and `)`.
-	CompanyPhone      string `json:"company_phone,omitempty"`
+	CompanyPhone string `json:"company_phone,omitempty"`
+
+	// CompanyPostalCode Postal code of your business address.
 	CompanyPostalCode string `json:"company_postal_code,omitempty"`
-	CompanyState      string `json:"company_state,omitempty"`
+
+	// CompanyState State, province or region of your business address.
+	CompanyState string `json:"company_state,omitempty"`
 
 	// CreditBalanceLowThresholdCents When a customer's credit in one currency drops below this
 	// amount, in that currency's minor units, the `credit.balance_low`
 	// webhook fires: 1000 means $10.00 of USD credit and €10.00 of EUR
-	// credit. null turns it off.
+	// credit. Send null to turn it off. Answers leave it out while it
+	// is off.
 	CreditBalanceLowThresholdCents int64 `json:"credit_balance_low_threshold_cents,omitempty"`
 
-	// CreditNotePrefix Starts every credit note number, such as `CN-000001`. A change
-	// applies to new credit notes only. Issued notes keep their
+	// CreditNotePrefix Starts every credit note number, such as `CN-000001`. Stored in
+	// upper case. A change applies to new credit notes only. Issued notes keep their
 	// numbers. It must differ from `invoice_prefix`, or an invoice and
 	// a credit note would get the same number.
 	CreditNotePrefix string `json:"credit_note_prefix,omitempty"`
 
-	// DefaultCurrency ISO 4217 code. Zero-decimal currencies (such as JPY) are not supported yet.
+	// DefaultCurrency ISO 4217 code, stored in upper case. Zero-decimal currencies (such as JPY) are not supported yet.
 	DefaultCurrency string `json:"default_currency,omitempty"`
 
 	// DefaultProductTaxCode Stripe product tax code used when a plan has none, such as
@@ -8545,7 +8799,7 @@ type TenantSettingsInput struct {
 	// the current text.
 	InvoiceFooter string `json:"invoice_footer,omitempty"`
 
-	// InvoicePrefix Starts every invoice number, such as `HC-000001`.
+	// InvoicePrefix Starts every invoice number, such as `HC-000001`. Stored in upper case.
 	InvoicePrefix string `json:"invoice_prefix,omitempty"`
 
 	// LogoUrl Shown in emails and on the hosted invoice page. PDFs do not print it.
@@ -8951,7 +9205,7 @@ type UsageEventBatchResult struct {
 	Total int `json:"total"`
 }
 
-// WebhookDeliveryReplayResult defines model for WebhookDeliveryReplayResult.
+// WebhookDeliveryReplayResult What `POST /v1/webhook-endpoints/endpoints/{id}/deliveries/{deliveryID}/replay` returns.
 type WebhookDeliveryReplayResult struct {
 	// DeliveryId The new delivery to this endpoint.
 	DeliveryId string `json:"delivery_id"`
@@ -8960,73 +9214,144 @@ type WebhookDeliveryReplayResult struct {
 	EventId string `json:"event_id"`
 
 	// ReplayOf The original event.
-	ReplayOf string                            `json:"replay_of"`
-	Status   WebhookDeliveryReplayResultStatus `json:"status"`
+	ReplayOf string `json:"replay_of"`
+
+	// Status Always `queued`. The send happens in the background.
+	Status WebhookDeliveryReplayResultStatus `json:"status"`
 }
 
-// WebhookDeliveryReplayResultStatus defines model for WebhookDeliveryReplayResult.Status.
+// WebhookDeliveryReplayResultStatus Always `queued`. The send happens in the background.
 type WebhookDeliveryReplayResultStatus string
 
-// WebhookEndpoint defines model for WebhookEndpoint.
+// WebhookEndpoint A URL that Hardcount sends webhook events to, for one mode. Its
+// signing secret is never returned here: only creating the endpoint
+// and rotating its secret show it, once.
 type WebhookEndpoint struct {
-	// Active false = paused.
-	Active      bool      `json:"active"`
-	CreatedAt   time.Time `json:"created_at"`
-	Description string    `json:"description,omitempty"`
+	// Active False while the endpoint is paused. A paused endpoint gets no
+	// new events, its pending retries end as `failed`, and its
+	// deliveries cannot be resent.
+	Active bool `json:"active"`
 
-	// Events Subscribed event types. `*` means all.
-	Events                   []string  `json:"events"`
-	Id                       string    `json:"id"`
-	Livemode                 bool      `json:"livemode"`
+	// CreatedAt When the endpoint was created.
+	CreatedAt time.Time `json:"created_at"`
+
+	// Description Your note about the endpoint. Absent when empty.
+	Description string `json:"description,omitempty"`
+
+	// Events The event types the endpoint gets. `*` means every event, and a
+	// prefix such as `invoice.*` means every event whose type starts
+	// with `invoice.`.
+	Events []string `json:"events"`
+
+	// Id The endpoint's id (`hc_whe_…`).
+	Id string `json:"id"`
+
+	// Livemode The mode the endpoint gets events from, true for live. It is the caller's mode when the endpoint is created.
+	Livemode bool `json:"livemode"`
+
+	// SecondarySecretExpiresAt When the previous secret stops signing deliveries, 72 hours
+	// after the rotation. It stays in the answer after that time.
+	// Absent if the secret was never rotated.
 	SecondarySecretExpiresAt time.Time `json:"secondary_secret_expires_at,omitempty"`
 
-	// SecondarySecretLast4 The previous signing secret, during a rotation grace period.
-	SecondarySecretLast4 string    `json:"secondary_secret_last4,omitempty"`
-	SecretLast4          string    `json:"secret_last4"`
-	TenantId             string    `json:"tenant_id,omitempty"`
-	UpdatedAt            time.Time `json:"updated_at"`
-	Url                  string    `json:"url"`
+	// SecondarySecretLast4 Last 4 characters of the previous signing secret, after a
+	// rotation. Absent if the secret was never rotated.
+	SecondarySecretLast4 string `json:"secondary_secret_last4,omitempty"`
+
+	// SecretLast4 Last 4 characters of the current signing secret.
+	SecretLast4 string `json:"secret_last4"`
+
+	// TenantId The account the endpoint belongs to.
+	TenantId string `json:"tenant_id,omitempty"`
+
+	// UpdatedAt When the endpoint last changed.
+	UpdatedAt time.Time `json:"updated_at"`
+
+	// Url Where Hardcount POSTs each event. It must be `https://` on a
+	// public address. Outside production (`APP_ENV` is not
+	// `production`), `http://localhost` and loopback addresses work
+	// too.
+	Url string `json:"url"`
 }
 
 // WebhookEndpointCreated A new webhook endpoint and its signing secret. The secret is shown only here.
 type WebhookEndpointCreated struct {
+	// Endpoint A URL that Hardcount sends webhook events to, for one mode. Its
+	// signing secret is never returned here: only creating the endpoint
+	// and rotating its secret show it, once.
 	Endpoint WebhookEndpoint `json:"endpoint"`
 
 	// Secret The signing secret (`whsec_…`). Store it now; Hardcount does not show it again.
 	Secret string `json:"secret"`
 }
 
-// WebhookEndpointDelivery defines model for WebhookEndpointDelivery.
+// WebhookEndpointDelivery One delivery of one event to one endpoint, with the result of its
+// latest attempt. A failed attempt is tried again after about 1
+// minute, 5 minutes, 30 minutes, 2 hours and 24 hours. After the
+// sixth failed attempt the delivery is `failed`. A redirect counts as
+// a failure.
 type WebhookEndpointDelivery struct {
-	AttemptCount int       `json:"attempt_count"`
-	CompletedAt  time.Time `json:"completed_at"`
-	CreatedAt    time.Time `json:"created_at"`
-	Error        string    `json:"error"`
-	EventId      string    `json:"event_id"`
-	EventType    string    `json:"event_type"`
-	Id           string    `json:"id"`
+	// AttemptCount Attempts made so far, at most 6.
+	AttemptCount int `json:"attempt_count"`
+
+	// CompletedAt When the delivery succeeded or failed for good. null while pending.
+	CompletedAt time.Time `json:"completed_at"`
+
+	// CreatedAt When the delivery was queued.
+	CreatedAt time.Time `json:"created_at"`
+
+	// Error Why an attempt failed, such as `HTTP 500`, a connection error,
+	// `endpoint disabled` or `endpoint deleted`. Empty when no attempt
+	// failed. A delivery that succeeded on a retry keeps the earlier
+	// failure's text.
+	Error string `json:"error"`
+
+	// EventId The event this delivery sent. For a replay, the replay's own id; the message itself carried the original event's `id`.
+	EventId string `json:"event_id"`
+
+	// EventType The event's type, such as `invoice.finalized`.
+	EventType string `json:"event_type"`
+
+	// Id The delivery's id (`hc_whd_…`).
+	Id string `json:"id"`
 
 	// IsReplay The delivery came from a replay.
-	IsReplay        bool      `json:"is_replay"`
-	NextRetryAt     time.Time `json:"next_retry_at"`
-	ReplayOfEventId string    `json:"replay_of_event_id,omitempty"`
+	IsReplay bool `json:"is_replay"`
 
-	// ResponseBody First 4 KB of the receiver's response.
-	ResponseBody string                        `json:"response_body"`
-	Status       WebhookEndpointDeliveryStatus `json:"status"`
+	// NextRetryAt When the next attempt is due, while pending. null once the delivery is finished.
+	NextRetryAt time.Time `json:"next_retry_at"`
 
-	// StatusCode HTTP status from the receiver. 0 when there was no response.
+	// ReplayOfEventId The original event, when `is_replay` is true. Absent otherwise.
+	ReplayOfEventId string `json:"replay_of_event_id,omitempty"`
+
+	// ResponseBody Up to the first 1 KB of the receiver's latest answer.
+	ResponseBody string `json:"response_body"`
+
+	// Status `pending` while an attempt is running or due, `succeeded` after
+	// a 2xx answer, `failed` once no attempt is left or the endpoint
+	// was paused or deleted.
+	Status WebhookEndpointDeliveryStatus `json:"status"`
+
+	// StatusCode HTTP status from the receiver's latest answer. 0 when no attempt got an answer.
 	StatusCode int `json:"status_code"`
 }
 
-// WebhookEndpointDeliveryStatus defines model for WebhookEndpointDelivery.Status.
+// WebhookEndpointDeliveryStatus `pending` while an attempt is running or due, `succeeded` after
+// a 2xx answer, `failed` once no attempt is left or the endpoint
+// was paused or deleted.
 type WebhookEndpointDeliveryStatus string
 
-// WebhookEndpointStats defines model for WebhookEndpointStats.
+// WebhookEndpointStats All-time delivery counts for one endpoint in the caller's mode, from
+// `GET /v1/webhook-endpoints/endpoints/stats`.
 type WebhookEndpointStats struct {
+	// EndpointId The endpoint's id. It can name a deleted endpoint.
 	EndpointId string `json:"endpoint_id"`
-	Failed     int    `json:"failed"`
-	Succeeded  int    `json:"succeeded"`
+
+	// Failed Deliveries that failed for good.
+	Failed int `json:"failed"`
+
+	// Succeeded Deliveries that got a 2xx answer.
+	Succeeded int `json:"succeeded"`
 
 	// SuccessRate Percent (0-100) of finished deliveries that succeeded. Pending deliveries are not counted. 0 when none finished.
 	SuccessRate float32 `json:"success_rate"`
@@ -9036,93 +9361,154 @@ type WebhookEndpointStats struct {
 }
 
 // WebhookEvent One outbound webhook event, as Hardcount created it.
+// `GET /v1/webhook-endpoints/events` lists them. Each delivery POSTs
+// `{"id", "event_type", "created_at", "data"}` to the endpoint, where
+// `data` is this event's `payload`.
 type WebhookEvent struct {
+	// CreatedAt When the event was created.
 	CreatedAt time.Time `json:"created_at"`
-	EventType string    `json:"event_type"`
-	Id        string    `json:"id"`
-	Livemode  bool      `json:"livemode"`
+
+	// EventType What happened, such as `invoice.finalized`. docs/api/webhook-events.md lists every type.
+	EventType string `json:"event_type"`
+
+	// Id The event's id (`hc_whevt_…`). A replay has its own id but is sent with the original event's `id` and `created_at`.
+	Id string `json:"id"`
+
+	// Livemode The mode the event happened in. Only endpoints of the same mode get it.
+	Livemode bool `json:"livemode"`
 
 	// Payload The event's data: the resource the event is about, under the
 	// resource's name (`invoice`, `subscription`, `customer`,
 	// `payment_method`, `dunning_run` or `credit_balance`), as the
 	// API returns it, and the few keys the event adds beside it.
-	// docs/webhooks.md lists what each event carries;
+	// docs/api/webhook-events.md lists what each event carries;
 	// `payment.dispute_opened` and `payment.dispute_closed` carry a
 	// `DisputeWebhookEventData`; `payment.refunded_in_stripe` carries a
 	// `StripeRefundWebhookEventData`.
 	Payload map[string]interface{} `json:"payload"`
 
-	// ReplayOfEventId Set on a replay. The event the replay was made from.
+	// ReplayOfEventId Set on a replay. The event the replay was made from. Absent on an original event.
 	ReplayOfEventId string `json:"replay_of_event_id,omitempty"`
-	TenantId        string `json:"tenant_id,omitempty"`
+
+	// TenantId The account the event belongs to.
+	TenantId string `json:"tenant_id,omitempty"`
 }
 
-// WebhookEventDeliveryAttempt defines model for WebhookEventDeliveryAttempt.
+// WebhookEventDeliveryAttempt One row of an event's delivery timeline, from
+// `GET /v1/webhook_events/{id}/deliveries`. Each row is one
+// endpoint's delivery of the event or of one of its replays, with the
+// result of its latest attempt.
 type WebhookEventDeliveryAttempt struct {
-	// AttemptNo Position in the timeline, starting at 1.
-	AttemptNo           int       `json:"attempt_no"`
-	AttemptedAt         time.Time `json:"attempted_at"`
-	CompletedAt         time.Time `json:"completed_at"`
-	EndpointDescription string    `json:"endpoint_description"`
-	EndpointId          string    `json:"endpoint_id"`
-	EndpointUrl         string    `json:"endpoint_url"`
-	Error               string    `json:"error"`
+	// AttemptNo Position in the timeline, starting at 1. It is not the number of attempts.
+	AttemptNo int `json:"attempt_no"`
+
+	// AttemptedAt When the delivery was queued.
+	AttemptedAt time.Time `json:"attempted_at"`
+
+	// CompletedAt When the delivery succeeded or failed for good. null while pending.
+	CompletedAt time.Time `json:"completed_at"`
+
+	// EndpointDescription The endpoint's description, or empty.
+	EndpointDescription string `json:"endpoint_description"`
+
+	// EndpointId The endpoint the delivery went to.
+	EndpointId string `json:"endpoint_id"`
+
+	// EndpointUrl The endpoint's URL. It is kept after the endpoint is deleted.
+	EndpointUrl string `json:"endpoint_url"`
+
+	// Error Why an attempt failed, such as `HTTP 500` or a connection error. Empty when no attempt failed.
+	Error string `json:"error"`
 
 	// EventId The event this delivery belongs to. When `is_replay` is true, the replay's own id; the message it sent carries the original event's `id` (`root_event_id`).
-	EventId     string    `json:"event_id"`
-	Id          string    `json:"id"`
-	IsReplay    bool      `json:"is_replay"`
+	EventId string `json:"event_id"`
+
+	// Id The delivery's id (`hc_whd_…`).
+	Id string `json:"id"`
+
+	// IsReplay True when the row belongs to a replay of the event.
+	IsReplay bool `json:"is_replay"`
+
+	// NextRetryAt When the next attempt is due, while pending. null once the delivery is finished.
 	NextRetryAt time.Time `json:"next_retry_at"`
 
 	// ReplayEventId The replay's event id when `is_replay` is true; otherwise empty.
 	ReplayEventId string `json:"replay_event_id"`
 
-	// RequestPayloadSha256 SHA-256 of the event payload. Equal values mean the same payload was sent.
+	// RequestPayloadSha256 SHA-256, in hex, of the event's data. Two rows with the same
+	// value sent the same data.
 	RequestPayloadSha256 string `json:"request_payload_sha256"`
 
-	// ResponseBody First 4 KB of the receiver's response.
-	ResponseBody string                            `json:"response_body"`
-	Status       WebhookEventDeliveryAttemptStatus `json:"status"`
-	StatusCode   int                               `json:"status_code"`
+	// ResponseBody Up to the first 1 KB of the receiver's latest answer.
+	ResponseBody string `json:"response_body"`
+
+	// Status `pending` while an attempt is running or due, `succeeded` after a 2xx answer, `failed` once the delivery failed for good.
+	Status WebhookEventDeliveryAttemptStatus `json:"status"`
+
+	// StatusCode HTTP status from the receiver's latest answer. 0 when no attempt got an answer.
+	StatusCode int `json:"status_code"`
 }
 
-// WebhookEventDeliveryAttemptStatus defines model for WebhookEventDeliveryAttempt.Status.
+// WebhookEventDeliveryAttemptStatus `pending` while an attempt is running or due, `succeeded` after a 2xx answer, `failed` once the delivery failed for good.
 type WebhookEventDeliveryAttemptStatus string
 
-// WebhookReplayResult defines model for WebhookReplayResult.
+// WebhookReplayResult What `POST /v1/webhook_events/{id}/replay` returns.
 type WebhookReplayResult struct {
 	// EventId The new event created by the replay.
 	EventId string `json:"event_id"`
 
 	// ReplayOf The original event.
-	ReplayOf string                    `json:"replay_of"`
-	Status   WebhookReplayResultStatus `json:"status"`
+	ReplayOf string `json:"replay_of"`
+
+	// Status `queued` when at least one endpoint will get the replay.
+	// `no_matching_endpoints` when no active endpoint in this mode
+	// subscribes to the event's type; the replay event is still
+	// created.
+	Status WebhookReplayResultStatus `json:"status"`
 }
 
-// WebhookReplayResultStatus defines model for WebhookReplayResult.Status.
+// WebhookReplayResultStatus `queued` when at least one endpoint will get the replay.
+// `no_matching_endpoints` when no active endpoint in this mode
+// subscribes to the event's type; the replay event is still
+// created.
 type WebhookReplayResultStatus string
 
 // WebhookSecretRotation The endpoint's new signing secret. It is shown only here.
 type WebhookSecretRotation struct {
-	// SecondaryValidUntil Until this time, deliveries are also signed with the old secret.
+	// SecondaryValidUntil Until this time, 72 hours after the rotation, each delivery is
+	// signed with the old secret too, so your receiver can switch
+	// without rejecting events.
 	SecondaryValidUntil time.Time `json:"secondary_valid_until,omitempty"`
-	Secret              string    `json:"secret"`
+
+	// Secret The new signing secret (`whsec_…`). Store it now; Hardcount does not show it again.
+	Secret string `json:"secret"`
 }
 
 // WebhookStreamFrame The JSON in each `data:` line of `/v1/webhook_events/stream`.
 type WebhookStreamFrame struct {
+	// CreatedAt When the event was created.
 	CreatedAt time.Time `json:"created_at"`
 
 	// CustomerId The customer the event is about: the `customer_id` of the
 	// resource in `data` (its `id` for a `customer.*` event), or empty.
 	// For an event queued before `data` held the resource, its
 	// `data.customer_id`.
-	CustomerId      string    `json:"customer_id"`
-	EventId         string    `json:"event_id"`
-	EventType       string    `json:"event_type"`
-	LastAttemptAt   time.Time `json:"last_attempt_at"`
-	Livemode        bool      `json:"livemode"`
-	ReplayOfEventId string    `json:"replay_of_event_id"`
+	CustomerId string `json:"customer_id"`
+
+	// EventId The event's id. For a replay, the replay's own id.
+	EventId string `json:"event_id"`
+
+	// EventType The event's type, such as `invoice.finalized`.
+	EventType string `json:"event_type"`
+
+	// LastAttemptAt When the delivery result this frame reports happened. null in the first batch and in a new event's first frame.
+	LastAttemptAt time.Time `json:"last_attempt_at"`
+
+	// Livemode The event's mode. Live frames are not filtered by mode, so check it.
+	Livemode bool `json:"livemode"`
+
+	// ReplayOfEventId The original event, when this frame is about a replay. null otherwise.
+	ReplayOfEventId string `json:"replay_of_event_id"`
 
 	// Status Delivery state. Live frames send `pending`, `succeeded` or
 	// `failed`. Frames in the first batch send `pending`, `failed`,
@@ -9139,16 +9525,28 @@ type Limit = int
 // Offset defines model for Offset.
 type Offset = int
 
-// InvalidBody defines model for InvalidBody.
+// InvalidBody The body of an error answer. `error.type` is the broad class,
+// `error.code` is the exact reason for your code to branch on, and
+// `error.message` is a sentence for a person. Quote
+// `error.request_id` when you ask for help.
 type InvalidBody = Error
 
-// InvalidPage defines model for InvalidPage.
+// InvalidPage The body of an error answer. `error.type` is the broad class,
+// `error.code` is the exact reason for your code to branch on, and
+// `error.message` is a sentence for a person. Quote
+// `error.request_id` when you ask for help.
 type InvalidPage = Error
 
-// RateLimited defines model for RateLimited.
+// RateLimited The body of an error answer. `error.type` is the broad class,
+// `error.code` is the exact reason for your code to branch on, and
+// `error.message` is a sentence for a person. Quote
+// `error.request_id` when you ask for help.
 type RateLimited = Error
 
-// Unauthorized defines model for Unauthorized.
+// Unauthorized The body of an error answer. `error.type` is the broad class,
+// `error.code` is the exact reason for your code to branch on, and
+// `error.message` is a sentence for a person. Quote
+// `error.request_id` when you ask for help.
 type Unauthorized = Error
 
 // bearerAuthContextKey is the context key for BearerAuth security scheme
@@ -9204,8 +9602,10 @@ type ListApiKeysParams struct {
 // CreateApiKeyJSONBody defines parameters for CreateApiKey.
 type CreateApiKeyJSONBody struct {
 	// ExpiresAt Optional. Must be in the future. Omit for a key that does not expire.
-	ExpiresAt time.Time                   `json:"expires_at,omitempty"`
-	KeyType   CreateApiKeyJSONBodyKeyType `json:"key_type,omitempty"`
+	ExpiresAt time.Time `json:"expires_at,omitempty"`
+
+	// KeyType `secret` for full access, or `ingest` for a key that can only send usage events.
+	KeyType CreateApiKeyJSONBodyKeyType `json:"key_type,omitempty"`
 
 	// Name Label shown in the key list. Must not be blank.
 	Name string `json:"name"`
@@ -9216,9 +9616,12 @@ type CreateApiKeyParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -9236,9 +9639,12 @@ type RotateApiKeyParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -9246,7 +9652,9 @@ type RotateApiKeyParams struct {
 type ListAuditLogParams struct {
 	// ResourceType For example `invoice`, `api_key`, `setting`. See `/v1/audit-log/filters`.
 	ResourceType string `form:"resource_type,omitempty" json:"resource_type,omitempty"`
-	ResourceId   string `form:"resource_id,omitempty" json:"resource_id,omitempty"`
+
+	// ResourceId Only entries about this resource id.
+	ResourceId string `form:"resource_id,omitempty" json:"resource_id,omitempty"`
 
 	// Action For example `create`, `update`, `revoke`. See `/v1/audit-log/filters`.
 	Action string `form:"action,omitempty" json:"action,omitempty"`
@@ -9286,19 +9694,27 @@ type ListAuditLogParamsOrder string
 
 // AcceptInvitationJSONBody defines parameters for AcceptInvitation.
 type AcceptInvitationJSONBody struct {
-	// Password Required (and validated) only when no account exists for the invited email; ignored otherwise.
+	// Password Required when no account has the invited email: at least
+	// 12 characters, at most 72 bytes, and not one of the most
+	// common passwords. Ignored otherwise.
 	Password string `json:"password,omitempty"`
-	Token    string `json:"token"`
+
+	// Token The token from the invite link.
+	Token string `json:"token"`
 }
 
 // LoginJSONBody defines parameters for Login.
 type LoginJSONBody struct {
-	Email    openapi_types.Email `json:"email"`
-	Password string              `json:"password"`
+	// Email The user's sign-in email.
+	Email openapi_types.Email `json:"email"`
+
+	// Password The user's password.
+	Password string `json:"password"`
 }
 
 // SwitchSessionModeJSONBody defines parameters for SwitchSessionMode.
 type SwitchSessionModeJSONBody struct {
+	// Livemode True for live mode, false for test mode.
 	Livemode bool `json:"livemode"`
 }
 
@@ -9313,12 +9729,17 @@ type CheckPasswordResetToken200JSONResponseBodyValid bool
 
 // ConfirmPasswordResetJSONBody defines parameters for ConfirmPasswordReset.
 type ConfirmPasswordResetJSONBody struct {
+	// Password The new password: at least 12 characters, at most 72
+	// bytes, and not one of the most common passwords.
 	Password string `json:"password"`
-	Token    string `json:"token"`
+
+	// Token The token from the reset link.
+	Token string `json:"token"`
 }
 
 // RequestPasswordResetJSONBody defines parameters for RequestPasswordReset.
 type RequestPasswordResetJSONBody struct {
+	// Email The sign-in email of the account to reset.
 	Email openapi_types.Email `json:"email"`
 }
 
@@ -9330,20 +9751,25 @@ type RunBillingParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // BootstrapJSONBody defines parameters for Bootstrap.
 type BootstrapJSONBody struct {
-	// OwnerEmail Must contain `@`.
+	// OwnerEmail The owner's dashboard sign-in email. One plain address whose domain has a dot.
 	OwnerEmail string `json:"owner_email,omitempty"`
 
 	// OwnerPassword 12 or more characters, at most 72 bytes, and not a common password from a leaked-password list. Omit to have Hardcount generate one.
 	OwnerPassword string `json:"owner_password,omitempty"`
-	TenantName    string `json:"tenant_name,omitempty"`
+
+	// TenantName The account's name.
+	TenantName string `json:"tenant_name,omitempty"`
 
 	// Token The value of `HARDCOUNT_BOOTSTRAP_TOKEN`. Or send it as a Bearer token.
 	Token string `json:"token,omitempty"`
@@ -9477,9 +9903,12 @@ type CreateCreditNoteParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -9497,9 +9926,12 @@ type AttachStripeRefundToCreditNoteParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -9508,9 +9940,12 @@ type IssueCreditNoteParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -9519,9 +9954,12 @@ type RetryCreditNoteRefundParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -9539,9 +9977,12 @@ type SendCreditNoteParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -9553,9 +9994,12 @@ type VoidCreditNoteParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -9580,9 +10024,12 @@ type AdjustCreditsParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -9636,9 +10083,12 @@ type GrantCreditsParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -9752,9 +10202,12 @@ type CreateCustomerParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -9781,9 +10234,12 @@ type SendCustomerPaymentSetupEmailParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -9801,9 +10257,12 @@ type CreateCustomerPaymentSetupSessionParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -9812,9 +10271,12 @@ type SetCustomerDefaultPaymentMethodParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -9845,9 +10307,12 @@ type UpdateCustomerParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -9859,9 +10324,12 @@ type UpsertCustomerBillingProfileParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -9881,9 +10349,12 @@ type RotateCustomerCostDashboardTokenParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -9925,9 +10396,12 @@ type CreateDunningPolicyParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -9939,9 +10413,12 @@ type UpdateDunningPolicyParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -9950,9 +10427,12 @@ type SetDefaultDunningPolicyParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -9990,9 +10470,12 @@ type ResolveDunningRunParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10005,11 +10488,19 @@ type ExportAuditLogCsvParams struct {
 	DateFrom string `form:"date_from,omitempty" json:"date_from,omitempty"`
 
 	// DateTo Upper bound on created_at, inclusive. RFC 3339 or `YYYY-MM-DD` (end of that day, UTC).
-	DateTo       string `form:"date_to,omitempty" json:"date_to,omitempty"`
+	DateTo string `form:"date_to,omitempty" json:"date_to,omitempty"`
+
+	// ResourceType Only rows about this kind of resource, such as `invoice` or `api_key`.
 	ResourceType string `form:"resource_type,omitempty" json:"resource_type,omitempty"`
-	ResourceId   string `form:"resource_id,omitempty" json:"resource_id,omitempty"`
-	Action       string `form:"action,omitempty" json:"action,omitempty"`
-	ActorId      string `form:"actor_id,omitempty" json:"actor_id,omitempty"`
+
+	// ResourceId Only rows about this resource id.
+	ResourceId string `form:"resource_id,omitempty" json:"resource_id,omitempty"`
+
+	// Action Only rows with this action, such as `create` or `revoke`.
+	Action string `form:"action,omitempty" json:"action,omitempty"`
+
+	// ActorId Only rows by this actor (a user id or an API key id).
+	ActorId string `form:"actor_id,omitempty" json:"actor_id,omitempty"`
 
 	// TestClockId Only rows from this test clock's simulation.
 	TestClockId string `form:"test_clock_id,omitempty" json:"test_clock_id,omitempty"`
@@ -10139,9 +10630,12 @@ type CreateInvoiceParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10172,9 +10666,12 @@ type CreateInvoicePreviewParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10183,9 +10680,12 @@ type CollectInvoicePaymentParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10205,9 +10705,12 @@ type FinalizeInvoiceParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10216,9 +10719,12 @@ type AddInvoiceLineItemParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10227,9 +10733,12 @@ type MarkInvoiceUncollectibleParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10244,9 +10753,12 @@ type RecordInvoicePaymentParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10267,9 +10779,12 @@ type RefundInvoiceParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10281,9 +10796,12 @@ type ResendInvoiceSetupLinkParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10295,9 +10813,12 @@ type RetryInvoiceTaxParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10306,9 +10827,12 @@ type RotateInvoicePublicTokenParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10326,9 +10850,12 @@ type SendInvoiceParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10357,9 +10884,12 @@ type DismissInvoiceStripeRefundParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10368,14 +10898,18 @@ type VoidInvoiceParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // InviteMemberJSONBody defines parameters for InviteMember.
 type InviteMemberJSONBody struct {
+	// Email The teammate's email, one plain address. It is stored in lower case.
 	Email openapi_types.Email `json:"email"`
 }
 
@@ -10384,9 +10918,12 @@ type InviteMemberParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10425,9 +10962,12 @@ type CreateMeterParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10451,9 +10991,12 @@ type UpdateMeterParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10521,9 +11064,12 @@ type CreatePlanParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10567,9 +11113,12 @@ type UpdatePlanParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10595,9 +11144,12 @@ type AddPlanPriceParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10606,9 +11158,12 @@ type UpdatePlanPriceParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10670,9 +11225,12 @@ type CreatePriceOverrideParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10720,9 +11278,12 @@ type UpsertProviderCostParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10768,9 +11329,12 @@ type InstantiateRecipeParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10788,9 +11352,12 @@ type PreviewRecipeParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10799,9 +11366,12 @@ type UpdateTenantSettingsParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10816,9 +11386,12 @@ type SendTestEmailParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10842,9 +11415,12 @@ type ConnectStripeParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10862,9 +11438,12 @@ type SetStripeWebhookSecretParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10974,9 +11553,12 @@ type CreateSubscriptionParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10991,9 +11573,12 @@ type ActivateSubscriptionParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11021,9 +11606,12 @@ type SetSubscriptionBillingThresholdsParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11032,9 +11620,12 @@ type CancelSubscriptionParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11043,9 +11634,12 @@ type EndSubscriptionTrialParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11060,9 +11654,12 @@ type ExtendSubscriptionTrialParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11080,9 +11677,12 @@ type AddSubscriptionItemParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11103,9 +11703,12 @@ type UpdateSubscriptionItemParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11124,9 +11727,12 @@ type PauseSubscriptionCollectionParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11138,9 +11744,12 @@ type RetrySubscriptionBillingParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11158,9 +11767,12 @@ type ScheduleSubscriptionCancelParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11189,9 +11801,12 @@ type CreateTestClockParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11210,9 +11825,12 @@ type AdvanceTestClockParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11232,9 +11850,12 @@ type RetryTestClockAdvanceParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11487,9 +12108,14 @@ type ListWebhookEndpointsParams struct {
 
 // CreateWebhookEndpointJSONBody defines parameters for CreateWebhookEndpoint.
 type CreateWebhookEndpointJSONBody struct {
-	Description string   `json:"description,omitempty"`
-	Events      []string `json:"events,omitempty"`
-	Url         string   `json:"url"`
+	// Description Your note about the endpoint, such as what it feeds.
+	Description string `json:"description,omitempty"`
+
+	// Events Event types to send. `*` means every event; `invoice.*` means every invoice event. Leave it out or send `[]` for every event.
+	Events []string `json:"events,omitempty"`
+
+	// Url Where to send events. Surrounding spaces are trimmed.
+	Url string `json:"url"`
 }
 
 // CreateWebhookEndpointParams defines parameters for CreateWebhookEndpoint.
@@ -11497,9 +12123,12 @@ type CreateWebhookEndpointParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11519,10 +12148,17 @@ type DeleteWebhookEndpoint200JSONResponseBodyStatus string
 
 // UpdateWebhookEndpointJSONBody defines parameters for UpdateWebhookEndpoint.
 type UpdateWebhookEndpointJSONBody struct {
-	Active      bool     `json:"active,omitempty"`
-	Description string   `json:"description,omitempty"`
-	Events      []string `json:"events,omitempty"`
-	Url         string   `json:"url,omitempty"`
+	// Active False pauses the endpoint; true resumes it.
+	Active bool `json:"active,omitempty"`
+
+	// Description A new note. An empty string clears it.
+	Description string `json:"description,omitempty"`
+
+	// Events A new list of event types, replacing the old one. `[]` means every event.
+	Events []string `json:"events,omitempty"`
+
+	// Url A new URL, checked as on create. It cannot be empty.
+	Url string `json:"url,omitempty"`
 }
 
 // UpdateWebhookEndpointParams defines parameters for UpdateWebhookEndpoint.
@@ -11530,9 +12166,12 @@ type UpdateWebhookEndpointParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11552,9 +12191,12 @@ type ReplayWebhookDeliveryParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11563,9 +12205,12 @@ type RotateWebhookEndpointSecretParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11585,9 +12230,12 @@ type ReplayWebhookEventParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. The same key with a different method, path or body
+	// is a 422 with code `idempotency_error`. The other error cases are in
+	// docs/api/idempotency.md. The usage routes do not take it: each usage
+	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11602,6 +12250,7 @@ type ReceiveStripeWebhookJSONBody map[string]interface{}
 
 // ReceiveStripeWebhookParams defines parameters for ReceiveStripeWebhook.
 type ReceiveStripeWebhookParams struct {
+	// StripeSignature Stripe's signature of the body. Hardcount checks it with the connection's webhook signing secret.
 	StripeSignature string `json:"Stripe-Signature"`
 }
 
@@ -12070,13 +12719,13 @@ func (t *CreateUsageEventBatchJSONBody_Quantity) UnmarshalJSON(b []byte) error {
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
-	// Health check
+	// Check that the server is up
 	// (GET /health)
 	GetHealth(w http.ResponseWriter, r *http.Request)
-	// Readiness check for load balancers
+	// Check that the server can take requests
 	// (GET /health/ready)
 	GetHealthReady(w http.ResponseWriter, r *http.Request)
-	// Prometheus metrics
+	// Get Prometheus metrics
 	// (GET /metrics)
 	GetMetrics(w http.ResponseWriter, r *http.Request)
 	// Get MRR movement over time
@@ -12112,13 +12761,13 @@ type ServerInterface interface {
 	// Accept a team invitation
 	// (POST /v1/auth/accept-invite)
 	AcceptInvitation(w http.ResponseWriter, r *http.Request)
-	// Preview a team invitation (accept-page context)
+	// Preview a team invitation
 	// (GET /v1/auth/invite/{token})
 	GetInvitation(w http.ResponseWriter, r *http.Request, token string)
-	// Sign in with email and password; mint an httpOnly session cookie
+	// Sign in to the dashboard with email and password
 	// (POST /v1/auth/login)
 	Login(w http.ResponseWriter, r *http.Request)
-	// Revoke the current session and clear the cookie
+	// Sign out of the dashboard
 	// (POST /v1/auth/logout)
 	Logout(w http.ResponseWriter, r *http.Request)
 	// Switch the dashboard session between test and live mode
@@ -12346,16 +12995,16 @@ type ServerInterface interface {
 	// Void an invoice
 	// (POST /v1/invoices/{id}/void)
 	VoidInvoice(w http.ResponseWriter, r *http.Request, id string, params VoidInvoiceParams)
-	// List workspace members and invitations
+	// List team members and invitations
 	// (GET /v1/members)
 	ListMembers(w http.ResponseWriter, r *http.Request)
-	// Revoke a pending invitation
+	// Revoke an invitation
 	// (DELETE /v1/members/invitations/{id})
 	RevokeMemberInvitation(w http.ResponseWriter, r *http.Request, id string)
 	// Invite a teammate by email
 	// (POST /v1/members/invite)
 	InviteMember(w http.ResponseWriter, r *http.Request, params InviteMemberParams)
-	// Remove a member from the workspace
+	// Remove a member from the account
 	// (DELETE /v1/members/{userID})
 	RemoveMember(w http.ResponseWriter, r *http.Request, userID string)
 	// List meters
@@ -12445,13 +13094,13 @@ type ServerInterface interface {
 	// Preview a recipe
 	// (POST /v1/recipes/{key}/preview)
 	PreviewRecipe(w http.ResponseWriter, r *http.Request, key string, params PreviewRecipeParams)
-	// Get workspace settings
+	// Get account settings
 	// (GET /v1/settings)
 	GetTenantSettings(w http.ResponseWriter, r *http.Request)
-	// Update workspace settings
+	// Update account settings
 	// (PUT /v1/settings)
 	UpdateTenantSettings(w http.ResponseWriter, r *http.Request, params UpdateTenantSettingsParams)
-	// Email setup status
+	// Get the email setup status
 	// (GET /v1/settings/email)
 	GetEmailSettings(w http.ResponseWriter, r *http.Request)
 	// Send a test email
@@ -12577,37 +13226,37 @@ type ServerInterface interface {
 	// List webhook endpoints
 	// (GET /v1/webhook-endpoints/endpoints)
 	ListWebhookEndpoints(w http.ResponseWriter, r *http.Request, params ListWebhookEndpointsParams)
-	// Create webhook endpoint
+	// Create a webhook endpoint
 	// (POST /v1/webhook-endpoints/endpoints)
 	CreateWebhookEndpoint(w http.ResponseWriter, r *http.Request, params CreateWebhookEndpointParams)
-	// Delivery counts per webhook endpoint
+	// Get delivery counts per webhook endpoint
 	// (GET /v1/webhook-endpoints/endpoints/stats)
 	GetWebhookEndpointStats(w http.ResponseWriter, r *http.Request, params GetWebhookEndpointStatsParams)
-	// Delete (disable) webhook endpoint
+	// Delete a webhook endpoint
 	// (DELETE /v1/webhook-endpoints/endpoints/{id})
 	DeleteWebhookEndpoint(w http.ResponseWriter, r *http.Request, id string)
 	// Get a webhook endpoint
 	// (GET /v1/webhook-endpoints/endpoints/{id})
 	GetWebhookEndpoint(w http.ResponseWriter, r *http.Request, id string)
-	// Update webhook endpoint (no secret rotation)
+	// Update a webhook endpoint
 	// (PATCH /v1/webhook-endpoints/endpoints/{id})
 	UpdateWebhookEndpoint(w http.ResponseWriter, r *http.Request, id string, params UpdateWebhookEndpointParams)
-	// List an endpoint's recent deliveries
+	// List an endpoint's deliveries
 	// (GET /v1/webhook-endpoints/endpoints/{id}/deliveries)
 	ListWebhookEndpointDeliveries(w http.ResponseWriter, r *http.Request, id string, params ListWebhookEndpointDeliveriesParams)
 	// Resend one delivery to its endpoint
 	// (POST /v1/webhook-endpoints/endpoints/{id}/deliveries/{deliveryID}/replay)
 	ReplayWebhookDelivery(w http.ResponseWriter, r *http.Request, id string, deliveryID string, params ReplayWebhookDeliveryParams)
-	// Rotate signing secret (72h dual-signing grace)
+	// Rotate a webhook endpoint's signing secret
 	// (POST /v1/webhook-endpoints/endpoints/{id}/rotate-secret)
 	RotateWebhookEndpointSecret(w http.ResponseWriter, r *http.Request, id string, params RotateWebhookEndpointSecretParams)
-	// List outbound events, newest first
+	// List webhook events
 	// (GET /v1/webhook-endpoints/events)
 	ListWebhookEvents(w http.ResponseWriter, r *http.Request, params ListWebhookEventsParams)
-	// Stream webhook events live (Server-Sent Events)
+	// Stream webhook events as they happen
 	// (GET /v1/webhook_events/stream)
 	StreamWebhookEvents(w http.ResponseWriter, r *http.Request)
-	// List all delivery attempts for an event
+	// List all deliveries of an event and its replays
 	// (GET /v1/webhook_events/{id}/deliveries)
 	ListWebhookEventDeliveries(w http.ResponseWriter, r *http.Request, id string)
 	// Replay an event to all matching endpoints
@@ -12619,7 +13268,7 @@ type ServerInterface interface {
 	// Receive a Stripe webhook
 	// (POST /v1/webhooks/stripe/{endpoint_id})
 	ReceiveStripeWebhook(w http.ResponseWriter, r *http.Request, endpointId string, params ReceiveStripeWebhookParams)
-	// Resolve the current credential to its tenant context
+	// Get the account and mode of the current credential
 	// (GET /v1/whoami)
 	GetWhoami(w http.ResponseWriter, r *http.Request)
 }
@@ -12628,19 +13277,19 @@ type ServerInterface interface {
 
 type Unimplemented struct{}
 
-// Health check
+// Check that the server is up
 // (GET /health)
 func (_ Unimplemented) GetHealth(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Readiness check for load balancers
+// Check that the server can take requests
 // (GET /health/ready)
 func (_ Unimplemented) GetHealthReady(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Prometheus metrics
+// Get Prometheus metrics
 // (GET /metrics)
 func (_ Unimplemented) GetMetrics(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -12712,19 +13361,19 @@ func (_ Unimplemented) AcceptInvitation(w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Preview a team invitation (accept-page context)
+// Preview a team invitation
 // (GET /v1/auth/invite/{token})
 func (_ Unimplemented) GetInvitation(w http.ResponseWriter, r *http.Request, token string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Sign in with email and password; mint an httpOnly session cookie
+// Sign in to the dashboard with email and password
 // (POST /v1/auth/login)
 func (_ Unimplemented) Login(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Revoke the current session and clear the cookie
+// Sign out of the dashboard
 // (POST /v1/auth/logout)
 func (_ Unimplemented) Logout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -13180,13 +13829,13 @@ func (_ Unimplemented) VoidInvoice(w http.ResponseWriter, r *http.Request, id st
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// List workspace members and invitations
+// List team members and invitations
 // (GET /v1/members)
 func (_ Unimplemented) ListMembers(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Revoke a pending invitation
+// Revoke an invitation
 // (DELETE /v1/members/invitations/{id})
 func (_ Unimplemented) RevokeMemberInvitation(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -13198,7 +13847,7 @@ func (_ Unimplemented) InviteMember(w http.ResponseWriter, r *http.Request, para
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Remove a member from the workspace
+// Remove a member from the account
 // (DELETE /v1/members/{userID})
 func (_ Unimplemented) RemoveMember(w http.ResponseWriter, r *http.Request, userID string) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -13378,19 +14027,19 @@ func (_ Unimplemented) PreviewRecipe(w http.ResponseWriter, r *http.Request, key
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Get workspace settings
+// Get account settings
 // (GET /v1/settings)
 func (_ Unimplemented) GetTenantSettings(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Update workspace settings
+// Update account settings
 // (PUT /v1/settings)
 func (_ Unimplemented) UpdateTenantSettings(w http.ResponseWriter, r *http.Request, params UpdateTenantSettingsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Email setup status
+// Get the email setup status
 // (GET /v1/settings/email)
 func (_ Unimplemented) GetEmailSettings(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -13642,19 +14291,19 @@ func (_ Unimplemented) ListWebhookEndpoints(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Create webhook endpoint
+// Create a webhook endpoint
 // (POST /v1/webhook-endpoints/endpoints)
 func (_ Unimplemented) CreateWebhookEndpoint(w http.ResponseWriter, r *http.Request, params CreateWebhookEndpointParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Delivery counts per webhook endpoint
+// Get delivery counts per webhook endpoint
 // (GET /v1/webhook-endpoints/endpoints/stats)
 func (_ Unimplemented) GetWebhookEndpointStats(w http.ResponseWriter, r *http.Request, params GetWebhookEndpointStatsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Delete (disable) webhook endpoint
+// Delete a webhook endpoint
 // (DELETE /v1/webhook-endpoints/endpoints/{id})
 func (_ Unimplemented) DeleteWebhookEndpoint(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -13666,13 +14315,13 @@ func (_ Unimplemented) GetWebhookEndpoint(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Update webhook endpoint (no secret rotation)
+// Update a webhook endpoint
 // (PATCH /v1/webhook-endpoints/endpoints/{id})
 func (_ Unimplemented) UpdateWebhookEndpoint(w http.ResponseWriter, r *http.Request, id string, params UpdateWebhookEndpointParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// List an endpoint's recent deliveries
+// List an endpoint's deliveries
 // (GET /v1/webhook-endpoints/endpoints/{id}/deliveries)
 func (_ Unimplemented) ListWebhookEndpointDeliveries(w http.ResponseWriter, r *http.Request, id string, params ListWebhookEndpointDeliveriesParams) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -13684,25 +14333,25 @@ func (_ Unimplemented) ReplayWebhookDelivery(w http.ResponseWriter, r *http.Requ
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Rotate signing secret (72h dual-signing grace)
+// Rotate a webhook endpoint's signing secret
 // (POST /v1/webhook-endpoints/endpoints/{id}/rotate-secret)
 func (_ Unimplemented) RotateWebhookEndpointSecret(w http.ResponseWriter, r *http.Request, id string, params RotateWebhookEndpointSecretParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// List outbound events, newest first
+// List webhook events
 // (GET /v1/webhook-endpoints/events)
 func (_ Unimplemented) ListWebhookEvents(w http.ResponseWriter, r *http.Request, params ListWebhookEventsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Stream webhook events live (Server-Sent Events)
+// Stream webhook events as they happen
 // (GET /v1/webhook_events/stream)
 func (_ Unimplemented) StreamWebhookEvents(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// List all delivery attempts for an event
+// List all deliveries of an event and its replays
 // (GET /v1/webhook_events/{id}/deliveries)
 func (_ Unimplemented) ListWebhookEventDeliveries(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -13726,7 +14375,7 @@ func (_ Unimplemented) ReceiveStripeWebhook(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Resolve the current credential to its tenant context
+// Get the account and mode of the current credential
 // (GET /v1/whoami)
 func (_ Unimplemented) GetWhoami(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)

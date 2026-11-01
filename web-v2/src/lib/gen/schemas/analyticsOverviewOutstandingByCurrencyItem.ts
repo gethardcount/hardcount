@@ -12,6 +12,8 @@
  */
 
 export type AnalyticsOverviewOutstandingByCurrencyItem = {
+  /** Three-letter currency code, in upper case. */
   currency: string;
+  /** Amount due in this currency, in its minor unit (cents for USD). */
   amount_cents: number;
 };

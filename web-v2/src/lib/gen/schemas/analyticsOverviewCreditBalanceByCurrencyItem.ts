@@ -12,6 +12,8 @@
  */
 
 export type AnalyticsOverviewCreditBalanceByCurrencyItem = {
+  /** Three-letter currency code, in upper case. */
   currency: string;
+  /** Credit customers hold in this currency, in its minor unit (cents for USD). */
   amount_cents: number;
 };

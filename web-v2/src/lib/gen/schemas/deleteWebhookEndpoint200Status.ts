@@ -11,6 +11,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * Always `deleted`.
+ */
 export type DeleteWebhookEndpoint200Status = typeof DeleteWebhookEndpoint200Status[keyof typeof DeleteWebhookEndpoint200Status];
 
 

@@ -12,5 +12,6 @@
  */
 
 export type SwitchSessionMode200 = {
+  /** The mode the session is now in. */
   livemode: boolean;
 };

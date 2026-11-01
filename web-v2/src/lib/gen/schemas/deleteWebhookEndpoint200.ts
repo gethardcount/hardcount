@@ -13,5 +13,6 @@
 import type { DeleteWebhookEndpoint200Status } from './deleteWebhookEndpoint200Status';
 
 export type DeleteWebhookEndpoint200 = {
+  /** Always `deleted`. */
   status: DeleteWebhookEndpoint200Status;
 };

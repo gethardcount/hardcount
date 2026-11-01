@@ -16,13 +16,16 @@ import type { GetEmailSettings200TlsMode } from './getEmailSettings200TlsMode';
 export type GetEmailSettings200 = {
   /** False when `SMTP_HOST` is unset; every email then fails. */
   smtp_configured: boolean;
-  /** The SMTP relay host name, without port or credentials. Empty when not configured. */
+  /** The SMTP relay host (`SMTP_HOST`), without credentials. Empty when not configured. */
   smtp_host: string;
-  /** The envelope sender (`SMTP_FROM`). */
+  /** The envelope sender (`SMTP_FROM`, default `billing@hardcount.local`). */
   from_address: string;
+  /** How Hardcount connects to the SMTP server (`SMTP_TLS`). `starttls` is the default. */
   tls_mode: GetEmailSettings200TlsMode;
   /** Every environment variable an email link is built from, set or not. */
   links: GetEmailSettings200LinksItem[];
+  /** Whether this server can email a customer a link to add a payment method (SMTP and `PAYMENT_UPDATE_URL` are set up). */
   can_email_setup_links: boolean;
+  /** Whether this server can invite a teammate (SMTP and `DASHBOARD_BASE_URL` are set up). */
   can_send_invites: boolean;
 };

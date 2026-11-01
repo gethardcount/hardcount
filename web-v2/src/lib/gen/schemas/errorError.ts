@@ -11,6 +11,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * What went wrong.
+ */
 export type ErrorError = {
   /**
      * One of `invalid_request_error`, `authentication_error`,
@@ -18,20 +21,34 @@ export type ErrorError = {
      * answers has this shape, including an unknown path (404,
      * code `route_not_found`) and a method the path does not take
      * (405, code `method_not_allowed`, with an `Allow` header).
-     * The few exceptions are listed in docs/api-surface.md.
+     * The few exceptions are listed in docs/api/errors.md.
      */
-  type?: string;
-  code?: string;
-  message?: string;
-  request_id?: string;
+  type: string;
   /**
-     * The request field the error is about. Sent only when the error
-     * names one. A request body may hold only the fields its
-     * operation lists, spelled and cased as listed: any other
-     * field, or one the server sets (such as `id`), is refused
-     * with 422 and `param` naming it. An operation with no request body lists no fields: send
-     * no body, `{}` or `null`. The Stripe and Postmark webhooks and
-     * the LiteLLM callback take their sender's body as it comes.
+     * The exact reason, such as `validation_error`, `not_found`,
+     * `already_exists`, `invalid_state` or a more specific code
+     * the operation lists. Branch on this, not on `message`.
+     */
+  code: string;
+  /** What went wrong, written for a person to read. */
+  message: string;
+  /**
+     * This request's id (`req_…`), the same value as the
+     * `Hardcount-Request-Id` response header. On a replayed
+     * `Idempotency-Key` answer it is the first request's id.
+     */
+  request_id: string;
+  /**
+     * The request field or query parameter the error is about.
+     * Sent only when the error names one.
+     *
+     * A request body may hold only the fields its operation
+     * lists, spelled and cased as listed. Any other field, or one
+     * the server sets (such as `id`), is refused with 422 and
+     * `param` naming it. An operation with no request body lists
+     * no fields: send no body, `{}` or `null`. The Stripe and
+     * Postmark webhooks and the LiteLLM callback take their
+     * sender's body as it comes.
      */
   param?: string;
 };

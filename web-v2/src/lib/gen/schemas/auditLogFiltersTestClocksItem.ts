@@ -12,6 +12,8 @@
  */
 
 export type AuditLogFiltersTestClocksItem = {
+  /** The test clock's id (`hc_tclk_…`). */
   id: string;
+  /** The clock's name, taken from its own audit entries. Empty when the log has none. */
   name: string;
 };

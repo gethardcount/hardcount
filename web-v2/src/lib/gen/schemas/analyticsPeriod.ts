@@ -11,6 +11,11 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * The window an analytics call covers, ending now: the last 7, 30 or
+ * 90 days, or `12m` for the last 365 days in monthly buckets. The
+ * other periods use daily buckets.
+ */
 export type AnalyticsPeriod = typeof AnalyticsPeriod[keyof typeof AnalyticsPeriod];
 
 

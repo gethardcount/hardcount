@@ -12,27 +12,51 @@
  */
 import type { WebhookEventDeliveryAttemptStatus } from './webhookEventDeliveryAttemptStatus';
 
+/**
+ * One row of an event's delivery timeline, from
+ * `GET /v1/webhook_events/{id}/deliveries`. Each row is one
+ * endpoint's delivery of the event or of one of its replays, with the
+ * result of its latest attempt.
+ */
 export interface WebhookEventDeliveryAttempt {
+  /** The delivery's id (`hc_whd_…`). */
   id: string;
   /** The event this delivery belongs to. When `is_replay` is true, the replay's own id; the message it sent carries the original event's `id` (`root_event_id`). */
   event_id: string;
+  /** The endpoint the delivery went to. */
   endpoint_id: string;
+  /** The endpoint's URL. It is kept after the endpoint is deleted. */
   endpoint_url: string;
+  /** The endpoint's description, or empty. */
   endpoint_description: string;
-  /** Position in the timeline, starting at 1. */
+  /** Position in the timeline, starting at 1. It is not the number of attempts. */
   attempt_no: number;
+  /** `pending` while an attempt is running or due, `succeeded` after a 2xx answer, `failed` once the delivery failed for good. */
   status: WebhookEventDeliveryAttemptStatus;
+  /** HTTP status from the receiver's latest answer. 0 when no attempt got an answer. */
   status_code: number;
-  /** First 4 KB of the receiver's response. */
+  /** Up to the first 1 KB of the receiver's latest answer. */
   response_body: string;
+  /** Why an attempt failed, such as `HTTP 500` or a connection error. Empty when no attempt failed. */
   error: string;
-  /** SHA-256 of the event payload. Equal values mean the same payload was sent. */
+  /**
+     * SHA-256, in hex, of the event's data. Two rows with the same
+     * value sent the same data.
+     */
   request_payload_sha256: string;
+  /** When the delivery was queued. */
   attempted_at: string;
-  /** @nullable */
+  /**
+     * When the delivery succeeded or failed for good. null while pending.
+     * @nullable
+     */
   completed_at: string | null;
-  /** @nullable */
+  /**
+     * When the next attempt is due, while pending. null once the delivery is finished.
+     * @nullable
+     */
   next_retry_at: string | null;
+  /** True when the row belongs to a replay of the event. */
   is_replay: boolean;
   /** The replay's event id when `is_replay` is true; otherwise empty. */
   replay_event_id: string;

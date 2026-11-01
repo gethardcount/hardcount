@@ -12,9 +12,12 @@
  */
 
 export type AcceptInvitationBody = {
+  /** The token from the invite link. */
   token: string;
   /**
-     * Required (and validated) only when no account exists for the invited email; ignored otherwise.
+     * Required when no account has the invited email: at least
+     * 12 characters, at most 72 bytes, and not one of the most
+     * common passwords. Ignored otherwise.
      * @minLength 12
      */
   password?: string;

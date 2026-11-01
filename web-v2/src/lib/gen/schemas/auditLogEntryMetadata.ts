@@ -12,6 +12,6 @@
  */
 
 /**
- * Action details. A settings change lists each changed field with `from` and `to`.
+ * Action details. A settings change lists each changed field with `from` and `to`. Absent when the action has none.
  */
 export type AuditLogEntryMetadata = { [key: string]: unknown };

@@ -15,6 +15,7 @@ import type { CreateApiKeyBodyKeyType } from './createApiKeyBodyKeyType';
 export type CreateApiKeyBody = {
   /** Label shown in the key list. Must not be blank. */
   name: string;
+  /** `secret` for full access, or `ingest` for a key that can only send usage events. */
   key_type?: CreateApiKeyBodyKeyType;
   /** Optional. Must be in the future. Omit for a key that does not expire. */
   expires_at?: string;

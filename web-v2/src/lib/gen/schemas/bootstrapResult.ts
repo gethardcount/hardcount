@@ -12,16 +12,26 @@
  */
 import type { Tenant } from './tenant';
 
+/**
+ * What `POST /v1/bootstrap` returns: the new account, its owner's
+ * dashboard sign-in, and one test and one live secret key. This
+ * answer is the only place the keys appear.
+ */
 export interface BootstrapResult {
   tenant: Tenant;
-  /** Dashboard login email. */
+  /** The owner's dashboard sign-in email. */
   owner_email: string;
-  /** Dashboard login password (the one you sent, or the generated one). */
+  /**
+     * The owner's dashboard password: the one you sent, or the
+     * generated one (24 hex characters).
+     */
   owner_password: string;
+  /** True when Hardcount generated `owner_password` because the request sent none. */
   password_generated: boolean;
   /** Test-mode secret key (`hc_secret_test_...`). */
   secret_key_test: string;
   /** Live-mode secret key (`hc_secret_live_...`). */
   secret_key_live: string;
+  /** A reminder to save the credentials now. */
   message: string;
 }

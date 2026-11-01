@@ -11,11 +11,18 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * Who did it. `user`: a dashboard member. `api_key`: a request
+ * made with an API key. `customer`: a customer acting on a hosted
+ * page. `system`: Hardcount itself, such as a background job or a
+ * Stripe webhook.
+ */
 export type AuditLogEntryActorType = typeof AuditLogEntryActorType[keyof typeof AuditLogEntryActorType];
 
 
 export const AuditLogEntryActorType = {
   user: 'user',
   api_key: 'api_key',
+  customer: 'customer',
   system: 'system',
 } as const;

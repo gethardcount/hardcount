@@ -12,7 +12,9 @@
  */
 
 /**
- * Server-derived; treat as authoritative.
+ * `pending` until the invitation is accepted or revoked, or until
+ * `expires_at` passes (`expired`). The server works it out each
+ * time it answers.
  */
 export type MemberInvitationStatus = typeof MemberInvitationStatus[keyof typeof MemberInvitationStatus];
 

@@ -13,11 +13,12 @@
 import type { RequestPasswordReset200EmailDelivery } from './requestPasswordReset200EmailDelivery';
 
 export type RequestPasswordReset200 = {
+  /** The same sentence for every request. */
   message: string;
   /**
-     * Whether this deployment can deliver reset emails
-     * (SMTP configured AND `DASHBOARD_BASE_URL` set).
-     * Deployment posture, never account state.
+     * Whether this server can deliver reset emails: `ok`
+     * when SMTP is set up and `DASHBOARD_BASE_URL` is set,
+     * otherwise `not_configured`.
      */
   email_delivery: RequestPasswordReset200EmailDelivery;
 };

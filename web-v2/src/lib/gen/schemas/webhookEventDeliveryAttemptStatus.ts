@@ -11,6 +11,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * `pending` while an attempt is running or due, `succeeded` after a 2xx answer, `failed` once the delivery failed for good.
+ */
 export type WebhookEventDeliveryAttemptStatus = typeof WebhookEventDeliveryAttemptStatus[keyof typeof WebhookEventDeliveryAttemptStatus];
 
 

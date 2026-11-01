@@ -12,5 +12,6 @@
  */
 
 export type CheckPasswordResetToken200 = {
+  /** Always true. A token that cannot be used gets 422. */
   valid: true;
 };

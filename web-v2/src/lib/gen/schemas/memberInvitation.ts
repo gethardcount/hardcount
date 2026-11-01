@@ -12,16 +12,35 @@
  */
 import type { MemberInvitationStatus } from './memberInvitationStatus';
 
+/**
+ * An invitation for a teammate to join this account's dashboard.
+ * `POST /v1/members/invite` returns it, and `GET /v1/members` lists
+ * every invitation the account has sent, newest first.
+ */
 export interface MemberInvitation {
+  /** The invitation's id (`hc_minv_…`). */
   id: string;
+  /** The invited address, in lower case. It becomes the new member's sign-in email. */
   email: string;
-  /** Recorded for the future role split; not enforced (every member holds the full permission set). */
+  /**
+     * Always `member` for an invitation. Roles are recorded but not
+     * enforced yet: every member can do everything in the dashboard.
+     */
   role: string;
-  /** Server-derived; treat as authoritative. */
+  /**
+     * `pending` until the invitation is accepted or revoked, or until
+     * `expires_at` passes (`expired`). The server works it out each
+     * time it answers.
+     */
   status: MemberInvitationStatus;
+  /** The sign-in email of the member who sent the invitation. Absent when that user no longer exists. */
   invited_by_email?: string;
+  /** When the accept link stops working, 7 days after `created_at`. */
   expires_at: string;
+  /** When the invitation was created and its email queued. */
   created_at: string;
+  /** When the invitee accepted. Absent until then. */
   accepted_at?: string;
+  /** When a member revoked the invitation. Absent unless it was revoked. */
   revoked_at?: string;
 }

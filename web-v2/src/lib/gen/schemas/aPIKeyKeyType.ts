@@ -14,7 +14,7 @@
 /**
  * `secret` can read and change everything in the account.
  * `ingest` can only send usage events, for LiteLLM or another
- * gateway (ADR-133).
+ * gateway.
  */
 export type APIKeyKeyType = typeof APIKeyKeyType[keyof typeof APIKeyKeyType];
 
