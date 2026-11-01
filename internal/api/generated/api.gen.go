@@ -2230,13 +2230,13 @@ func (e CreateApiKeyJSONBodyKeyType) Valid() bool {
 
 // Defines values for ListAuditLogParamsOrder.
 const (
-	CreatedAt ListAuditLogParamsOrder = "created_at"
+	ListAuditLogParamsOrderCreatedAt ListAuditLogParamsOrder = "created_at"
 )
 
 // Valid indicates whether the value is a known member of the ListAuditLogParamsOrder enum.
 func (e ListAuditLogParamsOrder) Valid() bool {
 	switch e {
-	case CreatedAt:
+	case ListAuditLogParamsOrderCreatedAt:
 		return true
 	default:
 		return false
@@ -2321,6 +2321,36 @@ func (e ListCreditNotesParamsRefundStatus) Valid() bool {
 	case ListCreditNotesParamsRefundStatusSucceeded:
 		return true
 	case ListCreditNotesParamsRefundStatusUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListCreditNotesParamsSort.
+const (
+	ListCreditNotesParamsSortAmount           ListCreditNotesParamsSort = "amount"
+	ListCreditNotesParamsSortCreatedAt        ListCreditNotesParamsSort = "created_at"
+	ListCreditNotesParamsSortCreditNoteNumber ListCreditNotesParamsSort = "credit_note_number"
+	ListCreditNotesParamsSortIssuedAt         ListCreditNotesParamsSort = "issued_at"
+	ListCreditNotesParamsSortStatus           ListCreditNotesParamsSort = "status"
+	ListCreditNotesParamsSortTotalCents       ListCreditNotesParamsSort = "total_cents"
+)
+
+// Valid indicates whether the value is a known member of the ListCreditNotesParamsSort enum.
+func (e ListCreditNotesParamsSort) Valid() bool {
+	switch e {
+	case ListCreditNotesParamsSortAmount:
+		return true
+	case ListCreditNotesParamsSortCreatedAt:
+		return true
+	case ListCreditNotesParamsSortCreditNoteNumber:
+		return true
+	case ListCreditNotesParamsSortIssuedAt:
+		return true
+	case ListCreditNotesParamsSortStatus:
+		return true
+	case ListCreditNotesParamsSortTotalCents:
 		return true
 	default:
 		return false
@@ -2417,6 +2447,33 @@ func (e ListCreditLedgerEntriesParamsEntryType) Valid() bool {
 	}
 }
 
+// Defines values for ListCreditLedgerEntriesParamsSort.
+const (
+	ListCreditLedgerEntriesParamsSortAmount      ListCreditLedgerEntriesParamsSort = "amount"
+	ListCreditLedgerEntriesParamsSortAmountCents ListCreditLedgerEntriesParamsSort = "amount_cents"
+	ListCreditLedgerEntriesParamsSortCreatedAt   ListCreditLedgerEntriesParamsSort = "created_at"
+	ListCreditLedgerEntriesParamsSortEntryType   ListCreditLedgerEntriesParamsSort = "entry_type"
+	ListCreditLedgerEntriesParamsSortExpiresAt   ListCreditLedgerEntriesParamsSort = "expires_at"
+)
+
+// Valid indicates whether the value is a known member of the ListCreditLedgerEntriesParamsSort enum.
+func (e ListCreditLedgerEntriesParamsSort) Valid() bool {
+	switch e {
+	case ListCreditLedgerEntriesParamsSortAmount:
+		return true
+	case ListCreditLedgerEntriesParamsSortAmountCents:
+		return true
+	case ListCreditLedgerEntriesParamsSortCreatedAt:
+		return true
+	case ListCreditLedgerEntriesParamsSortEntryType:
+		return true
+	case ListCreditLedgerEntriesParamsSortExpiresAt:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ListCreditLedgerEntriesParamsDir.
 const (
 	ListCreditLedgerEntriesParamsDirAsc  ListCreditLedgerEntriesParamsDir = "asc"
@@ -2429,6 +2486,36 @@ func (e ListCreditLedgerEntriesParamsDir) Valid() bool {
 	case ListCreditLedgerEntriesParamsDirAsc:
 		return true
 	case ListCreditLedgerEntriesParamsDirDesc:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListCustomersParamsSort.
+const (
+	ListCustomersParamsSortCreatedAt   ListCustomersParamsSort = "created_at"
+	ListCustomersParamsSortDisplayName ListCustomersParamsSort = "display_name"
+	ListCustomersParamsSortEmail       ListCustomersParamsSort = "email"
+	ListCustomersParamsSortExternalId  ListCustomersParamsSort = "external_id"
+	ListCustomersParamsSortName        ListCustomersParamsSort = "name"
+	ListCustomersParamsSortStatus      ListCustomersParamsSort = "status"
+)
+
+// Valid indicates whether the value is a known member of the ListCustomersParamsSort enum.
+func (e ListCustomersParamsSort) Valid() bool {
+	switch e {
+	case ListCustomersParamsSortCreatedAt:
+		return true
+	case ListCustomersParamsSortDisplayName:
+		return true
+	case ListCustomersParamsSortEmail:
+		return true
+	case ListCustomersParamsSortExternalId:
+		return true
+	case ListCustomersParamsSortName:
+		return true
+	case ListCustomersParamsSortStatus:
 		return true
 	default:
 		return false
@@ -2537,6 +2624,48 @@ func (e ResolveDunningRunJSONBodyResolution) Valid() bool {
 	case InvoiceVoided:
 		return true
 	case PaymentRecovered:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListInvoicesParamsSort.
+const (
+	ListInvoicesParamsSortAmountDue          ListInvoicesParamsSort = "amount_due"
+	ListInvoicesParamsSortAmountDueCents     ListInvoicesParamsSort = "amount_due_cents"
+	ListInvoicesParamsSortBillingPeriodStart ListInvoicesParamsSort = "billing_period_start"
+	ListInvoicesParamsSortCreatedAt          ListInvoicesParamsSort = "created_at"
+	ListInvoicesParamsSortDueAt              ListInvoicesParamsSort = "due_at"
+	ListInvoicesParamsSortInvoiceNumber      ListInvoicesParamsSort = "invoice_number"
+	ListInvoicesParamsSortIssuedAt           ListInvoicesParamsSort = "issued_at"
+	ListInvoicesParamsSortPaymentStatus      ListInvoicesParamsSort = "payment_status"
+	ListInvoicesParamsSortPeriod             ListInvoicesParamsSort = "period"
+	ListInvoicesParamsSortStatus             ListInvoicesParamsSort = "status"
+)
+
+// Valid indicates whether the value is a known member of the ListInvoicesParamsSort enum.
+func (e ListInvoicesParamsSort) Valid() bool {
+	switch e {
+	case ListInvoicesParamsSortAmountDue:
+		return true
+	case ListInvoicesParamsSortAmountDueCents:
+		return true
+	case ListInvoicesParamsSortBillingPeriodStart:
+		return true
+	case ListInvoicesParamsSortCreatedAt:
+		return true
+	case ListInvoicesParamsSortDueAt:
+		return true
+	case ListInvoicesParamsSortInvoiceNumber:
+		return true
+	case ListInvoicesParamsSortIssuedAt:
+		return true
+	case ListInvoicesParamsSortPaymentStatus:
+		return true
+	case ListInvoicesParamsSortPeriod:
+		return true
+	case ListInvoicesParamsSortStatus:
 		return true
 	default:
 		return false
@@ -2930,6 +3059,36 @@ const (
 func (e ListSubscriptionsParamsCollection) Valid() bool {
 	switch e {
 	case Paused:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListSubscriptionsParamsSort.
+const (
+	ListSubscriptionsParamsSortCreatedAt     ListSubscriptionsParamsSort = "created_at"
+	ListSubscriptionsParamsSortDisplayName   ListSubscriptionsParamsSort = "display_name"
+	ListSubscriptionsParamsSortName          ListSubscriptionsParamsSort = "name"
+	ListSubscriptionsParamsSortNextBillingAt ListSubscriptionsParamsSort = "next_billing_at"
+	ListSubscriptionsParamsSortStatus        ListSubscriptionsParamsSort = "status"
+	ListSubscriptionsParamsSortTrialEndAt    ListSubscriptionsParamsSort = "trial_end_at"
+)
+
+// Valid indicates whether the value is a known member of the ListSubscriptionsParamsSort enum.
+func (e ListSubscriptionsParamsSort) Valid() bool {
+	switch e {
+	case ListSubscriptionsParamsSortCreatedAt:
+		return true
+	case ListSubscriptionsParamsSortDisplayName:
+		return true
+	case ListSubscriptionsParamsSortName:
+		return true
+	case ListSubscriptionsParamsSortNextBillingAt:
+		return true
+	case ListSubscriptionsParamsSortStatus:
+		return true
+	case ListSubscriptionsParamsSortTrialEndAt:
 		return true
 	default:
 		return false
@@ -10071,10 +10230,14 @@ type ListCreditNotesParams struct {
 	// hour.
 	RefundStatus ListCreditNotesParamsRefundStatus `form:"refund_status,omitempty" json:"refund_status,omitempty"`
 
-	// Sort One of credit_note_number, total_cents (alias amount), status, issued_at, created_at (default).
-	Sort string `form:"sort,omitempty" json:"sort,omitempty"`
+	// Sort The order of the list. `created_at` (the default),
+	// `credit_note_number`, `total_cents` (or `amount`), `status` or
+	// `issued_at`. Any other value is a 422 with `param: sort`. Ties are
+	// broken by `id` in the same direction.
+	Sort ListCreditNotesParamsSort `form:"sort,omitempty" json:"sort,omitempty"`
 
-	// Dir Sort direction, `desc` (the default) or `asc`.
+	// Dir Sort direction: `desc` (the default) or `asc`, in lower case. Any
+	// other value is a 422 with `param: dir`.
 	Dir ListCreditNotesParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
 
 	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
@@ -10093,6 +10256,9 @@ type ListCreditNotesParamsStatus string
 
 // ListCreditNotesParamsRefundStatus defines parameters for ListCreditNotes.
 type ListCreditNotesParamsRefundStatus string
+
+// ListCreditNotesParamsSort defines parameters for ListCreditNotes.
+type ListCreditNotesParamsSort string
 
 // ListCreditNotesParamsDir defines parameters for ListCreditNotes.
 type ListCreditNotesParamsDir string
@@ -10427,10 +10593,14 @@ type ListCreditLedgerEntriesParams struct {
 	// EntryType Only entries of this type.
 	EntryType ListCreditLedgerEntriesParamsEntryType `form:"entry_type,omitempty" json:"entry_type,omitempty"`
 
-	// Sort One of created_at (default), amount_cents, entry_type, expires_at.
-	Sort string `form:"sort,omitempty" json:"sort,omitempty"`
+	// Sort The order of the list. `created_at` (the default), `amount_cents`
+	// (or `amount`), `entry_type` or `expires_at`. Any other value is a
+	// 422 with `param: sort`. Ties are broken by `id` in the same
+	// direction.
+	Sort ListCreditLedgerEntriesParamsSort `form:"sort,omitempty" json:"sort,omitempty"`
 
-	// Dir Default desc.
+	// Dir Sort direction: `desc` (the default) or `asc`, in lower case. Any
+	// other value is a 422 with `param: dir`.
 	Dir ListCreditLedgerEntriesParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
 
 	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
@@ -10446,6 +10616,9 @@ type ListCreditLedgerEntriesParams struct {
 
 // ListCreditLedgerEntriesParamsEntryType defines parameters for ListCreditLedgerEntries.
 type ListCreditLedgerEntriesParamsEntryType string
+
+// ListCreditLedgerEntriesParamsSort defines parameters for ListCreditLedgerEntries.
+type ListCreditLedgerEntriesParamsSort string
 
 // ListCreditLedgerEntriesParamsDir defines parameters for ListCreditLedgerEntries.
 type ListCreditLedgerEntriesParamsDir string
@@ -10469,15 +10642,15 @@ type ListCustomersParams struct {
 	// stop there.
 	Search string `form:"search,omitempty" json:"search,omitempty"`
 
-	// Sort One of `display_name`, `email`, `external_id`, `status` or
-	// `created_at` (the default). Any other value sorts by `created_at`.
-	// On a server that encrypts customer data, a sort by `display_name`
-	// or `email` looks at the 5,000 newest customers at most; the rows
-	// and `total` stop there.
-	Sort string `form:"sort,omitempty" json:"sort,omitempty"`
+	// Sort The order of the list. `created_at` (the default), `display_name`
+	// (or `name`), `email`, `external_id` or `status`. Any other value is
+	// a 422 with `param: sort`. On a server that encrypts customer data,
+	// a sort by `display_name`, `name` or `email` looks at the 5,000
+	// newest customers at most; the rows and `total` stop there.
+	Sort ListCustomersParamsSort `form:"sort,omitempty" json:"sort,omitempty"`
 
-	// Dir Sort direction, `asc` or `desc`. Default `desc`; any value other
-	// than `asc` sorts descending.
+	// Dir Sort direction: `desc` (the default) or `asc`, in lower case. Any
+	// other value is a 422 with `param: dir`.
 	Dir ListCustomersParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
 
 	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
@@ -10490,6 +10663,9 @@ type ListCustomersParams struct {
 	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
+
+// ListCustomersParamsSort defines parameters for ListCustomers.
+type ListCustomersParamsSort string
 
 // ListCustomersParamsDir defines parameters for ListCustomers.
 type ListCustomersParamsDir string
@@ -10991,10 +11167,19 @@ type ListInvoicesParams struct {
 	// Ids Comma-separated invoice IDs to fetch exactly.
 	Ids string `form:"ids,omitempty" json:"ids,omitempty"`
 
-	// Sort One of invoice_number, amount_due_cents, billing_period_start, due_at, issued_at, status, payment_status, created_at (default). amount_due_cents sorts a paid invoice by what paid it (`amount_paid_cents` plus `credits_applied_cents`, since paying zeroes `amount_due_cents`) and every other invoice by `amount_due_cents`, which a voided or written-off invoice keeps. An unknown key sorts by created_at.
-	Sort string `form:"sort,omitempty" json:"sort,omitempty"`
+	// Sort The order of the list. `created_at` (the default), `invoice_number`,
+	// `amount_due_cents` (or `amount_due`), `billing_period_start` (or
+	// `period`), `due_at`, `issued_at`, `status` or `payment_status`.
+	// `amount_due_cents` sorts a paid invoice by what paid it
+	// (`amount_paid_cents` plus `credits_applied_cents`, since paying zeroes
+	// `amount_due_cents`) and every other invoice by `amount_due_cents`,
+	// which a voided or written-off invoice keeps. Any other value is a
+	// 422 with `param: sort`. Ties are broken by `id` in the same
+	// direction.
+	Sort ListInvoicesParamsSort `form:"sort,omitempty" json:"sort,omitempty"`
 
-	// Dir Sort direction, `desc` (the default) or `asc`.
+	// Dir Sort direction: `desc` (the default) or `asc`, in lower case. Any
+	// other value is a 422 with `param: dir`.
 	Dir ListInvoicesParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
 
 	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
@@ -11007,6 +11192,9 @@ type ListInvoicesParams struct {
 	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
+
+// ListInvoicesParamsSort defines parameters for ListInvoices.
+type ListInvoicesParamsSort string
 
 // ListInvoicesParamsDir defines parameters for ListInvoices.
 type ListInvoicesParamsDir string
@@ -12002,11 +12190,14 @@ type ListSubscriptionsParams struct {
 	// Search Case-insensitive substring match on display name or code.
 	Search string `form:"search,omitempty" json:"search,omitempty"`
 
-	// Sort One of display_name, status, next_billing_at, trial_end_at,
-	// created_at (default). Any other value sorts by created_at.
-	Sort string `form:"sort,omitempty" json:"sort,omitempty"`
+	// Sort The order of the list. `created_at` (the default),
+	// `next_billing_at`, `status`, `display_name` (or `name`) or
+	// `trial_end_at`. Any other value is a 422 with `param: sort`. Ties
+	// are broken by `id` in the same direction.
+	Sort ListSubscriptionsParamsSort `form:"sort,omitempty" json:"sort,omitempty"`
 
-	// Dir Sort direction, `asc` or `desc` (the default). Any other value sorts descending.
+	// Dir Sort direction: `desc` (the default) or `asc`, in lower case. Any
+	// other value is a 422 with `param: dir`.
 	Dir ListSubscriptionsParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
 
 	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
@@ -12028,6 +12219,9 @@ type ListSubscriptionsParamsBilling string
 
 // ListSubscriptionsParamsCollection defines parameters for ListSubscriptions.
 type ListSubscriptionsParamsCollection string
+
+// ListSubscriptionsParamsSort defines parameters for ListSubscriptions.
+type ListSubscriptionsParamsSort string
 
 // ListSubscriptionsParamsDir defines parameters for ListSubscriptions.
 type ListSubscriptionsParamsDir string

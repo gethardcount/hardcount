@@ -13,6 +13,7 @@
 import type { LimitParameter } from './limitParameter';
 import type { ListCreditLedgerEntriesDir } from './listCreditLedgerEntriesDir';
 import type { ListCreditLedgerEntriesEntryType } from './listCreditLedgerEntriesEntryType';
+import type { ListCreditLedgerEntriesSort } from './listCreditLedgerEntriesSort';
 import type { OffsetParameter } from './offsetParameter';
 
 export type ListCreditLedgerEntriesParams = {
@@ -21,11 +22,15 @@ export type ListCreditLedgerEntriesParams = {
  */
 entry_type?: ListCreditLedgerEntriesEntryType;
 /**
- * One of created_at (default), amount_cents, entry_type, expires_at.
+ * The order of the list. `created_at` (the default), `amount_cents`
+ * (or `amount`), `entry_type` or `expires_at`. Any other value is a
+ * 422 with `param: sort`. Ties are broken by `id` in the same
+ * direction.
  */
-sort?: string;
+sort?: ListCreditLedgerEntriesSort;
 /**
- * Default desc.
+ * Sort direction: `desc` (the default) or `asc`, in lower case. Any
+ * other value is a 422 with `param: dir`.
  */
 dir?: ListCreditLedgerEntriesDir;
 /**

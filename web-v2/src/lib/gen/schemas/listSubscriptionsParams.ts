@@ -14,6 +14,7 @@ import type { LimitParameter } from './limitParameter';
 import type { ListSubscriptionsBilling } from './listSubscriptionsBilling';
 import type { ListSubscriptionsCollection } from './listSubscriptionsCollection';
 import type { ListSubscriptionsDir } from './listSubscriptionsDir';
+import type { ListSubscriptionsSort } from './listSubscriptionsSort';
 import type { ListSubscriptionsStatus } from './listSubscriptionsStatus';
 import type { OffsetParameter } from './offsetParameter';
 
@@ -50,12 +51,15 @@ collection?: ListSubscriptionsCollection;
  */
 search?: string;
 /**
- * One of display_name, status, next_billing_at, trial_end_at,
- * created_at (default). Any other value sorts by created_at.
+ * The order of the list. `created_at` (the default),
+ * `next_billing_at`, `status`, `display_name` (or `name`) or
+ * `trial_end_at`. Any other value is a 422 with `param: sort`. Ties
+ * are broken by `id` in the same direction.
  */
-sort?: string;
+sort?: ListSubscriptionsSort;
 /**
- * Sort direction, `asc` or `desc` (the default). Any other value sorts descending.
+ * Sort direction: `desc` (the default) or `asc`, in lower case. Any
+ * other value is a 422 with `param: dir`.
  */
 dir?: ListSubscriptionsDir;
 /**

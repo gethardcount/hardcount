@@ -725,7 +725,7 @@ export const getListCustomersQueryKey = (params?: ListCustomersParams,) => {
     }
 
 
-export const getListCustomersQueryOptions = <TData = Awaited<ReturnType<typeof listCustomers>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(params?: ListCustomersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomers>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListCustomersQueryOptions = <TData = Awaited<ReturnType<typeof listCustomers>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(params?: ListCustomersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomers>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -744,10 +744,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListCustomersQueryResult = NonNullable<Awaited<ReturnType<typeof listCustomers>>>
-export type ListCustomersQueryError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse
+export type ListCustomersQueryError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
 
-export function useListCustomers<TData = Awaited<ReturnType<typeof listCustomers>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListCustomers<TData = Awaited<ReturnType<typeof listCustomers>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params: undefined |  ListCustomersParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomers>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listCustomers>>,
@@ -757,7 +757,7 @@ export function useListCustomers<TData = Awaited<ReturnType<typeof listCustomers
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListCustomers<TData = Awaited<ReturnType<typeof listCustomers>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListCustomers<TData = Awaited<ReturnType<typeof listCustomers>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params?: ListCustomersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomers>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listCustomers>>,
@@ -767,7 +767,7 @@ export function useListCustomers<TData = Awaited<ReturnType<typeof listCustomers
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListCustomers<TData = Awaited<ReturnType<typeof listCustomers>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListCustomers<TData = Awaited<ReturnType<typeof listCustomers>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params?: ListCustomersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomers>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -775,7 +775,7 @@ export function useListCustomers<TData = Awaited<ReturnType<typeof listCustomers
  * @summary List customers
  */
 
-export function useListCustomers<TData = Awaited<ReturnType<typeof listCustomers>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListCustomers<TData = Awaited<ReturnType<typeof listCustomers>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params?: ListCustomersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomers>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -3184,7 +3184,7 @@ export const getListCreditNotesQueryKey = (params?: ListCreditNotesParams,) => {
     }
 
 
-export const getListCreditNotesQueryOptions = <TData = Awaited<ReturnType<typeof listCreditNotes>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(params?: ListCreditNotesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditNotes>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListCreditNotesQueryOptions = <TData = Awaited<ReturnType<typeof listCreditNotes>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(params?: ListCreditNotesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditNotes>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -3203,10 +3203,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListCreditNotesQueryResult = NonNullable<Awaited<ReturnType<typeof listCreditNotes>>>
-export type ListCreditNotesQueryError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse
+export type ListCreditNotesQueryError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
 
-export function useListCreditNotes<TData = Awaited<ReturnType<typeof listCreditNotes>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListCreditNotes<TData = Awaited<ReturnType<typeof listCreditNotes>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params: undefined |  ListCreditNotesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditNotes>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listCreditNotes>>,
@@ -3216,7 +3216,7 @@ export function useListCreditNotes<TData = Awaited<ReturnType<typeof listCreditN
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListCreditNotes<TData = Awaited<ReturnType<typeof listCreditNotes>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListCreditNotes<TData = Awaited<ReturnType<typeof listCreditNotes>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params?: ListCreditNotesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditNotes>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listCreditNotes>>,
@@ -3226,7 +3226,7 @@ export function useListCreditNotes<TData = Awaited<ReturnType<typeof listCreditN
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListCreditNotes<TData = Awaited<ReturnType<typeof listCreditNotes>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListCreditNotes<TData = Awaited<ReturnType<typeof listCreditNotes>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params?: ListCreditNotesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditNotes>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -3234,7 +3234,7 @@ export function useListCreditNotes<TData = Awaited<ReturnType<typeof listCreditN
  * @summary List credit notes
  */
 
-export function useListCreditNotes<TData = Awaited<ReturnType<typeof listCreditNotes>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListCreditNotes<TData = Awaited<ReturnType<typeof listCreditNotes>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params?: ListCreditNotesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditNotes>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -3625,7 +3625,7 @@ export const getListCreditLedgerEntriesQueryKey = (customerId: string,
     }
 
 
-export const getListCreditLedgerEntriesQueryOptions = <TData = Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse>(customerId: string,
+export const getListCreditLedgerEntriesQueryOptions = <TData = Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(customerId: string,
     params?: ListCreditLedgerEntriesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
@@ -3645,10 +3645,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListCreditLedgerEntriesQueryResult = NonNullable<Awaited<ReturnType<typeof listCreditLedgerEntries>>>
-export type ListCreditLedgerEntriesQueryError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse
+export type ListCreditLedgerEntriesQueryError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
 
-export function useListCreditLedgerEntries<TData = Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse>(
+export function useListCreditLedgerEntries<TData = Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  customerId: string,
     params: undefined |  ListCreditLedgerEntriesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -3659,7 +3659,7 @@ export function useListCreditLedgerEntries<TData = Awaited<ReturnType<typeof lis
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListCreditLedgerEntries<TData = Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse>(
+export function useListCreditLedgerEntries<TData = Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  customerId: string,
     params?: ListCreditLedgerEntriesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -3670,7 +3670,7 @@ export function useListCreditLedgerEntries<TData = Awaited<ReturnType<typeof lis
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListCreditLedgerEntries<TData = Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse>(
+export function useListCreditLedgerEntries<TData = Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  customerId: string,
     params?: ListCreditLedgerEntriesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
@@ -3679,7 +3679,7 @@ export function useListCreditLedgerEntries<TData = Awaited<ReturnType<typeof lis
  * @summary List a customer's credit ledger
  */
 
-export function useListCreditLedgerEntries<TData = Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse>(
+export function useListCreditLedgerEntries<TData = Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  customerId: string,
     params?: ListCreditLedgerEntriesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
@@ -5997,7 +5997,7 @@ export const getListSubscriptionsQueryKey = (params?: ListSubscriptionsParams,) 
     }
 
 
-export const getListSubscriptionsQueryOptions = <TData = Awaited<ReturnType<typeof listSubscriptions>>, TError = Error | UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(params?: ListSubscriptionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSubscriptions>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListSubscriptionsQueryOptions = <TData = Awaited<ReturnType<typeof listSubscriptions>>, TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(params?: ListSubscriptionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSubscriptions>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -6016,10 +6016,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListSubscriptionsQueryResult = NonNullable<Awaited<ReturnType<typeof listSubscriptions>>>
-export type ListSubscriptionsQueryError = Error | UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse
+export type ListSubscriptionsQueryError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
 
 
-export function useListSubscriptions<TData = Awaited<ReturnType<typeof listSubscriptions>>, TError = Error | UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListSubscriptions<TData = Awaited<ReturnType<typeof listSubscriptions>>, TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
  params: undefined |  ListSubscriptionsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSubscriptions>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listSubscriptions>>,
@@ -6029,7 +6029,7 @@ export function useListSubscriptions<TData = Awaited<ReturnType<typeof listSubsc
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListSubscriptions<TData = Awaited<ReturnType<typeof listSubscriptions>>, TError = Error | UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListSubscriptions<TData = Awaited<ReturnType<typeof listSubscriptions>>, TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
  params?: ListSubscriptionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSubscriptions>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listSubscriptions>>,
@@ -6039,7 +6039,7 @@ export function useListSubscriptions<TData = Awaited<ReturnType<typeof listSubsc
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListSubscriptions<TData = Awaited<ReturnType<typeof listSubscriptions>>, TError = Error | UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListSubscriptions<TData = Awaited<ReturnType<typeof listSubscriptions>>, TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
  params?: ListSubscriptionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSubscriptions>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -6047,7 +6047,7 @@ export function useListSubscriptions<TData = Awaited<ReturnType<typeof listSubsc
  * @summary List subscriptions
  */
 
-export function useListSubscriptions<TData = Awaited<ReturnType<typeof listSubscriptions>>, TError = Error | UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListSubscriptions<TData = Awaited<ReturnType<typeof listSubscriptions>>, TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
  params?: ListSubscriptionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSubscriptions>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -8366,7 +8366,7 @@ export const getListInvoicesQueryKey = (params?: ListInvoicesParams,) => {
     }
 
 
-export const getListInvoicesQueryOptions = <TData = Awaited<ReturnType<typeof listInvoices>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(params?: ListInvoicesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoices>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListInvoicesQueryOptions = <TData = Awaited<ReturnType<typeof listInvoices>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(params?: ListInvoicesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoices>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -8385,10 +8385,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListInvoicesQueryResult = NonNullable<Awaited<ReturnType<typeof listInvoices>>>
-export type ListInvoicesQueryError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse
+export type ListInvoicesQueryError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
 
-export function useListInvoices<TData = Awaited<ReturnType<typeof listInvoices>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListInvoices<TData = Awaited<ReturnType<typeof listInvoices>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params: undefined |  ListInvoicesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoices>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listInvoices>>,
@@ -8398,7 +8398,7 @@ export function useListInvoices<TData = Awaited<ReturnType<typeof listInvoices>>
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListInvoices<TData = Awaited<ReturnType<typeof listInvoices>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListInvoices<TData = Awaited<ReturnType<typeof listInvoices>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params?: ListInvoicesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoices>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listInvoices>>,
@@ -8408,7 +8408,7 @@ export function useListInvoices<TData = Awaited<ReturnType<typeof listInvoices>>
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListInvoices<TData = Awaited<ReturnType<typeof listInvoices>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListInvoices<TData = Awaited<ReturnType<typeof listInvoices>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params?: ListInvoicesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoices>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -8416,7 +8416,7 @@ export function useListInvoices<TData = Awaited<ReturnType<typeof listInvoices>>
  * @summary List invoices
  */
 
-export function useListInvoices<TData = Awaited<ReturnType<typeof listInvoices>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListInvoices<TData = Awaited<ReturnType<typeof listInvoices>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params?: ListInvoicesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoices>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {

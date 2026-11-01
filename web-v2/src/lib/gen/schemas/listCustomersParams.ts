@@ -12,6 +12,7 @@
  */
 import type { LimitParameter } from './limitParameter';
 import type { ListCustomersDir } from './listCustomersDir';
+import type { ListCustomersSort } from './listCustomersSort';
 import type { OffsetParameter } from './offsetParameter';
 
 export type ListCustomersParams = {
@@ -37,16 +38,16 @@ ids?: string;
  */
 search?: string;
 /**
- * One of `display_name`, `email`, `external_id`, `status` or
- * `created_at` (the default). Any other value sorts by `created_at`.
- * On a server that encrypts customer data, a sort by `display_name`
- * or `email` looks at the 5,000 newest customers at most; the rows
- * and `total` stop there.
+ * The order of the list. `created_at` (the default), `display_name`
+ * (or `name`), `email`, `external_id` or `status`. Any other value is
+ * a 422 with `param: sort`. On a server that encrypts customer data,
+ * a sort by `display_name`, `name` or `email` looks at the 5,000
+ * newest customers at most; the rows and `total` stop there.
  */
-sort?: string;
+sort?: ListCustomersSort;
 /**
- * Sort direction, `asc` or `desc`. Default `desc`; any value other
- * than `asc` sorts descending.
+ * Sort direction: `desc` (the default) or `asc`, in lower case. Any
+ * other value is a 422 with `param: dir`.
  */
 dir?: ListCustomersDir;
 /**

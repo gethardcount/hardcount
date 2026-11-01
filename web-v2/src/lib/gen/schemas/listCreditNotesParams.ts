@@ -13,6 +13,7 @@
 import type { LimitParameter } from './limitParameter';
 import type { ListCreditNotesDir } from './listCreditNotesDir';
 import type { ListCreditNotesRefundStatus } from './listCreditNotesRefundStatus';
+import type { ListCreditNotesSort } from './listCreditNotesSort';
 import type { ListCreditNotesStatus } from './listCreditNotesStatus';
 import type { OffsetParameter } from './offsetParameter';
 
@@ -38,11 +39,15 @@ status?: ListCreditNotesStatus;
  */
 refund_status?: ListCreditNotesRefundStatus;
 /**
- * One of credit_note_number, total_cents (alias amount), status, issued_at, created_at (default).
+ * The order of the list. `created_at` (the default),
+ * `credit_note_number`, `total_cents` (or `amount`), `status` or
+ * `issued_at`. Any other value is a 422 with `param: sort`. Ties are
+ * broken by `id` in the same direction.
  */
-sort?: string;
+sort?: ListCreditNotesSort;
 /**
- * Sort direction, `desc` (the default) or `asc`.
+ * Sort direction: `desc` (the default) or `asc`, in lower case. Any
+ * other value is a 422 with `param: dir`.
  */
 dir?: ListCreditNotesDir;
 /**

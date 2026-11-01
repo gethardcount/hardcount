@@ -14257,16 +14257,16 @@ export interface operations {
                  */
                 search?: string;
                 /**
-                 * @description One of `display_name`, `email`, `external_id`, `status` or
-                 *     `created_at` (the default). Any other value sorts by `created_at`.
-                 *     On a server that encrypts customer data, a sort by `display_name`
-                 *     or `email` looks at the 5,000 newest customers at most; the rows
-                 *     and `total` stop there.
+                 * @description The order of the list. `created_at` (the default), `display_name`
+                 *     (or `name`), `email`, `external_id` or `status`. Any other value is
+                 *     a 422 with `param: sort`. On a server that encrypts customer data,
+                 *     a sort by `display_name`, `name` or `email` looks at the 5,000
+                 *     newest customers at most; the rows and `total` stop there.
                  */
-                sort?: string;
+                sort?: "created_at" | "display_name" | "name" | "email" | "external_id" | "status";
                 /**
-                 * @description Sort direction, `asc` or `desc`. Default `desc`; any value other
-                 *     than `asc` sorts descending.
+                 * @description Sort direction: `desc` (the default) or `asc`, in lower case. Any
+                 *     other value is a 422 with `param: dir`.
                  */
                 dir?: "asc" | "desc";
                 /**
@@ -14319,7 +14319,31 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            422: components["responses"]["InvalidPage"];
+            /**
+             * @description `limit` or `offset` is out of range or not a whole number, the
+             *     request sends the removed `after` cursor, `sort` or `dir` is not
+             *     one of its values. `param` names it, and for `sort` and `dir`
+             *     the message lists the allowed values.
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "sort \"nope\" is not one of created_at, display_name, name, email, external_id, status",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "sort"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             429: components["responses"]["RateLimited"];
         };
     };
@@ -17309,9 +17333,17 @@ export interface operations {
                  *     hour.
                  */
                 refund_status?: "none" | "pending" | "succeeded" | "failed" | "unknown" | "needs_attention";
-                /** @description One of credit_note_number, total_cents (alias amount), status, issued_at, created_at (default). */
-                sort?: string;
-                /** @description Sort direction, `desc` (the default) or `asc`. */
+                /**
+                 * @description The order of the list. `created_at` (the default),
+                 *     `credit_note_number`, `total_cents` (or `amount`), `status` or
+                 *     `issued_at`. Any other value is a 422 with `param: sort`. Ties are
+                 *     broken by `id` in the same direction.
+                 */
+                sort?: "created_at" | "credit_note_number" | "total_cents" | "amount" | "status" | "issued_at";
+                /**
+                 * @description Sort direction: `desc` (the default) or `asc`, in lower case. Any
+                 *     other value is a 422 with `param: dir`.
+                 */
                 dir?: "asc" | "desc";
                 /**
                  * @description Rows per page, from 1 to 100. Default 50. Any other value, one that
@@ -17398,7 +17430,31 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            422: components["responses"]["InvalidPage"];
+            /**
+             * @description `limit` or `offset` is out of range or not a whole number, the
+             *     request sends the removed `after` cursor, `sort` or `dir` is not
+             *     one of its values. `param` names it, and for `sort` and `dir`
+             *     the message lists the allowed values.
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "sort \"nope\" is not one of created_at, credit_note_number, total_cents, amount, status, issued_at",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "sort"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             429: components["responses"]["RateLimited"];
         };
     };
@@ -17946,9 +18002,17 @@ export interface operations {
             query?: {
                 /** @description Only entries of this type. */
                 entry_type?: "grant" | "usage" | "expiry" | "adjustment";
-                /** @description One of created_at (default), amount_cents, entry_type, expires_at. */
-                sort?: string;
-                /** @description Default desc. */
+                /**
+                 * @description The order of the list. `created_at` (the default), `amount_cents`
+                 *     (or `amount`), `entry_type` or `expires_at`. Any other value is a
+                 *     422 with `param: sort`. Ties are broken by `id` in the same
+                 *     direction.
+                 */
+                sort?: "created_at" | "amount_cents" | "amount" | "entry_type" | "expires_at";
+                /**
+                 * @description Sort direction: `desc` (the default) or `asc`, in lower case. Any
+                 *     other value is a 422 with `param: dir`.
+                 */
                 dir?: "asc" | "desc";
                 /**
                  * @description Rows per page, from 1 to 100. Default 50. Any other value, one that
@@ -18046,7 +18110,31 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            422: components["responses"]["InvalidPage"];
+            /**
+             * @description `limit` or `offset` is out of range or not a whole number, the
+             *     request sends the removed `after` cursor, `sort` or `dir` is not
+             *     one of its values. `param` names it, and for `sort` and `dir`
+             *     the message lists the allowed values.
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "sort \"nope\" is not one of created_at, amount_cents, amount, entry_type, expires_at",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "sort"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             429: components["responses"]["RateLimited"];
         };
     };
@@ -20472,11 +20560,16 @@ export interface operations {
                 /** @description Case-insensitive substring match on display name or code. */
                 search?: string;
                 /**
-                 * @description One of display_name, status, next_billing_at, trial_end_at,
-                 *     created_at (default). Any other value sorts by created_at.
+                 * @description The order of the list. `created_at` (the default),
+                 *     `next_billing_at`, `status`, `display_name` (or `name`) or
+                 *     `trial_end_at`. Any other value is a 422 with `param: sort`. Ties
+                 *     are broken by `id` in the same direction.
                  */
-                sort?: string;
-                /** @description Sort direction, `asc` or `desc` (the default). Any other value sorts descending. */
+                sort?: "created_at" | "next_billing_at" | "status" | "display_name" | "name" | "trial_end_at";
+                /**
+                 * @description Sort direction: `desc` (the default) or `asc`, in lower case. Any
+                 *     other value is a 422 with `param: dir`.
+                 */
                 dir?: "asc" | "desc";
                 /**
                  * @description Rows per page, from 1 to 100. Default 50. Any other value, one that
@@ -20566,7 +20659,31 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            422: components["responses"]["InvalidPage"];
+            /**
+             * @description `limit` or `offset` is out of range or not a whole number, the
+             *     request sends the removed `after` cursor, `sort` or `dir` is not
+             *     one of its values. `param` names it, and for `sort` and `dir`
+             *     the message lists the allowed values.
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "sort \"nope\" is not one of created_at, next_billing_at, status, display_name, name, trial_end_at",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "sort"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             429: components["responses"]["RateLimited"];
         };
     };
@@ -24313,9 +24430,22 @@ export interface operations {
                 overdue?: boolean;
                 /** @description Comma-separated invoice IDs to fetch exactly. */
                 ids?: string;
-                /** @description One of invoice_number, amount_due_cents, billing_period_start, due_at, issued_at, status, payment_status, created_at (default). amount_due_cents sorts a paid invoice by what paid it (`amount_paid_cents` plus `credits_applied_cents`, since paying zeroes `amount_due_cents`) and every other invoice by `amount_due_cents`, which a voided or written-off invoice keeps. An unknown key sorts by created_at. */
-                sort?: string;
-                /** @description Sort direction, `desc` (the default) or `asc`. */
+                /**
+                 * @description The order of the list. `created_at` (the default), `invoice_number`,
+                 *     `amount_due_cents` (or `amount_due`), `billing_period_start` (or
+                 *     `period`), `due_at`, `issued_at`, `status` or `payment_status`.
+                 *     `amount_due_cents` sorts a paid invoice by what paid it
+                 *     (`amount_paid_cents` plus `credits_applied_cents`, since paying zeroes
+                 *     `amount_due_cents`) and every other invoice by `amount_due_cents`,
+                 *     which a voided or written-off invoice keeps. Any other value is a
+                 *     422 with `param: sort`. Ties are broken by `id` in the same
+                 *     direction.
+                 */
+                sort?: "created_at" | "invoice_number" | "amount_due_cents" | "amount_due" | "billing_period_start" | "period" | "due_at" | "issued_at" | "status" | "payment_status";
+                /**
+                 * @description Sort direction: `desc` (the default) or `asc`, in lower case. Any
+                 *     other value is a 422 with `param: dir`.
+                 */
                 dir?: "asc" | "desc";
                 /**
                  * @description Rows per page, from 1 to 100. Default 50. Any other value, one that
@@ -24413,7 +24543,32 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            422: components["responses"]["InvalidPage"];
+            /**
+             * @description `limit` or `offset` is out of range or not a whole number, the
+             *     request sends the removed `after` cursor, `sort` or `dir` is not
+             *     one of its values, `from` or `to` is neither an RFC 3339 time nor
+             *     a YYYY-MM-DD date, or `to` is before `from`. `param` names it, and
+             *     for `sort` and `dir` the message lists the allowed values.
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "sort \"nope\" is not one of created_at, invoice_number, amount_due_cents, amount_due, billing_period_start, period, due_at, issued_at, status, payment_status",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "sort"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             429: components["responses"]["RateLimited"];
         };
     };

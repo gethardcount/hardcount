@@ -12,6 +12,7 @@
  */
 import type { LimitParameter } from './limitParameter';
 import type { ListInvoicesDir } from './listInvoicesDir';
+import type { ListInvoicesSort } from './listInvoicesSort';
 import type { OffsetParameter } from './offsetParameter';
 
 export type ListInvoicesParams = {
@@ -64,11 +65,20 @@ overdue?: boolean;
  */
 ids?: string;
 /**
- * One of invoice_number, amount_due_cents, billing_period_start, due_at, issued_at, status, payment_status, created_at (default). amount_due_cents sorts a paid invoice by what paid it (`amount_paid_cents` plus `credits_applied_cents`, since paying zeroes `amount_due_cents`) and every other invoice by `amount_due_cents`, which a voided or written-off invoice keeps. An unknown key sorts by created_at.
+ * The order of the list. `created_at` (the default), `invoice_number`,
+ * `amount_due_cents` (or `amount_due`), `billing_period_start` (or
+ * `period`), `due_at`, `issued_at`, `status` or `payment_status`.
+ * `amount_due_cents` sorts a paid invoice by what paid it
+ * (`amount_paid_cents` plus `credits_applied_cents`, since paying zeroes
+ * `amount_due_cents`) and every other invoice by `amount_due_cents`,
+ * which a voided or written-off invoice keeps. Any other value is a
+ * 422 with `param: sort`. Ties are broken by `id` in the same
+ * direction.
  */
-sort?: string;
+sort?: ListInvoicesSort;
 /**
- * Sort direction, `desc` (the default) or `asc`.
+ * Sort direction: `desc` (the default) or `asc`, in lower case. Any
+ * other value is a 422 with `param: dir`.
  */
 dir?: ListInvoicesDir;
 /**
