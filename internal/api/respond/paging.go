@@ -7,7 +7,7 @@ import (
 )
 
 // Every list route pages the same way: `limit` and `offset` in, `{data,
-// total}` out (List). docs/api-surface.md ("Lists") is the caller's copy.
+// total}` out (List). docs/api/pagination.md is the caller's copy.
 const (
 	// DefaultLimit is the page size when the request sends no limit.
 	DefaultLimit = 50
