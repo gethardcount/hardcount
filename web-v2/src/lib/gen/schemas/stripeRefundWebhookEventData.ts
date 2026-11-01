@@ -16,7 +16,7 @@ import type { InvoiceStripeRefund } from './invoiceStripeRefund';
 
 /**
  * The `data` of the outbound webhook event `payment.refunded_in_stripe`
- * (docs/api/webhook-events.md): the invoice the refunded payment
+ * ([Webhook events](https://gethardcount.com/docs/api/webhook-events/)): the invoice the refunded payment
  * belongs to, as it stood (a refund never changes it), and the refund
  * as the API returns it. The invoice leaves out `attention`,
  * `recovery_warning`, `billing_period_display` and `test_clock_id`,

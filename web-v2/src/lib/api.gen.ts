@@ -40,7 +40,8 @@ export interface paths {
          *     reach the database. A late billing scheduler shows as `degraded` in
          *     the body but keeps the status at 200: taking the server out of the
          *     balancer would not restart the scheduler. Alert on the scheduler
-         *     metrics instead (see docs/ops/runbook/monitoring.md). The database
+         *     metrics instead (see [Monitoring](https://gethardcount.com/docs/self-host/monitoring/)).
+         *     The database
          *     check waits at most 3 seconds. Not rate limited.
          */
         get: operations["getHealthReady"];
@@ -1172,7 +1173,7 @@ export interface paths {
          *     `Delivery`, `Bounce` and `SpamComplaint` records and ignores other
          *     record types and soft bounces. Without `POSTMARK_WEBHOOK_USER` and
          *     `POSTMARK_WEBHOOK_PASS` set, every request gets 401. See
-         *     docs/ops/email-setup.md.
+         *     [Set up email](https://gethardcount.com/docs/self-host/email-setup/).
          *
          *     Each record is matched to the email Hardcount sent through the
          *     `hc-outbox-id` key in its `Metadata`. A delivery, hard bounce or
@@ -4883,7 +4884,8 @@ export interface components {
                  *     answers has this shape, including an unknown path (404,
                  *     code `route_not_found`) and a method the path does not take
                  *     (405, code `method_not_allowed`, with an `Allow` header).
-                 *     The few exceptions are listed in docs/api/errors.md.
+                 *     The few exceptions are listed in
+                 *     [Errors](https://gethardcount.com/docs/api/errors/).
                  * @example invalid_request_error
                  */
                 type: string;
@@ -10711,7 +10713,7 @@ export interface components {
         };
         /**
          * @description The `data` of the outbound webhook event `payment.refunded_in_stripe`
-         *     (docs/api/webhook-events.md): the invoice the refunded payment
+         *     ([Webhook events](https://gethardcount.com/docs/api/webhook-events/)): the invoice the refunded payment
          *     belongs to, as it stood (a refund never changes it), and the refund
          *     as the API returns it. The invoice leaves out `attention`,
          *     `recovery_warning`, `billing_period_display` and `test_clock_id`,
@@ -10801,7 +10803,8 @@ export interface components {
         };
         /**
          * @description The `data` of the outbound webhook events `payment.dispute_opened`
-         *     and `payment.dispute_closed` (docs/api/webhook-events.md): the
+         *     and `payment.dispute_closed`
+         *     ([Webhook events](https://gethardcount.com/docs/api/webhook-events/)): the
          *     invoice the disputed payment paid and the dispute, each as the API
          *     returns it. The invoice leaves out `attention`, `recovery_warning`,
          *     `billing_period_display` and `test_clock_id`, which are worked out
@@ -13604,7 +13607,7 @@ export interface components {
             /** @description The mode the event happened in. Only endpoints of the same mode get it. */
             livemode: boolean;
             /**
-             * @description What happened, such as `invoice.finalized`. docs/api/webhook-events.md lists every type.
+             * @description What happened, such as `invoice.finalized`. [Webhook events](https://gethardcount.com/docs/api/webhook-events/) lists every type.
              * @example invoice.finalized
              */
             event_type: string;
@@ -13613,7 +13616,8 @@ export interface components {
              *     resource's name (`invoice`, `subscription`, `customer`,
              *     `payment_method`, `dunning_run` or `credit_balance`), as the
              *     API returns it, and the few keys the event adds beside it.
-             *     docs/api/webhook-events.md lists what each event carries;
+             *     [Webhook events](https://gethardcount.com/docs/api/webhook-events/) lists what each
+             *     event carries;
              *     `payment.dispute_opened` and `payment.dispute_closed` carry a
              *     `DisputeWebhookEventData`; `payment.refunded_in_stripe` carries a
              *     `StripeRefundWebhookEventData`.
@@ -14081,8 +14085,8 @@ export interface components {
          *     then, it gets 409 with code `conflict_idempotency`. The same key
          *     with a different method, path or body is a 422 with code
          *     `idempotency_error`. The other error cases are in
-         *     docs/api/idempotency.md. The usage routes do not take it: each usage
-         *     event carries its own `idempotency_key`.
+         *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+         *     not take it: each usage event carries its own `idempotency_key`.
          * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
          */
         IdempotencyKey: string;
@@ -14374,8 +14378,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -14532,8 +14536,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -14699,8 +14703,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -14955,8 +14959,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -15577,8 +15581,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -15800,8 +15804,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -16022,8 +16026,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -17001,8 +17005,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -17198,8 +17202,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -17485,8 +17489,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -17827,8 +17831,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -18228,8 +18232,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -18464,8 +18468,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -18593,8 +18597,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -18747,8 +18751,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -19071,8 +19075,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -19538,8 +19542,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -19828,8 +19832,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -20157,8 +20161,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -20422,8 +20426,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -20699,8 +20703,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -20919,8 +20923,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -21061,8 +21065,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -21307,8 +21311,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -21451,8 +21455,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -21754,8 +21758,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -22063,8 +22067,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -22205,8 +22209,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -22382,8 +22386,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -22684,8 +22688,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -22955,8 +22959,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -24584,8 +24588,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -24771,8 +24775,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -25126,8 +25130,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -25265,8 +25269,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -25383,8 +25387,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -25548,8 +25552,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -25668,8 +25672,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -25832,8 +25836,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -26006,8 +26010,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -26154,8 +26158,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -26366,8 +26370,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -26854,8 +26858,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -27033,8 +27037,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -27258,8 +27262,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -27412,8 +27416,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -27597,8 +27601,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -27782,8 +27786,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -27960,8 +27964,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -28137,8 +28141,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -29180,8 +29184,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -29538,8 +29542,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -29717,8 +29721,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -30029,8 +30033,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -30399,8 +30403,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -30818,8 +30822,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -30999,8 +31003,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -31684,8 +31688,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -31875,8 +31879,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -32885,8 +32889,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -33135,8 +33139,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -33404,8 +33408,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -33524,8 +33528,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -33685,8 +33689,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -34189,8 +34193,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -34396,8 +34400,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -34636,8 +34640,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -34841,8 +34845,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -35000,8 +35004,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -35105,8 +35109,8 @@ export interface operations {
                  *     then, it gets 409 with code `conflict_idempotency`. The same key
                  *     with a different method, path or body is a 422 with code
                  *     `idempotency_error`. The other error cases are in
-                 *     docs/api/idempotency.md. The usage routes do not take it: each usage
-                 *     event carries its own `idempotency_key`.
+                 *     [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+                 *     not take it: each usage event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];

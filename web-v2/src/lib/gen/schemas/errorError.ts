@@ -22,7 +22,8 @@ export type ErrorError = {
      * answers has this shape, including an unknown path (404,
      * code `route_not_found`) and a method the path does not take
      * (405, code `method_not_allowed`, with an `Allow` header).
-     * The few exceptions are listed in docs/api/errors.md.
+     * The few exceptions are listed in
+     * [Errors](https://gethardcount.com/docs/api/errors/).
      */
   type: string;
   /**

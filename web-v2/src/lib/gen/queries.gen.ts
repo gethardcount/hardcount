@@ -405,7 +405,8 @@ export const getGetHealthReadyUrl = () => {
  * reach the database. A late billing scheduler shows as `degraded` in
  * the body but keeps the status at 200: taking the server out of the
  * balancer would not restart the scheduler. Alert on the scheduler
- * metrics instead (see docs/ops/runbook/monitoring.md). The database
+ * metrics instead (see [Monitoring](https://gethardcount.com/docs/self-host/monitoring/)).
+ * The database
  * check waits at most 3 seconds. Not rate limited.
  * @summary Check that the server can take requests
  */
@@ -5059,7 +5060,7 @@ export const getReceivePostmarkWebhookUrl = () => {
  * `Delivery`, `Bounce` and `SpamComplaint` records and ignores other
  * record types and soft bounces. Without `POSTMARK_WEBHOOK_USER` and
  * `POSTMARK_WEBHOOK_PASS` set, every request gets 401. See
- * docs/ops/email-setup.md.
+ * [Set up email](https://gethardcount.com/docs/self-host/email-setup/).
  *
  * Each record is matched to the email Hardcount sent through the
  * `hc-outbox-id` key in its `Metadata`. A delivery, hard bounce or

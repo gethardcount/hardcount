@@ -26,14 +26,15 @@ export interface WebhookEvent {
   tenant_id?: string;
   /** The mode the event happened in. Only endpoints of the same mode get it. */
   livemode: boolean;
-  /** What happened, such as `invoice.finalized`. docs/api/webhook-events.md lists every type. */
+  /** What happened, such as `invoice.finalized`. [Webhook events](https://gethardcount.com/docs/api/webhook-events/) lists every type. */
   event_type: string;
   /**
      * The event's data: the resource the event is about, under the
      * resource's name (`invoice`, `subscription`, `customer`,
      * `payment_method`, `dunning_run` or `credit_balance`), as the
      * API returns it, and the few keys the event adds beside it.
-     * docs/api/webhook-events.md lists what each event carries;
+     * [Webhook events](https://gethardcount.com/docs/api/webhook-events/) lists what each
+     * event carries;
      * `payment.dispute_opened` and `payment.dispute_closed` carry a
      * `DisputeWebhookEventData`; `payment.refunded_in_stripe` carries a
      * `StripeRefundWebhookEventData`.

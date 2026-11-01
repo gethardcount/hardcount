@@ -17,7 +17,8 @@
  * resource's name (`invoice`, `subscription`, `customer`,
  * `payment_method`, `dunning_run` or `credit_balance`), as the
  * API returns it, and the few keys the event adds beside it.
- * docs/api/webhook-events.md lists what each event carries;
+ * [Webhook events](https://gethardcount.com/docs/api/webhook-events/) lists what each
+ * event carries;
  * `payment.dispute_opened` and `payment.dispute_closed` carry a
  * `DisputeWebhookEventData`; `payment.refunded_in_stripe` carries a
  * `StripeRefundWebhookEventData`.

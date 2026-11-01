@@ -16,7 +16,8 @@ import type { InvoiceDispute } from './invoiceDispute';
 
 /**
  * The `data` of the outbound webhook events `payment.dispute_opened`
- * and `payment.dispute_closed` (docs/api/webhook-events.md): the
+ * and `payment.dispute_closed`
+ * ([Webhook events](https://gethardcount.com/docs/api/webhook-events/)): the
  * invoice the disputed payment paid and the dispute, each as the API
  * returns it. The invoice leaves out `attention`, `recovery_warning`,
  * `billing_period_display` and `test_clock_id`, which are worked out

@@ -24,7 +24,7 @@
  * then, it gets 409 with code `conflict_idempotency`. The same key
  * with a different method, path or body is a 422 with code
  * `idempotency_error`. The other error cases are in
- * docs/api/idempotency.md. The usage routes do not take it: each usage
- * event carries its own `idempotency_key`.
+ * [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+ * not take it: each usage event carries its own `idempotency_key`.
  */
 export type IdempotencyKeyParameter = string;

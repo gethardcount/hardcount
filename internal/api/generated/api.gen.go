@@ -5150,7 +5150,8 @@ type CustomerUsageMeter struct {
 }
 
 // DisputeWebhookEventData The `data` of the outbound webhook events `payment.dispute_opened`
-// and `payment.dispute_closed` (docs/api/webhook-events.md): the
+// and `payment.dispute_closed`
+// ([Webhook events](https://gethardcount.com/docs/api/webhook-events/)): the
 // invoice the disputed payment paid and the dispute, each as the API
 // returns it. The invoice leaves out `attention`, `recovery_warning`,
 // `billing_period_display` and `test_clock_id`, which are worked out
@@ -5677,7 +5678,8 @@ type Error struct {
 		// answers has this shape, including an unknown path (404,
 		// code `route_not_found`) and a method the path does not take
 		// (405, code `method_not_allowed`, with an `Allow` header).
-		// The few exceptions are listed in docs/api/errors.md.
+		// The few exceptions are listed in
+		// [Errors](https://gethardcount.com/docs/api/errors/).
 		Type string `json:"type"`
 	} `json:"error,omitempty"`
 }
@@ -8442,7 +8444,7 @@ type StripeConnection struct {
 type StripeConnectionLastVerifiedErrorKind string
 
 // StripeRefundWebhookEventData The `data` of the outbound webhook event `payment.refunded_in_stripe`
-// (docs/api/webhook-events.md): the invoice the refunded payment
+// ([Webhook events](https://gethardcount.com/docs/api/webhook-events/)): the invoice the refunded payment
 // belongs to, as it stood (a refund never changes it), and the refund
 // as the API returns it. The invoice leaves out `attention`,
 // `recovery_warning`, `billing_period_display` and `test_clock_id`,
@@ -9770,7 +9772,7 @@ type WebhookEvent struct {
 	// CreatedAt When the event was created.
 	CreatedAt time.Time `json:"created_at"`
 
-	// EventType What happened, such as `invoice.finalized`. docs/api/webhook-events.md lists every type.
+	// EventType What happened, such as `invoice.finalized`. [Webhook events](https://gethardcount.com/docs/api/webhook-events/) lists every type.
 	EventType string `json:"event_type"`
 
 	// Id The event's id (`hc_whevt_…`). A replay has its own id but is sent with the original event's `id` and `created_at`.
@@ -9783,7 +9785,8 @@ type WebhookEvent struct {
 	// resource's name (`invoice`, `subscription`, `customer`,
 	// `payment_method`, `dunning_run` or `credit_balance`), as the
 	// API returns it, and the few keys the event adds beside it.
-	// docs/api/webhook-events.md lists what each event carries;
+	// [Webhook events](https://gethardcount.com/docs/api/webhook-events/) lists what each
+	// event carries;
 	// `payment.dispute_opened` and `payment.dispute_closed` carry a
 	// `DisputeWebhookEventData`; `payment.refunded_in_stripe` carries a
 	// `StripeRefundWebhookEventData`.
@@ -10046,8 +10049,8 @@ type CreateApiKeyParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10073,8 +10076,8 @@ type RotateApiKeyParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10195,8 +10198,8 @@ type RunBillingParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10364,8 +10367,8 @@ type CreateCreditNoteParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10391,8 +10394,8 @@ type AttachStripeRefundToCreditNoteParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10409,8 +10412,8 @@ type IssueCreditNoteParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10427,8 +10430,8 @@ type RetryCreditNoteRefundParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10454,8 +10457,8 @@ type SendCreditNoteParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10475,8 +10478,8 @@ type VoidCreditNoteParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10509,8 +10512,8 @@ type AdjustCreditsParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10576,8 +10579,8 @@ type GrantCreditsParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10715,8 +10718,8 @@ type CreateCustomerParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10753,8 +10756,8 @@ type SendCustomerPaymentSetupEmailParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10780,8 +10783,8 @@ type CreateCustomerPaymentSetupSessionParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10798,8 +10801,8 @@ type SetCustomerDefaultPaymentMethodParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10840,8 +10843,8 @@ type UpdateCustomerParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10861,8 +10864,8 @@ type UpsertCustomerBillingProfileParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10890,8 +10893,8 @@ type RotateCustomerCostDashboardTokenParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10945,8 +10948,8 @@ type CreateDunningPolicyParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10966,8 +10969,8 @@ type UpdateDunningPolicyParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -10984,8 +10987,8 @@ type SetDefaultDunningPolicyParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11033,8 +11036,8 @@ type ResolveDunningRunParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11215,8 +11218,8 @@ type CreateInvoiceParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11255,8 +11258,8 @@ type CreateInvoicePreviewParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11273,8 +11276,8 @@ type CollectInvoicePaymentParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11304,8 +11307,8 @@ type FinalizeInvoiceParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11322,8 +11325,8 @@ type AddInvoiceLineItemParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11340,8 +11343,8 @@ type MarkInvoiceUncollectibleParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11364,8 +11367,8 @@ type RecordInvoicePaymentParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11394,8 +11397,8 @@ type RefundInvoiceParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11415,8 +11418,8 @@ type ResendInvoiceSetupLinkParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11436,8 +11439,8 @@ type RetryInvoiceTaxParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11454,8 +11457,8 @@ type RotateInvoicePublicTokenParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11481,8 +11484,8 @@ type SendInvoiceParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11521,8 +11524,8 @@ type DismissInvoiceStripeRefundParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11539,8 +11542,8 @@ type VoidInvoiceParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11563,8 +11566,8 @@ type InviteMemberParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11614,8 +11617,8 @@ type CreateMeterParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11648,8 +11651,8 @@ type UpdateMeterParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11728,8 +11731,8 @@ type CreatePlanParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11783,8 +11786,8 @@ type UpdatePlanParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11820,8 +11823,8 @@ type AddPlanPriceParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11838,8 +11841,8 @@ type UpdatePlanPriceParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11911,8 +11914,8 @@ type CreatePriceOverrideParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -11970,8 +11973,8 @@ type UpsertProviderCostParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -12029,8 +12032,8 @@ type InstantiateRecipeParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -12056,8 +12059,8 @@ type PreviewRecipeParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -12074,8 +12077,8 @@ type UpdateTenantSettingsParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -12098,8 +12101,8 @@ type SendTestEmailParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -12131,8 +12134,8 @@ type ConnectStripeParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -12158,8 +12161,8 @@ type SetStripeWebhookSecretParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -12287,8 +12290,8 @@ type CreateSubscriptionParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -12311,8 +12314,8 @@ type ActivateSubscriptionParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -12348,8 +12351,8 @@ type SetSubscriptionBillingThresholdsParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -12366,8 +12369,8 @@ type CancelSubscriptionParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -12384,8 +12387,8 @@ type EndSubscriptionTrialParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -12408,8 +12411,8 @@ type ExtendSubscriptionTrialParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -12435,8 +12438,8 @@ type AddSubscriptionItemParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -12465,8 +12468,8 @@ type UpdateSubscriptionItemParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -12493,8 +12496,8 @@ type PauseSubscriptionCollectionParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -12514,8 +12517,8 @@ type RetrySubscriptionBillingParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -12541,8 +12544,8 @@ type ScheduleSubscriptionCancelParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -12583,8 +12586,8 @@ type CreateTestClockParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -12611,8 +12614,8 @@ type AdvanceTestClockParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -12642,8 +12645,8 @@ type RetryTestClockAdvanceParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -12927,8 +12930,8 @@ type CreateWebhookEndpointParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -12976,8 +12979,8 @@ type UpdateWebhookEndpointParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -13007,8 +13010,8 @@ type ReplayWebhookDeliveryParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -13025,8 +13028,8 @@ type RotateWebhookEndpointSecretParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -13056,8 +13059,8 @@ type ReplayWebhookEventParams struct {
 	// then, it gets 409 with code `conflict_idempotency`. The same key
 	// with a different method, path or body is a 422 with code
 	// `idempotency_error`. The other error cases are in
-	// docs/api/idempotency.md. The usage routes do not take it: each usage
-	// event carries its own `idempotency_key`.
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
